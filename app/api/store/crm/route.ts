@@ -104,7 +104,9 @@ export async function POST(request: NextRequest) {
       // The deal as it is now, for the board to put the creator's changes back on; never to someone who may not see it.
       const conflict = (current: { deal: Deal | null; raw: string | null }) => {
         if (!current.deal || current.raw === null) return refuse("unknown", 404);
-        const hidden = pipelines !== null && accessOf(guarded.role, access, pipelineOfStage(pipelines, current.deal.stage) ?? "") === "none";
+        // A stage in no pipeline is in none this person may see.
+        const where = pipelines === null ? null : pipelineOfStage(pipelines, current.deal.stage);
+        const hidden = pipelines !== null && (where === null || accessOf(guarded.role, access, where) === "none");
         return Response.json({ ok: false, error: "crm_conflict", ...(hidden ? {} : { current: { deal: current.deal, version: dealVersion(current.raw) } }) }, { status: 409 });
       };
       if (exact && (typeof body.version !== "string" || body.version !== dealVersion(exact.raw!))) return conflict(exact);
@@ -119,6 +121,8 @@ export async function POST(request: NextRequest) {
       const now = Math.floor(Date.now() / 1000);
       const deal = parseDeal({ ...merged, ...follow.value, formResponseRef: existing?.formResponseRef, id: existing?.id ?? newCrmId(10), createdAt: existing?.createdAt ?? now, updatedAt: now }, stages);
       if (!deal) return refuse(typeof merged.title === "string" && merged.title.trim() ? "stage" : "title");
+      // Nothing but the time would change: nothing is written, and the deal keeps its version.
+      if (exact && existing && JSON.stringify({ ...deal, updatedAt: 0 }) === JSON.stringify({ ...existing, updatedAt: 0 })) return Response.json({ ok: true, deal: existing, version: dealVersion(exact.raw!) });
       if (exact) {
         // Changed between the read and the write: nothing written; the board gets the deal as it is now.
         if ((await writeDealOver(statsId, deal, exact.raw!, store)) === "changed") return conflict(await readDealExact(statsId, asked, stages));

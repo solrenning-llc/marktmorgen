@@ -5,7 +5,7 @@ import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-
 import { dealOrder, orderDeals, dealWorklistCsv, type DealOrder, type DealView } from "@/lib/crm-deal-worklist";
 import { DealAgenda } from "@/components/deal-agenda";
 import { crmAnswer, type CrmAnswer, type CrmCurrentDeal } from "@/lib/crm-response";
-import { changedFields, dealChanges, draftFromDeal, emptyDraft, rebaseDraft, type DealDraft } from "@/lib/deal-draft";
+import { DEAL_SAVE_ID, DRAFT_UNITS, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, DEAL_HIDDEN, type DealDraft, type DraftConflict, type DraftUnit } from "@/lib/deal-draft";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -69,12 +69,15 @@ async function call(body: Record<string, unknown>): Promise<CrmAnswer> {
   }
 }
 
-/** The editor's deal, with the deal as it was opened (`base`) and that record's version: a save sends only what changed. */
-type OpenDraft = DealDraft & { base: DealDraft; version: string };
+/**
+ * The editor's deal, with the deal as it was opened (`base`) and that record's version: a save sends only what
+ * changed. `conflicts` are the parts somebody else changed too, shown beside them after a refused save.
+ */
+type OpenDraft = DealDraft & { base: DealDraft; version: string; conflicts: DraftConflict[] };
 
 /** What the board says when a deal changed on the server meanwhile (635 [GL3]); nothing the creator typed is lost. */
-const EDIT_CONFLICT = "This deal changed while you were editing. Your changes are kept; check them and save again.";
 const MOVE_CONFLICT = "This deal changed a moment ago, so it was not moved. Check it and move it again.";
+
 
 const KIND_WORDS: Record<StageKind, string> = { open: "Open", won: "Won", lost: "Lost" };
 
@@ -105,7 +108,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const [pipelineDraft, setPipelineDraft] = useState<PipelineDraft | null>(null);
   const money = (cents: number) => formatMoney(cents, currency);
   const [draft, setDraft] = useState<OpenDraft | null>(null);
-  const openDraft = (deal: Deal) => { const base = draftFromDeal(deal, currency); setError(null); setDraft({ ...base, base, version: versions[deal.id] ?? "" }); };
+  const openDraft = (deal: Deal) => { const base = draftFromDeal(deal, currency); setError(null); setDraft({ ...base, base, version: versions[deal.id] ?? "", conflicts: [] }); };
   const dealNameInput = useRef<HTMLInputElement>(null);
   const activeDealId = draft?.id;
   useEffect(() => { if (activeDealId !== undefined) dealNameInput.current?.focus(); }, [activeDealId]);
@@ -113,6 +116,16 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const [refreshing, startRefresh] = useTransition();
   const [writeUnconfirmed, setWriteUnconfirmed] = useState(false);
   const locked = busy || refreshing;
+  // Decided at once, not at the next render: a second change (a keyboard moving a stage select a step at a time) is not sent.
+  const gate = useRef(oneAtATime());
+  // Where focus goes back once the board is usable again: a disabled control loses it while a change is saved.
+  const focusTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (locked || !focusTo.current) return;
+    const target = document.getElementById(focusTo.current);
+    focusTo.current = null;
+    target?.focus();
+  }, [locked]);
   const [error, setError] = useState<string | null>(null);
   const [fieldDraft, setFieldDraft] = useState<(CrmField & { optionsText: string })[] | null>(null);
   const [filter, setFilter] = useState<DealActionFilter>(dealActionFilter(initialFilter));
@@ -131,11 +144,12 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const open = totals.filter((t) => t.stage.kind === "open");
   const won = totals.filter((t) => t.stage.kind === "won");
 
-  async function run(body: Record<string, unknown>, done: string, after?: () => void, onConflict?: (current: CrmCurrentDeal) => void) {
-    if (locked || writeUnconfirmed) return;
+  async function run(body: Record<string, unknown>, done: string, after?: () => void, onConflict?: (current: CrmCurrentDeal) => void, refocus?: string) {
+    if (locked || writeUnconfirmed || !gate.current.enter()) return;
     setBusy(true);
     setError(null);
     const answer = await call(body);
+    gate.current.leave();
     setBusy(false);
     if (answer.ok) {
       toast(answer.workflows === "not_checked" ? `${done} The workflow for this stage was not started for this person.` : done);
@@ -144,9 +158,19 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
       return;
     }
     if (answer.error === "crm_write_unconfirmed") setWriteUnconfirmed(true);
+    focusTo.current = refocus ?? null;
     // The deal changed meanwhile: nothing was written; the board takes the deal as it is now and loads the rest.
-    if (answer.error === "crm_conflict" && answer.current && onConflict) {
+    const kind = refusalKind(body.action, answer);
+    if (kind === "rebase" && answer.current && onConflict) {
       onConflict(answer.current);
+      startRefresh(() => router.refresh());
+      return;
+    }
+    // Changed and moved to a pipeline this person cannot see: nothing to put the changes back on, so the editor closes.
+    if (kind === "hidden") {
+      focusTo.current = null;
+      setDraft(null);
+      setError(DEAL_HIDDEN);
       startRefresh(() => router.refresh());
       return;
     }
@@ -173,7 +197,14 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     if (!opened.id) {
       const cents = opened.value.trim() ? readMoney(opened.value, currency as Currency) : 0;
       if (cents === null) return badMoney();
-      void run({ action: "deal", deal: { title: opened.title, email: opened.email, cents, stage: opened.stage, note: opened.note, nextAction: opened.nextAction, dueDate: opened.dueDate, assignee: opened.assignee } }, "Deal added.", () => setDraft(null));
+      void run({ action: "deal", deal: { title: opened.title, email: opened.email, cents, stage: opened.stage, note: opened.note, nextAction: opened.nextAction, dueDate: opened.dueDate, assignee: opened.assignee } }, "Deal added.", () => setDraft(null), undefined, DEAL_SAVE_ID);
+      return;
+    }
+    // Nothing changed: nothing to send, and the deal is left exactly as it is.
+    if (!changedFields(opened.base, opened).length) {
+      setDraft(null);
+      setError(null);
+      toast("Nothing changed, so nothing was saved.");
       return;
     }
     // Only what the creator changed since opening it, over the record they opened (635 [GL3]).
@@ -181,12 +212,29 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     if (!changes) return badMoney();
     void run({ action: "deal", version: opened.version, deal: changes }, "Deal saved.", () => setDraft(null), (current) => {
       const base = draftFromDeal(current.deal, currency);
-      setDraft({ ...rebaseDraft(opened.base, opened, current.deal, currency), base, version: current.version });
-      setError(EDIT_CONFLICT);
-    });
+      const rebased = rebaseDraft(opened.base, opened, current.deal, currency);
+      setDraft({ ...rebased.draft, base, version: current.version, conflicts: rebased.conflicts });
+      setError(conflictMessage(rebased.conflicts));
+      focusTo.current = conflictFocus(rebased.conflicts);
+    }, DEAL_SAVE_ID);
   }
 
   const firstOpen = stages.find((s) => s.kind === "open")?.id ?? stages[0]?.id ?? "";
+  const stageName = (id: string) => pipelines.flatMap(p => p.stages).find(st => st.id === id)?.name ?? "a stage that is gone";
+  // What is saved now for a part somebody else changed too, beside it, with a way to take it (3.3.1, 3.3.3).
+  const savedNow = (unit: DraftUnit) => {
+    const conflict = draft?.conflicts.find(c => c.unit === unit);
+    if (!draft || !conflict) return null;
+    const label = DRAFT_UNITS.find(u => u.unit === unit)!.label;
+    return (
+      <p className="sm:col-span-2 flex flex-wrap items-center gap-2 text-sm text-ink-soft [overflow-wrap:anywhere]">
+        <span>{`Saved now: ${savedNowText(conflict, currency, stageName)}`}</span>
+        <button type="button" className="btn btn-secondary btn-sm" aria-label={`Use what is saved now for ${label}`} onClick={() => setDraft({ ...draft, ...conflict.saved, conflicts: draft.conflicts.filter(c => c.unit !== unit) })}>
+          Use this
+        </button>
+      </p>
+    );
+  };
   const initialFields = fields.map(field => ({ ...field, optionsText: field.options.join(", ") }));
   const pipelineDirty = pipelineDraft !== null && (pipelineDraft.isNew || pipelineDraft.name !== pipeline.name || JSON.stringify(pipelineDraft.stages) !== JSON.stringify(pipeline.stages));
   const dirty = (draft !== null && changedFields(draft.base, draft).length > 0) || pipelineDirty || (fieldDraft !== null && JSON.stringify(fieldDraft) !== JSON.stringify(initialFields));
@@ -241,7 +289,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
             </p>
           </div>
           {draft === null ? (
-            <button type="button" className="btn btn-primary" disabled={locked || editing || writeUnconfirmed} onClick={() => { const base = emptyDraft(firstOpen); setError(null); setDraft({ ...base, base, version: "" }); }}>
+            <button type="button" className="btn btn-primary" disabled={locked || editing || writeUnconfirmed} onClick={() => { const base = emptyDraft(firstOpen); setError(null); setDraft({ ...base, base, version: "", conflicts: [] }); }}>
               <Icon name="plus" size={18} />
               New deal
             </button>
@@ -319,49 +367,56 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block sm:col-span-2">
                 <span className="field-label">What it is</span>
-                <input ref={dealNameInput} className="field mt-2" maxLength={MAX_DEAL_TITLE} value={draft.title} placeholder="Six coaching sessions for Dana" onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+                <input ref={dealNameInput} id={dealFieldId("title")} className="field mt-2" maxLength={MAX_DEAL_TITLE} value={draft.title} placeholder="Six coaching sessions for Dana" onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
               </label>
+              {savedNow("title")}
               <label className="block">
                 <span className="field-label">Their email (optional)</span>
-                <input className="field mt-2" type="email" autoComplete="off" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+                <input id={dealFieldId("email")} className="field mt-2" type="email" autoComplete="off" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
               </label>
+              {savedNow("email")}
               <label className="block">
                 <span className="field-label">{`What it is worth, in ${currency.toUpperCase()} (optional)`}</span>
-                <input className="field mt-2" inputMode="decimal" value={draft.value} placeholder="1500" onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
+                <input id={dealFieldId("value")} className="field mt-2" inputMode="decimal" value={draft.value} placeholder="1500" onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
               </label>
+              {savedNow("value")}
               <label className="block">
                 <span className="field-label">{pipelines.length > 1 ? "Pipeline and stage" : "Stage"}</span>
-                <select className="field mt-2" value={draft.stage} onChange={(e) => setDraft({ ...draft, stage: e.target.value })}>
+                <select id={dealFieldId("stage")} className="field mt-2" value={draft.stage} onChange={(e) => setDraft({ ...draft, stage: e.target.value })}>
                   <StageOptions pipelines={pipelines} />
                 </select>
               </label>
+              {savedNow("stage")}
               <label className="block sm:col-span-2">
                 <span className="field-label">Next action (optional)</span>
-                <input className="field mt-2" maxLength={200} value={draft.nextAction} placeholder="Follow up on the proposal" onChange={e => setDraft({ ...draft, nextAction: e.target.value })} />
+                <input id={dealFieldId("nextAction")} className="field mt-2" maxLength={200} value={draft.nextAction} placeholder="Follow up on the proposal" onChange={e => setDraft({ ...draft, nextAction: e.target.value })} />
               </label>
               <label className="block">
                 <span className="field-label">Action date (optional, UTC calendar date)</span>
-                <input className="field mt-2" type="date" value={draft.dueDate} onChange={e => setDraft({ ...draft, dueDate: e.target.value })} />
+                <input id={dealFieldId("dueDate")} className="field mt-2" type="date" value={draft.dueDate} onChange={e => setDraft({ ...draft, dueDate: e.target.value })} />
               </label>
+              {savedNow("followUp")}
               <label className="block">
                 <span className="field-label">Responsible teammate (optional)</span>
-                <select className="field mt-2" value={draft.assignee} onChange={e => setDraft({ ...draft, assignee: e.target.value })}>
+                <select id={dealFieldId("assignee")} className="field mt-2" value={draft.assignee} onChange={e => setDraft({ ...draft, assignee: e.target.value })}>
                   <option value="">Unassigned</option>
                   {draft.assignee && !assignees.includes(draft.assignee) ? <option value={draft.assignee}>{draft.assignee} (no longer eligible)</option> : null}
                   {assignees.map(email => <option key={email} value={email}>{email}</option>)}
                 </select>
               </label>
+              {savedNow("assignee")}
               <label className="block sm:col-span-2">
                 <span className="field-label">A note (optional)</span>
-                <textarea className="field mt-2" rows={3} maxLength={MAX_DEAL_NOTE} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
+                <textarea id={dealFieldId("note")} className="field mt-2" rows={3} maxLength={MAX_DEAL_NOTE} value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
               </label>
+              {savedNow("note")}
             </div>
             {/* Always there, so a message put in it is announced (only its words change). */}
             <p className={error ? "notice notice-error mt-4" : "sr-only"} role="alert">
               {error ?? ""}
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
-              <button type="button" className="btn btn-primary" disabled={locked || writeUnconfirmed} onClick={saveDeal}>
+              <button type="button" id={DEAL_SAVE_ID} className="btn btn-primary" disabled={locked || writeUnconfirmed} onClick={saveDeal}>
                 {busy ? "Saving…" : "Save deal"}
               </button>
               <button type="button" className="btn btn-secondary" disabled={locked} onClick={() => { setDraft(null); setError(null); }}>
@@ -409,10 +464,11 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                         <label className="min-w-0 flex-1">
                           <span className="sr-only">{pipelines.length > 1 ? `Move ${deal.title} to a stage or another pipeline` : `Move ${deal.title}`}</span>
                           <select
+                            id={`deal-stage-${deal.id}`}
                             className="field"
                             value={deal.stage}
                             disabled={locked || editing || writeUnconfirmed}
-                            onChange={(e) => void run({ action: "deal", version: versions[deal.id] ?? "", deal: { id: deal.id, stage: e.target.value } }, here.has(e.target.value) ? "Deal moved." : `Deal moved to ${pipelines.find(p => p.stages.some(st => st.id === e.target.value))?.name ?? "another pipeline"}.`, undefined, () => setError(MOVE_CONFLICT))}
+                            onChange={(e) => void run({ action: "deal", version: versions[deal.id] ?? "", deal: { id: deal.id, stage: e.target.value } }, here.has(e.target.value) ? "Deal moved." : `Deal moved to ${pipelines.find(p => p.stages.some(st => st.id === e.target.value))?.name ?? "another pipeline"}.`, undefined, () => setError(MOVE_CONFLICT), `deal-stage-${deal.id}`)}
                           >
                             <StageOptions pipelines={pipelines} />
                           </select>

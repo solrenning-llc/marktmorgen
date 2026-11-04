@@ -152,6 +152,39 @@ async function main(): Promise<void> {
   const lost = await counted({ action: "deal", version: hal.version, deal: { id: hal.id, note: "Booked again" } });
   is("a conflict: the stages and the record, nothing written", [lost.reply.status, lost.calls, lost.writes], [409, 2, []]);
 
+  part("A save with nothing changed");
+  const ivy = await newDeal("Plan for Ivy");
+  const sameAgain = await counted({ action: "deal", version: ivy.version, deal: { id: ivy.id, note: "First call" } });
+  is("answered as saved, with nothing written: the record, its time and its version stay", [sameAgain.reply.status, sameAgain.writes, sameAgain.reply.body.version, (await stored(ivy.id)) !== null && dealVersion((await stored(ivy.id))!) === ivy.version], [200, [], ivy.version, true]);
+  is("and an id alone writes nothing either", (await counted({ action: "deal", version: ivy.version, deal: { id: ivy.id } })).writes, []);
+
+  part("A deal that moved, meanwhile, to a stage in no pipeline this person read");
+  const workshops = { id: "wkshp1", name: "Workshops", stages: [{ id: "wnew01", name: "New", kind: "open" }, { id: "wwon01", name: "Won", kind: "won" }, { id: "wlost1", name: "Lost", kind: "lost" }] };
+  is("(a second pipeline)", (await post({ action: "pipeline", pipeline: workshops, moves: {} })).status, 200);
+  await writePipelineAccess(statsId, "sam@example.com", {}, store);
+  const jo = await newDeal("Coaching for Jo");
+  let pipesReads = 0;
+  let movedJo = "";
+  try {
+    redis.pipeline = async (commands) => {
+      // The route reads the stages, then (for a teammate) the pipelines: this second read no longer has Workshops.
+      if (commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === "nl:crm:pipes:" + statsId && ++pipesReads === 2) {
+        const [pipes, legacy] = await original.call(redis, commands);
+        return [JSON.stringify((JSON.parse(pipes as string) as { id: string }[]).filter((p) => p.id !== "wkshp1")), legacy];
+      }
+      if (commands.some((c) => c[0] === "EVAL" && c[1] === MOVE_CRM_DEAL && c[4] === jo.id) && !movedJo) {
+        movedJo = JSON.stringify({ ...JSON.parse((await stored(jo.id))!), stage: "wnew01" });
+        await original.call(redis, [["HSET", dealsKey, jo.id, movedJo]]);
+      }
+      return original.call(redis, commands);
+    };
+    const hiddenNow = await post({ action: "deal", version: jo.version, deal: { id: jo.id, note: "Mine" } }, "sam");
+    is("409, and the deal as it is now is not sent: a stage in no pipeline they read counts as hidden", [hiddenNow.status, hiddenNow.body.error, "current" in hiddenNow.body], [409, "crm_conflict", false]);
+  } finally {
+    redis.pipeline = original;
+  }
+  is("nothing written over the move", await stored(jo.id), movedJo);
+
   part("Someone whose access to the pipeline is view only");
   const gus = await newDeal("Package for Gus");
   await writePipelineAccess(statsId, "sam@example.com", { [sales.id]: "view" }, store);

@@ -4,7 +4,7 @@ import { DEAL_ID, type Deal } from "@/lib/crm-rules";
 export type CrmCurrentDeal = { deal: Deal; version: string };
 /** A confirmed CRM change; `workflows` says whether a deal entering a stage had its workflow checked (lib/deal-stage-trigger.ts). */
 export type CrmAnswer = { ok: true; workflows?: "checked" | "not_checked" } | { ok: false; error: string; current?: CrmCurrentDeal };
-const REFUSALS = new Set(["title", "followup", "date", "assignee", "stage", "full", "unknown", "fields", "stages", "value", "invalid", "role", "origin", "signed_out", "locked", "store_gone", "none", "unavailable", "bad_request", "forbidden", "crm_deal_read_unavailable", "crm_schema_read_unavailable", "pipelines", "pipeline_limit", "pipeline_last", "moves", "crm_conflict"]);
+const REFUSALS = new Set(["title", "followup", "date", "assignee", "stage", "full", "unknown", "fields", "stages", "value", "invalid", "role", "origin", "signed_out", "locked", "store_gone", "none", "unavailable", "bad_request", "forbidden", "crm_deal_read_unavailable", "crm_schema_read_unavailable", "pipelines", "pipeline_limit", "pipeline_last", "moves", "crm_conflict", "store_full"]);
 const VERSION = /^[0-9a-f]{32}$/;
 const text = (value: unknown) => typeof value === "string";
 const optionalText = (value: unknown) => value === undefined || typeof value === "string";

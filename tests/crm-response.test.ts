@@ -25,4 +25,5 @@ for(const bad of [null,{},[],"x",{deal:current.deal},{version:current.version},{
   is("a malformed current is never put in the editor",crmAnswer(false,{ok:false,error:"crm_conflict",current:bad}),uncertain);
 is("current on another error stays uncertain",crmAnswer(false,{ok:false,error:"unknown",current}),uncertain);
 is("a bare deal on a conflict stays uncertain, as before",crmAnswer(false,{ok:false,error:"crm_conflict",deal:current.deal}),uncertain);
+is("a full data room is a refusal before any write, with its own words",crmAnswer(false,{ok:false,error:"store_full"}),{ok:false,error:"store_full"});
 done();

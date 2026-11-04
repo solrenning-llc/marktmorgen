@@ -4,7 +4,7 @@
  * (lib/deal-draft.ts), so nothing typed is lost and nothing written by a
  * workflow step meanwhile is overwritten.
  */
-import { changedFields, dealChanges, draftFromDeal, emptyDraft, rebaseDraft } from "@/lib/deal-draft";
+import { DEAL_HIDDEN, DEAL_SAVE_ID, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText } from "@/lib/deal-draft";
 import type { Deal } from "@/lib/crm-rules";
 import { done, is, part } from "./check";
 
@@ -26,11 +26,44 @@ is("a new deal starts empty in the first open stage", emptyDraft("lead00"), { id
 part("Putting the creator's changes back on the deal as it is now");
 const typed = { ...base, note: "Sent the proposal" };
 const rebased = rebaseDraft(base, typed, now, "usd");
-is("only the note changed: the step's assignee, next action and date come in, with the creator's note", [rebased.note, rebased.assignee, rebased.nextAction, rebased.dueDate, rebased.stage], ["Sent the proposal", "maya@example.com", "Call Dana back", "2026-11-10", "lead00"]);
-is("and the next save sends only the note again", dealChanges(draftFromDeal(now, "usd"), rebased, "usd"), { id: "abcdefghij", note: "Sent the proposal" });
+is("only the note changed: the step's assignee, next action and date come in, with the creator's note", [rebased.draft.note, rebased.draft.assignee, rebased.draft.nextAction, rebased.draft.dueDate, rebased.draft.stage], ["Sent the proposal", "maya@example.com", "Call Dana back", "2026-11-10", "lead00"]);
+is("no part changed on both sides: no conflict", rebased.conflicts, []);
+is("and the next save sends only the note again", dealChanges(draftFromDeal(now, "usd"), rebased.draft, "usd"), { id: "abcdefghij", note: "Sent the proposal" });
 const both = rebaseDraft(base, { ...base, assignee: "sam@example.com", nextAction: "Send the contract" }, now, "usd");
-is("a field changed by both keeps the creator's value", [both.assignee, both.nextAction, both.dueDate], ["sam@example.com", "Send the contract", "2026-11-10"]);
+is("a part changed by both keeps the creator's value", [both.draft.assignee, both.draft.nextAction], ["sam@example.com", "Send the contract"]);
+is("the next action and its date are one: the creator's action never gets the step's date", [both.draft.nextAction, both.draft.dueDate], ["Send the contract", ""]);
+is("each part changed by both is a conflict, with what is saved now", both.conflicts, [{ unit: "followUp", saved: { nextAction: "Call Dana back", dueDate: "2026-11-10" } }, { unit: "assignee", saved: { assignee: "maya@example.com" } }]);
+is("a part both changed to the same thing is no conflict", rebaseDraft(base, { ...base, assignee: "maya@example.com" }, now, "usd").conflicts, []);
 const cleared = rebaseDraft({ ...base, note: "First call" }, { ...base, note: "" }, { ...now, note: "Edited by a teammate" }, "usd");
-is("a field the creator emptied stays empty", cleared.note, "");
-is("nothing typed: the deal as it is now", rebaseDraft(base, base, now, "usd"), draftFromDeal(now, "usd"));
+is("a field the creator emptied stays empty, and what was saved is offered", [cleared.draft.note, cleared.conflicts], ["", [{ unit: "note", saved: { note: "Edited by a teammate" } }]]);
+is("nothing typed: the deal as it is now", rebaseDraft(base, base, now, "usd"), { draft: draftFromDeal(now, "usd"), conflicts: [] });
+
+part("What the editor says and where focus goes");
+const words = conflictMessage(both.conflicts);
+is("the message names each part somebody else changed too", words, "This deal changed while you were editing. Your changes are kept. Someone else also changed the next action and its date and the responsible teammate. What is saved now is shown beside each. Choose, then save again.");
+is("every sentence is under 21 words", words.split(/(?<=\.) /).every((sentence) => sentence.split(/\s+/).length < 21), true);
+is("with no part in conflict, it says only that the changes are kept", conflictMessage([]), "This deal changed while you were editing. Your changes are kept. Check them and save again.");
+const many = conflictMessage(["title", "email", "value", "stage", "note"].map((unit) => ({ unit: unit as never, saved: {} })));
+is("many parts are counted, so no sentence runs long", [many.includes("Someone else also changed 5 parts of it."), many.split(/(?<=\.) /).every((sentence) => sentence.split(/\s+/).length < 21)], [true, true]);
+is("focus goes to the first part in conflict, in the editor's order", [conflictFocus(both.conflicts), conflictFocus([{ unit: "note", saved: {} }, { unit: "value", saved: {} }])], [dealFieldId("nextAction"), dealFieldId("value")]);
+is("and to Save when none is", conflictFocus([]), DEAL_SAVE_ID);
+const stageName = (id: string) => ({ won000: "Won" } as Record<string, string>)[id] ?? "?";
+is("what is saved now, in words", [
+  savedNowText(both.conflicts[0], "usd", stageName),
+  savedNowText({ unit: "followUp", saved: { nextAction: "Call", dueDate: "" } }, "usd", stageName),
+  savedNowText({ unit: "followUp", saved: { nextAction: "", dueDate: "" } }, "usd", stageName),
+  savedNowText({ unit: "assignee", saved: { assignee: "" } }, "usd", stageName),
+  savedNowText({ unit: "value", saved: { value: "1250.5" } }, "usd", stageName),
+  savedNowText({ unit: "stage", saved: { stage: "won000" } }, "usd", stageName),
+  savedNowText({ unit: "note", saved: { note: "" } }, "usd", stageName),
+], ["Call Dana back, on 2026-11-10", "Call, with no date", "no next action", "Unassigned", "1250.5 USD", "Won", "nothing"]);
+
+part("A refused change: put back, closed, or said");
+is("an edit's conflict with the deal as it is now: put back", refusalKind("deal", { error: "crm_conflict", current: {} }), "rebase");
+is("an edit's conflict with nothing sent back (moved where they cannot see it): closed", [refusalKind("deal", { error: "crm_conflict" }), DEAL_HIDDEN], ["hidden", "This deal moved where you cannot see it. Nothing was saved."]);
+is("a pipeline change's conflict, or any other refusal: its own words", [refusalKind("pipeline", { error: "crm_conflict" }), refusalKind("deal", { error: "title" })], ["message", "message"]);
+
+part("One change at a time, decided at once");
+const gate = oneAtATime();
+is("the first change goes, a second before its answer does not, the next one after it does", [gate.enter(), gate.enter(), (gate.leave(), gate.enter())], [true, false, true]);
 done();

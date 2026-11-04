@@ -46,12 +46,110 @@ export function dealChanges(base: DealDraft, draft: DealDraft, currency: string)
 }
 
 /**
- * The creator's changes put back on the deal as it is now: every field from
- * `current`, except those the creator changed since `base`, which keep what
- * they typed.
+ * What the creator edits as one thing: a field, except the next action and
+ * its date, which only make sense together, so they are always kept or
+ * taken as a pair (never the creator's action with somebody else's date).
  */
-export function rebaseDraft(base: DealDraft, draft: DealDraft, current: Deal, currency: string): DealDraft {
-  const next = draftFromDeal(current, currency);
-  for (const field of changedFields(base, draft)) next[field] = draft[field];
-  return next;
+export type DraftUnit = "title" | "email" | "value" | "stage" | "note" | "followUp" | "assignee";
+export const DRAFT_UNITS: readonly { unit: DraftUnit; fields: readonly DraftField[]; label: string }[] = [
+  { unit: "title", fields: ["title"], label: "what it is" },
+  { unit: "email", fields: ["email"], label: "their email" },
+  { unit: "value", fields: ["value"], label: "what it is worth" },
+  { unit: "stage", fields: ["stage"], label: "the stage" },
+  { unit: "followUp", fields: ["nextAction", "dueDate"], label: "the next action and its date" },
+  { unit: "assignee", fields: ["assignee"], label: "the responsible teammate" },
+  { unit: "note", fields: ["note"], label: "the note" },
+];
+
+/** A part both the creator and somebody else changed: the creator's words stay, and `saved` is what is saved now. */
+export type DraftConflict = { unit: DraftUnit; saved: Partial<DealDraft> };
+
+const differs = (fields: readonly DraftField[], a: DealDraft, b: DealDraft) => fields.some((field) => a[field] !== b[field]);
+
+/**
+ * The creator's changes put back on the deal as it is now: every part from
+ * `current`, except those the creator changed since `base`, which keep what
+ * they typed, whole (the next action with its own date). A part changed on
+ * both sides, to something else, is a conflict: the editor shows what is
+ * saved now beside it, with a way to take it.
+ */
+export function rebaseDraft(base: DealDraft, draft: DealDraft, current: Deal, currency: string): { draft: DealDraft; conflicts: DraftConflict[] } {
+  const now = draftFromDeal(current, currency);
+  const next = { ...now };
+  const conflicts: DraftConflict[] = [];
+  for (const { unit, fields } of DRAFT_UNITS) {
+    if (!differs(fields, base, draft)) continue;
+    for (const field of fields) next[field] = draft[field];
+    if (differs(fields, base, now) && differs(fields, draft, now)) conflicts.push({ unit, saved: Object.fromEntries(fields.map((field) => [field, now[field]])) });
+  }
+  return { draft: next, conflicts };
+}
+
+/** Names a list in plain words: "a", "a and b", "a, b and c". */
+const listOf = (words: string[]) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
+
+/** What the editor says after a conflict: short sentences, naming each part somebody else changed too. */
+export function conflictMessage(conflicts: readonly DraftConflict[]): string {
+  const said = "This deal changed while you were editing. Your changes are kept.";
+  if (!conflicts.length) return `${said} Check them and save again.`;
+  const names = DRAFT_UNITS.filter((u) => conflicts.some((c) => c.unit === u.unit)).map((u) => u.label);
+  const what = names.length > 3 ? `${names.length} parts of it` : listOf(names);
+  return `${said} Someone else also changed ${what}. What is saved now is shown beside ${conflicts.length === 1 ? "it" : "each"}. Choose, then save again.`;
+}
+
+/** The id of a field of the editor, so focus can go back to it. */
+export const dealFieldId = (field: DraftField) => `deal-field-${field}`;
+export const DEAL_SAVE_ID = "deal-save";
+
+/** Where focus goes when a save comes back refused: the first part in conflict, in the editor's order, or Save. */
+export function conflictFocus(conflicts: readonly DraftConflict[]): string {
+  const first = DRAFT_UNITS.find((u) => conflicts.some((c) => c.unit === u.unit));
+  return first ? dealFieldId(first.fields[0]) : DEAL_SAVE_ID;
+}
+
+/** One request at a time, decided at once: a second change made before the first one's answer is not sent. */
+export function oneAtATime(): { enter(): boolean; leave(): void } {
+  let busy = false;
+  return {
+    enter() {
+      if (busy) return false;
+      busy = true;
+      return true;
+    },
+    leave() {
+      busy = false;
+    },
+  };
+}
+
+/** What is saved now for a part in conflict, in words shown beside it ("Saved now: …"). */
+export function savedNowText(conflict: DraftConflict, currency: string, stageName: (id: string) => string): string {
+  const saved = conflict.saved;
+  switch (conflict.unit) {
+    case "value":
+      return saved.value ? `${saved.value} ${currency.toUpperCase()}` : "no amount";
+    case "stage":
+      return stageName(saved.stage ?? "");
+    case "assignee":
+      return saved.assignee || "Unassigned";
+    case "followUp":
+      if (!saved.nextAction) return saved.dueDate ? `no next action, dated ${saved.dueDate}` : "no next action";
+      return saved.dueDate ? `${saved.nextAction}, on ${saved.dueDate}` : `${saved.nextAction}, with no date`;
+    default:
+      return saved[conflict.unit] || "nothing";
+  }
+}
+
+/** What the board says when a deal it was changing moved to a pipeline this person cannot see. */
+export const DEAL_HIDDEN = "This deal moved where you cannot see it. Nothing was saved.";
+
+/**
+ * What the board does with a refused change: "rebase" puts the creator's
+ * changes on the deal as it is now; "hidden" closes the editor, since the
+ * deal changed and moved where this person cannot see it (sending again
+ * would only be refused again); "message" shows the refusal's own words.
+ */
+export function refusalKind(action: unknown, answer: { error: string; current?: unknown }): "rebase" | "hidden" | "message" {
+  if (action !== "deal" || answer.error !== "crm_conflict") return "message";
+  return answer.current ? "rebase" : "hidden";
 }

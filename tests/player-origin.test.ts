@@ -5,7 +5,7 @@
  * from the window of one of those frames.
  */
 import { readFileSync } from "node:fs";
-import { PLAYER_ORIGINS, framePlayer, isPlayerOrigin, messagePlayer, playerOf } from "@/lib/player-origin";
+import { PLAYER_ORIGINS, framePlayer, frameTarget, isPlayerOrigin, messagePlayer, playerOf } from "@/lib/player-origin";
 import { embedUrl } from "@/lib/sales-page";
 import { done, is, part } from "./check";
 
@@ -67,5 +67,12 @@ part("The page uses it");
 const page = readFileSync("components/page-depth.tsx", "utf8");
 is("no loose origin pattern is left in the page", /\/youtube\/\.test|vimeo\\\.com\$/.test(page), false);
 is("the page checks each message's sender and origin with messagePlayer", /messagePlayer\([^;]*,\s*event\.source\s*,\s*event\.origin\s*\)/.test(page), true);
+
+part("Messages to a player go to its own origin, never to any");
+is("a player frame's target is its exact origin", [frameTarget(youtubeFrame), frameTarget(vimeoFrame)], [new URL(youtubeFrame).origin, new URL(vimeoFrame).origin]);
+is("anything else has no target", ["https://evilvimeo.com/video/1", "http://player.vimeo.com/video/1", "not a url", ""].map(frameTarget), [null, null, null, null]);
+const depthSource = readFileSync("components/page-depth.tsx", "utf8");
+is("the sales page never posts to \"*\"", /postMessage\([^;]*,\s*"\*"\s*\)/.test(depthSource), false);
+is("and posts only to frameTarget's answer", (depthSource.match(/postMessage\(/g) ?? []).length === (depthSource.match(/postMessage\([^;]*, target\)/g) ?? []).length, true);
 
 done();

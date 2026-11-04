@@ -2,7 +2,7 @@
  * Confirmation and shipment are separate intentions with separate sources.
  * This module shares the existing bounded pool/Lua, never a provider quota.
  */
-import { singleDigitalAccessCovered, singleDigitalMessage, readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity, verifySingleDigitalRenewal, singleDigitalRenewalDraft, activateSingleDigitalRenewal, type SingleDigitalRenewalDraft } from "@/lib/single-digital-access";
+import { singleDigitalAccessCovered, singleDigitalRenewalCopy, singleDigitalMessage, readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity, verifySingleDigitalRenewal, singleDigitalRenewalDraft, activateSingleDigitalRenewal, type SingleDigitalRenewalDraft } from "@/lib/single-digital-access";
 import { storeForEmail, storeRef } from "@/lib/store";
 import { physicalOptionCovered } from "@/lib/physical-option-confirmation";
 import { createHash, randomBytes } from "node:crypto";
@@ -1092,7 +1092,9 @@ export async function orderConfirmationMailOf(statsId: string, email: string, ru
       if (!renewal || renewal.row.statsId !== statsId || renewal.row.person !== person) throw Error("Confirmation copy source is unknown");
       const message = renewal.payload.draft?.message;
       if (message && hash(message.to.trim().toLowerCase()) !== person) throw Error("Confirmation copy recipient is unknown");
-      out.push({ purpose: renewal.row.purpose, phase: renewal.row.phase, created: renewal.row.created,
+      const original = singleDigitalRenewalCopy(renewal.payload.capsule, statsId, renewal.row.accountId, email);
+      if (!original) throw Error("Confirmation copy original identity is unknown");
+      out.push({ ...original, purpose: renewal.row.purpose, phase: renewal.row.phase, state: renewal.row.state, created: renewal.row.created,
         ...(message ? { subject: message.subject, text: message.text } : {}) });
       continue;
     }

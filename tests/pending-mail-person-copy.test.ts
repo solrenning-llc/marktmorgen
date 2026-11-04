@@ -65,3 +65,19 @@ test("unknown or oversized index replies fail the whole copy", async () => {
     await assert.rejects(orderConfirmationMailOf("stats", "buyer@example.test", runtime));
   }
 });
+
+test("four genuine pending shipping messages stay inside the personal copy's supported index", async () => {
+  redis.clear(); process.env.NIMBUS_DATA_KEY = "SYNTHETIC_SHIPMENT_DATA_KEY_1234567890";
+  const now = Date.now(), world = shipmentOutboxFixture();
+  const runtime = { lifecycle: "active" as const, policy: shipmentPolicy(now), pipeline: world.pipeline, now: () => now };
+  for (let i = 0; i < 4; i++) {
+    assert.equal((await enqueueShipmentMail({ statsId: "copy_four", session: `cs_test_copyfour00000${i}`, authorizedAt: now,
+      shipped: { at: Math.floor(now / 1000), tracking: "https://example.test/track" },
+      message: { from: "Store <sender@example.test>", to: "buyer@example.test", subject: `Parcel ${i}`, text: `Original parcel ${i}`, replyTo: "team@example.test" } }, runtime)).ok, true);
+  }
+  world.commands.length = 0;
+  const rows = await shipmentMailOf("copy_four", "buyer@example.test", { ...runtime, lifecycle: "retired" });
+  assert.equal(rows.length, 4);
+  assert.deepEqual(new Set(rows.map(r => (r as {subject: string}).subject)), new Set(["Parcel 0", "Parcel 1", "Parcel 2", "Parcel 3"]));
+  assert.ok(world.commands.every(c => reads.has(String(c[0]))));
+});

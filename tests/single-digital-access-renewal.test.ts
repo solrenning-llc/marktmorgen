@@ -163,13 +163,27 @@ test("a renewal copied under another source identity is unknown and leaves the a
 
 
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
+import { singleDigitalRenewalCopy } from "@/lib/single-digital-access";
 test("personal copy includes the existing renewal request without exposing a capsule or creating a token",async()=>{
  const f=await queued(),before=f.calls.length;
  const commands:(string|number)[][]=[];
  const rows=await orderConfirmationMailOf(f.store.statsId!,f.email,{...f.runtime,lifecycle:"retired",pipeline:async batch=>{commands.push(...batch);return f.runtime.pipeline!(batch);}});
  assert.equal(rows.length,1);assert.equal(tokenKeys().length,0);assert.equal(f.calls.length,before);
+ const saved=await readSingleDigitalRenewalOrigin(f.id,f.runtime);assert.ok(saved);
+ const expected={checkout:f.capsule.sessionId,product:f.capsule.productId,unitCents:f.capsule.unitCents,paidCents:f.capsule.paidCents,currency:f.capsule.currency,paidAt:f.capsule.created};
+ assert.deepEqual(rows[0],{...expected,purpose:"single-digital-access-renewal",phase:"renewal_queued",state:"queued",created:saved.row.created});
+ assert.deepEqual(singleDigitalRenewalCopy(saved.payload.capsule,f.store.statsId!,saved.row.accountId,f.email),expected);
+ for(const [sealed,stats,account,email] of [[saved.payload.capsule+"corrupt",f.store.statsId!,saved.row.accountId,f.email],[saved.payload.capsule,"other_store",saved.row.accountId,f.email],[saved.payload.capsule,f.store.statsId!,"acct_Other",f.email],[saved.payload.capsule,f.store.statsId!,saved.row.accountId,"other@example.test"]])
+  assert.equal(singleDigitalRenewalCopy(sealed,stats,account,email),null);
  assert.ok(commands.every(c=>["TYPE","SCARD","SMEMBERS","GETRANGE","GET"].includes(String(c[0]))));
  const text=JSON.stringify(rows);assert.ok(text.includes("single-digital-access-renewal"));
  assert.equal(/capsule|sealed|token|storeRef|fingerprint/i.test(text),false);
  assert.deepEqual(await orderConfirmationMailOf(f.store.statsId!,"other@example.test",f.runtime),[]);
+ await runOrderConfirmationMail(f.runtime.now!()+30000,async(_m,barrier)=>{assert.equal(await barrier(),true);return "unknown";},f.runtime);
+ assert.equal((await readSingleDigitalRenewalOrigin(f.id,f.runtime))?.row.state,"dispatching");
+ const grants=tokenKeys().length,gets=f.gets.length;
+ const after=await orderConfirmationMailOf(f.store.statsId!,f.email,{...f.runtime,lifecycle:"retired"});
+ assert.equal((after[0] as {state:string}).state,"dispatching");
+ for(const [key,value] of Object.entries(expected))assert.equal((after[0] as Record<string,unknown>)[key],value);
+ assert.equal(tokenKeys().length,grants);assert.equal(f.gets.length,gets);
 });

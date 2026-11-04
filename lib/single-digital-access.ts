@@ -128,6 +128,19 @@ export function singleDigitalRenewalIdentity(store: Store, sealed: string): Sing
     return c && c.sid === store.sid && c.statsId === store.statsId && c.accountId === store.stripeAccountId ? c : null;
   } catch { return null; }
 }
+/** Personal-copy projection of an existing authenticated historical claim.
+ * No current payment/catalog check, inbox grant or renewal permission is
+ * inferred; a refund does not erase the historical data held about a buyer. */
+export function singleDigitalRenewalCopy(sealed: string, statsId: string, accountId: string, email: string): { checkout: string; product: string; unitCents: number; paidCents: number; currency: string; paidAt: number } | null {
+  if (typeof sealed !== "string" || sealed.length > MAX_CAPSULE_BYTES) return null;
+  const opened = unseal(sealed, CONTEXT);
+  try {
+    const c = opened.ok ? capsule(JSON.parse(opened.value)) : null;
+    if (!c || c.statsId !== statsId || c.accountId !== accountId || c.email !== normaliseEmail(email)) return null;
+    return { checkout: c.sessionId, product: c.productId, unitCents: c.unitCents, paidCents: c.paidCents, currency: c.currency, paidAt: c.created };
+  } catch { return null; }
+}
+
 export async function verifySingleDigitalRenewal(store: Store, sealed: string): Promise<{ claim: SingleDigitalCapsule; store: Store; product: Listing } | null> {
   const c = singleDigitalRenewalIdentity(store, sealed);
   const current = c ? await storeForEmail(storeRef(store)) : null;

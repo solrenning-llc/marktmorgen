@@ -118,7 +118,7 @@ import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
-import { COMPUTER_BODY_MAX, type PreviewScreen } from "@/lib/preview-screen";
+import { COMPUTER_BODY_MAX, type PreviewScreen, screenFor } from "@/lib/preview-screen";
 import {
   ROW_EDIT_WHY,
   ROW_ELEMENT_NAMES,
@@ -474,7 +474,10 @@ export function PageEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   // The preview as on a computer or as on a phone, one press apart; remembered in this browser only.
-  const [screen, setScreen] = usePreviewScreen();
+  const [chosenScreen, setScreen] = usePreviewScreen();
+  // One choice for both places; until it is made, the narrow column beside the blocks shows a phone and the full preview a computer.
+  const screen = screenFor("beside", chosenScreen);
+  const fullScreen = screenFor("full", chosenScreen);
   // Where the block picker is open: the place a new block would take, or null when closed.
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1803,14 +1806,14 @@ export function PageEditor({
       {view === "preview" ? (
         <div className="mt-5">
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-            <ScreenSwitch value={screen} onChange={setScreen} />
+            <ScreenSwitch value={fullScreen} onChange={setScreen} />
             {dirty ? <span className="ml-auto text-xs font-semibold text-ink-soft">Showing unsaved changes</span> : null}
           </div>
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
             <span className="text-ink-soft">Style:</span>
             <PageStylePicker value={style} onChange={setStyle} compact />
           </div>
-          {pagePreview(screen)}
+          {pagePreview(fullScreen)}
         </div>
       ) : (
         // On a wide screen the page is drawn beside the blocks as they are edited.
@@ -2343,7 +2346,7 @@ export function PageEditor({
         <aside
           ref={beside}
           aria-label="The page as visitors see it"
-          className="sp-beside sticky top-24 mt-6 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl"
+          className="sp-beside sticky top-24 mt-6 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl [scrollbar-gutter:stable]"
           onClick={(event) => {
             // A press on a part of the page opens its block for editing, beside it.
             const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-block]") : null;

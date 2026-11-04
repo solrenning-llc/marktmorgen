@@ -13,14 +13,19 @@ import {
   PREVIEW_SCREEN_LABEL,
   type PreviewScreen,
   fitScale,
+  nextRoom,
   readPreviewScreen,
   shrunkHeight,
   shrunkNote,
 } from "@/lib/preview-screen";
 
-/** The screen chosen, remembered in this browser only; "computer" until read, or when the browser keeps nothing. */
-export function usePreviewScreen(): [PreviewScreen, (next: PreviewScreen) => void] {
-  const [screen, setScreen] = useState<PreviewScreen>("computer");
+/**
+ * The screen chosen, remembered in this browser only; null while none is (or
+ * the browser keeps nothing), when each place shows its own default
+ * (screenFor in lib/preview-screen.ts).
+ */
+export function usePreviewScreen(): [PreviewScreen | null, (next: PreviewScreen) => void] {
+  const [screen, setScreen] = useState<PreviewScreen | null>(null);
   useEffect(() => {
     const first = window.setTimeout(() => {
       try {
@@ -92,7 +97,8 @@ export function PreviewFrame({ screen, children }: { screen: PreviewScreen; chil
     const inner = stage.current;
     if (!outer || !inner) return;
     const read = () => {
-      setRoom(outer.clientWidth);
+      // A wider room within a scrollbar's width is not taken back, so a scrollbar that comes and goes cannot loop.
+      setRoom((was) => nextRoom(was, outer.clientWidth));
       setTall(inner.offsetHeight);
     };
     const watch = new ResizeObserver(read);
@@ -103,12 +109,24 @@ export function PreviewFrame({ screen, children }: { screen: PreviewScreen; chil
   useEffect(() => {
     const inner = stage.current;
     if (!inner) return;
+    // Only what is not already out of the Tab order is written, so the change
+    // this makes (a tabindex) finds nothing left to write and the watching ends.
     const still = () => {
-      inner.querySelectorAll<HTMLElement>(FOCUSABLE).forEach((el) => el.setAttribute("tabindex", "-1"));
+      inner.querySelectorAll<HTMLElement>(FOCUSABLE).forEach((el) => {
+        if (el.getAttribute("tabindex") !== "-1") el.setAttribute("tabindex", "-1");
+      });
     };
     still();
+    // What is drawn later, and what changes later into something the keyboard
+    // could reach (a tabindex given back, a link, a button enabled, a part made
+    // editable, a player given controls).
     const watch = new MutationObserver(still);
-    watch.observe(inner, { childList: true, subtree: true });
+    watch.observe(inner, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["tabindex", "href", "disabled", "contenteditable", "controls"],
+    });
     return () => watch.disconnect();
   }, []);
   const frame = PREVIEW_FRAME_WIDTH[screen];

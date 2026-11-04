@@ -93,7 +93,7 @@ export { MAX_CONTACT_NAME, MAX_CONTACT_TAGS, MAX_TAG_LENGTH, readTags } from "@/
 /**
  * What contacts take in the store's data room (lib/store-data.ts), all in
  * one slot. A contact put on the list by an order is part of what the order
- * left, so those writes pass `room` as { order: store } and are written by
+ * left, so those writes pass `room` as orderRoom(store) and are written by
  * lib/order-data.ts, which charges the room what each really adds (a buyer
  * already on the list, only what their record grew by); every other way on
  * (a sign-up, an import, the API, labels a sequence adds) takes what it grows
@@ -106,12 +106,27 @@ const CONTACTS_SLOT = "ct";
 export const TOKEN_BYTES = dataBytes(["0".repeat(40), "x".repeat(40 + 254 + 40)], 1) + 64;
 const contactBytes = (contact: Contact | null) => (contact ? dataBytes([JSON.stringify(contact)], 1) + TOKEN_BYTES : 0);
 
-/** Who a contact's write is counted for: the store's room, an order of the store's, or nobody (the company's own lists). */
-export type ContactRoom = DataStore | { order: DataOwner } | null;
+/**
+ * An order's writes, marked as such by orderRoom and nothing else. It used to
+ * be told apart by having an `order` field, but every store record has one
+ * (the order of its page's parts), so a write passed the whole store was taken
+ * for an order's: not charged first, and written through lib/order-data.ts
+ * with no owner, so never counted (edge tests of 4 November 2026).
+ */
+const ORDER_ROOM: unique symbol = Symbol("an order's contact writes");
+export type OrderRoom = { readonly [ORDER_ROOM]: true; readonly order: DataOwner };
+/** The room for contacts an order puts on the list: charged by lib/order-data.ts at what each really adds. */
+export function orderRoom(owner: DataOwner): OrderRoom {
+  return { [ORDER_ROOM]: true, order: owner };
+}
+const isOrderRoom = (room: ContactRoom): room is OrderRoom => room !== null && (room as Partial<OrderRoom>)[ORDER_ROOM] === true;
+
+/** Who a contact's write is counted for: the store's room, an order of the store's (orderRoom), or nobody (the company's own lists). */
+export type ContactRoom = DataStore | OrderRoom | null;
 
 /** Takes what writing these contacts over what they were grows the list by; nothing when the writes are an order's. */
 async function needContacts(room: ContactRoom, pairs: { before: Contact | null; next: Contact }[]): Promise<void> {
-  if (!room || "order" in room) return;
+  if (!room || isOrderRoom(room)) return;
   const grown = pairs.reduce((sum, { before, next }) => sum + Math.max(0, contactBytes(next) - contactBytes(before)), 0);
   if (grown > 0) await needData(room, [{ slot: CONTACTS_SLOT, bytes: grown }]);
 }
@@ -184,7 +199,7 @@ export async function upsertContact(
     /** The store's id, given when the person typed the address themselves, so asking to be deleted from every store finds this one (lib/joined-stores.ts). */
     sid?: string;
   },
-  /** The store whose data room the contact takes from; { order: store } for one an order put on (lib/order-data.ts); null for the company's own lists. */
+  /** The store whose data room the contact takes from; orderRoom(store) for one an order put on (lib/order-data.ts); null for the company's own lists. */
   room: ContactRoom,
 ): Promise<AddResult> {
   const none = { joined: false, gotProduct: false, full: false };
@@ -252,7 +267,7 @@ export async function upsertContact(
   if (resubscribe) commands.push(["DECR", unsubKey(listId)]);
   if (deleted && ownYes) commands.push(liftCommand(listId, email));
   if (input.sid) commands.push(...joinedCommands(input.sid, email));
-  if (room && "order" in room) await orderWrite(room.order, commands);
+  if (room && isOrderRoom(room)) await orderWrite(room.order, commands);
   else await redisPipeline(commands);
   return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
 }

@@ -92,6 +92,7 @@ import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
+import { CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, TASKS_LOCK_WAIT_MS } from "@/lib/crm";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
@@ -374,6 +375,26 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
  */
 export const ROUND_TRIP_SECONDS = 0.25;
 export const STRIPE_LIST_PAGE = EXPORT_PAGE_SECONDS * MEMORY_SECOND + 0.1 * CPU_SECOND;
+/**
+ * One contact value set (lib/crm.ts, setValue), beside the request that asked
+ * (a studio save, or a workflow's step), at the most: held at 2 GB, with the
+ * wait shape's share of CPU, for the whole wait for the store's people lock
+ * (TASKS_LOCK_WAIT_MS) and every trip to the database one after another (each
+ * try for the lock, the room taken, the write, the room given back, the lock
+ * let go) at ROUND_TRIP_SECONDS; its CRM_VALUE_SET_COMMANDS; and its
+ * CRM_VALUE_SET_BYTES through the database (the value, the one it replaced,
+ * the keys). Counted as CRM_VALUE_SET_UNITS studio requests, taken by the
+ * caller before setValue is called (app/api/store/crm/route.ts, lib/flows.ts);
+ * tests/plan-cost-registry.test.ts holds them above it, and
+ * tests/crm-person-room.test.ts holds the commands and tries measured under
+ * these bounds.
+ */
+export const CRM_VALUE_SET_SECONDS = TASKS_LOCK_WAIT_MS / 1000 + CRM_VALUE_SET_COMMANDS * ROUND_TRIP_SECONDS;
+export const CRM_VALUE_SET =
+  CRM_VALUE_SET_SECONDS * MEMORY_SECOND
+  + CRM_VALUE_SET_SECONDS * (SHAPES.wait.cpu / SHAPES.wait.seconds) * CPU_SECOND
+  + CRM_VALUE_SET_COMMANDS * COMMAND
+  + CRM_VALUE_SET_BYTES * DB_BYTE;
 export function apiReadCost(w: ReadWork): number {
   return w.commands * COMMAND + w.bytes * DB_BYTE + w.sent * ORIGIN_PER_BYTE + w.stripePages * STRIPE_LIST_PAGE + w.roundTrips * ROUND_TRIP_SECONDS * MEMORY_SECOND;
 }
@@ -849,6 +870,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
+      // A contact value set (its wait for the people lock, its commands and bytes) takes CRM_VALUE_SET_UNITS studio requests
+      // first, from the studio and from a workflow's step alike (C3-119, 4 November 2026; tests/plan-cost-registry.ts, CRM_VALUE_SET).
+      { file: "lib/crm.ts", names: ["CRM_VALUE_SET_UNITS", "CRM_VALUE_SET_COMMANDS", "CRM_VALUE_SET_BYTES", "CRM_VALUE_LOCK_TRIES"] },
+      { file: "app/api/store/crm/route.ts", names: ["countStudio(store, null, CRM_VALUE_SET_UNITS)"] },
+      { file: "lib/flows.ts", names: ["takeAllowance(store, \"studio\", CRM_VALUE_SET_UNITS)"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).
       { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).

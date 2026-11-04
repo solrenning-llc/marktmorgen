@@ -57,7 +57,13 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
             ? "This field cannot keep that value. Your entry is still here; correct it and try again."
             : answer.error === "busy"
               ? "Another change to your contacts was being saved at the same moment, so this one was not saved. Your entry is still here; try again in a moment."
-              : "This change was refused. Your entry is still here; check your access and try again.",
+              : answer.error === "unknown"
+                ? "This person or this field is no longer in your store, so nothing was saved. Reload the page to see your contacts as they are now."
+                : answer.error === "studio_used"
+                  ? "Your studio has no requests left this month, so nothing was saved. Your entry is still here."
+                  : answer.error === "unavailable"
+                    ? "This could not be counted right now, so nothing was saved. Your entry is still here; try again in a minute."
+                    : "This change was refused. Your entry is still here; check your access and try again.",
         );
       }
     } catch {

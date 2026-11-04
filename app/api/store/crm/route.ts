@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { StoreFullError } from "@/lib/store-full";
 import { guardStoreWrite } from "@/lib/store-request";
-import { refusedJson } from "@/lib/studio-route";
+import { countStudio, refusedJson } from "@/lib/studio-route";
+import { studioRefusal } from "@/lib/person-tasks";
 import { lockedFor } from "@/lib/two-step";
 import { LockBusyError } from "@/lib/redis-lock";
 import { ensureStatsId } from "@/lib/store";
@@ -11,7 +12,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CrmFieldsKept, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
+import { CRM_VALUE_SET_UNITS, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -61,7 +62,14 @@ export async function POST(request: NextRequest) {
     if (body.action === "value") {
       const field = (await readFields(statsId)).find((f) => f.id === body.field);
       if (!field) return refuse("unknown", 404);
-      const ok = await setValue(statsId, typeof body.person === "string" ? body.person : "", field, body.value, store);
+      // A value set waits for the store's people lock and writes in one script: its work is counted as
+      // CRM_VALUE_SET_UNITS more studio requests, taken before it is written (tests/plan-cost-registry.ts, CRM_VALUE_SET).
+      const counted = await countStudio(store, null, CRM_VALUE_SET_UNITS);
+      if (!counted.ok) {
+        const refused = studioRefusal(counted.reason, counted.message);
+        return Response.json(refused.body, { status: refused.status });
+      }
+      const ok = await setValue(statsId, typeof body.person === "string" ? body.person : "", field, body.value, counted.store ?? store);
       return ok ? Response.json({ ok: true }) : refuse("value");
     }
     if (body.action === "stages") {
@@ -166,6 +174,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof CrmDealWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
     // A value set while the person's other changes, or their deletion, held the store's people lock: nothing written.
     if (error instanceof LockBusyError) return refuse("busy", 409);
+    // A person deleted from the store: nothing about them is written again, as for anything that is gone.
+    if (error instanceof CrmPersonGone) return refuse("unknown", 404);
     console.error("saving a store's fields or deals failed", error);
     return refuse("server_error", 500);
   }

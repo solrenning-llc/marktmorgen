@@ -71,6 +71,7 @@ export const PERSON_DATA: PersonData[] = [
 
   // ---------------------------------------------------------------- what the store keeps about them
   { file: "lib/crm.ts", how: "erased", what: "Your fields about them, and every deal with them" },
+  { file: "lib/crm.ts", how: "kept", what: "A one-way mark that they were deleted, for 31 days", why: "So a field saved late, from a page or a workflow step that started before the deletion, never puts anything about them back. It cannot be turned back into the address, and it goes by itself." },
   { file: "lib/agreement-store.ts", how: "erased", what: "Every proposal and agreement you sent them, each version's text and any signature they gave: their name and address, the name they typed, when, and the one-way code made from their internet address. One waiting for a signature stops taking one. The signed copies already emailed stay with whoever received them" },
   { file: "lib/payment-request-store.ts", how: "erased", what: "Every payment request you sent them: their name and address, what it asked for and what became of it. An open one is withdrawn, so its link stops working and no reminder goes. What they paid stays on your Stripe account" },
   { file: "lib/buyer-profile.ts", how: "erased", what: "Your team's notes about them" },

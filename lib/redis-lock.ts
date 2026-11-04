@@ -60,10 +60,30 @@ async function script(source: string, keys: string[], args: (string | number)[],
  * go. Returns what the holder needs to keep and release it, or throws
  * LockBusyError.
  */
+/** The pause before taking a lock again: FIRST_PAUSE_MS, doubled each time up to LAST_PAUSE_MS, with up to 20 ms more. */
+const FIRST_PAUSE_MS = 20;
+const LAST_PAUSE_MS = 250;
+
+/**
+ * How many times takeLock tries a lock that stays taken for the whole of
+ * `waitMs`, at the most: one try, then one after each pause that still fits
+ * in the wait (each pause is at least its length). What a caller's cost
+ * line counts its tries at (tests/plan-cost-registry.ts).
+ */
+export function lockTriesWithin(waitMs: number): number {
+  let tries = 1;
+  let waited = 0;
+  for (let wait = FIRST_PAUSE_MS; waited + wait <= waitMs; wait = Math.min(wait * 2, LAST_PAUSE_MS)) {
+    waited += wait;
+    tries += 1;
+  }
+  return tries;
+}
+
 export async function takeLock(key: string, ttlSeconds: number, waitMs: number): Promise<Held> {
   const token = crypto.randomUUID();
   const giveUpAt = Date.now() + waitMs;
-  for (let wait = 20; ; wait = Math.min(wait * 2, 250)) {
+  for (let wait = FIRST_PAUSE_MS; ; wait = Math.min(wait * 2, LAST_PAUSE_MS)) {
     const receipt = await redisPipeline([["SET", key, token, "NX", "EX", ttlSeconds]]);
     // One acquisition command needs exactly one reply before work can start.
     if (!Array.isArray(receipt) || receipt.length !== 1) throw new LockBusyError();

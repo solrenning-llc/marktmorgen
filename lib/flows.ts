@@ -67,7 +67,8 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { CRM_VALUE_SET_UNITS, CrmDealReadUnavailable, CrmPersonGone, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { takeAllowance } from "@/lib/store-allowance";
 import { type Held, LockBusyError, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
@@ -163,7 +164,7 @@ const QUEUE = "nl:mail:flowq";
  * returns those whose time is up to the queue, so no contact is dropped.
  */
 const LEASE = "nl:mail:flowq:lease";
-const LEASE_SECONDS = 15 * 60;
+export const LEASE_SECONDS = 15 * 60;
 /**
  * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
  * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
@@ -742,10 +743,19 @@ async function actOnPeople(
     const out: Acted[] = [];
     for (const email of emails) {
       try {
+        // The value set's own work (the people lock, its script) is counted on the store's studio figure first, as from the
+        // studio (tests/plan-cost-registry.ts, CRM_VALUE_SET): nothing is written when it is not taken.
+        const counted = await takeAllowance(store, "studio", CRM_VALUE_SET_UNITS);
+        if (!counted.ok) {
+          out.push({ email, state: "failed", note: `“${field.name}” was not set: ${counted.reason === "used" ? "the studio has no requests left this month." : "the studio's requests could not be counted right now."}` });
+          continue;
+        }
         out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: `“${field.name}” was not set: the store's data room is full.` });
+        // The person was deleted from the store (lib/crm.ts, setValue): nothing about them is written again.
+        else if (error instanceof CrmPersonGone) out.push({ email, state: "failed", note: `“${field.name}” was not set: this person was deleted from your store.` });
         // Another change of the store's people held their lock past the wait (lib/crm.ts, setValue): nothing was written.
         else if (error instanceof LockBusyError) out.push({ email, state: "failed", note: `“${field.name}” was not set: another change to your contacts was being saved at the same moment.` });
         else out.push({ email, state: "uncertain", note: `Whether “${field.name}” was set could not be confirmed.` });

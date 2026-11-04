@@ -510,10 +510,11 @@ export class MemoryRedis {
           held.delete(args[2]);
           return value;
         }
-        // lib/crm.ts SET_CRM_VALUE: a person's value written only while the people lock is the caller's, answering what it replaced.
-        if (key.startsWith("-- marktmorgen:crm-value-set:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, lock, target, token, person, value] = args;
+        // lib/crm.ts SET_CRM_VALUE: a person's value written only while the people lock is the caller's and the person was not deleted, answering what it replaced.
+        if (key.startsWith("-- marktmorgen:crm-value-set:v2\n") && args[0] === "3" && args.length === 7) {
+          const [, lock, target, erased, token, person, value] = args;
           if (this.run(["GET", lock]) !== token) return 0;
+          if (Number(this.run(["EXISTS", erased])) === 1) return 2;
           const before = this.run(["HGET", target, person]);
           this.run(value === "" ? ["HDEL", target, person] : ["HSET", target, person, value]);
           return typeof before === "string" ? [1, before] : [1];

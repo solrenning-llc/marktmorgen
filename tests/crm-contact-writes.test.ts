@@ -3,7 +3,7 @@ import { POST } from "@/app/api/store/crm/route";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { crmAnswer } from "@/lib/crm-response";
-import { CrmValueWriteUnconfirmed, SET_CRM_VALUE, setValue } from "@/lib/crm";
+import { CrmPersonGone, CrmValueWriteUnconfirmed, SET_CRM_VALUE, setValue } from "@/lib/crm";
 import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
 import { type CrmField } from "@/lib/crm-rules";
@@ -22,7 +22,7 @@ async function main() {
   try {
     part("Contact saves and clears require exact acknowledgements");
     for(const value of ["Acme", ""]) {
-      for(const invalid of [null, {}, [], [null], ["1"], [true], [-1], [1], [2], [[]], [[2]], [[1,5]], [[1,"a","b"]], [1,1], new Error("reply lost")]) {
+      for(const invalid of [null, {}, [], [null], ["1"], [true], [-1], [1], [3], [[]], [[2]], [[1,5]], [[1,"a","b"]], [1,1], new Error("reply lost")]) {
         reply=invalid;writes=0;let uncertain=false;
         try { await setValue("contact-check",person,field,value, ROOM); } catch(error) { uncertain=error instanceof CrmValueWriteUnconfirmed; }
         is("unknown save or clear stays uncertain",uncertain,true);
@@ -37,6 +37,15 @@ async function main() {
       reply=[0];writes=0;let busy=false;
       try { await setValue("contact-check",person,field,"Acme Corporation", ROOM); } catch(error) { busy=error instanceof LockBusyError; }
       is("LockBusyError, tried once",[busy,writes],[true,1]);
+      is("the room taken first is given back",await used(),before);
+    }
+    part("A person deleted from the store: nothing written, the room taken given back, and it says so");
+    {
+      const used=async()=>(await dataUsed(ROOM))?.used ?? 0;
+      const before=await used();
+      reply=[2];writes=0;let gone=false;
+      try { await setValue("contact-check",person,field,"Acme Corporation", ROOM); } catch(error) { gone=error instanceof CrmPersonGone; }
+      is("CrmPersonGone, tried once",[gone,writes],[true,1]);
       is("the room taken first is given back",await used(),before);
     }
     part("Applied writes with lost replies are not rolled back");
@@ -76,6 +85,13 @@ async function main() {
     is("the page reads it as a refusal, not an unconfirmed write",crmAnswer(busy.ok,busyBody),{ok:false,error:"busy"});
     is("nothing written",(await original.call(redis,[["HGET","nl:crm:v:"+sid+":"+field.id,person]]))[0],"Acme");
     await original.call(redis,[["DEL","nl:crm:tasklock:"+sid]]);
+    // A person deleted from the store: 404 unknown, as for anything gone, and nothing about them written again.
+    await original.call(redis,[["SET","nl:crm:erased:"+sid+":"+person,"1","EX",60]]);
+    const gone=await POST(new NextRequest("https://marktmorgen.com/api/store/crm",{method:"POST",headers:{"content-type":"application/json",cookie:SESSION_COOKIE+"="+session},body:JSON.stringify({action:"value",field:field.id,person,value:"Umbrella"})}));
+    const goneBody=await gone.json();
+    is("deleted person: 404 unknown",[gone.status,goneBody.error],[404,"unknown"]);
+    is("the page reads it as a refusal",crmAnswer(gone.ok,goneBody),{ok:false,error:"unknown"});
+    is("nothing written again",(await original.call(redis,[["HGET","nl:crm:v:"+sid+":"+field.id,person]]))[0],"Acme");
   } finally {redis.pipeline=original;}
   done();
 }

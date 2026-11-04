@@ -11,7 +11,8 @@ import { readAction } from "@/lib/flow-rules";
 import { parseFlowList } from "@/lib/flow-list";
 import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
-import { readDealExact, readDeals, readStages, writeDeal, writeDealOver } from "@/lib/crm";
+import { dealBytes, dealSlot, readDealExact, readDeals, readStages, writeDeal, writeDealOver } from "@/lib/crm";
+import { dataKey } from "@/lib/store-data";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { putMember, removeMember, setMemberRole } from "@/lib/team";
 import { flowConfigurationIssues } from "@/lib/flow-review";
@@ -104,9 +105,11 @@ async function main(): Promise<void> {
   // A deal is written only over the exact record read just before: one the board changed meanwhile is left as it is.
   await writeDeal(statsId, { id: "racedeal01", title: "Race", email: "race@example.com", cents: 0, stage: open.id, note: "", createdAt: 3, updatedAt: 3 }, ROOM);
   const read = await readDealExact(statsId, "racedeal01", stages);
-  await writeDeal(statsId, { ...read.deal!, note: "Typed on the board", updatedAt: 4 }, ROOM);
+  await writeDeal(statsId, { ...read.deal!, note: "Typed on the board, ".repeat(25), updatedAt: 4 }, ROOM);
   is("a write over a copy the board changed meanwhile writes nothing", await writeDealOver(statsId, { ...read.deal!, assignee: PAT, updatedAt: 5 }, read.raw!, ROOM), "changed");
-  is("and what the creator typed stays", [(await readDealExact(statsId, "racedeal01", stages)).deal!.note, (await readDealExact(statsId, "racedeal01", stages)).deal!.assignee ?? null], ["Typed on the board", null]);
+  const slotNow = async (id: string) => Number((await redis.pipeline([["HGET", dataKey(ROOM)!, dealSlot(id)]]))[0]);
+  is("the store's data room counts the record as the board left it, never the copy read before", await slotNow("racedeal01"), dealBytes((await readDealExact(statsId, "racedeal01", stages)).deal!));
+  is("and what the creator typed stays", [(await readDealExact(statsId, "racedeal01", stages)).deal!.note.startsWith("Typed on the board"), (await readDealExact(statsId, "racedeal01", stages)).deal!.assignee ?? null], [true, null]);
   const again = await readDealExact(statsId, "racedeal01", stages);
   is("over the record as it is now, it is written", await writeDealOver(statsId, { ...again.deal!, assignee: PAT, updatedAt: 6 }, again.raw!, ROOM), "saved");
   is("a deal that is gone is never made again by a write over it", await writeDealOver(statsId, { ...again.deal!, id: "gonedeal01" }, again.raw!, ROOM), "changed");

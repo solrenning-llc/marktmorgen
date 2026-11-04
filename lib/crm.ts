@@ -224,8 +224,11 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
     saved = await redisPipeline([["EVAL", SAVE_CRM_PIPELINES, 1, pipesKey(statsId), snapshotRaw, record]]);
   } catch { throw new CrmSchemaWriteUnconfirmed(); }
   if (Array.isArray(saved) && saved.length === 1 && saved[0] === -1) {
-    // Nothing was written: the room goes back to what the saved record weighs.
-    await giveData(room, [{ slot: PIPES_SLOT, bytes: snapshotRaw ? dataBytes([snapshotRaw], 1) : 0, set: true }]).catch(() => {});
+    // Nothing was written: the room goes back to what the record kept there now weighs, read again, since the write
+    // that changed it meanwhile sized the room to itself (never to the snapshot this request read).
+    const reply = await redisPipeline([["GET", pipesKey(statsId)]]).catch(() => null);
+    const now = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+    if (now === null || typeof now === "string") await giveData(room, [{ slot: PIPES_SLOT, bytes: typeof now === "string" ? dataBytes([now], 1) : 0, set: true }]).catch(() => {});
     throw new CrmSchemaConflict();
   }
   if (!Array.isArray(saved) || saved.length !== 1 || saved[0] !== 1) throw new CrmSchemaWriteUnconfirmed();
@@ -403,8 +406,15 @@ export async function writeDealOver(statsId: string, deal: Deal, before: string,
   } catch { throw new CrmDealWriteUnconfirmed(); }
   if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 1 && saved[0] !== 0 && saved[0] !== -1)) throw new CrmDealWriteUnconfirmed();
   if (saved[0] === 1) return "saved";
-  // Nothing written: its room as the record still there weighs, or none when it is gone.
-  await giveData(room, [{ slot: dealSlot(deal.id), bytes: saved[0] === -1 ? dataBytes([deal.id, before], 1) : 0, set: true }]);
+  // Nothing written: its room put back to what the record kept there now weighs (the board's own write sized it to
+  // that), or none when it is gone. Read again, so a record the board made bigger is never counted at its old size.
+  let now: unknown = null;
+  if (saved[0] === -1) {
+    const reply = await redisPipeline([["HGET", dealsKey(statsId), deal.id]]).catch(() => null);
+    now = Array.isArray(reply) && reply.length === 1 ? reply[0] : null;
+  }
+  if (saved[0] === 0 || typeof now === "string") await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof now === "string" ? dataBytes([deal.id, now], 1) : 0, set: true }]);
+  // Unreadable: the slot keeps the size this write took, never less than the record could weigh.
   return "changed";
 }
 

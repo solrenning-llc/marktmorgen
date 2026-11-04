@@ -465,6 +465,9 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
   const quantity = num(item?.quantity) || 1;
   // A year paid and held as a "trial" until it ends (lib/yearly-fallback-sweep.ts) is a paying member, not a trial.
   const held = paidYearHeld(raw as Parameters<typeof paidYearHeld>[0]);
+  // That trial is the year paid, also once it is over (the membership active again, monthly): its time is never
+  // counted as a free trial in the store's revenue month by month (lib/mrr-movements.ts).
+  const paidTrial = held || (/^\d{9,11}$/.test(meta.yearly_paid_until ?? "") && String(num(raw.trial_end)) === meta.yearly_paid_until);
   return {
     id: typeof raw.id === "string" ? raw.id : "",
     status: held ? "active" : typeof raw.status === "string" ? raw.status : "",
@@ -475,7 +478,7 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     count: num(item?.price?.recurring?.interval_count) || 1,
     start: num(raw.start_date),
     ended: num(raw.ended_at),
-    trialEnd: held ? 0 : num(raw.trial_end),
+    trialEnd: paidTrial ? 0 : num(raw.trial_end),
     channel: "channel" in meta ? (meta.channel && meta.channel !== "direct" ? meta.channel : "direct") : meta.utm_source || "unrecorded",
     entry: entryOf(meta),
     // A membership with a set number of payments is given its end when it is

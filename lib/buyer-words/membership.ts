@@ -96,6 +96,7 @@ const en = {
   /** "a month", "every 3 months": how often a membership is paid for. */
   every: (interval: Interval, count: number) => (count === 1 ? `a ${interval}` : `every ${count} ${interval}s`),
   ends: (date: string) => `Ends ${date}`,
+  paidUntil: (date: string) => `Paid until ${date}`,
   cancel: "Cancel",
   switchPlan: "Switch plan",
   switchCurrencyNote: "Switching plans is not offered on this membership: it is paid in a different currency from the one the store's plans use now.",
@@ -451,6 +452,7 @@ const es: MembershipWords = {
       ? { day: "al día", week: "a la semana", month: "al mes", year: "al año" }[interval]
       : `cada ${count} ${{ day: "días", week: "semanas", month: "meses", year: "años" }[interval]}`,
   ends: (date) => `Termina el ${date}`,
+  paidUntil: (date) => `Pagada hasta el ${date}`,
   cancel: "Cancelar",
   switchPlan: "Cambiar de plan",
   switchCurrencyNote: "Esta membresía no ofrece cambiar de plan: se paga en una moneda distinta de la que usan ahora los planes de la tienda.",
@@ -796,6 +798,7 @@ const fr: MembershipWords = {
           year: `tous les ${count}${S}ans`,
         }[interval],
   ends: (date) => `Se termine le ${date}`,
+  paidUntil: (date) => `Payé jusqu'au ${date}`,
   cancel: "Annuler",
   switchPlan: "Changer de formule",
   switchCurrencyNote: "Cet abonnement ne propose pas de changer de formule, car il est payé dans une autre devise que celle des formules actuelles de la boutique.",
@@ -1142,6 +1145,7 @@ const de: MembershipWords = {
       ? { day: "pro Tag", week: "pro Woche", month: "pro Monat", year: "pro Jahr" }[interval]
       : `alle ${count} ${{ day: "Tage", week: "Wochen", month: "Monate", year: "Jahre" }[interval]}`,
   ends: (date) => `Endet am ${date}`,
+  paidUntil: (date) => `Bezahlt bis ${date}`,
   cancel: "Kündigen",
   switchPlan: "Tarif wechseln",
   switchCurrencyNote: "Bei dieser Mitgliedschaft ist kein Tarifwechsel möglich: Sie wird in einer anderen Währung bezahlt als der, in der die Tarife des Shops jetzt angeboten werden.",
@@ -1503,6 +1507,7 @@ const it: MembershipWords = {
       ? { day: "al giorno", week: "a settimana", month: "al mese", year: "all'anno" }[interval]
       : `ogni ${count} ${{ day: "giorni", week: "settimane", month: "mesi", year: "anni" }[interval]}`,
   ends: (date) => `Termina ${il(date)}`,
+  paidUntil: (date) => `Pagato fino ${al(date)}`,
   cancel: "Annulla",
   switchPlan: "Cambia piano",
   switchCurrencyNote: "Questo abbonamento non può cambiare piano: è pagato in una valuta diversa da quella dei piani attuali del negozio.",
@@ -1848,6 +1853,7 @@ const nl: MembershipWords = {
       ? { day: "per dag", week: "per week", month: "per maand", year: "per jaar" }[interval]
       : `elke ${count} ${{ day: "dagen", week: "weken", month: "maanden", year: "jaar" }[interval]}`,
   ends: (date) => `Eindigt op ${date}`,
+  paidUntil: (date) => `Betaald tot ${date}`,
   cancel: "Opzeggen",
   switchPlan: "Abonnement wijzigen",
   switchCurrencyNote: "Bij dit lidmaatschap kun je niet van abonnement wisselen: het wordt betaald in een andere valuta dan die van de huidige abonnementen van de winkel.",
@@ -2191,6 +2197,7 @@ const pt: MembershipWords = {
       ? { day: "por dia", week: "por semana", month: "por mês", year: "por ano" }[interval]
       : `a cada ${count} ${{ day: "dias", week: "semanas", month: "meses", year: "anos" }[interval]}`,
   ends: (date) => `Termina a ${date}`,
+  paidUntil: (date) => `Paga até ${date}`,
   cancel: "Cancelar",
   switchPlan: "Mudar de plano",
   switchCurrencyNote: "Esta subscrição não pode mudar de plano: é paga numa moeda diferente da dos planos atuais da loja.",

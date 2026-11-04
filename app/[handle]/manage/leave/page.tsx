@@ -103,6 +103,12 @@ export default async function LeavePage({ params, searchParams }: Params) {
           ) : (
             <>
               <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{one.title === m.yourMembership ? m.leaveHeadPlain : m.leaveHead(one.title)}</h1>
+              {one.paidUntil ? (
+                // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): said first, so leaving is decided knowing it.
+                <p className="st-muted mt-2 text-sm font-semibold" data-paid-until>
+                  {m.paidUntil(endDate(one.paidUntil))}
+                </p>
+              ) : null}
 
               {!why ? (
                 <>

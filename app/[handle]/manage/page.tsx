@@ -137,6 +137,7 @@ export default async function ManagePage({ params, searchParams }: Params) {
                         <p className="st-muted text-sm">
                           {one.amount ? `${formatMoney(one.amount, one.currency, say.lang.locale)} ${every(one)}` : null}
                           {one.endsAt ? `${one.amount ? " · " : ""}${m.ends(endDate(one.endsAt))}` : null}
+                          {one.paidUntil ? `${one.amount || one.endsAt ? " · " : ""}${m.paidUntil(endDate(one.paidUntil))}` : null}
                         </p>
                       </div>
                       {one.pause ? (

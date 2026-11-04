@@ -37,7 +37,7 @@ import { type PauseSub, cannotPause, pauseOf, periodEndOf } from "@/lib/membersh
 import { isOwnReasonId, offers } from "@/lib/leave-rules";
 import { countLeave } from "@/lib/leave-flow";
 import { canSellProduct } from "@/lib/store-checkout";
-import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
+import { type YearlyChoice, type YearlySub, paidYearHeld, yearlyChoice } from "@/lib/yearly-switch-rules";
 
 /** How long the emailed link keeps working. */
 export const MANAGE_LINK_SECONDS = 60 * 60;
@@ -378,6 +378,11 @@ export type Membership = {
   periodEnd: number;
   /** The same membership's yearly price, when this one can move to it (lib/yearly-switch-rules.ts). */
   yearly: YearlyChoice | null;
+  /**
+   * The end of a year the member paid while moving to the monthly price, held with nothing to pay until then
+   * (lib/yearly-fallback-sweep.ts, paidYearHeld): the page says "Paid until" that day and offers no switch before it.
+   */
+  paidUntil?: number | null;
 };
 
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -394,6 +399,7 @@ export type SubRow = {
   cancel_at_period_end?: unknown;
   cancel_at?: unknown;
   current_period_end?: unknown;
+  trial_end?: unknown;
   items?: {
     data?: {
       current_period_end?: unknown;
@@ -498,6 +504,7 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
         const listing = listings.get(product);
         return listing && canSellProduct(store, listing) ? yearlyChoice(sub as YearlySub, listing, store.tiers, store.currency, nowSeconds) : null;
       })(),
+      paidUntil: paidYearHeld(sub) && typeof sub.trial_end === "number" ? sub.trial_end : null,
     };
   });
 }

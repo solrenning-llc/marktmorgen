@@ -167,6 +167,7 @@ try{
 
     // The actual help page and its hydrated search: no account, API or test-only UI.
     // Preserve the entry-page audit above; these are bounded navigation regressions.
+    await page.waitForURL(origin+"/api/auth/lost",{waitUntil:"load"});
     for(const helpWidth of [390,1280]){
      await page.setViewportSize({width:helpWidth,height:900});
      await page.goto(origin+"/help#%",{waitUntil:"networkidle"});
@@ -198,7 +199,7 @@ try{
       await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       if(await search.inputValue()!=="Stripe")throw Error("Unrelated or malformed help fragment cleared the search");
      }
-     if(errors.length)throw Error("Help navigation raised a browser error: "+errors.join("; "));
+     if(errors.length||writes)throw Error("Help navigation raised an error or attempted a write: "+errors.join("; "));
      console.log("HELP_FRAGMENT_NAVIGATION_REGRESSION:"+JSON.stringify({engine,width:helpWidth,malformedEntry:true,keyboardSection:true,hiddenAnswer:true,queryPreserved:true,writes,foreign}));
     }
    }

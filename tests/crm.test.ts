@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   is("a deal made, with an id of its own", [made.ok, typeof made.deal?.id, made.deal?.id?.length], [true, "string", 10]);
   const store = (await storeForEmail(OWNER))!;
   const id = made.deal.id as string;
-  const moved = await call_({ action: "deal", deal: { ...made.deal, stage: "won000" } });
+  const moved = await call_({ action: "deal", version: made.version, deal: { ...made.deal, stage: "won000" } });
   is("moved on", [moved.ok, (await readDeals(store.statsId, DEFAULT_STAGES))[0]?.stage], [true, "won000"]);
   is("no title, refused", (await call_({ action: "deal", deal: { title: " ", stage: "lead00" } })).error, "title");
   is("an id that is not one of theirs, refused", (await call_({ action: "deal", deal: { id: "zzzzzzzzzz", title: "x", stage: "lead00" } })).error, "unknown");

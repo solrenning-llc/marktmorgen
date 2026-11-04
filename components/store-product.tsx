@@ -1,6 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
+import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
 import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
@@ -63,6 +64,9 @@ export function pricePill(store: Store, product: Listing): string {
   if (activePwyw(product)) return `${money(product.priceCents)}+`;
   const options = sellableOptions(product);
   const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
+  // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices.
+  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
+  if (lengths.length) return w.fromPrice(money(fromPrice(lengths) as number));
   const price = `${money(fromPriceCents(product))}${every}`;
   return options.length > 1 ? w.fromPrice(price) : price;
 }
@@ -140,8 +144,8 @@ export function SaleNote({ store, product }: { store: Store; product: Listing })
 }
 
 /** What a card says about a call: one person, a group, or dated live sessions. */
-function callLine(store: Store, call: NonNullable<Listing["call"]>, now = Date.now()): string {
-  const { w } = speech(store);
+function callLine(store: Store, call: NonNullable<Listing["call"]>, priceCents: number, now = Date.now()): string {
+  const { w, lang } = speech(store);
   // In person (lib/call-place.ts): no call and nothing online; the address is on its booking page.
   const inPerson = Boolean(call.place);
   if (call.kind === "live") {
@@ -150,6 +154,9 @@ function callLine(store: Store, call: NonNullable<Listing["call"]>, now = Date.n
     return inPerson ? w.inPersonLive(coming) : w.callLive(coming);
   }
   if (call.seats > 1) return inPerson ? w.inPersonGroup(call.minutes, call.seats) : w.callGroup(call.minutes, call.seats);
+  // Several lengths (lib/call-lengths.ts): each one said, "30 or 60 minutes".
+  const lengths = listedLengths(call, priceCents);
+  if (lengths.length) return inPerson ? w.inPersonLengths(lengthList(lengths, lang.locale)) : w.callLengths(lengthList(lengths, lang.locale));
   return inPerson ? w.inPersonOne(call.minutes) : w.callOne(call.minutes);
 }
 
@@ -187,7 +194,7 @@ export function ProductFacts({
   } else if (inside) {
     facts.push(w.bundleOf(inside.length, worthLine(store, inside, product.priceCents)));
   }
-  if (product.call) facts.push(callLine(store, product.call));
+  if (product.call) facts.push(callLine(store, product.call, product.priceCents));
   if (product.podcast && product.podcast.episodes > 0) {
     facts.push(w.podcast(product.podcast.episodes));
   }
@@ -652,7 +659,8 @@ export function BuyBox({
     return (
       <>
         <Link prefetch={false} href={`/@${store.handle}/book/${product.id}`} className="btn st-btn btn-block mt-4">
-          {w.priced(product.call.kind === "live" ? w.pickSession : w.pickTime, money(product.priceCents))}
+          {/* Several lengths (lib/call-lengths.ts): from the lowest of their prices, as the card says it. */}
+          {w.priced(product.call.kind === "live" ? w.pickSession : w.pickTime, listedLengths(product.call, product.priceCents).length ? pricePill(store, product) : money(product.priceCents))}
         </Link>
         <PackageOffer store={store} product={product} />
       </>

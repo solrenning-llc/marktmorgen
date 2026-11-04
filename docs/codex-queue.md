@@ -1849,6 +1849,8 @@ Ajuste lib/deemed-supplier.ts e docs/eu-vat-article-9a.md aos pontos 10 a 17: in
 Estado inicial: na fila.
 Em 275 [FX1], retire o INSS enquanto o dono não receber pró-labore, e inclua os custos de cumprir: Form 5472 e Form 1120 pro forma, a declaração da LLC no IRPF, a CBE quando aplicável, a taxa anual de Delaware e os registros e declarações de impostos sobre consumo (OSS e equivalentes), com fontes oficiais datadas. Desconhecido reprova.
 
+**Recorte de evidência federal incorporado — Codex D, 04/11/2026:** PR #2299 incorporado em `ba65e0409271f518be190eabce9793d7cd5e1e87`, head `d516427fbfc9590350459afb3bf7530ed6dea613`, com nove agregadores All checks verdes e revisões independentes do Codex C e do Revisor 2 preservadas na junção exclusivamente documental pela CX-82. Em `docs/llc-fixed-costs-2026-10-22.md`, fontes oficiais do IRS datadas sustentam o escopo condicional do pacote Form 5472/1120 pro forma, prazo e extensão pelo Form 7004, entrega e penalidades. O teste documental prende essas evidências; não certifica aplicabilidade à LLC, declaração preparada ou entregue, nem teto completo de custo reservado. Desconhecido continua reprovando, nunca zero. Estado: incorporado; publicação por SHA/domínio não verificada. O 474 [TX4] continua em andamento, com os demais custos e providências pendentes; nenhum preço, limite, comissão, flag ou trava alterado.
+
 475. [TX5] Mostrar o efeito.
 Estado inicial: na fila, junto de 466 [MR3].
 Mostre, por plano, intervalo e complemento, o lucro líquido no pior caso com a nova leitura e a base mínima da empresa, e recalcule os limites de e-mails para a lista de 309 [EM1] com ela. Não proponha nem aplique preço novo.

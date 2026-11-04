@@ -116,11 +116,27 @@ test("the real reservations file parses: every lane has a prefix and rows name e
   for (const r of reservations(text)) assert.match(r.file, /^[\w.\[\]\/-]+$/, r.file);
 });
 
+// Since the rows moved to docs/reservations/<agent>.md, the base's docs/reservations.md has no rows:
+// the CI call must pass the agents' own files too, or nothing is ever refused (Revisor 3, #1855).
+test("the CI inputs carry the agents' own files, so a file another agent reserved there is refused", () => {
+  const shown: Record<string, string> = Object.fromEntries([["HEAD^1:docs/reservations.md", lanesOnly], ...files.map((f: { path: string; text: string }) => [`HEAD^1:${f.path}`, f.text])]);
+  const git = (args: string[]) => {
+    if (args[0] === "rev-parse") return "base";
+    if (args[0] === "show") return shown[args[1]] ?? "";
+    if (args[0] === "diff") return "lib/calls.ts\n";
+    if (args[0] === "ls-tree") return files.map((f: { path: string }) => f.path).join("\n");
+    throw new Error(args.join(" "));
+  };
+  const inputs = pullRequestInputs(git);
+  const result = report(conflicts({ ...inputs, branch: "claude3/y" }), "claude3/y", inputs.changed.length);
+  assert.equal(result.ok, false, result.lines.join("\n"));
+});
+
 // The real check: on a pull request (GitHub sets GITHUB_HEAD_REF), the files this PR changes
 // against its base must not include a file another agent reserved on the base branch.
 test("this pull request changes no file another agent reserved", { skip: !process.env.GITHUB_HEAD_REF }, () => {
   const branch = process.env.GITHUB_HEAD_REF!;
-  const { text, changed } = pullRequestInputs((args: string[]) => execFileSync("git", args, { encoding: "utf8" }));
-  const result = report(conflicts({ text, branch, changed }), branch, changed.length);
+  const inputs = pullRequestInputs((args: string[]) => execFileSync("git", args, { encoding: "utf8" }));
+  const result = report(conflicts({ ...inputs, branch }), branch, inputs.changed.length);
   assert.ok(result.ok, result.lines.join("\n"));
 });

@@ -21,7 +21,8 @@
  *     Stripe will not close because it was just paid;
  *   - the thanks page marks each limited product of the cart sold;
  *   - the open cart says a sold out one is sold out and leaves it out of the
- *     total, and never says so of one whose count cannot be read; the route
+ *     total, and never says so of one whose count cannot be read; the unit
+ *     the browser back from Stripe holds (its cookie) is its own, until paid; the route
  *     sends a cart that sold out back to it, and sets the cookie that hands
  *     its units back;
  *   - the store page, the product page, "Goes well with" and the cart's
@@ -252,6 +253,19 @@ async function main(): Promise<void> {
   const open = await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${[made.Guide, made.Print].join(",")}`));
   const cart = (await open.json()) as { items: { id: string; ok: boolean; soldOut: boolean }[]; total: string };
   is("the open cart: the held print sold out, left out of the total", [cart.items.map((item) => [item.ok, item.soldOut]), cart.total], [[[true, false], [false, true]], "$20"]);
+  type Opened = { items: { id: string; ok: boolean; soldOut: boolean }[]; total: string };
+  const readWith = async (cookie: string) =>
+    (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${[made.Guide, made.Print].join(",")}`, { headers: { cookie } }))).json()) as Opened;
+  const backCookie = back.cookie.split(";")[0];
+  const mineBack = await readWith(backCookie);
+  is("the browser back from Stripe: the print it holds is its own, not sold out, and in its total", [mineBack.items.map((item) => [item.ok, item.soldOut]), mineBack.total], [[[true, false], [true, false]], "$40"]);
+  const otherBrowser = await readWith("nl_cart_hold=cs_test_cartstocknotmine01");
+  is("a cookie naming a checkout that holds nothing frees nothing", otherBrowser.items.map((item) => [item.ok, item.soldOut]), [[true, false], [false, true]]);
+  is("a cookie that is not a checkout's id frees nothing", (await readWith("nl_cart_hold=p_x")).items.map((item) => item.soldOut), [false, true]);
+  const printListing = parseProduct({ id: made.Print, title: "Print", summary: "", priceCents: 2000, stock: 1 }) as Listing;
+  is("the count for everyone else is unchanged", await stockLeft(owner, printListing), 0);
+  await confirmCartStock(owner, [printListing], backCookie.split("=")[1]);
+  is("once that checkout is paid, its print is sold out to that browser too", (await readWith(backCookie)).items.map((item) => item.soldOut), [false, true]);
   await redis.pipeline([["HSET", `nl:stock:${owner.statsId}:${made.Poster}`, "cs_test_cartstockjunk0001", "not a hold"]]);
   const unread = (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${made.Poster}`))).json()) as { items: { ok: boolean; soldOut: boolean }[] };
   is("a count that cannot be read is not paid for, and never said to be sold out", unread.items.map((item) => [item.ok, item.soldOut]), [[false, false]]);

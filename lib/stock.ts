@@ -50,8 +50,14 @@ async function readEntries(store: Store, product: Listing): Promise<Map<string, 
  * Holds that ran out are settled on the way: paid ones become sales, the rest
  * are handed back. When Stripe cannot be asked, a hold stays counted — the
  * safe way to be wrong is to show one unit too few, never to sell one too many.
+ *
+ * `mine` is a checkout this browser opened (the open cart's cookie): its own
+ * live, unpaid hold is not counted against it, so a buyer back from Stripe
+ * is not told the unit they hold is sold out. Paying again closes that
+ * checkout before holding a unit anew (releaseCartStockHolds), so the unit
+ * is never sold twice.
  */
-export async function stockLeft(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
+export async function stockLeft(store: Store, product: Listing, now = Date.now(), mine?: string): Promise<number | null> {
   const limit = limitedStock(product);
   if (limit === null) return null;
   if (!store.statsId || !isRedisConfigured()) throw new Error("Stock reading unavailable");
@@ -60,6 +66,7 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
   let checks = 0;
   const writes: (string | number)[][] = [];
   for (const [session, entry] of entries) {
+    if (mine !== undefined && session === mine && !entry.paid && entry.until > now) continue;
     if (entry.paid || entry.until > now) {
       used += 1;
       continue;

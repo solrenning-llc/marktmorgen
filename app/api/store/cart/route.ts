@@ -63,7 +63,11 @@ export async function GET(request: NextRequest) {
   const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => ({ soon: new Set<string>() }))]);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
-  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));
+  // The unit this browser holds with the cart's checkout it last opened is its own (the cookie it was given then):
+  // a buyer back from Stripe is not told it is sold out. Paying again closes that checkout before holding anew.
+  const mine = request.cookies.get(CART_HOLD_COOKIE)?.value ?? "";
+  const hold = /^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(mine) ? mine : undefined;
+  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p, Date.now(), hold).catch(() => undefined)] as const)));
   const selling = canSell(store);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {

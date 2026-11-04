@@ -4,9 +4,11 @@
  * none, a teammate who can see deals or nobody; refused, never cut; twenty a
  * person, a thousand a store; grouped by date as deals' next actions are.
  */
-import { MAX_PERSON_TASKS, MAX_TASK_TEXT, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
-import { changePersonTasks, forgetCrmPerson, readAllTasks, readPersonTasks } from "@/lib/crm";
+import { MAX_PERSON_TASKS, MAX_TASK_TEXT, TASKS_BUSY, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
+import { CrmValueWriteUnconfirmed, changePersonTasks, forgetCrmPerson, readAllTasks, readPersonTasks } from "@/lib/crm";
+import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -79,6 +81,73 @@ async function main(): Promise<void> {
   await forgetCrmPerson(STATS, ANA, "ana@example.com");
   is("a deleted person's tasks are deleted", [await readPersonTasks(STATS, ANA), (await readAllTasks(STATS)).length], [[], 0]);
 
+  part("Two changes at once: each one kept, the room counted once");
+  // Two quick clicks, or two teammates, on the same person at the same instant.
+  const SAME = "u".repeat(16);
+  const lockKey = `nl:crm:tasklock:${SAME}`;
+  const used = async () => (await dataUsed(ROOM))?.used ?? 0;
+  const stored = async (person: string) => (await redis.pipeline([["HGET", `nl:crm:tasks:${SAME}`, person]]))[0];
+  const weighs = (person: string, value: unknown) => (typeof value === "string" && value ? dataBytes([person, value], 1) : 0);
+  const at = (person: string, fn: (tasks: PersonTask[]) => ReturnType<typeof addTask>) => changePersonTasks(SAME, person, ROOM, fn);
+  const roomBefore = await used();
+  const both = await Promise.all([at(ANA, (t) => addTask(t, input({ text: "First" }), id(11), NOW)), at(ANA, (t) => addTask(t, input({ text: "Second" }), id(12), NOW))]);
+  is("two adds at once: both answered ok", both.map((r) => r.ok), [true, true]);
+  is("both kept", (await readPersonTasks(SAME, ANA)).map((t) => t.id).sort(), [id(11), id(12)]);
+  is("the last answer says what is kept", both[1].ok ? both[1].tasks.map((t) => t.id).sort() : null, [id(11), id(12)]);
+  is("the room taken once, for what is kept", (await used()) - roomBefore, weighs(ANA, await stored(ANA)));
+  await Promise.all([at(ANA, (t) => editTask(t, id(11), input({ text: "First, changed" }))), at(ANA, (t) => editTask(t, id(12), input({ text: "Second, changed" })))]);
+  is("two edits at once: both kept", (await readPersonTasks(SAME, ANA)).map((t) => t.text).sort(), ["First, changed", "Second, changed"]);
+  is("the room follows the edits", (await used()) - roomBefore, weighs(ANA, await stored(ANA)));
+  await Promise.all([at(ANA, (t) => markTask(t, id(11), true, NOW)), at(ANA, (t) => markTask(t, id(12), true, NOW))]);
+  is("two marked done at once: both done", (await readPersonTasks(SAME, ANA)).map((t) => t.done), [true, true]);
+  const four = await Promise.all([at(ANA, (t) => ({ ok: true, tasks: dropTask(t, id(11)) })), at(ANA, (t) => ({ ok: true, tasks: dropTask(t, id(12)) })), at(BEN, (t) => addTask(t, input({ text: "Third" }), id(13), NOW)), at(BEN, (t) => addTask(t, input({ text: "Fourth" }), id(14), NOW))]);
+  is("two removed and two added at once: all answered ok", four.map((r) => r.ok), [true, true, true, true]);
+  is("both removed, the record with them", [await readPersonTasks(SAME, ANA), await stored(ANA)], [[], null]);
+  is("both added to the other person", (await readPersonTasks(SAME, BEN)).map((t) => t.id).sort(), [id(13), id(14)]);
+  is("the room given back once and taken once", (await used()) - roomBefore, weighs(BEN, await stored(BEN)));
+  is("the lock let go after each change", (await redis.pipeline([["EXISTS", lockKey]]))[0], 0);
+
+  part("Still taken after the wait: refused, nothing written or counted");
+  await redis.pipeline([["SET", lockKey, "someone-else", "NX", "EX", 10]]);
+  const roomHeld = await used();
+  const waited = Date.now();
+  const refused = await at(BEN, (t) => addTask(t, input({ text: "Fifth" }), id(15), NOW)).then(() => null, (error: unknown) => error);
+  is("refused as busy after waiting a little", [refused instanceof LockBusyError, Date.now() - waited >= 1_500], [true, true]);
+  is("nothing written", (await readPersonTasks(SAME, BEN)).length, 2);
+  is("nothing counted", await used(), roomHeld);
+  is("someone else's lock is not let go", (await redis.pipeline([["GET", lockKey]]))[0], "someone-else");
+  setTimeout(() => void redis.pipeline([["DEL", lockKey]]), 300);
+  is("a change waits for the one before it, then is kept", (await at(BEN, (t) => addTask(t, input({ text: "Fifth" }), id(15), NOW))).ok, true);
+
+  part("A write that fails lets go of the lock");
+  const pipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HSET" && c[1] === `nl:crm:tasks:${SAME}`)) throw new Error("the write failed");
+    return pipe(commands);
+  }) as typeof redis.pipeline;
+  try {
+    const failed = await at(BEN, (t) => addTask(t, input({ text: "Sixth" }), id(16), NOW)).then(() => null, (error: unknown) => error);
+    is("the failed write says so", failed instanceof CrmValueWriteUnconfirmed, true);
+  } finally {
+    redis.pipeline = pipe;
+  }
+  is("the lock is let go after it", (await redis.pipeline([["EXISTS", lockKey]]))[0], 0);
+  is("the next change goes through at once", (await at(BEN, (t) => addTask(t, input({ text: "Sixth" }), id(16), NOW))).ok, true);
+
+  part("Deleting a person waits for a change of their tasks, and never skips them");
+  await redis.pipeline([["SET", lockKey, "someone-else", "NX", "EX", 10]]);
+  setTimeout(() => void redis.pipeline([["DEL", lockKey]]), 300);
+  await forgetCrmPerson(SAME, BEN, "ben@example.com");
+  is("waited, then deleted", await readPersonTasks(SAME, BEN), []);
+  await at(ANA, (t) => addTask(t, input({ text: "Kept" }), id(17), NOW));
+  await redis.pipeline([["SET", lockKey, "someone-else", "NX", "EX", 10]]);
+  const notDeleted = await forgetCrmPerson(SAME, ANA, "ana@example.com").then(() => null, (error: unknown) => error);
+  is("still taken: the deletion fails and says so", notDeleted instanceof LockBusyError, true);
+  is("nothing was skipped quietly: still there to delete again", (await readPersonTasks(SAME, ANA)).length, 1);
+  await redis.pipeline([["DEL", lockKey]]);
+  await forgetCrmPerson(SAME, ANA, "ana@example.com");
+  is("deleted on the next try", await readPersonTasks(SAME, ANA), []);
+
   part("Through the studio's route");
   const owner = "tasks@example.com";
   await claimHandle(owner, "taskshop", "Task Shop", "");
@@ -106,6 +175,11 @@ async function main(): Promise<void> {
   is("an action that is not one", (await post({ action: "launch", person: ANA })).body.error, "unknown");
   is("no session: refused", (await post({ action: "add", person: ANA, text: "Call" }, {})).status >= 400, true);
   is("kept under the store's own records", (await readPersonTasks(statsId, ANA)).length, 1);
+  await redis.pipeline([["SET", `nl:crm:tasklock:${statsId}`, "someone-else", "NX", "EX", 10]]);
+  const busy = await post({ action: "add", person: ANA, text: "Call" });
+  is("another change still being saved: 409, saying what to do", [busy.status, busy.body.error, busy.body.message], [409, "busy", TASKS_BUSY]);
+  await redis.pipeline([["DEL", `nl:crm:tasklock:${statsId}`]]);
+  is("nothing written while refused", (await readPersonTasks(statsId, ANA)).length, 1);
 
   part("As kept: whatever is stored is checked again");
   is("broken entries and repeated ids dropped", parseTasks([{ id: id(1), text: "Fine", due: "", assignee: "", done: false, createdAt: NOW }, { id: id(1), text: "Repeated" }, { id: "BAD", text: "x" }, { id: id(2), text: "Bad date", due: "soon", assignee: "" }, null]).map((t) => t.text), ["Fine"]);

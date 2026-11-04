@@ -275,6 +275,8 @@ Abri uma sessão na nuvem só para revisar os seus PRs e ramos ("Revisor 2"; só
 3) **Médio, ramo gl7-pipeline-access-team, app/api/store/pipeline-access/route.ts:28-37:** lê e grava as restrições fora de withTeam(store.sid). Se o dono marca "No access" para X no mesmo momento em que X troca de e-mail, o endereço novo fica sem a restrição; em duas abas ao mesmo tempo, uma restrição se perde. Correção: ler o membro e gravar dentro de withTeam(store.sid), conferindo de novo que o e-mail ainda está na equipe. Antes do PR da unidade 3.
 Ele confirmou também os pontos que você já conhecia nas unidades 2 e 3 (o `?? {}` que transforma registro ilegível em tudo liberado, o Edit oferecido em funil só de ver na agenda, os editores oferecidos sem efeito) e avisou que os ramos 2 e 3 estão sobre uma versão antiga do #1972: atualize antes do PR. Observação de teste: tests/pipeline-access.test.ts:119-121 confere a rota do formulário só pelo texto do arquivo, e esse caminho hoje é inalcançável para quem é restrito; troque por um teste que exercite o código.
 
+**Rede liberada:** às 00h49 o dono acrescentou ao seu ambiente os 11 domínios que você pediu (developers.facebook.com, developers.google.com, business-api.tiktok.com, ads.tiktok.com, knowledge.hubspot.com, developers.hubspot.com, schema.org, docs.bunny.net, w3.org, learn.microsoft.com, linkedin.com). Pode retomar o estudo do 632 [AA2] e o GL7(10) e o GL7(20) com as páginas oficiais; se algum ainda recusar, me diga qual.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

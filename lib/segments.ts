@@ -13,10 +13,11 @@
  *
  * None of the three is written down about anybody. Each is worked out from
  * the store's own sales on the creator's Stripe account (lib/stats.ts,
- * readPaidSales), only when an email asks for one, and the answer is kept ten
- * minutes so a creator changing the boxes does not ask Stripe each time:
+ * readPaidSales), only when an email asks for one, and the answer is kept an
+ * hour (owner, C3-80 (b)) so a creator changing the boxes does not ask Stripe
+ * each time; every count shown from it says when it was read (`at`):
  *
- *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, v: 4, r: [[address, cents, last ms, channel, orders], …] }, ten minutes
+ *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, t: read at ms, v: 4, r: [[address, cents, last ms, channel, orders], …] }, an hour
  *   nl:mail:segs:<listId>       hash: <id> → JSON Segment, the store's saved groups
  *
  * A group is a name over the choices the composer already has: who, one
@@ -38,7 +39,8 @@ import { MAX_SEGMENTS, MAX_SEGMENT_NAME, type Narrow, type Segment, isNarrowed, 
 
 export { type Narrow, NO_NARROW, QUIET_DAYS, ACTIVE_DAYS, MAX_SEGMENTS, MAX_SEGMENT_NAME, type Segment, readNarrow, isNarrowed } from "@/lib/segments-rules";
 
-const LEDGER_SECONDS = 600;
+/** How long the copy of the store's buyers is kept (owner, C3-80 (b), 4 November 2026: an hour; ten minutes before). */
+export const LEDGER_SECONDS = 3_600;
 const SEGMENT_ID = /^[0-9a-f]{12}$/;
 
 const ledgerKey = (statsId: string) => `nl:stats:${statsId}:ledger`;
@@ -50,7 +52,8 @@ const segmentsKey = (listId: string) => `nl:mail:segs:${listId}`;
  * checkout once, an offer taken after paying not counted again (270 [GR1]).
  */
 export type LedgerEntry = { cents: number; last: number; channel: string; orders: number };
-export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean };
+/** `at`: when it was read (ms), from its copy or from Stripe; what the studio shows from it says "as of" that time. */
+export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean; at?: number };
 
 type Row = [string, number, number, string, number];
 /** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes; 5: invoices' payments; 6: each renewal counted as a time they bought). */
@@ -79,7 +82,7 @@ export class LedgerNotCounted extends Error {
 
 /**
  * Studio requests one reading of the buyers from Stripe costs at the most,
- * when its ten-minute copy ran out (tests/plan-cost-registry.ts,
+ * when its one-hour copy ran out (tests/plan-cost-registry.ts,
  * BUYER_LEDGER), besides what it reads and writes by size (below): for a
  * caller that counts them (`count`, below).
  */
@@ -108,7 +111,7 @@ export const readsBuyers = (store: Store): boolean => readsSales(store) || Boole
 
 /**
  * The studio requests one reading of the buyers (buyerLedger, below) costs at
- * the most, as what is kept is measured now: its ten-minute copy by size, and,
+ * the most, as what is kept is measured now: its one-hour copy by size, and,
  * should that copy be gone or unusable, the reading from Stripe with the
  * imported buyers and the PayPal sales and refunds by how many are kept, each
  * counted exactly as buyerLedger counts it. What a narrowed email the
@@ -135,14 +138,14 @@ export async function ledgerReadingUnits(store: Store): Promise<number> {
 /**
  * `count`, when given, is asked before anything big is read, with the studio
  * requests it costs, and answers whether they were counted; when they were
- * not, nothing more is read and LedgerNotCounted is thrown. The ten-minute
+ * not, nothing more is read and LedgerNotCounted is thrown. The one-hour
  * copy is counted by its size (measured first, STRLEN, then read no further
  * than counted, GETRANGE), and a reading from Stripe as BUYER_LEDGER_UNITS,
  * with the imported buyers and the PayPal sales and refunds by how many are
  * kept (ledgerReadBytes), before any is read.
  */
 export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>): Promise<Ledger> {
-  if (!readsBuyers(store)) return { buyers: new Map(), partial: false };
+  if (!readsBuyers(store)) return { buyers: new Map(), partial: false, at: Date.now() };
   const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
   if (store.statsId && isRedisConfigured()) {
     const [size] = await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]);
@@ -152,9 +155,10 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
     const [cached] = Number(size) > 0 ? await redisPipeline([["GETRANGE", ledgerKey(store.statsId), 0, Math.max(units * LEDGER_BYTES_PER_UNIT, PAGE_INCLUDED_BYTES) - 1]]) : [null];
     if (typeof cached === "string" && cached) {
       try {
-        const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; v?: number };
-        if (kept.c === store.currency && kept.v === LEDGER_SHAPE && Array.isArray(kept.r)) {
-          return { buyers: new Map(kept.r.map(([e, cents, last, channel, orders]) => [e, { cents, last, channel, orders }])), partial: kept.p === true };
+        const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; t?: number; v?: number };
+        // A copy without the time it was read (written before it was kept an hour) is read again: what is shown says when.
+        if (kept.c === store.currency && kept.v === LEDGER_SHAPE && Array.isArray(kept.r) && Number.isSafeInteger(kept.t) && (kept.t as number) > 0) {
+          return { buyers: new Map(kept.r.map(([e, cents, last, channel, orders]) => [e, { cents, last, channel, orders }])), partial: kept.p === true, at: kept.t };
         }
       } catch {
         // Read again below.
@@ -169,6 +173,8 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   // A store that reads no sales (no Stripe, no PayPal: imported buyers only) reads none of them (round 7, M1).
   const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };
   const moved = ledgerReadBytes({ imported: Number(imported || 0), paypalSales: paypal.sales, paypalRefunds: paypal.refunds });
+  // When this reading began: anything paid after it may be missing from what it found.
+  const at = Date.now();
   if (!(await counted((store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(moved)))) throw new LedgerNotCounted();
   // Checkouts and offers after paying; and, on a Stripe account, the renewals
   // of memberships and payment plans, and what refunds and disputes took back
@@ -242,7 +248,7 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   }
   // Partial when any list was cut short or unread, or when an invoice's payment was needed and not found.
   const partial = readPartial || missed;
-  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial };
+  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial, at };
   // Buyers brought over from another platform (lib/imported-purchases.ts): history, never a sale.
   // Nothing spent here and no purchase date here; they first came "imported".
   for (const email of (await importedBuyers(store.statsId).catch(() => new Map<string, number>())).keys()) {
@@ -250,7 +256,7 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   }
   if (store.statsId && isRedisConfigured()) {
     const rows: Row[] = [...out.buyers].map(([e, r]) => [e, r.cents, r.last, r.channel, r.orders]);
-    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
+    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows, t: at, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
   }
   return out;
 }
@@ -345,7 +351,7 @@ export async function removeSegment(store: Store, id: unknown): Promise<Segment[
 }
 
 /**
- * Lets the ten-minute copy of the store's buyers go (lib/person-erasure.ts),
+ * Lets the one-hour copy of the store's buyers go (lib/person-erasure.ts),
  * so a deleted person is not in it: it is read again from Stripe when next
  * needed, without them in the list's own records.
  */

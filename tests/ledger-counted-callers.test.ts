@@ -29,7 +29,7 @@ import { upsertContact } from "@/lib/contacts";
 import { ROOM } from "./data-room";
 import { broadcastAnswer } from "@/lib/broadcast-response";
 import { startUpdate, updateReadUnits } from "@/lib/product-updates";
-import { BUYER_LEDGER_UNITS, LedgerNotCounted, ledgerReadBytes, ledgerReadingUnits, ledgerUnits } from "@/lib/segments";
+import { BUYER_LEDGER_UNITS, LEDGER_SECONDS, LedgerNotCounted, buyerLedger, ledgerReadBytes, ledgerReadingUnits, ledgerUnits } from "@/lib/segments";
 import { countLedger } from "@/lib/person-agenda-read";
 import { readListing } from "@/lib/catalog";
 import { redisPipeline } from "@/lib/redis";
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   const shop = await load();
   await upsertContact(shop.listId as string, "ann@example.com", { agreed: true, explicit: true, source: "import" }, ROOM);
   const ledgerKey = `nl:stats:${shop.statsId}:ledger`;
-  const copy = () => redisPipeline([["SET", ledgerKey, JSON.stringify({ c: shop.currency, p: false, r: [["ann@example.com", 9000, Date.now(), "direct", 2]], v: 6 })]]);
+  const copy = () => redisPipeline([["SET", ledgerKey, JSON.stringify({ c: shop.currency, p: false, r: [["ann@example.com", 9000, Date.now(), "direct", 2]], t: Date.now(), v: 6 })]]);
   // The studio's counter of the month running now (a scheduled email may hold in later months' counters too).
   const nowKey = () => redis.keys().find((key) => key.startsWith("nl:allow:studio:") && key.endsWith(`:${windowId(shop)}`))!;
   const keyAt = (ms: number) => nowKey().replace(/:[^:]+$/, `:${windowAt(shop, ms)!.id}`);
@@ -465,6 +465,24 @@ async function main(): Promise<void> {
     is(`a record with ${JSON.stringify(bad)} is refused as malformed, never run`, await run(waitOff.broadcast.id).then(() => "ran", () => "refused"), "refused");
   }
   await redisPipeline([["DEL", offKey]]);
+
+  part("The copy of the buyers is kept an hour, and what is shown from it says when it was read (C3-80 (b))");
+  await redisPipeline([["DEL", ledgerKey]]);
+  stripeCalls = 0;
+  const readNow = await buyerLedger(shop);
+  const kept = JSON.parse(String((await redisPipeline([["GET", ledgerKey]]))[0]));
+  const ttl = Number((await redisPipeline([["TTL", ledgerKey]]))[0]);
+  is("read from Stripe, its copy is kept an hour, with when it was read", [LEDGER_SECONDS, ttl > 600 && ttl <= 3_600, typeof readNow.at === "number" && readNow.at === kept.t, stripeCalls > 0], [3_600, true, true, true]);
+  stripeCalls = 0;
+  const fromCopy2 = await buyerLedger(shop);
+  is("read again from the copy: Stripe not read, and the same time", [stripeCalls, fromCopy2.at], [0, readNow.at]);
+  await redisPipeline([["SET", ledgerKey, JSON.stringify({ ...kept, t: undefined })]]);
+  stripeCalls = 0;
+  const untimed = await buyerLedger(shop);
+  is("a copy without the time it was read (written before) is read again, so nothing is shown without when", [stripeCalls > 0, typeof untimed.at === "number"], [true, true]);
+  const route = flat("app/api/store/mail/route.ts");
+  const studio = flat("components/email-studio.tsx");
+  is("the composer's count sends when the buyers were read, and the composer says it in the browser's own time", [route.includes('...(typeof ledger.at === "number" ? { asOf: ledger.at } : {}),'), studio.includes('return `as of ${new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;'), studio.includes('${narrowedNow && asOf !== null ? `, from your buyers ${asOfWords(asOf)}` : ""}'), studio.includes("Your buyers are read again at most once an hour, so a sale made since may not be in them yet.")], [true, true, true, true]);
 
   part("The routes and the studio");
   const history = flat("components/email-studio.tsx");

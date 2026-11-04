@@ -293,6 +293,15 @@ const TIME: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour:
  * A time in the reader's own time zone. The server does not know it, so the
  * first render says UTC and the browser swaps in local time straight after.
  */
+/**
+ * The time the store's buyers behind a count were read, in this browser's own time (the one the composer's times are
+ * in): "as of 3:42 PM". Their copy is kept an hour (lib/segments.ts, LEDGER_SECONDS; C3-80 (b)). Drawn only after a
+ * count came back, in the browser, so it is never the server's.
+ */
+export function asOfWords(ms: number): string {
+  return `as of ${new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+}
+
 const noSubscription = () => () => {};
 function When({ seconds }: { seconds: number }) {
   const inBrowser = useSyncExternalStore(noSubscription, () => true, () => false);
@@ -737,11 +746,15 @@ function Compose(props: {
   // How many buyers are of each kind, from the ledger the choices below read (270 [GR1], unit 3c); null until read.
   const [kinds, setKinds] = useState<Partial<Record<RfmGroup, number>> | null>(null);
   const [partial, setPartial] = useState(false);
+  // When the buyers behind the last count were read (ms), or null when that count read none.
+  const [asOf, setAsOf] = useState<number | null>(null);
   const [segments, setSegments] = useState<Segment[]>(props.segments);
   const [groupName, setGroupName] = useState("");
   const parsedSpent = readSegmentSpend(spentText, props.currency as Currency);
   const invalidSpent = parsedSpent === null;
   const minSpent = parsedSpent ?? 0;
+  // Whether the count reads the buyers: then it says when they were read.
+  const narrowedNow = Boolean(minSpent || channel || quietDays || buyerGroup || activeDays);
   const narrow: Narrow = { minSpent, channel, quietDays, ...(buyerGroup ? { group: buyerGroup } : {}), ...(activeDays ? { activeDays } : {}) };
   const countKey = JSON.stringify([productId, notProductId, who, minSpent, channel, quietDays, activeDays, buyerGroup, more, countRevision, invalidSpent, countedLabel]);
   // A label still being typed is not counted yet: no count is shown for a label other than the one typed.
@@ -789,6 +802,7 @@ function Compose(props: {
           setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
         }
         if (typeof a.partial === "boolean") setPartial(a.partial);
+        setAsOf(typeof a.asOf === "number" && Number.isSafeInteger(a.asOf) && a.asOf > 0 ? a.asOf : null);
         const shown = countError.current;
         countError.current = null;
         if (shown !== null) setError((current) => (current === shown ? null : current));
@@ -1182,10 +1196,11 @@ function Compose(props: {
               they came from and when they last bought, but its amount is not added to what they spent, which counts only your
               store&apos;s currency.
               {partial ? " There is more to read than one reading takes, so the oldest sales, refunds or disputes may be left out and these counts may be a little off." : ""}
+              {asOf !== null ? ` These counts of your buyers are ${asOfWords(asOf)}. Your buyers are read again at most once an hour, so a sale made since may not be in them yet.` : ""}
             </p>
           </div>
         </details>
-        <p className="text-sm font-semibold text-ink" role="status">{invalidSpent ? "Correct the spending amount before checking recipients." : reach === null ? (reachPending ? "Checking recipients…" : "The recipient count is unavailable. Check it again before sending or scheduling.") : `${n(reach)} ${reach === 1 ? "person" : "people"}`}</p>
+        <p className="text-sm font-semibold text-ink" role="status">{invalidSpent ? "Correct the spending amount before checking recipients." : reach === null ? (reachPending ? "Checking recipients…" : "The recipient count is unavailable. Check it again before sending or scheduling.") : `${n(reach)} ${reach === 1 ? "person" : "people"}${narrowedNow && asOf !== null ? `, from your buyers ${asOfWords(asOf)}` : ""}`}</p>
         {/* What this email is of the month's emails, from the two numbers already on the page (lib/send-count.ts), read out when it changes. */}
         <p className={`text-sm ${monthCount?.over ? "font-semibold text-ink" : "text-ink-soft"}`} aria-live="polite" data-send-count>{monthCount?.line ?? ""}</p>
         {reach === null && !invalidSpent ? <button type="button" className="btn btn-secondary btn-sm" disabled={locked || reachPending} aria-busy={reachPending} onClick={() => setCountRevision(value => value + 1)}>{reachPending ? "Checking recipients…" : "Check recipients again"}</button> : null}
@@ -1250,7 +1265,7 @@ function Compose(props: {
               <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
                 <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Who gets it</dt>
                 <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">
-                  {`${n(reach)} ${reach === 1 ? "person" : "people"}`}
+                  {`${n(reach)} ${reach === 1 ? "person" : "people"}${narrowedNow && asOf !== null ? `, from your buyers ${asOfWords(asOf)}` : ""}`}
                   <AudienceSummary audience={{ who, productId: productId || null, notProductId, narrow, label: cleanLabel || null }} products={props.products} currency={props.currency} />
                 </dd>
                 <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("mail-send-to")}>Change<span className="sr-only"> who gets it</span></button></dd>

@@ -537,7 +537,7 @@ export const PATH_PAGE = request("heavy", 54, 120_000);
 export const PATH_BOARD_JOIN = request("heavy",70,30_000);
 /**
  * One reading of a store's buyers from the creator's Stripe account at the
- * most (lib/segments.ts, buyerLedger), when its ten-minute copy ran out: its
+ * most (lib/segments.ts, buyerLedger), when its one-hour copy ran out: its
  * pages of sales, renewals, refunds, disputes and invoice payments read side
  * by side, the longest ALL_TIME_PAGES pages one after another, each waited
  * on at 2 GB (EXPORT_PAGE_SECONDS); and the copy of up to two rows a sale

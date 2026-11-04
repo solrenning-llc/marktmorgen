@@ -102,11 +102,11 @@ try{
  assert.equal((await budget.initializeResendFallbackBudget({review,usage},{pipeline})).status,'initialized');
  const held=await budget.reserveResendFallback({review,usage,attemptId,recipients:1,payloadFingerprint:hash('synthetic final body')},{pipeline});assert.equal(held.status,'reserved');
  // Admission has setup slack. Approach its ORIGINAL reset without changing it.
- if(cfg.case!=='healthy')await new Promise(resolve=>setTimeout(resolve,Math.max(0,reset-realNow()-500)));
+ if(cfg.case!=='healthy'&&cfg.case!=='lost_ack')await new Promise(resolve=>setTimeout(resolve,Math.max(0,reset-realNow()-500)));
  const authorizationWall=realNow();
  Date.now=cfg.case==='moving_offset'?()=>realNow()-400:cfg.case==='large_offset'?()=>authorizationWall-73*3600000:cfg.case==='healthy'?realNow:()=>authorizationWall;
- const delay=cfg.case==='healthy'||cfg.case==='consumer_delay'?0:cfg.case==='moving_offset'?606:650;
- const sdk={pipeline:async commands=>{const result=await pipeline(commands);if(commands[0][5]==='dispatch'&&delay)await new Promise(resolve=>setTimeout(resolve,delay));return result;}};
+ const delay=cfg.case==='healthy'||cfg.case==='consumer_delay'||cfg.case==='lost_ack'?0:cfg.case==='moving_offset'?606:650;
+ const sdk={pipeline:async commands=>{const result=await pipeline(commands);if(commands[0][5]==='dispatch'&&cfg.case==='lost_ack')throw Error('Synthetic committed dispatch ACK lost');if(commands[0][5]==='dispatch'&&delay)await new Promise(resolve=>setTimeout(resolve,delay));return result;}};
  const began=performance.now(),permission=await budget.markResendFallbackDispatched(held.claim,sdk),elapsed=performance.now()-began;
  if(cfg.case==='consumer_delay')await new Promise(resolve=>setTimeout(resolve,650));
  // The consumer is deliberately minimal: the real transport has its own
@@ -117,6 +117,7 @@ try{
   assert.equal(response.status,200);postAt=(await response.json()).at;posts++;
  }
  const state=await one(['HMGET',keys[0],'held','spent']);assert.deepEqual(state,[permission.status==='dispatch'?'1':'0','0']);
+ if(cfg.case==='lost_ack')assert.equal(await one(['HGET',keys[1],'state']),'released');
  if(cfg.case==='healthy'){assert.equal(posts,1);assert.ok(postAt<reset);}
  else if(cfg.case==='large_offset'){assert.equal(posts,0);}
  else if(cfg.unsafe){assert.equal(posts,1);assert.ok(postAt>=reset);}
@@ -324,7 +325,7 @@ def main():
                 guard = " || performance.now() >= sendBeforeMonotonicMs"
                 assert source.count(guard) == 1
                 unsafe.write_text(source.replace(guard, ""))
-                for red, cases in [(False, ["frozen", "moving_offset", "large_offset", "consumer_delay", "healthy"]),
+                for red, cases in [(False, ["frozen", "moving_offset", "large_offset", "consumer_delay", "healthy", "lost_ack"]),
                                    (True, ["frozen", "moving_offset", "consumer_delay"])]:
                     for case in cases:
                         config = {"module": str(unsafe if red else actual), "port": port,

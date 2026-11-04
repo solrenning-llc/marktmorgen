@@ -1048,7 +1048,7 @@ const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "st
  * Stripe's fee or any refund, each in the currency it was paid in.
  */
 /** A financial page completes only with explicit valid pagination and distinct records. */
-function financialPage(list: { data?: unknown; has_more?: unknown }, seen: Set<string>): Record<string, unknown>[] {
+export function financialPage(list: { data?: unknown; has_more?: unknown }, seen: Set<string>): Record<string, unknown>[] {
   // Invalid pages and stalled cursors are failed readings, never confirmed zero.
   if (!list || !Array.isArray(list.data) || typeof list.has_more !== "boolean") {
     throw new Error("Invalid financial page");

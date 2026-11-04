@@ -6,7 +6,7 @@ import { wordsIn } from "@/lib/buyer-words";
 import { DEFAULT_LANGUAGE, LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { imageUrl } from "@/lib/product-image";
 import { type Piece, aboutBlocks } from "@/lib/product-about";
-import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, bandsOf, quoteHost } from "@/lib/sales-page";
+import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, type RowBlock, type RowElement, bandsOf, quoteHost } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { PageFacts } from "@/lib/page-facts";
 import { MAX_LONG_ANSWER, MAX_SHORT_ANSWER, type FormDef, type FormField, branches, formOpen, offersKeep, scheduleWhen } from "@/lib/forms";
@@ -240,6 +240,98 @@ function Heading({ text, id }: { text: string; id?: string }) {
     <h2 id={id} className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-[1.75rem]">
       {text}
     </h2>
+  );
+}
+
+/**
+ * One element of a row (lib/sales-page.ts, RowBlock). `level` is the
+ * heading level the page outline gives it: a row's heading is a section
+ * heading like every block's (h2), and a subheading sits under the row's
+ * heading when one comes before it (h3), or stands as a section heading of
+ * its own when none does, so the outline never skips a level.
+ */
+function RowElementView({ element, ctx, level }: { element: RowElement; ctx: BlockContext; level: 2 | 3 }) {
+  switch (element.kind) {
+    case "heading":
+      return <Heading text={element.text} />;
+    case "subheading": {
+      const Tag = level === 3 ? "h3" : "h2";
+      return <Tag className="font-display text-lg font-semibold leading-snug sm:text-xl">{element.text}</Tag>;
+    }
+    case "paragraph":
+      return <PlainText text={element.text} preview={ctx.preview} className="text-[1.0625rem]" />;
+    case "list":
+      return (
+        <div className="st-about leading-relaxed">
+          <ul>
+            {element.items.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      );
+    case "icon":
+      // No label: decoration, hidden from screen readers. A label: what the icon says, read as an image.
+      return (
+        <span className="sp-row-icon">
+          <Icon name={element.name} size={32} label={element.label || undefined} />
+        </span>
+      );
+    case "button": {
+      if (!element.url) return <ActionButton ctx={ctx} label={element.label} />;
+      const className = "btn st-btn sp-row-btn";
+      if (ctx.preview) return <span className={className}>{element.label}</span>;
+      return (
+        <a href={element.url} className={className} target="_blank" rel="noopener noreferrer nofollow ugc">
+          {element.label}
+          <NewTab />
+        </a>
+      );
+    }
+    case "image": {
+      const { picture } = element;
+      return (
+        <figure className="sp-row-picture">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={imageUrl(picture)} alt={element.decorative ? "" : picture.alt} width={picture.width} height={picture.height} loading="lazy" decoding="async" />
+          {picture.caption ? <figcaption className="st-muted mt-2 text-sm leading-snug">{picture.caption}</figcaption> : null}
+        </figure>
+      );
+    }
+    case "video":
+      return (
+        <div className="sp-row-video">
+          <VideoEmbed video={element.video} title={element.title || ctx.productTitle} poster={null} inert={ctx.preview} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
+        </div>
+      );
+  }
+}
+
+/**
+ * A row of one to three columns: side by side once there is room, one
+ * column on a phone. The markup is in reading order, column by column, so
+ * a screen reader, the keyboard and a phone all meet the first column's
+ * elements before the second's; the grid only places them.
+ */
+function RowView({ block, ctx }: { block: RowBlock; ctx: BlockContext }) {
+  if (block.columns.every((column) => column.length === 0)) return null;
+  // Each part's heading level, in reading order, worked out before drawing: a
+  // subheading after the row's first heading sits under it (h3), else it is a
+  // section heading of its own (h2).
+  const firstHeading = block.columns.flat().findIndex((element) => element.kind === "heading");
+  const offsets = block.columns.map((_, i) => block.columns.slice(0, i).reduce((n, column) => n + column.length, 0));
+  return (
+    <section className="sp-section">
+      <div className={`sp-row sp-row-${block.columns.length}`}>
+        {block.columns.map((column, i) => (
+          <div key={i} className="sp-row-column">
+            {column.map((element, j) => (
+              <RowElementView key={j} element={element} ctx={ctx} level={firstHeading >= 0 && offsets[i] + j > firstHeading ? 3 : 2} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -637,6 +729,8 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
       if (!form) return null;
       return <FormView block={block} form={form} ctx={ctx} />;
     }
+    case "row":
+      return RowView({ block, ctx });
     case "facts": {
       // Only numbers the store counted, and only those the creator chose; none, and the block is not drawn.
       const shown = block.show.map((key) => ctx.facts?.[key]).filter((fact): fact is NonNullable<typeof fact> => Boolean(fact));

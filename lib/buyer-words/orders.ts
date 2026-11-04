@@ -51,6 +51,10 @@ const en = {
       title: "This link has expired",
       body: "A link to your purchases works for 24 hours. Ask for a new one below; it takes a few seconds.",
     },
+    busy: {
+      title: "This store can't show your purchases right now",
+      body: "What you bought is kept. Try again later. If your link has expired by then, ask for a new one below.",
+    },
   } as Record<string, { title: string; body: string }>,
 
   // ---- Asking for the link -------------------------------------------------------
@@ -294,6 +298,10 @@ const es: OrdersWords = {
       title: "Este enlace ha caducado",
       body: "Un enlace a tus compras funciona durante 24 horas. Pide uno nuevo abajo; tarda unos segundos.",
     },
+    busy: {
+      title: "Esta tienda no puede mostrar tus compras ahora mismo",
+      body: "Lo que compraste se conserva. Vuelve a intentarlo más tarde. Si para entonces tu enlace ha caducado, pide uno nuevo abajo.",
+    },
   },
 
   getAgainTitle: "Vuelve a obtener lo que compraste",
@@ -509,6 +517,10 @@ const fr: OrdersWords = {
       title: "Ce lien a expiré",
       body: `Un lien vers vos achats est valable 24${S}heures. Demandez-en un nouveau ci-dessous${S}; cela ne prend que quelques secondes.`,
     },
+    busy: {
+      title: "Cette boutique ne peut pas afficher vos achats pour le moment",
+      body: "Ce que vous avez acheté est conservé. Réessayez plus tard. Si votre lien a expiré d'ici là, demandez-en un nouveau ci-dessous.",
+    },
   },
 
   getAgainTitle: "Récupérez ce que vous avez acheté",
@@ -721,6 +733,10 @@ const de: OrdersWords = {
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Ein Link zu Ihren Käufen gilt 24 Stunden. Fordern Sie unten einen neuen an; das dauert nur ein paar Sekunden.",
+    },
+    busy: {
+      title: "Dieser Shop kann Ihre Käufe gerade nicht anzeigen",
+      body: "Was Sie gekauft haben, bleibt erhalten. Versuchen Sie es später noch einmal. Wenn Ihr Link bis dahin abgelaufen ist, fordern Sie unten einen neuen an.",
     },
   },
 
@@ -940,6 +956,10 @@ const it: OrdersWords = {
       title: "Questo link è scaduto",
       body: "Un link ai tuoi acquisti funziona per 24 ore. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
     },
+    busy: {
+      title: "Questo negozio non può mostrare i tuoi acquisti in questo momento",
+      body: "Ciò che hai acquistato è conservato. Riprova più tardi. Se nel frattempo il tuo link è scaduto, chiedine uno nuovo qui sotto.",
+    },
   },
 
   getAgainTitle: "Recupera ciò che hai acquistato",
@@ -1154,6 +1174,10 @@ const nl: OrdersWords = {
       title: "Deze link is verlopen",
       body: "Een link naar je aankopen werkt 24 uur. Vraag hieronder een nieuwe aan; dat duurt maar een paar seconden.",
     },
+    busy: {
+      title: "Deze winkel kan je aankopen nu niet tonen",
+      body: "Wat je hebt gekocht, blijft bewaard. Probeer het later opnieuw. Is je link tegen die tijd verlopen, vraag dan hieronder een nieuwe aan.",
+    },
   },
 
   getAgainTitle: "Haal je aankopen opnieuw op",
@@ -1366,6 +1390,10 @@ const pt: OrdersWords = {
     expired: {
       title: "Esta ligação expirou",
       body: "Uma ligação para as suas compras funciona durante 24 horas. Peça uma nova abaixo; demora apenas alguns segundos.",
+    },
+    busy: {
+      title: "Esta loja não pode mostrar as suas compras neste momento",
+      body: "O que comprou fica guardado. Tente novamente mais tarde. Se entretanto a sua ligação expirar, peça uma nova abaixo.",
     },
   },
 

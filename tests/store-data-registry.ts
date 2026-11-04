@@ -462,7 +462,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:voice:@lib/customer-voice.ts": { what: "What buyers said, summed up a month", parts: [capped(14 * 16 * KB, "One summary a month, 400 days.")] },
   "nl:voice:lock:@lib/customer-voice.ts": short("One summary at a time", "studio", 1, 128),
   "nl:rsum:@lib/review-ai-summary.ts": short("A product's AI summary of its reviews, kept eight days", "studio", 8, 4 * KB),
-  "nl:rsum:lock:@lib/review-ai-summary.ts": short("One review summary at a time", "studio", 1, 128),
+  "nl:rsum:@lib/reviews.ts": short("The same summary, only deleted here when a review it counted is deleted, hidden or refunded", "studio", 8, 4 * KB),
+  "nl:rsum:lock:@lib/review-ai-summary.ts": short("One review summary at a time, two minutes", "studio", 1, 128),
+  "nl:rsum:last:@lib/review-ai-summary.ts": short("When a product's last AI summary of its reviews was made, kept eight days and not deleted with the summary, so the week's limit holds", "studio", 8, 64),
+  "nl:rsum:ver:@lib/review-ai-summary.ts": short("A random mark of a product's reviews, read and checked in the same step as keeping a summary", "studio", 8, 64),
+  "nl:rsum:ver:@lib/reviews.ts": short("The same mark, set new each time a review a summary may count is deleted, hidden, refunded or rewritten", "studio", 8, 64),
 
   // ---------------------------------------------------------------- lib/ d–f
   "nl:store:delivery:@lib/delivery.ts": { what: "Bytes delivered, by the month", parts: [capped(14 * KEY, "One count a month, 400 days.")] },
@@ -911,6 +915,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:yearly-offer:@lib/yearly-offer.ts": company("A yearly offer made", "The company's offer to a creator about their own plan."),
   "nl:tier:@lib/yearly-switch.ts": short("A membership's lock while it goes yearly", "request", 1, 128, REQ("tier switch")),
   "nl:yearly:link:@lib/yearly-switch.ts": short("A link to go yearly", "own", 30, LINK_BYTES, MAIL("yearly")),
+  "nl:tier:@lib/yearly-fallback.ts": short("A membership's lock while a failed yearly renewal moves to monthly", "request", 1, 128, REQ("tier switch")),
+  "nl:yearly:fallback:try:@lib/yearly-fallback.ts": short("How many times one failed yearly renewal was tried on the monthly price", "request", 2, KEY, REQ("tier switch")),
+  "nl:yearly:fallback:void@lib/yearly-fallback.ts": company("Yearly renewals left open after a move to monthly, for the daily job to void", "One set for the company: one entry per failed yearly renewal moved to monthly (account, invoice, invoice), taken out by the daily job (630 [HN6](14) unit 2c)."),
+  "nl:yearly:fallback:check@lib/yearly-fallback.ts": company("Moves to monthly whose answer was unknown, for the daily job to check", "One set for the company: one entry per failed yearly renewal whose move came back unknown, taken out by the daily job (630 [HN6](14) unit 2c)."),
+  "nl:yearly:fallback:both@lib/yearly-fallback.ts": company("Renewals paid while their month was charged, for the daily job to refund the month", "One set for the company: one entry per failed yearly renewal found paid in the seconds of its move, taken out by the daily job (630 [HN6](14) unit 2c)."),
   "nl:yearly:price:@lib/yearly-switch.ts": { what: "A yearly price made, per product and currency: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
 };
 

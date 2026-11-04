@@ -109,6 +109,7 @@ export function SlotPicker({
   host,
   minutes,
   newTab,
+  shownCents,
   words,
 }: {
   starts: number[];
@@ -127,6 +128,8 @@ export function SlotPicker({
   minutes?: number;
   /** Inside a frame on the creator's own site (app/embed): Stripe's page opens in a new tab, never in the frame. */
   newTab?: boolean;
+  /** Beside it, the price the page showed for it, in cents: only compared with the creator's record, never charged (price-changed). */
+  shownCents?: number;
   words: SlotWords;
 }) {
   const { locale } = words;
@@ -170,6 +173,7 @@ export function SlotPicker({
         <input type="hidden" name="tz" value={tz} />
         {pkg ? <input type="hidden" name="pkg" value={pkg} /> : null}
         {minutes && !move ? <input type="hidden" name="minutes" value={minutes} /> : null}
+        {minutes && !move && shownCents !== undefined ? <input type="hidden" name="shown" value={shownCents} /> : null}
         {host && !move ? (
           <>
             <input type="hidden" name="host" value={host.key} />

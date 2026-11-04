@@ -14,7 +14,7 @@ Code read: `origin/main` at `fcd1617ac` (4 November 2026): `lib/backup-run.ts`, 
 | Size per run | at most 4 MiB of sealed JSON (`BACKUP_MAX_BYTES` = 4,194,304 bytes); stored object at most that + 65,536 bytes of seal room = **4,259,840 bytes** (`objectBound`) | `lib/backup-run.ts` |
 | R2 operations per run | 1 `PutObject` with `If-None-Match: *` (Class A; a 412 is also billed as Class A) + 1 `GetObject` read-back (Class B). No delete, no list | `r2BackupStore`, `verifyBackupRoundtrip` |
 | Runs | at most 1 per UTC day (`SET nl:backup:ran:<day> NX`), so at most **31 a month**; a second call the same day costs 1 command and stops | `runBackup` |
-| Retention | Not in code: a lifecycle rule the owner sets on the bucket. `validReview` demands `(retentionDays + 2)` since #2219 (was `(retentionDays + 1)` × objectBound ≤ maxStoredBytes` | `validReview` |
+| Retention | Not in code: a lifecycle rule the owner sets on the bucket. `validReview` demands `(retentionDays + 3)` since the review of #2175 (`(retentionDays + 2)` since #2219 (was `(retentionDays + 1)` × objectBound ≤ maxStoredBytes` | `validReview` |
 | Daily report reads | `backupStale()` 1 `GET` + `backupLastFailure()` 1 `GET` | `lib/backup-run.ts` |
 | Schedule and route | None yet; no `maxDuration` exists for the run | `vercel.json` unchanged |
 
@@ -145,7 +145,7 @@ None of this switches the backup on (docs/backup.md): `BACKUP_COST_REVIEW` is st
 - **Privacy:** a backup keeps a person's data after it is erased on the site. A shorter retention lets that copy go sooner, and the privacy text that must be published when the backup is switched on (docs/backup.md, prerequisite 7) can say "up to 30 days".
 - **Recovery:** 30 daily copies are enough to notice a mistake and go back to before it within a month. Upstash's own provider backup keeps 1 or 3 days (docs/backup.md, provider research), so this is the only longer history.
 - **Rule for the owner:** in the bucket `marktmorgen-backup`, an object lifecycle rule that deletes objects with prefix `backups/` **30 days** after they were created. The code has no delete (`lib/backup-store.ts`), so this rule is the only retention.
-- **Matching review figures** (superseded by section 5b: (30 + 2) × the set's bound): `retentionDays` 30; `maxStoredBytes` = (30 + 1) × 4,259,840 = **132,055,040 bytes**, which `validReview` accepts, because (retentionDays + 1) × objectBound ≤ maxStoredBytes holds with equality.
+- **Matching review figures** (superseded by sections 5b and 5c: (30 + 3) × the set's bound): `retentionDays` 30; `maxStoredBytes` = (30 + 1) × 4,259,840 = **132,055,040 bytes**, which `validReview` accepts, because (retentionDays + 1) × objectBound ≤ maxStoredBytes holds with equality.
 
 **Retention approved** (owner, MR; inbox C4-27, 4 November 2026): 30 days, `maxStoredBytes` 132,055,040.
 
@@ -165,32 +165,34 @@ The lines above that use 31 copies for a 30-day retention are taken at **32** (3
 
 - R2 storage, 30 days, one object a run = 32 × 4,259,840 = 136,314,880 bytes = 0.1363 GB × $0.015 = **$0.0020** (unchanged at four decimals); per store in parts, storage × 32/31 (+3.2%).
 - R2 operations, one object a run = 31 × (2 × $4.50 + $0.36) / 1,000,000 = **$0.000290**; in parts, 31 × (parts + 1) × (2 × $4.50 + $0.36) / 1,000,000.
-- Matching review figures: `retentionDays` 30, `maxStoredBytes` ≥ (30 + 2) × the run's stored bound; `validReview` holds the extra day (#2219).
+- Matching review figures (superseded by section 5c: (30 + 3)): `retentionDays` 30, `maxStoredBytes` ≥ (30 + 2) × the run's stored bound; `validReview` holds the extra day (#2219).
 
-## 5c. The fixed-cost line in code (inbox C4-44, 4 November 2026)
+## 5c. The fixed-cost line in code (inbox C4-44, 4 November 2026; corrected after its independent review)
 
 `lib/backup-cost.ts` (`backupWorstMonth(review, routeSeconds)`) prices the worst month from the caps of a review the run would accept, with the rates in `lib/spend-cost-table.ts`; `tests/backup-cost.test.ts` holds every line against figures worked out by hand. It is the `backup` line of the LLC fixed costs (`lib/llc-fixed-costs.ts`, 100% Marktmorgen under FX275), whose reviewed ceiling stays unknown, never zero, while anything in `BACKUP_COST_UNKNOWNS` is open.
 
 What changed from sections 3 and 5b, each toward more cost:
 
-- **R2 storage:** retention + 2 sets at the daily peak (30 days + the lifecycle rule's day + the day being written = 32), each at the stored bound of a set in parts (`runStoredBound`: the copy, each part's seal room and the manifest), plus one GB-month of rounding.
+- **32 runs a month**, not 31: a run is marked by the UTC day it starts, so one that starts just before a midnight writes after it, and a 31-day billing period that does not start at 00:00 UTC touches 32 days.
+- **R2 storage:** retention + 3 sets at the daily peak (30 days + the lifecycle rule's day + the day being written + a run that wrote past its midnight = 33), each at the stored bound of a set in parts (`runStoredBound`), plus one GB-month of rounding. `validReview` (`lib/backup-run.ts`) now demands the same (retention + 3) × a set's bound of `maxStoredBytes`.
 - **R2 operations:** one Class A for each object written and one more for its lifecycle deletion, one Class B for its read-back, plus one million of each class of rounding.
-- **Upstash bytes:** every command the caps allow taken as a full `SCAN` page (500 names of 1,024 bytes), since `COUNT` is a hint and the shared database holds other products' keys; every copied byte as read (`maxRunBytes` counts the base64 `DUMP`s the run keeps, so the 1.7 × logical bytes measured in item 6 decides how much data fits under the cap, not what the cap lets be billed); each key's name sent twice.
-- **No free quota** is credited anywhere (R2's 10 GB-month and million operations, Upstash's free GB and bandwidth).
+- **Upstash bytes:** every command the caps allow taken as a full `SCAN` page (500 names of 1,024 bytes), since `COUNT` is a hint and the shared database holds other products' keys; every copied byte as read (`maxRunBytes` counts the base64 `DUMP`s the run keeps, so the 1.7 × logical bytes measured in item 6 decides how much data fits under the cap, not what the cap lets be billed); each key's name sent twice; the marks and the report's reads. **Upstash storage:** the backup's four marks.
+- **No free quota** is credited anywhere.
 
-Worst month of the design as built (one part of 4 MiB, 10,000 keys, 20,202 commands, 30 days, `maxStoredBytes` 138,417,152, a 300 s route):
+Worst month of the design as built (one part of 4 MiB, 10,000 keys, 20,202 commands, 30 days, `maxStoredBytes` 142,742,688, a 300 s route):
 
 | Line | Per month |
 | --- | ---: |
-| R2 storage (32 sets + 1 GB-month of rounding) | $0.0171 |
-| R2 Class A (124 operations + 1 million of rounding) | $4.5006 |
-| R2 Class B (62 operations + 1 million of rounding) | $0.3600 |
-| Upstash commands (31 × 20,204) | $1.2526 |
-| Upstash bytes (31 × 10.37 GB, almost all of it the `SCAN` pages taken as full) | $9.6429 |
-| Vercel (31 calls of 300 s at 2 GB) | $0.3855 |
-| Provider allowance, 10% | $1.6159 |
-| **Total** | **$17.7746** |
+| R2 storage (33 sets + 1 GB-month of rounding) | $0.0171 |
+| R2 Class A (128 operations + 1 million of rounding) | $4.5006 |
+| R2 Class B (64 operations + 1 million of rounding) | $0.3600 |
+| Upstash commands (32 × 20,204) | $1.2931 |
+| Upstash bytes (32 × 10.37 GB, almost all of it the `SCAN` pages taken as full) | $9.9540 |
+| Upstash storage (4 marks) | $0.0000 |
+| Vercel (32 calls of 300 s at 2 GB) | $0.3979 |
+| Provider allowance, 10% | $1.6523 |
+| **Total** | **$18.1749** |
 
-A year: 12 × $17.7746 = **$213.29**. More than half is the `SCAN` reading: a cap on the pages the walk may read (for example 200, as section 3 assumed) would bring the Upstash bytes to about $0.12 and the month to about $7.30; that is a code change for a later unit, not made here.
+A year: 12 × $18.1749 = **$218.10**. More than half is the `SCAN` reading: a cap on the pages the walk may read (for example 200, as section 3 assumed) would bring the Upstash bytes to about $0.12 and the month to about $7.36; that is a code change for a later unit, not made here.
 
-Still open, so the line is not reviewed (`BACKUP_COST_UNKNOWNS`): the route and its maximum duration (300 s assumed), the Vercel rates of 7 October 2026, whether Vercel bills the bytes sent to R2 and Upstash, the last batch of `DUMP`s read before the cap refuses it (a key's size is not capped by the backup), and the `SCAN` names of other products. Nothing is switched on: `BACKUP_COST_REVIEW` stays `null` until the owner approves the monthly cost.
+Still open, so the line is not reviewed (`BACKUP_COST_UNKNOWNS`): the route and its maximum duration (300 s assumed); the Vercel rates of 7 October 2026; whether Vercel bills the bytes sent to R2 and Upstash; the last batch of `DUMP`s read before the cap refuses it (a key's size is not capped by the backup); the `SCAN` names of other products and names escaped in JSON; how often a day the run is called (each call refused at the day's mark is one command and one Vercel call, and nothing limits them yet); the report's two reads a day, assumed while nothing schedules it; whether Upstash and Vercel round usage up to a block as R2 does; and reading a set back to restore, priced when a restore is decided. Nothing is switched on: `BACKUP_COST_REVIEW` stays `null` until the owner approves the monthly cost.

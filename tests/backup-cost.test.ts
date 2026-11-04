@@ -5,8 +5,8 @@
  * records, not by the code under test.
  *
  * What fails here:
- *   - a line missing or lighter than its worst case: R2 at retention + 2 sets
- *     with a GB-month of rounding, a Class A for each object written and each
+ *   - a line missing or lighter than its worst case: R2 at retention + 3 sets
+ *     with a GB-month of rounding, 32 runs (a run marked before a midnight writes after it), a Class A for each object written and each
  *     deleted by the lifecycle rule, a Class B for each read-back, a million of
  *     each class of rounding, every Upstash command and byte the caps allow,
  *     the route's whole duration, the 10% provider allowance;
@@ -22,7 +22,8 @@ import { done, is, part } from "./check";
 
 // The design as built: one part of at most 4 MiB, 10,000 keys, 20,202 commands (20,000 for the copy, 200 SCAN pages,
 // the two marks), 30 days kept. One set's stored bound: 4,194,304 + one part's seal room 65,536 + the manifest's
-// 160 + 65,536 = 4,325,536 bytes; 32 sets = 138,417,152 bytes.
+// 160 + 65,536 = 4,325,536 bytes; 33 sets (30 days, the lifecycle rule's day, the day written, a run that wrote past
+// its midnight) = 142,742,688 bytes. 32 runs a month: a run marked before a midnight writes after it.
 const builtAsIs: BackupCostReview = {
   maxRows: 10_000,
   maxCommands: 20_202,
@@ -30,7 +31,7 @@ const builtAsIs: BackupCostReview = {
   maxParts: 1,
   maxRunBytes: 4_194_304,
   retentionDays: 30,
-  maxStoredBytes: 138_417_152,
+  maxStoredBytes: 142_742_688,
   reviewedAt: "2026-11-04",
   source: "synthetic: the design as built, priced in docs/backup-cost-2026-11-04.md",
 };
@@ -38,33 +39,35 @@ const builtAsIs: BackupCostReview = {
 part("The worst month of the design as built, line by line (micro-dollars)");
 const month = backupWorstMonth(builtAsIs, 300);
 const line = (id: string) => month?.lines.find((l) => l.id === id)?.microUsd ?? -1;
-// (0.138417152 GB + 1 GB-month of rounding) × 15,000 = 17,076.26 → 17,077.
-is("R2 storage: 32 sets at the daily peak, plus a GB-month of rounding", line("r2-storage"), 17_077);
-// 31 runs × 2 objects × 2 = 124 operations; (124 / 1,000,000 + 1) × 4,500,000 = 4,500,558.
-is("R2 Class A: each object written and deleted, plus a million of rounding", line("r2-class-a"), 4_500_558);
-// 31 × 2 = 62; (62 / 1,000,000 + 1) × 360,000 = 360,022.32 → 360,023.
-is("R2 Class B: each object read back, plus a million of rounding", line("r2-class-b"), 360_023);
-// 31 × (20,202 + 2) = 626,324 commands × 2 = 1,252,648.
-is("Upstash commands: every one the caps allow and the report's two reads", line("upstash-commands"), 1_252_648);
-// A run: 20,202 × 500 × 1,024 = 10,343,424,000 + 4,194,304 + 10,000 × 2,112 = 10,368,738,304 bytes;
-// × 31 = 321.430887424 GB × 30,000 = 9,642,926.62 → 9,642,927.
-is("Upstash bytes: every command a full SCAN page, every copied byte, each name sent twice", line("upstash-transfer"), 9_642_927);
-// 31 × (2 × 300/3,600 × 10,600 + 300/3,600 × 128,000 + 0.6) = 31 × 12,433.93 = 385,451.93 → 385,452.
-is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 385_452);
-// 16,158,685 × 10% = 1,615,868.5 → 1,615,869.
-is("the provider allowance on all of it", line("provider-allowance"), 1_615_869);
-is("the month: $17.77", month?.knownMicroUsd, 17_774_554);
+// (0.142742688 GB + 1 GB-month of rounding) × 15,000 = 17,141.14 → 17,142.
+is("R2 storage: 33 sets at the daily peak, plus a GB-month of rounding", line("r2-storage"), 17_142);
+// 32 runs × 2 objects × 2 = 128 operations; (128 / 1,000,000 + 1) × 4,500,000 = 4,500,576.
+is("R2 Class A: each object written and deleted, plus a million of rounding", line("r2-class-a"), 4_500_576);
+// 32 × 2 = 64; (64 / 1,000,000 + 1) × 360,000 = 360,023.04 → 360,024.
+is("R2 Class B: each object read back, plus a million of rounding", line("r2-class-b"), 360_024);
+// 32 × (20,202 + 2) = 646,528 commands × 2 = 1,293,056.
+is("Upstash commands: every one the caps allow and the report's two reads", line("upstash-commands"), 1_293_056);
+// A run: 20,202 × 500 × 1,024 = 10,343,424,000 + 4,194,304 + 10,000 × 2,112 + 4 × 1,024 = 10,368,742,400 bytes;
+// × 32 = 331.7997568 GB × 30,000 = 9,953,992.70 → 9,953,993.
+is("Upstash bytes: every command a full SCAN page, every copied byte, each name sent twice, the marks", line("upstash-transfer"), 9_953_993);
+// 4 marks × 1,024 bytes = 0.000004096 GB × 250,000 = 1.02 → 2.
+is("Upstash storage: the backup's four marks", line("upstash-storage"), 2);
+// 32 × (2 × 300/3,600 × 10,600 + 300/3,600 × 128,000 + 0.6) = 32 × 12,433.93 = 397,885.87 → 397,886.
+is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 397_886);
+// 16,522,679 × 10% = 1,652,267.9 → 1,652,268.
+is("the provider allowance on all of it", line("provider-allowance"), 1_652_268);
+is("the month: $18.17", month?.knownMicroUsd, 18_174_947);
 is("no free quota anywhere: storage, operations and bytes all above zero", [line("r2-storage"), line("r2-class-a"), line("r2-class-b"), line("upstash-transfer")].every((n) => n > 0), true);
 
 part("Larger caps cost more, never less");
-const parts64: BackupCostReview = { ...builtAsIs, maxRows: 640_000, maxCommands: 1_292_802, maxParts: 64, maxRunBytes: 268_435_456, maxStoredBytes: 32 * (268_435_456 + 64 * 65_536 + 64 * 160 + 65_536) };
+const parts64: BackupCostReview = { ...builtAsIs, maxRows: 640_000, maxCommands: 1_292_802, maxParts: 64, maxRunBytes: 268_435_456, maxStoredBytes: 33 * (268_435_456 + 64 * 65_536 + 64 * 160 + 65_536) };
 const bigger = backupWorstMonth(parts64, 300);
 is("64 parts of 4 MiB: a review the run accepts", bigger !== null, true);
 is("and each line at least the one-part figure", (bigger?.lines ?? []).every((l) => l.microUsd >= line(l.id)), true);
 is("a longer route costs more", (backupWorstMonth(builtAsIs, 800)?.knownMicroUsd ?? 0) > (month?.knownMicroUsd ?? Infinity), true);
 
 part("Nothing priced for what the run would refuse");
-is("a storage ceiling below retention + 2 sets", backupWorstMonth({ ...builtAsIs, maxStoredBytes: 138_417_151 }, 300), null);
+is("a storage ceiling below retention + 3 sets", backupWorstMonth({ ...builtAsIs, maxStoredBytes: 142_742_687 }, 300), null);
 is("a review with no date", backupWorstMonth({ ...builtAsIs, reviewedAt: "" }, 300), null);
 is("no route duration", backupWorstMonth(builtAsIs, 0), null);
 is("a duration past Vercel's longest", backupWorstMonth(builtAsIs, 801), null);

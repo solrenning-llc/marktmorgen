@@ -796,7 +796,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Can I put the buyer's email on a PDF?",
         a: [
-          "Yes. Switch on stamping for a product, and every page of the PDF a buyer downloads carries one line along the bottom with their email, the date and their order. It discourages sharing; it does not stop it, and it is not copy protection. PDFs up to 50 MB are stamped; a bigger one, or one locked with a password, is handed over as uploaded and your studio tells you. Say on the product that the buyer's email is printed on it.",
+          "Yes. Switch on stamping for a product, and every page of the PDF a buyer downloads carries one line along the bottom with their email, the date and their order. It discourages sharing; it does not stop it, and it is not copy protection. PDFs up to 50 MB are stamped; a bigger one, or one locked with a password, is handed over as uploaded and your studio tells you. An EPUB gets the same line hidden inside the book's files, where reading apps do not show it; one with a digital signature or encryption (DRM) is handed over as uploaded. Say on the product that the buyer's email is in the file.",
         ],
       },
       {
@@ -897,6 +897,8 @@ export const HELP_SECTIONS: HelpSection[] = [
           "A deal is somebody you are talking to about a sale that does not happen at your checkout, such as a coaching package or a project, with what it is worth in your store's currency. It sits on a stage you name, each open, won or lost, and each stage is added up. Only people on your team who see your orders see any of it, and nothing in it emails anybody by itself.",
           "Deals sit in pipelines: one for coaching and one for brand partnerships, say, each with its own stages in the order you choose. You rename, reorder, add and remove stages; removing a stage that still holds deals asks you where they go, and removing a pipeline moves its deals to a stage of another, so no deal is deleted that way. A deal moves to any stage of any pipeline. Each pipeline shows what its open, won and lost deals add up to, from the values you recorded: nothing is weighted or forecast. " + pipelineLimitWords(),
           "A workflow can start when a deal enters a stage you choose: when your team makes a deal in that stage, or moves one there. It starts only for the person the deal names by email, only if they are on your list and agreed to hear from you, and once per person, like every workflow. A deal made from a form response, moved by a workflow step, or moved because you removed its stage starts nothing. Each stage starts one workflow at most, which can start others with a step. On a plan with workflows, a deal entering a stage takes one more studio request, for that check.",
+          "A workflow can also start when someone signs one of your proposals or agreements: only for the person who signed, by the address you sent it to, only if they are on your list and agreed to hear from you, and once per person. Signing never adds anybody to your list. One workflow starts on signing; it can start others with a step.",
+          "The same is true of a payment request: a workflow can start when someone pays one, only for the person you sent it to, only if they are on your list and agreed to hear from you, and once per person. Paying never adds anybody to your list. One workflow starts on a paid request.",
         ],
       },
       {

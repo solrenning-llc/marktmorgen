@@ -37,9 +37,13 @@ import { readListing, readListings } from "@/lib/catalog";
 import type { ProductFile } from "@/lib/product-file";
 import {
   type ProductOption,
+  handsOver,
   lowestPriceCents,
-  optionDelivers,
+  sellableOptions,
 } from "@/lib/product-option";
+
+// Read here for years; it now lives beside the option rules, so the studio can read it too.
+export { sellableOptions };
 import { isPaidUp } from "@/lib/billing";
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { StripeError, checkoutClosesAt, onAccount, platformKey } from "@/lib/stripe-account";
@@ -79,6 +83,10 @@ const SESSION_ID_PATTERN = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 /** The name printed at the top of Stripe's page (Stripe API 2025-09-30.clover and later). */
 const DISPLAY_NAME = "branding_settings[display_name]";
 
+// Keep newly created memberships/plans on the classic semantics used by our
+// renewal changes, independently of the platform account default. CX-47.
+const SUBSCRIPTION_CHECKOUT_VERSION = "2025-09-30.clover";
+
 export function isSellingConfigured(): boolean {
   return platformKey() !== null;
 }
@@ -106,20 +114,6 @@ export function canSell(store: Store): boolean {
 }
 
 /**
- * The options a buyer may actually be offered.
- *
- * An option with nothing behind it is left off the page rather than sold and
- * apologised for afterward. The creator is told about it in the studio, which
- * is where it can be fixed; the buyer never meets it.
- */
-export function sellableOptions(product: Listing): ProductOption[] {
-  // A course or a private podcast is its own delivery: every option opens it,
-  // and a file or link on one is something extra that option includes.
-  const opens = Boolean(product.course || product.podcast || product.shipping);
-  return product.options.filter((option) => optionDelivers(option, opens));
-}
-
-/**
  * A product can only be sold once there is something to hand over.
  *
  * Either kind counts: a file we host, or a link to wherever the creator keeps
@@ -136,20 +130,9 @@ export function canSellProduct(store: Store, product: Listing): boolean {
   // A draft is not on sale until the creator publishes it.
   if (product.hidden) return false;
   if (!canSell(store)) return false;
-  // A bundle hands over its products: it is ready once it holds two. Whether
-  // each can still be handed over is read when the checkout opens.
-  if (product.bundle) return product.options.length === 0 && product.recurring === null && product.bundle.length >= MIN_BUNDLE_ITEMS;
-  // A call delivers a time, not a file: it is ready once it has hours set.
-  if (product.call) return product.options.length === 0 && product.recurring === null;
-  // A course delivers its lessons: it is ready once it has one, at one price
-  // or at several (each option opens the same course).
-  if (product.course) return product.course.lessons > 0;
-  // A private podcast delivers its episodes: it is ready once it has one.
-  if (product.podcast) return product.podcast.episodes > 0;
-  // A physical product delivers what the creator ships (lib/shipping.ts).
-  if (activeShipping(product)) return true;
-  if (product.options.length > 0) return sellableOptions(product).length > 0;
-  return product.file !== null || product.link !== null;
+  // What it hands over is read from the product alone (lib/product-option.ts,
+  // handsOver), which the studio also reads to say what removing a price does.
+  return handsOver(product);
 }
 
 /** The figure a product card leads with: the cheapest way in. */
@@ -374,6 +357,8 @@ export async function createCheckout(
     success_url: `${origin}/@${store.handle}/thanks?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/@${store.handle}`,
   });
+
+  if (recurring) body.set("subscription_data[billing_mode][type]", "classic");
 
   // Which option was bought decides which file is handed over later, so it
   // travels with the charge rather than being worked out again afterward.
@@ -796,7 +781,7 @@ export async function createCheckout(
     // Set just before the request, because Stripe counts its minimum from then.
     if (extras.held) body.set("expires_at", String(checkoutClosesAt()));
     else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
-    return onAccount("POST", store.stripeAccountId as string, "/checkout/sessions", body);
+    return onAccount("POST", store.stripeAccountId as string, "/checkout/sessions", body, recurring ? SUBSCRIPTION_CHECKOUT_VERSION : undefined);
   };
 
   // Each of the two things Stripe may refuse is put right once, whichever it

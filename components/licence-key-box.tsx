@@ -62,20 +62,12 @@ export function LicenceKeyBox({
         <>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
             <code
-              className="min-w-0 flex-1 select-all break-words rounded-xl px-3 py-2 font-mono text-base font-semibold tracking-wide sm:text-lg"
+              className="min-w-0 flex-1 select-all rounded-xl px-3 py-2 font-mono text-base font-semibold tracking-wide [overflow-wrap:anywhere] sm:text-lg"
               style={{ background: "var(--st-accent-soft)", color: "var(--st-text)", textDecoration: revoked ? "line-through" : undefined }}
             >
-              {/* A long key wraps between its groups rather than inside one. */}
-              {value.split("-").map((part, i, all) => (
-                <span key={i}>
-                  {part}
-                  {i < all.length - 1 ? (
-                    <>
-                      -<wbr />
-                    </>
-                  ) : null}
-                </span>
-              ))}
+              {/* One text, read and copied whole; a long key wraps wherever it must (overflow-wrap: anywhere), with no element
+                  per group, so a key from a creator's list of a hundred hyphens costs no more than its characters (C3-97). */}
+              {value}
             </code>
             {revoked ? null : (
               <button

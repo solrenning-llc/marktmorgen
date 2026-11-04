@@ -45,6 +45,7 @@ const ALLOWED: { pattern: RegExp; why: string }[] = [
   { pattern: /^nl:(health|stats:[0-9a-f]+:ledger)/, why: "ten-minute copies, worked out again when next read" },
   { pattern: /^nl:(sender|wf:day):/, why: "counts of emails and workflow runs, never who" },
   { pattern: /^nl:tasks:doors$/, why: "files waiting for the daily job to delete them, when the file store did not answer" },
+  { pattern: /^nl:rsum:(ver|last):[0-9a-f]+:[A-Za-z0-9_-]+$/, why: "a random mark that a product's reviews changed, so an AI summary counting the deleted review is not kept (lib/reviews.ts), and when the week's last summary was made, never who" },
   { pattern: /^nl:data:/, why: "the store's data room, counting what a deletion gave back (lib/store-data.ts), never who" },
 ];
 
@@ -85,6 +86,8 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
 
   const asked = await requestErasureLink({ email: tess, ip: "203.0.113.7", origin: "https://marktmorgen.com", handle: store.handle });
   is("asking sends a link", asked, "sent");
+  // The link goes after the answer (lib/erasure-request.ts, afterAnswer): wait for it before reading what was sent.
+  for (let i = 0; i < 200 && !sent.some((m) => m.to === tess && m.text.includes("/privacy/delete?token=")); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
   const mail = sent.find((m) => m.to === tess && m.text.includes("/privacy/delete?token="));
   const token = mail?.text.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
   is("the email carries a link that works", token.length, 64);

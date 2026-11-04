@@ -41,6 +41,8 @@ export type Held = { key: string; token: string; ttlSeconds: number };
 export class LockBusyError extends Error {
   constructor(message = "busy") {
     super(message);
+    // Named, so a caller that tells it by its name (lib/paypal-payouts.ts) or a log line knows it; prefer instanceof.
+    this.name = "LockBusyError";
   }
 }
 
@@ -111,6 +113,38 @@ export async function setIfHeld(held: Held, key: string, value: string, options:
     return written === "OK" ? 1 : 0;
   });
   return done === 1;
+}
+
+/**
+ * Fenced writes that never fall back (lib/passkeys.ts, lib/two-step.ts): each
+ * is one script on the Redis side, and when the script cannot run, nothing is
+ * written and the answer is false, so the caller treats it as a lost lock.
+ * The first line names the script for the local stand-in (lib/redis-memory.ts).
+ */
+const FENCED_SET_ONLY = '-- marktmorgen:fenced-set:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[2], ARGV[2]) return 1 else return 0 end';
+const FENCED_SET_NEW_ONLY =
+  '-- marktmorgen:fenced-set-new:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] and redis.call("EXISTS", KEYS[2]) == 0 then redis.call("SET", KEYS[2], ARGV[2]) return 1 else return 0 end';
+const FENCED_DEL_ONLY =
+  '-- marktmorgen:fenced-del:v1\nif redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end\nfor i = 2, #KEYS do redis.call("DEL", KEYS[i]) end\nreturn 1';
+
+async function strictScript(source: string, keys: string[], args: string[]): Promise<boolean> {
+  try {
+    const [result] = await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]);
+    return result === 1;
+  } catch {
+    return false;
+  }
+}
+
+/** Sets `key` only while the lock is still ours (and, with `absent`, only when nothing is there), in one script; false otherwise, never a fallback. */
+export async function setIfHeldOnly(held: Held, key: string, value: string, options: { absent?: boolean } = {}): Promise<boolean> {
+  return strictScript(options.absent ? FENCED_SET_NEW_ONLY : FENCED_SET_ONLY, [held.key, key], [held.token, value]);
+}
+
+/** Deletes `keys` only while the lock is still ours, in one script; false otherwise, never a fallback. */
+export async function deleteIfHeldOnly(held: Held, keys: string[]): Promise<boolean> {
+  if (!keys.length) return true;
+  return strictScript(FENCED_DEL_ONLY, [held.key, ...keys], [held.token]);
 }
 
 /** Runs `work` with the lock at `key` held, and lets go of it after, whatever happens. */

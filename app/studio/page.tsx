@@ -211,15 +211,18 @@ import { unusedSummary } from "@/lib/closing-refunds";
 import { holdCounts } from "@/lib/closing-holds";
 import { CLOSING_CHECKOUT_SECONDS, lastPlanMoment } from "@/lib/closing-plan-guard";
 import { type Permission, type Role, ROLE_NAMES, ROLE_SUMMARIES, can } from "@/lib/team-roles";
-import { MAX_TEAM, readTeam } from "@/lib/team";
+import { MAX_TEAM, SECOND_STEP_WORDS, readTeam, secondStepWay } from "@/lib/team";
 import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
-import { listPasskeys } from "@/lib/passkeys";
+import { REMOVAL_DAYS, listPasskeys, pendingRemoval } from "@/lib/passkeys";
+import { liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PasskeyManager } from "@/components/passkey-manager";
+import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
+import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
@@ -653,6 +656,14 @@ const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Log in again first",
     body: "Moving your account needs a login from the last 15 minutes. Log out, log in again, and ask once more. Nothing was changed.",
   },
+  "second-step": {
+    title: "Log in again with your passkey or your app's code",
+    body: "Your account has a passkey or two-step login, so moving it needs a login with one of them, not only the emailed link. Nothing was changed.",
+  },
+  "has-login": {
+    title: "That address has its own passkeys or two-step login",
+    body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed.",
+  },
   limited: {
     title: "Too many attempts for that address",
     body: "Wait an hour and try again.",
@@ -786,6 +797,10 @@ export default async function StudioPage({
   const found = await studioView(cookieStore, typeof params.store === "string" ? params.store : undefined, null);
   if (!found.ok && found.reason === "signed_out") redirect("/signin");
   const view = found.ok ? found.view : null;
+  // A team that requires two-step sign-in held this session at its door
+  // (lib/team.ts teamTwoStepBlocks): what to do next, in place of starting a store.
+  const heldAt = !found.ok && found.reason === "two_step" && found.email ? found.store ?? null : null;
+  const secondStep = heldAt && !found.ok && found.email ? await secondStepWay(found.email).catch(() => "set_up" as const) : null;
   const email = view?.email ?? (found.ok ? "" : (found.email ?? ""));
   const role: Role = view?.role ?? "owner";
   /** Whether this person's role on this store has a permission (lib/team-roles.ts). */
@@ -1100,6 +1115,12 @@ export default async function StudioPage({
     : [null, { state: "none" as const }, null];
   // The person's own passkeys, and — for the owner — how many are on the team.
   // Adding a passkey needs a login from the last fifteen minutes (lib/auth.ts).
+  // Passkeys whose wait to be removed has run out go first, so the list below is what is left; and
+  // whether this session may add a passkey or an app (lib/second-step-gate.ts), so the managers say so.
+  const removing = email ? await pendingRemoval(email).catch(() => null) : null;
+  const passkeyRemovals: Record<string, number> = removing ? removing.atOf : {};
+  const needsStep = email ? !(await mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : false;
+  const canKeep = email ? mayKeepPasskey(await liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : false;
   const [passkeys, team, freshLogin, lockedTill, twoStep, recoveryShown] = await Promise.all([
     email ? listPasskeys(email).catch(() => []) : Promise.resolve([]),
     store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
@@ -1194,7 +1215,7 @@ export default async function StudioPage({
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">{`Some things are locked until ${new Date(lockedTill).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}`}</p>
             <p className="mt-1 text-sm text-ink-soft">
-              You got in through your recovery address or without your second step, so payments, your plan, your team, exports, settings, sending to your list, your sign-in address, passkeys and two-step login wait until then. Everything else is open: your products, pages, buyers, numbers and drafts. On that day nothing is locked any more, and you can move your sign-in address to an inbox you have. Logging in with your sign-in email, a passkey or your app&apos;s code before then opens everything at once.
+              {`You got in through your recovery address or without your second step, so ${LOCKED_LIST} wait until then. Everything else is open: your products, pages, buyers, numbers and drafts. On that day nothing is locked any more, and you can move your sign-in address to an inbox you have. Logging in with your sign-in email, a passkey or your app's code before then opens everything at once.`}
             </p>
           </div>
         ) : twoStep.reset > 0 ? (
@@ -3236,6 +3257,10 @@ export default async function StudioPage({
               <PasskeyManager
                 initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                 fresh={freshLogin}
+                needsStep={needsStep}
+                canKeep={canKeep}
+                removals={passkeyRemovals}
+                removalDays={REMOVAL_DAYS}
               />
               <RecoveryAddressManager shown={recoveryShown} />
               <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
@@ -3292,6 +3317,51 @@ export default async function StudioPage({
             </div>
             </div>
           </>
+        ) : secondStep ? (
+          <section aria-labelledby="second-step-title" className="card mt-8 p-6 sm:p-8">
+            <h2 id="second-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              {SECOND_STEP_WORDS[secondStep].title}
+            </h2>
+            {heldAt?.name ? (
+              <p className="mt-2 max-w-[80ch] text-ink-soft">
+                {"You help run "}
+                <strong className="text-ink [overflow-wrap:anywhere]">{heldAt.name}</strong>.
+              </p>
+            ) : null}
+            <p className="mt-2 max-w-[80ch] text-ink-soft">{SECOND_STEP_WORDS[secondStep].body}</p>
+            {secondStep === "passkey" ? (
+              <>
+                <PasskeySignIn />
+                <p className="mt-4 text-sm text-ink-soft">
+                  <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
+                    Go to the login page to use your passkey there
+                  </Link>
+                </p>
+              </>
+            ) : secondStep === "app" ? (
+              <Link href="/signin" className="btn btn-primary mt-6 inline-flex min-h-11 items-center">
+                {SECOND_STEP_WORDS.app.action}
+              </Link>
+            ) : (
+              <div className="mt-6 space-y-6">
+                <PasskeyManager
+                  initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
+                  fresh={freshLogin}
+                  needsStep={needsStep}
+                  canKeep={canKeep}
+                  removals={passkeyRemovals}
+                  removalDays={REMOVAL_DAYS}
+                />
+                <RecoveryAddressManager shown={recoveryShown} />
+                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
+                <p className="text-sm text-ink-soft">
+                  <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
+                    Once it is set up, log in again with it
+                  </Link>
+                </p>
+              </div>
+            )}
+          </section>
         ) : (
           <div className="card mt-8 p-6 sm:p-8">
             <p className="text-lg font-semibold tracking-[-0.02em] text-ink">

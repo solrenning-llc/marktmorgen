@@ -43,6 +43,7 @@ import { NextRequest } from "next/server";
 import { GET as downloadRoute } from "@/app/api/store/download/route";
 import { POST as ordersRoute } from "@/app/api/store/orders/route";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { LANGUAGE_CODES } from "@/lib/store-language";
 import { REDIS_TIMEOUT_MS, RESEND_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { requestsIn } from "@/lib/traffic";
@@ -622,7 +623,7 @@ test("a link request whose meter is refused after its units says sent, as for an
   assert.equal(mails, 0, "nothing was emailed");
   // The page's words hold for both: a link normally arrives; if it does not, try again later.
   const words = ordersWords("en");
-  assert.ok(words.sentBody("Olive Studio").includes("a link is normally on its way") && words.nothingArrived.includes("try again later") && words.nothingArrived.includes("reply to your order confirmation"));
+  assert.ok(words.sentBody("Olive Studio").includes("a link is normally on its way") && words.nothingArrived.includes("try again later"));
 });
 
 test("a link request says sent whatever happens past its units: the email not sent, the purchases not read", async () => {
@@ -651,4 +652,21 @@ test("a link request says sent whatever happens past its units: the email not se
 test("a link request reads for ORDERS_LINK_READ_MS at the most, so its grant and email fit in the route's time", () => {
   assert.ok(ORDERS_LINK_READ_MS + REDIS_TIMEOUT_MS + RESEND_TIMEOUT_MS < ORDERS_OPEN_SECONDS * 1000, String(ORDERS_LINK_READ_MS));
   assert.ok(readFileSync("lib/buyer-orders.ts", "utf8").includes("callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);"));
+});
+
+test("the page after a link request sends nobody to reply to an email unless every email about a purchase answers to the creator", () => {
+  // Every email a buyer gets about what they have here, and whether each answers to the creator (replyTo: store.email).
+  const senders = ["lib/purchase-email.ts", "lib/gifts.ts", "lib/paypal-sales.ts", "lib/preorders.ts", "lib/group-buy.ts", "lib/api-write.ts", "lib/imports.ts", "lib/buyer-orders.ts"];
+  const unanswered = senders.filter((file) => {
+    const text = readFileSync(file, "utf8");
+    const sends = (text.match(/\bsendEmail\(\{|messages\.push\(\{/g) ?? []).length;
+    const answered = (text.match(/replyTo: store\.email/g) ?? []).length;
+    return sends > answered;
+  });
+  // Today a gift's email to whom it is for, a place's, and this link's own do not.
+  assert.ok(unanswered.length > 0, "every one answers now: the page may say so again");
+  for (const language of LANGUAGE_CODES) {
+    const words = ordersWords(language);
+    assert.doesNotMatch(`${words.sentBody("Olive Studio")} ${words.nothingArrived}`, /confirm|bestätigung|bevestiging|conferma|reply|respon|antwo|rispond/i, language);
+  }
 });

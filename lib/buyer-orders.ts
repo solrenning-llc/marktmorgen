@@ -766,7 +766,9 @@ export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable
  * to the server's log, since anything else would tell who bought here. The
  * page's words hold for both (lib/buyer-words/orders.ts, sentBody and
  * nothingArrived: a link normally arrives; if not, the spam folder, another
- * address, later, or the order confirmation to reach the creator).
+ * address, or later). They promise no way to reach the creator: not every
+ * email a buyer gets about a purchase answers to the creator (a gift's, a
+ * place's), and a store's contact form is the creator's choice.
  */
 export async function requestOrdersLink(input: {
   store: Store;

@@ -9,7 +9,7 @@
 import { ORDER_BOARD_ENTRY_BYTES, ORDER_COMMANDS, ORDER_ENTRY_BYTES, ORDER_KEY_BYTES, ORDER_WRITE, ORDER_WRITE_MAX, orderWriteCharged } from "@/lib/order-data";
 import { dataKey, dataUsed } from "@/lib/store-data";
 import { DATA_ROOM_BYTES, DATA_STEP_BYTES, orderDataBytes } from "@/lib/store-data-rules";
-import { upsertContact } from "@/lib/contacts";
+import { orderRoom, upsertContact } from "@/lib/contacts";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { recordEnrollment } from "@/lib/learn";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
@@ -103,7 +103,7 @@ async function main() {
   const room = () => Number(redis.run(["HGET", dataKey(store)!, "o"]) ?? 0);
   const buy = async (email: string, productId: string, title: string) => {
     const before = room();
-    await upsertContact(store.listId!, email, { agreed: false, explicit: false, source: "buyer", sid: store.sid, productId, title, at: new Date().toISOString() }, { order: store });
+    await upsertContact(store.listId!, email, { agreed: false, explicit: false, source: "buyer", sid: store.sid, productId, title, at: new Date().toISOString() }, orderRoom(store));
     await rememberBuyers(store.sid, [email]);
     await recordEnrollment(store, email, productId, Math.floor(Date.now() / 1000));
     return room() - before;

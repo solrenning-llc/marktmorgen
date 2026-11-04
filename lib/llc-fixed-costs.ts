@@ -54,8 +54,10 @@ export function allocateEntireLlcFixedCosts(lines: readonly FixedCostCeiling[]) 
    if (!record || typeof record !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(record))
     || Reflect.ownKeys(record).length !== keys.length) return null;
    const fields = Object.getOwnPropertyDescriptors(record);
-   const data: Record<string, unknown> = {};
+   const data: Record<string, unknown> = Object.create(null);
    for (const key of keys) {
+    // A missing cost must not resolve to an inherited descriptor or getter.
+    if (!Object.hasOwn(fields, key)) return null;
     const field = fields[key];
     if (!field || !Object.hasOwn(field, "value")) return null;
     data[key] = field.value;

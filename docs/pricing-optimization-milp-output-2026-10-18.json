@@ -5,7 +5,7 @@
    "scenario": "-0.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 790.857,
+   "objective": 790.844,
    "plans": {
     "creator": {
      "monthCents": 12900,
@@ -52,7 +52,7 @@
    "scenario": "-0.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 805.7431,
+   "objective": 805.7209,
    "plans": {
     "creator": {
      "monthCents": 12900,
@@ -99,7 +99,7 @@
    "scenario": "-1",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 341.8282,
+   "objective": 341.8224,
    "plans": {
     "creator": {
      "monthCents": 12900,
@@ -146,7 +146,7 @@
    "scenario": "-1",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 348.2422,
+   "objective": 348.232,
    "plans": {
     "creator": {
      "monthCents": 12900,
@@ -193,7 +193,7 @@
    "scenario": "-1.5",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 205.7585,
+   "objective": 205.7547,
    "plans": {
     "creator": {
      "monthCents": 7900,
@@ -240,7 +240,7 @@
    "scenario": "-1.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 379.3712,
+   "objective": 379.3184,
    "plans": {
     "creator": {
      "monthCents": 4900,
@@ -287,7 +287,7 @@
    "scenario": "-2",
    "alternative": "A",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 128.7795,
+   "objective": 128.7773,
    "plans": {
     "creator": {
      "monthCents": 7900,
@@ -334,7 +334,7 @@
    "scenario": "-2",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 439.8996,
+   "objective": 439.8388,
    "plans": {
     "creator": {
      "monthCents": 4900,

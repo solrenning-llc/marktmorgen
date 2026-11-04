@@ -85,6 +85,7 @@ import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion } from "@/lib/affiliate-promotion";
 import { onAccount } from "@/lib/stripe-account";
+import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { DISPUTE_TAKES } from "@/lib/retained-revenue";
 import { isSettled } from "@/lib/instant-pay";
 import { SITE_URL } from "@/lib/site-url";
@@ -132,9 +133,9 @@ const APPLY_ADDRESS_LIMIT = 5;
 const CLICK_IP_LIMIT = 30;
 const RATE_WINDOW_SECONDS = 60 * 60;
 /** How many pages of a hundred refunds are read when the book is opened. */
-const REFUND_PAGES = 10;
+export const REFUND_PAGES = 10;
 /** And of a hundred disputes, which are far fewer. */
-const DISPUTE_PAGES = 3;
+export const DISPUTE_PAGES = 3;
 // DISPUTE_TAKES, the dispute states that take the money, is lib/retained-revenue.ts's: the numbers read the same set.
 
 /** The cookie an affiliate's own browser is signed in with, one per store. */
@@ -1773,15 +1774,21 @@ export type Book = {
  * oldest sale on the book on. Pending refunds count: the creator already
  * gave the money back.
  */
-async function refundsSince(store: Store, since: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+async function refundsSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
   const byIntent = new Map<string, number>();
   if (!store.stripeAccountId) return { byIntent, complete: false };
   let after = "";
   for (let page = 0; page < REFUND_PAGES; page += 1) {
+    const wait = stripeWait(deadline);
+    if (wait === null) return { byIntent, complete: false };
     const listed = await onAccount(
       "GET",
       store.stripeAccountId,
       `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      undefined,
+      undefined,
+      undefined,
+      wait,
     );
     const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
     for (const refund of rows) {
@@ -1803,15 +1810,21 @@ async function refundsSince(store: Store, since: number): Promise<{ byIntent: Ma
  * is holding or the buyer won (DISPUTE_TAKES). Read beside the refunds, so a
  * sale charged back earns its affiliate nothing, as a sale refunded does.
  */
-export async function disputesSince(store: Store, since: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+export async function disputesSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
   const byIntent = new Map<string, number>();
   if (!store.stripeAccountId) return { byIntent, complete: false };
   let after = "";
   for (let page = 0; page < DISPUTE_PAGES; page += 1) {
+    const wait = stripeWait(deadline);
+    if (wait === null) return { byIntent, complete: false };
     const listed = await onAccount(
       "GET",
       store.stripeAccountId,
       `/disputes?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      undefined,
+      undefined,
+      undefined,
+      wait,
     );
     const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
     for (const dispute of rows) {
@@ -1885,7 +1898,54 @@ export async function bookSizes(store: Store): Promise<BookSizes | null> {
  * person, what an affiliate sees: their clicks, the sales through their link
  * with what each earns after refunds, and what the creator says they paid.
  */
-export async function readBook(store: Store, only?: string): Promise<Book> {
+/**
+ * How much the book would read, counted before it is read (4 November 2026,
+ * lib/public-read-rules.ts): the fields of every hash readBook reads whole,
+ * and the records it then reads one command each, PayPal's refunds and the
+ * open bookings of the leads, at its caps. Eight commands whatever the size;
+ * null when they cannot be counted, which reads nothing.
+ */
+export async function bookSize(store: Store): Promise<{ fields: number; rows: number } | null> {
+  if (!store.statsId || !isRedisConfigured()) return { fields: 0, rows: 0 };
+  const statsId = store.statsId;
+  try {
+    const counts = (await redisPipeline([
+      ["HLEN", peopleKey(statsId)],
+      ["HLEN", clicksKey(statsId)],
+      ["HLEN", salesKey(statsId)],
+      ["HLEN", payoutsKey(statsId)],
+      ["HLEN", sharesKey(statsId)],
+      ["HLEN", paidClicksKey(statsId)],
+      ["HLEN", leadsKey(statsId)],
+      ["ZCARD", paypalRefundedKey(statsId)],
+    ])).map(Number);
+    if (counts.length !== 8 || counts.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+    const fields = counts.slice(0, 7).reduce((sum, n) => sum + n, 0);
+    return { fields, rows: Math.min(counts[7], 500) + Math.min(counts[6], 200) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How long the next call to Stripe may wait before `deadline` (epoch
+ * milliseconds): its full STRIPE_TIMEOUT_MS when there is none, what is left
+ * otherwise, and null when less than a second is, so the read stops there
+ * and what it read is incomplete.
+ */
+export function stripeWait(deadline: number | undefined, now = Date.now()): number | null {
+  if (deadline === undefined) return STRIPE_TIMEOUT_MS;
+  const left = deadline - now;
+  return left < 1_000 ? null : Math.min(STRIPE_TIMEOUT_MS, Math.floor(left));
+}
+
+/**
+ * The program's book, or one affiliate's (`only`). With `deadline` (epoch
+ * milliseconds), Stripe is asked nothing past it, and what was not read is
+ * marked incomplete (invoicesChecked, refundsChecked): the affiliate page's
+ * refresh stops so (lib/affiliate-book-snapshot.ts, BOOK_READ_SECONDS).
+ */
+export async function readBook(store: Store, only?: string, limits: { deadline?: number } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
   const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = await redisPipeline([
@@ -1943,7 +2003,7 @@ export async function readBook(store: Store, only?: string): Promise<Book> {
   let recurringLines: Referral[] = [];
   if (store.stripeAccountId && everyone.length) {
     try {
-      const read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400);
+      const read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, limits.deadline);
       recurringLines = read.lines.filter((r) => mine(r.aff));
       invoicesChecked = read.complete;
     } catch (error) {
@@ -1962,7 +2022,7 @@ export async function readBook(store: Store, only?: string): Promise<Book> {
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
     try {
-      const read = store.stripeAccountId ? await refundsSince(store, since) : { byIntent: new Map<string, number>(), complete: true };
+      const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
       // PayPal's refunds in full, named by the payment as the book names it.
@@ -1976,7 +2036,7 @@ export async function readBook(store: Store, only?: string): Promise<Book> {
     // is owed is not known (refundsChecked), and no payout is made on it.
     if (store.stripeAccountId) {
       try {
-        const disputed = await disputesSince(store, since);
+        const disputed = await disputesSince(store, since, limits.deadline);
         for (const [pi, cents] of disputed.byIntent) refunds.set(pi, (refunds.get(pi) ?? 0) + cents);
         refundsChecked = refundsChecked && disputed.complete;
       } catch (error) {
@@ -2049,7 +2109,7 @@ export async function readBook(store: Store, only?: string): Promise<Book> {
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */
-const INVOICE_PAGES = 10;
+export const INVOICE_PAGES = 10;
 /** The most pages of the creator's Stripe account one reading of the book waits on: invoices, refunds and disputes (lib/api-read-rules.ts, bookWork). */
 export const BOOK_STRIPE_PAGES = INVOICE_PAGES + REFUND_PAGES + DISPUTE_PAGES;
 const AFF_SUB_STRIPE_VERSION = "2026-08-26.dahlia";
@@ -2082,7 +2142,7 @@ export function withinMonths(from: number, paidAt: number, months: number): bool
  * never written down. A membership's payment counts while it falls within
  * the months agreed when it was sold; a plan's every payment counts.
  */
-async function recurringReferrals(store: Store, everyone: Affiliate[], since: number): Promise<{ lines: Referral[]; complete: boolean }> {
+async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number): Promise<{ lines: Referral[]; complete: boolean }> {
   const handles = saleHandles(store);
   const byId = new Map(everyone.map((a) => [a.id, a]));
   const found: { invoice: InvoiceLike; meta: Record<string, string> }[] = [];
@@ -2092,7 +2152,9 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     const query = new URLSearchParams({ limit: "100", status: "paid", "created[gte]": String(Math.max(0, since)) });
     query.append("expand[]", "data.payments");
     if (after) query.set("starting_after", after);
-    const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION)) as { data?: unknown; has_more?: unknown };
+    const wait = stripeWait(deadline);
+    if (wait === null) break;
+    const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, wait)) as { data?: unknown; has_more?: unknown };
     const rows = (Array.isArray(listed.data) ? listed.data : []) as InvoiceLike[];
     for (const invoice of rows) {
       const meta = invoice.parent?.subscription_details?.metadata ?? {};

@@ -184,13 +184,12 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * back when Stripe will not close it, and a product's bought alone) and closing one whose hold could not be written;
  * and the lock and hold commands of every limited product in a full cart (three for a lock's renewal or release where
  * the script is refused), the questions' answers and times, and the lapsed provisional holds each count lets go of
- * (MAX_LAPSED). NOT YET in ORDER_COST: priced on every order it breaks tests/plan-margin.test.ts ("Scale keeps more
- * than Pro") at any value from about $0.0001, and it is about $0.00043 (docs/codex-queue.md, 513 [PF1], Depende do
- * dono). Held here so the gap is named, not hidden.
+ * (MAX_LAPSED). About $0.00043. In ORDER_COST, on every order whatever it holds, by the owner's decisions of 3 November
+ * 2026 (C2-63, C2-70: a known cost enters the account, the MR rule).
  */
 export const ORDER_STOCK = (STOCK_ORDER_WAIT_MS / 1000) * MEMORY_SECOND + STOCK_ORDER_COMMANDS * COMMAND;
-/** What one order costs at the most: its confirmation, the email that says it shipped, its compute, and what it leaves for its store's closing. */
-export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
+/** What one order costs at the most: its confirmation, the email that says it shipped, its compute, its stock work, and what it leaves for its store's closing. */
+export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + ORDER_STOCK;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -387,14 +386,14 @@ export const COST_LINES: CostLine[] = [
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },
       // A cart's checkout holds a unit of each limited product in it (513 [PF1], unit 3, 2 November 2026): a lock, a count, a provisional hold and its own for each, at most MAX_CART.
-      // Its waits on Stripe and its commands are bounded (ORDER_STOCK, 3 November 2026); not yet priced on this line, see ORDER_STOCK.
+      // Its waits and its commands are bounded and priced on every order (ORDER_STOCK in ORDER_COST, 3 November 2026).
       { file: "lib/stock.ts", names: ["withCartStockHolds", "PENDING_MS", "releaseCartStockHolds", "STOCK_ORDER_WAIT_MS", "STOCK_ORDER_COMMANDS", "LOCK_WAIT_MS", "MAX_LAPSED", "const checks: StripeChecks = { left: MAX_CHECKS };", "CHECK_MS"] },
       // A cart's checkout reads the offers of each of its products, and what each bundle in it hands over, at most MAX_CART of each, to know whose offers follow it (556 [CT1], 1 and 2 November 2026): reads only, inside that order.
       { file: "lib/cart-offers.ts", names: ["cartOfferOwner", "liveFunnel"] },
       { file: "lib/cart-rules.ts", names: ["MAX_CART = 4"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
     ],
-    basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. A checkout of limited products (513 [PF1], 3 November 2026; lib/stock.ts) waits for each product's lock, and on Stripe for its counts, the old checkouts it closes (read back when Stripe will not) and a new one it closes, each question CHECK_MS at the most, STOCK_ORDER_WAIT_MS in all, and sends at most STOCK_ORDER_COMMANDS lock and hold commands: ORDER_STOCK, about $0.00043 an order, not yet in ORDER_COST (it would make Scale keep less than Pro; the owner's, docs/codex-queue.md 513 [PF1]).",
+    basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. A checkout of limited products (513 [PF1], 3 November 2026; lib/stock.ts) waits for each product's lock, and on Stripe for its counts, the old checkouts it closes (read back when Stripe will not) and a new one it closes, each question CHECK_MS at the most, STOCK_ORDER_WAIT_MS in all, and sends at most STOCK_ORDER_COMMANDS lock and hold commands: ORDER_STOCK, about $0.00043 an order, in ORDER_COST on every order whatever it holds (owner, 3 November 2026).",
   },
   {
     id: "list-email",

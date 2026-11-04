@@ -75,6 +75,13 @@ export type VoiceSummary = {
   /** How many texts were read, by where they came from. */
   read: Partial<Record<VoiceSource, number>>;
   themes: VoiceTheme[];
+  /**
+   * The themes reviews are part of, picked before the themes above are cut to
+   * MAX_THEMES (searches, counted as many times as they were made, can take
+   * every place there), with up to three reviews as their examples. The
+   * reviews page reads these. Missing on a summary made before they were kept.
+   */
+  reviewThemes?: VoiceTheme[];
   /** Texts that fit no theme said by two or more. */
   other: number;
 };
@@ -161,10 +168,16 @@ export function voicePrompt(items: VoiceItem[]): string {
  * theme, is dropped; a theme left with fewer than two texts, or a name with a
  * figure in it, is dropped too. Counts and examples come from the texts. Pure.
  */
-export function themesFrom(raw: Record<string, unknown> | null, items: VoiceItem[]): { themes: VoiceTheme[]; other: number } {
+export function themesFrom(raw: Record<string, unknown> | null, items: VoiceItem[]): { themes: VoiceTheme[]; reviewThemes: VoiceTheme[]; other: number } {
   const byId = new Map(items.map((i) => [i.id, i]));
   const used = new Set<number>();
   const themes: VoiceTheme[] = [];
+  const reviewThemes: VoiceTheme[] = [];
+  const examplesOf = (list: VoiceItem[]) =>
+    [...list]
+      .sort((a, b) => b.n - a.n || a.id - b.id)
+      .slice(0, 3)
+      .map((i) => ({ source: i.source, text: i.text, n: i.n, ...(i.product ? { product: i.product } : {}), ...(i.stars ? { stars: i.stars } : {}) }));
   const listed = Array.isArray(raw?.themes) ? (raw.themes as unknown[]) : [];
   for (const entry of listed) {
     if (!entry || typeof entry !== "object") continue;
@@ -177,21 +190,17 @@ export function themesFrom(raw: Record<string, unknown> | null, items: VoiceItem
     for (const item of mine) used.add(item.id);
     const sources: Partial<Record<VoiceSource, number>> = {};
     for (const item of mine) sources[item.source] = (sources[item.source] ?? 0) + item.n;
-    themes.push({
-      title,
-      count: mine.reduce((sum, item) => sum + item.n, 0),
-      sources,
-      examples: [...mine]
-        .sort((a, b) => b.n - a.n || a.id - b.id)
-        .slice(0, 3)
-        .map((i) => ({ source: i.source, text: i.text, n: i.n, ...(i.product ? { product: i.product } : {}), ...(i.stars ? { stars: i.stars } : {}) })),
-    });
+    const count = mine.reduce((sum, item) => sum + item.n, 0);
+    themes.push({ title, count, sources, examples: examplesOf(mine) });
+    const reviews = mine.filter((item) => item.source === "review");
+    if (reviews.length) reviewThemes.push({ title, count, sources, examples: examplesOf(reviews) });
   }
   themes.sort((a, b) => b.count - a.count);
+  reviewThemes.sort((a, b) => (b.sources.review ?? 0) - (a.sources.review ?? 0) || b.count - a.count);
   const kept = themes.slice(0, MAX_THEMES);
   const inKept = kept.reduce((sum, t) => sum + t.count, 0);
   const all = items.reduce((sum, i) => sum + i.n, 0);
-  return { themes: kept, other: Math.max(0, all - inKept) };
+  return { themes: kept, reviewThemes: reviewThemes.slice(0, MAX_THEMES), other: Math.max(0, all - inKept) };
 }
 
 /** How many texts of each kind were read. Pure. */
@@ -254,7 +263,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
       const json = reply ? jsonIn(reply) : null;
       if (!json) return null;
       const sorted = themesFrom(json, items);
-      const summary: VoiceSummary = { at: Math.floor(now / 1000), month, read: readBySource(items), themes: sorted.themes, other: sorted.other };
+      const summary: VoiceSummary = { at: Math.floor(now / 1000), month, read: readBySource(items), themes: sorted.themes, reviewThemes: sorted.reviewThemes, other: sorted.other };
       return summary;
     });
     if (!done.ok) return { ok: false, reason: done.reason === "notes" ? "failed" : done.reason };

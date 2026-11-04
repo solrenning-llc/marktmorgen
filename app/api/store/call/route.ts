@@ -34,6 +34,10 @@ export async function POST(request: NextRequest) {
     // A deposit (lib/call-deposit.ts; 520 [LB1] unit 5a) is not offered yet: the booking page, the page after paying
     // and the emails do not say what is left to pay in person, and the editor does not keep it. Refused until they do (5b).
     if (setup.deposit) return Response.json({ ok: false, error: "deposit" }, { status: 400 });
+    // Several lengths (637 [GL5]) are not offered yet: the booking page, the store page, the page after paying and the
+    // checkout reminder say one length and one price, and this route does not yet check them with the store's currency,
+    // the product's price, package and team (lib/call-lengths.ts, readCallLengths). Refused until the editor unit does.
+    if (setup.lengths) return Response.json({ ok: false, error: "lengths" }, { status: 400 });
     // In person chosen with no address (lib/call-place.ts): never saved as a call with no link.
     const asked = (guarded.body.call as { place?: unknown } | null | undefined)?.place;
     if (asked !== undefined && asked !== null && !setup.place) return Response.json({ ok: false, error: "place" }, { status: 400 });

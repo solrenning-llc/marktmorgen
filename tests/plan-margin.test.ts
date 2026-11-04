@@ -206,15 +206,12 @@ for (const [schedule, prices] of SCHEDULES) for (const tier of TIERS) {
   });
 }
 
-test("Scale keeps more than Pro does in its own worst month, monthly and yearly, where neither takes a share", () => {
-  // The dearest plan is the one a heavy sender is on, so it is the last one
-  // that may be allowed to be the thinnest. With a share of each sale the
-  // comparison is not like for like — Studio is paid a share on top of what
-  // is counted here and Scale is not — so it holds for the prices without.
-  for (const cycle of ["month", "year"] as const) {
-    const prices = PRICES_WITHOUT_COMMISSION;
-    const kept = (tier: Tier) => (netOf(tier, cycle, prices) - worstCost(tier)) / netOf(tier, cycle, prices);
-    assert.ok(kept("scale") >= kept("pro"), `${cycle}: Scale keeps ${(kept("scale") * 100).toFixed(1)}% and Pro ${(kept("pro") * 100).toFixed(1)}%`);
+// MR rule (AGENTS.md; owner, 3 November 2026, C2-63/C2-70; docs/codex-queue.md, 465 [MR2]): no unit loses money.
+test("every plan keeps a net profit above the spend floor's room in its own worst month, monthly and yearly", () => {
+  for (const tier of TIERS) for (const cycle of ["month", "year"] as const) {
+    const months = cycle === "year" ? 12 : 1;
+    const profit = months * (netOf(tier, cycle, PRICES_WITHOUT_COMMISSION) - worstCost(tier));
+    assert.ok(profit > 0 && profit >= (cycle === "year" ? 1 : 0.25), `${tier}, ${cycle}: net profit $${profit.toFixed(4)}`);
   }
 });
 
@@ -255,16 +252,13 @@ test("a thousand visits past what a plan covers are not sold: at the published p
   assert.doesNotMatch(job, /settleAllVisits|visitsOwedCents/, "visits past a plan must not be billed while the price does not pay for them");
 });
 
-test("a thousand orders past what a plan covers bring in well over what they cost", () => {
-  // The third thing charged by use, held to the same floor: what reaches us
-  // for a thousand orders, against a thousand of the dearest order there is.
+test("a thousand orders past what a plan covers bring in more than they cost, with the spend floor's room", () => {
+  // The third thing charged by use: what reaches us for a thousand orders, against a thousand of the dearest order
+  // there is. MR rule (owner, 3 November 2026, C2-70; docs/codex-queue.md, 465 [MR2]): a profit with the room, no
+  // longer a 45% floor; the share it keeps (about 42% since the stock work is priced) is for the monthly report.
   const kept = (ORDER_CENTS_PER_THOUSAND_OVER / 100) * lineKeptShare();
   const cost = 1000 * ORDER_COST;
-  const margin = (kept - cost) / kept;
-  assert.ok(
-    margin >= 0.45,
-    `a thousand orders past the plan bring in $${kept.toFixed(4)} and cost $${cost.toFixed(4)}, which keeps ${(margin * 100).toFixed(0)}%.`,
-  );
+  assert.ok(kept - cost > 0 && kept - cost >= 0.25, `a thousand orders past the plan bring in $${kept.toFixed(4)} and cost $${cost.toFixed(4)}.`);
 });
 
 test("an order that paid a share is covered by it several times over, so it is not counted", () => {

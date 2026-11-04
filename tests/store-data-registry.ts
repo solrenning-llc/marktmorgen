@@ -453,6 +453,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:crm:stages:@lib/crm.ts": { what: "The first pipeline's stages, as the board kept them before pipelines", parts: [capped(MAX_STAGES * 256, "MAX_STAGES stages.", src("lib/crm-rules.ts", "MAX_STAGES"))] },
   "nl:crm:pipes:@lib/crm.ts": { what: "The deals' pipelines and their stages (17 October 2026): one slot, at what the record weighs", room: ["lib/crm.ts"] },
   "nl:crm:v:@lib/crm.ts": { what: "People's values of the store's fields", room: ["lib/crm.ts"] },
+  "nl:vcard:@lib/creator-card.ts": { what: "The creator's business card, as they typed it", room: ["lib/creator-card.ts"] },
   "nl:voice:@lib/customer-voice.ts": { what: "What buyers said, summed up a month", parts: [capped(14 * 16 * KB, "One summary a month, 400 days.")] },
   "nl:voice:lock:@lib/customer-voice.ts": short("One summary at a time", "studio", 1, 128),
 

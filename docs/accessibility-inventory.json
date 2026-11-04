@@ -1680,6 +1680,7 @@
     "app/api/store/course/start/route.ts",
     "app/api/store/course/task/route.ts",
     "app/api/store/course/task/upload/route.ts",
+    "app/api/store/creator-card/route.ts",
     "app/api/store/crm/route.ts",
     "app/api/store/currency/route.ts",
     "app/api/store/depth/route.ts",

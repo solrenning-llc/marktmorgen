@@ -72,9 +72,10 @@ export const CALENDAR_MAX_EVENTS = 1_000;
 export const CALENDAR_COPY_SECONDS = 40 * 86_400;
 /**
  * The copy is made again when a booking changed (lib/call-records.ts,
- * bookingsChangedKey: a booking made or moved, or a time let go), or once it
- * is this old. What marks nothing (a refund, a cancellation, a live session
- * the creator adds: their paths are other agents' files) shows at the next
+ * bookingsChangedKey: a booking made or moved, a time let go, or a booking
+ * ended by a refund or a lost dispute, lib/call-meetings.ts), or once it is
+ * this old. What marks nothing yet (a cancellation, a live session the
+ * creator adds: their paths are other agents' files) shows at the next
  * making: within this, or up to a day when the UTC day's makings
  * (CALENDAR_BUILDS_PER_DAY) are spent.
  */

@@ -126,6 +126,16 @@ const changedCommands = (callsId: string, now = Date.now()): (string | number)[]
 };
 
 /**
+ * A booking ended by a refund or a lost dispute (lib/call-meetings.ts, the
+ * refund job): the feed's file is made again at the app's next check, with
+ * one more making that UTC day, as for a booking made or moved.
+ */
+export async function markBookingsChanged(callsId: string, now = Date.now()): Promise<void> {
+  if (!isRedisConfigured()) return;
+  await redisPipeline(changedCommands(callsId, now));
+}
+
+/**
  * Asks the mail job to look at a checkout once it can no longer be open: if
  * it was paid and its buyer never came back, the booking is confirmed then.
  */

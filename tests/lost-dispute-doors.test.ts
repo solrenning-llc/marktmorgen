@@ -27,6 +27,7 @@ import { paidForAny } from "@/lib/community-access";
 import { purchasesFor } from "@/lib/buyer-orders";
 import { checkKey, keyForSale, revokeRefunded } from "@/lib/licence-keys";
 import { syncMeetings } from "@/lib/call-meetings";
+import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
 import { lostDisputesSince } from "@/lib/refunds";
 import { callScope, readRecord, writeRecord, type MeetRecord } from "@/lib/meet-records";
 import { MEET_STORES } from "@/lib/meet-links";
@@ -240,6 +241,9 @@ async function main(): Promise<void> {
   is("the job looks up the calls lost, not the won one", [...lookedUp].sort(), ["pi_TestCallLost01", "pi_TestCallPart01"]);
   const gone = async (pi: string) => (await readRecord(scopeOf(pi)))?.gone;
   is("and their meetings end; the won call's stays", [await gone("pi_TestCallLost01"), await gone("pi_TestCallPart01"), await gone("pi_TestCallWon001")], [true, true, false]);
+  // The private calendar feed is made again at the app's next check, one making for each booking ended (inbox C4-18, M3).
+  const [changed, credits] = await redis.pipeline([["GET", bookingsChangedKey(callsId)], ["GET", bookingCreditsKey(callsId, new Date().toISOString().slice(0, 10))]]);
+  is("and the store's calendar feed is told its bookings changed, with a making for each", [Number(changed) > 0, Number(credits)], [true, 2]);
   closings = [];
 
   part("A review's verified buyer");

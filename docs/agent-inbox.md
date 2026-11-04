@@ -797,6 +797,9 @@ Médio, reproduzido: lib/store-assistant-rules.ts:247, GUARANTEE_NOUNS deixou de
 Leve: :257, REMISE_AS_DISCOUNT deixa passar "Profitez de la remise exclusive pour les abonnés." e "La remise réservée aux membres.". Decisão: inverta, pegue "remise" e libere só as locuções de entrega ("remise en main propre", "remise du", "date de remise"). Teste com as duas frases.
 Sem achado no claude3/api-events-measured (4020385d). Depois da correção, o Revisor 2 confere de novo antes do merge.
 
+### C3-108 — 04/11/2026 14h35 — Resposta do dono: e-mail agendado SEM filtro também é cancelado com aviso
+mail-ledger-counted (1b15a9ffa), C3-102 (2): decidido. Um e-mail agendado sem filtro (lista inteira) segue a mesma regra do filtrado: se o plano não estiver pago no mês do envio, é cancelado com aviso ao criador, e nada sai depois do fim do plano. O criador reagenda se o plano voltar. Não deixe em 'waiting' para sair sozinho quando o Pro voltar. Teste que falha antes: plano encerrado + agendado sem filtro -> cancelado, aviso enviado, zero envios; plano reativado não o ressuscita. Siga com a conferência curta do alto corrigido e abra o PR.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar
@@ -926,6 +929,9 @@ Lembrete da sua revisão do #2196 (sem grave nem médio, entra quando verde): LE
 
 ### C4-35 — 04/11/2026 14h40 — #2196: o Studio AAA (webkit) achou uma violação real de contraste
 No CI do #2196, 'Studio AAA (webkit)' falhou em /studio, largura 390, modo forced-colors: color-contrast em <summary role="button" class="btn btn-secondary w-fit …">Add a pixel</summary> (components/pixel-editor.tsx:106), contraste 2,78 (frente #8f8e89, fundo #efece5; esperado 4,5:1, e o projeto exige 7:1 em AAA). Deve ser o "1 caso em 60" que você viu no #2135, e pode já existir no main (o seu quadro agora sempre desenhado pode só ter mudado o que fica na tela). Corrija na causa, no mesmo #2196 ou num PR pequeno logo antes: o summary com aparência de botão desativado/esmaecido em forced-colors precisa usar cores do sistema (ButtonText/ButtonFace, ou forced-color-adjust adequado) e o contraste AAA no modo normal; teste que falha antes. Não afrouxe a matriz. Depois disso rodo de novo e incorporo o #2196.
+
+### C4-36 — 04/11/2026 14h40 — C4-33 (1): resposta do dono, (A) agora e (B) logo em seguida
+Medição aceita: 24 pesadas por dia não cabem nos US$ 65 no formato atual. Decisão: (A) neste PR, o teto vira 5 por dia, calculado pela margem e preso por teste (o 6º passaria dos US$ 65; o teste quebra se a conta mudar), mantendo "Updated at HH:MM" e o aviso com orçamento próprio; siga com os itens 2 a 5, o resto do M3 e os leves, e peça a revisão. (B) é a próxima unidade sua, logo depois do #2111 entrar: leitura pesada incremental (uma inteira por dia e as outras só do que mudou desde a cópia guardada: Stripe created>at, PayPal desde at), com o teto recalculado pela mesma conta, mirando 24 ou mais por dia dentro dos US$ 65. Na (B), prove que a cópia incremental soma igual à leitura inteira (teste com reembolso e contestação no meio do dia) e que uma falha de leitura incremental cai para a inteira sem estourar o teto.
 
 ## Codex
 

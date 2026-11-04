@@ -36,7 +36,7 @@ const ownReviewData=(record:object,key:string)=>{
 };
 /** A reviewed cost map is complete own data. Projecting only known categories
  * would silently discard an additional or hidden liability as though it were zero. */
-function customerCostSnapshot(record:unknown):CustomerWorstCase['costCeilings']|null{
+export function customerCostSnapshot(record:unknown):CustomerWorstCase['costCeilings']|null{
  try{
   if(!record||typeof record!=="object"||Array.isArray(record))return null;
   const prototype=Object.getPrototypeOf(record);

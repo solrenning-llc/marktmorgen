@@ -1,8 +1,13 @@
 "use client";
 
-import { useId, useState } from "react";
-import { BundleDelivery, type BundleWords } from "@/components/bundle-delivery";
-import { LicenceKeyBox, type LicenceKeyWords } from "@/components/licence-key-box";
+import { type FormEvent, useId, useState, useSyncExternalStore } from "react";
+import { BundleDelivery } from "@/components/bundle-delivery";
+import { LicenceKeyBox } from "@/components/licence-key-box";
+import { useOrdersShared } from "@/components/orders-shared";
+import { LINK_SHOWN } from "@/lib/buyer-orders-rules";
+
+/** Whether the page runs its script never changes once read. */
+const noChange = () => () => {};
 
 /** One product of the bundle, as app/api/store/orders/bundle/route.ts answers it. */
 export type OrdersBundleLine = {
@@ -17,29 +22,29 @@ export type OrdersBundleLine = {
 /** What the route answers: the products, and what is said about the ones the store no longer has; or why not. */
 export type OrdersBundleAnswer = { ok: true; lines: OrdersBundleLine[]; missing: string | null } | { ok: false; message: string };
 
-/** Everything the box says, in the store's language (lib/buyer-words/orders.ts), with the titles already in. */
-export type OrdersBundleWords = {
-  heading: string;
-  show: string;
-  hide: string;
-  loading: string;
-  failed: string;
-  bundle: Omit<BundleWords, "missing">;
-  key: Omit<LicenceKeyWords, "label">;
-};
-
 /**
  * A bundle on the list of purchases: its name, and a button that shows its
- * products (the WAI-ARIA disclosure pattern: the button says whether they are
- * shown and names what it shows, focus stays on it, and the products follow it).
- * They are read only when asked for, from `address`, a request that pays for
- * itself before anything is read (lib/buyer-orders.ts, bundleFor), so an
- * opening of the list never draws every product of every bundle (C3-80).
- * Shown once, they stay: hiding and showing them again reads nothing more.
+ * products (the WAI-ARIA disclosure pattern once the page runs its script: the
+ * button's name stays the same, aria-expanded says whether they are shown,
+ * focus stays on it, and the products follow it). They are read only when
+ * asked for, from app/api/store/orders/bundle, a request that pays for itself
+ * before anything is read (lib/buyer-orders.ts, bundleFor), so an opening of
+ * the list never draws every product of every bundle (C3-80). Shown once,
+ * they stay: hiding and showing them again reads nothing more.
+ *
+ * Without JavaScript the same button sends its form: the list's page draws
+ * this bundle's products on a page of their own (`bundle`), paid for the same
+ * way (app/[handle]/orders/page.tsx). Only what differs from one bundle to
+ * the next comes as props; the words and the address are the list's
+ * (components/orders-shared.tsx).
  */
-export function OrdersBundle({ address, storeName, words }: { address: string; storeName: string; words: OrdersBundleWords }) {
+export function OrdersBundle({ reference, item, label, heading }: { reference: string; item: string; label: string; heading: string }) {
+  const shared = useOrdersShared();
+  const { words } = shared;
   const panel = useId();
   const head = useId();
+  // False in the HTML and while the page takes over, true once it runs: only then is the button a disclosure.
+  const ready = useSyncExternalStore(noChange, () => true, () => false);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState("");
@@ -50,6 +55,7 @@ export function OrdersBundle({ address, storeName, words }: { address: string; s
     setProblem("");
     let said = words.failed;
     try {
+      const address = `/api/store/orders/bundle?${new URLSearchParams({ handle: shared.handle, token: shared.token, ref: reference, item })}`;
       const response = await fetch(address, { cache: "no-store", headers: { Accept: "application/json" } });
       const answer = (await response.json().catch(() => null)) as OrdersBundleAnswer | null;
       if (answer?.ok) {
@@ -66,7 +72,8 @@ export function OrdersBundle({ address, storeName, words }: { address: string; s
     setProblem(said);
   }
 
-  function toggle() {
+  function toggle(event: FormEvent) {
+    event.preventDefault();
     const next = !open;
     setOpen(next);
     if (next && !shown && !loading) void load();
@@ -75,19 +82,22 @@ export function OrdersBundle({ address, storeName, words }: { address: string; s
   return (
     <section className="mt-6" aria-labelledby={head}>
       <p id={head} className="st-label">
-        {words.heading}
+        {heading}
       </p>
-      <button
-        type="button"
-        className="btn btn-secondary btn-block btn-wrap mt-3 min-h-11 [overflow-wrap:anywhere]"
-        aria-expanded={open}
-        aria-controls={panel}
-        onClick={toggle}
-      >
-        {open ? words.hide : words.show}
-      </button>
-      {/* Kept on the page whether or not the products are shown, so what it says is read out when it changes. */}
-      <p role="status" className="st-muted mt-3 text-sm empty:hidden">
+      <form method="get" action={`/@${shared.handle}/orders`} onSubmit={toggle}>
+        <input type="hidden" name="token" value={shared.token} />
+        <input type="hidden" name="bundle" value={`${reference}:${item}`} />
+        <button
+          type="submit"
+          className="btn btn-secondary btn-block btn-wrap mt-3 min-h-11 [overflow-wrap:anywhere]"
+          aria-expanded={ready ? open : undefined}
+          aria-controls={ready ? panel : undefined}
+        >
+          {label}
+        </button>
+      </form>
+      {/* Always on the page, so what it says is read out when it changes; out of sight while it says nothing. */}
+      <p role="status" className={loading ? "st-muted mt-3 text-sm" : "sr-only"}>
         {loading ? words.loading : ""}
       </p>
       {problem ? (
@@ -98,9 +108,10 @@ export function OrdersBundle({ address, storeName, words }: { address: string; s
       <div id={panel} hidden={!open}>
         {shown ? (
           <BundleDelivery
-            storeName={storeName}
-            heading={words.heading}
+            storeName={shared.storeName}
+            heading={heading}
             showHeading={false}
+            shownLink={LINK_SHOWN}
             missing={shown.missing ? 1 : 0}
             words={{ ...words.bundle, missing: shown.missing }}
             lines={shown.lines.map((line) => ({
@@ -110,7 +121,7 @@ export function OrdersBundle({ address, storeName, words }: { address: string; s
               keyBox: line.key ? (
                 <LicenceKeyBox
                   title={line.title}
-                  storeName={storeName}
+                  storeName={shared.storeName}
                   value={line.key.value}
                   revoked={line.key.revoked}
                   waiting={line.key.waiting}

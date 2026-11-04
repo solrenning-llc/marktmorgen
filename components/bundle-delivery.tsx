@@ -56,6 +56,7 @@ export function BundleDelivery({
   storeName,
   heading = "What is inside",
   showHeading = true,
+  shownLink,
   words: given,
 }: {
   lines: BundleLine[];
@@ -65,6 +66,12 @@ export function BundleDelivery({
   heading?: string;
   /** False when the heading is already drawn above, as on the list of purchases (components/orders-bundle.tsx): it stays the list's name. */
   showHeading?: boolean;
+  /**
+   * The most characters of a link's address said as text, as on the list of
+   * purchases (lib/buyer-orders-rules.ts, LINK_SHOWN): the whole address is the
+   * button's own, one click away. All of it when not given, as on the thanks page.
+   */
+  shownLink?: number;
   /** Said in the store's language; English when not given. */
   words?: BundleWords;
 }) {
@@ -99,7 +106,9 @@ export function BundleDelivery({
                     {words.openIt}
                   <NewTab /></a>
                   <p className="st-muted mt-2 break-all text-xs">
-                    {words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", product.link)}
+                    {words.keptOn
+                      .replace("{host}", linkHost(product.link))
+                      .replace("{link}", shownLink !== undefined && product.link.length > shownLink ? `${product.link.slice(0, shownLink)}…` : product.link)}
                   </p>
                 </>
               ) : line.download ? (

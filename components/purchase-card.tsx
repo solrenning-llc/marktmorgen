@@ -1,8 +1,8 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import { NewTab } from "@/components/new-tab";
-import { LicenceKeyBox, type LicenceKeyWords } from "@/components/licence-key-box";
-import { OrdersBundle, type OrdersBundleWords } from "@/components/orders-bundle";
+import { OrdersBundle } from "@/components/orders-bundle";
+import { OrdersKey } from "@/components/orders-shared";
 
 /** A way to open what was bought: its address and what its button says. */
 export type CardLink = { href: string; label: string };
@@ -17,7 +17,9 @@ export type CardKey = { slot: string; title?: string; label: string; value: stri
  * One purchase on the buyer's list, as lib/purchase-cards.ts (cardOf) reads it:
  * only words, addresses and yes-or-no, so the same card is drawn by the page
  * and by the batch of older purchases the buyer asks to check
- * (components/older-purchases.tsx), whichever draws it.
+ * (components/older-purchases.tsx), whichever draws it. The words every
+ * bundle and key box shares are the list's, given once
+ * (components/orders-shared.tsx), never one copy a card.
  */
 export type PurchaseCardModel = {
   reference: string;
@@ -32,11 +34,10 @@ export type PurchaseCardModel = {
   main: CardDelivery | null;
   added: { key: string; course: CardLink | null; delivery: CardDelivery | null }[];
   importedNote: string | null;
-  bundles: { key: string; address: string; heading: string; show: string; hide: string }[];
+  /** Each bundle on the order: which one ("main" or the key it was ticked under), its heading and its button's name. */
+  bundles: { item: string; heading: string; label: string }[];
   keys: CardKey[];
   review: CardLink | null;
-  /** The words every bundle and key box on the card shares. */
-  shared: Pick<OrdersBundleWords, "loading" | "failed" | "bundle" | "key">;
 };
 
 function Delivery({ delivery, language }: { delivery: CardDelivery; language: unknown }) {
@@ -58,19 +59,13 @@ function Delivery({ delivery, language }: { delivery: CardDelivery; language: un
   );
 }
 
-/** One purchase on the list: what it is, when it was bought, and every way to open it again. */
-export function PurchaseCard({ card, storeName, language, titleRef }: { card: PurchaseCardModel; storeName: string; language: unknown; titleRef?: (node: HTMLParagraphElement | null) => void }) {
-  const key = (found: CardKey) => (
-    <LicenceKeyBox
-      key={found.slot}
-      title={found.title}
-      storeName={storeName}
-      value={found.value}
-      revoked={found.revoked}
-      waiting={found.waiting}
-      words={{ ...(card.shared.key as Omit<LicenceKeyWords, "label">), label: found.label }}
-    />
-  );
+/**
+ * One purchase on the list: what it is, when it was bought, and every way to
+ * open it again. Drawn inside the list's OrdersSharedProvider, whose words its
+ * bundles and keys take.
+ */
+export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardModel; language: unknown; titleRef?: (node: HTMLParagraphElement | null) => void }) {
+  const key = (found: CardKey) => <OrdersKey key={found.slot} title={found.title} label={found.label} value={found.value} revoked={found.revoked} waiting={found.waiting} />;
   return (
     <li className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
       <p className="font-semibold" ref={titleRef} tabIndex={titleRef ? -1 : undefined}>{card.title}</p>
@@ -121,12 +116,7 @@ export function PurchaseCard({ card, storeName, language, titleRef }: { card: Pu
       </div>
       {card.importedNote ? <p className="st-muted mt-3 text-xs leading-relaxed">{card.importedNote}</p> : null}
       {card.bundles.map((bundle) => (
-        <OrdersBundle
-          key={bundle.key}
-          address={bundle.address}
-          storeName={storeName}
-          words={{ heading: bundle.heading, show: bundle.show, hide: bundle.hide, ...card.shared }}
-        />
+        <OrdersBundle key={bundle.item} reference={card.reference} item={bundle.item} label={bundle.label} heading={bundle.heading} />
       ))}
       {card.keys.map(key)}
       {card.review ? (

@@ -14,8 +14,9 @@
  * listing read as ORDERS_LISTING_COMMANDS. When the store has no room left,
  * nothing more is read and the page says it cannot show the purchases now.
  * tests/plan-cost-registry.ts prices both (ORDERS_OPEN_READ, line
- * public-requests) and tests/plan-cost-registry.test.ts holds the units above
- * what they stand for.
+ * public-requests) and tests/plan-cost-registry.test.ts holds the units
+ * above what they stand for, with a tenth to spare and no more (C3-83:
+ * 12 until the page was measured as it is sent, ORDERS_PAGE_BYTES).
  *
  * Taken from the public requests, never from the buyers' actions figure
  * (takeAllowance(store, "buyer"), lib/buyer-actions.ts): that figure is the
@@ -23,7 +24,7 @@
  * would let one buyer reloading the page use it up and stop every other
  * buyer's actions at the store.
  */
-export const ORDERS_OPEN_UNITS = 12;
+export const ORDERS_OPEN_UNITS = 17;
 /** How long one opening may run at the most: the page's maxDuration (app/[handle]/orders/page.tsx). */
 export const ORDERS_OPEN_SECONDS = 30;
 /** Commands every opening may make besides its metered reads: the grant, what waits (four, and one for each of WAITING_SHOWN agreements, lib/buyer-waiting.ts), the Discord server and its roles (tests/orders-open.test.ts holds it). */
@@ -106,8 +107,10 @@ export const ORDERS_STRIPE_CALLS = 200;
 /**
  * The lists every opening may read from Stripe, whatever the buyer has: the
  * buyer's checkouts under both spellings of the address (two), the payments
- * taken in one click for at most ten of their customers (ten), and the store's
- * bookings, five pages at the most (lib/calls.ts, MAX_PAGES).
+ * taken in one click for ten of their customers (ORDERS_ONE_CLICK_LISTS; each
+ * further customer's list is a call taken from the rest, and one that does not
+ * fit waits for a batch, said as not checked yet), and the store's bookings,
+ * five pages at the most (lib/calls.ts, MAX_PAGES).
  */
 export const ORDERS_STRIPE_LISTS = 2 + 10 + 5;
 /**
@@ -127,13 +130,18 @@ export const PLAN_REFUND_CALLS = 1 + 1 + 10 + 10;
  * twenty-product bundles no longer draw 3,200 links. What the page still
  * draws is bounded by the store's own limits: forty purchases, each with its
  * own delivery and three ticked at checkout (each link at most 2,000
- * characters in its address, every character escaped at six bytes at the
- * most, and shown as text cut to LINK_SHOWN characters), forty booked calls
- * and what waits on the buyer. tests/orders-page-bounds.test.ts holds a page
- * drawn at those limits under it, and tests/plan-cost-registry.ts prices it
- * in ORDERS_OPEN_READ.
+ * characters in its address, shown as text cut to LINK_SHOWN characters),
+ * each with its bundle's button and its license key, forty booked calls and
+ * what waits on the buyer. Counted as the App Router sends it
+ * (tests/page-response.ts): the HTML, the RSC payload that carries the same
+ * tree again (each address once more, & at six bytes there), and an
+ * allowance for the shell; every text of the character that costs the most
+ * in both. Measured with the HTML alone it was 2,650,000 until the review of
+ * 4 November 2026 found the payload missing. tests/orders-page-bounds.test.ts
+ * holds a page drawn at those limits under it, and tests/plan-cost-registry.ts
+ * prices it in ORDERS_OPEN_READ.
  */
-export const ORDERS_PAGE_BYTES = 2_650_000;
+export const ORDERS_PAGE_BYTES = 5_600_000;
 /** The most characters of a delivery's address the list shows as text; the whole address is the button's own, one click away. */
 export const LINK_SHOWN = 60;
 
@@ -146,16 +154,19 @@ export const LINK_SHOWN = 60;
  * of the bundle with its address and its key, ORDERS_BUNDLE_BYTES at the most.
  * The bundle's listings and keys are taken through the meter before they are
  * read. tests/plan-cost-registry.ts prices it (ORDERS_BUNDLE_READ) and
- * tests/plan-cost-registry.test.ts holds the units above it.
+ * tests/plan-cost-registry.test.ts holds the units above it, with a tenth to
+ * spare (2 until C3-83, when the page without JavaScript had to fit too).
  */
-export const ORDERS_BUNDLE_UNITS = 2;
+export const ORDERS_BUNDLE_UNITS = 3;
 /**
- * The most bytes the answer with a bundle's products holds: twenty products,
- * each with its title, its address (2,000 characters, escaped at two bytes at
- * the most in JSON), its download and course addresses and its key with its
- * label (tests/orders-page-bounds.test.ts holds a full bundle under it).
+ * The most bytes showing a bundle's products sends: twenty products, each with
+ * its title, its address (2,000 characters), its download and course addresses
+ * and its key with its label. The button's JSON answer is the smaller; the
+ * page drawn without JavaScript (app/[handle]/orders/page.tsx, `bundle`) is
+ * the larger, measured as it is sent (tests/page-response.ts), and is what
+ * this holds (tests/orders-page-bounds.test.ts holds both under it).
  */
-export const ORDERS_BUNDLE_BYTES = 150_000;
+export const ORDERS_BUNDLE_BYTES = 750_000;
 /** How often one link may show a bundle's products in an hour, as a download's link is limited. */
 export const ORDERS_BUNDLE_PER_HOUR = 240;
 
@@ -170,18 +181,32 @@ export const ORDERS_BUNDLE_PER_HOUR = 240;
  * its answer, ORDERS_OLDER_BYTES at the most. Every listing, key and feed it
  * reads past them goes through its meter. tests/plan-cost-registry.ts prices
  * it (ORDERS_OLDER_READ) and tests/plan-cost-registry.test.ts holds the units
- * above it.
+ * above it, with a tenth to spare (8 until C3-83, when the page without
+ * JavaScript had to fit too).
  */
-export const ORDERS_OLDER_UNITS = 8;
+export const ORDERS_OLDER_UNITS = 9;
 /** Commands a batch makes besides its metered reads: the link's grant. */
 export const ORDERS_OLDER_COMMANDS = 1;
 /**
- * The most bytes a batch's answer holds: as many purchases as the ceiling
- * checks (fifteen), each with its own delivery and three ticked at checkout
- * (an address of 2,000 characters, escaped at two bytes at the most in JSON),
- * their keys, bundles and the words they share
- * (tests/orders-page-bounds.test.ts holds a batch at those limits under it).
+ * The most bytes a batch sends: ORDERS_OLDER_MOST purchases, each with its own
+ * delivery and three ticked at checkout (an address of 2,000 characters),
+ * their keys and bundles. The button's JSON answer is the smaller; the page
+ * drawn without JavaScript (app/[handle]/orders/page.tsx, `older`), measured
+ * as it is sent (tests/page-response.ts), is the larger and is what this
+ * holds (tests/orders-page-bounds.test.ts holds both under it).
  */
-export const ORDERS_OLDER_BYTES = 800_000;
+export const ORDERS_OLDER_BYTES = 1_200_000;
 /** How often one link may check a batch of older purchases in an hour. */
 export const ORDERS_OLDER_PER_HOUR = 60;
+/**
+ * The most purchases one batch of older purchases shows (C3-80, 4 November
+ * 2026): a checkout whose refund check is one call to Stripe (a charge marked
+ * disputed) would otherwise let a batch show as many as the ceiling of calls
+ * holds. A checkout and what was added to it in one click after paying count
+ * one each; what does not fit waits for the next batch, said as not checked yet.
+ */
+export const ORDERS_OLDER_MOST = 8;
+/** The lists of payments taken in one click every opening and every batch may read inside ORDERS_STRIPE_LISTS; each one past them is a call from the ceiling. */
+export const ORDERS_ONE_CLICK_LISTS = 10;
+/** The most customers whose payments taken in one click wait for a batch, named in the batch's address (lib/buyer-orders.ts, readOlderCursor). */
+export const ORDERS_OLDER_PAID_MOST = 64;

@@ -21,18 +21,28 @@ import { linkHost } from "@/lib/product-link";
 import { speech } from "@/lib/buyer-words";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { preorderWords } from "@/lib/buyer-words/preorder";
-import type { BumpKey } from "@/lib/bundle-rules";
+import { BUMP_KEYS, type BumpKey } from "@/lib/bundle-rules";
+import { withinStore } from "@/lib/metered-limits";
 import type { Store } from "@/lib/store";
 import {
+  type BundleShown,
   type Delivery,
   type OrdersMeter,
   type Purchase,
   LINK_SHOWN,
+  ORDERS_BUNDLE_PER_HOUR,
+  ORDERS_OLDER_PER_HOUR,
+  OrdersBusy,
+  bundleFor,
+  olderFor,
   ORDERS_FEED_COMMANDS,
   ORDERS_KEY_COMMANDS,
   ORDERS_LISTING_COMMANDS,
 } from "@/lib/buyer-orders";
 import type { CardDelivery, CardKey, PurchaseCardModel } from "@/components/purchase-card";
+import type { OrdersShared } from "@/components/orders-shared";
+import type { OrdersBundleLine } from "@/components/orders-bundle";
+import { parseLanguage } from "@/lib/store-language";
 
 /** What a list of purchases needs besides the purchases. */
 export type Extras = {
@@ -126,7 +136,6 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
     return [{ slot, title, label: title ? words.yourKeyFor(title) : words.yourKey, value: issued ? issued.key : null, revoked: Boolean(issued?.revoked), waiting: found !== "error" && found.state === "waiting" }];
   };
 
-  const bundleAddress = (item: "main" | BumpKey) => `/api/store/orders/bundle?${new URLSearchParams({ handle, token, ref: purchase.reference, item })}`;
   const reviewableIn = purchase.kind !== "imported" && inOrder(purchase).some((id) => extras.reviewing.has(id));
   const meta = [
     purchase.option,
@@ -187,16 +196,11 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
     importedNote:
       purchase.kind === "imported" && !purchase.giftFrom && !purchase.paidWith && !purchase.place && !purchase.preorder ? words.importedNote(store.name) : null,
     // A bundle's products are not drawn here: a button shows them when the buyer asks, read then by a request that pays for
-    // itself (components/orders-bundle.tsx, app/api/store/orders/bundle/route.ts; C3-80, ORDERS_PAGE_BYTES).
+    // itself (components/orders-bundle.tsx, app/api/store/orders/bundle/route.ts; C3-80, ORDERS_PAGE_BYTES). Its name gives
+    // no count: what the order lists may no longer all be in the store, and it is not read until asked for.
     bundles: [
-      ...(purchase.items
-        ? [{ key: "main", address: bundleAddress("main"), heading: words.whatIsInside, show: words.showInside(purchase.title, purchase.items.ids.length), hide: words.hideInside(purchase.title) }]
-        : []),
-      ...purchase.added.flatMap((added) =>
-        added.items
-          ? [{ key: added.key, address: bundleAddress(added.key), heading: words.insideTitle(added.title), show: words.showInside(added.title, added.items.ids.length), hide: words.hideInside(added.title) }]
-          : [],
-      ),
+      ...(purchase.items ? [{ item: "main", heading: words.whatIsInside, label: words.showInside(purchase.title) }] : []),
+      ...purchase.added.flatMap((added) => (added.items ? [{ item: added.key, heading: words.insideTitle(added.title), label: words.showInside(added.title) }] : [])),
     ],
     keys: [
       ...keyOf(`${purchase.reference}|main`, purchase.added.some((added) => extras.keys.has(`${purchase.reference}|${added.key}`)) ? purchase.title : undefined),
@@ -209,7 +213,22 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
             label: purchase.added.length || purchase.items ? words.reviewAll : words.reviewTitle(purchase.title),
           }
         : null,
-    shared: {
+  };
+}
+
+/**
+ * What every bundle, key and batch of older purchases on the list shares, in
+ * the store's language: given once to the list (components/orders-shared.tsx),
+ * never once a card (C3-80, ORDERS_PAGE_BYTES).
+ */
+export function ordersShared(store: Store, token: string): OrdersShared {
+  const words = ordersWords(store.language);
+  return {
+    handle: store.handle,
+    token,
+    storeName: store.name,
+    language: parseLanguage(store.language),
+    words: {
       loading: words.loadingInside,
       failed: words.insideFailed,
       bundle: {
@@ -228,6 +247,99 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
         waiting: words.keyWaiting(store.name),
         failed: words.keyNotShown,
       },
+      check: words.checkOlder,
+      checking: words.checkingOlder,
+      olderFailed: words.olderFailed,
+    },
+  };
+}
+
+/**
+ * A bundle's products as the buyer asked to see them (lib/buyer-orders.ts,
+ * bundleFor), each with its address, its download and its key: what the
+ * button's answer carries (app/api/store/orders/bundle) and what the page
+ * draws without JavaScript (app/[handle]/orders/page.tsx), said the same way.
+ */
+export function bundleLinesOf(store: Store, token: string, which: "main" | BumpKey, shown: BundleShown): { lines: OrdersBundleLine[]; missing: string | null } {
+  const words = ordersWords(store.language);
+  const { purchase, items, keys } = shown;
+  const lines = items.lines.map((line) => {
+    const key = keys.get(line.productId);
+    const issued = key && key !== "error" && key.state === "issued" ? key : null;
+    return {
+      id: line.productId,
+      title: line.title,
+      link: line.delivery?.link ?? null,
+      download: line.delivery?.file
+        ? `/api/store/download?${new URLSearchParams({ handle: store.handle, ref: purchase.reference, token, pid: line.productId, ...(which !== "main" ? { item: which } : {}) })}`
+        : null,
+      course: line.courseProduct ? `/@${store.handle}/course/${line.courseProduct}` : null,
+      key: key
+        ? { label: words.yourKeyFor(line.title), value: issued ? issued.key : null, revoked: Boolean(issued?.revoked), waiting: key !== "error" && key.state === "waiting" }
+        : null,
+    };
+  });
+  return { lines, missing: items.missing > 0 ? words.bundleMissing(items.missing, store.name) : null };
+}
+
+/** What a request for a bundle's products or a batch of older purchases answers: what to draw, or why not, with its status. */
+export type Asked<T> = { ok: true; value: T } | { ok: false; status: 404 | 410 | 429 | 502; message: string };
+
+/**
+ * A bundle's products, asked for with the button under it (the route
+ * app/api/store/orders/bundle) or its form without JavaScript (the page,
+ * `bundle`), one way for both: the link's own limit and the request's call,
+ * then bundleFor (lib/buyer-orders.ts), which takes ORDERS_BUNDLE_UNITS
+ * before anything is read. A store with no room is told "too often", and
+ * nothing is read. `title` is the bundle's own name.
+ */
+export async function askBundle(store: Store, token: string, reference: string, item: string): Promise<Asked<{ title: string; lines: OrdersBundleLine[]; missing: string | null }>> {
+  const say = ordersWords(store.language).downloadProblems;
+  const which: "main" | BumpKey | null = item === "main" ? "main" : (BUMP_KEYS as readonly string[]).includes(item) ? (item as BumpKey) : null;
+  if (!which) return { ok: false, status: 404, message: say.nothingToDownload };
+  if (!(await withinStore("orders-bundle", `${store.handle}:t:${token}`, ORDERS_BUNDLE_PER_HOUR, 3600, store, "buyer"))) return { ok: false, status: 429, message: say.tooOften };
+  let shown;
+  try {
+    shown = await bundleFor(store, token, reference, which);
+  } catch (error) {
+    if (error instanceof OrdersBusy) return { ok: false, status: 429, message: say.tooOften };
+    console.error("showing a bundle's products failed", error);
+    return { ok: false, status: 502, message: say.purchaseCheckFailed };
+  }
+  if (!shown) return { ok: false, status: 410, message: say.linkExpired };
+  const title = which === "main" ? shown.purchase.title : (shown.purchase.added.find((added) => added.key === which)?.title ?? shown.purchase.title);
+  return { ok: true, value: { title, ...bundleLinesOf(store, token, which, shown) } };
+}
+
+/**
+ * The next batch of older purchases, asked for with the button under the list
+ * (the route app/api/store/orders/older) or its form without JavaScript (the
+ * page, `older`), one way for both: the link's own limit and the request's
+ * call, then olderFor (lib/buyer-orders.ts), which takes ORDERS_OLDER_UNITS
+ * before anything is read and shows ORDERS_OLDER_MOST purchases at the most.
+ * Each is said as the list says it; `older` is where the next batch starts,
+ * null after the last; `left` says what still waits.
+ */
+export async function askOlder(store: Store, token: string, older: string): Promise<Asked<{ cards: PurchaseCardModel[]; older: string | null; left: string; said: string }>> {
+  const words = ordersWords(store.language);
+  if (!(await withinStore("orders-older", `${store.handle}:t:${token}`, ORDERS_OLDER_PER_HOUR, 3600, store, "buyer"))) return { ok: false, status: 429, message: words.downloadProblems.tooOften };
+  let found;
+  try {
+    found = await olderFor(store, token, older, (purchases, email, meter) => extrasFor(store, email, purchases, meter));
+  } catch (error) {
+    if (error instanceof OrdersBusy) return { ok: false, status: 429, message: words.downloadProblems.tooOften };
+    console.error("checking older purchases failed", error);
+    return { ok: false, status: 502, message: words.olderFailed };
+  }
+  if (!found) return { ok: false, status: 410, message: words.downloadProblems.linkExpired };
+  const { purchases, cursor, count, added, extra } = found;
+  return {
+    ok: true,
+    value: {
+      cards: purchases.map((purchase) => cardOf(store, purchase, token, extra)),
+      older: cursor,
+      left: cursor ? words.olderNotChecked(count, added) : "",
+      said: words.olderShown(purchases.length),
     },
   };
 }

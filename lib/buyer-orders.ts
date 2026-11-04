@@ -63,6 +63,9 @@ import {
   ORDERS_BUNDLE_UNITS,
   ORDERS_KEY_COMMANDS,
   ORDERS_OLDER_UNITS,
+  ORDERS_OLDER_MOST,
+  ORDERS_OLDER_PAID_MOST,
+  ORDERS_ONE_CLICK_LISTS,
   ORDERS_STRIPE_CALLS,
   ORDERS_STRIPE_LISTS,
   PLAN_REFUND_CALLS,
@@ -101,6 +104,9 @@ export {
   ORDERS_OLDER_COMMANDS,
   ORDERS_OLDER_PER_HOUR,
   ORDERS_OLDER_UNITS,
+  ORDERS_OLDER_MOST,
+  ORDERS_OLDER_PAID_MOST,
+  ORDERS_ONE_CLICK_LISTS,
   ORDERS_STRIPE_CALLS,
   ORDERS_STRIPE_LISTS,
   LINK_SHOWN,
@@ -141,14 +147,39 @@ export class OrdersMeter {
    * Checkouts not read because their refund could not be checked inside
    * ORDERS_STRIPE_CALLS, newest first: the page says how many, and the buyer
    * checks them a batch at a time when they ask (olderFor), from the first.
+   * What was added to one of them in one click after paying waits with it.
    */
   older: string[] = [];
+  /** Whether a checkout in `older` made a customer, so payments taken in one click after it may wait with it, not counted yet. */
+  olderAdded = false;
+  /**
+   * Customers whose payments taken in one click are not shown because they
+   * could not be checked inside ORDERS_STRIPE_CALLS (their list, or the
+   * disputes of the charges Stripe marks disputed), each as "cus_…", or
+   * "cus_…:n" when its first n were shown: checked by the next batch, first.
+   */
+  paid: string[] = [];
+  /** Lists of payments taken in one click still free inside ORDERS_STRIPE_LISTS. */
+  private lists = ORDERS_ONE_CLICK_LISTS;
   constructor(private readonly store: Store) {}
   /** Takes `calls` to the creator's Stripe account before they are made; false, taking nothing, when they would pass the ceiling. */
   stripe(calls: number): boolean {
     if (calls > this.stripeLeft) return false;
     this.stripeLeft -= calls;
     return true;
+  }
+  /** Takes one list of payments taken in one click: one of the ORDERS_ONE_CLICK_LISTS every reading may make, or past them a call from the ceiling. */
+  list(): boolean {
+    if (this.lists > 0) {
+      this.lists -= 1;
+      return true;
+    }
+    return this.stripe(1);
+  }
+  /** A checkout whose refund cannot be checked now: noted, newest first, for a batch to check when the buyer asks. */
+  defer(session: Row): void {
+    this.older.push(typeof session.id === "string" ? session.id : "");
+    if (customerOf(session)) this.olderAdded = true;
   }
   take(commands: number): Promise<void> {
     const next = this.queue.then(() => this.takeNow(commands));
@@ -500,7 +531,7 @@ async function refundedFor(account: string, session: Row, meter?: OrdersMeter): 
   meter?.alive();
   const calls = refundCalls(session);
   if (meter && calls > 0 && !meter.stripe(calls)) {
-    meter.older.push(typeof session.id === "string" ? session.id : "");
+    meter.defer(session);
     return "unchecked";
   }
   return purchaseRefunded(account, session);
@@ -676,7 +707,7 @@ async function purchaseFromSession(
   }
   if (!delivery && !added.length && !courseProduct && !podcastProduct && !items) return null;
 
-  const customer = typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer) ? session.customer : null;
+  const customer = customerOf(session);
   return { customer, purchase: {
     reference: id,
     kind: "sale",
@@ -698,20 +729,40 @@ async function purchaseFromSession(
   } };
 }
 
-/** What one payment taken in one click after a checkout hands over again, or null: the list's reading and one download's. */
-async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines = true, meter?: OrdersMeter): Promise<Purchase | null> {
+/** A payment taken in one click after a checkout of this store, paid and not given back in full: what the list may show once its dispute is checked. */
+function oneClickHere(store: Store, intent: Row): boolean {
   const id = typeof intent.id === "string" ? intent.id : "";
-  if (!INTENT_ID_PATTERN.test(id)) return null;
   const meta = (intent.metadata ?? {}) as Record<string, string>;
-  if (meta.kind !== "upsell" || !saleHandles(store).has(meta.store ?? "")) return null;
-  if (intent.status !== "succeeded" || refunded(intent)) return null;
+  return INTENT_ID_PATTERN.test(id) && meta.kind === "upsell" && saleHandles(store).has(meta.store ?? "") && intent.status === "succeeded" && !refunded(intent);
+}
+
+/** The checkout a payment taken in one click followed (lib/upsell.ts, metadata[parent]), or "". */
+const parentOf = (intent: Row) => String(((intent.metadata ?? {}) as Record<string, unknown>).parent ?? "");
+
+/** The Stripe customer a checkout made, whose payments taken in one click after it are its own, or null. */
+function customerOf(session: Row): string | null {
+  return typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer) ? session.customer : null;
+}
+
+/**
+ * What one payment taken in one click after a checkout hands over again, or
+ * null: the list's reading and one download's. `checked` when the caller
+ * already took the call its dispute needs from the meter's ceiling.
+ */
+async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines = true, meter?: OrdersMeter, checked = false): Promise<Purchase | null> {
+  if (!oneClickHere(store, intent)) return null;
+  const id = intent.id as string;
+  const meta = (intent.metadata ?? {}) as Record<string, string>;
   // Lost to a dispute is given back too (lib/refunds.ts): Stripe is asked only of a charge it marks disputed, that one call
-  // taken from the opening's ceiling (ORDERS_STRIPE_CALLS) first. Past the opening's time, or once its meter was refused,
-  // nothing more goes to Stripe (C3-87). A read with no room left is taken as one that failed: it keeps the payment on the
-  // list, as keptUnlessLost() does.
+  // taken from the ceiling (ORDERS_STRIPE_CALLS) first. Past the opening's time, or once its meter was refused, nothing more
+  // goes to Stripe (C3-87). With no room left for it, it is not handed over: never shown as checked when it was not (the
+  // list says it is not checked yet and a batch checks it, oneClickOf), never downloaded unchecked (lookUp).
   meter?.alive();
   const account = store.stripeAccountId;
-  if (account && !(meter && disputed(intent) && !meter.stripe(1)) && (await keptUnlessLost(account, intent))) return null;
+  if (account && disputed(intent)) {
+    if (meter && !checked && !meter.stripe(1)) return null;
+    if (await keptUnlessLost(account, intent)) return null;
+  }
   const product = await find(meta.product);
   const items = product ? await linesOf(find, bundleFromMeta(meta, "bundle"), lines) : null;
   if (!product || !(product.file || product.link || items)) return null;
@@ -766,6 +817,55 @@ async function purchaseFromImported(store: Store, statsId: string, email: string
   };
 }
 
+/** A customer's payments taken in one click, newest first, as Stripe lists them with their charges. */
+async function oneClickList(account: string, customer: string): Promise<Row[]> {
+  const query = new URLSearchParams({ customer, limit: "50" });
+  query.append("expand[]", "data.latest_charge");
+  const listed = (await onAccount("GET", account, `/payment_intents?${query}`)) as Listed;
+  const created = (row: Row) => (typeof row.created === "number" ? row.created : 0);
+  // One order for every reading, so a batch that resumes a customer's list after its first n resumes at the same one.
+  return rows(listed).sort((a, b) => created(b) - created(a) || String(a.id).localeCompare(String(b.id)));
+}
+
+/** A customer waiting in a batch's address: "cus_…", or "cus_…:n" once its first n payments taken in one click were shown. */
+const paidEntry = (customer: string, shown: number) => (shown > 0 ? `${customer}:${shown}` : customer);
+
+/**
+ * The payments taken in one click for one customer, each checked before it is
+ * shown, through the meter (C3-80): the list is one of ORDERS_ONE_CLICK_LISTS,
+ * or a call from the ceiling past them; the disputes of the charges Stripe
+ * marks disputed are taken together, so either every one of them is checked
+ * or none is shown. What does not fit, the list itself, those disputes, or
+ * the purchases past `room`, is not shown: `next` names the customer, with
+ * how many were shown, for a batch to check, said as not checked yet. `skip`
+ * leaves out the ones that followed a checkout not checked yet, which wait
+ * with it; `only` keeps the ones that followed those checkouts alone. `from`
+ * skips the first ones, shown before.
+ */
+async function oneClickOf(
+  store: Store,
+  customer: string,
+  find: Finder,
+  meter: OrdersMeter,
+  { skip, only, room = Infinity, from = 0 }: { skip?: Set<string>; only?: Set<string>; room?: number; from?: number },
+): Promise<{ purchases: Purchase[]; next: string | null }> {
+  const wait = { purchases: [], next: paidEntry(customer, from) };
+  meter.alive();
+  if (!meter.list()) return wait;
+  const listed = await oneClickList(store.stripeAccountId as string, customer);
+  const mine = listed.filter((intent) => oneClickHere(store, intent) && !skip?.has(parentOf(intent)) && (!only || only.has(parentOf(intent))));
+  const taken = mine.slice(from, from + room);
+  // No room left for them in this batch: read only to know whether any wait, so no batch is asked for nothing.
+  if (taken.length === 0) return { purchases: [], next: mine.length > from ? paidEntry(customer, from) : null };
+  if (!meter.stripe(taken.filter(disputed).length)) return wait;
+  const purchases: Purchase[] = [];
+  for (const intent of taken) {
+    const purchase = await purchaseFromIntent(store, intent, find, false, meter, true);
+    if (purchase) purchases.push(purchase);
+  }
+  return { purchases, next: mine.length > from + taken.length ? paidEntry(customer, from + taken.length) : null };
+}
+
 /**
  * Everything this address paid this store for that can be handed over again,
  * newest first, read from the creator's own Stripe account.
@@ -787,7 +887,7 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   let shown = 0;
   for (const session of await checkoutsOf(store, email, meter)) {
     if (meter?.older.length && refundCalls(session) > 0) {
-      if (waitsForCheck(store, session)) meter.older.push(session.id as string);
+      if (waitsForCheck(store, session)) meter.defer(session);
       continue;
     }
     if (shown >= MAX_LISTED) {
@@ -802,16 +902,21 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   }
 
   // What was added in one click after paying is its own payment, made for
-  // the customer the checkout created.
-  for (const customer of account ? [...customers].slice(0, 10) : []) {
-    const query = new URLSearchParams({ customer, limit: "50" });
-    query.append("expand[]", "data.latest_charge");
-    meter?.alive();
-    const listed = (await onAccount("GET", account as string, `/payment_intents?${query}`)) as Listed;
-    for (const intent of rows(listed)) {
+  // the customer the checkout created. One that followed a checkout not checked yet waits with it (olderFor); a customer
+  // whose list, or whose disputes, do not fit in the ceiling waits whole, said as not checked yet (C3-80).
+  if (account && meter) {
+    const waiting = new Set(meter.older);
+    for (const customer of customers) {
+      const read = await oneClickOf(store, customer, find, meter, { skip: waiting });
+      for (const purchase of read.purchases) if (!found.has(purchase.reference)) found.set(purchase.reference, purchase);
+      if (read.next) meter.paid.push(read.next);
+    }
+  }
+  for (const customer of account && !meter ? [...customers].slice(0, ORDERS_ONE_CLICK_LISTS) : []) {
+    for (const intent of await oneClickList(account as string, customer)) {
       const id = typeof intent.id === "string" ? intent.id : "";
       if (found.has(id)) continue;
-      const purchase = await purchaseFromIntent(store, intent, find, false, meter);
+      const purchase = await purchaseFromIntent(store, intent, find, false);
       if (purchase) found.set(purchase.reference, purchase);
     }
   }
@@ -947,7 +1052,7 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
   const [purchases, calls] = read;
   // A purchase whose refund could not be checked yet is still a purchase of this address: the link is sent, and the page
   // checks it when asked. Whoever asked is answered "sent" either way, so this tells them nothing.
-  const unchecked = meter.older.length;
+  const unchecked = meter.older.length + meter.paid.length;
   if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;
 
   const token = randomBytes(32).toString("hex");
@@ -956,7 +1061,8 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
   await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]);
 
   const name = store.name;
-  const count = purchases.length + calls.length + unchecked;
+  // Only what was checked is counted; the rest is said as older purchases not checked yet, never as bought for certain.
+  const count = purchases.length + calls.length;
   const link = `${origin}/@${store.handle}/orders?token=${token}`;
   const words = ordersWords(store.language);
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
@@ -964,7 +1070,7 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
     to: email,
     subject: words.ordersSubject(name),
     text: [
-      words.ordersIntro(name, count),
+      words.ordersIntro(name, count, unchecked > 0),
       "",
       link,
       "",
@@ -1066,28 +1172,68 @@ export async function findPurchase(
   return found;
 }
 
+/** A customer waiting in a batch's address, with how many of its payments taken in one click were shown before. */
+const PAID_ENTRY = /^cus_[A-Za-z0-9]{6,64}(?::[1-9][0-9]{0,2})?$/;
+
+/** Where the next batch of older purchases starts: the first checkout not checked yet, and the customers whose payments taken in one click wait. */
+export type OlderCursor = { from: string | null; paid: string[] };
+
+/**
+ * The address of the next batch, as the button and the link without
+ * JavaScript carry it (`older`): the checkout, then "~" and the customers
+ * waiting, joined by "."; null when nothing waits.
+ */
+export function olderCursor(from: string | null, paid: string[]): string | null {
+  if (!from && paid.length === 0) return null;
+  // At most one customer for each purchase a list shows and each a batch adds, far under ORDERS_OLDER_PAID_MOST.
+  return `${from ?? ""}${paid.length ? `~${paid.slice(0, ORDERS_OLDER_PAID_MOST).join(".")}` : ""}`;
+}
+
+/** What an opening left for the batches: where they start, how many checkouts wait, and whether anything added in one click may wait too. */
+export function olderOf(meter: OrdersMeter): { cursor: string | null; count: number; added: boolean } {
+  return { cursor: olderCursor(meter.older[0] ?? null, meter.paid), count: meter.older.length, added: meter.olderAdded || meter.paid.length > 0 };
+}
+
+/** A batch's address read back; null when it is not shaped like one, so nothing is read for it. */
+export function readOlderCursor(raw: string): OlderCursor | null {
+  const parts = raw.split("~");
+  if (raw.length > 8_192 || parts.length > 2) return null;
+  const [from, list] = parts;
+  if (from && !SESSION_ID_PATTERN.test(from)) return null;
+  const paid = list ? list.split(".") : [];
+  if (paid.length > ORDERS_OLDER_PAID_MOST || !paid.every((entry) => PAID_ENTRY.test(entry))) return null;
+  if (!from && paid.length === 0) return null;
+  return { from: from || null, paid };
+}
+
 /**
  * The next batch of the older purchases the list could not check inside
- * ORDERS_STRIPE_CALLS (OrdersMeter.older), from the checkout `from`, asked for
- * with the button under the list (components/older-purchases.tsx,
- * app/api/store/orders/older/route.ts). Paid for as an opening is, before
- * anything is read: the link's grant, then ORDERS_OLDER_UNITS of the store's
- * buyer requests, then every read through a meter of its own, with the same
- * ceiling of calls to Stripe, so a batch checks as many as an opening would
- * and notes the rest for the next. `more` reads what the purchases need
- * besides themselves (lib/purchase-cards.ts, extrasFor) through the same
- * meter, inside the same time (ORDERS_READ_MS). Null when the link opens
- * nothing or `from` is not one of the address's checkouts. Throws OrdersBusy
- * when the store has no room, before Stripe is asked anything, and OrdersLate
- * past that time.
+ * ORDERS_STRIPE_CALLS, from `older` (olderCursor), asked for with the button
+ * under the list (components/older-purchases.tsx,
+ * app/api/store/orders/older/route.ts) or its link without JavaScript
+ * (app/[handle]/orders/page.tsx). Paid for as an opening is, before anything
+ * is read: the link's grant, then ORDERS_OLDER_UNITS of the store's buyer
+ * requests, then every read through a meter of its own, with the same ceiling
+ * of calls to Stripe. It shows ORDERS_OLDER_MOST purchases at the most: first
+ * the payments taken in one click that waited (their customers must be ones
+ * the address's own checkouts made), then the checkouts not checked yet, from
+ * the first, each with what was added to it in one click after paying (C3-80).
+ * What does not fit is in the next batch's address, and said as not checked
+ * yet: `count` checkouts, and `added` when something added in one click may
+ * wait too. `more` reads what the purchases need besides themselves
+ * (lib/purchase-cards.ts, extrasFor) through the same meter, inside the same
+ * time (ORDERS_READ_MS). Null when the link opens nothing or the address is
+ * not one of this buyer's. Throws OrdersBusy when the store has no room,
+ * before Stripe is asked anything, and OrdersLate past that time.
  */
 export async function olderFor<T>(
   store: Store,
   token: string,
-  from: string,
+  older: string,
   more: (purchases: Purchase[], email: string, meter: OrdersMeter) => Promise<T>,
-): Promise<{ purchases: Purchase[]; older: string[]; extra: T } | null> {
-  if (!SESSION_ID_PATTERN.test(from) || !ORDERS_TOKEN_PATTERN.test(token) || !store.stripeAccountId) return null;
+): Promise<{ purchases: Purchase[]; cursor: string | null; count: number; added: boolean; extra: T } | null> {
+  const cursor = readOlderCursor(older);
+  if (!cursor || !ORDERS_TOKEN_PATTERN.test(token) || !store.stripeAccountId) return null;
   const email = await ordersGrant(store, token);
   if (!email) return null;
   if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OLDER_UNITS))) throw new OrdersBusy();
@@ -1095,20 +1241,56 @@ export async function olderFor<T>(
   const done = await withinOpening(
     (async () => {
       const checkouts = await checkoutsOf(store, email, meter);
-      const at = checkouts.findIndex((session) => session.id === from);
-      if (at < 0) return null;
+      let waiting: Row[] = [];
+      if (cursor.from) {
+        const at = checkouts.findIndex((session) => session.id === cursor.from);
+        if (at < 0) return null;
+        waiting = checkouts.slice(at).filter((session) => waitsForCheck(store, session));
+      }
+      // Only a customer one of the address's own checkouts made is read.
+      const theirs = new Set(checkouts.map(customerOf));
+      const later = new Set(waiting.map((session) => session.id as string));
       const find = finderFor(store, meter);
       const purchases: Purchase[] = [];
-      for (const session of checkouts.slice(at)) {
-        if (!waitsForCheck(store, session)) continue;
-        if (meter.older.length) {
-          meter.older.push(session.id as string);
-          continue;
+      const paid: string[] = [];
+      for (const [i, entry] of cursor.paid.entries()) {
+        if (purchases.length >= ORDERS_OLDER_MOST) {
+          paid.push(...cursor.paid.slice(i));
+          break;
+        }
+        const [customer, shown] = entry.split(":");
+        if (!theirs.has(customer)) continue;
+        const read = await oneClickOf(store, customer, find, meter, { skip: later, room: ORDERS_OLDER_MOST - purchases.length, from: Number(shown ?? 0) });
+        purchases.push(...read.purchases);
+        if (read.next) paid.push(read.next);
+      }
+      let next = waiting.length;
+      for (const [i, session] of waiting.entries()) {
+        if (purchases.length >= ORDERS_OLDER_MOST) {
+          next = i;
+          break;
         }
         const got = await purchaseFromSession(store, session, find, meter, false);
-        if (got) purchases.push(got.purchase);
+        // Its refund check did not fit: it, and every one after it, waits for the next batch.
+        if (meter.older.length) {
+          next = i;
+          break;
+        }
+        if (!got) continue;
+        purchases.push(got.purchase);
+        if (!got.customer) continue;
+        const read = await oneClickOf(store, got.customer, find, meter, { only: new Set([session.id as string]), room: ORDERS_OLDER_MOST - purchases.length });
+        purchases.push(...read.purchases);
+        if (read.next) paid.push(read.next);
       }
-      return { purchases, older: meter.older, extra: await more(purchases, email, meter) };
+      const rest = waiting.slice(next);
+      return {
+        purchases,
+        cursor: olderCursor((rest[0]?.id as string | undefined) ?? null, paid),
+        count: rest.length,
+        added: paid.length > 0 || rest.some((session) => customerOf(session) !== null),
+        extra: await more(purchases, email, meter),
+      };
     })(),
     meter,
   );

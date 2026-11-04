@@ -261,9 +261,10 @@ export const ORDERS_STORE_COMMANDS = 2;
  * address at 16 KB, and each agreement shown read whole, as one kept before
  * its mark held its title is, at AGREEMENT_VERSION_MOST); and the page sent on
  * at ORDERS_PAGE_BYTES, the most a page drawn at every limit of the store
- * sends now that a bundle's products are read only when asked for
- * (tests/orders-page-bounds.test.ts; 2 MB until C3-80, when forty purchases
- * of four full bundles drew 14.19 MB).
+ * sends now that a bundle's products are read only when asked for, its HTML,
+ * its RSC payload and its shell (tests/orders-page-bounds.test.ts; 2 MB until
+ * C3-80, when forty purchases of four full bundles drew 14.19 MB; 2.65 MB, the
+ * HTML alone, until C3-83).
  * Counted as ORDERS_OPEN_UNITS public requests taken before anything is read;
  * every read past it is a command of the meter, priced at
  * ORDERS_METERED_COMMAND (tests/plan-cost-registry.test.ts holds both).
@@ -295,7 +296,8 @@ export const DOWNLOAD_LOOKUP_READ =
  * What showing a bundle's products on the list of purchases costs besides its
  * metered reads and the request's own call (lib/buyer-orders.ts, bundleFor;
  * app/api/store/orders/bundle/route.ts; C3-80), at the most: a download's
- * lookup of one purchase, and its answer sent on, ORDERS_BUNDLE_BYTES.
+ * lookup of one purchase, and its answer sent on, ORDERS_BUNDLE_BYTES (the
+ * page drawn without JavaScript, the larger of the two).
  * Counted as ORDERS_BUNDLE_UNITS public requests taken before the grant is
  * read (tests/plan-cost-registry.test.ts holds them above it).
  */
@@ -681,10 +683,14 @@ export const COST_LINES: CostLine[] = [
       // before it is made; a bundle's products are read only when the buyer asks, by their own request: ORDERS_BUNDLE_UNITS
       // before the grant, the listings and keys through the meter (C3-80, 4 November 2026; ORDERS_BUNDLE_READ in
       // tests/plan-cost-registry.test.ts, the page's bytes and the calls in tests/orders-page-bounds.test.ts).
-      { file: "lib/buyer-orders.ts", names: ["if (meter && calls > 0 && !meter.stripe(calls))", "if (shown >= MAX_LISTED) {", "if (meter?.older.length && refundCalls(session) > 0) {", "export async function bundleFor", "takePublicRequest(store, \"buyer\", Date.now(), ORDERS_BUNDLE_UNITS)", "export async function olderFor", "takePublicRequest(store, \"buyer\", Date.now(), ORDERS_OLDER_UNITS)", "if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;", "await meter.take(keyed.length * ORDERS_KEY_COMMANDS)", "await linesOf(find, bundleFromMeta(meta, \"bundle\"), lines)"] },
-      { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_STRIPE_CALLS", "ORDERS_STRIPE_LISTS", "PLAN_REFUND_CALLS", "ORDERS_PAGE_BYTES", "LINK_SHOWN", "ORDERS_BUNDLE_UNITS", "ORDERS_BUNDLE_BYTES", "ORDERS_BUNDLE_PER_HOUR", "ORDERS_OLDER_UNITS", "ORDERS_OLDER_COMMANDS", "ORDERS_OLDER_BYTES", "ORDERS_OLDER_PER_HOUR"] },
-      { file: "app/api/store/orders/older/route.ts", names: ["export const maxDuration = 30", "withinStore(\"orders-older\"", "olderFor(store, token", "if (error instanceof OrdersBusy) return answer(429"] },
-      { file: "app/api/store/orders/bundle/route.ts", names: ["export const maxDuration = 30", "withinStore(\"orders-bundle\"", "bundleFor(store, token", "if (error instanceof OrdersBusy) return answer(429"] },
+      { file: "lib/buyer-orders.ts", names: ["if (meter && calls > 0 && !meter.stripe(calls))", "if (shown >= MAX_LISTED) {", "if (meter?.older.length && refundCalls(session) > 0) {", "if (purchases.length >= ORDERS_OLDER_MOST) {", "if (meter && !checked && !meter.stripe(1)) return null;", "if (!meter.stripe(taken.filter(disputed).length)) return wait;", "return this.stripe(1);", "export async function bundleFor", "takePublicRequest(store, \"buyer\", Date.now(), ORDERS_BUNDLE_UNITS)", "export async function olderFor", "takePublicRequest(store, \"buyer\", Date.now(), ORDERS_OLDER_UNITS)", "if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;", "await meter.take(keyed.length * ORDERS_KEY_COMMANDS)", "await linesOf(find, bundleFromMeta(meta, \"bundle\"), lines)"] },
+      { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_STRIPE_CALLS", "ORDERS_STRIPE_LISTS", "PLAN_REFUND_CALLS", "ORDERS_PAGE_BYTES", "LINK_SHOWN", "ORDERS_BUNDLE_UNITS", "ORDERS_BUNDLE_BYTES", "ORDERS_BUNDLE_PER_HOUR", "ORDERS_OLDER_UNITS", "ORDERS_OLDER_COMMANDS", "ORDERS_OLDER_BYTES", "ORDERS_OLDER_PER_HOUR", "ORDERS_OLDER_MOST", "ORDERS_ONE_CLICK_LISTS"] },
+      // Both buttons' requests, and the same requests made by the page's own forms without JavaScript, go through one way each
+      // (lib/purchase-cards.ts, askBundle and askOlder): the link's limit and the request's call, then their units (C3-80).
+      { file: "app/api/store/orders/older/route.ts", names: ["export const maxDuration = 30", "askOlder(store,"] },
+      { file: "app/api/store/orders/bundle/route.ts", names: ["export const maxDuration = 30", "askBundle(store,"] },
+      { file: "lib/purchase-cards.ts", names: ["withinStore(\"orders-older\"", "olderFor(store, token, older", "withinStore(\"orders-bundle\"", "bundleFor(store, token, reference, which)", "if (error instanceof OrdersBusy) return { ok: false, status: 429"] },
+      { file: "app/[handle]/orders/page.tsx", names: ["await askBundle(store, token,", "await askOlder(store, token, asked)", "if (token && (bundleAsked || olderAsked))"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
     ],

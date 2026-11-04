@@ -12,12 +12,15 @@ import { notFound } from "next/navigation";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
+import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
-import { type Extras, cardOf, extrasFor } from "@/lib/purchase-cards";
+import { type Extras, askBundle, askOlder, cardOf, extrasFor, ordersShared } from "@/lib/purchase-cards";
 import { PurchaseCard } from "@/components/purchase-card";
 import { OlderPurchases } from "@/components/older-purchases";
+import { OrdersKey, OrdersSharedProvider } from "@/components/orders-shared";
+import { BundleDelivery } from "@/components/bundle-delivery";
+import { LINK_SHOWN } from "@/lib/buyer-orders-rules";
 import { speech, speechFor } from "@/lib/buyer-words";
 import { type OrdersWords, ordersWords } from "@/lib/buyer-words/orders";
 import { NewTab } from "@/components/new-tab";
@@ -127,6 +130,19 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token : "";
   const status = typeof query.status === "string" ? query.status : "";
+  // Without JavaScript, a bundle's button and the older purchases' button send their forms here: the page draws what they
+  // ask for on a page of its own, read and paid for exactly as the button's own request is (lib/purchase-cards.ts,
+  // askBundle and askOlder: the link's limit and the request's call, then their units before anything is read), never
+  // the whole list again.
+  const bundleAsked = typeof query.bundle === "string" ? query.bundle : "";
+  const olderAsked = typeof query.older === "string" ? query.older : "";
+  if (token && (bundleAsked || olderAsked)) {
+    return (
+      <Frame store={store}>
+        {bundleAsked ? await BundleView({ store, token, asked: bundleAsked }) : await OlderView({ store, token, asked: olderAsked })}
+      </Frame>
+    );
+  }
   // Each opening with a link takes ORDERS_OPEN_UNITS of the store's buyer requests before anything is read
   // (lib/buyer-orders.ts, openOrders), so a link reloaded in a loop has a ceiling; without room, nothing is read and the
   // page says to come back. What it reads past them, in proportion to what the buyer has, is taken through its meter
@@ -142,9 +158,10 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   let calls: BookedCall[] = [];
   let waiting: Waiting = { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: false };
   let failed = false;
-  // Older purchases whose refund did not fit in the opening's calls to Stripe (ORDERS_STRIPE_CALLS), newest first: said as
-  // not checked yet, never as not bought, with a button that checks them a batch at a time (components/older-purchases.tsx).
-  let older: string[] = [];
+  // Older purchases whose refund did not fit in the opening's calls to Stripe (ORDERS_STRIPE_CALLS), and what was added to
+  // an order in one click that could not be checked: said as not checked yet, never as not bought, with a button that checks
+  // them a batch at a time (components/older-purchases.tsx), from where `older.cursor` says.
+  let older: ReturnType<typeof olderOf> = { cursor: null, count: 0, added: false };
   let discordProducts: Set<string> | null = null;
   // What the purchases need besides themselves: podcast feeds, license keys and what can be reviewed (lib/purchase-cards.ts).
   let extras: Extras = { feeds: new Map(), keys: new Map(), reviewing: new Set() };
@@ -161,7 +178,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
         const discord = isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;
         // Each read through the meter before it is made: feeds, listings and keys (lib/purchase-cards.ts, extrasFor).
         const more = await extrasFor(store, email, listed, meter);
-        return { listed, booked, waits, discord, more, older: [...meter.older] };
+        return { listed, booked, waits, discord, more, older: olderOf(meter) };
       })();
       const outcome = await withinOpening(reading, meter);
       if (outcome === "late") failed = true;
@@ -210,25 +227,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   );
 
   return (
-    <div
-      lang={said.lang.locale}
-      className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
-      style={lookStyle(store.look) as React.CSSProperties}
-    >
-      <main id="content" className="relative mx-auto max-w-xl px-4 py-14 sm:py-20">
-        <div className="text-center">
-          {store.photoId ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={photoUrl(store.photoId)} alt="" width={72} height={72} className="st-avatar" style={{ width: 72, height: 72 }} />
-          ) : (
-            <p aria-hidden="true" className="st-avatar st-avatar-initial" style={{ width: 72, height: 72, fontSize: "1.75rem" }}>
-              {store.name.slice(0, 1).toUpperCase()}
-            </p>
-          )}
-          <p className="st-muted mt-4 text-sm font-semibold">{store.name}</p>
-        </div>
-
-        <div className="st-card mt-6 p-6 sm:p-9">
+    <Frame store={store}>
           {email && purchases ? (
             <>
               <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">
@@ -252,7 +251,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   </ul>
                 </section>
               ) : null}
-              {purchases.length === 0 && older.length === 0 && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 && older.length === 0 ? (
+              {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 && !older.cursor ? (
                 <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
               ) : (
                 <>
@@ -268,24 +267,18 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                       </form>
                     </div>
                   ) : null}
-                  {purchases.length > 0 ? (
-                    <ul className="mt-7 space-y-4">
-                      {/* Each purchase drawn by the same card the batch of older purchases draws (components/purchase-card.tsx). */}
-                      {purchases.map((purchase) => (
-                        <PurchaseCard key={purchase.reference} card={cardOf(store, purchase, token, extras)} storeName={store.name} language={store.language} />
-                      ))}
-                    </ul>
-                  ) : null}
-                  {older.length > 0 ? (
-                    <OlderPurchases
-                      address={`/api/store/orders/older?${new URLSearchParams({ handle: store.handle, token })}`}
-                      from={older[0]}
-                      left={words.olderNotChecked(older.length)}
-                      storeName={store.name}
-                      language={store.language}
-                      words={{ check: words.checkOlder, checking: words.checkingOlder, failed: words.olderFailed }}
-                    />
-                  ) : null}
+                  {/* The words every bundle, key and batch shares, sent once for the whole list (components/orders-shared.tsx). */}
+                  <OrdersSharedProvider value={ordersShared(store, token)}>
+                    {purchases.length > 0 ? (
+                      <ul className="mt-7 space-y-4">
+                        {/* Each purchase drawn by the same card the batch of older purchases draws (components/purchase-card.tsx). */}
+                        {purchases.map((purchase) => (
+                          <PurchaseCard key={purchase.reference} card={cardOf(store, purchase, token, extras)} language={store.language} />
+                        ))}
+                      </ul>
+                    ) : null}
+                    {older.cursor ? <OlderPurchases older={older.cursor} left={words.olderNotChecked(older.count, older.added)} /> : null}
+                  </OrdersSharedProvider>
                   <p className="st-muted mt-6 text-sm">{words.worksFor24}</p>
                 </>
               )}
@@ -316,6 +309,39 @@ export default async function OrdersPage({ params, searchParams }: Params) {
               {available ? form : null}
             </>
           )}
+    </Frame>
+  );
+}
+
+/**
+ * The page around what it shows: the store's look and language, its picture
+ * and name, the card, and the way back to the store. The same for the list
+ * and for what its buttons draw without JavaScript.
+ */
+function Frame({ store, children }: { store: Store; children: React.ReactNode }) {
+  const said = speech(store);
+  const words = ordersWords(store.language);
+  return (
+    <div
+      lang={said.lang.locale}
+      className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
+      style={lookStyle(store.look) as React.CSSProperties}
+    >
+      <main id="content" className="relative mx-auto max-w-xl px-4 py-14 sm:py-20">
+        <div className="text-center">
+          {store.photoId ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photoUrl(store.photoId)} alt="" width={72} height={72} className="st-avatar" style={{ width: 72, height: 72 }} />
+          ) : (
+            <p aria-hidden="true" className="st-avatar st-avatar-initial" style={{ width: 72, height: 72, fontSize: "1.75rem" }}>
+              {store.name.slice(0, 1).toUpperCase()}
+            </p>
+          )}
+          <p className="st-muted mt-4 text-sm font-semibold">{store.name}</p>
+        </div>
+
+        <div className="st-card mt-6 p-6 sm:p-9">
+          {children}
         </div>
 
         <div className="mt-8 text-center">
@@ -379,5 +405,95 @@ function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store
         <p className="st-muted mt-4">{words.waitingMore(waiting.requestsTotal + waiting.agreementsTotal - waiting.requests.length - waiting.agreements.length)}</p>
       ) : null}
     </section>
+  );
+}
+
+/** The way back from what a button drew without JavaScript to the whole list: an opening of its own, as any reload is. */
+function BackToList({ store, token }: { store: Store; token: string }) {
+  return (
+    <p className="mt-8">
+      <a href={`/@${store.handle}/orders?${new URLSearchParams({ token })}`} className="st-footer-link inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+        {ordersWords(store.language).backToList}
+      </a>
+    </p>
+  );
+}
+
+/**
+ * A bundle's products, as its button shows them, on a page of their own for a
+ * browser without JavaScript (`bundle=<reference>:<item>`): read by askBundle
+ * (lib/purchase-cards.ts), the button's own request, so it takes the same
+ * units before anything is read and refuses the same way, with nothing read.
+ */
+async function BundleView({ store, token, asked }: { store: Store; token: string; asked: string }) {
+  const words = ordersWords(store.language);
+  const cut = asked.lastIndexOf(":");
+  const answer = await askBundle(store, token, cut > 0 ? asked.slice(0, cut) : "", cut > 0 ? asked.slice(cut + 1) : "");
+  const shared = ordersShared(store, token);
+  return (
+    <>
+      <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
+        {answer.ok ? words.insideTitle(answer.value.title) : words.pageTitle}
+      </h1>
+      {answer.ok ? (
+        <OrdersSharedProvider value={shared}>
+          <BundleDelivery
+            storeName={store.name}
+            heading={words.insideTitle(answer.value.title)}
+            showHeading={false}
+            shownLink={LINK_SHOWN}
+            missing={answer.value.missing ? 1 : 0}
+            words={{ ...shared.words.bundle, missing: answer.value.missing }}
+            lines={answer.value.lines.map((line) => ({
+              product: { id: line.id, title: line.title, link: line.link },
+              download: line.download,
+              course: line.course ? { href: line.course } : null,
+              keyBox: line.key ? <OrdersKey title={line.title} label={line.key.label} value={line.key.value} revoked={line.key.revoked} waiting={line.key.waiting} /> : null,
+            }))}
+          />
+        </OrdersSharedProvider>
+      ) : (
+        <p role="alert" className="mt-4 leading-relaxed" style={{ color: "var(--st-text)" }}>
+          {answer.message}
+        </p>
+      )}
+      <BackToList store={store} token={token} />
+    </>
+  );
+}
+
+/**
+ * The next batch of older purchases, as its button adds them, on a page of its
+ * own for a browser without JavaScript (`older=<where it starts>`): read by
+ * askOlder (lib/purchase-cards.ts), the button's own request, so it takes the
+ * same units before anything is read, shows ORDERS_OLDER_MOST at the most,
+ * and refuses the same way, with nothing read. The next batch is one more
+ * press of the same button.
+ */
+async function OlderView({ store, token, asked }: { store: Store; token: string; asked: string }) {
+  const words = ordersWords(store.language);
+  const answer = await askOlder(store, token, asked);
+  return (
+    <>
+      <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{words.olderTitle}</h1>
+      {answer.ok ? (
+        <OrdersSharedProvider value={ordersShared(store, token)}>
+          <p className="st-muted mt-4 leading-relaxed">{answer.value.said}</p>
+          {answer.value.cards.length ? (
+            <ul className="mt-7 space-y-4">
+              {answer.value.cards.map((card) => (
+                <PurchaseCard key={card.reference} card={card} language={store.language} />
+              ))}
+            </ul>
+          ) : null}
+          {answer.value.older ? <OlderPurchases older={answer.value.older} left={answer.value.left} /> : null}
+        </OrdersSharedProvider>
+      ) : (
+        <p role="alert" className="mt-4 leading-relaxed" style={{ color: "var(--st-text)" }}>
+          {answer.message}
+        </p>
+      )}
+      <BackToList store={store} token={token} />
+    </>
   );
 }

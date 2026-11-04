@@ -7,14 +7,24 @@
  * weighs (lib/segments.ts, buyerLedger). At the most AGENDA_UNITS besides the
  * buyers (tests/plan-cost-registry.ts, AGENDA_READ). Server only.
  */
-import { readAllTasks, tasksKept } from "@/lib/crm";
+import { readAllTasks } from "@/lib/crm";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { AGENDA_ROW_MARKUP_BYTES, type AgendaDayGroup, agendaForDays, agendaReadUnits, daysAround, personAddresses } from "@/lib/person-agenda";
 import { sentBytes, sentUnits } from "@/lib/sent-bytes";
 import type { DueTask } from "@/lib/person-tasks";
 import type { Store } from "@/lib/store";
 import { countStudio, studioPath } from "@/lib/studio-route";
-import { allowanceUsed } from "@/lib/store-allowance";
-import { allowanceFor } from "@/lib/store-allowance-rules";
+
+/**
+ * How many people have tasks kept (one HLEN), so a page with none reads and
+ * counts nothing more. The hash is lib/crm.ts's tasks hash, by the same key
+ * (tests/person-agenda.test.ts holds the two together).
+ */
+export async function tasksKept(statsId: string | null): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["HLEN", `nl:crm:tasks:${statsId}`]]);
+  return Number(n) || 0;
+}
 
 /**
  * Counts reading the store's buyers, with the studio requests buyerLedger
@@ -42,11 +52,11 @@ export async function countUnits(store: Store, units: number): Promise<{ ok: tru
   if (units <= 0) return { ok: true };
   const counted = await countStudio(store, null, units);
   if (counted.ok) return { ok: true };
-  if (counted.reason === "used" && units > 1) {
-    // One sentence, with how many this needs and how many are left (round 6, L1).
-    const left = Math.max(0, allowanceFor(store, "studio") - (await allowanceUsed(store, "studio").catch(() => Number.POSITIVE_INFINITY)));
-    const leftWords = Number.isFinite(left) ? `${left === 0 ? "none is" : left === 1 ? "1 is" : `${left} are`} left` : "fewer are left";
-    return { ok: false, reason: "used", message: `This needs ${units} of your studio requests, and ${leftWords}.` };
+  // One sentence with how many this needs and how many were left, from the figure's own count, and when they come
+  // back (round 7, M2). Without that count (or with no figure at all, as in a trial), the figure's own words.
+  if (counted.reason === "used" && units > 1 && counted.left !== undefined) {
+    const left = counted.left === 0 ? "none are left" : counted.left === 1 ? "only 1 is left" : `only ${counted.left.toLocaleString("en-US")} are left`;
+    return { ok: false, reason: "used", message: `This needs ${units.toLocaleString("en-US")} of your studio requests, and ${left}.${counted.reset ? ` ${counted.reset}` : ""}` };
   }
   return { ok: false, reason: counted.reason, message: counted.message };
 }

@@ -18,7 +18,8 @@
  *   - the totals page's reading of one store's numbers makes no more
  *     commands than TOTALS_STORE_SHAPE counts, and it takes its units first.
  *
- * (A product update's reading is held by tests/product-update-ceiling.test.ts.)
+ * (A product update's search for its buyers is counted in the studio's requests,
+ *  lib/product-updates.ts updateReadUnits, held by tests/ledger-counted-callers.test.ts.)
  */
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { readFileSync } from "node:fs";

@@ -13,7 +13,7 @@ export const STORE_READINGS_PER_DAY = 8;
  * (tests/plan-margin.test.ts, US$ 65; inbox C4-18, C4-33), held there: one more
  * a day would pass it.
  */
-export const HEAVY_READINGS_PER_DAY = 3;
+export const HEAVY_READINGS_PER_DAY = 2;
 /** How long a reading is shown as it is before it is read again. */
 export const READING_FRESH_SECONDS = 600;
 

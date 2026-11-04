@@ -66,8 +66,10 @@ export async function POST(request: NextRequest) {
       }
       const result = editPodcast(podcast, edit);
       if (!result.ok) {
-        // An upload that could not be taken is not left in storage.
-        if (edit.op === "add") await del(edit.pathname).catch(() => {});
+        // Nothing is deleted for a refusal: the browser names the file, and the product's folder also holds its
+        // episodes and its own file, so the name may be one of those. No door writes down which upload is new
+        // (the name gets a random ending only once it is stored), so a file left behind here stays, counted in
+        // the store's storage and the month's upload room it was signed under, never deleted from under a record.
         return fail(result.reason);
       }
       await savePodcast(result.podcast);

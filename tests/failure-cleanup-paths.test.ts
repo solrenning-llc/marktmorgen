@@ -1,0 +1,174 @@
+/**
+ * A request that fails never deletes a file the browser named unless that request took it as a fresh upload
+ * (4 November 2026, after a review proved a member with only "page" deleting a product's picture).
+ *
+ * A store's pictures share one folder, and a product's files and its episodes share the product's folder; the
+ * routes only check the folder. So a path the browser sends on a failed request may be another record's file.
+ * Each check sends the real route a real request from the creator's own session, with synthetic files in a file
+ * store held in memory (tests/failure-cleanup-world.ts), and reads what is left:
+ *
+ *   - a link's picture refused (no size, or no such link) with a product's picture named: the picture stays;
+ *   - a product's picture refused (no such product) with another product's picture named: it stays;
+ *   - a smaller copy refused (as wide as the picture) that is another product's smaller copy: it stays;
+ *   - an episode refused (no title) naming another episode's audio: the audio stays;
+ *   - and what is still cleaned: a picture let in through the door for this request, then refused, is deleted;
+ *     once put on something it is never taken as fresh again, and a door asked for a picture already stored
+ *     never makes it fresh.
+ *
+ * The inventory at the end reads every deletion in app/api/store and holds each to a reason it cannot reach a
+ * file the browser named that belongs to another record, so a new one fails here until somebody says which.
+ */
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, setProductImage, storeFolder } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { fileFolder } from "@/lib/product-file";
+import { store as redis } from "./redis-stub";
+import { files } from "./failure-cleanup-world";
+import { done, is, part } from "./check";
+import { POST as linkImage } from "@/app/api/store/link-image/route";
+import { POST as productImage } from "@/app/api/store/image/route";
+import { POST as door } from "@/app/api/store/image/upload/route";
+import { POST as podcast } from "@/app/api/store/podcast/route";
+import { storeForEmail } from "@/lib/store";
+
+const OWNER = "cleanup.maker@example.com";
+const ORIGIN = "https://marktmorgen.com";
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0]);
+const MP3 = new Uint8Array([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0]);
+
+const post = (path: string, session: string, body: unknown) =>
+  new NextRequest(`${ORIGIN}${path}`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) });
+const result = async (response: Response) => [response.status, ((await response.json().catch(() => ({}))) as { error?: string; ok?: boolean }).error ?? "ok"];
+
+async function main(): Promise<void> {
+  redis.clear();
+  files.clear();
+  await claimHandle(OWNER, "cleanupshop", "Cleanup Shop", "");
+  await ensureStatsId(OWNER);
+  const a = await addProduct(OWNER, "Guide", "", "19", null);
+  const b = await addProduct(OWNER, "Course", "", "29", null);
+  const added = await addStoreLink(OWNER, "My podcast", "https://example.com/pod");
+  if (!a.ok || !b.ok || !added.ok) throw new Error("setup");
+  const linkId = added.store.links[0].id;
+  const session = await openSession(OWNER);
+  const folder = await imageFolder(OWNER);
+  const picture = (n: string) => `images/${folder}/${n.repeat(32)}.jpg`;
+
+  // Product A's picture and its smaller copy, already on the product.
+  const big = picture("a");
+  const small = picture("b");
+  files.set(big, { bytes: JPEG, contentType: "image/jpeg" });
+  files.set(small, { bytes: JPEG, contentType: "image/jpeg" });
+  const placed = await setProductImage(OWNER, a.product.id, { path: big, width: 1200, height: 800, alt: "", bytes: JPEG.length, small: { path: small, width: 400, bytes: JPEG.length } });
+  is("product A has its picture and smaller copy", placed.ok && (await readListing((await storeForEmail(OWNER))!, a.product.id))?.image?.small?.path, small);
+
+  part("A link's picture refused never deletes a product's picture");
+  is("no size: refused", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: big, width: 0, height: 0 }))), [400, "invalid"]);
+  is("and product A's picture is still there", files.has(big), true);
+  is("no such link: refused", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: "nope", path: big, width: 320, height: 180 }))), [404, "unknown"]);
+  is("and product A's picture is still there", files.has(big), true);
+
+  part("A product's picture refused never deletes another product's picture");
+  is("no such product: refused", await result(await productImage(post("/api/store/image", session, { action: "attach", id: "nope", path: big, width: 1200, height: 800, small: { path: small, width: 400 } }))), [404, "unknown"]);
+  is("and product A's picture and smaller copy are still there", [files.has(big), files.has(small)], [true, true]);
+  const own = picture("c");
+  files.set(own, { bytes: JPEG, contentType: "image/jpeg" });
+  is("product B's own picture, with A's smaller copy said to be as wide: put on without the copy", await result(await productImage(post("/api/store/image", session, { action: "attach", id: b.product.id, path: own, width: 1200, height: 800, small: { path: small, width: 5000 } }))), [200, "ok"]);
+  is("and product A's smaller copy is still there", files.has(small), true);
+
+  part("An episode refused never deletes another episode's audio");
+  is("product A made a podcast", await result(await podcast(post("/api/store/podcast", session, { action: "enable", id: a.product.id }))), [200, "ok"]);
+  const audio = `${fileFolder(await storeFolder(OWNER), a.product.id)}${"e".repeat(20)}.mp3`;
+  files.set(audio, { bytes: MP3, contentType: "audio/mpeg" });
+  is("an episode put out", await result(await podcast(post("/api/store/podcast", session, { action: "add", id: a.product.id, pathname: audio, title: "Episode one", notes: "" }))), [200, "ok"]);
+  is("the same audio again with no title: refused", await result(await podcast(post("/api/store/podcast", session, { action: "add", id: a.product.id, pathname: audio, title: "", notes: "" }))), [400, "title"]);
+  is("and the episode's audio is still there", files.has(audio), true);
+
+  part("A fresh upload refused is still cleaned, and only while fresh");
+  const ask = (pathname: string, payload: Record<string, string>) =>
+    door(post("/api/store/image/upload", session, { type: "blob.generate-presigned-url", payload: { pathname, clientPayload: JSON.stringify(payload), multipart: false } }));
+  const fresh = picture("d");
+  is("the door opened for the link's picture", (await ask(fresh, { linkId })).status, 200);
+  files.set(fresh, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() });
+  is("refused for no size", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: fresh, width: 0, height: 0 }))), [400, "invalid"]);
+  is("and the upload nothing shows is deleted", files.has(fresh), false);
+  const lost = picture("f");
+  is("the door opened for product B's picture", (await ask(lost, { productId: b.product.id })).status, 200);
+  files.set(lost, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() });
+  is("put on a product that is not there: refused", await result(await productImage(post("/api/store/image", session, { action: "attach", id: "nope", path: lost, width: 1200, height: 800 }))), [404, "unknown"]);
+  is("and the upload is deleted", files.has(lost), false);
+  const kept = picture("1");
+  await ask(kept, { productId: b.product.id });
+  files.set(kept, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() });
+  is("a fresh picture put on product B", await result(await productImage(post("/api/store/image", session, { action: "attach", id: b.product.id, path: kept, width: 1200, height: 800 }))), [200, "ok"]);
+  is("then named on a refused link picture", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: kept, width: 0, height: 0 }))), [400, "invalid"]);
+  is("and product B's picture is still there: it was taken when put on", files.has(kept), true);
+  is("the door asked again for product A's picture, already stored (an upload could never write over it)", (await ask(big, { linkId })).status, 200);
+  is("then named on a refused link picture", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: big, width: 0, height: 0 }))), [400, "invalid"]);
+  is("and product A's picture is still there: stored before the door noted it", files.has(big), true);
+
+  part("Inventory: every deletion under app/api/store, and why it cannot reach another record's file");
+  const routes: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (name === "route.ts") routes.push(relative(process.cwd(), path));
+    }
+  };
+  walk("app/api/store");
+  const found: string[] = [];
+  for (const file of routes.sort()) {
+    const source = readFileSync(file, "utf8");
+    const lines = source.split("\n");
+    lines.forEach((line, i) => {
+      const call = line.match(/\b(del|deleteFile|dropFresh)\(/);
+      if (!call || call.index === undefined || /^\s*(\/\/|\*)/.test(line) || /^\s*const dropFresh/.test(line)) return;
+      // The argument up to its own closing parenthesis.
+      let depth = 1;
+      let at = call.index + call[0].length;
+      const from = at;
+      for (; at < line.length && depth > 0; at += 1) depth += line[at] === "(" ? 1 : line[at] === ")" ? -1 : 0;
+      found.push(`${file.replace(/^app\/api\/store\//, "").replace(/\/route\.ts$/, "")} ${call[1]}(${line.slice(from, at - 1).trim()})`);
+    });
+  }
+  // What each deletion is handed, and why that cannot be a file of another record the browser named.
+  const REASONS: Record<string, string> = {
+    "page del(gone)": "pictures this page held in the page-picture registry, released after the page was written",
+    "file/attach del(result.removed.pathname)": "the file the record held, after the record that replaced it was written",
+    "site-page del(gone)": "pictures this site page held in the page-picture registry, released after the page was written",
+    "podcast del(result.removed.pathname)": "the audio of the episode the record removed, after it was written",
+    "image dropFresh([path, smallPath])": "only the paths this request took from the picture door",
+    "image dropFresh([smallPath])": "only the paths this request took from the picture door",
+    "image dropFresh(imagePaths(image))": "only the paths this request took from the picture door",
+    "image del(imagePaths(result.removed))": "the picture the record held, after the record that replaced it was written",
+    "product del(file.pathname)": "files of a removed product, read from its own records",
+    "product del(linked.removed.pathname)": "the file the record held, after the link that replaced it was written",
+    "option del(file.pathname)": "files of a removed option, read from its own record",
+    "links del(result.removed.path)": "the picture the removed link held, after it was written",
+    "link-image dropFresh(path)": "only a path this request took from the picture door",
+    "link-image dropFresh(image.path)": "only a path this request took from the picture door",
+    "link-image del(result.removed.path)": "the picture the record held, after the record that replaced it was written",
+    "course del(files)": "handed-in work of a removed assignment, read from its own records",
+    "course del(file.pathname)": "lesson files the course no longer holds, after it was written",
+    "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
+    "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
+    "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
+  };
+  const unexplained = [...new Set(found)].filter((entry) => !Object.hasOwn(REASONS, entry));
+  is("every deletion under app/api/store has a reason here", unexplained, []);
+  const gone = Object.keys(REASONS).filter((entry) => !found.includes(entry));
+  is("and every reason here still names a deletion", gone, []);
+  const takers = routes.filter((file) => /ownsImagePath\(/.test(readFileSync(file, "utf8")) && !/\/ai\/|\/upload\//.test(file));
+  is("every route that puts a picture from the door on a record takes it from the door", takers.filter((file) => !/takePictureDoor\(/.test(readFileSync(file, "utf8"))), []);
+  is("and the door writes each one down", /notePictureDoor\(pathname\)/.test(readFileSync("app/api/store/image/upload/route.ts", "utf8")), true);
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

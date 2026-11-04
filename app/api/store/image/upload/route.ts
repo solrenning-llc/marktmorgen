@@ -8,6 +8,7 @@ import { imageFolder } from "@/lib/store";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES, ownsImagePath } from "@/lib/product-image";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { costPauseCode } from "@/lib/plan-standing";
+import { notePictureDoor } from "@/lib/picture-door";
 
 /** How long the creator has to start the upload after asking for the door. */
 const UPLOAD_WINDOW_MS = 5 * 60 * 1000;
@@ -72,6 +73,10 @@ export async function POST(request: NextRequest) {
         if (!ownsImagePath(pathname, await imageFolder(ref))) throw new Error("invalid");
         // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
         { const paused = costPauseCode(store); if (paused) throw new Error(paused); }
+
+        // Written down so that a request putting it on that then fails may delete it, and only it
+        // (lib/picture-door.ts). Not written down, it is never deleted by a failure: kept, not lost.
+        await notePictureDoor(pathname).catch((error: unknown) => console.error("could not note a picture upload", error));
 
         const rules = {
           allowedContentTypes: [...IMAGE_CONTENT_TYPES],

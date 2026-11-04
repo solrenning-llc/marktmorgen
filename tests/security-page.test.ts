@@ -86,13 +86,13 @@ const promiseSites: [string, string][] = [
   ...["app/studio/page.tsx", "lib/plan-closing.ts", "app/terms/page.tsx", "lib/plan-refund-words.ts", "app/mission/page.tsx"].map((file): [string, string] => [file, read(file)]),
 ];
 const occurrences = promiseSites.flatMap(([name, text]) => windows(text).map((window): [string, string] => [name, window]));
-const INCLUDED = [...NAMED, "name", "bio", "links", "currency", "thank-you notes"];
-const LEFT_OUT_NOW = ["files", "videos", "community posts", "email sequences", "broadcasts", "reviews", "coupons", "affiliates", "bookings", "funnels", "CRM deals", "tasks"];
+const INCLUDED = [...NAMED, "name", "bio", "links", "currency", "thank-you notes", "address", "date it was created"];
+const LEFT_OUT_NOW = ["files", "videos", "community posts", "email sequences", "broadcasts", "reviews", "coupons", "affiliates", "booked calls", "funnels", "CRM deals", "tasks"];
 is("every promise site is found, the card for a closed store and the studio title included", [promiseSites.every(([name, text]) => windows(text).length > 0), occurrences.filter(([name]) => name === "app/studio/page.tsx").length, occurrences.filter(([name]) => name === "lib/feature-pages.ts").length], [true, 2, 2]);
 is("the copy names each exported part, as whole words", NAMED.map((word) => hasWord(promised.replace(/blog posts/, "posts"), word)), NAMED.map(() => true));
 is("the copy lists each exclusion of notIncluded and the CRM tasks (not in storeExport)", [["files", "videos", "community posts"].map((word) => excluded.includes(word) && hasWord(copyText, word)), !/readPersonTasks|crm/.test(exporter) && hasWord(copyText, "CRM deals and tasks")], [[true, true, true], true]);
 is("the file's own note says nothing else is in it and what stays in the studio", [/nothing else is in this file\. for example/.test(excluded), LEFT_OUT_NOW.every((word) => hasWord(excluded, word))], [true, true]);
-is("the export holds the store's name, bio, links, currency and thank-you notes", [/name: store\.name, bio: store\.bio, links: store\.links/.test(exporter), /currency: store\.currency/.test(exporter), /thanks: notes\[i\]/.test(exporter)], [true, true, true]);
+is("the export holds the store's name, bio, links, currency and thank-you notes", [/name: store\.name, bio: store\.bio, links: store\.links/.test(exporter), /currency: store\.currency/.test(exporter), /handle: store\.handle/.test(exporter), /createdAt: store\.createdAt/.test(exporter), /payments are in your orders/.test(read("lib/store-export.ts")), /thanks: notes\[i\]/.test(exporter)], [true, true, true, true, true, true]);
 is("no occurrence promises everything or the whole store", occurrences.map(([, w]) => /\b(everything|whole store|entire store)\b/i.test(w)), occurrences.map(() => false));
 is("no site text uses the old promises", promiseSites.map(([, text]) => /download everything your store|your whole store, as one file|downloaded your whole store|whole store as one file/i.test(text)), promiseSites.map(() => false));
 is("every occurrence says what is left out, as whole words, and never reads as a full list", occurrences.filter(([name]) => LISTS_LEFT_OUT(name)).map(([, w]) => LEFT_OUT_NOW.every((word) => hasWord(w, word)) && /nothing else is in (it|the file)\. for example/i.test(w)), occurrences.filter(([name]) => LISTS_LEFT_OUT(name)).map(() => true));

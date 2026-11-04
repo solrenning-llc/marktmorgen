@@ -28,7 +28,7 @@ export function refundEffects(o: { assistant: boolean }): string[] {
     `We email you when your plan ends, ${WARN_MONTH_DAYS} days before your store closes and ${WARN_WEEK_DAYS} days before it, each time with the date. Starting a plan again before then keeps your store.`,
     "When it closes, its files are removed, and the renewals of the memberships and payment plans you sold through it are stopped at Stripe, each at the end of the period already paid.",
     `Within ${ERASE_WITHIN_DAYS} days of closing, usually the same day, everything else it keeps with us is deleted, your buyers' access to what they bought from it included. Every sale, refund and payout stays on your own Stripe account.`,
-    `Before then, you can download your store's main data as one file from the notice at the top of your studio, ${ENDED_STORE_EXPORTS === 1 ? "once" : `up to ${ENDED_STORE_EXPORTS} times`}. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, bookings, funnels and CRM deals and tasks stay in your studio.`,
+    `Before then, you can download your store's main data as one file from the notice at the top of your studio, ${ENDED_STORE_EXPORTS === 1 ? "once" : `up to ${ENDED_STORE_EXPORTS} times`}. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`,
     ...(o.assistant ? ["Your Store assistant add-on stops at the end of the month you already paid for, and nothing more is charged for it."] : []),
   ];
 }

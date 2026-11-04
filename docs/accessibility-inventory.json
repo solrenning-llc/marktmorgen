@@ -1427,6 +1427,7 @@
     "components/person-fields.tsx",
     "components/person-find.tsx",
     "components/person-notes.tsx",
+    "components/person-tasks.tsx",
     "components/phone-alerts-panel.tsx",
     "components/pick-bundle-form.tsx",
     "components/picture-viewer.tsx",

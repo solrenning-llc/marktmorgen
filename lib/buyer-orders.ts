@@ -1445,7 +1445,7 @@ async function lookUp(
   // A payment taken in one click: shown on the list when it was made for the customer of one of the address's checkouts
   // that the list hands over (purchasesFor: that checkout's own reading names the customer). Read here with the checkout
   // it followed (lib/upsell.ts, metadata[parent]), which must have been paid with this address and be read by that same
-  // rule: its product and the products ticked with it, and nothing of a bundle.
+  // rule: its product and the products checked with it, and nothing of a bundle.
   const intent = await readOne(store, `/payment_intents/${encodeURIComponent(reference)}?expand[]=latest_charge`, meter);
   const intentMeta = (intent?.metadata ?? {}) as Record<string, string>;
   const parent = intentMeta.parent ?? "";

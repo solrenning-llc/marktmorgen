@@ -212,10 +212,10 @@ async function main(): Promise<void> {
   is("a deal with nobody named, or the same stage, is not an entry", [entersStage({ email: "", stage: "bwon00" }, null), entersStage({ email: "a@b.co", stage: "bwon00" }, { stage: "bwon00" }), entersStage({ email: "a@b.co", stage: "bwon00" }, { stage: "bnew00" }), entersStage({ email: "a@b.co", stage: "bwon00" }, null)], [false, false, true, true]);
   const anaDeal = await call({ action: "deal", deal: { title: "Brand deal with Ana", email: "ana@example.com", cents: 50000, stage: "bnew00" } });
   is("made in another stage: not started", [anaDeal.body.workflows, await flowsStartedFor(flows, "ana@example.com")], ["checked", []]);
-  const signed = await call({ action: "deal", deal: { ...anaDeal.body.deal, stage: "bwon00" } });
+  const signed = await call({ action: "deal", version: anaDeal.body.version, deal: { ...anaDeal.body.deal, stage: "bwon00" } });
   is("moved into the stage: started", [signed.body.workflows, await flowsStartedFor(flows, "ana@example.com")], ["checked", [flowId]]);
-  await call({ action: "deal", deal: { ...signed.body.deal, stage: "bnew00" } });
-  await call({ action: "deal", deal: { ...signed.body.deal, stage: "bwon00" } });
+  const out = await call({ action: "deal", version: signed.body.version, deal: { ...signed.body.deal, stage: "bnew00" } });
+  await call({ action: "deal", version: out.body.version, deal: { ...signed.body.deal, stage: "bwon00" } });
   is("moved out and in again: one run, as every trigger", Number((await redis.pipeline([["HGET", "nl:mail:flowstats:" + flowId, "started"]]))[0]), 1);
   const ben = await call({ action: "deal", deal: { title: "Ben, not on the list", email: "ben@example.com", cents: 0, stage: "bwon00" } });
   is("somebody not on the list starts nothing", [ben.body.workflows, await flowsStartedFor(flows, "ben@example.com")], ["checked", []]);

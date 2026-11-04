@@ -5,13 +5,13 @@ import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { BLOCK_KINDS, type BlockKind, type PageBlock } from "@/lib/sales-page";
-import { MAX_SECTION_BLOCKS, MAX_SECTION_NAME, NOT_IN_SECTIONS, type SavedSection, blocksForPage, fitsPage } from "@/lib/saved-blocks";
+import { MAX_SECTION_BLOCKS, MAX_SECTION_NAME, type SavedSection, blocksForPage, fitsPage, savable } from "@/lib/saved-blocks";
 
 const MESSAGES: Record<string, string> = {
   name: "Give the section a name. Only you see it.",
   empty: "Check at least one block to save.",
   too_many: `A section holds up to ${MAX_SECTION_BLOCKS} blocks.`,
-  kind: "A headline at the top and the reviews cannot be in a section: a page has one of each.",
+  kind: "The headline at the top, the reviews and columns stay on their own page: they cannot be in a section.",
   too_big: "Those blocks hold more words than one section can.",
   shape: "One of those blocks would not be kept as it is. Check it is complete and try again.",
   sections_full: "Your library holds all the sections your store can keep. Remove one to save another.",
@@ -94,7 +94,8 @@ export function SavedSections({
     }
   }
 
-  const savable = blocks.filter((block) => !NOT_IN_SECTIONS.includes(block.kind));
+  // The library's own rule (lib/saved-blocks.ts, NOT_IN_SECTIONS): never a list of kinds kept here.
+  const offered = blocks.filter(savable);
 
   async function saveNew() {
     const picked = blocks.filter((block) => chosen.includes(block.id));
@@ -258,7 +259,7 @@ export function SavedSections({
             <div className="mt-4 rounded-[12px] bg-white p-3 ring-1 ring-line">
               <p className="text-sm font-semibold text-ink">{`Check the blocks to save, up to ${MAX_SECTION_BLOCKS}`}</p>
               <ul className="mt-2 space-y-1">
-                {savable.map((block) => (
+                {offered.map((block) => (
                   <li key={block.id}>
                     <label className="flex min-h-11 items-center gap-2 text-sm text-ink" htmlFor={`sp-${block.id}`}>
                       <input
@@ -286,7 +287,7 @@ export function SavedSections({
               </div>
             </div>
           ) : (
-            <button type="button" className="btn btn-secondary btn-sm mt-4" disabled={disabled || busy || savable.length === 0 || sections.length >= limit} onClick={() => setPicking(true)}>
+            <button type="button" className="btn btn-secondary btn-sm mt-4" disabled={disabled || busy || offered.length === 0 || sections.length >= limit} onClick={() => setPicking(true)}>
               <Icon name="plus" size={16} />
               Save blocks of this page as a section
             </button>

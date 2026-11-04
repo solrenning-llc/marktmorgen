@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { visiblePipelines } from "@/lib/pipeline-access-rules";
+import { readPipelineAccess } from "@/lib/pipeline-access";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
@@ -45,9 +47,15 @@ export default async function StudioFormsPage({ searchParams }: Params) {
   const [reviewData, team] = canCreateDeals
     ? await Promise.all([readOpportunityReview(store.statsId), readTeam(store.sid).catch(() => null)])
     : [emptyReview, null] as const;
+  // A teammate sees only the pipelines the store lets them, and makes deals only in those they may change (639 [GL7](7)).
+  const restricted = view.role !== "owner" && view.role !== "admin";
+  const access = canCreateDeals && restricted ? await readPipelineAccess(store.statsId, view.email).catch(() => null) : {};
+  const seen = visiblePipelines(reviewData.pipelines, view.role, access);
+  const seenStages = new Set(seen.flatMap((p) => p.stages.map((stage) => stage.id)));
+  const changeable = seen.filter((p) => p.access === "edit").map((p) => ({ id: p.id, name: p.name, stages: p.stages }));
   // Each stage named with its pipeline once there is more than one (lib/crm-rules.ts).
-  const dealStages = reviewData.pipelines.length ? labeledStages(reviewData.pipelines) : reviewData.stages;
-  const existingDeals = reviewData.deals.map(({ id, title, email, stage, formResponseRef }) => ({ id, title, email, stage, formResponseRef }));
+  const dealStages = !restricted ? (reviewData.pipelines.length ? labeledStages(reviewData.pipelines) : reviewData.stages) : changeable.length ? labeledStages(changeable) : [];
+  const existingDeals = reviewData.deals.filter((deal) => !restricted || seenStages.has(deal.stage)).map(({ id, title, email, stage, formResponseRef }) => ({ id, title, email, stage, formResponseRef }));
   const dealAssignees = team ? [...new Set([store.email, ...team.members.filter(member => can(member.role, "orders")).map(member => member.email)])] : [];
   const saved: SavedForm[] = await Promise.all(
     forms.map(async (form) => {

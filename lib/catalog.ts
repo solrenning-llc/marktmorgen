@@ -202,7 +202,8 @@ export type Product = {
   keys: KeySetup | null;
   /**
    * Whether a PDF it delivers is stamped with the buyer's email on every
-   * page when it is downloaded (lib/pdf-stamp.ts).
+   * page when it is downloaded, and an EPUB marked with it inside the book
+   * (lib/pdf-stamp.ts).
    */
   stamp: boolean;
   /**

@@ -222,6 +222,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/release": row("settings", execute, "Lets go of an old address for good."),
   "POST store/rename": row("settings", execute, "Moves the store's public address, which links elsewhere point to."),
   "POST store/resend": row("buyers", execute, "Sends a buyer their purchase email again."),
+  "POST store/review-summary": row("community", read),
   "POST store/reviews": row("community", draft),
   "POST store/sale": row("offers", draft),
   "POST store/save-offer": row("offers", draft),

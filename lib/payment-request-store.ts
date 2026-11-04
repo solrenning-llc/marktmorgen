@@ -316,7 +316,7 @@ const intentOf = (value: unknown): string =>
  * is. A payment that comes in after the request expired or was withdrawn
  * still paid it (its checkout was opened while it was open), so it is paid.
  */
-export async function markPaid(store: Pick<Store, "sid">, id: string, session: PaidSession, now = Date.now()): Promise<{ request: PaymentRequest; fresh: boolean } | null> {
+export async function markPaid(store: Store, id: string, session: PaidSession, now = Date.now()): Promise<{ request: PaymentRequest; fresh: boolean } | null> {
   const done = await changeRequest(store, id, (request) => {
     if (request.state === "paid" || request.state === "refunded") return { next: null, answer: false };
     const paid: PaymentRequest = {
@@ -331,7 +331,15 @@ export async function markPaid(store: Pick<Store, "sid">, id: string, session: P
     };
     return { next: paid, answer: true };
   }, now);
-  return done ? { request: done.request, fresh: done.answer } : null;
+  if (!done) return null;
+  // 635 [GL3]: the first time it is written as paid, however that was learned, the workflow that starts on it,
+  // for the person it was sent to, only while on the list (lib/payment-flow-trigger.ts; never throws). Loaded
+  // here, not at the top, so the payment path and the workflows never load each other.
+  if (done.answer) {
+    const { paymentRequestPaid } = await import("@/lib/payment-flow-trigger");
+    await paymentRequestPaid(store, done.request.email);
+  }
+  return { request: done.request, fresh: done.answer };
 }
 
 /** Requests whose reminder is due, at most `limit`, as "<sid>|<id>". */

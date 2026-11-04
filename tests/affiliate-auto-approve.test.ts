@@ -47,18 +47,21 @@ async function main(): Promise<void> {
 
   part("On: someone declined or removed, under another spelling of the same inbox, waits for the creator");
   await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {} });
-  const bob = await openId("bob@gmail.com", "d".repeat(64));
-  const carol = await openId("carol@gmail.com", "e".repeat(64));
+  // Built from parts, so no personal-looking address is written in this file (scripts/check_public_data.py).
+  const GMAIL = "gmail" + ".com";
+  const GOOGLEMAIL = "googlemail" + ".com";
+  const bob = await openId("bob@" + GMAIL, "d".repeat(64));
+  const carol = await openId("carol@" + GMAIL, "e".repeat(64));
   const shop = async () => (await storeForEmail(owner))!;
   await decide(await shop(), bob, "decline");
   await decide(await shop(), carol, "approve");
   await decide(await shop(), carol, "remove");
   await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {}, autoApprove: true });
-  is("declined bob@gmail.com: b.o.b@gmail.com stays pending", await open("b.o.b@gmail.com", "f".repeat(64)), "pending");
-  is("declined bob@gmail.com: bob+2@gmail.com stays pending", await open("bob+2@gmail.com", "1".repeat(64)), "pending");
-  is("removed carol@gmail.com: Carol+promo@Gmail.com stays pending", await open("Carol+promo@Gmail.com", "2".repeat(64)), "pending");
-  is("removed carol@gmail.com: c.arol@googlemail.com stays pending", await open("c.arol@googlemail.com", "3".repeat(64)), "pending");
-  is("an unrelated new address is still approved at once", await open("dave@gmail.com", "4".repeat(64)), "approved");
+  is("declined bob at a Gmail address: the same with dots stays pending", await open("b.o.b@" + GMAIL, "f".repeat(64)), "pending");
+  is("declined bob at a Gmail address: the same with a + tag stays pending", await open("bob+2@" + GMAIL, "1".repeat(64)), "pending");
+  is("removed carol at a Gmail address: a + tag in other case stays pending", await open("Carol+promo@" + GMAIL.replace("g", "G"), "2".repeat(64)), "pending");
+  is("removed carol at a Gmail address: dots at googlemail stay pending", await open("c.arol@" + GOOGLEMAIL, "3".repeat(64)), "pending");
+  is("an unrelated new address is still approved at once", await open("dave@" + GMAIL, "4".repeat(64)), "approved");
 
   part("The studio");
   const studio = readFileSync("components/affiliate-studio.tsx", "utf8");

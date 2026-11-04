@@ -36,6 +36,10 @@
  * charge as partial would leave a buyer whose bank took the whole payment
  * back through an exchange rate with everything (inbox C4-9); no tolerance
  * is invented, so a lost dispute is read as the whole payment taken back.
+ * The owner confirmed this rule on 4 November 2026 (inbox C4-13): a dispute
+ * closed as lost closes the whole order, whatever its amount, because the
+ * bank gave the money back to the buyer and Stripe does not say which part
+ * of the order was disputed.
  *
  * On the current API Stripe does not send a charge's dispute with it, so
  * refundedInFull() alone sees refunds only. Disputes are seen only through
@@ -110,7 +114,8 @@ const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
 /**
  * Whether the bank took this payment back from the creator for good: a
  * dispute on its charge that Stripe has closed as lost, whatever its amount
- * (the header says why). Takes what refundedInFull() takes. Stripe marks a disputed charge with `disputed` but
+ * (the owner's rule of 4 November 2026; the header says why). Takes what
+ * refundedInFull() takes. Stripe marks a disputed charge with `disputed` but
  * no longer sends the dispute with it, and nothing can expand it, so only
  * for a charge marked disputed (rare) is Stripe asked for that charge's
  * disputes: a door reading an undisputed payment makes no extra request.
@@ -177,6 +182,8 @@ export const LOST_DISPUTE_PAGES = 3;
 
 /**
  * The disputes on the creator's account that Stripe closed as lost since
+ * (each the whole order taken back, whatever its amount: the owner's rule of
+ * 4 November 2026, in the header)
  * `since` (seconds), read from the closing events, which Stripe keeps thirty
  * days: each as a row rowGivesBack() takes, `id` the event's, `created` the
  * time it closed, `payment_intent` the payment it took back, `charge` the

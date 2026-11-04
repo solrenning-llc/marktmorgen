@@ -6167,6 +6167,8 @@ Regras: valem para estes itens todas as regras da seção SH (itens 204 a 214), 
 Estado: OR: após o Bloco A, na ordem já existente entre 206 [SH3] e 272 [HM1]; 232 [CA1] foi antecipado e não se repete; antes do Bloco B. Registro de posição; os estados e provas históricos abaixo permanecem válidos.
 Crie uma demonstração do studio (o painel do criador) que qualquer visitante abre sem cadastro, sobre a loja de demonstração rotulada como fictícia, para ver na prática como se cria um produto, uma página, uma oferta extra, uma assinatura e um e-mail. Tudo o que o visitante fizer é temporário, isolado dos dados reais, sem enviar e-mail, sem cobrar e sem chamar a IA de verdade (as respostas de IA, se mostradas, são exemplos fixos e rotulados como exemplos). Ao final, um botão leva ao cadastro. Proteja contra robôs com a proteção que já existe, coloque teto automático para o custo das sessões e meça a conversão.
 
+Andamento (Claude 4, 04/11/2026): unidade 1, desenho e regras puras, testada num PR (ramo claude4/kj1-studio-demo-rules; arquivos: docs/studio-demo.md, lib/studio-demo-rules.ts, tests/studio-demo-rules.test.ts); nada ligado (STUDIO_DEMO_ON false) até as próximas unidades e a revisão.
+
 257. [KJ2] Página de checkout com o conteúdo do criador
 
 Estado: OR: após o Bloco A, na ordem já existente entre 206 [SH3] e 272 [HM1]; 232 [CA1] foi antecipado e não se repete; antes do Bloco B. Registro de posição; os estados e provas históricos abaixo permanecem válidos.

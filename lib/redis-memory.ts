@@ -849,6 +849,10 @@ export class MemoryRedis {
       }
       case "SISMEMBER":
         return this.set(key).has(args[0]) ? 1 : 0;
+      case "SMISMEMBER": {
+        const members = this.set(key);
+        return args.map((member) => (members.has(member) ? 1 : 0));
+      }
       case "SMEMBERS":
         return [...this.set(key)];
       case "SUNION": {

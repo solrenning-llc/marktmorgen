@@ -64,7 +64,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:imports:active", "nl:imports:busy:", "nl:imports:cf:", "nl:imports:cf:lock:", "nl:imports:list:",
   "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:seen:", "nl:indexnow:sent", "nl:join:t:",
   "nl:learn:link:", "nl:learn:paid:", "nl:learn:pass:", "nl:learn:passes:", "nl:learn:rate:addr:",
-  "nl:learn:rate:ip:", "nl:leave:", "nl:lib:joined:", "nl:lib:link:", "nl:listed:", "nl:mail-check:last",
+  "nl:learn:rate:ip:", "nl:leave:", "nl:lib:joined:", "nl:lib:link:", "nl:listed:", "nl:lostdispute:cursor:", "nl:mail-check:last",
   "nl:mail-check:lock", "nl:mail:clk:", "nl:mail:day:", "nl:mail:drafts:", "nl:mail:flowq:lease",
   "nl:mail:flowstats:", "nl:mail:health:", "nl:mail:lock", "nl:mail:paused:", "nl:mail:queue",
   "nl:mail:ramp:", "nl:mail:segs:", "nl:mail:used:", "nl:manage:link:", "nl:manage:opens:",
@@ -277,6 +277,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:leave:": E,
   "nl:lib:": L, "nl:lib:joined:": L, "nl:lib:link:": X(1),
   "nl:listed:": X(8),
+  "nl:lostdispute:cursor:": X(30), // a job's place in a store's lost disputes (lib/refunds.ts), thirty days at the most
   // ---------------------------------------------------------------- m
   "nl:mail-check:last": C, "nl:mail-check:lock": C,
   "nl:mail:bc:": T("nl:mail:bcs:"), "nl:mail:bcs:": E, "nl:mail:clk:": E, "nl:mail:day:": C, "nl:mail:drafts:": E, "nl:mail:enr:": E,

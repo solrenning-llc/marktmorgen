@@ -175,16 +175,16 @@ async function main(): Promise<void> {
   part("Every path hands it on, and the pages say it");
   const calls = readFileSync("lib/calls.ts", "utf8");
   is("the sale's note is read with every paid booking", calls.includes("    due: readDue(meta),\n"), true);
-  is("the booking catch-up and the daily job hand it to the confirmation", [calls.includes("      due: call.due,\n      origin,\n    }).catch((error) => console.error(\"catching up a booking failed\""), readFileSync("lib/call-reminders.ts", "utf8").includes("              due: call.due,\n")], [true, true]);
+  is("the booking catch-up and the daily job hand it to the confirmation", [calls.includes("      due: call.due,\n      cancel: call.cancel,\n      origin,\n    }).catch((error) => console.error(\"catching up a booking failed\""), readFileSync("lib/call-reminders.ts", "utf8").includes("              due: call.due,\n")], [true, true]);
   is(
     "only an in-person booking is read for it, before the once-only mark",
-    [calls.includes('if (whereOf(product.call).kind !== "place") due = null;'), calls.indexOf("due = (await paidCall(store, session))?.due ?? null;") < calls.indexOf('const [fresh] = await orderWrite(store, [["SET", confirmedKey(session)')],
+    [calls.includes('const needDue = due === undefined && whereOf(product.call).kind === "place";'), calls.indexOf("const sale = await paidCall(store, session);") < calls.indexOf('const [fresh] = await orderWrite(store, [["SET", confirmedKey(session)')],
     [true, true],
   );
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
   is(
     "the thanks page reads it for an in-person booking, hands it on, and shows it under the address",
-    [thanks.includes("sessionId && order.state === \"paid\" && order.call && order.product.call?.place"), thanks.includes("      due,\n      origin: SITE_URL,"), thanks.indexOf("data-call-due") > thanks.indexOf("data-call-place")],
+    [thanks.includes("sessionId && order.state === \"paid\" && order.call && (order.product.call?.place || order.product.call?.cancelHours)"), thanks.includes("      due,\n      cancel,\n      origin: SITE_URL,"), thanks.indexOf("data-call-due") > thanks.indexOf("data-call-place")],
     [true, true, true],
   );
   const book = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");

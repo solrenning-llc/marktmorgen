@@ -734,3 +734,27 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
   await redisPipeline([["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]]);
   return theirs.length;
 }
+
+/**
+ * The record of sending a person to the store's connected email platform, for
+ * the copy of their data (619 [SZ3], lib/person-copy.ts): what was sent,
+ * when and what became of it. The same jobs the erasure deletes. Only reads.
+ */
+export async function syncJobsOf(statsId: string | null, email: string): Promise<JobView[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  const address = normaliseEmail(email);
+  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
+  const ids = (Array.isArray(logged) ? logged : []).map(String).slice(0, LOG_SIZE * 2);
+  if (!ids.length) return [];
+  const raws = await redisPipeline(ids.map((id) => ["GET", jobKey(id)]));
+  return raws.flatMap((raw) => {
+    try {
+      const job = JSON.parse(String(raw)) as Job;
+      if (typeof job.email !== "string" || normaliseEmail(job.email) !== address) return [];
+      const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
+      return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
+    } catch {
+      return [];
+    }
+  });
+}

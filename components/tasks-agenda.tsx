@@ -30,6 +30,11 @@ export function agendaDay(days: Readonly<Record<string, unknown>>, creatorDay: s
   return Object.prototype.hasOwnProperty.call(days, creatorDay) ? { today: creatorDay, stale: false } : { today: serverDay, stale: true };
 }
 
+/** What the agenda says when its groups are for a day that is over: which day they show, and that a new one started. */
+export function staleWords(shownDay: string): string {
+  return `Showing the tasks as of ${dayWords(shownDay)}, the day this page was opened. A new day has started since, so some may be past their date now.`;
+}
+
 /** A task in the agenda, with the address and page of the person it is about when found. */
 export type AgendaListRow = DueTask & { email: string | null; href: string };
 
@@ -45,13 +50,14 @@ export function TasksAgendaList({ rows, days, serverDay, found }: { rows: Agenda
   const groups = days[today] ?? [];
   return (
     <>
+      {/* Always there, so a screen reader hears the sentence when it appears; the button stays outside it. */}
+      <div role="status" className={stale ? "notice notice-info mt-4" : undefined}>
+        {stale ? staleWords(today) : null}
+      </div>
       {stale ? (
-        <p className="notice notice-info mt-4" role="status">
-          {"A new day has started since this page was opened, so these groups may be out of date. "}
-          <button type="button" className="btn btn-secondary btn-sm ml-1" onClick={() => window.location.reload()}>
-            Reload the tasks
-          </button>
-        </p>
+        <button type="button" className="btn btn-secondary btn-sm mt-3" onClick={() => window.location.reload()}>
+          Reload the tasks
+        </button>
       ) : null}
       {groups.map((group) => (
         <div key={group.key} className="mt-6">

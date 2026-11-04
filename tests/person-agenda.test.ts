@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { type AgendaListRow, TasksAgendaList, agendaDay, agendaLinkWords } from "@/components/tasks-agenda";
+import { type AgendaListRow, TasksAgendaList, agendaDay, agendaLinkWords, staleWords } from "@/components/tasks-agenda";
 import { AGENDA_SHOWN, PERSON_KEY, addressForPerson, addressesOf, agendaForDays, agendaGroups, daysAround } from "@/lib/person-agenda";
 import { personKey } from "@/lib/person-key";
 import type { DueTask, PersonTask } from "@/lib/person-tasks";
@@ -65,8 +65,14 @@ async function main() {
   part("A page left open, and its links (edge review)");
   is("a day the server made the groups for is drawn as it is", agendaDay(agenda.days, "2026-11-05", "2026-11-04"), { today: "2026-11-05", stale: false });
   is("two midnights later the groups are out of date, and it is said, never guessed", [agendaDay(agenda.days, "2026-11-06", "2026-11-04"), agendaDay(agenda.days, "__proto__", "2026-11-04").stale], [{ today: "2026-11-04", stale: true }, true]);
-  is("the creator is offered to read them again, never moved by the page on its own", list.includes("A new day has started since this page was opened") && list.includes("onClick={() => window.location.reload()}") && !list.includes("router.refresh()"), true);
+  is("the creator is offered to read them again, never moved by the page on its own", list.includes("onClick={() => window.location.reload()}") && !list.includes("router.refresh()"), true);
+  // Drawn for a day the groups were not made for, as a page left open two midnights later is.
+  const late = drawn("2026-11-09");
+  is("a status region is there before anything is said (round 2, B-M)", /^<div role="status"><\/div>/.test(fortaleza), true);
+  is("then it says which day the groups show and that a new one started (round 2, B-L)", late.includes('<div role="status" class="notice notice-info mt-4">Showing the tasks as of Nov 9, 2026, the day this page was opened. A new day has started since, so some may be past their date now.</div>'), true);
+  is("with the button to read them again outside the region, tall enough to tap (btn-sm, 44 px)", /<\/div><button type="button" class="btn btn-secondary btn-sm mt-3">Reload the tasks<\/button>/.test(late) && !/role="status"[^>]*>[^<]*<button/.test(late), true);
   is("the person's day moves on at midnight on its own (components/person-tasks.tsx, watchDay)", readFileSync("components/person-tasks.tsx", "utf8").includes("useSyncExternalStore(watchBrowserDay,"), true);
+  is("the sentence names the day, in words", staleWords("2026-11-04").startsWith("Showing the tasks as of Nov 4, 2026,"), true);
   is("a link's own words say where it goes, not an address alone", [agendaLinkWords("ann@example.com"), fortaleza.includes(">Open the buyer page of ann@example.com</a>")], ["Open the buyer page of ann@example.com", true]);
 
   part("The deals page's day (edge review)");

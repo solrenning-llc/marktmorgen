@@ -96,7 +96,9 @@ function StageOptions({ pipelines, except }: { pipelines: readonly Pipeline[]; e
 
 export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today: serverDay, initialFilter = "all", requestHref, viewOnly, someHidden = false }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; /** The server's (UTC) day, for its own drawing; the creator's own day takes over in the browser. */ today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string; /** Pipelines this person may see but not change (639 [GL7](7)): their deals are shown without the controls that change them. */ viewOnly?: string[]; /** Someone who may not see every pipeline (639 [GL7](7)): the store's pipeline count is never said, so it cannot tell how many are hidden. */ someHidden?: boolean }) {
   // The creator's own calendar day, as on the tasks (components/person-tasks.tsx): a deal due today in Fortaleza at
-  // 22:30 is due today there, not overdue because it is already tomorrow in UTC.
+  // 22:30 is due today there, not overdue because it is already tomorrow in UTC. Where the creator's day is not the
+  // server's, the follow-up counts are drawn once with the server's and again at once in the browser: a single
+  // change after the page loads, never a mismatch with the server's drawing.
   const today = useCreatorDay(serverDay);
   const router = useRouter();
   const pipelines: Pipeline[] = savedPipelines?.length ? savedPipelines : [firstPipeline(everyStage)];

@@ -21,3 +21,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex D | 474 [TX4]: official U.S. federal filing evidence | codex/d-tx4-us-filing-evidence | `docs/llc-fixed-costs-2026-10-22.md`, `tests/tx4-us-filing-evidence.test.ts` | 04/11/2026 |
 | Codex H | 310 [AX2]: help links reveal answers hidden by search; malformed fragments stay harmless | codex/h-help-navigation | `components/help-search.tsx`, `tests/help-search-navigation.test.ts`, `tests/e2e/accessibility-public-matrix.mjs` | 04/11/2026 |
 | Codex H | 310 [AX2]: copied answer links preserve native modified navigation | codex/h-copy-link-native | `components/copy-link.tsx`, `tests/copy-link-native.test.ts` | 04/11/2026 |
+| Codex F | 476 [TX6]: residual tax risks, aggravating facts and design mitigations; historical research preserved | codex/f-tax-residual-risks | `docs/tax-uncertainty.md`, `tests/tax-residual-risks.test.ts` | 04/11/2026 |

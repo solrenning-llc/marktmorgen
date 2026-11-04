@@ -75,7 +75,7 @@ const MAILS: Record<string, unknown> = {
     reply_to: ["Sam at work <sam@work.example.org>"],
     subject: "",
     text: null,
-    html: "<div>Only a page<br>two lines &amp; a sign</div>",
+    html: "<div>Only a page<br>two lines &amp; a sign<br>written as &amp;lt;b&amp;gt;</div>",
     headers: {},
   },
   // Written to another site that receives through the same Resend account.
@@ -211,7 +211,8 @@ async function main(): Promise<void> {
   await POST(announce(C));
   const page = sent[1]?.body;
   is("the name, the reply address and a subject", [page?.from, page?.reply_to, page?.subject], ['"Sam via Marktmorgen" <support@marktmorgen.com>', "sam@work.example.org", "(no subject)"]);
-  is("the page is read out as text", page?.text, "From: Sam <sam@example.org>\nTo: hello@marktmorgen.com\n\nOnly a page\ntwo lines & a sign");
+  is("the page is read out as text", page?.text, "From: Sam <sam@example.org>\nTo: hello@marktmorgen.com\n\nOnly a page\ntwo lines & a sign\nwritten as &lt;b&gt;");
+  // Each entity is read once: an escaped "&amp;lt;b&amp;gt;" stays the words "&lt;b&gt;", never a tag.
   is("no files: none sent", page?.attachments, undefined);
 
   part("A message written to another site of ours");

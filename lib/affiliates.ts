@@ -75,7 +75,7 @@
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPayPalRefunds } from "@/lib/paypal-sales";
-import { saleHandles } from "@/lib/store";
+import { saleHandles, storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -915,10 +915,21 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
   // approval email with their link goes as usual. Only a new application; someone declined or removed stays out,
   // and so does the same inbox written another way (a dot or a "+" tag): an application whose address matches any
   // other record, declined and removed included, waits for the creator instead.
+  // The store's own address (the owner's, as it is now) waits too: the owner is never their own affiliate.
+  // The choice is read again from the store as it is now, and the application again, so a creator who turned
+  // approval off, or declined or removed this person, in the meantime is not overruled.
   const autoChosen = created && grant.k !== 1 && store.affiliates.autoApprove === true && affiliate.status === "pending";
   const knownInbox = autoChosen && (await sameInboxAsAnother(store, affiliate.email, affiliate.id));
-  const autoApproved = autoChosen && !knownInbox;
-  if (autoApproved) affiliate = (await decide(store, affiliate.id, "approve")) ?? affiliate;
+  const ownersInbox = autoChosen && canonicalEmail(affiliate.email) === canonicalEmail(store.email);
+  let autoApproved = false;
+  if (autoChosen && !knownInbox && !ownersInbox) {
+    const now = store.sid ? await storeForId(store.sid) : null;
+    const still = now?.affiliates.autoApprove === true ? await readAffiliate(store, affiliate.id) : null;
+    if (still?.status === "pending") {
+      affiliate = (await decide(store, affiliate.id, "approve")) ?? affiliate;
+      autoApproved = affiliate.status === "approved";
+    }
+  }
 
   if (created && isSenderConfigured() && grant.k !== 1) {
     const studioLink = `${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`;
@@ -933,6 +944,7 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
         ...(knownInbox
           ? ["It was not approved at once: the address matches one already on your list (including people you declined or removed), written the same way or another way, so it waits for your decision."]
           : []),
+        ...(ownersInbox ? ["It was not approved at once: it is this store's own address, so it waits for your decision."] : []),
         ...(affiliate.note ? [`Where they will share it: ${affiliate.note}`] : []),
         "",
         autoApproved ? `Remove them in your studio if you would rather not: ${studioLink}` : `Approve or decline them in your studio: ${studioLink}`,

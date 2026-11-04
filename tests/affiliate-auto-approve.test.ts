@@ -107,6 +107,18 @@ async function main(): Promise<void> {
   part("The creator is the creator however the address is written");
   is("a + tag on the store's own address is refused as the owner", await requestAffiliateLink({ store: (await storeForEmail(owner))!, email: "auto+me@example.com", note: "", ip: "203.0.113.9", origin: "https://marktmorgen.com" }), "owner");
 
+  part("Read again just before approving");
+  const stale = (await storeForEmail(owner))!;
+  await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {} });
+  await redis.pipeline([["SET", linkKey("8".repeat(64)), JSON.stringify({ s: statsId, e: "gina@example.com", n: "" }), "EX", 600]]);
+  const late = await openAffiliateLink(stale, "8".repeat(64));
+  is("approval turned off after the store was read: the application waits", late.ok ? late.affiliate.status : late.reason, "pending");
+  await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {}, autoApprove: true });
+  is("the store's own address, opened from a link, waits", await open(owner.replace("@", "+aff@"), "9".repeat(64)), "pending");
+  is("and the creator is told why", toldAbout(owner.replace("@", "+aff@")).includes("it is this store's own address, so it waits for your decision."), true);
+  const route = readFileSync("app/api/store/affiliates/open/route.ts", "utf8");
+  is("someone approved at once lands on the page that says their link is ready, not that they applied", route.includes('result.affiliate.status === "approved" ? "joined" : "applied"'), true);
+
   part("The studio");
   const studio = readFileSync("components/affiliate-studio.tsx", "utf8");
   is("a labeled switch that says what it does, no more than the code keeps", studio.includes("Approve every application at once") && studio.includes("Someone you declined or removed stays out with the same address, and an application whose address matches one on your list written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Off, each application waits for you.") && !studio.includes("Anyone you declined or removed stays out"), true);

@@ -6,3 +6,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |

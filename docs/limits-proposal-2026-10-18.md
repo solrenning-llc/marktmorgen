@@ -24,7 +24,7 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | List emails a month | none today | none today | 7,000 | 7,000 | 10,000 | 10,000 |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
 | Net with the cuts | **60.18%** | **60.44%** | **60.34%** | **60.01%** | **60.40%** | **60.00%** |
-| Every printed line at 10% / at zero | 62.04% / 62.23% | 62.50% / 62.73% | 62.76% / 63.03% | 62.73% / 63.04% | 62.79% / 63.06% | 62.70% / 63.00% |
+| Every printed line at 10% / at zero | 62.04% / 62.23% | 62.50% / 62.73% | 62.76% / 63.02% | 62.73% / 63.03% | 62.79% / 63.05% | 62.70% / 63.00% |
 | Or every printed line cut alike to | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today |
 
 ## How each line compares

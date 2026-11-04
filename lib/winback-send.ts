@@ -27,7 +27,7 @@ import { onAccount, platformKey } from "@/lib/stripe-account";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { namedPriceGone } from "@/lib/product-option";
+import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
@@ -123,6 +123,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
     if (!subId || !customer || !handles.has(meta.store ?? "") || !meta.product || meta.kind === "plan" || meta.ends_after) continue;
     const product = await readListing(store, meta.product);
     if (!product?.recurring || !canSellProduct(store, product)) continue;
+    // The price they left: one removed, or kept with nothing to hand over, is
+    // offered to nobody (owner, C2-89). Skipped before any mark, so no email
+    // is spent and no later offer is held back by ONCE_PER_DAYS.
+    if (!namedPriceOffered(product, meta.option ?? "")) continue;
     const recurring = sub.items?.data?.[0]?.price?.recurring;
     const interval = typeof recurring?.interval === "string" ? recurring.interval : product.recurring.interval;
     const count = typeof recurring?.interval_count === "number" ? recurring.interval_count : 1;
@@ -271,7 +275,8 @@ export async function openWinBack(
   // last, is not swapped for another or for the product's own price: the
   // page says that price is no longer offered, with a link to the product's page.
   if (namedPriceGone(product, grant.option)) return { ok: false, reason: "price" };
-  if (!canSellProduct(store, product)) return { ok: false, reason: "unavailable" };
+  // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
+  if (!canSellProduct(store, product) || !namedPriceOffered(product, grant.option)) return { ok: false, reason: "unavailable" };
   const option = product.options.length ? grant.option : undefined;
   try {
     // A limited product holds a unit while the checkout is open, as any other checkout does.

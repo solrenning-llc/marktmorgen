@@ -53,10 +53,13 @@ export default async function MovePage({ params, searchParams }: Params) {
   const price = invite && product && selling ? priceWords(store, product, invite.o) : null;
   const first = invite ? firstChargeAt(invite.r) : null;
   // The price the email named is gone (an option removed, even the last): said, never swapped for another (lib/move-members.ts, openMove).
-  const priceGone = Boolean(invite && product?.recurring && namedPriceGone(product, invite.o)) || status === "price";
+  const priceGone = Boolean(invite && product?.recurring && namedPriceGone(product, invite.o));
   // What stops the member here, and what happened on the last press: a refused page or too many tries leave the button.
   const blocking = !invite ? m.notices.expired : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
-  const notice = m.notices[status as keyof typeof m.notices] ?? blocking;
+  // With the price gone there is no button, so never "try again" or "press the button again": only that it is gone.
+  // "price" in the address says nothing by itself: only the product does.
+  const said = status === "price" ? undefined : m.notices[status as keyof typeof m.notices];
+  const notice = priceGone ? m.notices.price : (said ?? blocking);
   // Where the prices offered today are, when the one named is gone: the product's own page, while buyers can see it.
   const pricesLink = priceGone && product && !product.hidden ? product : null;
 
@@ -118,7 +121,7 @@ export default async function MovePage({ params, searchParams }: Params) {
               </button>
               <p className="st-muted mt-3 text-center text-sm">{m.doNothing}</p>
             </form>
-          ) : product && selling && !pricesLink ? (
+          ) : product && selling && !priceGone ? (
             <p className="mt-6 text-center text-sm">
               <Link href={productPath(store, product)} className="st-footer-link font-semibold">
                 {product.title}

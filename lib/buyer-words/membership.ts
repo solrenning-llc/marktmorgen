@@ -220,7 +220,7 @@ const en = {
 
   // ---- A membership that has ended ----------------------------------------------------------
   offerNotices: {
-    price: "The store no longer offers the price this offer was for, so it cannot be used. Nothing was charged. The product's page shows the prices offered today.",
+    price: "The store no longer offers the price this offer was for, so it cannot be used. Nothing was charged.",
     expired: "This offer has ended. You can still come back at the usual price below.",
     unavailable: "This offer cannot be used for this membership any more. You can still come back at the usual price below, if it is offered.",
     refused: "The offer could not be applied just now. You can come back at the usual price below, or reply to the email it came in.",
@@ -573,7 +573,7 @@ const es: MembershipWords = {
   backToMembership: "Volver a tu membresía",
 
   offerNotices: {
-    price: "La tienda ya no ofrece el precio para el que era esta oferta, así que no se puede usar. No se cobró nada. La página del producto muestra los precios que se ofrecen hoy.",
+    price: "La tienda ya no ofrece el precio para el que era esta oferta, así que no se puede usar. No se cobró nada.",
     expired: "Esta oferta ha terminado. Todavía puedes volver al precio habitual, abajo.",
     unavailable: "Esta oferta ya no se puede usar para esta membresía. Todavía puedes volver al precio habitual, abajo, si se ofrece.",
     refused: "No se pudo aplicar la oferta en este momento. Puedes volver al precio habitual, abajo, o responder al email en el que llegó.",
@@ -921,7 +921,7 @@ const fr: MembershipWords = {
   backToMembership: "Retour à votre abonnement",
 
   offerNotices: {
-    price: "La boutique ne propose plus le prix auquel cette offre correspondait, elle ne peut donc pas être utilisée. Rien n'a été débité. La page du produit indique les prix proposés aujourd'hui.",
+    price: "La boutique ne propose plus le prix auquel cette offre correspondait, elle ne peut donc pas être utilisée. Rien n'a été débité.",
     expired: "Cette offre est terminée. Vous pouvez toujours revenir au prix habituel ci-dessous.",
     unavailable: "Cette offre ne peut plus être utilisée pour cet abonnement. Vous pouvez toujours revenir au prix habituel ci-dessous, s'il est proposé.",
     refused: "L'offre n'a pas pu être appliquée pour le moment. Vous pouvez revenir au prix habituel ci-dessous, ou répondre à l'e-mail dans lequel elle est arrivée.",
@@ -1274,7 +1274,7 @@ const de: MembershipWords = {
   backToMembership: "Zurück zu Ihrer Mitgliedschaft",
 
   offerNotices: {
-    price: "Der Shop bietet den Preis, für den dieses Angebot galt, nicht mehr an, deshalb kann es nicht genutzt werden. Es wurde nichts berechnet. Auf der Seite des Produkts sehen Sie die Preise, die heute angeboten werden.",
+    price: "Der Shop bietet den Preis, für den dieses Angebot galt, nicht mehr an, deshalb kann es nicht genutzt werden. Es wurde nichts berechnet.",
     expired: "Dieses Angebot ist abgelaufen. Sie können unten weiterhin zum normalen Preis zurückkehren.",
     unavailable:
       "Dieses Angebot kann für diese Mitgliedschaft nicht mehr genutzt werden. Sie können unten weiterhin zum normalen Preis zurückkehren, falls er angeboten wird.",
@@ -1628,7 +1628,7 @@ const it: MembershipWords = {
   backToMembership: "Torna al tuo abbonamento",
 
   offerNotices: {
-    price: "Il negozio non offre più il prezzo a cui si riferiva questa offerta, quindi non può essere usata. Non è stato addebitato nulla. La pagina del prodotto mostra i prezzi offerti oggi.",
+    price: "Il negozio non offre più il prezzo a cui si riferiva questa offerta, quindi non può essere usata. Non è stato addebitato nulla.",
     expired: "Questa offerta è terminata. Puoi comunque tornare al prezzo normale qui sotto.",
     unavailable: "Questa offerta non può più essere usata per questo abbonamento. Puoi comunque tornare al prezzo normale qui sotto, se è offerto.",
     refused: "Non è stato possibile applicare l'offerta in questo momento. Puoi tornare al prezzo normale qui sotto, o rispondere all'email con cui è arrivata.",
@@ -1973,7 +1973,7 @@ const nl: MembershipWords = {
   backToMembership: "Terug naar je lidmaatschap",
 
   offerNotices: {
-    price: "De winkel biedt de prijs waarvoor dit aanbod was niet meer aan, dus het kan niet worden gebruikt. Er is niets afgeschreven. Op de pagina van het product staan de prijzen die vandaag worden aangeboden.",
+    price: "De winkel biedt de prijs waarvoor dit aanbod gold niet meer aan, dus het kan niet worden gebruikt. Er is niets afgeschreven.",
     expired: "Dit aanbod is afgelopen. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs.",
     unavailable: "Dit aanbod kan niet meer voor dit lidmaatschap worden gebruikt. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs, als die wordt aangeboden.",
     refused: "Het aanbod kon nu niet worden toegepast. Je kunt hieronder terugkomen tegen de gewone prijs, of de e-mail beantwoorden waarin het kwam.",
@@ -2316,7 +2316,7 @@ const pt: MembershipWords = {
   backToMembership: "Voltar à sua subscrição",
 
   offerNotices: {
-    price: "A loja já não oferece o preço a que esta oferta se referia, por isso não pode ser usada. Não foi cobrado nada. A página do produto mostra os preços oferecidos hoje.",
+    price: "A loja já não oferece o preço a que esta oferta se referia, por isso não pode ser usada. Não foi cobrado nada.",
     expired: "Esta oferta terminou. Ainda pode voltar ao preço habitual, abaixo.",
     unavailable: "Esta oferta já não pode ser usada nesta subscrição. Ainda pode voltar ao preço habitual, abaixo, se estiver disponível.",
     refused: "Não foi possível aplicar a oferta neste momento. Pode voltar ao preço habitual, abaixo, ou responder ao email em que ela chegou.",

@@ -22,7 +22,7 @@ import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { namedPriceGone } from "@/lib/product-option";
+import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { onAccount } from "@/lib/stripe-account";
 import { storeBase } from "@/lib/purchase-email";
@@ -151,7 +151,8 @@ export async function noteKept(store: Store, email: string, productId: string, n
 export function priceWords(store: Store, product: Listing, optionId: string): { amount: string; line: string } | null {
   if (!product.recurring) return null;
   // The price the email named, or nothing: never another option, nor the product's own price once its option is gone.
-  if (namedPriceGone(product, optionId)) return null;
+  // Nor one kept with nothing to hand over: the checkout does not offer it.
+  if (!namedPriceOffered(product, optionId)) return null;
   const option = product.options.find((o) => o.id === optionId) ?? null;
   const say = speech(store);
   const regular = option ? option.priceCents : product.priceCents;
@@ -280,7 +281,8 @@ export async function openMove(
   // is not swapped for another or for the product's own price: the page says
   // that price is no longer offered, with a link to the product's page.
   if (namedPriceGone(product, invite.o)) return { ok: false, reason: "price" };
-  if (!canSellProduct(store, product)) return { ok: false, reason: "unavailable" };
+  // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
+  if (!canSellProduct(store, product) || !namedPriceOffered(product, invite.o)) return { ok: false, reason: "unavailable" };
   const option = product.options.length ? invite.o : undefined;
   try {
     const held = await withStockHold(store, product, (holding) =>

@@ -29,7 +29,7 @@ const en = {
   notices: {
     expired: { title: "This link no longer works", body: "It was for one person and one membership, for a limited time. The store's page has the membership, if you would like to join." },
     unavailable: { title: "This membership is not on sale just now", body: "Nothing was charged. The store's owner can tell you more." },
-    price: { title: "This price is no longer offered", body: "The store no longer offers the price this link was for, so it cannot keep your membership at that price. Nothing was charged. The product's page shows the prices offered today." },
+    price: { title: "This price is no longer offered", body: "The store no longer offers the price this link was for, so it cannot keep your membership at that price. Nothing was charged." },
     refused: { title: "The payment page could not be opened", body: "Nothing was charged. Try again in a few minutes." },
     limited: { title: "That was a lot of tries", body: "Nothing was charged. Wait a few minutes and press the button again." },
   } satisfies Record<string, Notice>,
@@ -68,7 +68,7 @@ const es: MoveWords = {
   notices: {
     expired: { title: "Este enlace ya no funciona", body: "Era para una persona y una membresía, durante un tiempo limitado. La página de la tienda tiene la membresía, si quieres unirte." },
     unavailable: { title: "Esta membresía no está a la venta ahora mismo", body: "No se cobró nada. El dueño de la tienda puede darte más información." },
-    price: { title: "Este precio ya no se ofrece", body: "La tienda ya no ofrece el precio para el que era este enlace, así que no puede conservar tu membresía a ese precio. No se cobró nada. La página del producto muestra los precios que se ofrecen hoy." },
+    price: { title: "Este precio ya no se ofrece", body: "La tienda ya no ofrece el precio para el que era este enlace, así que no puede conservar tu membresía a ese precio. No se cobró nada." },
     refused: { title: "No se pudo abrir la página de pago", body: "No se cobró nada. Inténtalo de nuevo en unos minutos." },
     limited: { title: "Han sido muchos intentos", body: "No se cobró nada. Espera unos minutos y pulsa el botón otra vez." },
   },
@@ -103,7 +103,7 @@ const fr: MoveWords = {
   notices: {
     expired: { title: "Ce lien ne fonctionne plus", body: "Il était destiné à une personne et à un abonnement, pour une durée limitée. La page de la boutique propose l'abonnement, si vous souhaitez le rejoindre." },
     unavailable: { title: "Cet abonnement n'est pas en vente pour le moment", body: "Rien n'a été débité. Le propriétaire de la boutique peut vous en dire plus." },
-    price: { title: "Ce prix n'est plus proposé", body: "La boutique ne propose plus le prix auquel ce lien correspondait, il ne peut donc pas garder votre abonnement à ce prix. Rien n'a été débité. La page du produit indique les prix proposés aujourd'hui." },
+    price: { title: "Ce prix n'est plus proposé", body: "La boutique ne propose plus le prix auquel ce lien correspondait, il ne peut donc pas garder votre abonnement à ce prix. Rien n'a été débité." },
     refused: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été débité. Réessayez dans quelques minutes." },
     limited: { title: "Cela fait beaucoup d'essais", body: "Rien n'a été débité. Patientez quelques minutes puis appuyez de nouveau sur le bouton." },
   },
@@ -138,7 +138,7 @@ const de: MoveWords = {
   notices: {
     expired: { title: "Dieser Link funktioniert nicht mehr", body: "Er galt für eine Person und eine Mitgliedschaft, für begrenzte Zeit. Auf der Seite des Shops finden Sie die Mitgliedschaft, wenn Sie beitreten möchten." },
     unavailable: { title: "Diese Mitgliedschaft wird gerade nicht angeboten", body: "Es wurde nichts berechnet. Der Inhaber des Shops kann Ihnen mehr sagen." },
-    price: { title: "Dieser Preis wird nicht mehr angeboten", body: "Der Shop bietet den Preis, für den dieser Link galt, nicht mehr an, deshalb kann er Ihre Mitgliedschaft nicht zu diesem Preis fortführen. Es wurde nichts berechnet. Auf der Seite des Produkts sehen Sie die Preise, die heute angeboten werden." },
+    price: { title: "Dieser Preis wird nicht mehr angeboten", body: "Der Shop bietet den Preis, für den dieser Link galt, nicht mehr an, deshalb kann er Ihre Mitgliedschaft nicht zu diesem Preis fortführen. Es wurde nichts berechnet." },
     refused: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es in ein paar Minuten noch einmal." },
     limited: { title: "Das waren viele Versuche", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und drücken Sie dann erneut auf die Schaltfläche." },
   },
@@ -173,7 +173,7 @@ const it: MoveWords = {
   notices: {
     expired: { title: "Questo link non funziona più", body: "Era per una persona e un abbonamento, per un tempo limitato. La pagina del negozio ha l'abbonamento, se vuoi iscriverti." },
     unavailable: { title: "Questo abbonamento al momento non è in vendita", body: "Non è stato addebitato nulla. Il proprietario del negozio può darti più informazioni." },
-    price: { title: "Questo prezzo non è più offerto", body: "Il negozio non offre più il prezzo a cui si riferiva questo link, quindi non può mantenere il tuo abbonamento a quel prezzo. Non è stato addebitato nulla. La pagina del prodotto mostra i prezzi offerti oggi." },
+    price: { title: "Questo prezzo non è più offerto", body: "Il negozio non offre più il prezzo a cui si riferiva questo link, quindi non può mantenere il tuo abbonamento a quel prezzo. Non è stato addebitato nulla." },
     refused: { title: "Non è stato possibile aprire la pagina di pagamento", body: "Non è stato addebitato nulla. Riprova tra qualche minuto." },
     limited: { title: "Sono stati molti tentativi", body: "Non è stato addebitato nulla. Aspetta qualche minuto e premi di nuovo il pulsante." },
   },
@@ -208,7 +208,7 @@ const nl: MoveWords = {
   notices: {
     expired: { title: "Deze link werkt niet meer", body: "Hij was voor één persoon en één lidmaatschap, voor beperkte tijd. Op de pagina van de winkel staat het lidmaatschap, als je lid wilt worden." },
     unavailable: { title: "Dit lidmaatschap is nu niet te koop", body: "Er is niets afgeschreven. De eigenaar van de winkel kan je meer vertellen." },
-    price: { title: "Deze prijs wordt niet meer aangeboden", body: "De winkel biedt de prijs waarvoor deze link was niet meer aan, dus hij kan je lidmaatschap niet tegen die prijs houden. Er is niets afgeschreven. Op de pagina van het product staan de prijzen die vandaag worden aangeboden." },
+    price: { title: "Deze prijs wordt niet meer aangeboden", body: "De winkel biedt de prijs waarvoor deze link was niet meer aan, dus hij kan je lidmaatschap niet tegen die prijs houden. Er is niets afgeschreven." },
     refused: { title: "De betaalpagina kon niet worden geopend", body: "Er is niets afgeschreven. Probeer het over een paar minuten opnieuw." },
     limited: { title: "Dat waren veel pogingen", body: "Er is niets afgeschreven. Wacht een paar minuten en druk dan opnieuw op de knop." },
   },
@@ -243,7 +243,7 @@ const pt: MoveWords = {
   notices: {
     expired: { title: "Esta ligação já não funciona", body: "Era para uma pessoa e uma subscrição, por tempo limitado. A página da loja tem a subscrição, se quiser aderir." },
     unavailable: { title: "Esta subscrição não está à venda neste momento", body: "Não foi cobrado nada. O proprietário da loja pode dar-lhe mais informações." },
-    price: { title: "Este preço já não é oferecido", body: "A loja já não oferece o preço a que esta ligação se referia, por isso não pode manter a sua subscrição a esse preço. Não foi cobrado nada. A página do produto mostra os preços oferecidos hoje." },
+    price: { title: "Este preço já não é oferecido", body: "A loja já não oferece o preço a que esta ligação se referia, por isso não pode manter a sua subscrição a esse preço. Não foi cobrado nada." },
     refused: { title: "Não foi possível abrir a página de pagamento", body: "Não foi cobrado nada. Tente novamente dentro de alguns minutos." },
     limited: { title: "Foram muitas tentativas", body: "Não foi cobrado nada. Aguarde alguns minutos e prima o botão novamente." },
   },

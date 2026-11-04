@@ -257,6 +257,18 @@ export function namedPriceGone(product: { options: { id: string }[] }, optionId:
   return optionId ? !product.options.some((option) => option.id === optionId) : product.options.length > 0;
 }
 
+/**
+ * Whether the price an email named can be bought today: not gone
+ * (namedPriceGone), and, when it names an option, that option is one the
+ * checkout offers (sellableOptions: it hands something over). An option kept
+ * with nothing to hand over is not a price on sale: the link opens nothing
+ * and no email or reminder names it.
+ */
+export function namedPriceOffered(product: Listing, optionId: string): boolean {
+  if (namedPriceGone(product, optionId)) return false;
+  return !optionId || sellableOptions(product).some((option) => option.id === optionId);
+}
+
 /** The option to have chosen when the page opens: the creator's pick, else the first. */
 export function startingOption(options: ProductOption[]): ProductOption | null {
   return options.find((option) => option.best) ?? options[0] ?? null;

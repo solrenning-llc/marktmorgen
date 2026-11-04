@@ -10,11 +10,11 @@
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { addOption, addProduct, claimHandle, ensureStatsId, removeOption, setLanguage, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureStatsId, removeOption, setLanguage, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { inviteEmail, inviteMembers, openMove, priceWords, readInvite } from "@/lib/move-members";
 import { openWinBack } from "@/lib/winback-send";
-import { namedPriceGone } from "@/lib/product-option";
+import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { moveWords } from "@/lib/buyer-words/move";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { LANGUAGES } from "@/lib/store-language";
@@ -72,19 +72,24 @@ async function main(): Promise<void> {
   await setProductLink(OWNER, id, "https://example.com/club");
   await addOption(OWNER, id, "Basic", "19");
   await addOption(OWNER, id, "Plus", "39");
+  // Kept with nothing to hand over yet: not offered by the checkout.
+  await addOption(OWNER, id, "Bare", "49");
   let store = (await storeForEmail(OWNER))!;
-  const [basic, plus] = (await readProduct(store, id))!.options.map((o) => o.id);
+  const [basic, plus, bare] = (await readProduct(store, id))!.options.map((o) => o.id);
   await setProductLink(OWNER, basic, "https://example.com/basic");
   await setProductLink(OWNER, plus, "https://example.com/plus");
   store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
 
   const renews = nowS + 20 * DAY;
-  const [plusField, basicField] = await inviteMembers(store, "job_pricegone", [
+  const [plusField, basicField, bareField] = await inviteMembers(store, "job_pricegone", [
     { email: "ada@example.com", productId: id, option: plus, renews },
     { email: "ben@example.com", productId: id, option: basic, renews },
+    { email: "cy@example.com", productId: id, option: bare, renews },
   ]);
-  if (!plusField || !basicField) throw new Error("not invited");
+  if (!plusField || !basicField || !bareField) throw new Error("not invited");
+  const bareInvite = (await readInvite(statsId, bareField))!;
+  const bareOffer = await comeBackOffer(statsId, id, bare);
   const plusInvite = (await readInvite(statsId, plusField))!;
   const basicInvite = (await readInvite(statsId, basicField))!;
   const plusOffer = await comeBackOffer(statsId, id, plus);
@@ -96,10 +101,22 @@ async function main(): Promise<void> {
   const backPlus = await openWinBack(store, id, plusOffer, "https://marktmorgen.com", TEST_CONSENT);
   is("the come-back offer opens Plus", [backPlus.ok, checkouts.at(-1)?.get("metadata[option]")], [true, plus]);
 
+  part("An option kept with nothing to hand over");
+  let product = (await readProduct(store, id))!;
+  const atStart = checkouts.length;
+  const moveBare = await openMove(store, id, bareInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  const backBare = await openWinBack(store, id, bareOffer, "https://marktmorgen.com", TEST_CONSENT);
+  is("not on sale: the general answer, never \"refused\" for ever nor \"price\", and no checkout", [namedPriceOffered(product, bare), moveBare.ok ? "opened" : moveBare.reason, backBare.ok ? "opened" : backBare.reason, checkouts.length], [false, "unavailable", "unavailable", atStart]);
+  is("no email or reminder names it", [priceWords(store, product, bare), await inviteEmail(store, bareField)], [null, null]);
+  const bareBack = await page(RenewPage, "pricegone", id, { back: bareOffer });
+  is("its come-back page offers nothing and says so, not that the offer ended", [bareBack.includes(membershipWords("en").comeBackWith), bareBack.includes(membershipWords("en").offerNotices.unavailable.replace(/'/g, "&#x27;")), bareBack.includes("This offer has ended")], [false, true, false]);
+  await removeOption(OWNER, bare);
+  store = (await storeForEmail(OWNER))!;
+
   part("One of several removed");
   await removeOption(OWNER, plus);
   store = (await storeForEmail(OWNER))!;
-  let product = (await readProduct(store, id))!;
+  product = (await readProduct(store, id))!;
   const before = checkouts.length;
   const move1 = await openMove(store, id, plusInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
   const back1 = await openWinBack(store, id, plusOffer, "https://marktmorgen.com", TEST_CONSENT);
@@ -107,6 +124,13 @@ async function main(): Promise<void> {
   is("no email or reminder names another price", [priceWords(store, product, plus), await inviteEmail(store, plusField)], [null, null]);
   is("Basic's link still opens at Basic", (await openMove(store, id, basicInvite.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT)).ok, true);
   checkouts.length = before;
+  const links = (html: string) => html.split(`href="/@pricegone/p/`).length - 1;
+  const plusBack = await page(RenewPage, "pricegone", id, { back: plusOffer });
+  is("the come-back page: no checkout form and no Renew button, one link to the product's page", [plusBack.includes(`action="/api/store/checkout"`), plusBack.includes(`action="/api/store/come-back/open"`), plusBack.includes("Renew The Inner Circle"), links(plusBack)], [false, false, false, 1]);
+  const limitedMove = await page(MovePage, "pricegone", id, { k: plusInvite.t, status: "limited" });
+  is("the moving-in page with the price gone never says to press a button that is not there", [limitedMove.includes(moveWords("en").notices.price.title), limitedMove.includes(moveWords("en").notices.limited.title), limitedMove.includes(moveWords("en").notices.refused.title)], [true, false, false]);
+  const stillOffered = await page(RenewPage, "pricegone", id, { back: basicOffer, status: "price" });
+  is("a price still offered: \"status=price\" in the address alone says nothing is gone", [stillOffered.includes(membershipWords("en").offerNotices.price.replace(/'/g, "&#x27;")), stillOffered.includes(`action="/api/store/come-back/open"`)], [false, true]);
 
   part("The last one removed");
   await removeOption(OWNER, basic);
@@ -117,6 +141,8 @@ async function main(): Promise<void> {
   const back2 = await openWinBack(store, id, basicOffer, "https://marktmorgen.com", TEST_CONSENT);
   is("neither opens at the product's own price: both say the price is gone", [move2.ok ? "opened" : move2.reason, back2.ok ? "opened" : back2.reason, checkouts.length], ["price", "price", before]);
   is("and no email or reminder names the product's own price instead", [priceWords(store, product, basic), await inviteEmail(store, basicField)], [null, null]);
+  const lastBack = await page(RenewPage, "pricegone", id, { back: basicOffer });
+  is("the come-back page: no checkout form at the product's own price, one link to the product's page", [lastBack.includes(`action="/api/store/checkout"`), lastBack.includes("$29 a month"), links(lastBack)], [false, false, 1]);
 
   part("The pages, in every language");
   for (const language of Object.keys(LANGUAGES) as (keyof typeof LANGUAGES)[]) {
@@ -134,6 +160,12 @@ async function main(): Promise<void> {
     is(`${language}: the come-back page says the price is no longer offered, with no offer button`, [renewed.includes(escaped(w.offerNotices.price)), renewed.includes(escaped(w.comeBackWith))], [true, false]);
     is(`${language}: with a link to the product's page that says what it is for`, renewed.includes(escaped(w.seePrices("The Inner Circle"))), true);
   }
+  part("A draft");
+  await setLanguage(OWNER, "en");
+  await setProductHidden(OWNER, id, true);
+  const draftMove = await page(MovePage, "pricegone", id, { k: basicInvite.t });
+  const draftBack = await page(RenewPage, "pricegone", id, { back: basicOffer });
+  is("no page buyers can open, so no link and no word of one", [links(draftMove), links(draftBack), /product(&#x27;|')s page/.test(draftMove + draftBack), draftMove.includes(moveWords("en").notices.price.title)], [0, 0, false, true]);
   is("every language says it, in its own words", new Set(Object.keys(LANGUAGES).map((l) => moveWords(l).notices.price.title)).size, Object.keys(LANGUAGES).length);
 
   done();

@@ -360,8 +360,9 @@ export function optionRemovalWords(
     );
     // lib/move-members.ts openMove and lib/winback-send.ts: an invitation or offer names its option, and one gone,
     // even the last, is never swapped for another price (owner, C2-89): its page says so, with a link to the product's page.
+    // A draft has no page buyers can open, so no link is promised for it.
     said.push(
-      "Anyone with an unused invitation for it (sent to members moving here from another platform) or an unused come-back offer for it is told this price is no longer offered, with a link to the product's page.",
+      `Anyone with an unused invitation for it (sent to members moving here from another platform) or an unused come-back offer for it is told this price is no longer offered${product.hidden ? "" : ", with a link to the product's page"}.`,
     );
   }
   if (product.planBefore && !product.planAfter) said.push("Your payment plan stops being offered.");

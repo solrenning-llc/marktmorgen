@@ -18,10 +18,12 @@
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import {
+  addOption,
   addProduct,
   claimHandle,
   ensureListId,
   ensureStatsId,
+  removeOption,
   setProductLink,
   setStripeAccount,
   setSubscription,
@@ -31,6 +33,7 @@ import {
 import { unsubscribe, upsertContact, readUnsubToken } from "@/lib/contacts";
 import { parseWinBack, winbackOn, winbackWords } from "@/lib/winback";
 import { openWinBack, readWinBack, sendWinBacks, winbackEmail } from "@/lib/winback-send";
+import { readProduct } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -182,6 +185,29 @@ async function main(): Promise<void> {
   await sendWinBacks(Date.now() + 30_000, now);
   is("is not written to again", emails.slice(1).some((e) => e.to[0] === "dana@example.com"), false);
   is("while a one-payment offer now reaches the yearly member it could not before", emails.slice(1).map((e) => e.to[0]), ["hal@example.com"]);
+
+  part("A price since removed, or kept with nothing to hand over (owner, C2-89)");
+  // A membership at several prices: Gone is removed, Bare has no file or link, Kept is offered.
+  const tiers = await addProduct("owner@example.com", "Bread Club", "", "19", { interval: "month", trialDays: 0, payments: 0 });
+  if (!tiers.ok) throw new Error("no product");
+  for (const label of ["Gone", "Bare", "Kept"]) await addOption("owner@example.com", tiers.product.id, label, "19");
+  store = await storeForEmail("owner@example.com");
+  const [gone, bare, kept] = (await readProduct(store!, tiers.product.id))!.options.map((o) => o.id);
+  await setProductLink("owner@example.com", gone, "https://example.com/gone");
+  await setProductLink("owner@example.com", kept, "https://example.com/kept");
+  await removeOption("owner@example.com", gone);
+  for (const [id, email] of [["cus_Ivy000001", "ivy@example.com"], ["cus_Jon000001", "jon@example.com"], ["cus_Kim000001", "kim@example.com"]]) {
+    customers.set(id, email);
+    await agreed(email);
+  }
+  ended("sub_Ivy000001", "cus_Ivy000001", 8, { store: "harbor", product: tiers.product.id, option: gone });
+  ended("sub_Jon000001", "cus_Jon000001", 8, { store: "harbor", product: tiers.product.id, option: bare });
+  ended("sub_Kim000001", "cus_Kim000001", 8, { store: "harbor", product: tiers.product.id, option: kept });
+  const sentBefore = emails.length;
+  const onceBefore = redis.keys().filter((k) => k.startsWith("nl:wb:once:")).length;
+  await sendWinBacks(Date.now() + 30_000, now);
+  is("only the member whose price is still offered is written to", emails.slice(sentBefore).map((e) => e.to[0]), ["kim@example.com"]);
+  is("the others leave no mark: no email spent, no later offer held back", [redis.keys().includes("nl:wb:acct_1TestHarbor0001:sub_Ivy000001"), redis.keys().includes("nl:wb:acct_1TestHarbor0001:sub_Jon000001"), redis.keys().filter((k) => k.startsWith("nl:wb:once:")).length - onceBefore], [false, false, 1]);
 
   done();
 }

@@ -40,7 +40,7 @@ export default async function LostEmailPage({ searchParams }: { searchParams: Pr
           ) : (
             <>
               <p className="mt-1 text-sm text-ink-soft">
-                {`Type the address you log in with. If your account has a recovery address, we email a link there that lets you in at once. Your products, pages, buyers and numbers are open straight away; payments, your plan, your team, exports, settings, sending to your list and your sign-in address open ${LOCK_DAYS} days later, unless you log in with your old inbox, a passkey or your app's code before then. That wait is only for what someone who got into an old inbox could take.`}
+                {`Type the address you log in with. If your account has a recovery address, we email a link there that lets you in at once. Your products, pages, buyers and numbers are open straight away; payments, your plan, your team, exports, settings, sending to your list, deleting a person or a product and your sign-in address open ${LOCK_DAYS} days later, unless you log in with your old inbox, a passkey or your app's code before then. That wait is only for what someone who got into an old inbox could take.`}
               </p>
               <form method="post" action="/api/auth/lost" className="mt-3 space-y-3">
                 <label className="block" htmlFor="lost-email">

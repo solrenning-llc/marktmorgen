@@ -48,8 +48,9 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
 
-  // A session let in without its second step cannot add a way in of its own (lib/two-step.ts).
-  if ((body.action === "options" || body.action === "add") && (await lockedUntil(session)) > 0) {
+  // A session let in without its second step cannot add a way in of its own, nor take one away from the owner
+  // (lib/two-step.ts): removing a passkey could lock the owner out, and it cannot be undone.
+  if ((body.action === "options" || body.action === "add" || body.action === "remove") && (await lockedUntil(session)) > 0) {
     return Response.json({ ok: false, error: "locked" }, { status: 403 });
   }
   if ((body.action === "options" || body.action === "add") && !(await isFreshSession(session))) {

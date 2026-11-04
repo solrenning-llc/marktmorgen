@@ -33,9 +33,10 @@
  * When the recovery inbox is lost as well (or for an account set up before
  * there was one), the creator still gets in at once, from the same page, with
  * the emailed link alone — into a studio where what could take money, data or
- * the account itself away is locked for RESET_DAYS (LOCKED_NEEDS: payments,
+ * the account itself away is locked for RESET_DAYS (LOCKED_NEEDS and LOCKED_ACTIONS: payments,
  * the plan, the team, deleting, exports, settings, sending to the list,
- * imports, the sign-in address, passkeys, two-step login). They can sell, edit
+ * imports, deleting a person or a product, the sign-in address, passkeys,
+ * two-step login). They can sell, edit
  * their products and pages, answer buyers and read their numbers meanwhile.
  * After those days two-step login turns off and nothing is locked. In that
  * time the account is emailed, every browser still logged in shows it, and any
@@ -187,9 +188,25 @@ const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { weekday: 
 /**
  * What a session opened without the second step may not do until its days
  * are over (lib/studio-route.ts studioAccess): everything that moves money or
- * data out, changes who can get in, or cannot be undone.
+ * data out, changes who can get in, or cannot be undone. "erase" (deleting a
+ * person and everything the store keeps about them, lib/person-erasure.ts)
+ * cannot be undone, so it waits too (4 November 2026, C2-76).
  */
-export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "delete", "export", "settings", "send", "import"];
+export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "delete", "export", "settings", "send", "import", "erase"];
+
+/**
+ * Single actions under a permission the locked session otherwise keeps, that
+ * cannot be undone: removing a product deletes it, its files, its picture and
+ * its course for good (app/api/store/product, removeProduct), so it waits,
+ * while adding and editing products stay open. Keyed by permission, matched
+ * against the `action` a route passes to studioAccess.
+ */
+export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = { products: ["remove"] };
+
+/** Whether a locked session may not do `need` (with `action`, when the route names one). */
+export function lockedOut(need: string, action = ""): boolean {
+  return LOCKED_NEEDS.includes(need) || (Object.hasOwn(LOCKED_ACTIONS, need) && LOCKED_ACTIONS[need].includes(action));
+}
 
 /** Until when a session is locked, in ms, or 0 for a session that is not. */
 export async function lockedUntil(session: string | undefined, now = Date.now()): Promise<number> {
@@ -224,7 +241,7 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   await tell(
     email,
     first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
-    `Somebody who opened ${through} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, payments, your plan, your team, exports, settings, sending to your list, your sign-in address, passkeys and two-step login are locked for them; after that, two-step login turns off.
+    `Somebody who opened ${through} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, payments, your plan, your team, exports, settings, sending to your list, deleting a person or a product, your sign-in address, passkeys and two-step login are locked for them; after that, two-step login turns off.
 
 If that was you, keep working: everything else is open.
 

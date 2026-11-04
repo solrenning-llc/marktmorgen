@@ -148,7 +148,7 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
     "This link logs you in. It works once, for 15 minutes:",
     `${origin}/signin/lost/confirm?token=${token}`,
     "",
-    `Until ${LOCK_DAYS} days have passed, payments, the plan, the team, exports, settings, sending to your list and your sign-in address stay locked for a login like this; everything else is open at once. Then you can move your sign-in address to an inbox you have.`,
+    `Until ${LOCK_DAYS} days have passed, payments, the plan, the team, exports, settings, sending to your list, deleting a person or a product and your sign-in address stay locked for a login like this; everything else is open at once. Then you can move your sign-in address to an inbox you have.`,
     "",
     "If you did not ask for this, ignore it: nothing changes unless the link is used.",
   ]);

@@ -47,7 +47,7 @@ type Fonts = { sans: Uint8Array; semi: Uint8Array; serif: Uint8Array };
 let fonts: Promise<Fonts> | null = null;
 
 /** The three faces, read once per server. */
-function loadFonts(): Promise<Fonts> {
+export function loadFonts(): Promise<Fonts> {
   // Each path written out whole, so the deployment's file tracing sees them
   // (next.config.ts lists the folder too).
   fonts ??= Promise.all([

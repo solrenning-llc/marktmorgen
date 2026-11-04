@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import { PipelineAccessEditor } from "@/components/pipeline-access-editor";
+import { readPipelines } from "@/lib/crm";
+import { readAllPipelineAccess } from "@/lib/pipeline-access";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { StudioHeader } from "@/components/studio-header";
@@ -38,7 +41,14 @@ export default async function StudioTeamPage({
   }
   const { view } = found;
   const { store } = view;
-  const [team, log] = await Promise.all([readTeam(store.sid), readLog(store.sid)]);
+  const [team, log, pipelines, access] = await Promise.all([
+    readTeam(store.sid),
+    readLog(store.sid),
+    readPipelines(store.statsId).catch(() => null),
+    readAllPipelineAccess(store.statsId).catch(() => null),
+  ]);
+  // Only Editors and Support can be restricted: the owner and Admins always see and change every pipeline (639 [GL7](7)).
+  const restrictable = team.members.flatMap((m) => (m.role === "editor" || m.role === "support" ? [{ email: m.email, role: m.role }] : []));
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -65,6 +75,20 @@ export default async function StudioTeamPage({
               max={MAX_TEAM}
             />
           </div>
+
+          <section className="card mt-8 p-6 sm:p-8" aria-labelledby="pipeline-access-title">
+            <h2 id="pipeline-access-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              Who sees each sales pipeline
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm text-ink-soft">
+              Under Deals, each Editor and Support person can change every pipeline unless you choose otherwise here. Can only see shows its deals without changing them; No access hides it. Admins and you always see and change every pipeline.
+            </p>
+            {pipelines && access ? (
+              <PipelineAccessEditor members={restrictable} pipelines={pipelines.map(({ id, name }) => ({ id, name }))} initial={Object.fromEntries(restrictable.map((m) => [m.email, access[m.email] === undefined ? {} : access[m.email]]))} />
+            ) : (
+              <p className="notice notice-warn mt-4">Your pipelines or your team&apos;s access could not be read just now. Nothing was changed. Try again in a moment.</p>
+            )}
+          </section>
 
           <section className="card mt-8 p-6 sm:p-8" aria-labelledby="log-title">
             <h2 id="log-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">

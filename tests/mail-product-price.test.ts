@@ -31,7 +31,7 @@ part("One price");
 is("free: the store's word for it", label(shop(), listing({ priceCents: 0 })), "Free");
 is("one price: the price", label(shop(), listing({})), "$29");
 const until = speech(shop()).dateTime((NOW + 3 * DAY) * 1000);
-is("a store sale with days to go: the sale price and the day it ends", label(shop({ sale: sale(NOW + 3 * DAY) }), listing({})), `$23.20 sale price, until ${until}`);
+is("a store sale with days to go: the sale price and the day it ends", label(shop({ sale: sale(NOW + 3 * DAY) }), listing({})), `Sale price: $23.20, until ${until}`);
 is("the day it ends, in UTC with the zone's name", until.endsWith("UTC"), true);
 is("a sale ending within a day: the regular price", [label(shop({ sale: sale(NOW + DAY - 60) }), listing({})), label(shop({ sale: sale(NOW + MAIL_SALE_MARGIN_SECONDS) }), listing({}))], ["$29", "$29"]);
 is("a sale not covering this product: the regular price", label(shop({ sale: sale(NOW + 3 * DAY, { all: false, products: ["other12345"] }) }), listing({})), "$29");
@@ -54,6 +54,15 @@ is("pay what you want: the floor, or more", label(shop(), listing({ priceCents: 
 
 part("Tax");
 is("tax on top: said after the price", [label(shop(onTop), listing({})), label(shop(onTop), listing({ priceCents: 500, pwyw: { suggestedCents: 1500 } })), label(shop(onTop), listing({ ...monthly, priceCents: 900 }))], ["$29 + tax where it applies", "$5 or more + tax where it applies", "$9 a month + tax where it applies"]);
+is("on a sale, the tax words follow the amount, before the end date", label(shop({ ...onTop, sale: sale(NOW + 3 * DAY) }), listing({})), `Sale price: $23.20 + tax where it applies, until ${until}`);
+is("in every language, the tax words come before the end date", LANGUAGE_CODES.map((code) => {
+  const store = shop({ ...onTop, language: code, sale: sale(NOW + 3 * DAY) } as Partial<Store>);
+  const said = label(store, listing({}));
+  const { w, dateTime } = speech(store);
+  const tax = said.indexOf(w.plusTax);
+  return tax > 0 && tax < said.indexOf(dateTime((NOW + 3 * DAY) * 1000));
+}), LANGUAGE_CODES.map(() => true));
+is("German says it in full, with no abbreviation", wordsIn("de").plusTax, "plus anfallende Steuern");
 is("tax included or off: nothing added", [label(shop({ tax: { ...NO_TAX, enabled: true, included: true } }), listing({})), label(shop(), listing({}))], ["$29", "$29"]);
 is("free with tax on: still just free", label(shop(onTop), listing({ priceCents: 0 })), "Free");
 
@@ -65,7 +74,7 @@ is("the email's card keeps the price", label(fairStore, listing({})), "$29");
 
 part("In the store's language");
 const facts: PriceFacts = { free: false, priceCents: 2900, fromCents: 2900, optionCount: 0, interval: null, pwyw: true, sale: null, taxOnTop: true };
-is("German, in euros", mailPriceLabel({ language: "de", currency: "eur" }, facts, NOW), `${speech({ language: "de", currency: "eur" }).money(2900)} oder mehr zzgl. anfallender Steuern`);
+is("German, in euros", mailPriceLabel({ language: "de", currency: "eur" }, facts, NOW), `${speech({ language: "de", currency: "eur" }).money(2900)} oder mehr plus anfallende Steuern`);
 is("Portuguese, free", mailPriceLabel({ language: "pt", currency: "eur" }, { ...facts, free: true }, NOW), "Grátis");
 const keys = ["orMore", "plusTax", "salePriceUntil"];
 is("each of the 7 languages has the 3 email card words, together at the end", LANGUAGE_CODES.map((code) => Object.keys(wordsIn(code)).slice(-3)), LANGUAGE_CODES.map(() => keys));

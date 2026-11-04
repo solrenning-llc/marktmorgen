@@ -335,5 +335,5 @@ export const en = {
   // ---- Email cards (lib/mail-product-price.ts) -------------------------------------------
   orMore: (price: string) => `${price} or more`,
   plusTax: "+ tax where it applies",
-  salePriceUntil: (price: string, when: string) => `${price} sale price, until ${when}`,
+  salePriceUntil: (price: string, when: string) => `Sale price: ${price}, until ${when}`,
 };

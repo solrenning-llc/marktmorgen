@@ -82,7 +82,7 @@ const priced = (f: Partial<PriceFacts>, store = price.store) => {
 };
 is("free, one price, a membership, options, pay what you want", [priced({ free: true }), priced({}), priced({ interval: "month", priceCents: 900, fromCents: 900 }), priced({ optionCount: 3, fromCents: 1500 }), priced({ pwyw: true, priceCents: 500 })], ["Free", "$29", "$9 a month", "from $15", "$5 or more"]);
 is("tax on top is said; free stays free", [priced({ taxOnTop: true }), priced({ free: true, taxOnTop: true })], ["$29 + tax where it applies", "Free"]);
-is("a sale with more than a day to go: its price and end; within a day: the regular price", [priced({ sale: { percent: 20, ends: NOW + 2 * MAIL_SALE_MARGIN_SECONDS } })?.startsWith("$23.20 sale price, until "), priced({ sale: { percent: 20, ends: NOW + MAIL_SALE_MARGIN_SECONDS } })], [true, "$29"]);
+is("a sale with more than a day to go: its price and end; within a day: the regular price", [priced({ sale: { percent: 20, ends: NOW + 2 * MAIL_SALE_MARGIN_SECONDS } })?.startsWith("Sale price: $23.20, until "), priced({ sale: { percent: 20, ends: NOW + MAIL_SALE_MARGIN_SECONDS } })], [true, "$29"]);
 is("in the store's language", priced({ free: true }, { language: "fr", currency: "eur" }), "Gratuit");
 is("the plain text says the same price", productCardText({ ...guide, facts: { ...facts, taxOnTop: true } }, price), `Sourdough & Co guide ($29 + tax where it applies): ${guide.href}`);
 

@@ -5,6 +5,7 @@
  */
 import { addProduct, claimHandle, removeProduct, ensureStatsId, setProductBundle, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
 import { parseProduct, readListings } from "@/lib/catalog";
+import type { CallSetup } from "@/lib/call-setup";
 import { productsBuyableNow } from "@/lib/mail-product-sellable";
 import { blockProblems, leavingProducts, productsLine } from "@/lib/mail-product-block";
 import { store as redis } from "./redis-stub";
@@ -96,6 +97,44 @@ async function main(): Promise<void> {
   is("0 left is out; 1 or 3 of 3 left is in", [(await buyable([limited("limited001")])).size, (await buyable([limited("limited003")])).size, (await buyable([limited("limited002")])).size], [0, 1, 1]);
   await redis.pipeline([["HSET", `nl:stock:${STATS}:limited004`, "cs_test_bad", "{"]]);
   is("stock that cannot be read is out", (await buyable([limited("limited004")])).size, 0);
+
+  part("Licence keys");
+  const keyed = listing({ id: "keyed00001", keys: { source: "pool" } });
+  is("keys from an empty pool: out, as its page says Sold out", (await buyable([keyed])).size, 0);
+  await redis.pipeline([["RPUSH", `nl:keys:${STATS}:keyed00001:pool`, "AAAA-BBBB-CCCC-DDDD"]]);
+  is("with a key left in the pool: in", (await buyable([keyed])).size, 1);
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "LLEN")) throw new Error("synthetic outage");
+    return original(commands);
+  };
+  try {
+    is("a pool that cannot be read: out", (await buyable([keyed])).size, 0);
+  } finally {
+    redis.pipeline = original;
+  }
+  is("keys made on the spot never run out", (await buyable([listing({ id: "keyed00002", keys: { source: "generated" } })])).size, 1);
+
+  part("Calls");
+  const at = Date.now();
+  const call = (kind: "weekly" | "live", starts: number[]): Listing => ({
+    ...listing({ id: `call${kind}${starts.length}`.padEnd(10, "0"), link: undefined }),
+    call: { kind, minutes: 30, tz: "UTC", weekly: [], noticeHours: 2, horizonDays: 30, bufferMinutes: 0, room: null, video: false, meet: null, seats: 1, sessions: starts.map((start, i) => ({ id: `s${i}`, start, minutes: 30, seats: 5, room: null })) } as CallSetup,
+  });
+  is("weekly hours: in", (await buyable([call("weekly", [])])).size, 1);
+  is("a live session with no date on sale: out, as its page says No dates", [(await buyable([call("live", [])])).size, (await buyable([call("live", [at - 3_600_000, at + 3_600_000])])).size], [0, 0]);
+  is("a live session with a date still before its notice: in", (await buyable([call("live", [at + 3 * 3_600_000])])).size, 1);
+
+  part("Suspended or selling through PayPal");
+  const suspended: Store = { ...store, suspended: "2026-11-04T00:00:00.000Z" };
+  is("a suspended store shows nothing, free products included", (await productsBuyableNow(suspended, await all())).size, 0);
+  process.env.PAYPAL_PARTNER_CLIENT_ID = "paypal_client_stand_in";
+  process.env.PAYPAL_PARTNER_SECRET = "paypal_secret_stand_in";
+  process.env.PAYPAL_PARTNER_MERCHANT_ID = "PARTNER0001";
+  process.env.PAYPAL_BN_CODE = "BN_STAND_IN";
+  const paypalOnly: Store = { ...store, stripeChargesEnabled: false, paypalSeller: { merchant: "SELLER00001", at: 1 } };
+  is("a store selling only through PayPal: its PayPal products are in", (await productsBuyableNow(paypalOnly, await all())).has(paid), true);
+  is("without its PayPal account: out again", (await productsBuyableNow({ ...paypalOnly, paypalSeller: null }, await all())).has(paid), false);
+  for (const name of ["PAYPAL_PARTNER_CLIENT_ID", "PAYPAL_PARTNER_SECRET", "PAYPAL_PARTNER_MERCHANT_ID", "PAYPAL_BN_CODE"]) delete process.env[name];
 
   part("Bundles");
   // A draft inside a bundle is still handed over with it (lib/bundle-rules.ts, canBeInBundle).

@@ -15,13 +15,14 @@
  *     Never an introductory price or the yearly price beside it: those are
  *     offers with their own terms, said on the product's page.
  *   - Several options: "from $9", the lowest one a buyer can pick.
- *   - One price under a running store sale: "$20 sale price, until Oct 9,
+ *   - One price under a running store sale: "Sale price: $20, until Oct 9,
  *     3:00 PM UTC", only while the sale still has more than a day to run
  *     (MAIL_SALE_MARGIN_SECONDS). An email is read hours or days after it
  *     goes, so a sale closer to its end is not promised: the regular price
  *     is shown, and the page takes the sale off if it is still on.
  *   - Tax added on top at checkout (Stripe Tax on, prices without it): the
- *     price says so ("+ tax where it applies").
+ *     price says so ("+ tax where it applies"), right after the amount, so
+ *     it never reads as part of a sale's end date.
  *
  * Never the price for a visitor's country (lib/fair-price.ts): an email has
  * no visitor, and its readers live anywhere.
@@ -65,7 +66,7 @@ export function mailPriceLabel(store: { language?: unknown; currency: string }, 
   }
   if (f.optionCount > 1) return `${w.fromPrice(money(f.fromCents))}${tax}`;
   if (f.optionCount === 0 && f.sale && f.sale.percent > 0 && f.sale.ends - nowSeconds > MAIL_SALE_MARGIN_SECONDS) {
-    return `${w.salePriceUntil(money(salePrice(f.priceCents, f.sale.percent)), dateTime(f.sale.ends * 1000))}${tax}`;
+    return w.salePriceUntil(`${money(salePrice(f.priceCents, f.sale.percent))}${tax}`, dateTime(f.sale.ends * 1000));
   }
   return `${money(f.fromCents)}${tax}`;
 }

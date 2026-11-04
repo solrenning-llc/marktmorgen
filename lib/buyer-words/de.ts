@@ -307,6 +307,6 @@ export const de: BuyerWords = {
 
   // ---- Email cards (lib/mail-product-price.ts)
   orMore: (price) => `${price} oder mehr`,
-  plusTax: "zzgl. anfallender Steuern",
+  plusTax: "plus anfallende Steuern",
   salePriceUntil: (price, when) => `Aktionspreis: ${price}, bis ${when}`,
 };

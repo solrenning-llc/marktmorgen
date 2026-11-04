@@ -36,12 +36,17 @@ const events = Array.from({ length: TOTAL }, (_, i) => ({
 let reads = 0;
 const lookedUp = new Set<string>();
 let refundsList: Record<string, unknown>[] = [];
+let eventsOn = true;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.pathname === "/v1/checkout/sessions" && url.searchParams.get("payment_intent")) lookedUp.add(String(url.searchParams.get("payment_intent")));
-  if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ object: "list", data: refundsList, has_more: false }));
+  if (url.pathname === "/v1/refunds") {
+    // As Stripe lists them: only those created at or after the asked time.
+    const gte = Number(url.searchParams.get("created[gte]") ?? 0);
+    return new Response(JSON.stringify({ object: "list", data: refundsList.filter((r) => Number(r.created) >= gte), has_more: false }));
+  }
   if (url.pathname !== "/v1/events") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
-  if (url.searchParams.get("type") !== "charge.dispute.closed") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  if (!eventsOn || url.searchParams.get("type") !== "charge.dispute.closed") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   reads += 1;
   const after = url.searchParams.get("starting_after");
   const from = after ? events.findIndex((e) => e.id === after) + 1 : 0;
@@ -133,6 +138,12 @@ async function main(): Promise<void> {
   }
   is("the license key job looks up every other lost dispute's payment", lookedUp.size, TOTAL - 1);
   is("and its place moves past the newest closing", Number((await redis.pipeline([["GET", keysPlace]]))[0]), NOW);
+  // A run that ends unsure (here, out of time at once) writes the same place again, its time renewed, so runs that stay
+  // unsure never let it lapse back to thirty days ago (review of #2158).
+  await redis.pipeline([["EXPIRE", keysPlace, 5]]);
+  await revokeRefunded(keysStore, Date.now() - 1);
+  const [kept, ttl] = await redis.pipeline([["GET", keysPlace], ["TTL", keysPlace]]);
+  is("an unsure run keeps the place and renews its time", [Number(kept), Number(ttl) > 86_400], [NOW, true]);
   const noPayCalls = "d".repeat(16);
   const noPayStore = { statsId: "n".repeat(32), callsId: noPayCalls, stripeAccountId: ACCOUNT, handle: "cursor-nopay", previousHandles: [] } as unknown as Store;
   await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 86_400_000, `${noPayCalls}|cursor-nopay`]]);
@@ -150,6 +161,31 @@ async function main(): Promise<void> {
   }
   is("and its place moves past the newest closing", Number((await redis.pipeline([["GET", callsPlace]]))[0]) >= NOW, true);
   events[7].data.object.payment_intent = `pi_Cursor${String(7).padStart(6, "0")}`;
+
+  part("A first run that could not look up every refund keeps its window (review of #2158)");
+  // The call job asks about at most REFUND_LOOKUPS payments a run. A store with no place yet had its place moved past
+  // every refund the first run listed, also those it never looked up: they were never read again.
+  eventsOn = false;
+  const firstCalls = "e".repeat(16);
+  const firstStore = { statsId: "f".repeat(32), callsId: firstCalls, stripeAccountId: ACCOUNT, handle: "cursor-first", previousHandles: [] } as unknown as Store;
+  await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 86_400_000, `${firstCalls}|cursor-first`]]);
+  const nowAt = Math.floor(Date.now() / 1000);
+  refundsList = Array.from({ length: 15 }, (_, i) => ({
+    id: `re_CursorFirst${String(i).padStart(3, "0")}`,
+    object: "refund",
+    status: "succeeded",
+    created: nowAt - 3_600 * (i + 1),
+    payment_intent: `pi_CursorFirst${String(i).padStart(3, "0")}`,
+    charge: { object: "charge", refunded: true, amount: 100, amount_refunded: 100 },
+  }));
+  lookedUp.clear();
+  for (let run = 0; run < 5; run += 1) {
+    shift += 5 * 60_000;
+    await syncMeetings(async (handle) => (handle === "cursor-first" ? firstStore : null), Date.now() + 60_000, "https://marktmorgen.com");
+  }
+  is("every refund's payment is looked up, across the runs", refundsList.every((r) => lookedUp.has(String(r.payment_intent))), true);
+  refundsList = [];
+  eventsOn = true;
 
   part("A place of another window is never followed");
   await (await lostDisputesSince(ACCOUNT, since, Number.POSITIVE_INFINITY, LOST_DISPUTE_PAGES, key)).commit();

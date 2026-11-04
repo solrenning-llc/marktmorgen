@@ -648,12 +648,11 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     if (!(await confirmLostRead(lostRead, refundSeenKey(store)))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
-  // A store with no anchor yet keeps the one it started from, so the next run reads the same window and the lost
-  // disputes' kept place still counts (review of #2158), as the calls job does.
-  if ((complete && !unsure && lookups > 0 && Date.now() < deadline) || !(Number(anchorRaw) > 0)) {
-    const place = complete && !unsure && lookups > 0 && Date.now() < deadline ? Math.max(newest, anchor) : anchor;
-    await redisPipeline([["SET", refundAnchorKey(store), String(place), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
-  }
+  // Every run writes the place: moved forward only past what was read to the end, otherwise the one it started from,
+  // its time renewed. So a store with no anchor yet keeps its window and the lost disputes' kept place still counts,
+  // and runs that stay unsure never let the place lapse back to thirty days ago (reviews of #2158).
+  const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
+  await redisPipeline([["SET", refundAnchorKey(store), String(done ? Math.max(newest, anchor) : anchor), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   return revoked;
 }
 

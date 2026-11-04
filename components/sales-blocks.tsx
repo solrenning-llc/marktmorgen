@@ -315,24 +315,18 @@ function RowElementView({ element, ctx, level }: { element: RowElement; ctx: Blo
  */
 function RowView({ block, ctx }: { block: RowBlock; ctx: BlockContext }) {
   if (block.columns.every((column) => column.length === 0)) return null;
-  // In reading order, column by column: the first heading is the section's (h2), every one after it sits under it (h3).
-  const levels: (2 | 3)[][] = [];
-  let headed = false;
-  for (const column of block.columns) {
-    const inColumn: (2 | 3)[] = [];
-    for (const element of column) {
-      inColumn.push(headed ? 3 : 2);
-      if (element.kind === "heading") headed = true;
-    }
-    levels.push(inColumn);
-  }
+  // Each part's heading level, in reading order, worked out before drawing: a
+  // subheading after the row's first heading sits under it (h3), else it is a
+  // section heading of its own (h2).
+  const firstHeading = block.columns.flat().findIndex((element) => element.kind === "heading");
+  const offsets = block.columns.map((_, i) => block.columns.slice(0, i).reduce((n, column) => n + column.length, 0));
   return (
     <section className="sp-section">
       <div className={`sp-row sp-row-${block.columns.length}`}>
         {block.columns.map((column, i) => (
           <div key={i} className="sp-row-column">
             {column.map((element, j) => (
-              <RowElementView key={j} element={element} ctx={ctx} level={levels[i][j]} />
+              <RowElementView key={j} element={element} ctx={ctx} level={firstHeading >= 0 && offsets[i] + j > firstHeading ? 3 : 2} />
             ))}
           </div>
         ))}

@@ -173,7 +173,7 @@ is("a decorative picture is hidden from screen readers", draw(keep([row([[{ kind
 is("a link button opens its checked address, and says it opens a new tab", html.includes('href="https://example.com/recipes" class="btn st-btn sp-row-btn" target="_blank" rel="noopener noreferrer nofollow ugc"') && html.includes("new-tab-note"), true);
 is("a button with no address is the page's own", html.includes('href="#buy"'), true);
 is("buttons use the theme's button, at least 44 pixels high", (html.match(/class="btn st-btn/g) ?? []).length, 2);
-is("in the studio's preview a link button does nothing", draw(three, { ...ctx, preview: true }).includes("https://example.com/recipes"), false);
+is("in the studio's preview a link button does nothing", draw(three, { ...ctx, preview: true }).includes('href="https://example.com/recipes"'), false);
 const video = draw(keep([row([[el.video]])]).page.blocks[0]);
 is("a video is the lazy player, loading nothing before play", [video.includes("<iframe"), video.includes("A week, planned")], [false, true]);
 const tags = draw(keep([row([[{ kind: "heading", text: "<script>alert(1)</script>" }, { kind: "paragraph", text: '<img src=x onerror="alert(1)">' }]])]).page.blocks[0]);

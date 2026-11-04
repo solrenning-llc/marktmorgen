@@ -37,7 +37,7 @@ import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
 import { isLiveSub, soldAMembership } from "@/lib/membership-access";
-import { purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, readListings, sellsAny, sellsThings } from "@/lib/catalog";
 import { paidCalls } from "@/lib/calls";
@@ -467,16 +467,26 @@ function rows(listed: Listed): Row[] {
 /** Whether Stripe says this charge was given back in full: the shared rule (lib/refunds.ts). */
 const refunded = refundedInFull;
 
+/** Whether Stripe marks this payment's charge as disputed: only then does lib/refunds.ts ask it for the charge's disputes. */
+function disputed(payment: unknown): boolean {
+  if (!payment || typeof payment !== "object") return false;
+  const value = payment as { object?: unknown; disputed?: unknown; latest_charge?: unknown };
+  const charge = value.object === "charge" ? value : value.latest_charge;
+  return Boolean(charge && typeof charge === "object" && (charge as { disputed?: unknown }).disputed === true);
+}
+
 /**
  * The calls lib/refunds.ts (purchaseRefunded) makes to the creator's Stripe
  * account for this checkout, at the most: none when its own payment, read with
- * the list, already says so, or when it is not a payment plan; a payment
- * plan's first invoice and its payments otherwise (PLAN_REFUND_CALLS).
+ * the list, already says it was refunded; one for the disputes of a charge
+ * Stripe marks disputed (keptUnlessLost); and for a payment plan its first
+ * invoice, that invoice's payments and each payment's disputes
+ * (PLAN_REFUND_CALLS).
  */
 function refundCalls(session: Row): number {
   if (refundedInFull(session.payment_intent)) return 0;
   const meta = (session.metadata ?? {}) as Record<string, unknown>;
-  return session.mode === "subscription" && meta.kind === "plan" ? PLAN_REFUND_CALLS : 0;
+  return (disputed(session.payment_intent) ? 1 : 0) + (session.mode === "subscription" && meta.kind === "plan" ? PLAN_REFUND_CALLS : 0);
 }
 
 /**
@@ -689,12 +699,19 @@ async function purchaseFromSession(
 }
 
 /** What one payment taken in one click after a checkout hands over again, or null: the list's reading and one download's. */
-async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines = true): Promise<Purchase | null> {
+async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines = true, meter?: OrdersMeter): Promise<Purchase | null> {
   const id = typeof intent.id === "string" ? intent.id : "";
   if (!INTENT_ID_PATTERN.test(id)) return null;
   const meta = (intent.metadata ?? {}) as Record<string, string>;
   if (meta.kind !== "upsell" || !saleHandles(store).has(meta.store ?? "")) return null;
   if (intent.status !== "succeeded" || refunded(intent)) return null;
+  // Lost to a dispute is given back too (lib/refunds.ts): Stripe is asked only of a charge it marks disputed, that one call
+  // taken from the opening's ceiling (ORDERS_STRIPE_CALLS) first. Past the opening's time, or once its meter was refused,
+  // nothing more goes to Stripe (C3-87). A read with no room left is taken as one that failed: it keeps the payment on the
+  // list, as keptUnlessLost() does.
+  meter?.alive();
+  const account = store.stripeAccountId;
+  if (account && !(meter && disputed(intent) && !meter.stripe(1)) && (await keptUnlessLost(account, intent))) return null;
   const product = await find(meta.product);
   const items = product ? await linesOf(find, bundleFromMeta(meta, "bundle"), lines) : null;
   if (!product || !(product.file || product.link || items)) return null;
@@ -794,7 +811,7 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
     for (const intent of rows(listed)) {
       const id = typeof intent.id === "string" ? intent.id : "";
       if (found.has(id)) continue;
-      const purchase = await purchaseFromIntent(store, intent, find, false);
+      const purchase = await purchaseFromIntent(store, intent, find, false, meter);
       if (purchase) found.set(purchase.reference, purchase);
     }
   }
@@ -1262,5 +1279,5 @@ async function lookUp(
   const customer = (await purchaseFromSession(store, session, find, meter))?.customer ?? null;
   if (!customer || customer !== intent.customer) return null;
   allow(intentMeta.product, want.pid, ...(want.bundle ? inside : []));
-  return done(await purchaseFromIntent(store, intent, find));
+  return done(await purchaseFromIntent(store, intent, find, true, meter));
 }

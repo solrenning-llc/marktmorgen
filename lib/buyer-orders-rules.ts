@@ -112,11 +112,12 @@ export const ORDERS_STRIPE_CALLS = 200;
 export const ORDERS_STRIPE_LISTS = 2 + 10 + 5;
 /**
  * Calls lib/refunds.ts makes at the most to read whether a purchase paid in
- * installments was refunded: its first invoice, that invoice's payments (ten
- * at the most, its list's limit) and each of those payments
- * (tests/orders-open.test.ts holds the ten to that file).
+ * installments was given back: its first invoice, that invoice's payments
+ * (ten at the most, its list's limit), each of those payments and, for each
+ * one whose charge Stripe marks disputed, its disputes (givenBack)
+ * (tests/orders-page-bounds.test.ts holds the ten to that file).
  */
-export const PLAN_REFUND_CALLS = 1 + 1 + 10;
+export const PLAN_REFUND_CALLS = 1 + 1 + 10 + 10;
 
 /**
  * What one opening of the orders page sends to the browser at the most, in

@@ -39,6 +39,7 @@ import {
   ORDERS_PAGE_BYTES,
   ORDERS_STRIPE_CALLS,
   ORDERS_STRIPE_LISTS,
+  OrdersLate,
   OrdersMeter,
   PLAN_REFUND_CALLS,
   ordersLinkFor,
@@ -89,6 +90,8 @@ let calls: string[] = [];
 let refundedInvoices = new Set<string>();
 /** Emails handed to the sender. */
 let mails = 0;
+/** Run when Stripe answers the payments taken in one click for a customer. */
+let onIntents: (() => void) | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -108,6 +111,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (url.searchParams.get("customer_details[email]") !== BUYER) return answer({ object: "list", data: [], has_more: false });
     return answer({ object: "list", data: checkouts.filter((s) => (s.metadata as Record<string, string>).kind !== "call"), has_more: false });
   }
+  if (path === "/payment_intents") onIntents?.();
   if (path === "/payment_intents") return answer({ object: "list", data: intents.filter((i) => i.customer === url.searchParams.get("customer")), has_more: false });
   const invoice = path.match(/^\/invoices\/(in_[A-Za-z0-9]+)$/);
   if (invoice) return answer({ object: "invoice", id: invoice[1], payment_intent: null });
@@ -137,6 +141,7 @@ beforeEach(() => {
   calls = [];
   refundedInvoices = new Set();
   mails = 0;
+  onIntents = null;
   afterTasks.length = 0;
   process.env.STRIPE_SECRET_KEY = "sk_test_orders_bounds_only";
   process.env.RESEND_API_KEY = "re_test_orders_bounds_only";
@@ -516,4 +521,40 @@ test("the button's words are in every language the page has", () => {
       assert.notEqual(words.insideFailed, en.insideFailed, language);
     }
   }
+});
+
+test("a payment taken in one click asks Stripe about its dispute only while the opening may: never past its time, never past its ceiling (C3-87)", async () => {
+  await shop();
+  const drafts = await addDraftProducts(OWNER, [0, 1].map((i) => ({ title: `Upsold ${i}`, summary: "", priceCents: 1000, link: `https://example.test/u/${i}` })));
+  assert.ok(drafts.ok);
+  const store = (await storeForEmail(OWNER))!;
+  checkouts = [paid(0, 120, { product: drafts.ids[0] })];
+  // Taken in one click after it, for the customer that checkout made, on a charge Stripe marks disputed.
+  intents = [{
+    object: "payment_intent",
+    id: "pi_BoundsUpsell000001",
+    status: "succeeded",
+    customer: checkouts[0].customer,
+    created: NOW - 60,
+    metadata: { kind: "upsell", store: "bounds", product: drafts.ids[1] },
+    latest_charge: { object: "charge", id: "ch_BoundsDisputed01", amount: 1000, amount_refunded: 0, refunded: false, disputed: true },
+  }];
+  const disputes = () => calls.filter((c) => c.startsWith("/disputes?")).length;
+  const upsold = (list: { reference: string }[]) => list.some((p) => p.reference === "pi_BoundsUpsell000001");
+  // With room: its disputes asked once, and none lost, so it stays.
+  calls = [];
+  assert.ok(upsold(await purchasesFor(store, BUYER, new OrdersMeter(store))));
+  assert.equal(disputes(), 1);
+  // Its ceiling spent: Stripe is not asked, and it stays, as when a read fails.
+  calls = [];
+  const spent = new OrdersMeter(store);
+  assert.ok(spent.stripe(ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS));
+  assert.ok(upsold(await purchasesFor(store, BUYER, spent)));
+  assert.equal(disputes(), 0);
+  // Past its time (the meter stopped as the payments are answered): nothing more goes to Stripe.
+  calls = [];
+  const late = new OrdersMeter(store);
+  onIntents = () => late.stop();
+  await assert.rejects(purchasesFor(store, BUYER, late), OrdersLate);
+  assert.equal(disputes(), 0);
 });

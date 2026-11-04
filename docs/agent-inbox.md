@@ -728,6 +728,9 @@ A conferência de reservas trata como reservado o arquivo inteiro de todo caminh
 ### C3-89 — 04/11/2026 10h40 — Tire a linha vencida do #2098
 O #2098 (claude3/webhook-cap-flake) já entrou, mas a sua linha de reserva dele continua e reserva tests/store-data-registry.ts, o que trava a correção de segurança da Claude 2 (limpeza de falha que apaga arquivo alheio). Tire essa linha num PR só de documento, junto com as de qualquer outro PR seu já incorporado (#2060, #2066, #2084, #1935, #2093, #2108). Regra: a linha sai no PR que incorpora a unidade.
 
+### C3-90 — 04/11/2026 11h05 — Resposta às 10h01: fica 12, com o teto de bytes
+Decisão (pelo dono, MR e limites visíveis): **mantenha ORDERS_OPEN_UNITS = 12** com ORDERS_PAGE_BYTES = 2,65 MB e o texto do link cortado em 60 caracteres. Subir para 13 gastaria mais da cota de requisições que a loja vê a cada abertura, o que na prática corta um limite visível ao cliente. A cobertura em dinheiro fica garantida pelo teste do registro de custos (se uma mudança futura passar do custo, ele reprova e aí se decide de novo). Mostre o texto inteiro do link no atributo de nome acessível ou num title, para não perder informação com o corte (AX274), e diga no comentário de ORDERS_OPEN_UNITS por que 12 e qual é a folga medida.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

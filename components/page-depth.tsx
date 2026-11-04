@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
+import { framePlayer, messagePlayer } from "@/lib/player-origin";
 import { WHY_NOT, type WhyNot } from "@/lib/why-not-rules";
 import type { WhyNotWords } from "@/lib/buyer-words/why-not";
 
@@ -102,14 +103,20 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
     const listen = () => {
       for (const frame of document.querySelectorAll<HTMLIFrameElement>(".sp-video iframe")) {
         try {
-          if (frame.src.includes("youtube")) frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), "*");
-          if (frame.src.includes("vimeo")) frame.contentWindow?.postMessage(JSON.stringify({ method: "addEventListener", value: "timeupdate" }), "*");
+          const player = framePlayer(frame.src);
+          if (player === "youtube") frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), "*");
+          if (player === "vimeo") frame.contentWindow?.postMessage(JSON.stringify({ method: "addEventListener", value: "timeupdate" }), "*");
         } catch {}
       }
     };
     // What the players say back: YouTube its time and length, Vimeo its share played.
+    // Only from the exact origin of a player frame this page drew, and only
+    // from that frame's own window (lib/player-origin.ts): any other window
+    // can post a message here too.
     const onMessage = (event: MessageEvent) => {
       if (!videoBlock) return;
+      const player = messagePlayer(document.querySelectorAll<HTMLIFrameElement>(".sp-video iframe"), event.source, event.origin);
+      if (!player) return;
       let data: unknown = event.data;
       if (typeof data === "string") {
         try {
@@ -120,14 +127,14 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
       }
       if (!data || typeof data !== "object") return;
       const message = data as { event?: string; info?: { currentTime?: number; duration?: number }; data?: { percent?: number } };
-      if (/youtube/.test(event.origin) && (message.event === "infoDelivery" || message.event === "initialDelivery")) {
+      if (player === "youtube" && (message.event === "infoDelivery" || message.event === "initialDelivery")) {
         // YouTube says the length once, near the start, and the time on every
         // message after: the length is kept from whichever message carried it.
         const d = Number(message.info?.duration);
         if (d > 0) youtubeLength = d;
         const t = Number(message.info?.currentTime);
         if (t > 0 && youtubeLength > 0) reached(quartile(t / youtubeLength));
-      } else if (/vimeo\.com$/.test(event.origin) && message.event === "timeupdate") {
+      } else if (player === "vimeo" && message.event === "timeupdate") {
         const p = Number(message.data?.percent);
         if (p > 0) reached(quartile(p));
       }

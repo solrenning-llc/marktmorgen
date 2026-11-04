@@ -11,6 +11,7 @@ import { contactWords } from "@/lib/buyer-words/contact";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { SITE_URL } from "@/lib/site-url";
+import { contactOpen } from "@/lib/store-contact";
 
 export const metadata: Metadata = {
   title: "Business card — Marktmorgen",
@@ -47,6 +48,16 @@ export default async function StudioCardPage({ searchParams }: Params) {
           <p className="mt-3 max-w-2xl text-ink-soft">
             One address to give anyone you meet. It shows only what you type here, and a Save contact button that adds you to their phone&apos;s contacts. It stays off until you turn it on.
           </p>
+          {contactOpen(store) ? (
+            <p className="mt-3 max-w-2xl text-sm text-ink-soft">Under your card, your store&apos;s contact form lets visitors leave their name, their email and a message for you, in your inbox.</p>
+          ) : (
+            <p className="mt-3 max-w-2xl text-sm text-ink-soft">
+              {"Your store's contact form is off, so the card shows no way for visitors to leave their details. "}
+              <Link href={`${studioPath(store)}#contact`} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                Turn on the contact form
+              </Link>
+            </p>
+          )}
           {card?.on ? (
             <p className="mt-3">
               <Link href={`/@${store.handle}/contact`} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">

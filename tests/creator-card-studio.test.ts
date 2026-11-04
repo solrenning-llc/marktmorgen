@@ -51,6 +51,7 @@ part("In the studio");
 const studio = readFileSync("app/studio/card/page.tsx", "utf8");
 is("for those who may change the store's pages, as the route", studio.includes('"page");') && readFileSync("app/api/store/creator-card/route.ts", "utf8").includes('jsonAccess(request, "page")') && readFileSync("app/api/store/creator-card/route.ts", "utf8").includes('guardStoreWrite(request, "page"'), true);
 is("a link to the card once it is shown", studio.includes("{card?.on ? (") && studio.includes("Open your card at"), true);
+is("says whether visitors can leave their details under it, and where to turn that on", studio.includes("{contactOpen(store) ? (") && studio.includes("your store&apos;s contact form lets visitors leave their name") && studio.includes('<Link href={`${studioPath(store)}#contact`}') && studio.includes("Turn on the contact form"), true);
 is("said when it cannot be read", studio.includes("Your card could not be read just now. Nothing was changed."), true);
 const site = readFileSync("app/studio/site/page.tsx", "utf8");
 is("reached from Your pages, for the same people", site.includes('"page");') && site.includes('<Link href={studioPath(store, "", "card")}') && site.includes("Set up your business card"), true);

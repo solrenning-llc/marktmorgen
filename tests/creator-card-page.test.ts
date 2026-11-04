@@ -66,6 +66,7 @@ async function main(): Promise<void> {
   const bare = draw({ ...card, title: "", email: "", phone: "", website: "", note: "" });
   is("only what was filled in", !bare.includes("<dl") && !bare.includes("mailto:") && bare.includes("Ana Souza</h1>"), true);
   is("a message's notice still shows on the same address", await open("sent"), "shown");
+  is("under the card, the store's own contact form when it is on, to leave one's details", readFileSync("app/[handle]/contact/page.tsx", "utf8").includes("{contactOpen(store) ? <StoreContactBox store={store} /> : null}"), true);
   is("the page reads the card only with no message's notice", readFileSync("app/[handle]/contact/page.tsx", "utf8").includes("if (!card?.on) redirect(`/@${store.handle}`);"), true);
 
   part("The file to save");

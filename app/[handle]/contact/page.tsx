@@ -8,6 +8,8 @@ import { speech } from "@/lib/buyer-words";
 import { contactWords } from "@/lib/buyer-words/contact";
 import { readCreatorCard } from "@/lib/creator-card";
 import { CreatorCardView } from "@/components/creator-card-view";
+import { StoreContactBox } from "@/components/store-contact-box";
+import { contactOpen } from "@/lib/store-contact";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -46,6 +48,8 @@ export default async function ContactPage({ params, searchParams }: Params) {
       <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
         <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
           <CreatorCardView card={card} handle={store.handle} storeName={store.name} words={w.card} />
+          {/* A visitor leaves their name and address for the creator, by the store's own contact form (lib/store-contact.ts), when it is on. */}
+          {contactOpen(store) ? <StoreContactBox store={store} /> : null}
           <StoreTracking store={store} presence event={null} />
         </main>
       </div>

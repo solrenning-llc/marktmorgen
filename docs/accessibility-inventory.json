@@ -973,6 +973,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/companies/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/companies",
+      "parameters": []
+    },
+    {
       "source": "app/studio/copy/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/copy",
@@ -1269,6 +1275,7 @@
     "components/community-push-toggle.tsx",
     "components/community-room.tsx",
     "components/community-studio.tsx",
+    "components/companies-editor.tsx",
     "components/confirm-action.tsx",
     "components/contact-box-editor.tsx",
     "components/copy-link.tsx",
@@ -1941,6 +1948,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 133
+    "pageTemplates": 134
   }
 }

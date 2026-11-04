@@ -146,6 +146,11 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                 </p>
               ) : null}
               <h1 className="t-h2 mt-3">Everything one buyer has done with your store</h1>
+              <p className="mt-2">
+                <Link href={studioPath(store, "", "companies")} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                  Companies you sell to
+                </Link>
+              </p>
               <p className="mt-3 max-w-2xl text-ink-soft">
                 What they paid and when, what was given back, where they found you, their memberships, how far they are in
                 your courses, the calls coming up, your emails to them, and your team&apos;s notes. Read from your own

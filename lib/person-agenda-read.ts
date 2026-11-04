@@ -7,12 +7,24 @@
  * weighs (lib/segments.ts, buyerLedger). At the most AGENDA_UNITS besides the
  * buyers (tests/plan-cost-registry.ts, AGENDA_READ). Server only.
  */
-import { readAllTasks, tasksKept } from "@/lib/crm";
+import { readAllTasks } from "@/lib/crm";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { AGENDA_ROW_MARKUP_BYTES, type AgendaDayGroup, agendaForDays, agendaReadUnits, daysAround, personAddresses } from "@/lib/person-agenda";
 import { sentBytes, sentUnits } from "@/lib/sent-bytes";
 import type { DueTask } from "@/lib/person-tasks";
 import type { Store } from "@/lib/store";
 import { countStudio, studioPath } from "@/lib/studio-route";
+
+/**
+ * How many people have tasks kept (one HLEN), so a page with none reads and
+ * counts nothing more. The hash is lib/crm.ts's tasks hash, by the same key
+ * (tests/person-agenda.test.ts holds the two together).
+ */
+export async function tasksKept(statsId: string | null): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["HLEN", `nl:crm:tasks:${statsId}`]]);
+  return Number(n) || 0;
+}
 
 /**
  * Counts reading the store's buyers, with the studio requests buyerLedger

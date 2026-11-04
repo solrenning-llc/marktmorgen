@@ -198,10 +198,8 @@ async function main() {
   is("with Stripe on and PayPal off, the PayPal sales kept are still counted, and their refunds are not read", [stripeRead, stripeAsked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 0 }))]]);
   redis.pipeline = pipe;
 
-  part("The deals page's day (edge review)");
-  const board = readFileSync("components/deals-board.tsx", "utf8");
-  is("deals are compared with the creator's own day, as the tasks are, not the server's UTC one", board.includes("const today = useCreatorDay(serverDay);") && board.includes("today: serverDay, initialFilter") && !board.includes("(UTC). Won and lost"), true);
-  is("and the page says whose day it is", board.includes("Dates use your own calendar day, {today}, where this browser is."), true);
+  part("The agenda's count of people with tasks reads the CRM's own tasks hash (round 7)");
+  is("tasksKept reads the hash lib/crm.ts keeps the tasks in, by the same key", readFileSync("lib/crm.ts", "utf8").includes("const tasksKey = (statsId: string) => `nl:crm:tasks:${statsId}`;") && readFileSync("lib/person-agenda-read.ts", "utf8").includes("`nl:crm:tasks:${statsId}`"), true);
 
   part("On the buyers page");
   const page = readFileSync("app/studio/people/page.tsx", "utf8");

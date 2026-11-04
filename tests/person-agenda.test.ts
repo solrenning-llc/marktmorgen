@@ -9,13 +9,13 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type AgendaListRow, TasksAgendaList, agendaDay, agendaLinkWords, staleWords } from "@/components/tasks-agenda";
-import { AGENDA_SHOWN, AGENDA_UNITS, PERSON_KEY, addressForPerson, addressesOf, agendaForDays, agendaGroups, daysAround } from "@/lib/person-agenda";
+import { AGENDA_SHOWN, AGENDA_UNITS, PERSON_KEY, agendaReadUnits, addressForPerson, addressesOf, agendaForDays, agendaGroups, daysAround } from "@/lib/person-agenda";
 import { personKey } from "@/lib/person-key";
 import { redisPipeline } from "@/lib/redis";
-import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LedgerNotCounted, buyerLedger, ledgerUnits } from "@/lib/segments";
+import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LedgerNotCounted, buyerLedger, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import type { DueTask, PersonTask } from "@/lib/person-tasks";
 import type { Store } from "@/lib/store";
-import { agendaData } from "@/lib/person-agenda-read";
+import { agendaData, countUnits } from "@/lib/person-agenda-read";
 import { countStudio } from "@/lib/studio-route";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
@@ -124,15 +124,39 @@ async function main() {
   const studioCount = () => { const k = redis.keys().find((key) => key.startsWith("nl:allow:studio:")); return k; };
   const empty = await agendaData(realStore, "2026-11-04");
   is("with no task kept, nothing more is read and no studio request is counted (L5)", [empty.state, studioCount(), watch.some((c) => c[0] === "HGETALL")], ["empty", undefined, false]);
-  await redisPipeline([["HSET", `nl:crm:tasks:${realStore.statsId}`, ann, JSON.stringify([{ id: "abcdefghij", text: "Call Ann", due: "", assignee: "", done: false, createdAt: 1, doneAt: 0 }])]]);
+  // Three people with tasks: at the most a person's tasks weigh, more than the page's own request moves.
+  for (const who of ["ann", "ben", "cy"]) await redisPipeline([["HSET", `nl:crm:tasks:${realStore.statsId}`, personKey(realStore.statsId!, `${who}@example.com`), JSON.stringify([{ id: "abcdefghij", text: `Call ${who}`, due: "", assignee: "", done: false, createdAt: 1, doneAt: 0 }])]]);
   await countStudio(realStore, null, 1);
-  await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio") - 1)]]);
+  await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio"))]]);
   watch.length = 0;
   const spent = await agendaData(realStore, "2026-11-04");
-  is("with only one studio request left, the agenda is refused with the allowance's sentence and reads no task (M4)", [spent.state, spent.state === "refused" && spent.message.length > 0, watch.some((c) => c[0] === "HGETALL" && c[1] === `nl:crm:tasks:${realStore.statsId}`)], ["refused", true, false]);
+  is("with fewer studio requests left than it needs, the agenda is refused, saying so, and reads no task (M4)", [spent.state, spent.state === "refused" && spent.message.length > 0, watch.some((c) => c[0] === "HGETALL" && c[1] === `nl:crm:tasks:${realStore.statsId}`)], ["refused", true, false]);
   await redisPipeline([["SET", studioCount()!, "0"]]);
   const read = await agendaData(realStore, "2026-11-04");
-  is("with room, it reads the tasks and counts AGENDA_UNITS", [read.state, Number((await redisPipeline([["GET", studioCount()!]]))[0])], ["ok", AGENDA_UNITS]);
+  is("with room, it reads the tasks and counts what three people's tasks can weigh, and nothing for its small rows (round 5, M1)", [read.state, Number((await redisPipeline([["GET", studioCount()!]]))[0])], ["ok", agendaReadUnits(3)]);
+  is("a store with one person's tasks counts nothing beyond its page; 1,000 people count at most AGENDA_UNITS", [agendaReadUnits(1), agendaReadUnits(3), agendaReadUnits(1_000), AGENDA_UNITS], [0, 1, 2, 5]);
+  await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio") - 3)]]);
+  const tooMany = await countUnits(realStore, 5);
+  is("asking more than are left says this needs more than is left, not that all are spent (round 5, L4)", [tooMany.ok, !tooMany.ok && tooMany.message.startsWith("This needs 5 of your studio requests, more than are left.")], [false, true]);
+  await redisPipeline([["SET", studioCount()!, "0"]]);
+
+  part("A store selling with PayPal (round 5, H1)");
+  const paypalShop = { statsId: "ppstats", handle: "ppshop", previousHandles: [], currency: "usd", paypalSeller: "SELLER1" } as unknown as Store;
+  const meta = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`k${String.fromCharCode(97 + i)}`, "v".repeat(200)]));
+  const seed: (string | number)[][] = [];
+  for (let i = 0; i < 300; i++) {
+    const order = `ORDER${String(i).padStart(10, "0")}`;
+    seed.push(["SET", `nl:ppsell:paid:${order}`, JSON.stringify({ store: "ppstats", order, capture: `CAP${i}`, email: `buyer${i}@example.com`, product: "p1", cents: 100, currency: "usd", at: 1_700_000_000 + i, handle: "ppshop", meta })]);
+    seed.push(["ZADD", "nl:ppsell:sales:ppstats", 1_700_000_000 + i, order]);
+    if (i < 50) seed.push(["ZADD", "nl:ppsell:refunded:ppstats", 1_700_000_000 + i, order]);
+  }
+  await redisPipeline(seed);
+  const paypalAsked: number[] = [];
+  watch.length = 0;
+  const paypalLedger = await buyerLedger(paypalShop, async (units) => { paypalAsked.push(units); return true; });
+  is("its PayPal sales and refunds are counted from how many are kept, before they are read, with no Stripe part (the 50 refunded are not buyers)", [paypalAsked, paypalLedger.buyers.size], [[ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 50 }))], 250]);
+  is("which counts more than what was read: 300 records and 50 refunds of about 5 KB", ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 50 })) * 1_000_000 >= 350 * 5_300, true);
+  is("the refunds are read in one MGET, never one GET each", [watch.filter((c) => c[0] === "GET" && c[1].startsWith("nl:ppsell:paid:")).length, watch.filter((c) => c[0] === "MGET").length], [0, 2]);
   redis.pipeline = pipe;
 
   part("The deals page's day (edge review)");

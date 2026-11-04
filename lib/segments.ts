@@ -28,8 +28,9 @@ import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
-import { paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
+import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
 import { rfmGroup } from "@/lib/rfm-rules";
+import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
 import { ALL_TIME_PAGES, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -88,24 +89,38 @@ export const LEDGER_BYTES_PER_UNIT = 1_000_000;
 /** The most one imported buyer weighs: its address and when it came, read, then written in the copy as a row. */
 export const IMPORTED_BUYER_BYTES = 2 * (254 + 64);
 
-/** Studio requests reading (or writing) `bytes` of the buyers costs, by size. */
-export const ledgerUnits = (bytes: number) => Math.ceil(Math.max(0, bytes) / LEDGER_BYTES_PER_UNIT);
+
+/** Studio requests reading (or writing) `bytes` of the buyers costs, by size: none within PAGE_INCLUDED_BYTES. */
+export const ledgerUnits = (bytes: number) => (bytes <= PAGE_INCLUDED_BYTES ? 0 : Math.ceil(bytes / LEDGER_BYTES_PER_UNIT));
+
+/**
+ * What a reading of the buyers moves besides Stripe's pages, from what is
+ * kept, measured before it is read: the imported buyers, and the PayPal sales
+ * (at most ALL_TIME_PAGES pages of a hundred) and refunds
+ * (PAYPAL_REFUNDS_READ), each at the most its record can weigh.
+ */
+export function ledgerReadBytes(kept: { imported: number; paypalSales: number; paypalRefunds: number }): number {
+  return kept.imported * IMPORTED_BUYER_BYTES + Math.min(kept.paypalSales, ALL_TIME_PAGES * 100) * MAX_PAID_BYTES + Math.min(kept.paypalRefunds, PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
+}
 
 /**
  * `count`, when given, is asked before anything big is read, with the studio
  * requests it costs, and answers whether they were counted; when they were
  * not, nothing more is read and LedgerNotCounted is thrown. The ten-minute
- * copy is counted by its size (measured first, STRLEN), and a reading from
- * Stripe as BUYER_LEDGER_UNITS and the imported buyers by how many there are
- * (HLEN), both before they are read.
+ * copy is counted by its size (measured first, STRLEN, then read no further
+ * than counted, GETRANGE), and a reading from Stripe as BUYER_LEDGER_UNITS,
+ * with the imported buyers and the PayPal sales and refunds by how many are
+ * kept (ledgerReadBytes), before any is read.
  */
 export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>): Promise<Ledger> {
   if (!readsSales(store) && !store.pastBuyers) return { buyers: new Map(), partial: false };
   const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
   if (store.statsId && isRedisConfigured()) {
     const [size] = await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]);
-    if (Number(size) > 0 && !(await counted(ledgerUnits(Number(size))))) throw new LedgerNotCounted();
-    const [cached] = Number(size) > 0 ? await redisPipeline([["GET", ledgerKey(store.statsId)]]) : [null];
+    const units = ledgerUnits(Number(size));
+    if (Number(size) > 0 && !(await counted(units))) throw new LedgerNotCounted();
+    // Never more than was counted: a copy grown since is read cut, cannot be parsed, and is read again below, counted.
+    const [cached] = Number(size) > 0 ? await redisPipeline([["GETRANGE", ledgerKey(store.statsId), 0, Math.max(units * LEDGER_BYTES_PER_UNIT, PAGE_INCLUDED_BYTES) - 1]]) : [null];
     if (typeof cached === "string" && cached) {
       try {
         const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; v?: number };
@@ -117,9 +132,12 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
       }
     }
   }
-  // Stripe's pages, and the imported buyers read and written in the copy, by how many there are: before any is read.
+  // Stripe's pages (when there is a Stripe account), and the imported buyers and the PayPal sales and refunds by
+  // how many are kept, at the most each weighs: counted before any is read.
   const [imported] = store.statsId && isRedisConfigured() ? await redisPipeline([["HLEN", importedWhoKey(store.statsId)]]) : [0];
-  if (!(await counted(BUYER_LEDGER_UNITS + ledgerUnits(Number(imported || 0) * IMPORTED_BUYER_BYTES)))) throw new LedgerNotCounted();
+  const paypal = store.paypalSeller ? await paypalKept(store.statsId) : { sales: 0, refunds: 0 };
+  const moved = ledgerReadBytes({ imported: Number(imported || 0), paypalSales: paypal.sales, paypalRefunds: paypal.refunds });
+  if (!(await counted((store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(moved)))) throw new LedgerNotCounted();
   // Checkouts and offers after paying; and, on a Stripe account, the renewals
   // of memberships and payment plans, and what refunds and disputes took back
   // (270 [GR1], unit 2): a member who pays every month is not quiet since they

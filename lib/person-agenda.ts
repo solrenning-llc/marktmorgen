@@ -1,5 +1,6 @@
 import { personKey } from "@/lib/person-key";
-import { type DueTask, MAX_STORE_TASKS, MAX_TASK_TEXT, tasksDue } from "@/lib/person-tasks";
+import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, MAX_TASK_TEXT, tasksDue } from "@/lib/person-tasks";
+import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
 import { buyerLedger } from "@/lib/segments";
 import type { Store } from "@/lib/store";
 
@@ -27,13 +28,20 @@ export const AGENDA_TASKS_BYTES = MAX_STORE_TASKS * MAX_TASK_RECORD_BYTES;
  */
 export const AGENDA_ROW_SENT_BYTES = Math.ceil(2.5 * (MAX_TASK_RECORD_BYTES + 2 * 254 + 200));
 /**
- * Studio requests the agenda counts before it reads (on top of the buyers
- * page's own): every task of the store and its rows sent on
- * (tests/plan-cost-registry.ts, AGENDA_READ). Reading the buyers from the
- * creator's Stripe account again, when the ten-minute copy ran out, counts
- * BUYER_LEDGER_UNITS more just before it happens (lib/segments.ts).
+ * Studio requests the agenda counts before it reads every task, beyond the
+ * buyers page's own (round 5, M1): by how many people have tasks
+ * (`peopleWithTasks`, one HLEN), each at the most a person's tasks can
+ * weigh, none within PAGE_INCLUDED_BYTES, then one a megabyte. What it sends
+ * on is counted after, by its measured size (lib/sent-bytes.ts), and the
+ * buyers by what their reading weighs (lib/segments.ts).
  */
-export const AGENDA_UNITS = 4;
+export function agendaReadUnits(peopleWithTasks: number): number {
+  const bytes = Math.min(Math.max(0, peopleWithTasks) * MAX_PERSON_TASKS * MAX_TASK_RECORD_BYTES, AGENDA_TASKS_BYTES);
+  return bytes <= PAGE_INCLUDED_BYTES ? 0 : Math.ceil(bytes / 1_000_000);
+}
+
+/** The most the agenda's reading and sending count together (every task, every row): held against AGENDA_READ. */
+export const AGENDA_UNITS = agendaReadUnits(MAX_STORE_TASKS) + Math.ceil((AGENDA_MAX_ROWS * AGENDA_ROW_SENT_BYTES) / 1_000_000);
 /** A person's key, as in the address of their page from the agenda. */
 export const PERSON_KEY = /^[0-9a-f]{32}$/;
 

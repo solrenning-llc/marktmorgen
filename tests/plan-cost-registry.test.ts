@@ -2,7 +2,8 @@ import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { AGENDA_READ, BUYER_LEDGER } from "./plan-cost-registry";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
-import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT } from "@/lib/segments";
+import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
+import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
 /**
@@ -257,13 +258,17 @@ test("what the buyers' copy and the imported buyers weigh is counted a studio re
  assert.ok(IMPORTED_BUYER_BYTES >= 2 * (254 + 10), "an imported buyer is read and written in the copy: never priced as less");
  // BUYER_LEDGER prices Stripe's pages and rows only; the imported are counted by size, so the source must count them.
  const source = read("lib/segments.ts");
- assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("BUYER_LEDGER_UNITS + ledgerUnits(Number(imported || 0) * IMPORTED_BUYER_BYTES)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers are counted before they are read");
- assert.ok(source.includes('["STRLEN", ledgerKey(store.statsId)]') && source.indexOf("STRLEN") < source.indexOf('["GET", ledgerKey(store.statsId)]'), "the copy is measured and counted before it is read");
+ assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("const paypal = store.paypalSeller ? await paypalKept(store.statsId)") && source.includes("ledgerUnits(moved)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers and PayPal's sales are counted before they are read");
+ assert.ok(source.includes('["STRLEN", ledgerKey(store.statsId)]') && source.indexOf("STRLEN") < source.indexOf('["GETRANGE", ledgerKey(store.statsId)'), "the copy is measured and counted before it is read, and read no further");
+ // PayPal's reading is counted in full (round 5, H1): what ledgerReadBytes counts for the most PayPal kept covers PAYPAL_LEDGER.
+ const paypalUnits = ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER }));
+ assert.ok(PAYPAL_LEDGER <= UNIT_COST.studio * paypalUnits, `${PAYPAL_LEDGER} > ${paypalUnits} x ${UNIT_COST.studio}`);
+ assert.ok(ledgerReadBytes({ imported: 0, paypalSales: 3_000, paypalRefunds: 500 }) >= PAYPAL_LEDGER_BYTES, "every PayPal record read is counted");
 });
 
-test("the tasks agenda fits the studio requests it counts, and no fewer would do", () => {
+test("the tasks agenda at its most fits the studio requests it counts", () => {
  assert.ok(AGENDA_READ <= UNIT_COST.studio * AGENDA_UNITS, `${AGENDA_READ} > ${AGENDA_UNITS} x ${UNIT_COST.studio}`);
- assert.ok(AGENDA_READ > UNIT_COST.studio * (AGENDA_UNITS - 1), `${AGENDA_READ} <= ${AGENDA_UNITS - 1} x ${UNIT_COST.studio}: lower AGENDA_UNITS`);
+ // AGENDA_UNITS is what agendaReadUnits and the rows' size count at the most (lib/person-agenda.ts): never less than the cost.
 });
 
 test("Path push fits its reserved studio requests", () => {

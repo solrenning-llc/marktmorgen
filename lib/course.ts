@@ -20,6 +20,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
 import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
 import { type TaskSetup, parseTaskSetup } from "@/lib/assignment-rules";
+import { randomLetters } from "@/lib/random-letters";
 
 export const MAX_MODULES = 30;
 export const MAX_LESSONS = 200;
@@ -132,10 +133,7 @@ export function newCourseId(): string {
 
 /** Twelve lowercase letters and digits: short enough for a URL, unique in practice. */
 export function newItemId(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(12);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+  return randomLetters("abcdefghijklmnopqrstuvwxyz0123456789", 12);
 }
 
 function cleanTitle(raw: unknown, fallback: string): string {

@@ -23,7 +23,7 @@
  *   nl:slink:<code>             the link: its store and where it goes
  *   nl:slink:store:<statsId>    hash: <code> → the same, the store's links
  */
-import { randomBytes } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CODE, CODE_LETTERS, MAX_LINKS, type ShortLink, linkName, linkPlace, readTarget } from "@/lib/short-link-rules";
 
@@ -94,7 +94,8 @@ export async function addLink(
   // One link to a name: two would add their results together on one row.
   if (links.some((l) => l.name === name)) return { ok: false, reason: "taken" };
   for (let tries = 0; tries < 5; tries += 1) {
-    const code = Array.from(randomBytes(6), (b) => ALPHABET[b % ALPHABET.length]).join("");
+    // randomInt draws each letter evenly; a byte taken modulo 31 would favour the first eight.
+    const code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
     const kept: Kept = { code, name, place: linkPlace(input.place), target, made: now, sid: store.sid, statsId: store.statsId };
     const [got] = await redisPipeline([["SET", linkKey(code), JSON.stringify(kept), "NX"]]);
     if (got === null) continue;

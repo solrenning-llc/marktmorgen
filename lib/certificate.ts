@@ -29,6 +29,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, lessonsInOrder } from "@/lib/course";
 import { requiredQuizLessons } from "@/lib/quiz";
 import { emailKey } from "@/lib/learn";
+import { randomLetters } from "@/lib/random-letters";
 
 export const CERT_ID_PATTERN = /^[a-z0-9]{16}$/;
 export const MIN_CERT_NAME = 2;
@@ -75,10 +76,7 @@ export function standingOf(c: Pick<Certificate, "withdrawnAt" | "validUntil">, n
 }
 
 export function newCertificateId(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+  return randomLetters("abcdefghijklmnopqrstuvwxyz0123456789", 16);
 }
 
 /**

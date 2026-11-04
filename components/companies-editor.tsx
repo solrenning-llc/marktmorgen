@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/toast";
+import { agendaLinkWords } from "@/components/tasks-agenda";
 import { COMPANY_REFUSALS, type Company, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_WEBSITE } from "@/lib/crm-companies-rules";
 
 type Shown = Company & { addresses: Record<string, string> };
@@ -319,8 +320,8 @@ export function CompaniesEditor({
                       <li key={person}>
                         {company.addresses[person] ? (
                           <a href={peopleHref(person)} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
-                            {company.addresses[person]}
-                            <span className="sr-only">: open their page</span>
+                            {/* The link's own visible words say where it goes (2.4.9), as the tasks agenda's do (round 6, L5). */}
+                            {agendaLinkWords(company.addresses[person])}
                           </a>
                         ) : (
                           <span className="text-ink-soft">{addressesRead ? `A person we could not find among your Stripe buyers${addressesPartial ? " (the oldest buyers are not read)" : ""}` : "A person whose address could not be read just now"}</span>

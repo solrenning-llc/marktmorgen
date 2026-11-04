@@ -21,7 +21,7 @@ part("The list");
 const html = draw([{ ...north, addresses: { [ann]: "ann@example.com" } }]);
 is("each company under its own heading, with its count", html.includes('<h2 id="companies-title"') && html.includes("Your companies (1)") && html.includes("<h3") && html.includes("North School</h3>"), true);
 is("its site and note", html.includes("north.example.com") && html.includes("Buys seats each term"), true);
-is("each person linked to their page by key, named by their address, the link saying where it goes (2.4.9)", html.includes(`href="/studio/people?store=s1&amp;who=${ann}"`) && html.includes('>ann@example.com<span class="sr-only">: open their page</span></a>'), true);
+is("each person linked to their page by key, named by their address, the link saying where it goes in words everyone sees (2.4.9; round 6, L5)", html.includes(`href="/studio/people?store=s1&amp;who=${ann}"`) && html.includes(">Open the buyer page of ann@example.com</a>") && !html.includes('class="sr-only">: open their page'), true);
 is("someone not among the buyers is said to be so, in plain words (3.1.5)", html.includes("A person we could not find among your Stripe buyers") && !html.includes("read from your Stripe account"), true);
 is("when Stripe could not be read, nobody is said to be missing from the buyers", [draw([{ ...north, addresses: {} }], false).includes("A person whose address could not be read just now"), draw([{ ...north, addresses: {} }], false).includes("could not find among")], [true, false]);
 is("each company's heading can take the focus, for an undo that puts it back", html.includes('<h3 tabindex="-1"') && html.includes('<h2 id="companies-title" tabindex="-1"'), true);

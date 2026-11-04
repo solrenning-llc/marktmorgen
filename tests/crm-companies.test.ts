@@ -327,6 +327,8 @@ async function main(): Promise<void> {
   is("a store with no company counts nothing and reads no hash (L5)", [barePage.state, barePerson.state === "ok" && barePerson.companies.length, redis.keys().filter((k) => k.startsWith("nl:allow:studio:")).length, watched.some((c) => c[0] === "HGETALL")], ["ok", 0, bareKeysBefore, false]);
   redis.pipeline = realPipe;
 
+  is("a figure that could not be counted, or no place this month, answers unavailable, never used (round 6, L2)", readFileSync("app/api/store/companies/route.ts", "utf8").includes('error: counted.reason === "used" ? "studio_used" : "unavailable"') && readFileSync("app/api/store/companies/route.ts", "utf8").includes('status: counted.reason === "used" ? 429 : 503'), true);
+
   part("The studio requests a companies request takes (round 3, L6; round 5, M1)");
   const usedKey = () => redis.keys().find((k) => k.startsWith("nl:allow:studio:"));
   const used = async () => { const k = usedKey(); return k ? Number((await redisPipeline([["GET", k]]))[0] ?? 0) : 0; };

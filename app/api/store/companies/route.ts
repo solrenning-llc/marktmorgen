@@ -49,7 +49,8 @@ async function countRead(store: Store): Promise<Response | null> {
   const kept = await companiesKept(store.statsId);
   const counted = await countUnits(store, companiesRequestUnits(kept));
   if (counted.ok) return null;
-  return Response.json({ ok: false, error: "studio_used", message: counted.message }, { status: 429 });
+  // Used up is 429; a figure that could not be counted, or no place this month, is unavailable (round 6, L2).
+  return Response.json({ ok: false, error: counted.reason === "used" ? "studio_used" : "unavailable", message: counted.message }, { status: counted.reason === "used" ? 429 : 503 });
 }
 
 const MAX_BODY_BYTES = (MAX_COMPANY_NAME + 200 + MAX_COMPANY_NOTE) * 6 + MAX_COMPANY_PEOPLE * 40 + 1_000;

@@ -10,7 +10,8 @@ const MAX_BODY_BYTES = 6_000;
 /**
  * The contact form on a store page (lib/store-contact.ts): a plain form, so it
  * works without JavaScript. The answer is always the store's contact page,
- * and nothing the visitor typed goes in its address.
+ * and nothing the visitor typed goes in its address (only whether it was
+ * sent from under the business card, so its way back leads there).
  */
 export async function POST(request: NextRequest) {
   const origin = originFrom(request);
@@ -20,6 +21,7 @@ export async function POST(request: NextRequest) {
   let email = "";
   let message = "";
   let honeypot = "";
+  let fromCard = false;
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (field: string) => {
@@ -31,6 +33,8 @@ export async function POST(request: NextRequest) {
     email = read("email").slice(0, 300);
     message = read("message").slice(0, 4_000);
     honeypot = read("website");
+    // Sent from under the creator's business card (app/[handle]/contact/page.tsx): the page after it leads back there.
+    fromCard = read("from") === "card";
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -39,7 +43,7 @@ export async function POST(request: NextRequest) {
   // One of the store's public requests for its window (lib/traffic.ts).
   if (!(await takePublicRequest(store))) return new Response("This store can't take messages right now. Please try again later.", { status: 429 });
   const away = (status: string) =>
-    new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/contact?status=${status}`, "Cache-Control": "no-store" } });
+    new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/contact?status=${status}${fromCard ? "&from=card" : ""}`, "Cache-Control": "no-store" } });
   // A field no person can see: whatever filled it in is told it worked, and nothing is sent.
   if (honeypot.trim()) return away("sent");
   try {

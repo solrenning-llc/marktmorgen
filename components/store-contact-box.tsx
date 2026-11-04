@@ -4,8 +4,11 @@ import { contactWords } from "@/lib/buyer-words/contact";
 import { speech } from "@/lib/buyer-words";
 import { MAX_MESSAGE, MAX_NAME, MIN_MESSAGE } from "@/lib/store-contact-rules";
 
-/** The contact form on the store page (lib/store-contact.ts): a plain form, so it works without JavaScript. */
-export function StoreContactBox({ store }: { store: Store }) {
+/**
+ * The contact form on the store page (lib/store-contact.ts): a plain form, so it works without JavaScript.
+ * Under the creator's business card (`from` "card"), the page after sending leads back to the card.
+ */
+export function StoreContactBox({ store, from }: { store: Store; from?: "card" }) {
   const w = contactWords(store.language);
   const said = speech(store);
   return (
@@ -16,6 +19,7 @@ export function StoreContactBox({ store }: { store: Store }) {
       <p className="st-muted mt-2">{store.contact.line || w.line(store.name)}</p>
       <form action="/api/store/contact" method="post" className="mt-5 space-y-3">
         <input type="hidden" name="handle" value={store.handle} />
+        {from ? <input type="hidden" name="from" value={from} /> : null}
         <div aria-hidden="true" className="hidden">
           <label>
             {said.w.leaveEmpty}

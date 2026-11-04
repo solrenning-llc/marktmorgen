@@ -31,7 +31,7 @@ export type CreatorCard = {
   title: string;
   /** An address they want people to write to, or nothing. */
   email: string;
-  /** A phone number in the international form (+ and the country code), or nothing. */
+  /** A phone number as the creator typed it, grouped their way, with + (or 00) and the country code; dialled from its digits (crmPhone). Or nothing. */
   phone: string;
   /** Their own website, https, or nothing. */
   website: string;
@@ -72,15 +72,15 @@ export function readCard(raw: Record<string, unknown>): { ok: true; card: Creato
   if (title === null) return { ok: false, error: "title" };
   const typedEmail = line(raw.email, MAX_CARD_EMAIL);
   if (typedEmail === null || (typedEmail && !EMAIL.test(typedEmail))) return { ok: false, error: "email" };
+  // Kept as typed, so it shows grouped as the creator wrote it; only a number crmPhone dials is taken.
   const typedPhone = line(raw.phone, 40);
-  const phone = typedPhone ? crmPhone(typedPhone) : "";
-  if (typedPhone === null || phone === null) return { ok: false, error: "phone" };
+  if (typedPhone === null || (typedPhone && crmPhone(typedPhone) === null)) return { ok: false, error: "phone" };
   const typedSite = line(raw.website, 200);
   const website = typedSite ? crmUrl(typedSite) : "";
   if (typedSite === null || website === null || (website && !website.startsWith("https://"))) return { ok: false, error: "website" };
   const note = line(raw.note, MAX_CARD_NOTE);
   if (note === null) return { ok: false, error: "note" };
-  return { ok: true, card: { on, name, title, email: typedEmail, phone, website, note } };
+  return { ok: true, card: { on, name, title, email: typedEmail, phone: typedPhone, website, note } };
 }
 
 /** A card as read back: checked again, and off whenever any of it fails. */
@@ -118,14 +118,21 @@ export function foldLine(text: string): string {
 /**
  * The "Save contact" file for a card that is on, with the store's own page
  * as a second link; null for a card that is off. Only what the card holds.
+ *
+ * N, which vCard 3.0 requires and some contact apps still read, holds the
+ * whole name as the given name: which word is a family name, or whether it
+ * is a person's name at all (the field invites a business's), is never
+ * guessed, so every app shows the name as typed. No KIND, for the same
+ * reason: the card does not say whether it is a person or a business.
  */
 export function cardVcard(card: CreatorCard, storeName: string, storeUrl: string): string | null {
   if (!card.on || !card.name) return null;
-  const lines = ["BEGIN:VCARD", "VERSION:4.0", `FN:${vcardText(card.name)}`, "KIND:individual"];
+  const lines = ["BEGIN:VCARD", "VERSION:4.0", `FN:${vcardText(card.name)}`, `N:;${vcardText(card.name)};;;`];
   if (card.title) lines.push(`TITLE:${vcardText(card.title)}`);
   if (storeName && storeName !== card.name) lines.push(`ORG:${vcardText(storeName)}`);
   if (card.email) lines.push(`EMAIL:${vcardText(card.email)}`);
-  if (card.phone) lines.push(`TEL;VALUE=uri:tel:${card.phone}`);
+  const tel = card.phone ? crmPhone(card.phone) : null;
+  if (tel) lines.push(`TEL;VALUE=uri:tel:${tel}`);
   if (card.website) lines.push(`URL:${card.website}`);
   if (storeUrl && storeUrl !== card.website) lines.push(`URL:${storeUrl}`);
   if (card.note) lines.push(`NOTE:${vcardText(card.note)}`);
@@ -143,6 +150,26 @@ export function vcardFileName(card: CreatorCard): string {
     .slice(0, 60)
     .toLowerCase();
   return `${plain || "contact"}.vcf`;
+}
+
+/**
+ * The same name as written, for Content-Disposition's filename* (RFC 6266,
+ * RFC 8187), for a name with letters outside plain ASCII: letters in any
+ * script kept, what a file name cannot hold made "-", percent-encoded as
+ * UTF-8. Null for a plain ASCII name, whose plain file name says it already;
+ * browsers that do not read filename* use the plain one.
+ */
+export function vcardFileNameStar(card: CreatorCard): string | null {
+  if (!/[^\u0000-\u007f]/.test(card.name)) return null;
+  const cleaned = card.name
+    .normalize("NFC")
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.-]+|[\s.-]+$/g, "");
+  // Cut by characters, never inside one.
+  const written = Array.from(cleaned).slice(0, 60).join("");
+  const name = `${written || "contact"}.vcf`;
+  return `UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
 }
 
 const cardKey = (statsId: string) => `nl:vcard:${statsId}`;

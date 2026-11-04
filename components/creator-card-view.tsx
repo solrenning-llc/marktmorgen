@@ -1,6 +1,12 @@
 import Link from "next/link";
 import type { ContactWords } from "@/lib/buyer-words/contact";
 import type { CreatorCard } from "@/lib/creator-card";
+import { crmPhone } from "@/lib/crm-rules";
+
+/** A mailto: link to the address as typed: each side percent-encoded, so ? & % # / in it stay part of the address (RFC 6068). */
+export function mailtoHref(email: string): string {
+  return `mailto:${email.split("@").map(encodeURIComponent).join("@")}`;
+}
 
 /**
  * The card as the creator typed it: each way to reach them a link, and the
@@ -8,15 +14,16 @@ import type { CreatorCard } from "@/lib/creator-card";
  * under a third-level heading, with its links as plain text, so nothing in
  * it leaves the studio or saves a card that is not the one kept yet; its
  * Save contact is drawn dashed and says "(preview)", so it does not look
- * like a button that works. A phone's link keeps only its digits and +, so
- * every phone dials it. Every link is at least 44px tall (2.5.5).
+ * like a button that works. A phone shows as the creator typed it, grouped
+ * their way; its link keeps only + and the digits (crmPhone), so every
+ * phone dials it. Every link is at least 44px tall (2.5.5).
  */
 export function CreatorCardView({ card, handle, storeName, words, preview = false }: { card: CreatorCard; handle: string; storeName: string; words: ContactWords["card"]; preview?: boolean }) {
   const Heading = preview ? "h3" : "h1";
   const id = preview ? "card-preview-name" : "card-name";
   const ways: { label: string; text: string; href: string }[] = [];
-  if (card.email) ways.push({ label: words.email, text: card.email, href: `mailto:${card.email}` });
-  if (card.phone) ways.push({ label: words.phone, text: card.phone, href: `tel:${card.phone.replace(/[^\d+]/g, "")}` });
+  if (card.email) ways.push({ label: words.email, text: card.email, href: mailtoHref(card.email) });
+  if (card.phone) ways.push({ label: words.phone, text: card.phone, href: `tel:${crmPhone(card.phone) ?? card.phone.replace(/[^\d+]/g, "")}` });
   if (card.website) ways.push({ label: words.website, text: card.website.replace(/^https:\/\//, "").replace(/\/$/, ""), href: card.website });
   return (
     <article className="st-card p-7 sm:p-10" aria-labelledby={id}>

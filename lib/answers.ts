@@ -224,8 +224,28 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
   }
   // The creator's own notes are never what the cut takes: the page's lines give way to them (inbox C4-16 (f)).
   const notes = store.answers.facts ? `What ${store.name} wants buyers to know, in their words:\n${store.answers.facts}` : "";
-  if (!notes) return parts.join("\n\n").slice(0, MAX_FACTS_CHARS);
-  return `${parts.join("\n\n").slice(0, Math.max(0, MAX_FACTS_CHARS - notes.length - 2))}\n\n${notes}`.slice(0, MAX_FACTS_CHARS);
+  // The page is cut between its parts, never inside one, so no price or date reaches the model half read (review of #2177).
+  const room = notes ? Math.max(0, MAX_FACTS_CHARS - notes.length - 2) : MAX_FACTS_CHARS;
+  const kept = wholeParts(parts, room);
+  if (!notes) return kept;
+  return `${kept}${kept ? "\n\n" : ""}${notes}`.slice(0, MAX_FACTS_CHARS);
+}
+
+/** As many of the page's parts as fit in `room` characters, whole, joined as they are. Pure. */
+function wholeParts(parts: string[], room: number): string {
+  let out = "";
+  for (const part of parts) {
+    const next = out ? `${out}\n\n${part}` : part;
+    if (next.length > room) {
+      // The part that does not fit gives its whole lines that do, never half of one.
+      const cut = next.slice(0, room);
+      const line = cut.lastIndexOf("\n");
+      out = line > out.length ? cut.slice(0, line).trimEnd() : out || cut;
+      break;
+    }
+    out = next;
+  }
+  return out;
 }
 
 /**
@@ -234,7 +254,7 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
  * it whether it is decoration or not (inbox C4-16 (e)).
  */
 function pictureWords(picture: { alt: string; caption: string }, decorative: boolean): string {
-  return [!decorative && picture.alt ? `A picture: ${picture.alt}` : "", picture.caption ? `Under it: ${picture.caption}` : ""].filter(Boolean).join("\n");
+  return [!decorative && picture.alt ? `A picture: ${picture.alt}` : "", picture.caption ? (!decorative && picture.alt ? `Under it: ${picture.caption}` : `A caption: ${picture.caption}`) : ""].filter(Boolean).join("\n");
 }
 
 const SYSTEM = [

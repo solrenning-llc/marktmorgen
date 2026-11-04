@@ -75,6 +75,7 @@ async function main(): Promise<void> {
   }));
   is("a row's picture says its words and its caption", ["A bowl of soup", "Ready in twelve minutes"].map((words) => withCaptions.includes(words)), [true, true]);
   is("a decorative picture's caption is printed, so it is told, its description is not", [withCaptions.includes("Printed on recycled paper"), withCaptions.includes("Swirls")], [true, false]);
+  is("told as a caption of its own, never \"Under it\" with nothing above", [withCaptions.includes("A caption: Printed on recycled paper"), withCaptions.includes("Under it: Printed on recycled paper")], [true, false]);
   is("a picture-and-text block says its words, its picture and its caption", ["One list for the whole week.", "A full grocery bag", "Everything for seven dinners"].map((words) => withCaptions.includes(words)), [true, true, true]);
 
   part("The creator's own notes are never what the length cut takes (inbox C4-16 (f))");
@@ -82,6 +83,13 @@ async function main(): Promise<void> {
   const noted = { ...store, answers: { ...store.answers, facts: NOTES } };
   const long = factsFor(noted, product, "A long description. ".repeat(2_000), page);
   is("a page longer than the facts may be still keeps the notes, whole, at the end", [long.length <= MAX_FACTS_CHARS, long.endsWith(NOTES)], [true, true]);
+  {
+    // Review of #2177: the page is cut between its parts, never inside one, so no price reaches the model half read.
+    const parts = Array.from({ length: 800 }, (_, i) => `Line ${i}: the price is $129.`).join("\n");
+    const cut = factsFor(noted, product, parts, page);
+    const pagePart = cut.slice(0, cut.lastIndexOf("\n\nWhat "));
+    is("a long page is cut at the end of a line: its last line whole", [cut.length <= MAX_FACTS_CHARS, /the price is \$129\.$/.test(pagePart.trimEnd())], [true, true]);
+  }
   is("and a short page keeps everything, the notes last", factsFor(noted, product, "", page).endsWith(NOTES) && factsFor(noted, product, "", page).includes("Fast dinners"), true);
 
   done();

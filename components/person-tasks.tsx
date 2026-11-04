@@ -98,20 +98,39 @@ export function undoBody(task: PersonTask, assignees: readonly string[]): { body
   return { body: { action: "add", text: task.text, due: task.due, assignee: stays ? task.assignee : "" }, unassigned: !stays };
 }
 
-/** The task an add put in: the one in `after` that was not in `before` (never the last one another tab added). */
-export function addedTask(before: readonly PersonTask[], after: readonly PersonTask[]): PersonTask | null {
+/**
+ * The task an add put in: the one in `after` that was not in `before`
+ * (never the last one another tab added). When another tab added one at the
+ * same moment, the new one with the words, date and teammate sent (`like`);
+ * null only when none of the new ones has them.
+ */
+export function addedTask(before: readonly PersonTask[], after: readonly PersonTask[], like?: { text: string; due: string; assignee: string }): PersonTask | null {
   const known = new Set(before.map((task) => task.id));
   const added = after.filter((task) => !known.has(task.id));
-  return added.length === 1 ? added[0] : null;
+  if (added.length === 1) return added[0];
+  const same = like ? added.filter((task) => task.text === like.text && task.due === like.due && task.assignee === like.assignee) : [];
+  return same.length ? same[same.length - 1] : null;
+}
+
+/**
+ * What an undo says once it is done, in one message: put back, with nobody
+ * named when its teammate may no longer be responsible, and done again when
+ * it was done; or, when the task put back could not be told apart from one
+ * added elsewhere at the same moment, that it is open and can be marked done.
+ */
+export function undoWords(task: PersonTask, unassigned: boolean, doneAgain: boolean | null): string {
+  const back = unassigned ? `Task put back with nobody named, since ${task.assignee} can no longer be responsible for tasks.` : "Task put back.";
+  if (!task.done) return back;
+  return doneAgain ? `${back} Marked done again.` : `${back} It is open: mark it done if it still is.`;
 }
 
 /**
  * Refusals that mean this screen is out of date (another tab or teammate
- * removed the task, or filled the person's list): the tasks are read again
- * so what is shown is what is kept.
+ * removed the task, or filled the person's list, or the teammate chosen left
+ * the team): the tasks are read again so what is shown is what is kept.
  */
 export function staleRefusal(error: string | undefined): boolean {
-  return error === "unknown" || error === "full" || error === "store_full";
+  return error === "unknown" || error === "full" || error === "store_full" || error === "assignee";
 }
 
 /**
@@ -146,7 +165,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
     return false;
   }
 
-  async function send(body: Record<string, unknown>, done: string): Promise<PersonTask[] | null> {
+  async function send(body: Record<string, unknown>, done: string | null): Promise<PersonTask[] | null> {
     setBusy(true);
     setError("");
     try {
@@ -158,7 +177,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; tasks?: PersonTask[]; message?: string; error?: string };
       if (answer.ok && answer.tasks) {
         setTasks(answer.tasks);
-        toast(done);
+        if (done) toast(done);
         return answer.tasks;
       }
       const said = answer.message ?? (answer.error === "data_full" ? "Your store's data room is full. Delete something you no longer need first." : "That did not save. Try again in a moment.");
@@ -180,11 +199,14 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   async function undoRemove(task: PersonTask) {
     const { body, unassigned } = undoBody(task, assignees);
     const before = tasks;
-    const back = await send(body, unassigned ? `Task put back with nobody named, since ${task.assignee} can no longer be responsible for tasks.` : "Task put back.");
+    // Said once, when all of it is done (round 2, A-L): never a message for the add and another for done again.
+    const back = await send(body, task.done ? null : undoWords(task, unassigned, null));
     if (!back) return;
     setRemoved(null);
-    const added = addedTask(before, back);
-    if (task.done && added) await send({ action: "done", id: added.id, done: true }, "Marked done again.");
+    if (!task.done) return;
+    const added = addedTask(before, back, { text: String(body.text), due: String(body.due), assignee: String(body.assignee) });
+    if (!added) return toast(undoWords(task, unassigned, false));
+    await send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true));
   }
 
   const open = tasks.filter((task) => !task.done).length;

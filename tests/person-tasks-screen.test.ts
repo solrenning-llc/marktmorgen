@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PersonTasks, addedTask, browserDay, staleRefusal, undoBody, untilNextDay, watchDay } from "@/components/person-tasks";
+import { PersonTasks, addedTask, browserDay, staleRefusal, undoBody, undoWords, untilNextDay, watchDay } from "@/components/person-tasks";
 import { MAX_PERSON_TASKS, type PersonTask, dayIn, readTaskInput } from "@/lib/person-tasks";
 import { done, is, part } from "./check";
 
@@ -42,8 +42,15 @@ is("a status region, there before anything is removed, says what was removed", h
 const gone = task(7, { text: "Send the slides", due: "2026-11-05", assignee: "sam@example.com", done: true });
 is("undo puts back the words, the date and the teammate", undoBody(gone, ["owner@example.com", "sam@example.com"]), { body: { action: "add", text: "Send the slides", due: "2026-11-05", assignee: "sam@example.com" }, unassigned: false });
 is("a teammate who left since: the task comes back with nobody named, and it is said, instead of not coming back", [undoBody(gone, ["owner@example.com"]), source.includes("const { body, unassigned } = undoBody(task, assignees);") && source.includes("can no longer be responsible for tasks")], [{ body: { action: "add", text: "Send the slides", due: "2026-11-05", assignee: "" }, unassigned: true }, true]);
-is("the task put back is the one this add made, never one another tab added at the same moment", [addedTask([task(1)], [task(1), task(9), task(8)]), addedTask([task(1)], [task(1), task(9)])?.id, source.includes("const added = addedTask(before, back);")], [null, "task000009", true]);
-is("and marks it done again if it was", source.includes('if (task.done && added) await send({ action: "done", id: added.id, done: true }'), true);
+is("the task put back is the one this add made, never one another tab added at the same moment", [addedTask([task(1)], [task(1), task(9)])?.id, source.includes("const added = addedTask(before, back, { text: String(body.text), due: String(body.due), assignee: String(body.assignee) });")], ["task000009", true]);
+const sent = { text: "Send the slides", due: "2026-11-05", assignee: "" };
+const theirs = task(8, { text: "Call Ana" });
+const ours = task(9, { text: "Send the slides", due: "2026-11-05" });
+is("two new at once (round 2, A-M): the one with the words, date and teammate sent, wherever it is", [addedTask([task(1)], [task(1), ours, theirs], sent)?.id, addedTask([task(1)], [task(1), theirs, ours], sent)?.id], ["task000009", "task000009"]);
+is("and none only when no new one has them", [addedTask([task(1)], [task(1), theirs, task(7, { text: "Other" })], sent), addedTask([task(1)], [task(1), theirs, ours])], [null, null]);
+is("and marks it done again if it was", source.includes('await send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true));'), true);
+is("said once, all of it in one message (round 2, A-L)", [undoWords(gone, true, true), undoWords({ ...gone, done: false }, false, null), source.includes("const back = await send(body, task.done ? null : undoWords(task, unassigned, null));")], ["Task put back with nobody named, since sam@example.com can no longer be responsible for tasks. Marked done again.", "Task put back.", true]);
+is("and when the task put back cannot be told apart, it says it is open, briefly", [undoWords(gone, false, false), source.includes("if (!added) return toast(undoWords(task, unassigned, false));")], ["Task put back. It is open: mark it done if it still is.", true]);
 is("offered only after the removal was saved", source.includes('if (await send({ action: "remove", id: task.id }, "Task removed.")) setRemoved(task);'), true);
 
 part("On the person's page");
@@ -92,7 +99,7 @@ if (zoneBefore === undefined) delete process.env.TZ;
 else process.env.TZ = zoneBefore;
 
 part("A screen another tab changed (edge review)");
-is("a task gone or a list filled elsewhere says this screen is out of date", ["unknown", "full", "store_full", "text", "long", "date", "assignee", undefined].map(staleRefusal), [true, true, true, false, false, false, false, false]);
+is("a task gone, a list filled or a teammate gone elsewhere says this screen is out of date", ["unknown", "full", "store_full", "assignee", "text", "long", "date", undefined].map(staleRefusal), [true, true, true, true, false, false, false, false]);
 is("then the tasks are read again, so what is shown is what is kept, and the refusal says so", source.includes("staleRefusal(answer.error) && (await reread())") && source.includes("/api/store/person-tasks?person=${encodeURIComponent(person)}") && source.includes("The list now shows the tasks as they are."), true);
 
 part("Words no one can see (edge review)");
@@ -102,5 +109,12 @@ is("words shown backwards lose their direction signs", typed("\u202eCall Ana"), 
 is("half a character pair is shown as the replacement sign", typed("A\ud800B"), "A\ufffdB");
 is("C1 controls are made spaces, an accent typed as two characters kept as one", [typed("a\u0085b"), typed("Cafe\u0301")], ["a b", "Caf\u00e9"]);
 is("emoji joined by a joiner stay as typed", typed("Thank \u{1F469}\u200d\u{1F4BB}"), "Thank \u{1F469}\u200d\u{1F4BB}");
+part("Signs no one sees, as the sequence import takes them out (round 2, A-L)");
+is("a soft hyphen, a zero-width space and the direction marks go", typed("Ca\u00adll\u200b A\u200en\u200fa"), "Call Ana");
+is("the joiners stay on purpose (Persian, the Indic scripts, emoji)", [typed("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645"), typed("a\u200db")], ["\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", "a\u200db"]);
+is("tag characters, which can carry words no one sees, go", [typed("Call Ana\u{E0068}\u{E0069}\u{E0064}"), typed("Only\u{E007F}")], ["Call Ana", "Only"]);
+const scotland = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+is("except inside a flag of a region, kept whole", typed(`Visit ${scotland}`), `Visit ${scotland}`);
+is("words of tag characters only are no task", typed("\u{E0068}\u{E0069}"), "text");
 
 done();

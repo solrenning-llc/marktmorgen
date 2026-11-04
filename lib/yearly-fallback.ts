@@ -60,7 +60,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { productOfSub } from "@/lib/tier-rules";
 import { forgetTierPrice, tierPrice } from "@/lib/tier-switch";
-import { withLock } from "@/lib/redis-lock";
+import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { type FallbackSub, type MonthlyFallback, monthlyFallback } from "@/lib/yearly-fallback-rules";
 import type { Listing, Store } from "@/lib/store";
 
@@ -80,7 +80,11 @@ export const FALLBACK_STRIPE_VERSION = "2026-08-26.dahlia";
  *     the move, so a year found paid meanwhile has its month refunded ("account|yearly|monthly");
  *   - CHECK: a move whose outcome is not known yet (Stripe did not answer, a pending update whose payment is not known
  *     to have failed, or it applied with the first month not paid yet): the year stays with no automatic retry until
- *     the job reads the membership again ("account|subscription|invoice");
+ *     the job reads the membership again ("account|subscription|invoice"). The job knows the move happened by the
+ *     price's interval being month together with `metadata.monthly_replaced` naming this yearly invoice, which Stripe
+ *     writes with the move itself, never before it applies (fallbackBody; from API version 2026-05-27.dahlia). Still
+ *     to do in unit 2c, as an extra defence: take the CHECK entry itself plus an interval of month as the move made,
+ *     without requiring the metadata;
  *   - BOTH: the year was paid while the month was charged; the month is refunded ("account|yearly|monthly").
  */
 export const FALLBACK_VOID_KEY = "nl:yearly:fallback:void";
@@ -97,7 +101,21 @@ const tryKey = (invoice: string) => `nl:yearly:fallback:try:${invoice}`;
  */
 export const FALLBACK_LOCK_SECONDS = 240;
 
-/** The move itself: the product's monthly price from now, no proration, made only if the first month is paid. */
+/**
+ * The move itself: the product's monthly price from now, made only if the first month is paid.
+ *
+ * `proration_behavior=none`, decided with unit 2a (4 November 2026) and kept by the third review: the failed yearly
+ * invoice was never paid, so there is no paid time of the year to credit, and the new period starts now
+ * (`billing_cycle_anchor=now`), so the first month is charged whole. Any proration would credit the member for a
+ * year they never paid, or charge them for days of it.
+ *
+ * The membership's own record travels with the move, atomic with it: from API version 2026-05-27.dahlia Stripe
+ * accepts `metadata` with `payment_behavior=pending_if_incomplete`, keeps it in `pending_update.metadata` and merges
+ * it into the subscription's only when the pending update applies (changelog, read 4 November 2026:
+ * docs.stripe.com/changelog/dahlia/2026-05-27/pending-subscription-update-metadata; before that version it was an
+ * error). FALLBACK_STRIPE_VERSION is pinned after it, and tests/yearly-fallback.test.ts fails if it ever goes back.
+ * `metadata.every` is read by lib/purchase-email.ts, app/[handle]/thanks/page.tsx and lib/yearly-switch-rules.ts.
+ */
 export function fallbackBody(itemId: string, monthlyPrice: string, failedInvoice: string): URLSearchParams {
   const body = new URLSearchParams({
     "items[0][id]": itemId,
@@ -270,7 +288,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
       return result;
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "LockBusyError") return { ok: false, reason: "busy" };
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     if (!(error instanceof StripeError)) console.error("moving a yearly membership to monthly failed", error);
     return { ok: false, reason: "error" };
   }

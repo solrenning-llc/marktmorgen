@@ -17,9 +17,9 @@ const REFUSALS: Record<string, string> = {
   off: "AI summaries are not available for this store just now.",
   slow: "Too many AI requests a moment ago. Try again in a minute.",
   // The try is counted before the model answers (lib/ai.ts keeps it counted on purpose), so this never says otherwise.
-  failed: "The summary could not be made just now. This try counts as one of this month's AI jobs. Try again later.",
+  failed: "The summary could not be made just now. This try counts as one of this month's AI jobs. You can try again now; each try is one more AI job.",
   week: "A summary of this product was made in the last 7 days. A new one can be made a week after it.",
-  empty: "No theme came out that two or more reviews share in their own words, so nothing was kept. This try counts as one of this month's AI jobs. You can try again another day.",
+  empty: "No theme came out that two or more reviews share in their own words, so nothing was kept. This try counts as one of this month's AI jobs. You can try again now; each try is one more AI job.",
 };
 
 /**
@@ -61,17 +61,19 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
       const response = await fetch("/api/store/review-summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product: product.id }) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; summary?: Kept; error?: string; left?: number | null; next?: number | null };
       if (answer.ok && answer.summary) {
+        // The button goes with the summary shown: focus moves to the status first, so it never falls to the page.
+        statusRefs.current[product.id]?.focus();
         setShown((all) => all.map((p) => (p.id === product.id ? { ...p, summary: answer.summary! } : p)));
         setSaid((all) => ({ ...all, [product.id]: typeof answer.left === "number" ? `Made. ${answer.left} AI ${answer.left === 1 ? "job" : "jobs"} left this month.` : "This week's summary." }));
         say(`The summary of ${product.title}'s reviews is ready.`);
-        window.setTimeout(() => statusRefs.current[product.id]?.focus(), 0);
       } else {
         const why = answer.error === "week" && typeof answer.next === "number" ? `A summary of this product was made in the last 7 days. A new one can be made from ${day(answer.next)} (UTC).` : REFUSALS[answer.error ?? "failed"] ?? REFUSALS.failed;
         setSaid((all) => ({ ...all, [product.id]: why }));
+        // A week's refusal takes the button away: focus moves to what is said first, so it never falls to the page.
+        if (answer.error === "week" && typeof answer.next === "number") statusRefs.current[product.id]?.focus();
         if (answer.error === "week" && typeof answer.next === "number") setShown((all) => all.map((p) => (p.id === product.id ? { ...p, lastAt: answer.next! - SUMMARY_REFRESH_SECONDS } : p)));
         say(`No summary of ${product.title}'s reviews was made.`);
-        // A week's refusal takes the button away: focus goes to what was said instead.
-        window.setTimeout(() => (answer.error === "week" ? statusRefs.current[product.id] : buttonRefs.current[product.id])?.focus(), 0);
+        if (!(answer.error === "week" && typeof answer.next === "number")) window.setTimeout(() => buttonRefs.current[product.id]?.focus(), 0);
       }
     } catch {
       setSaid((all) => ({ ...all, [product.id]: "That did not work. Check your connection and try again." }));

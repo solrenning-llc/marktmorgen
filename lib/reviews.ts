@@ -244,6 +244,19 @@ export async function visibleReviews(
   return [...shownFirst, ...rest].slice(0, Math.max(limit, shownFirst.length));
 }
 
+/** Some of a product's reviews by id, each as kept (hidden and refunded ones too), or null when it is gone. At most 60. */
+export async function readReviewsById(statsId: string, productId: string, ids: readonly string[]): Promise<(Review | null)[]> {
+  const wanted = ids.filter((id) => REVIEW_ID_PATTERN.test(id)).slice(0, 60);
+  if (!wanted.length || !STATS_ID_PATTERN.test(statsId) || !PRODUCT_ID_PATTERN.test(productId) || !isRedisConfigured()) return ids.map(() => null);
+  const [rows] = await redisPipeline([["HMGET", productKey(statsId, productId), ...wanted]]);
+  const byId = new Map<string, Review>();
+  (Array.isArray(rows) ? rows : []).forEach((raw, i) => {
+    const review = parseReview(raw);
+    if (review && review.id === wanted[i]) byId.set(review.id, review);
+  });
+  return ids.map((id) => byId.get(id) ?? null);
+}
+
 /** One review, when it exists. */
 export async function readReview(statsId: string, productId: string, id: string): Promise<Review | null> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId) || !isRedisConfigured()) return null;

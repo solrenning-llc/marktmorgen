@@ -48,6 +48,13 @@ is("a summary taken away by a review change: no button before the week is over, 
 is("a week after the last one, the button", draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: null, lastAt: NOW - SUMMARY_REFRESH_SECONDS }]).includes(">Make the summary<"), true);
 is("a week's refusal said with its date", source.includes('answer.error === "week" && typeof answer.next === "number"') && /week: "/.test(source), true);
 
+part("Second review of 4 November 2026: what a refusal allows, focus before the button goes");
+is("a failed or empty try says the next may be made now, as the code allows", [source.includes("try again another day"), source.includes("Try again later"), (source.match(/You can try again now; each try is one more AI job\./g) ?? []).length], [false, false, 2]);
+const success = source.slice(source.indexOf("if (answer.ok && answer.summary) {"), source.indexOf("} else {"));
+is("after a summary, focus moves to the status before the button is taken away", success.indexOf("statusRefs.current[product.id]?.focus();") > -1 && success.indexOf("statusRefs.current[product.id]?.focus();") < success.indexOf("setShown("), true);
+const refused = source.slice(source.indexOf("} else {"), source.indexOf("} catch {"));
+is("after a week's refusal too, never by a timer once the button is gone", refused.indexOf("statusRefs.current[product.id]?.focus();") > -1 && refused.indexOf("statusRefs.current[product.id]?.focus();") < refused.indexOf("setShown(") && !/setTimeout\(\(\) => statusRefs/.test(source), true);
+
 part("The page");
 const page = readFileSync("app/studio/reviews/page.tsx", "utf8");
 is("opening the page only reads what was made, never makes one", page.includes("readReviewSummary(store.statsId, p.id)") && !page.includes("makeReviewSummary"), true);

@@ -180,7 +180,46 @@ async function main(): Promise<void> {
   is("a review deleted takes the summary", await readReviewSummary(statsId, kiln), null);
   const reset = await makeReviewSummary(store, kiln, day + 14 * 86_400_000 + 480_000);
   is("but not the week: no second AI job, said when the next may be made", [reset, prompts.length], [{ ok: false, reason: "week", next: Math.floor((day + 14 * 86_400_000 + 420_000) / 1000) + SUMMARY_REFRESH_SECONDS }, asked]);
+  const weekRoute = await POST(new NextRequest("https://marktmorgen.com/api/store/review-summary", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ product: kiln }) }));
+  const weekBody = (await weekRoute.json()) as { error?: string; next?: number };
+  is("through the route: 429, with the next date", [weekRoute.status, weekBody.error, typeof weekBody.next], [429, "week", "number"]);
   is("a week later, made again", (await makeReviewSummary(store, kiln, day + 21 * 86_400_000 + 480_000)).ok, true);
+
+  part("Second review of 4 November 2026: a deletion that fails to take the summary, a lock that ran out");
+  is("the summary kept says which reviews it read", ((JSON.parse(String((await redis.pipeline([["GET", `nl:rsum:${statsId}:${kiln}`]]))[0])) as { k?: string[] }).k ?? []).length, 5);
+  const realPipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // Redis fails for the summary's deletion only (lib/reviews.ts logs it and goes on).
+    if (commands.some((c) => String(c[1] ?? "").startsWith("nl:rsum:ver:"))) throw new Error("redis down for this test");
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  const goner = (await visibleReviews(statsId, kiln, 0, 10))[0];
+  const quiet = console.error;
+  console.error = () => {};
+  await deleteReview(statsId, kiln, goner.id, ROOM);
+  console.error = quiet;
+  redis.pipeline = realPipeline;
+  is("the deletion failed to take the summary away", (await redis.pipeline([["GET", `nl:rsum:${statsId}:${kiln}`]]))[0] !== null, true);
+  is("but it is never read while it counts the review gone", await readReviewSummary(statsId, kiln), null);
+  is("nor given back as this week's, and no AI job made for it", [(await makeReviewSummary(store, kiln, day + 21 * 86_400_000 + 540_000)).ok, prompts.length], [false, prompts.length]);
+
+  const fifth = await addProduct(OWNER, "Wheel Basics", "", "45");
+  if (!fifth.ok) throw new Error("no product");
+  const wheel = fifth.product.id;
+  for (const [i, text] of ["Clear basics", "Clear basics, useful", "Useful basics", "Useful and clear", "Clear and useful", "Useful basics again"].entries()) {
+    await saveReview(statsId, { productId: wheel, email: `wheel${i}@example.com`, reference: `cs_test_whl${i}0000000000`, pi: `pi_whl${i}`, rating: 5, text, name: `Wheel ${i}` }, ROOM);
+  }
+  store = (await storeForEmail(OWNER))!;
+  reply = JSON.stringify({ themes: [{ title: "Clear basics", reviews: [1, 2, 3, 4, 5] }] });
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    // The model takes longer than the lock: it runs out and another call takes it.
+    if (new URL(String(input)).hostname === "api.anthropic.com") await redis.pipeline([["SET", `nl:rsum:lock:${statsId}`, "another-call", "EX", 120]]);
+    return keep(input, init);
+  }) as typeof fetch;
+  const late = await makeReviewSummary(store, wheel, day + 600_000);
+  globalThis.fetch = keep;
+  is("a call whose lock ran out keeps nothing, nor takes the week", [late.ok, await readReviewSummary(statsId, wheel), (await redis.pipeline([["GET", `nl:rsum:last:${statsId}:${wheel}`]]))[0]], [false, null, null]);
+  is("and leaves the other call's lock to it", (await redis.pipeline([["GET", `nl:rsum:lock:${statsId}`]]))[0], "another-call");
   done();
 }
 

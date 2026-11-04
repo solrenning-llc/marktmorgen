@@ -25,12 +25,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import OrdersPage from "@/app/[handle]/orders/page";
 import { GET as bundleRoute } from "@/app/api/store/orders/bundle/route";
+import { GET as olderRoute } from "@/app/api/store/orders/older/route";
+import type { OlderAnswer } from "@/components/older-purchases";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import {
   MAX_LISTED,
   ORDERS_BUNDLE_BYTES,
   ORDERS_BUNDLE_UNITS,
+  ORDERS_OLDER_BYTES,
+  ORDERS_OLDER_UNITS,
   ORDERS_PAGE_BYTES,
   ORDERS_STRIPE_CALLS,
   ORDERS_STRIPE_LISTS,
@@ -38,6 +42,7 @@ import {
   PLAN_REFUND_CALLS,
   ordersLinkFor,
   purchasesFor,
+  requestOrdersLink,
 } from "@/lib/buyer-orders";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { LANGUAGE_CODES } from "@/lib/store-language";
@@ -80,11 +85,16 @@ let checkouts: Record<string, unknown>[] = [];
 let intents: Record<string, unknown>[] = [];
 let calls: string[] = [];
 let refundedInvoices = new Set<string>();
+/** Emails handed to the sender. */
+let mails = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-  if (url.hostname.includes("resend")) return answer({ id: "00000000-0000-4000-8000-000000000000" });
+  if (url.hostname.includes("resend")) {
+    mails += 1;
+    return answer({ id: "00000000-0000-4000-8000-000000000000" });
+  }
   assert.equal(url.hostname, "api.stripe.com");
   assert.equal(init?.method ?? "GET", "GET", "nothing is written to the creator's Stripe account");
   assert.equal(new Headers(init?.headers).get("Stripe-Account"), ACCOUNT);
@@ -93,7 +103,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/checkout/sessions") {
     // The store's bookings (lib/calls.ts) and the buyer's checkouts.
     if (url.searchParams.has("created[gte]")) return answer({ object: "list", data: checkouts.filter((s) => (s.metadata as Record<string, string>).kind === "call"), has_more: false });
-    assert.equal(url.searchParams.get("customer_details[email]"), BUYER);
+    if (url.searchParams.get("customer_details[email]") !== BUYER) return answer({ object: "list", data: [], has_more: false });
     return answer({ object: "list", data: checkouts.filter((s) => (s.metadata as Record<string, string>).kind !== "call"), has_more: false });
   }
   if (path === "/payment_intents") return answer({ object: "list", data: intents.filter((i) => i.customer === url.searchParams.get("customer")), has_more: false });
@@ -124,6 +134,7 @@ beforeEach(() => {
   intents = [];
   calls = [];
   refundedInvoices = new Set();
+  mails = 0;
   process.env.STRIPE_SECRET_KEY = "sk_test_orders_bounds_only";
   process.env.RESEND_API_KEY = "re_test_orders_bounds_only";
 });
@@ -161,16 +172,22 @@ function plan(index: number, ago: number, product: string): Record<string, unkno
   return paid(index, ago, { product, kind: "plan" }, { mode: "subscription", invoice: `in_Bounds${String(index).padStart(12, "0")}`, payment_intent: null });
 }
 
+/** The token of the last link a test opened the list with. */
+let token = "";
+
 async function open(store: Store): Promise<string> {
   const link = (await ordersLinkFor(store, BUYER, `${ORIGIN}/@${store.handle}`))!;
-  const token = new URL(link).searchParams.get("token")!;
+  token = new URL(link).searchParams.get("token")!;
   return renderToStaticMarkup(await OrdersPage({ params: Promise.resolve({ handle: `@${store.handle}` }), searchParams: Promise.resolve({ token }) }));
 }
 
 /** The title of each purchase the page lists, in order (not a bundle's or a call's). */
 const listed = (html: string) => [...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><p class="font-semibold">([^<]+)<\/p>/g)].map((m) => m[1]);
 
-test("a hundred purchases paid in installments: at most ORDERS_STRIPE_CALLS calls to Stripe, the newest checked, the rest said as not checked, never as not bought", async () => {
+/** The next batch of older purchases, from that checkout, as the button asks for it. */
+const older = (from: string, by = token) => olderRoute(new NextRequest(`${ORIGIN}/api/store/orders/older?${new URLSearchParams({ handle: "bounds", token: by, from })}`));
+
+test("a hundred purchases paid in installments: at most ORDERS_STRIPE_CALLS calls to Stripe, the newest checked, the rest not checked yet with a button that checks them, batch by batch, to the last", async () => {
   const store = await shop();
   const drafts = await addDraftProducts(OWNER, Array.from({ length: 100 }, (_, i) => ({ title: `Plan product ${String(i).padStart(3, "0")}`, summary: "", priceCents: 1000, link: `https://example.test/p/${i}` })));
   assert.ok(drafts.ok);
@@ -184,9 +201,96 @@ test("a hundred purchases paid in installments: at most ORDERS_STRIPE_CALLS call
   assert.equal(invoices, checks, "a refund check for as many plans as the ceiling holds, and no more");
   assert.deepEqual(listed(html), Array.from({ length: checks }, (_, i) => `Plan product ${String(i).padStart(3, "0")}`), "the newest are the ones checked and shown");
   const words = ordersWords("en");
-  assert.ok(html.includes(words.notChecked), "the page says some purchases could not be checked");
+  assert.ok(html.includes(words.olderNotChecked(100 - checks)), "the page says how many are not checked yet");
+  assert.ok(html.includes(`>${words.checkOlder}</button>`), "with the button that checks them");
+  assert.ok(/<button type="button" class="[^"]*min-h-11[^"]*" aria-describedby="[^"]+">/.test(html), "a 44-pixel button named by what it does and described by how many wait");
   assert.ok(!html.includes(words.nothingToOpen("Bounds Studio").slice(0, 40)), "and never that there is nothing");
-  console.log(`a hundred installment purchases: ${calls.length} calls to Stripe (1,216 before), ${checks} refund checks, ${100 - checks} said as not checked`);
+  // The button asks from the first one not checked; each batch checks as many as an opening would, until none is left.
+  assert.ok(readFileSync("app/[handle]/orders/page.tsx", "utf8").includes("from={older[0]}"));
+  let from: string | null = checkouts[checks].id as string;
+  const titles: string[] = [];
+  let batches = 0;
+  while (from) {
+    calls = [];
+    const answer = await older(from);
+    assert.equal(answer.status, 200);
+    const body = (await answer.json()) as OlderAnswer;
+    assert.ok(body.ok);
+    if (!body.ok) break;
+    assert.ok(calls.length <= ORDERS_STRIPE_CALLS, `${calls.length} calls`);
+    assert.ok(body.cards.length <= checks);
+    titles.push(...body.cards.map((card) => card.title));
+    assert.equal(body.said, words.olderShown(body.cards.length));
+    from = body.from;
+    assert.equal(body.left, from ? words.olderNotChecked(100 - checks - titles.length) : "");
+    batches += 1;
+  }
+  assert.deepEqual(titles, Array.from({ length: 100 - checks }, (_, i) => `Plan product ${String(checks + i).padStart(3, "0")}`), "every older one, in order, to the last");
+  console.log(`a hundred installment purchases: ${checks} checked on opening, the other ${100 - checks} in ${batches} batches of the button, each under ${ORDERS_STRIPE_CALLS} calls to Stripe (1,216 in one opening before)`);
+});
+
+test("checking older purchases pays before it reads and refuses without reading: no room, a link that opens nothing, a checkout not the address's", async () => {
+  const store = await shop();
+  const drafts = await addDraftProducts(OWNER, Array.from({ length: 20 }, (_, i) => ({ title: `Plan ${i}`, summary: "", priceCents: 1000, link: `https://example.test/r/${i}` })));
+  assert.ok(drafts.ok);
+  checkouts = drafts.ids.map((id, i) => plan(i, 60 * (i + 1), id));
+  await open(store);
+  const from = checkouts[15].id as string;
+  const folder = await storeFolder(OWNER);
+  const window = allowanceWindow(store)!.id;
+  const before = await requestsIn(folder, window);
+  assert.equal((await older(from)).status, 200);
+  assert.ok((await requestsIn(folder, window)) - before >= 1 + ORDERS_OLDER_UNITS, "its call and its units, then its metered reads");
+  calls = [];
+  assert.equal((await older(from, "f".repeat(64))).status, 410);
+  assert.equal((await older("cs_test_NotThisBuyers000000")).status, 410);
+  assert.equal((await older("../etc")).status, 410);
+  assert.ok(calls.every((c) => c.startsWith("/checkout/sessions?")), "a checkout not the address's is looked for in its own list only");
+  await redis.pipeline([["SET", `nl:traffic:r:${folder}:${window}`, String(requestLimitFor(store) - 1)]]);
+  calls = [];
+  const busy = await older(from);
+  assert.deepEqual([busy.status, calls], [429, []]);
+});
+
+test("a batch of older purchases at every limit stays under ORDERS_OLDER_BYTES", async () => {
+  await shop();
+  const parsed = readLink(`https://example.test/?${"\\".repeat(MAX_LINK_LENGTH - "https://example.test/?".length)}`);
+  assert.ok(parsed.ok);
+  const checks = Math.floor((ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS) / PLAN_REFUND_CALLS);
+  const drafts = await addDraftProducts(OWNER, Array.from({ length: checks * 2 * 4 }, (_, i) => ({ title: `${i}`.padEnd(MAX_TITLE_LENGTH, '"'), summary: "", priceCents: 1000, link: parsed.url })));
+  assert.ok(drafts.ok);
+  for (const id of drafts.ids) assert.ok((await setProductKeys(OWNER, id, { source: "generated", prefix: "K".repeat(MAX_PREFIX_LENGTH), groups: MAX_GROUPS, groupLength: MAX_GROUP_LENGTH, lowAt: 0 })).ok);
+  const ids = drafts.ids;
+  checkouts = Array.from({ length: checks * 2 }, (_, i) => ({
+    ...plan(i, 60 * (i + 1), ids[i * 4]),
+    metadata: { store: "bounds", kind: "plan", product: ids[i * 4], bump: ids[i * 4 + 1], bump2: ids[i * 4 + 2], bump3: ids[i * 4 + 3], ...bundleMeta("bundle", ids.slice(0, MAX_BUNDLE_ITEMS)), ...Object.fromEntries(BUMP_KEYS.flatMap((key) => Object.entries(bundleMeta(`${key}_bundle`, ids.slice(0, MAX_BUNDLE_ITEMS))))) },
+  }));
+  await open((await storeForEmail(OWNER))!);
+  const answer = await older(checkouts[checks].id as string);
+  const text = await answer.text();
+  const body = JSON.parse(text) as OlderAnswer;
+  assert.ok(body.ok && body.cards.length === checks && body.from === null, "a whole batch, the last one");
+  assert.ok(body.ok && body.cards.every((card) => card.keys.length === 4 && card.bundles.length === 4 && card.main?.href === parsed.url));
+  assert.ok(Buffer.byteLength(text) <= ORDERS_OLDER_BYTES, `${Buffer.byteLength(text)} bytes`);
+  console.log(`a batch of ${checks} older purchases at their longest: ${Buffer.byteLength(text)} bytes, under ${ORDERS_OLDER_BYTES}`);
+});
+
+test("a link request for an address whose purchases are not checked yet sends the link, and answers sent as for any address", async () => {
+  await shop();
+  const drafts = await addDraftProducts(OWNER, Array.from({ length: 100 }, (_, i) => ({ title: `Plan ${i}`, summary: "", priceCents: 1000, link: `https://example.test/l/${i}` })));
+  assert.ok(drafts.ok);
+  checkouts = drafts.ids.map((id, i) => plan(i, 60 * (i + 1), id));
+  // Every one the request checks was given back in full: nothing it read can be opened, the older ones are not checked yet.
+  const checks = Math.floor((ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS) / PLAN_REFUND_CALLS);
+  for (let i = 0; i < checks; i++) refundedInvoices.add(`in_Bounds${String(i).padStart(12, "0")}`);
+  const store = (await storeForEmail(OWNER))!;
+  const links = async () => redis.keys().filter((key) => key.startsWith("nl:orders:link:")).length;
+  assert.equal(await requestOrdersLink({ store, email: BUYER, ip: "203.0.113.70", origin: ORIGIN }), "sent");
+  assert.deepEqual([mails, await links()], [1, 1], "the link was made and emailed");
+  // An address that bought nothing: the same answer, and nothing sent.
+  checkouts = [];
+  assert.equal(await requestOrdersLink({ store, email: "nobody@example.test", ip: "203.0.113.71", origin: ORIGIN }), "sent");
+  assert.deepEqual([mails, await links()], [1, 1]);
 });
 
 test("a buyer whose installment purchases all fit is told nothing about unchecked ones; one refunded in full is left off", async () => {
@@ -197,7 +301,7 @@ test("a buyer whose installment purchases all fit is told nothing about unchecke
   refundedInvoices.add(`in_Bounds${String(2).padStart(12, "0")}`);
   const html = await open(store);
   assert.deepEqual(listed(html), ["Few 0", "Few 1", "Few 3", "Few 4"]);
-  assert.ok(!html.includes(ordersWords("en").notChecked));
+  assert.ok(!html.includes(ordersWords("en").checkOlder));
   // Each check stays inside PLAN_REFUND_CALLS: the invoice, its payments (ten at the most, lib/refunds.ts) and each payment.
   for (const i of [0, 1, 2, 3, 4]) {
     const invoice = `Bounds${String(i).padStart(12, "0")}`;
@@ -222,7 +326,7 @@ test("once MAX_LISTED purchases are found, older checkouts are not read at all",
     const meter = new OrdersMeter(store);
     const found = await purchasesFor(store, BUYER, meter);
     assert.equal(found.length, MAX_LISTED);
-    assert.equal(meter.unchecked, 0);
+    assert.deepEqual(meter.older, []);
     for (const id of drafts.ids.slice(MAX_LISTED)) assert.ok(!asked.some((c) => c.includes(id)), `${id} was read`);
   } finally {
     redis.pipeline = pipeline;
@@ -392,7 +496,10 @@ test("the button's words are in every language the page has", () => {
     assert.ok(words.showInside("Kit", 20).includes("20"), language);
     if (language !== "en") {
       assert.notEqual(words.showInside("Kit", 20), en.showInside("Kit", 20), language);
-      assert.notEqual(words.notChecked, en.notChecked, language);
+      assert.notEqual(words.olderNotChecked(5), en.olderNotChecked(5), language);
+      assert.notEqual(words.checkOlder, en.checkOlder, language);
+      assert.notEqual(words.olderShown(5), en.olderShown(5), language);
+      assert.notEqual(words.olderFailed, en.olderFailed, language);
       assert.notEqual(words.loadingInside, en.loadingInside, language);
       assert.notEqual(words.insideFailed, en.insideFailed, language);
     }

@@ -147,8 +147,13 @@ const en = {
   hideInside: (title: string) => `Hide the products in ${title}`,
   loadingInside: "Getting the products…",
   insideFailed: "These products could not be shown just now. Try again in a moment.",
-  /** Purchases whose refund could not be checked inside the opening's calls to Stripe (lib/buyer-orders.ts, ORDERS_STRIPE_CALLS). */
-  notChecked: "Some of your purchases could not be checked this time, so they are not on this list. That does not mean you did not buy them.",
+  /** Purchases whose refund did not fit in the opening's calls to Stripe (lib/buyer-orders.ts, ORDERS_STRIPE_CALLS), and the button that checks the next batch (components/older-purchases.tsx). */
+  olderNotChecked: (count: number) => (count === 1 ? "1 older purchase is not checked yet." : `${count} older purchases are not checked yet.`),
+  checkOlder: "Check older purchases",
+  checkingOlder: "Checking older purchases…",
+  olderShown: (count: number) =>
+    count === 0 ? "None of the purchases checked can be opened again." : count === 1 ? "1 more purchase is now on the list." : `${count} more purchases are now on the list.`,
+  olderFailed: "Older purchases could not be checked just now. Try again in a moment.",
 
   // ---- A license key (components/licence-key-box.tsx) ------------------------------------
   yourKey: "Your license key",
@@ -386,7 +391,12 @@ const es: OrdersWords = {
   hideInside: (title) => `Ocultar los productos de ${title}`,
   loadingInside: "Cargando los productos…",
   insideFailed: "No se han podido mostrar estos productos ahora. Inténtalo de nuevo en un momento.",
-  notChecked: "Algunas de tus compras no se han podido comprobar esta vez, así que no están en esta lista. Eso no significa que no las hayas comprado.",
+  olderNotChecked: (count) => (count === 1 ? "1 compra anterior aún no está comprobada." : `${count} compras anteriores aún no están comprobadas.`),
+  checkOlder: "Comprobar compras anteriores",
+  checkingOlder: "Comprobando compras anteriores…",
+  olderShown: (count) =>
+    count === 0 ? "Ninguna de las compras comprobadas se puede volver a abrir." : count === 1 ? "1 compra más está ahora en la lista." : `${count} compras más están ahora en la lista.`,
+  olderFailed: "No se han podido comprobar las compras anteriores ahora. Inténtalo de nuevo en un momento.",
 
   yourKey: "Tu clave de licencia",
   yourKeyFor: (title) => `Tu clave de licencia de ${title}`,
@@ -609,7 +619,12 @@ const fr: OrdersWords = {
   hideInside: (title) => `Masquer les produits de ${title}`,
   loadingInside: "Chargement des produits…",
   insideFailed: "Ces produits ne peuvent pas être affichés pour le moment. Réessayez dans un instant.",
-  notChecked: "Certains de vos achats n'ont pas pu être vérifiés cette fois-ci, ils ne figurent donc pas dans cette liste. Cela ne veut pas dire que vous ne les avez pas achetés.",
+  olderNotChecked: (count) => (count < 2 ? "1 achat plus ancien n'est pas encore vérifié." : `${count}${S}achats plus anciens ne sont pas encore vérifiés.`),
+  checkOlder: "Vérifier les achats plus anciens",
+  checkingOlder: "Vérification des achats plus anciens…",
+  olderShown: (count) =>
+    count === 0 ? "Aucun des achats vérifiés ne peut être rouvert." : count < 2 ? "1 achat de plus figure maintenant dans la liste." : `${count}${S}achats de plus figurent maintenant dans la liste.`,
+  olderFailed: "Les achats plus anciens ne peuvent pas être vérifiés pour le moment. Réessayez dans un instant.",
 
   yourKey: "Votre clé de licence",
   yourKeyFor: (title) => `Votre clé de licence pour ${title}`,
@@ -832,7 +847,12 @@ const de: OrdersWords = {
   hideInside: (title) => `Die Produkte in ${title} ausblenden`,
   loadingInside: "Die Produkte werden geladen…",
   insideFailed: "Diese Produkte können gerade nicht angezeigt werden. Versuchen Sie es gleich noch einmal.",
-  notChecked: "Einige Ihrer Käufe konnten diesmal nicht geprüft werden und stehen deshalb nicht in dieser Liste. Das heißt nicht, dass Sie sie nicht gekauft haben.",
+  olderNotChecked: (count) => (count === 1 ? "1 älterer Kauf ist noch nicht geprüft." : `${count} ältere Käufe sind noch nicht geprüft.`),
+  checkOlder: "Ältere Käufe prüfen",
+  checkingOlder: "Ältere Käufe werden geprüft…",
+  olderShown: (count) =>
+    count === 0 ? "Keiner der geprüften Käufe kann erneut geöffnet werden." : count === 1 ? "1 weiterer Kauf steht jetzt in der Liste." : `${count} weitere Käufe stehen jetzt in der Liste.`,
+  olderFailed: "Ältere Käufe können gerade nicht geprüft werden. Versuchen Sie es gleich noch einmal.",
 
   yourKey: "Ihr Lizenzschlüssel",
   yourKeyFor: (title) => `Ihr Lizenzschlüssel für ${title}`,
@@ -1059,7 +1079,12 @@ const it: OrdersWords = {
   hideInside: (title) => `Nascondi i prodotti in ${title}`,
   loadingInside: "Caricamento dei prodotti…",
   insideFailed: "Non è stato possibile mostrare questi prodotti ora. Riprova tra un momento.",
-  notChecked: "Non è stato possibile verificare alcuni dei tuoi acquisti questa volta, quindi non sono in questo elenco. Questo non vuol dire che tu non li abbia acquistati.",
+  olderNotChecked: (count) => (count === 1 ? "1 acquisto precedente non è ancora verificato." : `${count} acquisti precedenti non sono ancora verificati.`),
+  checkOlder: "Verifica gli acquisti precedenti",
+  checkingOlder: "Verifica degli acquisti precedenti…",
+  olderShown: (count) =>
+    count === 0 ? "Nessuno degli acquisti verificati può essere riaperto." : count === 1 ? "1 acquisto in più è ora nell'elenco." : `${count} acquisti in più sono ora nell'elenco.`,
+  olderFailed: "Non è stato possibile verificare gli acquisti precedenti ora. Riprova tra un momento.",
 
   yourKey: "La tua chiave di licenza",
   yourKeyFor: (title) => `La tua chiave di licenza per ${title}`,
@@ -1281,7 +1306,12 @@ const nl: OrdersWords = {
   hideInside: (title) => `Verberg de producten in ${title}`,
   loadingInside: "De producten worden geladen…",
   insideFailed: "Deze producten kunnen nu niet worden getoond. Probeer het zo opnieuw.",
-  notChecked: "Sommige van je aankopen konden deze keer niet worden gecontroleerd, dus staan ze niet in deze lijst. Dat betekent niet dat je ze niet hebt gekocht.",
+  olderNotChecked: (count) => (count === 1 ? "1 oudere aankoop is nog niet gecontroleerd." : `${count} oudere aankopen zijn nog niet gecontroleerd.`),
+  checkOlder: "Oudere aankopen controleren",
+  checkingOlder: "Oudere aankopen worden gecontroleerd…",
+  olderShown: (count) =>
+    count === 0 ? "Geen van de gecontroleerde aankopen kan opnieuw worden geopend." : count === 1 ? "1 aankoop extra staat nu in de lijst." : `${count} aankopen extra staan nu in de lijst.`,
+  olderFailed: "Oudere aankopen kunnen nu niet worden gecontroleerd. Probeer het zo opnieuw.",
 
   yourKey: "Je licentiesleutel",
   yourKeyFor: (title) => `Je licentiesleutel voor ${title}`,
@@ -1504,7 +1534,12 @@ const pt: OrdersWords = {
   hideInside: (title) => `Ocultar os produtos de ${title}`,
   loadingInside: "A carregar os produtos…",
   insideFailed: "Não foi possível mostrar estes produtos agora. Tente novamente daqui a pouco.",
-  notChecked: "Não foi possível verificar algumas das suas compras desta vez, por isso não estão nesta lista. Isso não significa que não as tenha comprado.",
+  olderNotChecked: (count) => (count === 1 ? "1 compra anterior ainda não foi verificada." : `${count} compras anteriores ainda não foram verificadas.`),
+  checkOlder: "Verificar compras anteriores",
+  checkingOlder: "A verificar compras anteriores…",
+  olderShown: (count) =>
+    count === 0 ? "Nenhuma das compras verificadas pode ser aberta novamente." : count === 1 ? "Mais 1 compra está agora na lista." : `Mais ${count} compras estão agora na lista.`,
+  olderFailed: "Não foi possível verificar as compras anteriores agora. Tente novamente daqui a pouco.",
 
   yourKey: "A sua chave de licença",
   yourKeyFor: (title) => `A sua chave de licença de ${title}`,

@@ -61,6 +61,7 @@ import {
   ORDERS_UNIT_COMMANDS,
   ORDERS_BUNDLE_UNITS,
   ORDERS_KEY_COMMANDS,
+  ORDERS_OLDER_UNITS,
   ORDERS_STRIPE_CALLS,
   ORDERS_STRIPE_LISTS,
   PLAN_REFUND_CALLS,
@@ -95,6 +96,10 @@ export {
   ORDERS_BUNDLE_PER_HOUR,
   ORDERS_BUNDLE_UNITS,
   ORDERS_PAGE_BYTES,
+  ORDERS_OLDER_BYTES,
+  ORDERS_OLDER_COMMANDS,
+  ORDERS_OLDER_PER_HOUR,
+  ORDERS_OLDER_UNITS,
   ORDERS_STRIPE_CALLS,
   ORDERS_STRIPE_LISTS,
   LINK_SHOWN,
@@ -131,8 +136,12 @@ export class OrdersMeter {
   taken = 0;
   /** Calls to the creator's Stripe account still free for refund checks: ORDERS_STRIPE_CALLS, less the lists every opening may read. */
   private stripeLeft = ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS;
-  /** Purchases not shown because their refund could not be checked inside ORDERS_STRIPE_CALLS: the page says so. */
-  unchecked = 0;
+  /**
+   * Checkouts not read because their refund could not be checked inside
+   * ORDERS_STRIPE_CALLS, newest first: the page says how many, and the buyer
+   * checks them a batch at a time when they ask (olderFor), from the first.
+   */
+  older: string[] = [];
   constructor(private readonly store: Store) {}
   /** Takes `calls` to the creator's Stripe account before they are made; false, taking nothing, when they would pass the ceiling. */
   stripe(calls: number): boolean {
@@ -471,18 +480,54 @@ function refundCalls(session: Row): number {
 
 /**
  * Whether a checkout was given back in full (lib/refunds.ts), its calls to
- * Stripe taken from the meter's ceiling first: "unchecked", counted on the
- * meter and with nothing asked, when they would pass it. A purchase that
- * could not be checked is never handed over, and never said to be not bought.
+ * Stripe taken from the meter's ceiling first: "unchecked", noted on the
+ * meter (older) and with nothing asked, when they would pass it. A purchase
+ * that could not be checked is never handed over, and never said to be not
+ * bought: the page says it is not checked yet, and checks it when asked.
  */
 async function refundedFor(account: string, session: Row, meter?: OrdersMeter): Promise<boolean | "unchecked"> {
   meter?.alive();
   const calls = refundCalls(session);
   if (meter && calls > 0 && !meter.stripe(calls)) {
-    meter.unchecked += 1;
+    meter.older.push(typeof session.id === "string" ? session.id : "");
     return "unchecked";
   }
   return purchaseRefunded(account, session);
+}
+
+/**
+ * Whether a checkout is one the list would hand over once its refund is
+ * checked, read from what came with it alone (nothing more is read): this
+ * store's, paid, and neither a call, a gift nor a place bought for several
+ * (as purchaseFromSession reads it), and one that needs its calls to Stripe.
+ */
+function waitsForCheck(store: Store, session: Row): boolean {
+  const id = typeof session.id === "string" ? session.id : "";
+  if (!SESSION_ID_PATTERN.test(id) || refundCalls(session) === 0) return false;
+  const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
+  return saleHandles(store).has(meta.store ?? "") && isSettled(session) && meta.kind !== "call" && !meta.gift && !meta.group;
+}
+
+/** The address's checkouts on the creator's Stripe account under both spellings of it, each once, newest first. */
+async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Promise<Row[]> {
+  const account = store.stripeAccountId;
+  if (!account) return [];
+  // Stripe keeps the address as it was typed at checkout.
+  const variants = [...new Set([email.trim(), normaliseEmail(email)])];
+  const checkouts = new Map<string, Row>();
+  for (const variant of variants) {
+    const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
+    query.append("expand[]", "data.subscription");
+    query.append("expand[]", "data.payment_intent.latest_charge");
+    meter?.alive();
+    const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
+    for (const session of rows(listed)) {
+      const id = typeof session.id === "string" ? session.id : "";
+      if (!checkouts.has(id)) checkouts.set(id, session);
+    }
+  }
+  const createdAt = (row: Row) => (typeof row.created === "number" ? row.created : 0);
+  return [...checkouts.values()].sort((a, b) => createdAt(b) - createdAt(a));
 }
 
 /** Looks a product up by id, each read once, and, with a meter, taken from it the first time it is asked for. */
@@ -716,27 +761,21 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   const found = new Map<string, Purchase>();
   const customers = new Set<string>();
 
-  // Stripe keeps the address as it was typed at checkout.
-  const variants = account ? [...new Set([email.trim(), normaliseEmail(email)])] : [];
-  const checkouts = new Map<string, Row>();
-  for (const variant of variants) {
-    const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-    query.append("expand[]", "data.subscription");
-    query.append("expand[]", "data.payment_intent.latest_charge");
-    meter?.alive();
-    const listed = (await onAccount("GET", account as string, `/checkout/sessions?${query}`)) as Listed;
-    for (const session of rows(listed)) {
-      const id = typeof session.id === "string" ? session.id : "";
-      if (!checkouts.has(id)) checkouts.set(id, session);
-    }
-  }
   // Both spellings' checkouts together, newest first, so the calls to Stripe a refund check needs (ORDERS_STRIPE_CALLS) go
-  // to the newest. Once MAX_LISTED purchases that are always shown (anything but an ended membership) are found, every
-  // older checkout is past the newest MAX_LISTED the list shows, so none is read any further.
-  const createdAt = (row: Row) => (typeof row.created === "number" ? row.created : 0);
+  // to the newest. Once one could not be checked, every older one that needs a check is only noted (meter.older), with
+  // nothing read, for the buyer to check when they ask (olderFor). Once MAX_LISTED purchases that are always shown
+  // (anything but an ended membership) are found, every other older checkout is past the newest MAX_LISTED the list
+  // shows, so none is read any further.
   let shown = 0;
-  for (const session of [...checkouts.values()].sort((a, b) => createdAt(b) - createdAt(a))) {
-    if (shown >= MAX_LISTED) break;
+  for (const session of await checkoutsOf(store, email, meter)) {
+    if (meter?.older.length && refundCalls(session) > 0) {
+      if (waitsForCheck(store, session)) meter.older.push(session.id as string);
+      continue;
+    }
+    if (shown >= MAX_LISTED) {
+      if (meter?.older.length) continue;
+      break;
+    }
     const got = await purchaseFromSession(store, session, find, meter, false);
     if (!got) continue;
     found.set(got.purchase.reference, got.purchase);
@@ -871,7 +910,10 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
   const read = await withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);
   if (read === "late") return;
   const [purchases, calls] = read;
-  if (purchases.length === 0 && calls.length === 0) return;
+  // A purchase whose refund could not be checked yet is still a purchase of this address: the link is sent, and the page
+  // checks it when asked. Whoever asked is answered "sent" either way, so this tells them nothing.
+  const unchecked = meter.older.length;
+  if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;
 
   const token = randomBytes(32).toString("hex");
   // Kept as typed: Stripe matches the address as it was written at checkout.
@@ -879,7 +921,7 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
   await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]);
 
   const name = store.name;
-  const count = purchases.length + calls.length;
+  const count = purchases.length + calls.length + unchecked;
   const link = `${origin}/@${store.handle}/orders?token=${token}`;
   const words = ordersWords(store.language);
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
@@ -987,6 +1029,56 @@ export async function findPurchase(
   const found = await withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS);
   if (found === "late") throw new OrdersLate();
   return found;
+}
+
+/**
+ * The next batch of the older purchases the list could not check inside
+ * ORDERS_STRIPE_CALLS (OrdersMeter.older), from the checkout `from`, asked for
+ * with the button under the list (components/older-purchases.tsx,
+ * app/api/store/orders/older/route.ts). Paid for as an opening is, before
+ * anything is read: the link's grant, then ORDERS_OLDER_UNITS of the store's
+ * buyer requests, then every read through a meter of its own, with the same
+ * ceiling of calls to Stripe, so a batch checks as many as an opening would
+ * and notes the rest for the next. `more` reads what the purchases need
+ * besides themselves (lib/purchase-cards.ts, extrasFor) through the same
+ * meter, inside the same time (ORDERS_READ_MS). Null when the link opens
+ * nothing or `from` is not one of the address's checkouts. Throws OrdersBusy
+ * when the store has no room, before Stripe is asked anything, and OrdersLate
+ * past that time.
+ */
+export async function olderFor<T>(
+  store: Store,
+  token: string,
+  from: string,
+  more: (purchases: Purchase[], email: string, meter: OrdersMeter) => Promise<T>,
+): Promise<{ purchases: Purchase[]; older: string[]; extra: T } | null> {
+  if (!SESSION_ID_PATTERN.test(from) || !ORDERS_TOKEN_PATTERN.test(token) || !store.stripeAccountId) return null;
+  const email = await ordersGrant(store, token);
+  if (!email) return null;
+  if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OLDER_UNITS))) throw new OrdersBusy();
+  const meter = new OrdersMeter(store);
+  const done = await withinOpening(
+    (async () => {
+      const checkouts = await checkoutsOf(store, email, meter);
+      const at = checkouts.findIndex((session) => session.id === from);
+      if (at < 0) return null;
+      const find = finderFor(store, meter);
+      const purchases: Purchase[] = [];
+      for (const session of checkouts.slice(at)) {
+        if (!waitsForCheck(store, session)) continue;
+        if (meter.older.length) {
+          meter.older.push(session.id as string);
+          continue;
+        }
+        const got = await purchaseFromSession(store, session, find, meter, false);
+        if (got) purchases.push(got.purchase);
+      }
+      return { purchases, older: meter.older, extra: await more(purchases, email, meter) };
+    })(),
+    meter,
+  );
+  if (done === "late") throw new OrdersLate();
+  return done;
 }
 
 const referenceKind = (reference: string) =>

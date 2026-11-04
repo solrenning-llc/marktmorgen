@@ -19,8 +19,8 @@ import { ADD_ON_LINES, ASSIST_REMIND_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, 
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
-import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING } from "./plan-cost-registry";
-import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS } from "@/lib/buyer-orders-rules";
+import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING } from "./plan-cost-registry";
+import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS } from "@/lib/buyer-orders-rules";
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
@@ -216,6 +216,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(DOWNLOAD_LOOKUP_UNITS * laterPageCost() >= DOWNLOAD_LOOKUP_READ, `${DOWNLOAD_LOOKUP_UNITS} x ${laterPageCost()} < ${DOWNLOAD_LOOKUP_READ}`);
   // Showing a bundle's products on that list is ORDERS_BUNDLE_UNITS public requests before its grant: a download's lookup and its answer.
   assert.ok(ORDERS_BUNDLE_UNITS * laterPageCost() >= ORDERS_BUNDLE_READ, `${ORDERS_BUNDLE_UNITS} x ${laterPageCost()} < ${ORDERS_BUNDLE_READ}`);
+  // Checking a batch of older purchases is ORDERS_OLDER_UNITS public requests before its grant: an opening's time and its answer.
+  assert.ok(ORDERS_OLDER_UNITS * laterPageCost() >= ORDERS_OLDER_READ, `${ORDERS_OLDER_UNITS} x ${laterPageCost()} < ${ORDERS_OLDER_READ}`);
+  console.log(`a batch of older purchases: $${ORDERS_OLDER_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OLDER_UNITS} requests`);
   console.log(`a download's lookup of its purchase: $${DOWNLOAD_LOOKUP_READ.toFixed(6)} at most before its metered reads, counted as ${DOWNLOAD_LOOKUP_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.

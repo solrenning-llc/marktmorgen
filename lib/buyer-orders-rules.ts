@@ -151,3 +151,30 @@ export const ORDERS_BUNDLE_UNITS = 2;
 export const ORDERS_BUNDLE_BYTES = 150_000;
 /** How often one link may show a bundle's products in an hour, as a download's link is limited. */
 export const ORDERS_BUNDLE_PER_HOUR = 240;
+
+/**
+ * What checking a batch of older purchases takes (app/api/store/orders/older;
+ * C3-80, 4 November 2026): an opening's purchases whose refund did not fit in
+ * its ORDERS_STRIPE_CALLS wait under the list, said as not checked yet, and
+ * the buyer checks them a batch at a time. ORDERS_OLDER_UNITS of the store's
+ * buyer requests are taken before the link's grant is read; they pay for the
+ * request held at 2 GB as long as an opening (ORDERS_OPEN_SECONDS, which
+ * bounds every call to Stripe it waits on), its ORDERS_OLDER_COMMANDS, and
+ * its answer, ORDERS_OLDER_BYTES at the most. Every listing, key and feed it
+ * reads past them goes through its meter. tests/plan-cost-registry.ts prices
+ * it (ORDERS_OLDER_READ) and tests/plan-cost-registry.test.ts holds the units
+ * above it.
+ */
+export const ORDERS_OLDER_UNITS = 8;
+/** Commands a batch makes besides its metered reads: the link's grant. */
+export const ORDERS_OLDER_COMMANDS = 1;
+/**
+ * The most bytes a batch's answer holds: as many purchases as the ceiling
+ * checks (fifteen), each with its own delivery and three ticked at checkout
+ * (an address of 2,000 characters, escaped at two bytes at the most in JSON),
+ * their keys, bundles and the words they share
+ * (tests/orders-page-bounds.test.ts holds a batch at those limits under it).
+ */
+export const ORDERS_OLDER_BYTES = 800_000;
+/** How often one link may check a batch of older purchases in an hour. */
+export const ORDERS_OLDER_PER_HOUR = 60;

@@ -37,7 +37,8 @@ export async function POST(request: NextRequest) {
         origin,
         handle: scope === "store" && back ? handle : undefined,
       });
-      // When the link could not be sent for want of room, the day it can be asked for again (UTC).
+      // Asked from one store that has no room: the first whole day (UTC) it can be asked for again.
+      // Asked for every store the answer is always "sent" (lib/erasure-request.ts), so nothing is added.
       const opens = asked.status === "full" && asked.opens ? `&opens=${new Date(asked.opens).toISOString().slice(0, 10)}` : "";
       return away(`status=${asked.status}${opens}${back}`);
     }

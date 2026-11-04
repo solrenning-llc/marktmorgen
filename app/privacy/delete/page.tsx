@@ -144,6 +144,13 @@ export default async function DeletePage({ searchParams }: Params) {
               {status ? (
                 <p className={`notice ${status.tone === "ok" ? "notice-success" : "notice-error"} mb-6`} role={status.tone === "ok" ? "status" : "alert"}>
                   {status.text}
+                  {statusKey === "sent" ? (
+                    <>
+                      {" "}No email after an hour? Check your spam folder, then write to{" "}
+                      <a href="mailto:support@marktmorgen.com" className="underline underline-offset-4">support@marktmorgen.com</a>{" "}
+                      from this address and ask us to delete your data. We answer within the time the law requires.
+                    </>
+                  ) : null}
                 </p>
               ) : null}
               {statusKey === "full" ? (

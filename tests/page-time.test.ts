@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   part("Sent, received, shown");
   const page = readFileSync("components/page-depth.tsx", "utf8");
   is("the page sends only the seconds it was visible, added up", page.includes('let visibleSince: number | null = document.visibilityState === "visible" ? performance.now() : null;') && page.includes("seenMs += performance.now() - visibleSince;") && page.includes("s: seenSeconds()"), true);
-  is("the route passes them on, in the same count", readFileSync("app/api/store/read/route.ts", "utf8").includes('text("v", 20), body.s)'), true);
+  is("the route passes them on, in the same count", readFileSync("app/api/store/read/route.ts", "utf8").includes("countDepth(statsId, scope, block, whyNot, video, body.s)"), true);
   is("the studio route says them, test or not", readFileSync("app/api/store/depth/route.ts", "utf8").includes("time: timeShares(depth.time)"), true);
   const few = renderToStaticMarkup(createElement(PageTime, { ranges: timeShares({ "@t0": 3 }), least: 20 }));
   is("too few measured: said how many so far, nothing shown", few.includes("Shown once 20 visitors have been measured; 3 so far.") && !few.includes("<table"), true);

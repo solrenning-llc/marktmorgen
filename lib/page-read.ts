@@ -21,19 +21,44 @@
  *   - the page carries a token made from the store's statistics id and the
  *     page, signed with a key only this deployment has, so the route needs no
  *     read of the store to know which one it is and that the page is its own;
- *   - the route writes one command;
- *   - only one visitor in READ_SAMPLE sends anything at all, chosen by the
- *     browser at random. A share worked out from a random eighth of the
- *     visitors is the same share, give or take, and the studio says so and
- *     waits for enough of them before it shows one.
+ *   - only one visitor in READ_SAMPLE sends anything at all. A share worked
+ *     out from a random eighth of the visitors is the same share, give or
+ *     take, and the studio says so and waits for enough of them before it
+ *     shows one.
+ *
+ * Every reading has a ceiling before it costs anything (639 [GL7](25), the
+ * cost lane's finding of 4 November 2026: the eighth was drawn only in the
+ * browser, a token never expired, and the route was in no store's figure):
+ *
+ *   - the eighth is drawn on the server: a page view gets a token only when
+ *     its visit's random nonce is drawn (readSampled), and the route checks
+ *     the same draw, so a call made by hand cannot pick itself in;
+ *   - a token is good for READ_TOKEN_SECONDS after the page was drawn and
+ *     for one reading: the route marks its nonce used (spendReadToken, one
+ *     SET NX that expires with the token) before anything else is asked, so
+ *     the same token sent again costs that one command and counts nothing;
+ *   - a reading the route takes is one of the store's public requests
+ *     (lib/traffic.ts, takePublicRequest), in its monthly window like a page
+ *     drawn: past the window nothing is counted.
  *
  * Nothing about the visitor is sent or kept: no cookie, no address, only
  * which block or item, and on the store page which one was clicked.
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { redisPipeline } from "@/lib/redis";
 import { deriveKey } from "@/lib/secret-box";
+import { READ_SAMPLE } from "@/lib/page-read-sample";
 
 export { READ_MIN_VISITORS, READ_SAMPLE } from "@/lib/page-read-sample";
+
+/** How long after its page was drawn a token is good for: a visitor who leaves later is not counted. */
+export const READ_TOKEN_SECONDS = 2 * 3600;
+/** How far ahead of this server's clock a token's time may be, for servers whose clocks differ a little. */
+const CLOCK_SLACK_SECONDS = 60;
+/** The longest token there is: a statistics id of 40, a time, a nonce of 16 and a signature of 22, with their dots. */
+export const READ_TOKEN_MAX = 100;
+const NONCE = /^[A-Za-z0-9_-]{16}$/;
+const ISSUED = /^[0-9a-z]{1,9}$/;
 
 /** What the store's own page is called where a product's id would go. */
 export const STORE_SCOPE = "~store";
@@ -49,29 +74,73 @@ function key(): Buffer | null {
   return signing;
 }
 
-function sign(statsId: string, scope: string): string {
+function sign(statsId: string, scope: string, issued: string, nonce: string): string {
   const k = key();
-  return k ? createHmac("sha256", k).update(`${statsId}|${scope}`).digest("base64url").slice(0, 22) : "";
+  return k ? createHmac("sha256", k).update(`${statsId}|${scope}|${issued}|${nonce}`).digest("base64url").slice(0, 22) : "";
 }
 
-/** The token a page carries: which store's numbers it writes to, and that it may. Empty when nothing can be signed. */
-export function readToken(statsId: string | null, scope: string): string {
-  if (!statsId || !STATS_ID.test(statsId) || !SCOPE.test(scope)) return "";
-  const signature = sign(statsId, scope);
-  return signature ? `${statsId}.${signature}` : "";
+/**
+ * Whether a visit's nonce is one of the READ_SAMPLE measured: a draw from the
+ * nonce itself, the same wherever it is made, so the route checks the very
+ * draw the page was given its token by. Pure.
+ */
+export function readSampled(nonce: string): boolean {
+  return NONCE.test(nonce) && createHash("sha256").update(`page-read|${nonce}`).digest()[0] % READ_SAMPLE === 0;
 }
 
-/** The statistics id a token was made for, when it was made for this page by this deployment; else null. */
-export function readTokenStats(token: string, scope: string): string | null {
-  if (typeof token !== "string" || token.length > 80 || !SCOPE.test(scope)) return null;
-  const dot = token.indexOf(".");
-  if (dot < 0) return null;
-  const statsId = token.slice(0, dot);
-  const given = token.slice(dot + 1);
-  if (!STATS_ID.test(statsId)) return null;
-  const want = sign(statsId, scope);
-  if (!want || given.length !== want.length) return null;
-  return timingSafeEqual(Buffer.from(given), Buffer.from(want)) ? statsId : null;
+/**
+ * The token a page view carries: which store's numbers it writes to, that it
+ * may, when the page was drawn and the visit's nonce. Empty for the visitors
+ * not drawn, seven in eight (readSampled), so their pages send nothing, and
+ * when nothing can be signed. A fresh nonce each page view.
+ */
+export function readToken(statsId: string | null, scope: string, now = Date.now(), nonce = randomBytes(12).toString("base64url")): string {
+  if (!statsId || !STATS_ID.test(statsId) || !SCOPE.test(scope) || !readSampled(nonce)) return "";
+  const issued = Math.floor(now / 1000).toString(36);
+  const signature = sign(statsId, scope, issued, nonce);
+  return signature ? `${statsId}.${issued}.${nonce}.${signature}` : "";
+}
+
+/** What a good token says: the statistics id it writes to and its visit's nonce. */
+export type ReadPass = { statsId: string; nonce: string };
+
+/**
+ * The statistics id and nonce of a token made for this page by this
+ * deployment, drawn, and not older than READ_TOKEN_SECONDS; else null. No
+ * command: whether it was used already is spendReadToken's.
+ */
+export function readTokenPass(token: unknown, scope: string, now = Date.now()): ReadPass | null {
+  if (typeof token !== "string" || token.length > READ_TOKEN_MAX || !SCOPE.test(scope)) return null;
+  const [statsId, issued, nonce, given, ...rest] = token.split(".");
+  if (rest.length || !STATS_ID.test(statsId ?? "") || !ISSUED.test(issued ?? "") || !readSampled(nonce ?? "")) return null;
+  const age = now / 1000 - parseInt(issued, 36);
+  if (!(age <= READ_TOKEN_SECONDS && age >= -CLOCK_SLACK_SECONDS)) return null;
+  const want = sign(statsId, scope, issued, nonce);
+  if (!want || typeof given !== "string" || given.length !== want.length) return null;
+  return timingSafeEqual(Buffer.from(given), Buffer.from(want)) ? { statsId, nonce } : null;
+}
+
+/** The statistics id a good token was made for (readTokenPass), or null. */
+export function readTokenStats(token: unknown, scope: string, now = Date.now()): string | null {
+  return readTokenPass(token, scope, now)?.statsId ?? null;
+}
+
+/** A visit's token marked used, until it expires anyway (639 [GL7](25)). */
+const onceKey = (nonce: string) => `nl:read:once:${nonce}`;
+
+/**
+ * Marks a good token's nonce used: true the first time, false when it was
+ * used already or the mark cannot be made. One command, made before anything
+ * else is asked, so a token sent again costs only this.
+ */
+export async function spendReadToken(nonce: string): Promise<boolean> {
+  if (!NONCE.test(nonce)) return false;
+  try {
+    const [reply] = await redisPipeline([["SET", onceKey(nonce), "1", "NX", "EX", READ_TOKEN_SECONDS + CLOCK_SLACK_SECONDS]]);
+    return reply === "OK";
+  } catch {
+    return false;
+  }
 }
 
 /**

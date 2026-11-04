@@ -23,7 +23,7 @@
  *     goes once, only where it may;
  *   - a cohort is read only at ages all its members have reached.
  */
-import { STORE_SCOPE, reachField, reachRows, readToken, readTokenStats } from "@/lib/page-read";
+import { STORE_SCOPE, reachField, reachRows, readSampled, readToken, readTokenStats } from "@/lib/page-read";
 import { countDepth, readDepth } from "@/lib/page-depth";
 import { readStats, recordHit, readSales, studioStats } from "@/lib/stats";
 import { classifySource } from "@/lib/source-rules";
@@ -88,11 +88,20 @@ async function main(): Promise<void> {
   await fresh();
   let store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
-  const productToken = readToken(statsId, "prod000001");
+  // A visit's nonce the server's draw measures (lib/page-read.ts, readSampled), a fresh one each time.
+  let seed = 0;
+  const drawn = () => {
+    for (;;) {
+      const nonce = `visit${String((seed += 1)).padStart(11, "0")}`;
+      if (readSampled(nonce)) return nonce;
+    }
+  };
+  const tokenFor = (scope: string) => readToken(statsId, scope, Date.now(), drawn());
+  const productToken = tokenFor("prod000001");
   is("opens its own store's numbers for its own page", readTokenStats(productToken, "prod000001"), statsId);
   is("and no other page", readTokenStats(productToken, "prod000002"), null);
   is("not the store page either", readTokenStats(productToken, STORE_SCOPE), null);
-  const forged = `${"a".repeat(32)}.${productToken.split(".")[1]}`;
+  const forged = `${"a".repeat(32)}.${productToken.split(".").slice(1).join(".")}`;
   is("nor another store's numbers with the same signature", readTokenStats(forged, "prod000001"), null);
   is("nothing opens nothing", [readTokenStats("", "prod000001"), readTokenStats("x.y", "prod000001")], [null, null]);
 
@@ -120,21 +129,20 @@ async function main(): Promise<void> {
     ["s:faq", 4, 5, 0],
   ]);
 
-  part("Measured through the route, one command each");
+  part("Measured through the route, once a visit");
   const send = (body: Record<string, unknown>, userAgent = PHONE) =>
-    readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": userAgent }, body: JSON.stringify(body) }) as never);
-  await send({ t: productToken, k: "d", p: "prod000001", b: "blok0001" });
-  await send({ t: productToken, k: "d", p: "prod000001", b: "blok0002" });
-  await send({ t: productToken, k: "d", p: "prod000002", b: "blok0001" });
-  await send({ t: productToken, k: "d", p: "prod000001", b: "blok0001" }, "Googlebot/2.1");
+    readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": userAgent }, body: JSON.stringify({ h: "harbor", ...body }) }) as never);
+  await send({ t: tokenFor("prod000001"), k: "d", p: "prod000001", b: "blok0001" });
+  await send({ t: tokenFor("prod000001"), k: "d", p: "prod000001", b: "blok0002" });
+  await send({ t: tokenFor("prod000001"), k: "d", p: "prod000002", b: "blok0001" });
+  await send({ t: tokenFor("prod000001"), k: "d", p: "prod000001", b: "blok0001" }, "Googlebot/2.1");
   is("a sales page's furthest block, for its own page, never a robot's", await readDepth(statsId, "prod000001"), { visitors: 2, stopped: { blok0001: 1, blok0002: 1 }, whyNot: {}, videos: {}, time: {} });
   is("and none for a page the token is not for", (await readDepth(statsId, "prod000002")).visitors, 0);
   await countDepth(statsId, "prod000001", "blok0002");
   is("the visitors are the blocks added up", (await readDepth(statsId, "prod000001")).visitors, 3);
-  const storeToken = readToken(statsId, STORE_SCOPE);
-  await send({ t: storeToken, k: "s", n: 2, b: "l:link01", c: "l:link01" });
-  await send({ t: storeToken, k: "s", n: 0, b: "p:prod000001", c: "" });
-  await send({ t: productToken, k: "s", n: 0, b: "p:prod000001", c: "" });
+  await send({ t: tokenFor(STORE_SCOPE), k: "s", n: 2, b: "l:link01", c: "l:link01" });
+  await send({ t: tokenFor(STORE_SCOPE), k: "s", n: 0, b: "p:prod000001", c: "" });
+  await send({ t: tokenFor("prod000001"), k: "s", n: 0, b: "p:prod000001", c: "" });
   const reachStats = (await readStats(store))!;
   is("the store page's, on the day's record", reachStats.windows.d7.reach, { "2.l:link01>l:link01": 1, "0.p:prod000001>": 1 });
 

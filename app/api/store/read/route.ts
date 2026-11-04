@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
 import { isBot } from "@/lib/source-rules";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { countDepth } from "@/lib/page-depth";
-import { STORE_SCOPE, reachField, readTokenStats } from "@/lib/page-read";
+import { countDepth, depthField } from "@/lib/page-depth";
+import { READ_TOKEN_MAX, STORE_SCOPE, reachField, readTokenPass, spendReadToken } from "@/lib/page-read";
 import { countReach } from "@/lib/stats";
+import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { takePublicRequest } from "@/lib/traffic";
 
 const MAX_BODY_BYTES = 600;
 
@@ -11,12 +13,16 @@ const done = () => new Response(null, { status: 204, headers: { "Cache-Control":
 
 /**
  * How a page was read, sent by one visitor in eight as they leave it
- * (lib/page-read.ts): the furthest block of a sales page, or the furthest
- * item of the store's page and the one clicked.
+ * (lib/page-read.ts): the furthest block of a sales page, with how long it
+ * was open and the video and answer, or the furthest item of the store's
+ * page and the one clicked.
  *
- * Built to cost one command: the page's own signed token says which store's
- * numbers it writes to, so the store is not read, and nothing else is asked.
- * The answer is always empty.
+ * Every reading has its ceiling before it costs anything (639 [GL7](25)):
+ * what is not what a page sends, a token not made for this page by this
+ * deployment, older than READ_TOKEN_SECONDS or of a visitor not drawn costs
+ * no command; a token used already costs the one command that says so
+ * (spendReadToken); a reading past the store's monthly window of public
+ * requests (takePublicRequest) is not counted. The answer is always empty.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return done();
@@ -32,18 +38,31 @@ export async function POST(request: NextRequest) {
     return done();
   }
   const text = (name: string, max: number) => (typeof body[name] === "string" ? (body[name] as string).slice(0, max) : "");
-  const token = text("t", 80);
+  const token = text("t", READ_TOKEN_MAX + 1);
 
+  // What is counted, worked out before any command: a sales page's furthest block, or the store page's field.
+  let count: ((statsId: string) => Promise<void>) | null = null;
+  let scope = "";
   if (body.k === "d") {
-    // A sales page: the product it belongs to, and the furthest block seen.
-    const product = text("p", 40);
-    const statsId = readTokenStats(token, product);
-    if (statsId) await countDepth(statsId, product, text("b", 12), text("w", 10), text("v", 20), body.s);
+    // A sales page: the product it belongs to, the furthest block seen, the answer, the video and the seconds.
+    scope = text("p", 40);
+    const [block, whyNot, video] = [text("b", 12), text("w", 10), text("v", 20)];
+    if (depthField(block, whyNot, video)) count = (statsId) => countDepth(statsId, scope, block, whyNot, video, body.s);
   } else if (body.k === "s") {
     // The store's own page: where the furthest item seen stood, which it was, and the one clicked.
-    const statsId = readTokenStats(token, STORE_SCOPE);
-    const field = statsId ? reachField(body.n, text("b", 42), text("c", 42)) : null;
-    if (statsId && field) await countReach(statsId, field);
+    scope = STORE_SCOPE;
+    const field = reachField(body.n, text("b", 42), text("c", 42));
+    if (field) count = (statsId) => countReach(statsId, field);
   }
+  const pass = count ? readTokenPass(token, scope) : null;
+  if (!count || !pass) return done();
+  // Once a visit: the token's nonce is marked used before anything else is asked.
+  if (!(await spendReadToken(pass.nonce))) return done();
+  // The store the page belongs to, for its window: the page says its address, the token which numbers.
+  const handle = normaliseHandle(text("h", 60));
+  const store = handle ? await storeForHandle(handle).catch(() => null) : null;
+  if (!store || store.statsId !== pass.statsId) return done();
+  if (!(await takePublicRequest(store, "public"))) return done();
+  await count(pass.statsId).catch(() => {});
   return done();
 }

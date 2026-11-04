@@ -1,9 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { READ_SAMPLE } from "@/lib/page-read-sample";
+import { useParams } from "next/navigation";
 import { WHY_NOT, type WhyNot } from "@/lib/why-not-rules";
 import type { WhyNotWords } from "@/lib/buyer-words/why-not";
+
+/** The store's address the page is drawn under (app/[handle]), which the route reads the store's window by. */
+export function useStoreHandle(): string {
+  const raw = useParams<{ handle?: string }>()?.handle ?? "";
+  try {
+    return decodeURIComponent(raw).replace(/^@+/, "");
+  } catch {
+    return "";
+  }
+}
 
 /** Sends a page's reading to /api/store/read, by beacon where the browser has one. */
 export function sendRead(payload: Record<string, unknown>) {
@@ -24,9 +34,9 @@ function quartile(percent: number): string {
 }
 
 /**
- * How a sales page was read, for one visitor in READ_SAMPLE, chosen here at
- * random, so the measure stays inside what a visit costs (lib/page-read.ts):
- * sent once, when they leave the page or switch away from it, as one count.
+ * How a sales page was read, for one visitor in READ_SAMPLE, drawn by the
+ * server, which hands only them a token (lib/page-read.ts): sent once, when
+ * they leave the page or switch away from it, as one count.
  *
  *   - the furthest block they saw (lib/page-depth.ts);
  *   - how far into the page's video they got, if they pressed play: the
@@ -42,6 +52,7 @@ function quartile(percent: number): string {
 export function PageDepth({ token, product, ask = null }: { token: string; product: string; ask?: WhyNotWords | null }) {
   const [asking, setAsking] = useState<"no" | "yes" | "done">("no");
   const answer = useRef<WhyNot | "">("");
+  const handle = useStoreHandle();
   // The thanks goes by itself after a moment.
   useEffect(() => {
     if (asking !== "done") return;
@@ -50,7 +61,8 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
   }, [asking]);
 
   useEffect(() => {
-    if (!token || Math.random() * READ_SAMPLE >= 1) return;
+    // No token: this visitor was not drawn (or nothing can be signed), so nothing is measured or asked.
+    if (!token || !handle) return;
     const blocks = [...document.querySelectorAll<HTMLElement>("[data-block]")];
     if (blocks.length === 0 || typeof IntersectionObserver === "undefined") return;
     let furthest = -1;
@@ -167,6 +179,7 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
       sent = true;
       sendRead({
         t: token,
+        h: handle,
         k: "d",
         p: product,
         b: blocks[furthest].dataset.block ?? "",
@@ -196,7 +209,7 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
       document.removeEventListener("visibilitychange", hidden);
       window.removeEventListener("pagehide", send);
     };
-  }, [token, product, ask]);
+  }, [token, handle, product, ask]);
 
   if (!ask || asking === "no") return null;
   return (

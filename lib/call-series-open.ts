@@ -11,19 +11,45 @@
  * (markSeriesOpen, again with the new end when its last session moves) and
  * the one that ends it early (markSeriesEnded), both through
  * lib/order-data.ts, so the store's data room is charged what each member
- * adds. A series whose last session has ended is simply not counted; its
- * member stays with the store, one per series booked, like the booking it
- * came with (tests/store-data-registry.ts).
+ * adds. A series whose last session has ended is not counted, and is
+ * removed at the store's next write here, its bytes given back to the room
+ * (seriesReleaseBytes); until then it stays with the store, one member per
+ * series booked (tests/store-data-registry.ts).
  *
  * A series booked while the currency is being changed keeps the currency
  * it read at booking, whichever wins: its own records carry it, so nothing
  * is charged in another currency even then.
  */
 import { redisPipeline } from "@/lib/redis";
-import { type DataOwner, orderWrite } from "@/lib/order-data";
+import { orderWrite, releaseOrderData } from "@/lib/order-data";
+import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
 export const seriesOpenKey = (callsId: string) => `nl:call:series:${callsId}`;
+
+/** A series' id: 32 hex characters, so every member weighs the same and what a removal gives back is known. */
+export const SERIES_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+/**
+ * What removing one member gives back to the room: what lib/order-data.ts
+ * charged its ZADD (the member, 8 bytes of score and 128 of entry, a quarter
+ * more), rounded down, so a removal never gives back more than the write
+ * took.
+ */
+export function seriesReleaseBytes(): number {
+  return Math.floor(((32 + 8 + 128) * 5) / 4 / DATA_STEP_BYTES) * DATA_STEP_BYTES;
+}
+
+/** Removes the members whose series is over at `now` and gives their bytes back to the room. */
+async function tidy(store: Store & { callsId: string }, now: number): Promise<void> {
+  const key = seriesOpenKey(store.callsId);
+  const [raw] = await redisPipeline([["ZRANGEBYSCORE", key, "-inf", now]]);
+  const over = Array.isArray(raw) ? (raw as string[]) : [];
+  if (!over.length) return;
+  // Only what this call removed is given back, so two writers never give the same member back twice.
+  const [gone] = await redisPipeline([["ZREM", key, ...over]]);
+  await releaseOrderData(store, (Number(gone) || 0) * seriesReleaseBytes());
+}
 
 /** How many series of the store have a session not yet over at `now` (their last session ends after it). */
 export async function runningSeries(store: Pick<Store, "callsId">, now = Date.now()): Promise<number> {
@@ -32,12 +58,23 @@ export async function runningSeries(store: Pick<Store, "callsId">, now = Date.no
   return Number(count) || 0;
 }
 
-/** A series booked, or its last session moved: running until `lastEnd` (ms). */
-export async function markSeriesOpen(store: DataOwner & { callsId: string }, seriesId: string, lastEnd: number): Promise<void> {
+/**
+ * A series booked, or its last session moved: running until `lastEnd`, the
+ * end of its last session in milliseconds, after `now`. Refuses an id that
+ * is not 32 hex characters or an end that is not a whole number of
+ * milliseconds in the future (seconds would read as long past). Series over
+ * are removed first.
+ */
+export async function markSeriesOpen(store: Store & { callsId: string }, seriesId: string, lastEnd: number, now = Date.now()): Promise<void> {
+  if (!SERIES_ID_PATTERN.test(seriesId)) throw new Error("markSeriesOpen: a series id is 32 hex characters");
+  if (!Number.isSafeInteger(lastEnd) || lastEnd <= now) throw new Error("markSeriesOpen: the last session's end must be a time in milliseconds after now");
+  await tidy(store, now);
   await orderWrite(store, [["ZADD", seriesOpenKey(store.callsId), lastEnd, seriesId]]);
 }
 
 /** A series ended before its last session (canceled by the buyer or the creator): no longer running. */
-export async function markSeriesEnded(store: DataOwner & { callsId: string }, seriesId: string): Promise<void> {
-  await orderWrite(store, [["ZREM", seriesOpenKey(store.callsId), seriesId]]);
+export async function markSeriesEnded(store: Store & { callsId: string }, seriesId: string, now = Date.now()): Promise<void> {
+  const [gone] = await redisPipeline([["ZREM", seriesOpenKey(store.callsId), seriesId]]);
+  await releaseOrderData(store, (Number(gone) || 0) * seriesReleaseBytes());
+  await tidy(store, now);
 }

@@ -12,8 +12,10 @@ import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStoreId, setProductCall, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import type { CallSetup } from "@/lib/call-setup";
-import { markSeriesEnded, markSeriesOpen, runningSeries, seriesOpenKey } from "@/lib/call-series-open";
+import { markSeriesEnded, markSeriesOpen, runningSeries, seriesOpenKey, seriesReleaseBytes } from "@/lib/call-series-open";
 import { POST as currencyRoute } from "@/app/api/store/currency/route";
+import { POST as taxRoute } from "@/app/api/store/tax/route";
+import { dataKey } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -43,10 +45,12 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(owner))!;
   const diary = { ...store, callsId: store.callsId! };
   const session = await openSession(owner);
-  const post = async (body: Record<string, unknown>) => {
-    const response = await currencyRoute(new NextRequest("https://marktmorgen.com/api/store/currency", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
+  const send = async (route: typeof currencyRoute, path: string, body: Record<string, unknown>) => {
+    const response = await route(new NextRequest(`https://marktmorgen.com/api/store/${path}`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
     return { status: response.status, body: (await response.json()) as { ok?: boolean; error?: string; running?: number; currency?: string } };
   };
+  const post = (body: Record<string, unknown>) => send(currencyRoute, "currency", body);
+  const taxPost = (body: Record<string, unknown>) => send(taxRoute, "tax", body);
   const now = Date.now();
 
   part("A series running");
@@ -56,6 +60,11 @@ async function main(): Promise<void> {
   const refused = await post({ currency: "eur", confirm: true });
   is("the change is refused, with how many series are running", [refused.status, refused.body.ok, refused.body.error, refused.body.running], [409, false, "series", 2]);
   is("and the store keeps its currency", (await storeForEmail(owner))!.currency, "usd");
+  const taxOn = await taxPost({ enabled: true, included: false, ids: false, invoices: false });
+  is("switching sales tax on is refused too, with how many series run (C2-94 review, medium 3)", [taxOn.status, taxOn.body.ok, taxOn.body.error, taxOn.body.running], [409, false, "series", 2]);
+  is("and tax stays off", (await storeForEmail(owner))!.tax.enabled, false);
+  const taxIds = await taxPost({ enabled: false, included: false, ids: true, invoices: false });
+  is("the tax number box alone, with tax off, stays free", [taxIds.status, taxIds.body.ok, (await storeForEmail(owner))!.tax.ids], [200, true, true]);
 
   part("A series over");
   await markSeriesEnded(diary, "a".repeat(32));
@@ -63,9 +72,22 @@ async function main(): Promise<void> {
   is("one whose last session has ended is not counted, nor at the moment it ends", [await runningSeries(store, now + 7 * 86_400_000), await runningSeries(store, now + 8 * 86_400_000)], [0, 0]);
   is("a store with no call diary has none", await runningSeries({ callsId: null }, now), 0);
 
+  part("What is written");
+  const room = async () => Number((await redis.pipeline([["HGET", dataKey(store)!, "o"]]))[0] ?? 0);
+  const before = await room();
+  const id = (c: string) => c.repeat(32);
+  const refusedWrite = async (f: () => Promise<void>) => { try { await f(); return false; } catch { return true; } };
+  is("an id that is not 32 hex characters, or an end not in milliseconds after now, is refused", [await refusedWrite(() => markSeriesOpen(diary, "s1", now + 86_400_000, now)), await refusedWrite(() => markSeriesOpen(diary, id("c"), Math.floor((now + 86_400_000) / 1000), now)), await refusedWrite(() => markSeriesOpen(diary, id("c"), now, now)), await refusedWrite(() => markSeriesOpen(diary, id("c"), Number.NaN, now)), await refusedWrite(() => markSeriesOpen(diary, id("c"), now + 0.5, now))], [true, true, true, true, true]);
+  await markSeriesOpen(diary, id("c"), now + 2 * 86_400_000, now);
+  const charged = (await room()) - before;
+  await markSeriesOpen(diary, id("d"), now + 30 * 86_400_000, now + 3 * 86_400_000);
+  is("a write removes the series over first and gives their bytes back to the room, never more than was charged", [(await redis.pipeline([["ZSCORE", seriesOpenKey(diary.callsId), id("c")]]))[0], charged >= seriesReleaseBytes(), seriesReleaseBytes() > 0], [null, true, true]);
+
   part("The studio says why");
   const panel = readFileSync("components/payments-panel.tsx", "utf8");
-  is("the refusal is said with how many and when it lifts", panel.includes('data.error === "series"') && panel.includes("charged in ${currency.toUpperCase()}, the currency it was booked in"), true);
+  const taxEditor = readFileSync("components/tax-editor.tsx", "utf8");
+  is("the tax refusal is said in plain words", taxEditor.includes("series: \"A series of calls is still running in your store."), true);
+  is("the refusal is said with how many and when it lifts", panel.includes('data.error === "series"') && panel.includes("charging in the currency it was booked in until its last session, whatever you choose here") && !/series of calls[^`]*\$\{chosen/.test(panel), true);
   done();
 }
 

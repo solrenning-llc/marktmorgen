@@ -116,7 +116,7 @@ export function PaymentsPanel({
       if (data.error === "series") {
         const n = data.running ?? 1;
         setError(
-          `${n === 1 ? "A series of calls is" : `${n} series of calls are`} still running. ${n === 1 ? "It is" : "Each is"} charged in ${currency.toUpperCase()}, the currency it was booked in, until its last session, so the currency can be changed once the last one is over or canceled.`,
+          `${n === 1 ? "A series of calls is" : `${n} series of calls are`} still running. ${n === 1 ? "It keeps" : "Each keeps"} charging in the currency it was booked in until its last session, whatever you choose here. So the currency can be changed once the last one is over or canceled. Nothing was changed.`,
         );
         return;
       }

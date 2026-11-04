@@ -46,6 +46,7 @@ import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call
 import { SITE_URL } from "@/lib/site-url";
 import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
+import { bookingsChangedKey } from "@/lib/call-records";
 
 /** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
 export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
@@ -53,15 +54,22 @@ export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
 export const FEED_MAX_BYTES = 2_000_000;
 /** How long a calendar may take to answer, redirects included. */
 export const FEED_TIMEOUT_MS = 8_000;
-/** How long the subscription file is reused before it is made again. */
-const OUT_SECONDS = 300;
 /**
- * Events the subscription file holds at the most, the soonest first (4
- * November 2026, C4-4): so the file kept, read on every answer and sent on,
- * has a size its feed's ceiling can be priced at (lib/read-ceilings.ts).
- * Past it, the furthest sessions wait until nearer ones are over.
+ * Events the subscription file holds at the most (4 November 2026, C4-4): so
+ * the file kept, read on every answer and sent on, has a size its feed's
+ * ceiling can be priced at (lib/read-ceilings.ts). Those still to come are
+ * kept first (keptSlots): past it, the oldest sessions already over (up to a
+ * week back) are left out of the file, then the furthest ahead.
  */
 export const CALENDAR_MAX_EVENTS = 1_000;
+/** How long the last good copy of the subscription file is kept for the calendar app (bookedCalendarFeed). */
+export const CALENDAR_COPY_SECONDS = 40 * 86_400;
+/** The copy is made again when a booking changed (lib/call-records.ts, markBookingsChanged), or once it is this old. */
+export const CALENDAR_REFRESH_SECONDS = 12 * 3_600;
+/** Times a store's file may be made again in a UTC day, every reason together. */
+export const CALENDAR_BUILDS_PER_DAY = 4;
+/** Answers one store's feed gets in an hour: two, its own REFRESH-INTERVAL of thirty minutes. */
+export const CALENDAR_POLLS_PER_HOUR = 2;
 /** The longest address accepted. Google's secret addresses are about 150 characters. */
 export const MAX_FEED_URL = 1000;
 
@@ -85,6 +93,9 @@ export function calendarKeys(raw: unknown): string[] {
   return [...(typeof value.token === "string" && value.token ? [tokenKey(value.token)] : []), ...feeds.flatMap((id) => [busyKey(id), goodKey(id), errKey(id), lockKey(id)])];
 }
 const outKey = (statsId: string) => `nl:cal:out:${statsId}`;
+/** The feed's answers in one hour, and the file's makings in one UTC day, each a count of the store's. */
+const paceKey = (statsId: string, hour: number) => `nl:cal:pace:${statsId}:${hour}`;
+const buildsKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}`;
 
 function parseConfig(raw: unknown): Config | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -443,10 +454,10 @@ export function bookedCalendar(
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${icsText(`${store.name} bookings`)}`,
-    "REFRESH-INTERVAL;VALUE=DURATION:PT15M",
-    "X-PUBLISHED-TTL:PT15M",
+    "REFRESH-INTERVAL;VALUE=DURATION:PT30M",
+    "X-PUBLISHED-TTL:PT30M",
   ];
-  for (const slot of [...slots.values()].sort((a, b) => a.start - b.start).slice(0, CALENDAR_MAX_EVENTS)) {
+  for (const slot of keptSlots([...slots.values()], now)) {
     const product = listings.find((p) => p.id === slot.product);
     const title = product?.title ?? "A call that is no longer listed";
     const setup = product?.call ?? null;
@@ -511,11 +522,93 @@ export async function slotRooms(store: Store, calls: BookedCall[], listings: Lis
   return new Map(asks.map((a, i) => [a.key, rooms[i]]));
 }
 
-/** The subscription file, made at most every five minutes per store. */
-export async function cachedBookedCalendar(statsId: string, make: () => Promise<string>): Promise<string> {
-  const [cached] = await redisPipeline([["GET", outKey(statsId)]]);
-  if (typeof cached === "string" && cached) return cached;
-  const text = await make();
-  await redisPipeline([["SET", outKey(statsId), text, "EX", OUT_SECONDS]]).catch(() => {});
-  return text;
+/**
+ * The CALENDAR_MAX_EVENTS events the file holds, in time order: those still to
+ * come first, the soonest first, then the latest of those over. A store past
+ * it leaves out its oldest past sessions (up to a week back) before anything
+ * still to come, and only then the furthest ahead.
+ */
+export function keptSlots<T extends { start: number; end: number }>(slots: T[], now: number): T[] {
+  const ahead = slots.filter((s) => s.end > now).sort((a, b) => a.start - b.start);
+  const over = slots.filter((s) => s.end <= now).sort((a, b) => b.start - a.start);
+  return [...ahead, ...over].slice(0, CALENDAR_MAX_EVENTS).sort((a, b) => a.start - b.start);
+}
+
+/** The last good copy of a store's file, and when it was begun. */
+type Copy = { at: number; ics: string };
+function parseCopy(raw: unknown): Copy | null {
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<Copy>;
+    return typeof value.at === "number" && typeof value.ics === "string" && value.ics ? { at: value.at, ics: value.ics } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A count with a ceiling, taken whole or not at all: SET NX with its expiry,
+ * INCRBY, and DECRBY when over. A count that cannot be made is a refusal.
+ */
+async function takeCounted(key: string, ceiling: number, seconds: number): Promise<boolean> {
+  try {
+    const [, raw] = await redisPipeline([["SET", key, "0", "NX", "EX", seconds], ["INCRBY", key, 1]]);
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n < 1) return false;
+    if (n <= ceiling) return true;
+    await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Thrown by a feed's `make` when the store behind its token is not the one that kept it. */
+export class FeedGone extends Error {}
+
+export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "paced" | "none" };
+
+/**
+ * What a store's private feed answers a calendar app (4 November 2026, C4-4;
+ * owner's rule MR). An app asks on its own (every thirty minutes, as the file says), so asking
+ * must never spend anything the creator sees counted (their studio's
+ * requests): it is answered from the last good copy of the file, kept
+ * CALENDAR_COPY_SECONDS, and the file is made again (`make`, which reads the
+ * store and its Stripe account) only when a booking was made, moved or
+ * cancelled since the copy was begun (lib/call-records.ts,
+ * markBookingsChanged) or the copy is CALENDAR_REFRESH_SECONDS old; at most
+ * CALENDAR_BUILDS_PER_DAY times a store a UTC day, counted before it is made.
+ * Past that, or when making it fails, the copy is answered as it is. One
+ * feed is answered CALENDAR_POLLS_PER_HOUR times an hour, counted before its
+ * copy is read; past them it is asked to come back ("paced"). All of it is
+ * one cost line of its own (tests/plan-cost-registry.ts, calendar-feed).
+ * "none" when there is no copy and none could be made.
+ */
+export async function bookedCalendarFeed(owner: { statsId: string; handle: string }, make: () => Promise<string>, now = Date.now()): Promise<FeedAnswer> {
+  if (!(await takeCounted(paceKey(owner.statsId, Math.floor(now / 3_600_000)), CALENDAR_POLLS_PER_HOUR, 3_600))) return { state: "paced" };
+  let raw: unknown[];
+  try {
+    raw = await redisPipeline([["MGET", outKey(owner.statsId), bookingsChangedKey(owner.handle)]]);
+  } catch {
+    return { state: "none" };
+  }
+  const [copyRaw, changedRaw] = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : [null, null];
+  const copy = parseCopy(copyRaw);
+  const changed = Number(changedRaw) || 0;
+  const fresh = copy !== null && changed <= copy.at && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
+  if (fresh) return { state: "copy", ics: copy.ics };
+  const day = new Date(now).toISOString().slice(0, 10);
+  if (!(await takeCounted(buildsKey(owner.statsId, day), CALENDAR_BUILDS_PER_DAY, 2 * 86_400))) {
+    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  }
+  let ics: string;
+  try {
+    ics = await make();
+  } catch (error) {
+    // Stripe did not answer: the copy stands. The store is no longer the one that kept it: nothing is answered.
+    if (copy && !(error instanceof FeedGone)) return { state: "copy", ics: copy.ics };
+    throw error;
+  }
+  await redisPipeline([["SET", outKey(owner.statsId), JSON.stringify({ at: now, ics }), "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
+  return { state: "made", ics };
 }

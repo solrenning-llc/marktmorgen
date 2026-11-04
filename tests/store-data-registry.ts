@@ -74,6 +74,7 @@ import { GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, LOG_SIZE as HOOK_LOG } from "@/l
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
 import { MAX_DEVICES } from "@/lib/phone-alerts";
 import { MAX_FEEDS } from "@/lib/calendar-sync";
+import { CALENDAR_FILE_BYTES } from "@/lib/read-ceilings";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { CLOSING, FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { CLOSING_DAYS } from "@/lib/plan-closing-rules";
@@ -320,7 +321,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cal:err:@lib/calendar-sync.ts": { what: "A feed's last failure", parts: [capped(MAX_FEEDS * KB, "One per feed, six hours.")] },
   "nl:cal:good:@lib/calendar-sync.ts": { what: "A feed's last good reading", parts: [capped(MAX_FEEDS * READING_BYTES, "One per feed, six hours.", src("lib/calendar-sync.ts", "MAX_FEEDS"))] },
   "nl:cal:lock:@lib/calendar-sync.ts": short("A feed read at a time", "request", 1, 128, REQ("page")),
-  "nl:cal:out:@lib/calendar-sync.ts": { what: "The store's calendar file, five minutes", parts: [capped(512 * KB, "One file a store, of what is booked.")] },
+  // Since 4 November 2026 (C4-4) the last good copy of the store's feed, kept CALENDAR_COPY_SECONDS, at most CALENDAR_MAX_EVENTS events (lib/read-ceilings.ts, CALENDAR_FILE_BYTES).
+  "nl:cal:out:@lib/calendar-sync.ts": { what: "The last good copy of the store's calendar file, forty days", parts: [capped(CALENDAR_FILE_BYTES + KB, "One file a store, of what is booked, at its largest.", src("lib/read-ceilings.ts", "CALENDAR_FILE_BYTES"), src("lib/calendar-sync.ts", "CALENDAR_MAX_EVENTS", "CALENDAR_COPY_SECONDS"))] },
+  "nl:cal:pace:@lib/calendar-sync.ts": { what: "The feed's answers this hour", parts: [capped(KEY, "One count a store, an hour.")] },
+  "nl:cal:builds:@lib/calendar-sync.ts": { what: "The feed's file made again today", parts: [capped(2 * KEY, "One count a store a UTC day, kept two days.")] },
+  "nl:cal:chg:@lib/call-records.ts": short("When the store's bookings last changed, for its calendar feed: one mark a store, set at each booking made or moved, forty days", "call", 40),
   "nl:cal:tok:@lib/calendar-sync.ts": { what: "The store's calendar file's token", parts: [capped(KEY, "One a store.")] },
   "nl:meet:rf:@lib/call-meetings.ts": short("Refunds already handled for meetings", "order", 30, MARK),
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },

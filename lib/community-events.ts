@@ -250,19 +250,6 @@ export async function allEvents(id: string): Promise<CommunityEvent[]> {
   return readEvents(id, ids);
 }
 
-/**
- * The event at one place in allEvents' order, for the search's one-time walk
- * (lib/community-walk.ts), which reads one at a time: undefined past the
- * last of MAX_KEPT_EVENTS, null where the one kept there cannot be read.
- */
-export async function eventAt(id: string, at: number): Promise<CommunityEvent | null | undefined> {
-  if (!isRedisConfigured() || !Number.isSafeInteger(at) || at < 0 || at >= MAX_KEPT_EVENTS) return undefined;
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "WITHSCORES", "LIMIT", at, 1]]);
-  const { ids } = flatIds(raw);
-  if (!ids.length) return undefined;
-  return (await readEvents(id, ids))[0] ?? null;
-}
-
 export type PastPage = { events: CommunityEvent[]; next: number | null };
 
 /**

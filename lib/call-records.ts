@@ -102,8 +102,20 @@ export async function planReminders(callsId: string, handle: string, session: st
     if (at - now < REMINDER_MIN_LEAD_MS) continue;
     commands.push(["ZADD", REMINDER_QUEUE, at, reminderMember(callsId, handle, session, mark, start)]);
   }
-  if (commands.length) await redisPipeline(commands);
+  // A booking made or moved: the store's calendar feed makes its file again (lib/calendar-sync.ts, bookedCalendarFeed).
+  commands.push(changedCommand(handle, now));
+  await redisPipeline(commands);
 }
+
+/**
+ * When a store's bookings last changed (made, moved, or a time let go), in
+ * milliseconds, by the store's handle: the private calendar feed makes its
+ * file again only after it (lib/calendar-sync.ts, bookedCalendarFeed). Kept as
+ * long as the feed's copy, CALENDAR_COPY_SECONDS.
+ */
+export const bookingsChangedKey = (handle: string) => `nl:cal:chg:${handle}`;
+const CHANGED_SECONDS = 40 * 86_400;
+const changedCommand = (handle: string, now = Date.now()): (string | number)[] => ["SET", bookingsChangedKey(handle), String(now), "EX", CHANGED_SECONDS];
 
 /**
  * Asks the mail job to look at a checkout once it can no longer be open: if
@@ -124,5 +136,6 @@ export async function unplanReminders(callsId: string, handle: string, session: 
       reminderMember(callsId, handle, session, "24", start),
       reminderMember(callsId, handle, session, "1", start),
     ],
+    changedCommand(handle),
   ]);
 }

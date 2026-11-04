@@ -1,151 +1,174 @@
 /**
- * Four reads take their worst from the store's window before they read
- * anything (C4-4, 4 November 2026; owner's rule MR: a ceiling before every
- * spend, an unknown cost never zero). What is checked:
+ * Three reads, each paid for before it reads anything (C4-4, 4 November 2026;
+ * owner's rule MR: a ceiling before every spend, an unknown cost never zero).
+ * The community search is Claude 3's (C4-6). What is checked, by behaviour,
+ * with the in-memory database and a stand-in for Stripe:
  *
- *   - the community search takes its units, a member's from the buyers'
- *     window and the creator's from the studio's, before its first read, and
- *     reads nothing when refused; each step of the one-time walk takes its
- *     own before it runs;
- *   - the walk goes a step at a time, from where it stopped, and no step
- *     moves more commands than the step's priced worst (WALK_STEP_SHAPE);
- *   - the private booking calendar takes its units before the kept file is
- *     read, and more before Stripe is read to make it again; the file holds
- *     at most CALENDAR_MAX_EVENTS events;
- *   - a product update takes its units before reading the store's sales
- *     (behaviour in tests/product-updates.test.ts);
- *   - the totals page takes each store's units before reading its numbers,
- *     the page's own store included.
+ *   - the private booking calendar answers a calendar app from the last good
+ *     copy of its file and never spends the creator's studio requests; the
+ *     file is made again only after a booking changed or once the copy is old,
+ *     at most CALENDAR_BUILDS_PER_DAY a day, counted before Stripe is read;
+ *     past that, and when Stripe fails, the copy is answered (never 503 while
+ *     one exists); a feed asked more than CALENDAR_POLLS_PER_HOUR times an
+ *     hour is asked to come back, reading nothing; the file keeps the events
+ *     still to come first;
+ *   - every unit of lib/read-ceilings.ts costs at least the worst it stands
+ *     for, priced with the registry's own rates, and the calendar's own cost
+ *     line is in the registry;
+ *   - the totals page's reading of one store's numbers makes no more
+ *     commands than TOTALS_STORE_SHAPE counts, and it takes its units first.
  *
- * Each figure is held against its worst in tests/plan-cost-registry.test.ts.
+ * (A product update's reading is held by tests/product-update-ceiling.test.ts.)
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { needsWalk, readPlace, walkStep } from "@/lib/community-walk";
-import { search } from "@/lib/community-search";
-import { bookedCalendar, CALENDAR_MAX_EVENTS } from "@/lib/calendar-sync";
-import { WALK_MEMBER_PAGE, WALK_STEP_SHAPE, searchUnits, SEARCH_DM_UNITS, SEARCH_REQUEST_UNITS, SEARCH_ROOM_UNITS } from "@/lib/read-ceilings";
-import { type Store, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { takeCommunityRead } from "@/lib/community-page";
+import {
+  CALENDAR_BUILDS_PER_DAY, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS,
+  bookedCalendar, bookedCalendarFeed, keptSlots, newFeedToken,
+} from "@/lib/calendar-sync";
+import { planReminders } from "@/lib/call-records";
+import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
+import {
+  CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, TOTALS_STORE_SHAPE, TOTALS_STORE_UNITS,
+  UPDATE_READ_SHAPE, UPDATE_READ_UNITS,
+} from "@/lib/read-ceilings";
+import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
+import { readNumbers } from "@/lib/stats-report";
+import { COST_LINES, UNIT_COST, readShapeCost } from "./plan-cost-registry";
+import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
-const OWNER = "walker@example.com";
-
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
-/** Where `needle` first is in `source`, failing loudly when it is not there at all. */
-const at = (source: string, needle: string) => {
-  const found = source.indexOf(needle);
-  if (found < 0) throw new Error(`not found: ${needle}`);
-  return found;
-};
+const OWNER = "feed@example.com";
 
-const CM = "walk1";
-const fakeStore = { handle: "walker", community: { id: CM }, catalog: { items: [], head: [], inline: [] } } as unknown as Store;
+let stripeReads = 0;
+let stripeDown = false;
+globalThis.fetch = (async () => {
+  stripeReads += 1;
+  if (stripeDown) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
+  return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+}) as typeof fetch;
 
-async function main(): Promise<void> {
-  part("The community search takes its worst before reading");
-  const page = read("app/[handle]/community/search/page.tsx");
-  const charge = at(page, "await take(searchUnits({ chat: config.chat.on, dm: config.dm.on }))");
-  is("its units are taken before the walk's mark, the search, the room and the messages are read", [
-    charge < at(page, "needsWalk(id)"),
-    charge < at(page, "searchEverything(id, asked)"),
-    charge < at(page, "searchRoom(id, used)"),
-    charge < at(page, "searchMessages(id, key, used)"),
-    charge < at(page, "visibleSpaces(store, config"),
-  ], [true, true, true, true, true]);
-  const door = read("lib/community-page.ts");
-  // Owner's decision of 4 November 2026, 06h51: a buyer's units come from their own figure, never the visits' requests.
-  is("a member's from the buyers' figure, never the visits' requests; the creator's from the studio's", [
-    page.includes("takeCommunityRead(store, owner, units)"),
-    door.includes('takeAllowance(store, "buyer", units.buyer)'),
-    door.includes("countStudio(store, null, units.studio)"),
-    door.slice(door.indexOf("export async function takeCommunityRead"), door.indexOf("export async function communityVisitor")).includes("takePublicRequest"),
-  ], [true, true, true, false]);
-  is("refused, it reads nothing: the member to the resting page, the creator to the paused studio", page.includes('if (!taken.ok) redirect(owner ? studioPath(store, `why=${taken.why}`, "paused") : `/@${store.handle}/resting`);'), true);
-  is("a step of the walk takes its own first, and waits when there is no room", at(page, "(await take(WALK_STEP_UNITS)).ok") < at(page, "await walkStep(store)"), true);
-  is("the whole walk at once is gone", page.includes("walkCommunity"), false);
-  is("the room and the messages are paid for only where they are on", [searchUnits({ chat: false, dm: false }), searchUnits({ chat: true, dm: true }).buyer], [SEARCH_REQUEST_UNITS, SEARCH_REQUEST_UNITS.buyer + SEARCH_ROOM_UNITS.buyer + SEARCH_DM_UNITS.buyer]);
-
-  part("A member's search is taken from the buyers' figure, not the visits' requests");
-  redis.clear();
-  process.env.STRIPE_SECRET_KEY = "sk_test_ceilings_only_a_stand_in";
-  await claimHandle(OWNER, "walker", "Walker Club", "");
-  await ensureStatsId(OWNER);
-  await setSubscription(OWNER, { customerId: "cus_Walker00001", subscriptionId: "sub_Walker00001", active: true, tier: "pro", period: paidPeriod() });
-  const paying = (await storeForEmail(OWNER))!;
-  const visitsWindow = () => (redis.run(["SCAN", "0", "MATCH", "nl:traffic:*"]) as [string, string[]])[1].map((k) => `${k}=${JSON.stringify(redis.run(["GET", k]))}`).sort();
-  const buyerLeft = async () => {
-    const taken = await takeAllowance(paying, "buyer", 1);
-    return taken.ok ? taken.left : -1;
-  };
-  const visitsBefore = visitsWindow();
-  const buyerBefore = await buyerLeft();
-  const units = searchUnits({ chat: true, dm: true });
-  is("taken", (await takeCommunityRead(paying, false, units)).ok, true);
-  is("from the buyers' figure, by its own units", buyerBefore - (await buyerLeft()), units.buyer + 1);
-  is("and nothing from the visits' requests", visitsWindow(), visitsBefore);
-  const rest = await buyerLeft();
-  if (rest > 0) await takeAllowance(paying, "buyer", rest);
-  is("past the figure the search is refused", (await takeCommunityRead(paying, false, units)).ok, false);
-
-  part("The one-time walk goes a step at a time");
-  redis.clear();
-  // Ninety listed members and one who is not: the walk reaches the directory after the courses and events, which this store has none of.
-  for (let i = 0; i < 91; i += 1) {
-    const k = `m${String(i).padStart(3, "0")}`;
-    const listed = i < 90;
-    redis.run(["HSET", `nl:cm:${CM}:m`, k, JSON.stringify({ k, e: `${k}@example.com`, n: listed ? `Walker ${k}` : "", h: listed ? `walker${k}` : "", dir: listed, at: 1_000 + i })]);
-    if (listed) redis.run(["ZADD", `nl:cm:${CM}:dir`, 1_000 + i, k]);
-  }
+/** Commands the database is sent while `work` runs. */
+async function counted<T>(work: () => Promise<T>): Promise<{ value: T; commands: number }> {
   const real = redis.pipeline;
   let commands = 0;
-  let most = 0;
   redis.pipeline = async (batch) => {
     commands += batch.length;
     return real(batch);
   };
-  const steps: string[] = [];
-  for (let n = 0; n < 10 && (await needsWalk(CM)); n += 1) {
-    commands = 0;
-    await walkStep(fakeStore);
-    most = Math.max(most, commands);
-    steps.push(readPlace(redis.run(["GET", `nl:cm:${CM}:swat`])).stage);
+  try {
+    return { value: await work(), commands };
+  } finally {
+    redis.pipeline = real;
   }
-  redis.pipeline = real;
-  is("no courses, no events, then the members a page at a time, and done", [steps.length, await needsWalk(CM)], [2 + Math.ceil(90 / WALK_MEMBER_PAGE), false]);
-  is("no step moves more commands than its priced worst", most <= WALK_STEP_SHAPE.commands, true);
-  is("every listed member is findable, and nobody else", [(await search(CM, "walker", null, "member")).total], [90]);
-  is("a step taken while another holds the walk does nothing", await (async () => {
-    redis.run(["DEL", `nl:cm:${CM}:sv`]);
-    redis.run(["SET", `nl:cm:${CM}:swalk`, "1", "EX", 120]);
-    return walkStep(fakeStore);
-  })(), false);
-  is("a place written by another version starts again", readPlace("2|m|100|40").stage, "course");
+}
 
-  part("The private booking calendar");
-  const route = read("app/api/store/calendar/[token]/route.ts");
-  is("every answer takes its units before the kept file is read", at(route, "countStudio(store, null, CALENDAR_READ_UNITS)") < at(route, "cachedBookedCalendar("), true);
-  is("making it again takes more before Stripe and the listings are read", [
-    at(route, "countStudio(store, null, CALENDAR_BUILD_UNITS)") < at(route, "paidCalls(store)"),
-    at(route, "countStudio(store, null, CALENDAR_BUILD_UNITS)") < at(route, 'readKind(store, "call")'),
-  ], [true, true]);
-  is("refused, the app is told to come back and nothing more is read", [route.includes("if (error instanceof WindowSpent) return later();"), route.includes('"Retry-After": "3600"')], [true, true]);
-  const start = Date.now() + 86_400_000;
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_feed_only_a_stand_in";
+  await claimHandle(OWNER, "feeder", "Feeder Calls", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestFeeder0001", true);
+  await setSubscription(OWNER, { customerId: "cus_Feeder00001", subscriptionId: "sub_Feeder00001", active: true, tier: "pro", period: paidPeriod() });
+  const load = async () => (await storeForEmail(OWNER))!;
+  const store = await load();
+  const url = (await newFeedToken(store)).subscribeUrl ?? "";
+  const token = url.slice(url.lastIndexOf("/") + 1);
+  const ask = () => feedRoute(new Request(url), { params: Promise.resolve({ token }) });
+  const studioLeft = async () => {
+    const taken = await takeAllowance(await load(), "studio", 1);
+    return taken.ok ? taken.left : -1;
+  };
+
+  part("The booking calendar answers from its last good copy, never from the studio's requests");
+  const before = await studioLeft();
+  const first = await ask();
+  const readsAfterFirst = stripeReads;
+  is("the first answer makes the file, reading Stripe", [first.status, (await first.text()).startsWith("BEGIN:VCALENDAR"), readsAfterFirst > 0], [200, true, true]);
+  const second = await ask();
+  is("the next answers it from the copy, reading nothing from Stripe", [second.status, stripeReads - readsAfterFirst], [200, 0]);
+  is("and neither took a single studio request", before - (await studioLeft()), 1);
+  const readsBeforePaced = stripeReads;
+  const paced = await ask();
+  is(`past ${CALENDAR_POLLS_PER_HOUR} answers in an hour the app is asked to come back, and nothing is read`, [paced.status, paced.headers.get("Retry-After"), stripeReads - readsBeforePaced], [429, "900", 0]);
+  const owner = { statsId: store.statsId as string, handle: store.handle };
+  await planReminders(store.callsId ?? "calls1", store.handle, "cs_test_feed000001", Date.now() + 3 * 86_400_000);
+  const readsBeforeChange = stripeReads;
+  const remade = await bookedCalendarFeed(owner, async () => {
+    stripeReads += 1;
+    return "BEGIN:VCALENDAR\r\nX-REMADE:1\r\nEND:VCALENDAR";
+  }, Date.now() + 3_600_000);
+  is("a booking made since: the next hour's answer makes the file again", [remade.state, stripeReads > readsBeforeChange], ["made", true]);
+
+  part("Made again a few times a day at most, and the copy stands when it cannot be");
+  const day = Date.UTC(2031, 0, 6, 0, 30);
+  let makings = 0;
+  const make = async () => {
+    makings += 1;
+    if (stripeDown) throw new Error("Stripe did not answer");
+    return `BEGIN:VCALENDAR\r\nX-MADE:${makings}\r\nEND:VCALENDAR`;
+  };
+  const answers: string[] = [];
+  for (let hour = 0; hour < CALENDAR_BUILDS_PER_DAY + 3; hour += 1) {
+    const now = day + hour * 3_600_000;
+    await planReminders("calls1", store.handle, `cs_test_feed00000${hour}`, now + 3 * 86_400_000, now);
+    answers.push((await bookedCalendarFeed(owner, make, now + 1_000)).state);
+  }
+  is(`a booking changed every hour: made ${CALENDAR_BUILDS_PER_DAY} times that day, then the copy`, [makings, answers.filter((a) => a === "made").length, answers.slice(-3)], [CALENDAR_BUILDS_PER_DAY, CALENDAR_BUILDS_PER_DAY, ["copy", "copy", "copy"]]);
+  const nextDay = day + 86_400_000 + 7 * 3_600_000;
+  is("the next day the copy has grown old: made again", [(await bookedCalendarFeed(owner, make, nextDay)).state, makings], ["made", CALENDAR_BUILDS_PER_DAY + 1]);
+  is("an hour on, nothing changed and the copy young: the copy, nothing made", [(await bookedCalendarFeed(owner, make, nextDay + 3_600_000)).state, makings], ["copy", CALENDAR_BUILDS_PER_DAY + 1]);
+  stripeDown = true;
+  const old = nextDay + (CALENDAR_REFRESH_SECONDS + 3_600) * 1000;
+  const failed = await bookedCalendarFeed(owner, make, old);
+  is("the copy grown old and Stripe down: the copy is answered, not an error", [failed.state, "ics" in failed && failed.ics.includes("X-MADE:")], ["copy", true]);
+  redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
+  const none = await bookedCalendarFeed(owner, make, old + 3_600_000).then((a) => a.state, () => "failed");
+  is("no copy at all and Stripe down: the route answers 503, asking the app to come back", [none, read("app/api/store/calendar/[token]/route.ts").includes("return later(503, 300);")], ["failed", true]);
+  stripeDown = false;
+
+  part("The file keeps what is still to come first");
+  const now = Date.now();
+  const slots = [
+    ...Array.from({ length: CALENDAR_MAX_EVENTS }, (_, i) => ({ start: now - (i + 2) * 600_000, end: now - (i + 1) * 600_000, id: `past${i}` })),
+    ...Array.from({ length: 30 }, (_, i) => ({ start: now + (i + 1) * 3_600_000, end: now + (i + 1) * 3_600_000 + 1_800_000, id: `next${i}` })),
+  ];
+  const kept = keptSlots(slots, now);
+  is("every event still to come is kept, then the latest past ones", [kept.length, kept.filter((s) => s.id.startsWith("next")).length, kept.some((s) => s.id === "past0"), kept.some((s) => s.id === `past${CALENDAR_MAX_EVENTS - 1}`)], [CALENDAR_MAX_EVENTS, 30, true, false]);
   const many = Array.from({ length: CALENDAR_MAX_EVENTS + 25 }, (_, i) => ({
-    session: `cs_${i}`, start: start + i * 3_600_000, end: start + i * 3_600_000 + 1_800_000, product: "p1", title: "Call", email: `b${i}@example.com`, name: null,
+    session: `cs_${i}`, start: now + 86_400_000 + i * 3_600_000, end: now + 86_400_000 + i * 3_600_000 + 1_800_000, product: "p1", title: "Call", email: `b${i}@example.com`, name: null,
     buyerTz: "UTC", moves: 0, answers: [], amount: 0, currency: "usd", hosts: [], claim: "", lead: "", pi: "", due: null, cancel: null,
   }));
-  const ics = bookedCalendar({ name: "Walker", handle: "walker", catalog: { items: [], head: [], inline: [] } } as unknown as Store, many as never, Date.now(), []);
-  is("the file holds at most CALENDAR_MAX_EVENTS events, the soonest", [ics.split("BEGIN:VEVENT").length - 1, ics.includes(`b0@example.com`), ics.includes(`b${CALENDAR_MAX_EVENTS}@example.com`)], [CALENDAR_MAX_EVENTS, true, false]);
+  const ics = bookedCalendar({ name: "Feeder", handle: "feeder", catalog: { items: [], head: [], inline: [] } } as unknown as Store, many as never, now, []);
+  is("the file holds at most CALENDAR_MAX_EVENTS events, the soonest", [ics.split("BEGIN:VEVENT").length - 1, ics.includes("b0@example.com"), ics.includes(`b${CALENDAR_MAX_EVENTS}@example.com`)], [CALENDAR_MAX_EVENTS, true, false]);
+  is("the build's Stripe pages are lib/calls.ts's own", read("lib/calls.ts").includes(`const MAX_PAGES = ${CALENDAR_STRIPE_PAGES};`), true);
+  is("each booking's moves and rooms are counted in the build", CALENDAR_BUILD_SHAPE.commands >= 2 + 5 * CALENDAR_STRIPE_PAGES * 100, true);
 
-  part("A product update and the totals page");
-  const updates = read("lib/product-updates.ts");
-  is("a product update takes its units before reading the sales", at(updates, "countStudio(store, null, UPDATE_READ_UNITS)") < at(updates, "readPaidSales(store, 0, ALL_TIME_PAGES)"), true);
+  part("Every figure costs at least the worst it stands for");
+  const held: [string, number, number, number][] = [
+    ["a product update's reading of every sale", UPDATE_READ_UNITS, UNIT_COST.studio, readShapeCost(UPDATE_READ_SHAPE)],
+    ["one store's numbers on the totals page", TOTALS_STORE_UNITS, UNIT_COST.studio, readShapeCost(TOTALS_STORE_SHAPE)],
+  ];
+  for (const [what, units, each, worst] of held) {
+    is(`${what}: ${units} units at $${each.toFixed(6)} cover $${worst.toFixed(6)}`, units * each >= worst, true);
+  }
+  is("a totals reading costs more than a page, so it is no longer the page's units", TOTALS_STORE_UNITS >= STUDIO_PAGE_UNITS, true);
+  const line = COST_LINES.find((l) => l.id === "calendar-feed");
+  const feedMonth = line ? line.monthlyUsd("creator") : 0;
+  is("the feed is a cost line of its own, every making and answer of the month at its worst", feedMonth >= 32 * CALENDAR_BUILDS_PER_DAY * readShapeCost(CALENDAR_BUILD_SHAPE) + 31 * 24 * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE), true);
+  console.log(`  calendar feed: a making $${readShapeCost(CALENDAR_BUILD_SHAPE).toFixed(6)}, an answer $${readShapeCost(CALENDAR_POLL_SHAPE).toFixed(6)}, the month $${feedMonth.toFixed(4)}`);
+  console.log(`  not one of these reads, reported: a store's first all-time filling $${readShapeCost(LIFE_FILL_SHAPE).toFixed(4)} once (${LIFE_FILL_SHAPE.commands} commands)`);
+
+  part("The totals page: one store's numbers, read within their count");
+  redis.run(["HSET", `nl:stats:${owner.statsId}:life`, "filled", "2031-01-01", "since", "2031-01-01", "vgap", "0"]);
+  const reading = await counted(() => readNumbers(store));
+  is(`one store's numbers make no more commands than TOTALS_STORE_SHAPE counts (${reading.commands} <= ${TOTALS_STORE_SHAPE.commands})`, reading.commands <= TOTALS_STORE_SHAPE.commands, true);
   const totals = read("app/studio/totals/page.tsx");
-  is("each store's numbers, this page's store's too, take their units before they are read", [at(totals, "countStudio(store, null, TOTALS_STORE_UNITS)") < at(totals, "readNumbers(store)"), totals.includes("alreadyCounted")], [true, false]);
+  is("each store's numbers, this page's store's too, take their units before they are read", [totals.indexOf("countStudio(store, null, TOTALS_STORE_UNITS)") >= 0 && totals.indexOf("countStudio(store, null, TOTALS_STORE_UNITS)") < totals.indexOf("readNumbers(store)"), totals.includes("alreadyCounted")], [true, false]);
 
   done();
 }

@@ -10,11 +10,9 @@ import { CREATOR } from "@/lib/community";
 import { searchRoom } from "@/lib/community-chat";
 import { unreadCount } from "@/lib/community-notify";
 import { visibleSpaces } from "@/lib/community-access";
-import { communityVisitor, takeCommunityRead } from "@/lib/community-page";
+import { communityVisitor } from "@/lib/community-page";
 import { type SearchKind, MAX_QUERY_LENGTH, queryWords, search, searchEverything } from "@/lib/community-search";
-import { needsWalk, walkStep } from "@/lib/community-walk";
-import { type SearchUnits, WALK_STEP_UNITS, searchUnits } from "@/lib/read-ceilings";
-import { studioPath } from "@/lib/studio-route";
+import { walkCommunity } from "@/lib/community-walk";
 import { eventsFound, lessonsFound, membersFound } from "@/lib/community-found";
 import { readableTime } from "@/lib/call-setup";
 import { pollViews } from "@/lib/community-polls";
@@ -22,12 +20,6 @@ import { CommunityBar, Face, PostCard, communityNotices, storeWhen } from "@/com
 import { type CommunityWords, communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { ConfirmDeletes } from "@/components/community-composer";
-
-/**
- * The page's own time limit, SEARCH_SECONDS (lib/read-ceilings.ts): what a
- * search waits on at the community's door is bounded by it, and priced at it.
- */
-export const maxDuration = 30;
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -113,28 +105,11 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
 
   const wanted = queryWords(asked);
 
-  // A search reads far more than a page: four indexes, the door of every
-  // space, the tab's lessons, events or posts, and the room and this person's
-  // messages where they are on. So it takes its worst from the store's window
-  // before it reads anything (owner's rule MR; lib/read-ceilings.ts): a
-  // member's from the store's figure for buyers (never the visits' requests:
-  // spending those would rest the storefront sooner), the creator's from the
-  // studio's. Past them it reads nothing, as the community's other pages rest.
-  const take = (units: SearchUnits) => takeCommunityRead(store, owner, units);
-  if (wanted.length) {
-    const taken = await take(searchUnits({ chat: config.chat.on, dm: config.dm.on }));
-    if (!taken.ok) redirect(owner ? studioPath(store, `why=${taken.why}`, "paused") : `/@${store.handle}/resting`);
-  }
-
   // Everything written before the index reached past posts is put into it once,
-  // a step at each search from the first one (lib/community-walk.ts). The step
-  // happens before the search rather than after it, because a first search
-  // that answers "nothing" about a course full of answers is worse than a
-  // first search that takes a moment. Each step takes its own worst first,
-  // and waits for a later search when the window has no room for it.
-  if (wanted.length && (await needsWalk(id).catch(() => false)) && (await take(WALK_STEP_UNITS)).ok) {
-    await walkStep(store).catch(() => {});
-  }
+  // here, the first time anybody searches. It happens before the search rather
+  // than after it, because a first search that answers "nothing" about a course
+  // full of answers is worse than a first search that takes a moment.
+  if (wanted.length) await walkCommunity(store).catch(() => {});
 
   // All four at once, so the tabs can carry real numbers rather than making
   // somebody press each one to find out whether it holds anything. Each comes

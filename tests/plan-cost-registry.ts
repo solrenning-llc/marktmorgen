@@ -104,7 +104,8 @@ import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY } f
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
-import type { ReadShape } from "@/lib/read-ceilings";
+import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE } from "@/lib/read-ceilings";
+import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -654,17 +655,28 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/path-reminder.ts", names: ["sendPathReminder", "PATH_REMINDER_UNITS"] },
       { file: "lib/path-facts.ts", names: ["PATH_SALE_PAGES", "PATH_REFUND_PAGES", "PATH_MONEY_SECONDS"] },
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
-      // Four reads take their worst first (C4-4, 4 November 2026; lib/read-ceilings.ts, held in tests/plan-cost-registry.test.ts):
-      // the creator's own community search, the private booking calendar (each answer, and each file made again), a product
-      // update's reading of every paid sale, and each store's numbers on the totals page.
-      { file: "lib/community-page.ts", names: ["countStudio(store, null, units.studio)"] },
-      { file: "app/api/store/calendar/[token]/route.ts", names: ["countStudio(store, null, CALENDAR_READ_UNITS)", "countStudio(store, null, CALENDAR_BUILD_UNITS)"] },
-      { file: "lib/calendar-sync.ts", names: ["CALENDAR_MAX_EVENTS", ".slice(0, CALENDAR_MAX_EVENTS)"] },
+      // Two reads take their worst first (C4-4, 4 November 2026; lib/read-ceilings.ts, held in tests/read-ceilings.test.ts):
+      // a product update's reading of every paid sale, and each store's numbers on the totals page.
       { file: "lib/product-updates.ts", names: ["countStudio(store, null, UPDATE_READ_UNITS)"] },
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, TOTALS_STORE_UNITS)"] },
-      { file: "lib/read-ceilings.ts", names: ["CALENDAR_READ_UNITS", "CALENDAR_BUILD_UNITS", "UPDATE_READ_UNITS", "TOTALS_STORE_UNITS"] },
+      { file: "lib/read-ceilings.ts", names: ["UPDATE_READ_UNITS", "TOTALS_STORE_UNITS"] },
     ],
-    basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. The creator's community search, the private booking calendar, a product update's reading of every sale and each store's numbers on the totals page take as many studio requests as their worst read costs, before reading (lib/read-ceilings.ts; held in tests/plan-cost-registry.test.ts).",
+    basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. A product update's reading of every sale and each store's numbers on the totals page take as many studio requests as their worst read costs, before reading (lib/read-ceilings.ts; held in tests/read-ceilings.test.ts).",
+  },
+  {
+    id: "calendar-feed",
+    feature: "The private booking calendar a creator subscribes to (/api/store/calendar/<token>.ics): every answer from the last good copy, and the copy made again (C4-4, 4 November 2026)",
+    monthlyUsd: () =>
+      DAY_WINDOWS * CALENDAR_BUILDS_PER_DAY * readShapeCost(CALENDAR_BUILD_SHAPE)
+      + (UTC_DAYS * 24 + 1) * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE)
+      + CALENDAR_FILE_BYTES * DB_BYTE_MONTH * (CALENDAR_COPY_SECONDS / (30 * 86_400)),
+    sources: [
+      { file: "lib/calendar-sync.ts", names: ["bookedCalendarFeed", "CALENDAR_BUILDS_PER_DAY", "CALENDAR_POLLS_PER_HOUR", "CALENDAR_REFRESH_SECONDS", "CALENDAR_COPY_SECONDS", "CALENDAR_MAX_EVENTS", "keptSlots", "takeCounted("] },
+      { file: "lib/call-records.ts", names: ["bookingsChangedKey", "changedCommand(handle"] },
+      { file: "app/api/store/calendar/[token]/route.ts", names: ["bookedCalendarFeed(owner"] },
+      { file: "lib/read-ceilings.ts", names: ["CALENDAR_POLL_SHAPE", "CALENDAR_BUILD_SHAPE", "CALENDAR_FILE_BYTES"] },
+    ],
+    basis: "A store's feed answers its calendar app from the last good copy of the file, at most CALENDAR_POLLS_PER_HOUR times an hour, counted before the copy is read (each a CALENDAR_POLL_SHAPE: the token, its settings, the pace and the copy, the copy sent); the file is made again only after a booking was made, moved or let go, or once the copy is CALENDAR_REFRESH_SECONDS old, at most CALENDAR_BUILDS_PER_DAY times a UTC day, counted before it is made (each a CALENDAR_BUILD_SHAPE: the store, five Stripe pages, every call listing, each booking's moves and room, the copy kept); the copy itself kept CALENDAR_COPY_SECONDS at its largest. One feed a store (a new address replaces the old). None of it is the studio's requests: an app asking on its own must never spend a figure the creator sees.",
   },
   {
     id: "rest-api",
@@ -733,14 +745,8 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR"] },
-      // A member's community search takes its worst first from this figure, never the visits' requests (owner, 4 November 2026, 06h51), with the room and
-      // messages where on and each step of the one-time walk (C4-4; lib/read-ceilings.ts, held in tests/plan-cost-registry.test.ts).
-      { file: "app/[handle]/community/search/page.tsx", names: ["takeCommunityRead(store, owner, units)", "searchUnits({ chat: config.chat.on, dm: config.dm.on })", "take(WALK_STEP_UNITS)", "export const maxDuration = 30;"] },
-      { file: "lib/community-page.ts", names: ["takeAllowance(store, \"buyer\", units.buyer)", "reservePaidResourceWindow(store)"] },
-      { file: "lib/read-ceilings.ts", names: ["SEARCH_REQUEST_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_DM_UNITS", "WALK_STEP_UNITS", "SEARCH_SECONDS = 30;"] },
-      { file: "lib/community-walk.ts", names: ["walkStep", "WALK_MEMBER_PAGE"] },
     ],
-    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. A member's community search takes as many units of the figure as its worst costs at the heaviest action's price, before it reads anything (lib/read-ceilings.ts). The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
+    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
   },
   {
     id: "webhooks",

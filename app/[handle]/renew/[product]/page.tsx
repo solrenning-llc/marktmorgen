@@ -15,6 +15,7 @@ import { DigitalConsentBox } from "@/components/digital-consent-box";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import { readListing } from "@/lib/catalog";
 import { readWinBack } from "@/lib/winback-send";
+import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -64,8 +65,19 @@ export default async function RenewPage({ params, searchParams }: Params) {
   const needsChoice = product ? product.options.length > 0 : false;
   // A come-back email's link (lib/winback-send.ts): the offer it carries, for
   // the address it was sent to, while it lasts.
-  const offer = back && product && selling ? await readWinBack(store, product.id, back).catch(() => null) : null;
+  const grant = back && product ? await readWinBack(store, product.id, back).catch(() => null) : null;
+  // Offered only while its price can be bought (lib/product-option.ts, namedPriceOffered).
+  const offer = selling && grant && product && namedPriceOffered(product, grant.option) ? grant : null;
   const until = offer ? say.date(offer.until * 1000) : "";
+  // The price the offer was for is gone (an option removed, even the last): said, never offered at another (lib/winback-send.ts, openWinBack).
+  // Read from the product, never from the query alone.
+  const priceGone = Boolean(grant && product && namedPriceGone(product, grant.option));
+  // An offer for an option kept with nothing to hand over: the general answer, as the button would give.
+  const kept = Boolean(grant && selling && !priceGone && !offer);
+  // "price" in the address says nothing by itself: only the product does.
+  const said = status === "price" ? undefined : notices[status];
+  // Where the prices offered today are: the product's own page, while buyers can see it.
+  const pricesLink = priceGone && product && !product.hidden ? product : null;
 
   return (
     <div
@@ -92,16 +104,23 @@ export default async function RenewPage({ params, searchParams }: Params) {
             {m.endedTitle}
           </h1>
           <p className="st-muted mt-4 text-lg leading-relaxed">
-            {product ? m.endedBody(product.title) : m.endedGone(store.name)}
+            {product ? (priceGone ? m.endedClosed(product.title) : m.endedBody(product.title)) : m.endedGone(store.name)}
           </p>
 
-          {back && (!offer || notices[status]) ? (
+          {back && (!offer || said || priceGone) ? (
             <div className="st-note mt-6 text-sm" role="status">
-              {notices[status] ?? notices.expired}
+              <p>{priceGone ? notices.price : (said ?? (kept ? notices.unavailable : notices.expired))}</p>
+              {pricesLink ? (
+                <p className="mt-2">
+                  <Link href={productPath(store, pricesLink)} className="inline-flex min-h-12 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                    {m.seePrices(pricesLink.title)}
+                  </Link>
+                </p>
+              ) : null}
             </div>
           ) : null}
 
-          {offer && product && !notices[status] ? (
+          {offer && product && !said && !priceGone ? (
             <form action="/api/store/come-back/open" method="post" className="mt-7">
               <input type="hidden" name="handle" value={store.handle} />
               <input type="hidden" name="product" value={product.id} />
@@ -119,7 +138,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
                 {m.comeBackWith}
               </button>
             </form>
-          ) : product && selling ? (
+          ) : priceGone ? null : product && selling ? (
             needsChoice ? (
               <Link href={productPath(store, product)} className="btn st-btn btn-lg btn-block mt-7">
                 {m.renewTitle(product.title)}
@@ -142,7 +161,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
             </p>
           ) : null}
 
-          {product ? (
+          {product && !priceGone ? (
             <p className="mt-4 text-center text-sm">
               <Link href={productPath(store, product)} className="st-footer-link font-semibold">
                 {m.see(product.title)}

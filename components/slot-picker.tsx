@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState, useSyncExternalStore } from "react";
+import { NewTab } from "@/components/new-tab";
 
 const noop = () => () => {};
 
@@ -108,6 +109,7 @@ export function SlotPicker({
   pkg,
   host,
   minutes,
+  newTab,
   shownCents,
   words,
 }: {
@@ -125,6 +127,8 @@ export function SlotPicker({
   host?: { key: string; label: string } | null;
   /** On a call with several lengths: the one chosen, in minutes, sent so it is booked and charged (lib/call-lengths.ts). */
   minutes?: number;
+  /** Inside a frame on the creator's own site (app/embed): Stripe's page opens in a new tab, never in the frame. */
+  newTab?: boolean;
   /** Beside it, the price the page showed for it, in cents: only compared with the creator's record, never charged (price-changed). */
   shownCents?: number;
   words: SlotWords;
@@ -162,95 +166,107 @@ export function SlotPicker({
     );
   }
 
-  return (
-    <form action={move ? "/api/store/book/move" : "/api/store/book"} method="post" target="_top" className="mt-6" {...(move ? {} : { "data-checkout": "" })}>
-      <input type="hidden" name="handle" value={handle} />
-      {move ? <input type="hidden" name="session" value={move} /> : null}
-      <input type="hidden" name="product" value={productId} />
-      <input type="hidden" name="tz" value={tz} />
-      {pkg ? <input type="hidden" name="pkg" value={pkg} /> : null}
-      {minutes && !move ? <input type="hidden" name="minutes" value={minutes} /> : null}
-      {minutes && !move && shownCents !== undefined ? <input type="hidden" name="shown" value={shownCents} /> : null}
-      {host && !move ? (
-        <>
-          <input type="hidden" name="host" value={host.key} />
-          <input type="hidden" name="host_label" value={host.label} />
-        </>
-      ) : null}
-
-      {/* A fieldset is as wide as its widest child unless told otherwise,
-          which would push the row of days out of the card. */}
-      <fieldset className="min-w-0">
-        <legend className="st-label">{words.pickDay}</legend>
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "thin" }}>
-          {days.map((d) => {
-            const label = dayLabel(d.starts[0], tz, locale);
-            const active = d.key === day.key;
-            return (
-              <button
-                key={d.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => {
-                  setChosenDay(d.key);
-                  setChosen(null);
-                }}
-                className="st-option shrink-0 flex-col !gap-0 px-3 py-2 text-center"
-                style={active ? { borderColor: "var(--st-accent-text)", background: "var(--st-accent-soft)" } : undefined}
-              >
-                <span className="st-muted text-xs font-semibold uppercase tracking-wide">{label.weekday}</span>
-                <span className="text-xl font-semibold leading-tight">{label.day}</span>
-                <span className="st-muted text-xs">{label.month}</span>
-              </button>
-            );
-          })}
-        </div>
-      </fieldset>
-
-      <fieldset className="mt-5 min-w-0">
-        <legend className="st-label">{words.pickTime}</legend>
-        <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
-          {day.starts.map((start) => {
-            const seats = seatsLeft?.[String(start)];
-            return (
-              <label
-                key={start}
-                className="st-option cursor-pointer flex-col justify-center !gap-0 !px-2 !py-2.5 text-center font-semibold tabular-nums"
-              >
-                <input
-                  type="radio"
-                  name="start"
-                  value={start}
-                  required
-                  className="sr-only"
-                  checked={chosen === start}
-                  onChange={() => setChosen(start)}
-                />
-                {timeLabel(start, tz, locale)}
-                {seats !== undefined ? <span className="st-muted text-xs font-normal">{seats}</span> : null}
-              </label>
-            );
-          })}
-        </div>
-        <p className="st-muted mt-3 text-sm">
-          {(local ? words.yours : words.creators).replace("{zone}", zoneLabel(day.starts[0], tz, locale))}
-        </p>
-      </fieldset>
-
-      {words.code && !move && !pkg ? <CodeField words={words.code} /> : null}
-
-      <div className="mt-6">
-        {chosen ? (
-          <p className="mb-3 rounded-2xl px-4 py-3 text-sm" style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }} role="status">
-            <strong>{longLabel(chosen, tz, locale)}</strong>
-            {words.chosen}
-          </p>
+  const inside = (
+    <>
+        <input type="hidden" name="handle" value={handle} />
+        {move ? <input type="hidden" name="session" value={move} /> : null}
+        <input type="hidden" name="product" value={productId} />
+        <input type="hidden" name="tz" value={tz} />
+        {pkg ? <input type="hidden" name="pkg" value={pkg} /> : null}
+        {minutes && !move ? <input type="hidden" name="minutes" value={minutes} /> : null}
+        {minutes && !move && shownCents !== undefined ? <input type="hidden" name="shown" value={shownCents} /> : null}
+        {host && !move ? (
+          <>
+            <input type="hidden" name="host" value={host.key} />
+            <input type="hidden" name="host_label" value={host.label} />
+          </>
         ) : null}
-        <button type="submit" className="btn st-btn btn-lg btn-block">
-          {words.submit}
-        </button>
-        <p className="st-muted mt-3 text-center text-xs">{words.note}</p>
-      </div>
+
+        {/* A fieldset is as wide as its widest child unless told otherwise,
+            which would push the row of days out of the card. */}
+        <fieldset className="min-w-0">
+          <legend className="st-label">{words.pickDay}</legend>
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-2" style={{ scrollbarWidth: "thin" }}>
+            {days.map((d) => {
+              const label = dayLabel(d.starts[0], tz, locale);
+              const active = d.key === day.key;
+              return (
+                <button
+                  key={d.key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    setChosenDay(d.key);
+                    setChosen(null);
+                  }}
+                  className="st-option shrink-0 flex-col !gap-0 px-3 py-2 text-center"
+                  style={active ? { borderColor: "var(--st-accent-text)", background: "var(--st-accent-soft)" } : undefined}
+                >
+                  <span className="st-muted text-xs font-semibold uppercase tracking-wide">{label.weekday}</span>
+                  <span className="text-xl font-semibold leading-tight">{label.day}</span>
+                  <span className="st-muted text-xs">{label.month}</span>
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        <fieldset className="mt-5 min-w-0">
+          <legend className="st-label">{words.pickTime}</legend>
+          <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {day.starts.map((start) => {
+              const seats = seatsLeft?.[String(start)];
+              return (
+                <label
+                  key={start}
+                  className="st-option cursor-pointer flex-col justify-center !gap-0 !px-2 !py-2.5 text-center font-semibold tabular-nums"
+                >
+                  <input
+                    type="radio"
+                    name="start"
+                    value={start}
+                    required
+                    className="sr-only"
+                    checked={chosen === start}
+                    onChange={() => setChosen(start)}
+                  />
+                  {timeLabel(start, tz, locale)}
+                  {seats !== undefined ? <span className="st-muted text-xs font-normal">{seats}</span> : null}
+                </label>
+              );
+            })}
+          </div>
+          <p className="st-muted mt-3 text-sm">
+            {(local ? words.yours : words.creators).replace("{zone}", zoneLabel(day.starts[0], tz, locale))}
+          </p>
+        </fieldset>
+
+        {words.code && !move && !pkg ? <CodeField words={words.code} /> : null}
+
+        <div className="mt-6">
+          {chosen ? (
+            <p className="mb-3 rounded-2xl px-4 py-3 text-sm" style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }} role="status">
+              <strong>{longLabel(chosen, tz, locale)}</strong>
+              {words.chosen}
+            </p>
+          ) : null}
+          <button type="submit" className="btn st-btn btn-lg btn-block">
+            {words.submit}
+            {/* In a frame, Stripe's page opens in a new tab: said in the button's name, in the page's language (3.2.5, G201). */}
+            {newTab && !move ? <NewTab /> : null}
+          </button>
+          <p className="st-muted mt-3 text-center text-xs">{words.note}</p>
+        </div>
+    </>
+  );
+  // Inside a frame on the creator's own site (app/embed), Stripe's page opens in a new tab; everywhere else, in the whole window.
+  return newTab && !move ? (
+    <form action={"/api/store/book"} method="post" target="_blank" rel="noopener" className="mt-6" data-checkout="">
+      {inside}
+    </form>
+  ) : (
+    <form action={move ? "/api/store/book/move" : "/api/store/book"} method="post" target="_top" className="mt-6" {...(move ? {} : { "data-checkout": "" })}>
+      {inside}
     </form>
   );
 }

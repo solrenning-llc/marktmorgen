@@ -8,7 +8,7 @@
  * a product's picture (app/api/store/image) and a link's
  * (app/api/store/link-image).
  */
-import { del, get, head } from "@/lib/blob";
+import { get, head } from "@/lib/blob";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { sniffPhotoType } from "@/lib/store-photo";
 
@@ -37,21 +37,21 @@ export async function firstBytes(path: string): Promise<Uint8Array | null> {
 
 /**
  * Whether an uploaded file is a picture we keep: at most MAX_IMAGE_BYTES, a
- * JPEG or a WebP by its own bytes, and saying so to the file store too. One
- * that is not is deleted here, so nothing that fails is left behind.
+ * JPEG or a WebP by its own bytes, and saying so to the file store too.
+ * Nothing is deleted here: the path came from the browser and may be another
+ * record's picture, so only the caller that took it from the picture door
+ * (lib/picture-door.ts) may delete it.
  */
 export async function checkUploadedImage(
   path: string,
 ): Promise<{ ok: true; bytes: number } | { ok: false; error: "too_big" | "type" }> {
   const found = await head(path);
   if (found.size > MAX_IMAGE_BYTES) {
-    await del(path).catch(() => {});
     return { ok: false, error: "too_big" };
   }
   const bytes = await firstBytes(path);
   const kind = bytes ? sniffPhotoType(bytes) : null;
   if (!kind || !(IMAGE_CONTENT_TYPES as readonly string[]).includes(kind) || kind !== found.contentType) {
-    await del(path).catch(() => {});
     return { ok: false, error: "type" };
   }
   return { ok: true, bytes: found.size };

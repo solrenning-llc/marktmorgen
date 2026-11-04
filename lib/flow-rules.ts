@@ -254,6 +254,8 @@ export function goalClash(trigger: FlowTrigger, productId: string | null, goal: 
 export type FlowAction =
   | { do: "tag" | "untag"; tag: string }
   | { do: "start"; flowId: string }
+  /** Takes the person out of another of the store's sequences, where they are now (635 [GL3], added 2 November 2026). */
+  | { do: "stop"; flowId: string }
   | { do: "webhook" }
   | { do: "field"; field: string; value: string }
   | { do: "deal"; stage: string; title: string }
@@ -287,9 +289,9 @@ export function readAction(raw: unknown, isFlow: (flowId: string) => boolean, ct
     const tag = cleanTag(value.tag);
     return tag ? { do: value.do, tag } : "bad";
   }
-  if (value.do === "start") {
+  if (value.do === "start" || value.do === "stop") {
     const flowId = typeof value.flowId === "string" ? value.flowId : "";
-    return flowId && isFlow(flowId) ? { do: "start", flowId } : "bad";
+    return flowId && isFlow(flowId) ? { do: value.do, flowId } : "bad";
   }
   // Tells the store's own server, through its webhooks (lib/webhooks.ts, "sequence.step"), who reached this step.
   if (value.do === "webhook") return { do: "webhook" };

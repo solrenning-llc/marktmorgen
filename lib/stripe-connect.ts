@@ -49,7 +49,7 @@ const STRIPE_ROOT = /^http:\/\/127\.0\.0\.1:\d+$/.test(
  * `capabilities.card_payments.status` looks like and the site would start
  * telling creators the wrong thing about their own money.
  */
-const STRIPE_VERSION = "2026-08-26.dahlia";
+export const STRIPE_VERSION = "2026-08-26.dahlia";
 
 /** A link Stripe hands back is short-lived and single use. */
 export const ONBOARDING_LINK_TTL_SECONDS = 5 * 60;

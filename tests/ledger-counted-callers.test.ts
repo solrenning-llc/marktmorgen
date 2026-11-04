@@ -157,7 +157,7 @@ async function main(): Promise<void> {
   await redisPipeline([["DEL", ledgerKey], ["SET", studioKey()!, String(allowanceFor(shop, "studio"))]]);
   stripeCalls = 0;
   const unheld = await advanceBroadcast(older.broadcast.id, storeForHandle, Date.now() + 5_000);
-  is("needing more than it holds with no request left, it is still read and listed, never waiting", [older.broadcast.reserve, unheld?.status !== "waiting", unheld?.listed, stripeCalls > 0, await used()], [undefined, true, true, true, allowanceFor(shop, "studio")]);
+  is("needing more than it holds with no request left, it is still read and listed, never waiting, and nothing more is counted", [older.broadcast.reserve, unheld?.status !== "waiting", unheld?.listed, stripeCalls > 0, await used()], [undefined, true, true, true, allowanceFor(shop, "studio")]);
 
   part("A scheduled or waiting email with no list made, nothing sent, can be canceled; what it holds is not given back");
   await copy();
@@ -187,7 +187,7 @@ async function main(): Promise<void> {
   await redisPipeline([["SET", offKey, JSON.stringify({ ...offRecord, reserve: -1 })]]);
   is("a record whose hold is not a whole number of requests is refused as malformed, never run", await advanceBroadcast(waitOff.broadcast.id, storeForHandle, Date.now() + 5_000).then(() => "ran", () => "refused"), "refused");
   await redisPipeline([["DEL", offKey]]);
-  is("no code path writes the old wait for the studio's requests", flat("lib/broadcasts.ts").includes("notCountedNote"), false);
+  is("no code path writes the old wait for the studio's requests, and the scheduled job counts nothing in them", [flat("lib/broadcasts.ts").includes("notCountedNote"), flat("lib/broadcasts.ts").includes("countUnits("), flat("lib/broadcasts.ts").includes("countLedger(")], [false, false, false]);
 
   part("The routes and the studio");
   const history = flat("components/email-studio.tsx");

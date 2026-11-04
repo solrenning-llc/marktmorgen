@@ -30,7 +30,6 @@ import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest,
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
 import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadingUnits, readNarrow } from "@/lib/segments";
-import { countUnits } from "@/lib/person-agenda-read";
 import { sameNarrow } from "@/lib/segments-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
@@ -459,8 +458,8 @@ export async function advanceBroadcast(
       // that part is read, so a run cut short never draws the same requests twice. What is held and not drawn stays
       // on the record: studio requests are never given back. What a reading needs beyond what is held (the kept
       // buyers grew since, an earlier run drew it and then waited for another reason, or an email written down before
-      // anything was held) is counted in the studio's requests when they allow it, and read either way: what could
-      // not be counted is logged, without who. Never a wait for the studio's requests (C3-80 (d)).
+      // anything was held) is read too, as every scheduled reading is, without counting it in the studio's requests,
+      // and logged, without who. Never a wait for the studio's requests (C3-80 (d)).
       let keep = given?.keep;
       if (!given) {
         const before = b;
@@ -472,8 +471,7 @@ export async function advanceBroadcast(
             held -= drawn;
             await save({ ...before, reserve: held });
           }
-          const rest = units - drawn;
-          if (rest > 0 && !(await countUnits(store, rest).then((counted) => counted.ok, () => false))) over += rest;
+          over += units - drawn;
           return true;
         };
         try {
@@ -486,7 +484,7 @@ export async function advanceBroadcast(
           return b;
         }
         if (b.reserve !== undefined) b = { ...b, reserve: held };
-        if (over > 0) console.warn("A scheduled email's reading of the buyers needed more studio requests than it held and could count", { id, over });
+        if (over > 0) console.warn("A scheduled email's reading of the buyers needed more studio requests than it held", { id, over });
       }
       const to = await audience(b.listId, b.productId ?? undefined, b.notProductId ?? undefined, whoOf(store, b.who), keep, b.label ?? undefined);
       let test = b.test;

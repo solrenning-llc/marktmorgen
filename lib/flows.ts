@@ -67,8 +67,9 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, readFields, readPipelines, readStages, readDeals, setValue, writeDeal } from "@/lib/crm";
-import { allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
+import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
+import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
 import { readForm } from "@/lib/form-store";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -748,106 +749,21 @@ async function actOnPeople(
     return out;
   }
   if (action.do === "deal" || action.do === "assign" || action.do === "next" || action.do === "rotate") {
-    const pipelines = await readPipelines(statsId);
-    const stages = allStages(pipelines);
-    let deals: Awaited<ReturnType<typeof readDeals>>;
-    try {
-      deals = await readDeals(statsId, stages);
-    } catch {
-      // Nothing was written: tried again later, which is safe.
-      return each(emails, "deferred", "Your deals board could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
-    }
-    const now = Math.floor(Date.now() / 1000);
-    // Who may be responsible for a deal now, read again as for "assign": the owner, and teammates who can see orders.
-    // Their open deals counted, so each deal goes to whoever has the fewest, the owner first on a tie.
-    const load = new Map<string, number>();
-    // The team, read once for both steps that need it; unreadable, nothing is written and the step is tried again later.
-    let team: Awaited<ReturnType<typeof readTeam>> | null = null;
-    if (action.do === "rotate" || action.do === "assign") {
+    // Sharing deals among the team is decided from one count of who holds what, so two runs at once (a cron that fires
+    // twice, two batches) would each give the same deal-light teammate a deal: one run shares at a time per store.
+    let held: Held | null = null;
+    if (action.do === "rotate") {
       try {
-        team = await readTeam(store.sid);
+        held = await takeLock(`nl:flow-rotate:${statsId}`, ROTATE_LOCK_SECONDS, 3_000);
       } catch {
-        return each(emails, "deferred", "Your team could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+        return each(emails, "deferred", "Deals are being shared on your team right now; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
       }
     }
-    if (action.do === "rotate" && team) {
-      for (const who of [store.email.toLowerCase(), ...team.members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())]) load.set(who, 0);
-      const openStage = new Set(stages.filter((s) => s.kind === "open").map((s) => s.id));
-      for (const d of deals) if (d.assignee && openStage.has(d.stage) && load.has(d.assignee)) load.set(d.assignee, (load.get(d.assignee) ?? 0) + 1);
+    try {
+      return await actOnDeals(store, statsId, action, emails, at, held);
+    } finally {
+      if (held) await releaseLock(held);
     }
-    if (action.do === "assign" && team) {
-      // Checked again now: a teammate who left, or lost the role, is never made responsible.
-      const eligible = action.assignee === store.email.toLowerCase() || team.members.some((m) => m.email.toLowerCase() === action.assignee && can(m.role, "orders"));
-      if (!eligible) return each(emails, "failed", `${action.assignee} can no longer be responsible for deals in this store.`);
-    }
-    const stage = action.do === "deal" ? stages.find((s) => s.id === action.stage) : undefined;
-    if (action.do === "deal" && !stage) return each(emails, "failed", "The deal stage was removed from your board.");
-    // A deal step works in the pipeline of its stage: their open deal there moves, and another pipeline's deal is left as it is.
-    const inPipeline = stage ? new Set(pipelineOf(pipelines, stage.id)?.stages.map((s) => s.id) ?? []) : null;
-    const out: Acted[] = [];
-    for (const email of emails) {
-      // Their open deal moves; with none open, a new one is made for them.
-      const open = deals.find((d) => d.email === email && (!inPipeline || inPipeline.has(d.stage)) && stages.find((s) => s.id === d.stage)?.kind === "open");
-      let deal;
-      if (action.do === "rotate") {
-        if (!open) {
-          out.push({ email, state: "failed", note: "They have no open deal to give to someone on your team." });
-          continue;
-        }
-        if (open.assignee && load.has(open.assignee)) {
-          out.push({ email, state: "confirmed", note: `${open.assignee} was already responsible for their deal.` });
-          continue;
-        }
-        const [who] = [...load.entries()].sort((a, b) => a[1] - b[1])[0];
-        deal = { ...open, assignee: who, updatedAt: now };
-      } else if (action.do === "next") {
-        if (!open) {
-          out.push({ email, state: "failed", note: "They have no open deal to set a next action on." });
-          continue;
-        }
-        // The due date as the deals board keeps it: a day, counted in UTC from when the step runs.
-        const dueDate = new Date((now + action.days * 86_400) * 1000).toISOString().slice(0, 10);
-        if (open.nextAction === action.text && open.dueDate === dueDate) {
-          out.push({ email, state: "confirmed", note: "Their deal already had this next action and due date." });
-          continue;
-        }
-        deal = { ...open, nextAction: action.text, dueDate, updatedAt: now };
-      } else if (action.do === "assign") {
-        if (!open) {
-          out.push({ email, state: "failed", note: "They have no open deal to make someone responsible for." });
-          continue;
-        }
-        if ((open.assignee ?? "") === action.assignee) {
-          out.push({ email, state: "confirmed", note: `${action.assignee} was already responsible for their deal.` });
-          continue;
-        }
-        deal = { ...open, assignee: action.assignee, updatedAt: now };
-      } else {
-        if (open && open.stage === stage!.id) {
-          out.push({ email, state: "confirmed", note: `Their deal was already in “${stage!.name}”.` });
-          continue;
-        }
-        deal = open
-          ? { ...open, stage: stage!.id, updatedAt: now }
-          : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
-      }
-      try {
-        const written = await writeDeal(statsId, deal, store);
-        // Counted only once written, so a deal not written leaves the share as it was.
-        if (written && action.do === "rotate" && deal.assignee) load.set(deal.assignee, (load.get(deal.assignee) ?? 0) + 1);
-        out.push(written ? { email, state: "confirmed", changed: true, note: action.do === "rotate" ? (load.size === 1 ? `${deal.assignee} is now responsible for their deal: nobody else on your team can be responsible for deals.` : `${deal.assignee} is now responsible for their deal, as the one on your team with the fewest open deals.`) : action.do === "next" ? `Next action on their deal: “${action.text}”, due ${deal.dueDate}.` : action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
-      } catch (error) {
-        if (error instanceof DataRoomError) {
-          out.push({ email, state: "failed", note: "The deal was not written: the store's data room is full." });
-          continue;
-        }
-        // Not known whether it was written: counted, so the share leans away from them rather than onto them.
-        if (!(error instanceof CrmDealReadUnavailable) && action.do === "rotate" && deal.assignee) load.set(deal.assignee, (load.get(deal.assignee) ?? 0) + 1);
-        out.push(error instanceof CrmDealReadUnavailable ? { email, state: "deferred", note: "Your deals board could not be read; tried again in a few minutes.", wait: "board" } : { email, state: "uncertain", note: "Whether the deal was saved could not be confirmed." });
-      }
-    }
-    // A deal a step moves starts no workflow of its stage (lib/deal-stage-trigger.ts): a step that starts another workflow does that, priced as its own step.
-    return out;
   }
   // The owner, told once for everyone who reached the step together: who, and where.
   if (!isSenderConfigured()) return each(emails, "deferred", "Email is not available right now; tried again later.").map((o) => ({ ...o, wait: "email_off" as const }));
@@ -872,6 +788,156 @@ async function actOnPeople(
   }).then((ok) => (ok ? "sent" : "no"), () => "unknown");
   if (sent === "no") await giveBackToMonth(store, 1).catch(() => {});
   return sent === "sent" ? each(emails, "confirmed", "You were emailed that they reached this step.").map((o) => ({ ...o, changed: true })) : sent === "no" ? each(emails, "failed", "The email to you was not accepted.") : each(emails, "uncertain", "Whether the email to you was sent could not be confirmed.");
+}
+
+/** Said when a deal changed on the board between the batch's read and its write: left as the creator made it. */
+const CHANGED_ON_BOARD = "Their deal changed on your board while this step ran, so it was left as it is.";
+
+/** How long one run may hold the right to share deals in a store (actOnDeals): the slowest batch with room. */
+export const ROTATE_LOCK_SECONDS = 120;
+
+/**
+ * The deal steps (a stage, a teammate made responsible, the next action, a
+ * deal shared among the team), for actOnPeople. `held` is the store's
+ * sharing lock, taken by the caller for "rotate" only.
+ */
+async function actOnDeals(
+  store: Store,
+  statsId: string,
+  action: Extract<FlowAction, { do: "deal" | "assign" | "next" | "rotate" }>,
+  emails: string[],
+  at: { flow: Flow; step: FlowStep; index: number },
+  held: Held | null,
+): Promise<Acted[]> {
+  const pipelines = await readPipelines(statsId);
+  const stages = allStages(pipelines);
+  let deals: Awaited<ReturnType<typeof readDeals>>;
+  try {
+    deals = await readDeals(statsId, stages);
+  } catch {
+    // Nothing was written: tried again later, which is safe.
+    return each(emails, "deferred", "Your deals board could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+  }
+  const now = Math.floor(Date.now() / 1000);
+  // Who may be responsible for a deal now, read again as for "assign": the owner, and teammates who can see orders.
+  // Their open deals counted, so each deal goes to whoever has the fewest, the owner first on a tie.
+  const load = new Map<string, number>();
+  // The team, read once for both steps that need it; unreadable, nothing is written and the step is tried again later.
+  let team: Awaited<ReturnType<typeof readTeam>> | null = null;
+  if (action.do === "rotate" || action.do === "assign") {
+    try {
+      team = await readTeam(store.sid);
+    } catch {
+      return each(emails, "deferred", "Your team could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+    }
+  }
+  if (action.do === "rotate" && team) {
+    for (const who of [store.email.toLowerCase(), ...team.members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())]) load.set(who, 0);
+    const openStage = new Set(stages.filter((s) => s.kind === "open").map((s) => s.id));
+    for (const d of deals) if (d.assignee && openStage.has(d.stage) && load.has(d.assignee)) load.set(d.assignee, (load.get(d.assignee) ?? 0) + 1);
+  }
+  if (action.do === "assign" && team) {
+    // Checked again now: a teammate who left, or lost the role, is never made responsible.
+    const eligible = action.assignee === store.email.toLowerCase() || team.members.some((m) => m.email.toLowerCase() === action.assignee && can(m.role, "orders"));
+    if (!eligible) return each(emails, "failed", `${action.assignee} can no longer be responsible for deals in this store.`);
+  }
+  const stage = action.do === "deal" ? stages.find((s) => s.id === action.stage) : undefined;
+  if (action.do === "deal" && !stage) return each(emails, "failed", "The deal stage was removed from your board.");
+  // A deal step works in the pipeline of its stage: their open deal there moves, and another pipeline's deal is left as it is.
+  const inPipeline = stage ? new Set(pipelineOf(pipelines, stage.id)?.stages.map((s) => s.id) ?? []) : null;
+  const out: Acted[] = [];
+  const isOpen = (d: Deal | null, email: string): d is Deal => Boolean(d && d.email === email && (!inPipeline || inPipeline.has(d.stage)) && stages.find((s) => s.id === d.stage)?.kind === "open");
+  for (const email of emails) {
+    // Their open deal moves; with none open, a new one is made for them.
+    let open: Deal | undefined = deals.find((d) => isOpen(d, email));
+    // Read again just before it is written, and written only over that exact record (writeDealOver): a deal the creator
+    // moved, changed or deleted on the board while this batch ran is never overwritten with the copy read for the batch.
+    let before: string | null = null;
+    if (open) {
+      let fresh: Awaited<ReturnType<typeof readDealExact>>;
+      try {
+        fresh = await readDealExact(statsId, open.id, stages);
+      } catch {
+        out.push({ email, state: "deferred", note: "Your deals board could not be read; tried again in a few minutes.", wait: "board" });
+        continue;
+      }
+      if (!isOpen(fresh.deal, email) || fresh.raw === null) {
+        out.push({ email, state: "failed", note: CHANGED_ON_BOARD });
+        continue;
+      }
+      open = fresh.deal;
+      before = fresh.raw;
+    }
+    // A share decided on a lock that ran out could be decided twice: the rest wait for the next run.
+    if (held && !(await holdLock(held))) {
+      out.push({ email, state: "deferred", note: "Deals are being shared on your team right now; tried again in a few minutes.", wait: "board" });
+      continue;
+    }
+    let deal: Deal;
+    if (action.do === "rotate") {
+      if (!open) {
+        out.push({ email, state: "failed", note: "They have no open deal to give to someone on your team." });
+        continue;
+      }
+      if (open.assignee && load.has(open.assignee)) {
+        out.push({ email, state: "confirmed", note: `${open.assignee} was already responsible for their deal.` });
+        continue;
+      }
+      const [who] = [...load.entries()].sort((a, b) => a[1] - b[1])[0];
+      deal = { ...open, assignee: who, updatedAt: now };
+    } else if (action.do === "next") {
+      if (!open) {
+        out.push({ email, state: "failed", note: "They have no open deal to set a next action on." });
+        continue;
+      }
+      // The due date as the deals board keeps it: a day, counted in UTC from when the step runs.
+      const dueDate = new Date((now + action.days * 86_400) * 1000).toISOString().slice(0, 10);
+      if (open.nextAction === action.text && open.dueDate === dueDate) {
+        out.push({ email, state: "confirmed", note: "Their deal already had this next action and due date." });
+        continue;
+      }
+      deal = { ...open, nextAction: action.text, dueDate, updatedAt: now };
+    } else if (action.do === "assign") {
+      if (!open) {
+        out.push({ email, state: "failed", note: "They have no open deal to make someone responsible for." });
+        continue;
+      }
+      if ((open.assignee ?? "") === action.assignee) {
+        out.push({ email, state: "confirmed", note: `${action.assignee} was already responsible for their deal.` });
+        continue;
+      }
+      deal = { ...open, assignee: action.assignee, updatedAt: now };
+    } else {
+      if (open && open.stage === stage!.id) {
+        out.push({ email, state: "confirmed", note: `Their deal was already in “${stage!.name}”.` });
+        continue;
+      }
+      deal = open
+        ? { ...open, stage: stage!.id, updatedAt: now }
+        : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
+    }
+    try {
+      const outcome = before === null ? ((await writeDeal(statsId, deal, store)) ? "saved" : "full") : await writeDealOver(statsId, deal, before, store);
+      if (outcome === "changed") {
+        out.push({ email, state: "failed", note: CHANGED_ON_BOARD });
+        continue;
+      }
+      const written = outcome === "saved";
+      // Counted only once written, so a deal not written leaves the share as it was.
+      if (written && action.do === "rotate" && deal.assignee) load.set(deal.assignee, (load.get(deal.assignee) ?? 0) + 1);
+      out.push(written ? { email, state: "confirmed", changed: true, note: action.do === "rotate" ? (load.size === 1 ? `${deal.assignee} is now responsible for their deal: nobody else on your team can be responsible for deals.` : `${deal.assignee} is now responsible for their deal, as the one on your team with the fewest open deals.`) : action.do === "next" ? `Next action on their deal: “${action.text}”, due ${deal.dueDate}.` : action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
+    } catch (error) {
+      if (error instanceof DataRoomError) {
+        out.push({ email, state: "failed", note: "The deal was not written: the store's data room is full." });
+        continue;
+      }
+      // Not known whether it was written: counted, so the share leans away from them rather than onto them.
+      if (!(error instanceof CrmDealReadUnavailable) && action.do === "rotate" && deal.assignee) load.set(deal.assignee, (load.get(deal.assignee) ?? 0) + 1);
+      out.push(error instanceof CrmDealReadUnavailable ? { email, state: "deferred", note: "Your deals board could not be read; tried again in a few minutes.", wait: "board" } : { email, state: "uncertain", note: "Whether the deal was saved could not be confirmed." });
+    }
+  }
+  // A deal a step moves starts no workflow of its stage (lib/deal-stage-trigger.ts): a step that starts another workflow does that, priced as its own step.
+  return out;
 }
 
 /**

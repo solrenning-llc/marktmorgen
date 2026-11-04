@@ -11,12 +11,13 @@ import { readAction } from "@/lib/flow-rules";
 import { parseFlowList } from "@/lib/flow-list";
 import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
-import { readDeals, readStages, writeDeal } from "@/lib/crm";
+import { readDealExact, readDeals, readStages, writeDeal, writeDealOver } from "@/lib/crm";
+import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { putMember, removeMember, setMemberRole } from "@/lib/team";
 import { flowConfigurationIssues } from "@/lib/flow-review";
 import { stepWhat } from "@/components/workflow-tools";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
@@ -98,6 +99,39 @@ async function main(): Promise<void> {
   for (let i = 0; i < 4; i += 1) await run();
   is("a deal held by someone who can no longer see orders goes to someone who can: only the owner now", (await readDeals(statsId, stages)).find((d) => d.id === "tiedeal001")!.assignee, OWNER);
   is("with only the owner left, the workflow's review says every deal goes to them", flowConfigurationIssues((await readFlows(list))[0], { products: [], courses: [], forms: [], fields: [], stages, flows: [], assignees: [OWNER] }).some((i) => i.includes("No one besides you can be responsible for deals, so every deal goes to you.")), true);
+
+  part("Never over what the creator did meanwhile");
+  // A deal is written only over the exact record read just before: one the board changed meanwhile is left as it is.
+  await writeDeal(statsId, { id: "racedeal01", title: "Race", email: "race@example.com", cents: 0, stage: open.id, note: "", createdAt: 3, updatedAt: 3 }, ROOM);
+  const read = await readDealExact(statsId, "racedeal01", stages);
+  await writeDeal(statsId, { ...read.deal!, note: "Typed on the board", updatedAt: 4 }, ROOM);
+  is("a write over a copy the board changed meanwhile writes nothing", await writeDealOver(statsId, { ...read.deal!, assignee: PAT, updatedAt: 5 }, read.raw!, ROOM), "changed");
+  is("and what the creator typed stays", [(await readDealExact(statsId, "racedeal01", stages)).deal!.note, (await readDealExact(statsId, "racedeal01", stages)).deal!.assignee ?? null], ["Typed on the board", null]);
+  const again = await readDealExact(statsId, "racedeal01", stages);
+  is("over the record as it is now, it is written", await writeDealOver(statsId, { ...again.deal!, assignee: PAT, updatedAt: 6 }, again.raw!, ROOM), "saved");
+  is("a deal that is gone is never made again by a write over it", await writeDealOver(statsId, { ...again.deal!, id: "gonedeal01" }, again.raw!, ROOM), "changed");
+
+  part("One run shares at a time");
+  // Another run sharing deals in this store holds the lock: this one waits, writes nothing, and shares on a later run.
+  await upsertContact(list, "late@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await writeDeal(statsId, { id: "latedeal01", title: "Late", email: "late@example.com", cents: 0, stage: open.id, note: "", createdAt: 7, updatedAt: 7 }, ROOM);
+  const other = await takeLock(`nl:flow-rotate:${statsId}`, 120, 0);
+  await enroll(store, "late@example.com", { joined: true });
+  await run();
+  is("while another run shares, nobody is given the deal", (await readDealExact(statsId, "latedeal01", stages)).deal!.assignee ?? null, null);
+  await releaseLock(other);
+  // Tried again a few minutes later, as a deals board that could not be read is.
+  const realNow = Date.now;
+  try {
+    for (let i = 1; i <= 4; i += 1) {
+      advance(3_600_000);
+      Date.now = () => realNow() + i * 3_600_000;
+      await run();
+    }
+  } finally {
+    Date.now = realNow;
+  }
+  is("once it let go, the deal is shared", typeof (await readDealExact(statsId, "latedeal01", stages)).deal!.assignee, "string");
 
   part("Said in words");
   const studio = readFileSync("components/email-studio.tsx", "utf8");

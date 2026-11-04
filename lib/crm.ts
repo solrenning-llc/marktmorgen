@@ -372,6 +372,42 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore): P
   } catch { throw new CrmDealWriteUnconfirmed(); }
 }
 
+/**
+ * One deal as it is kept now, with its exact record, so a write lands over
+ * that record only (writeDealOver). A read that fails throws
+ * CrmDealReadUnavailable; a deal that is gone reads as null.
+ */
+export async function readDealExact(statsId: string, id: string, stages: readonly Stage[]): Promise<{ deal: Deal | null; raw: string | null }> {
+  if (!DEAL_ID.test(id)) return { deal: null, raw: null };
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["HGET", dealsKey(statsId), id]]);
+  } catch { throw new CrmDealReadUnavailable(); }
+  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new CrmDealReadUnavailable();
+  const raw = reply[0] as string | null;
+  return { deal: raw === null ? null : parseDeal(json(raw), stages), raw };
+}
+
+/**
+ * Saves a deal over the exact record read (readDealExact), in one step on the
+ * Redis side (MOVE_CRM_DEAL): "changed", and nothing written, when the record
+ * is not that one any more or is gone, so a step never lands a stale copy
+ * over what the creator did on the board meanwhile. Its room is taken first,
+ * and put back as it was when nothing was written.
+ */
+export async function writeDealOver(statsId: string, deal: Deal, before: string, room: DataStore): Promise<"saved" | "changed"> {
+  await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
+  let saved: unknown;
+  try {
+    saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, before, JSON.stringify(deal)]]);
+  } catch { throw new CrmDealWriteUnconfirmed(); }
+  if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 1 && saved[0] !== 0 && saved[0] !== -1)) throw new CrmDealWriteUnconfirmed();
+  if (saved[0] === 1) return "saved";
+  // Nothing written: its room as the record still there weighs, or none when it is gone.
+  await giveData(room, [{ slot: dealSlot(deal.id), bytes: saved[0] === -1 ? dataBytes([deal.id, before], 1) : 0, set: true }]);
+  return "changed";
+}
+
 export async function readDeal(statsId: string, id: string, stages: readonly Stage[]): Promise<Deal | null> {
   if (!DEAL_ID.test(id)) return null;
   const [raw] = await redisPipeline([["HGET", dealsKey(statsId), id]]);

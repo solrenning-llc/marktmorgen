@@ -15,3 +15,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex E | 465 [MR2]: reject discarded customer cost evidence | codex/e-mr2-cost-evidence | `lib/net-margin-rules.ts`, `lib/reviewed-resource-envelope.ts`, `lib/funded-exposure-rules.ts`, `tests/net-margin-cost-evidence.test.ts` | 04/11/2026 |
 | Codex C | 465 [MR2]: complete protocol infrastructure profiles | codex/c-mr2-protocol-evidence | `lib/spend-cost-table.ts`, `tests/protocol-infrastructure-cost.test.ts`, `tests/contract-protocol-cost.test.ts` | 04/11/2026 |
 | Codex D | 465 [MR2]: complete fixed-cost evidence before minimum-base arithmetic | codex/d-mr2-fixed-evidence | `lib/customer-base-rules.ts`, `tests/customer-base-fixed-evidence.test.ts` | 04/11/2026 |
+| Codex C | 473 [TX3]: serializable own sales evidence | codex/c-tx3-sales-evidence | `lib/tax-sales-counter.ts`, `tests/tax-sales-counter.test.ts` | 04/11/2026 |

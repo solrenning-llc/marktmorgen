@@ -9,6 +9,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { DealsBoard } from "@/components/deals-board";
+import { DealAgenda } from "@/components/deal-agenda";
 import { DEFAULT_STAGES, FIRST_PIPELINE_ID, type Deal, type Pipeline } from "@/lib/crm-rules";
 import { readdirSync } from "node:fs";
 import { can } from "@/lib/team-roles";
@@ -27,9 +28,15 @@ is("its deals are shown", seen.includes("Deal d000000001"), true);
 is("with nothing that changes them: no new deal, no move, no edit, no remove", [seen.includes("New deal"), seen.includes("Move Deal d000000001"), />Edit</.test(seen), seen.includes('aria-label="Remove Deal d000000001"')], [false, false, false, false]);
 is("its stages cannot be changed, and it says why and whom to ask", [seen.includes("Change Sales and its stages"), seen.includes("You can see this pipeline but not change it. Ask the store&#x27;s owner or an Admin to change your access.")], [false, true]);
 
+is("nor a copy of it offered; a new pipeline of their own still is", [seen.includes("Duplicate “Sales”"), seen.includes("New pipeline")], [false, true]);
+const agenda = (onEdit?: (d: Deal) => void) => renderToStaticMarkup(createElement(DealAgenda, { deals: [{ ...deal("d000000001", "lead00"), nextAction: "Call back", dueDate: "2026-11-05" }], stages: DEFAULT_STAGES, currency: "usd", today: "2026-11-04", disabled: false, onEdit }));
+is("its agenda lists the deals with no Edit column or button", [/>Edit</.test(agenda()), agenda().includes("Call back")], [false, true]);
+is("the agenda of a pipeline they may change keeps Edit", />Edit</.test(agenda(() => {})), true);
+is("the board gives the agenda no editor on a pipeline they may only see", readFileSync("components/deals-board.tsx", "utf8").includes("onEdit={canChange ? deal =>"), true);
+
 part("A pipeline they may change, beside one they may only see");
 const mixed = draw(["coach0"]);
-is("its deals keep every control", mixed.includes("New deal") && mixed.includes("Move Deal d000000001") && mixed.includes("Change Sales and its stages"), true);
+is("its deals keep every control", mixed.includes("New deal") && mixed.includes("Move Deal d000000001") && mixed.includes("Change Sales and its stages") && mixed.includes("Duplicate “Sales”"), true);
 is("a deal can be moved only to a stage they may change", [mixed.includes('value="lead00"'), mixed.includes('value="cnew00"')], [true, false]);
 const open = draw();
 is("everything as before when nothing is restricted", [open.includes('value="cnew00"'), open.includes("Change Sales and its stages"), />Edit</.test(open), open.includes('aria-label="Remove Deal d000000001"'), open.includes("New deal")], [true, true, true, true, true]);
@@ -40,6 +47,7 @@ is("the deals page reads this person's access, the owner and Admins never restri
 is("shows only what they may see, and marks what they may only see", deals.includes("visiblePipelines(inventory.pipelines, view.role, access)") && deals.includes("deals: inventory.deals.filter((deal) => seenStages.has(deal.stage))") && deals.includes("viewOnly={viewOnly}"), true);
 is("never offers a pipeline beyond the store's limit", deals.includes("pipelineMax={Math.max(0, pipelineLimit(store) - hidden)}"), true);
 is("says so when there is nothing they may see", deals.includes("You have no pipelines to see in this store."), true);
+is("but never when their access could not be read: then the deals are unavailable, not missing", deals.includes("inventory.available && access !== null && shown.pipelines.length === 0") && deals.includes("&& shown.pipelines.length > 0;"), true);
 const forms = readFileSync("app/studio/forms/page.tsx", "utf8");
 is("the forms page offers only stages they may change, and shows only deals they may see", forms.includes('seen.filter((p) => p.access === "edit")') && forms.includes("reviewData.deals.filter((deal) => !restricted || seenStages.has(deal.stage))"), true);
 

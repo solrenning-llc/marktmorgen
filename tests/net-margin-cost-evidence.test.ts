@@ -19,6 +19,13 @@ test('an additional cost cannot disappear from an otherwise profitable review', 
  }
 });
 
+test('CX-71: the original TX fixture never approves an unknown additional supplier', () => {
+ const value = txCustomerFixture();
+ assert.equal(assessCustomerWorstCase(value).netCents, 8462);
+ Object.assign(value.costCeilings, { unreviewedSupplier: null });
+ unknown(value);
+});
+
 test('hidden and symbolic additional costs are not silently omitted', () => {
  for (const key of ['unreviewedSupplier', Symbol('unreviewedSupplier')]) {
   const value = review();

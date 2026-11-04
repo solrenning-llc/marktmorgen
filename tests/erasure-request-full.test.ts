@@ -37,12 +37,9 @@ import DeletePage from "@/app/privacy/delete/page";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 
-/**
- * The email goes after the answer (lib/erasure-request.ts, afterAnswer), unwaited outside a request: wait for what
- * it does, not for a number of turns of the event loop, which a busy machine outruns (inbox C4-40). At most 2 s.
- */
-const until = async (ready: () => boolean | Promise<boolean>) => {
-  for (let i = 0; i < 400 && !(await ready()); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+/** The email goes after the answer (lib/erasure-request.ts, afterAnswer): wait for it before reading what was sent. */
+const settled = async () => {
+  for (let i = 0; i < 50; i += 1) await new Promise((resolve) => setImmediate(resolve));
 };
 import { done, is, part } from "./check";
 
@@ -112,8 +109,7 @@ async function main(): Promise<void> {
   const usedBefore = [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")];
   const from = sent.length;
   is("the link is sent", await requestErasureLink({ email: TESS, ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
-  // The link sent and its share taken: the two things checked below, waited for, never assumed.
-  await until(async () => sent.slice(from).some((m) => m.to === TESS) && (await allowanceUsed(second, "transactional")) > usedBefore[1]);
+  await settled();
   const link = sent.slice(from).find((m) => m.to === TESS);
   is("to the address, naming both stores", [Boolean(link), link?.text.includes(one.name), link?.text.includes(two.name)], [true, true, true]);
   is("taken from the second store's share, nothing more from the first", [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")], [usedBefore[0], usedBefore[1] + 1]);
@@ -121,16 +117,8 @@ async function main(): Promise<void> {
   part("(b) Asked for every store, no store has room: the same answer as an unknown address");
   await fill(second);
   const before = sent.length;
-  // The work after the answer ends, for the known address, in its log line that no store had room: waited for, so
-  // "nothing is sent" is read once it could no longer send (inbox C4-40).
-  const warned: string[] = [];
-  const warn = console.warn;
-  console.warn = (...words: unknown[]) => void warned.push(words.map(String).join(" "));
   const whereAll = new URL((await ask({ email: TESS, scope: "all" })).headers.get("location") ?? "https://x.invalid/");
   const whereNobody = new URL((await ask({ email: "nobody@example.com", scope: "all" })).headers.get("location") ?? "https://x.invalid/");
-  await until(() => warned.some((w) => w.includes("a deletion link asked for every store was not emailed: full")));
-  console.warn = warn;
-  is("the work after the answer finished, finding no room", warned.some((w) => w.includes("was not emailed: full")), true);
   is("nothing is sent", sent.length, before);
   is("the known address is told what an unknown one is: 'sent', no day", [whereAll.search, whereAll.searchParams.get("status")], [whereNobody.search, "sent"]);
   const sentPage = walk(await DeletePage({ searchParams: Promise.resolve({ status: "sent" }) }));

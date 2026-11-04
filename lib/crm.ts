@@ -18,7 +18,6 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { forgetCompanyPerson } from "@/lib/crm-companies";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
@@ -514,8 +513,7 @@ return value`;
  * Deletes one person from the store's fields, deals and tasks
  * (lib/person-erasure.ts): every value kept under their key, every deal with
  * them, by the address a deal names, and the team's tasks about them; the
- * room all of these took goes back to `room` when it is given. They are also taken off any company, its
- * room given back too (639 [GL7](4)). Answers how many records went.
+ * room all of these took goes back to `room` when it is given. Answers how many records went.
  */
 export async function forgetCrmPerson(statsId: string | null, person: string, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
@@ -565,8 +563,6 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     if (gone === 1 && freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
     return gone === 1 ? 1 : 0;
   });
-  // And they are taken off any company they were linked to (639 [GL7](4)).
-  records += await forgetCompanyPerson(statsId, person, undefined, room ?? null);
   return records;
 }
 

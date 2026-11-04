@@ -65,6 +65,7 @@ import { forgetClicksPerson } from "@/lib/mail-clicks";
 import { forgetHealthPerson } from "@/lib/mail-health";
 import { forgetWorkflowPerson } from "@/lib/flows";
 import { forgetCrmPerson } from "@/lib/crm";
+import { forgetCompanyPerson } from "@/lib/crm-companies";
 import { forgetNotesPerson } from "@/lib/buyer-profile";
 import { forgetFormsPerson } from "@/lib/form-store";
 import { forgetFinishPerson } from "@/lib/course-finish";
@@ -117,6 +118,8 @@ export const ERASERS: Eraser[] = [
   { module: "lib/mail-clicks.ts", run: (s) => forgetClicksPerson(s.listId, s.email) },
   { module: "lib/mail-health.ts", run: (s) => forgetHealthPerson(s.store, s.email) },
   { module: "lib/crm.ts", run: (s) => forgetCrmPerson(s.statsId, s.person, s.email, s.store) },
+  // Taken off any company they were linked to, the room it took given back (639 [GL7](4)).
+  { module: "lib/crm-companies.ts", run: (s) => forgetCompanyPerson(s.statsId, s.person, undefined, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },

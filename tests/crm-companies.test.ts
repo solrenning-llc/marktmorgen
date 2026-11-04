@@ -11,6 +11,7 @@ import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/store/companies/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { forgetCrmPerson } from "@/lib/crm";
+import { ERASERS } from "@/lib/person-erasure";
 import {
   companiesReadUnits,
   companiesRequestUnits,
@@ -139,7 +140,10 @@ async function main(): Promise<void> {
   is("an address is not a key", (await post({ action: "link", id, person: "ann@example.com" })).body.error, "unknown");
 
   part("A person deleted goes from every company");
+  // The erasure runs lib/crm-companies.ts's own row (lib/person-erasure.ts, ERASERS), beside lib/crm.ts's.
+  is("the erasure takes a person off the companies in its own row, never inside lib/crm.ts", ERASERS.some((e) => e.module === "lib/crm-companies.ts") && !readFileSync("lib/crm.ts", "utf8").includes("forgetCompanyPerson"), true);
   await forgetCrmPerson(statsId, ann, "ann@example.com");
+  await ERASERS.find((e) => e.module === "lib/crm-companies.ts")!.run({ statsId, person: ann, store } as never, [], new Set());
   is("no longer linked", (await readCompanies(statsId))[0].people, []);
   is("the company stays", (await readCompanies(statsId)).map((c) => c.name), ["North School"]);
 
@@ -186,7 +190,7 @@ async function main(): Promise<void> {
   const leaving = Array.from({ length: 6 }, (_, i) => personKey(statsId, `leaving${i}@example.com`));
   for (const person of leaving) await post({ action: "link", id, person });
   const withThem = await slotOf();
-  for (const [i, person] of leaving.entries()) await forgetCrmPerson(statsId, person, `leaving${i}@example.com`, store);
+  for (const person of leaving) await forgetCompanyPerson(statsId, person, undefined, store);
   is("people deleted from the store give back the room their links took", [(await slotOf()) < withThem, await exact()], [true, 0]);
 
   part("A change whose lock ran out never writes over the next one (edge review)");
@@ -327,8 +331,6 @@ async function main(): Promise<void> {
   is("a store with no company counts nothing and reads no hash (L5)", [barePage.state, barePerson.state === "ok" && barePerson.companies.length, redis.keys().filter((k) => k.startsWith("nl:allow:studio:")).length, watched.some((c) => c[0] === "HGETALL")], ["ok", 0, bareKeysBefore, false]);
   redis.pipeline = realPipe;
 
-  is("a figure that could not be counted, or no place this month, answers unavailable, never used (round 6, L2)", readFileSync("app/api/store/companies/route.ts", "utf8").includes('error: counted.reason === "used" ? "studio_used" : "unavailable"') && readFileSync("app/api/store/companies/route.ts", "utf8").includes('status: counted.reason === "used" ? 429 : 503'), true);
-
   part("The studio requests a companies request takes (round 3, L6; round 5, M1)");
   const usedKey = () => redis.keys().find((k) => k.startsWith("nl:allow:studio:"));
   const used = async () => { const k = usedKey(); return k ? Number((await redisPipeline([["GET", k]]))[0] ?? 0) : 0; };
@@ -344,6 +346,16 @@ async function main(): Promise<void> {
   const spent = await post({ action: "add", name: "Over School" });
   is("when only the request itself fits, the change is refused as used, says it needs more than is left, and keeps nothing", [spent.status, spent.body.error, (await readCompanies(statsId)).some((c) => c.name === "Over School")], [429, "studio_used", false]);
   await redisPipeline([["SET", usedKey()!, "0"]]);
+  // The request's own studio request is counted, then what reading them costs cannot be (round 7, L1): unavailable, 503.
+  const counting = redis.pipeline.bind(redis);
+  let increments = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "INCRBY") && ++increments === 2) throw new Error("down");
+    return counting(commands);
+  }) as typeof redis.pipeline;
+  const uncounted = await post({ action: "add", name: "Uncounted School" });
+  redis.pipeline = counting;
+  is("when what reading them costs cannot be counted, the change answers 503 unavailable, never 429 used, and keeps nothing (round 6, L2; round 7, L1)", [uncounted.status, uncounted.body.error, (await readCompanies(statsId)).some((c) => c.name === "Uncounted School")], [503, "unavailable", false]);
   for (const c of await readCompanies(statsId)) if (c.name === "Counted School" || c.name.startsWith("Filler School")) await post({ action: "remove", id: c.id });
   const beforeSmall = await used();
   await post({ action: "add", name: "Small School" });

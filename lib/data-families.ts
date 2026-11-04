@@ -51,7 +51,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
-  "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
+  "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
@@ -74,6 +74,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
   "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
+  "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
+  "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
   "nl:orders:open:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
   "nl:pause:last:", "nl:pay:currencies:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
@@ -88,7 +90,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:recover:asks", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:ref:all", "nl:ref:by:",
   "nl:ref:c:", "nl:ref:code:", "nl:ref:cursor", "nl:ref:list:", "nl:ref:mine:", "nl:ref:mycode:",
   "nl:ref:owed", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:",
-  "nl:rev:ask:due", "nl:rev:ask:sent:", "nl:rev:link:", "nl:rev:lock:", "nl:rev:refunds:seen:",
+  "nl:resend-budget:{", "nl:rev:ask:due", "nl:rev:ask:sent:", "nl:rev:link:", "nl:rev:lock:", "nl:rev:refunds:seen:",
   "nl:rev:refunds:since:", "nl:rev:stores", "nl:rl:", "nl:rl:address:", "nl:rl:aff:addr:",
   "nl:sdemo:", "nl:sdemo:{<session>}:<family>[:<part>]", "nl:rl:aff:click:", "nl:rl:aff:ip:", "nl:rl:cm:addr:", "nl:rl:cm:ev:", "nl:rl:cm:ip:", "nl:rl:creators:",
   "nl:rl:export:", "nl:rl:free:addr:", "nl:rl:free:ip:", "nl:rl:hooks:test:", "nl:rl:licence:",
@@ -96,6 +98,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:rl:phone:test:", "nl:rl:signin:", "nl:rl:team-invite:", "nl:rlm:", "nl:sale:told:", "nl:sblocks:",
   "nl:sender:", "nl:ses:did:", "nl:ses:h:", "nl:ses:once:", "nl:ses:rest:", "nl:ses:state", "nl:ses:told:",
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
+  "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
+  "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
   "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
   "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
@@ -228,7 +232,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:cotrouble:": E, "nl:cotrouble:mail:": E,
   "nl:course:": E, "nl:courses:drip": I, "nl:courses:lock": C,
   "nl:creators:responses": C,
-  "nl:crm:deals:": E, "nl:crm:fields:": E, "nl:crm:pacc:": E, "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
+  "nl:crm:deals:": E, "nl:crm:fields:": E, "nl:crm:pacc:": E, "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:taskrecount:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
   // ---------------------------------------------------------------- d-f
   "nl:data:": E,
   "nl:dc:addr:": E, "nl:dc:due": I, "nl:dc:lock": C, "nl:dc:mem:": E, "nl:dc:ok:": E, "nl:dc:prod:": E, "nl:dc:srv:": E, "nl:dc:state:": X(1),
@@ -295,7 +299,17 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:nlink:": E, "nl:nlink:opens:": E,
   "nl:none": C,
   "nl:nudge:": E, "nl:nudge:count:": E, "nl:nudge:cursor": C,
-  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E, "nl:orders:seen:": X(45),
+  // Constructed pre-URL origins are never activated. Pending/unknown have no
+  // fixed TTL; built own erasers remove confirmed payloads and protect older
+  // unresolved recipients with bounded row markers and dedicated fences.
+  // Lifetime/copy/failure funding remains an activation blocker, not permission
+  // to retain a closed store's payload without reviewed funding/cleanup.
+  "nl:order-confirmation:closed:": C, "nl:order-confirmation:erased:": C, "nl:order-confirmation:due": C, "nl:order-confirmation:person:": C, "nl:order-confirmation:row:": C,
+  "nl:order-confirmation:source:": C, "nl:order-confirmation:store:": C,
+  "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E,
+  // Legacy marks expire in45days. The inactive original-window checkpoint
+  // may retain its receipt for767days; this is not its legacy price envelope.
+  "nl:orders:seen:": X(767),
   "nl:outreach:": E, "nl:outreach:stop:all": C, "nl:outreach:stoplink:": T("nl:outreach:"),
   // Emails published on the store (lib/letters.ts): the store's list goes, and each copy through it.
   "nl:letters:s:": E, "nl:letters:i:": T("nl:letters:s:", 400),
@@ -351,8 +365,15 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:sblock:uses:": E, "nl:sblocks:": E,
   "nl:sender:": C,
   "nl:ses:did:": C, "nl:ses:h:": C, "nl:ses:once:": C, "nl:ses:rest:": C, "nl:ses:state": C, "nl:ses:told:": C,
+  // Global financial holds must not be erased to manufacture free quota.
+  // They have no approved active funding; the production review is absent.
+  "nl:resend-budget:{": C,
   "nl:share:applied": I, "nl:share:lock": C, "nl:share:read-until": I, "nl:share:stores": I,
-  "nl:ship:done:": X(400),
+  // The direct legacy source has400days. A pending source has no TTL;
+  // cleanup owns its transition, so the walk cannot promise400days for all.
+  "nl:ship:done:": C,
+  "nl:ship:mail:all": C, "nl:ship:mail:closed:": C, "nl:ship:mail:due": C, "nl:ship:mail:erased:": C,
+  "nl:ship:mail:person:": C, "nl:ship:mail:pool": C, "nl:ship:mail:pool:": C, "nl:ship:mail:row:": C, "nl:ship:mail:store:": C,
   "nl:slink:": T("nl:slink:store:"), "nl:slink:store:": E,
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,

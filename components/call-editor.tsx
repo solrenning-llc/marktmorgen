@@ -405,12 +405,12 @@ const OWN_PRICE = "This product's price is outside what your store's currency al
  * always the first; each other one is longer, so the price on the store is
  * the call's own. Optional: none keeps the call exactly as it is.
  */
-function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorId }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string; wrong: string | null; clearWrong: () => void; errorId: string }) {
+function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorId }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string; wrong: { id: string; problem: string } | null; clearWrong: () => void; errorId: string }) {
   const longer = CALL_LENGTHS.filter((m) => m > draft.minutes);
   const unused = longer.filter((m) => !draft.extra.some((row) => row.minutes === m));
   // A line the server marked is unmarked once the creator changes or removes it; the others keep their marks (3.3.1).
   const setRow = (index: number, change: Partial<Draft["extra"][number]>) => {
-    if (draft.extra[index]?.id === wrong) clearWrong();
+    if (draft.extra[index]?.id === wrong?.id) clearWrong();
     setDraft({ ...draft, extra: draft.extra.map((row, i) => (i === index ? { ...row, ...change } : row)) });
   };
   // Focus follows the change (2.4.3): to a new row's length, or back to the group's explanation once a row is gone.
@@ -424,15 +424,18 @@ function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorI
       {draft.extra.map((row, index) => {
         // Not longer than the call's own length any more (its length was changed above): said on the row, kept until the creator decides.
         const notLonger = row.minutes <= draft.minutes;
-        const flagged = wrong === row.id;
-        const marked = notLonger || flagged;
-        // The message the server sent is said on the line it is about, not only above the save button (3.3.1).
-        const said = [notLonger ? `length-short-${id}-${row.id}` : "", flagged ? errorId : "", `lengths-price-${id}`].filter(Boolean).join(" ");
+        const flagged = wrong?.id === row.id;
+        // Only the field the server's problem is about is marked: a price problem on the price, any other on the length (3.3.1).
+        const priceWrong = flagged && wrong?.problem === "price";
+        const lengthWrong = flagged && !priceWrong;
+        const marked = notLonger || lengthWrong;
+        // The message the server sent is said on the field it is about, not only above the save button (3.3.1).
+        const said = [priceWrong ? errorId : "", `lengths-price-${id}`].filter(Boolean).join(" ");
         return (
         <div key={row.id} className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
           <label className="block">
             <span className="field-label">{`Length ${index + 2}`}</span>
-            <select id={`length-${id}-${row.id}`} className="field mt-2" value={row.minutes} aria-invalid={marked || undefined} aria-describedby={[notLonger ? `length-short-${id}-${row.id}` : "", flagged ? errorId : ""].filter(Boolean).join(" ") || undefined} onChange={(e) => setRow(index, { minutes: Number(e.target.value) })}>
+            <select id={`length-${id}-${row.id}`} className="field mt-2" value={row.minutes} aria-invalid={marked || undefined} aria-describedby={[notLonger ? `length-short-${id}-${row.id}` : "", lengthWrong ? errorId : ""].filter(Boolean).join(" ") || undefined} onChange={(e) => setRow(index, { minutes: Number(e.target.value) })}>
               {[row.minutes, ...unused].filter((m, i, all) => all.indexOf(m) === i).sort((a, b) => a - b).map((m) => (
                 <option key={m} value={m}>{`${m} minutes`}</option>
               ))}
@@ -447,7 +450,7 @@ function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorI
               required
               value={row.price}
               onChange={(e) => setRow(index, { price: e.target.value })}
-              aria-invalid={flagged || undefined}
+              aria-invalid={priceWrong || undefined}
               aria-describedby={said}
             />
           </label>
@@ -499,7 +502,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The other length the server said is wrong, kept by its row (not its place), so removing another row never moves the mark.
-  const [wrongLength, setWrongLength] = useState<string | null>(null);
+  const [wrongLength, setWrongLength] = useState<{ id: string; problem: string } | null>(null);
 
   const eligible =
     product.priceCents > 0 &&
@@ -536,7 +539,9 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         if (data.index === 0 && data.problem === "price") setError(OWN_PRICE);
         else setError(data.problem === "shorter" ? SHORTER_LENGTH : lengthsProblemWords(data.problem as LengthsProblem, currency, data.minutes));
         // The server counts lines from the call's own length (0); the editor's rows start at 1.
-        if (typeof data.index === "number" && data.index > 0) setWrongLength(draft.extra[data.index - 1]?.id ?? null);
+        // The rows are read from the draft this save sent, so a row removed while it was on its way never moves the mark onto another.
+        const sentRow = typeof data.index === "number" && data.index > 0 ? draft.extra[data.index - 1] : undefined;
+        setWrongLength(sentRow ? { id: sentRow.id, problem: data.problem } : null);
         return;
       }
       setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);

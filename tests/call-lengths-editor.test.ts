@@ -104,8 +104,14 @@ async function main(): Promise<void> {
   );
   is(
     "the line the server marks is kept by its row, said on that row, and unmarked once that row is changed or removed",
-    [editor.includes("setWrongLength(draft.extra[data.index - 1]?.id ?? null)"), editor.includes("const flagged = wrong === row.id;"), editor.includes("flagged ? errorId : \"\""), editor.includes("if (draft.extra[index]?.id === wrong) clearWrong();"), editor.includes("if (flagged) clearWrong();"), editor.includes('<p id={`call-error-${product.id}`} className="notice notice-error" role="alert">')],
-    [true, true, true, true, true, true],
+    [editor.includes("setWrongLength(sentRow ? { id: sentRow.id, problem: data.problem } : null)"), editor.includes("const flagged = wrong?.id === row.id;"), editor.includes("if (draft.extra[index]?.id === wrong?.id) clearWrong();"), editor.includes("if (flagged) clearWrong();"), editor.includes('<p id={`call-error-${product.id}`} className="notice notice-error" role="alert">')],
+    [true, true, true, true, true],
+  );
+  // Only the field the problem is about is marked invalid (3.3.1): a price problem marks the price, any other the length.
+  is(
+    "a price problem marks only the price, a length problem only the length",
+    [editor.includes('const priceWrong = flagged && wrong?.problem === "price";'), editor.includes("const lengthWrong = flagged && !priceWrong;"), editor.includes("const marked = notLonger || lengthWrong;"), editor.includes("aria-invalid={priceWrong || undefined}"), editor.includes('lengthWrong ? errorId : ""'), editor.includes('priceWrong ? errorId : ""'), editor.includes("aria-invalid={flagged || undefined}")],
+    [true, true, true, true, true, true, false],
   );
   is("the team and package editors say why", [readFileSync("components/team-event-editor.tsx", "utf8").includes("team_lengths:"), readFileSync("components/package-editor.tsx", "utf8").includes("lengths:")], [true, true]);
 }

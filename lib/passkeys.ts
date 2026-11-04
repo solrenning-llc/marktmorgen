@@ -724,6 +724,27 @@ export async function unlessSetToGo(email: string, id: string, work: () => Promi
   });
 }
 
+/**
+ * Points every passkey on the address's list back at the address, under its lock: the list is what an account
+ * holds, and an index left on another address (a move whose answer was lost midway, C3-117) would refuse every
+ * sign-in with it. Run by the repair of a broken move (lib/move-repair.ts). Answers how many were pointed back.
+ */
+export async function repointPasskeys(email: string): Promise<number> {
+  const address = normaliseEmail(email);
+  return withPasskeys(address, async (held) => {
+    const list = await listPasskeys(address);
+    if (!list.length) return 0;
+    const owners = await redisPipeline(list.map((p) => ["GET", credKey(p.id)]));
+    let fixed = 0;
+    for (const [i, p] of list.entries()) {
+      if (owners[i] === address) continue;
+      await fencedSet(held, credKey(p.id), address);
+      fixed += 1;
+    }
+    return fixed;
+  });
+}
+
 /** What waits to be removed, read without the lock and without applying anything: for checks made under another lock. */
 export async function pendingNow(email: string): Promise<PendingRemoval | null> {
   const record = await readDrop(normaliseEmail(email));
@@ -777,8 +798,10 @@ export async function movePasskeys(from: string, to: string, now = Date.now()): 
         if (list.length) {
           await fencedSet(heldTo, listKey(address), JSON.stringify(list));
           for (const p of list) {
-            await fencedSet(heldTo, credKey(p.id), address);
+            // Counted as written before it is awaited: a write whose answer is lost may have been applied, so the
+            // undo puts its index back too (Codex G on 4bb50dcf, C3-117). Putting back one never written is harmless.
             copied.push(p.id);
+            await fencedSet(heldTo, credKey(p.id), address);
           }
         }
         if (pending) await writeDrop(heldTo, address, pending);

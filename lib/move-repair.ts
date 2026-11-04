@@ -15,7 +15,7 @@
  * the same kind: it never merges two addresses' ways in.
  */
 import { clearBrokenMove, endAllSessions, moveRunning, readBrokenMove } from "@/lib/auth";
-import { listPasskeys, movePasskeys, pendingNow } from "@/lib/passkeys";
+import { listPasskeys, movePasskeys, pendingNow, repointPasskeys } from "@/lib/passkeys";
 import { moveTwoStep, twoStepOn } from "@/lib/two-step";
 import { settleDoubledStore, storeForEmail } from "@/lib/store";
 
@@ -40,6 +40,8 @@ export async function repairMove(email: string): Promise<boolean> {
       if (await twoStepOn(home)) return false;
       await moveTwoStep(away, home);
     }
+    // An index a lost answer left on the other address is pointed back at the list's (C3-117).
+    await repointPasskeys(home);
     await endAllSessions(away);
     await clearBrokenMove(from, to);
     return true;

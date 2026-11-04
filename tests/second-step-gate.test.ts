@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
-import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingNow, pendingRemoval, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingNow, pendingRemoval, repointPasskeys, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
 import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, moveTwoStep, replaceCodes, resetIfDue, spendRescue, startSetup, turnOff, twoStepOn, twoStepStatus } from "@/lib/two-step";
@@ -1157,6 +1157,30 @@ async function main(): Promise<void> {
   const lofMoved = await movePasskeys(LOF, LOT).then(() => "moved", () => "refused");
   redis.pipeline = lofPipe;
   is("the passkey is at the new address, nowhere lost", [lofMoved, (await listPasskeys(LOT)).map((p) => p.id), (await listPasskeys(LOF)).length, (await redis.pipeline([["GET", `nl:pk:cred:${hex("nimbus-passkey-id:cred-lof").slice(0, 40)}`]]))[0]], ["moved", ["cred-lof"], 0, LOT]);
+
+  part("Moving passkeys whose index write was applied and its answer lost: the index goes back (C3-117)");
+  const GIF = "gidx-from@example.com";
+  const GIT = "gidx-dest@example.com";
+  const gidx = makePasskey(GIF, "cred-g-index");
+  await gidx.keep();
+  const gidxCred = `nl:pk:cred:${hex("nimbus-passkey-id:cred-g-index").slice(0, 40)}`;
+  const gPipe = redis.pipeline.bind(redis);
+  let gLost = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!gLost && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-set:") && c.includes(gidxCred) && c.includes(GIT))) {
+      gLost = true;
+      await gPipe(commands);
+      throw new Error("applied; response lost");
+    }
+    return gPipe(commands);
+  }) as typeof redis.pipeline;
+  const gMoved = await movePasskeys(GIF, GIT).then(() => "moved", () => "refused");
+  redis.pipeline = gPipe;
+  is("the move is refused and the passkey stays where its list is, its index with it", [gMoved, (await listPasskeys(GIF)).length, (await listPasskeys(GIT)).length, (await redis.pipeline([["GET", gidxCred]]))[0]], ["refused", 1, 0, GIF]);
+  is("and it still logs in", (await signInWithPasskey(gidx)).length, 64);
+  // An index left on the other address all the same (as before this fix) is pointed back by the repair.
+  await redis.pipeline([["SET", gidxCred, GIT]]);
+  is("the repair points an index left on an address with no list back at the list's", [await repointPasskeys(GIF), (await redis.pipeline([["GET", gidxCred]]))[0], (await signInWithPasskey(gidx)).length], [1, GIF, 64]);
 
   part("Small items of C3-110");
   const KRA = "kra-owner@example.com";

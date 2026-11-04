@@ -28,6 +28,12 @@ export type CustomerBaseAssessment = {
 };
 const stopped = (status: CustomerBaseAssessment['status']): CustomerBaseAssessment => ({status,minimumCustomers:null,reviewedBaseSufficient:false});
 const cents = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+/** Financial evidence is own data, never inherited defaults or executable reads. */
+function ownReviewData(record: unknown, key: string): unknown {
+  if (!record || typeof record !== 'object') return undefined;
+  const field = Object.getOwnPropertyDescriptor(record, key);
+  return field && Object.hasOwn(field, 'value') ? field.value : undefined;
+}
 
 /** Every scenario uses all monthly rights at their maximum. For an annual
  * plan the supplied period costs/taxes must cover twelve such worst months.
@@ -36,24 +42,44 @@ const cents = (n: unknown): n is number => typeof n === 'number' && Number.isSaf
  * cash invoices divided by twelve without a reviewed accrual/reserve policy.
  */
 export function assessMinimumCustomerBase(units: CustomerBaseUnit[], fixed: CustomerBaseReview | null): CustomerBaseAssessment {
-  if (!fixed || !units.length || fixed.monthlyFixedCostsCeilingCents == null || fixed.monthlyFixedTaxesCeilingCents == null || fixed.reviewedPayingCustomers == null) return stopped('unknown');
-  if (!cents(fixed.monthlyFixedCostsCeilingCents) || !cents(fixed.monthlyFixedTaxesCeilingCents) || !cents(fixed.reviewedPayingCustomers)) return stopped('invalid');
-  if (fixed.allFixedCostsBounded !== true || fixed.allFixedTaxesReviewed !== true || typeof fixed.fixedCostsEvidence !== 'string' || !fixed.fixedCostsEvidence.trim() || typeof fixed.fixedTaxEvidence !== 'string' || !fixed.fixedTaxEvidence.trim()) return stopped('unknown');
-  const fixedCents = BigInt(fixed.monthlyFixedCostsCeilingCents) + BigInt(fixed.monthlyFixedTaxesCeilingCents);
-  let minimum = BigInt(1);
-  for (const unit of units) {
-    if (!unit || (unit.months !== 1 && unit.months !== 12)) return stopped('invalid');
-    const result = assessCustomerWorstCase(unit.scenario,unit.months);
-    if (!result.approved) return stopped(result.reason === 'below_floor' || result.reason === 'no_revenue' ? 'below_unit_floor' : 'unknown');
-    // Headroom in cents*basis-points for the full paid period. Keep months
-    // in the denominator until integer ceiling division; never round revenue.
-    const headroom = BigInt(result.netCents!) * BigInt(10000) - BigInt(unit.scenario!.collectedRevenueCents!) * BigInt(MINIMUM_NET_MARGIN_BPS);
-    if (fixedCents > BigInt(0) && headroom === BigInt(0)) return stopped('no_finite_base');
-    if (fixedCents === BigInt(0)) continue;
-    const needed = fixedCents * BigInt(10000) * BigInt(unit.months);
-    const count = (needed + headroom - BigInt(1)) / headroom;
-    if (count > minimum) minimum = count;
-  }
-  if (minimum > BigInt(Number.MAX_SAFE_INTEGER)) return stopped('invalid');
-  return {status:'calculated',minimumCustomers:Number(minimum),reviewedBaseSufficient:BigInt(fixed.reviewedPayingCustomers) >= minimum};
+  try {
+    if (!Array.isArray(units) || Object.getPrototypeOf(units) !== Array.prototype) return stopped('unknown');
+    const length = ownReviewData(units, 'length');
+    if (!cents(length) || length === 0 || Reflect.ownKeys(units).length !== length + 1) return stopped('unknown');
+    if (!fixed || typeof fixed !== 'object' || Array.isArray(fixed)) return stopped('unknown');
+    // Read every fixed-cost field once before validation and exact arithmetic.
+    const fixedCosts = ownReviewData(fixed, 'monthlyFixedCostsCeilingCents');
+    const fixedTaxes = ownReviewData(fixed, 'monthlyFixedTaxesCeilingCents');
+    const payingCustomers = ownReviewData(fixed, 'reviewedPayingCustomers');
+    const costsBounded = ownReviewData(fixed, 'allFixedCostsBounded');
+    const taxesReviewed = ownReviewData(fixed, 'allFixedTaxesReviewed');
+    const costsEvidence = ownReviewData(fixed, 'fixedCostsEvidence');
+    const taxEvidence = ownReviewData(fixed, 'fixedTaxEvidence');
+    if (fixedCosts == null || fixedTaxes == null || payingCustomers == null) return stopped('unknown');
+    if (!cents(fixedCosts) || !cents(fixedTaxes) || !cents(payingCustomers)) return stopped('invalid');
+    if (costsBounded !== true || taxesReviewed !== true || typeof costsEvidence !== 'string' || !costsEvidence.trim() || typeof taxEvidence !== 'string' || !taxEvidence.trim()) return stopped('unknown');
+    const fixedCents = BigInt(fixedCosts) + BigInt(fixedTaxes);
+    let minimum = BigInt(1);
+    // Descriptors bind the actual dense array. A supplied iterator cannot omit
+    // a weaker unit, and an indexed accessor cannot supply changing evidence.
+    for (let index = 0; index < length; index += 1) {
+      const unit = ownReviewData(units, String(index));
+      if (!unit || typeof unit !== 'object' || Array.isArray(unit)) return stopped('invalid');
+      const months = ownReviewData(unit, 'months');
+      const scenario = ownReviewData(unit, 'scenario') as CustomerWorstCase | null;
+      if (months !== 1 && months !== 12) return stopped('invalid');
+      const result = assessCustomerWorstCase(scenario, months);
+      if (!result.approved) return stopped(result.reason === 'below_floor' || result.reason === 'no_revenue' ? 'below_unit_floor' : 'unknown');
+      // MR's percentage floor is zero. Use only the assessor's detached net
+      // result; never re-read a scenario after it has been assessed.
+      const headroom = BigInt(result.netCents!) * BigInt(10000);
+      if (fixedCents > BigInt(0) && headroom === BigInt(0)) return stopped('no_finite_base');
+      if (fixedCents === BigInt(0)) continue;
+      const needed = fixedCents * BigInt(10000) * BigInt(months);
+      const count = (needed + headroom - BigInt(1)) / headroom;
+      if (count > minimum) minimum = count;
+    }
+    if (minimum > BigInt(Number.MAX_SAFE_INTEGER)) return stopped('invalid');
+    return {status:'calculated',minimumCustomers:Number(minimum),reviewedBaseSufficient:BigInt(payingCustomers) >= minimum};
+  } catch { return stopped('unknown'); }
 }

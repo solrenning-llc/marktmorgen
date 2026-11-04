@@ -40,9 +40,11 @@ type State = {
   month: { status: string } | null;
   schedule: string | null;
   method: string;
+  /** The membership's own record, as written by a call of its own. */
+  meta: Record<string, string>;
 };
 let st: State;
-const fresh = (): State => ({ interval: "year", pendingUpdate: false, year: { status: "open", auto_advance: true, amount_paid: 0 }, month: null, schedule: null, method: "card" });
+const fresh = (): State => ({ interval: "year", pendingUpdate: false, year: { status: "open", auto_advance: true, amount_paid: 0 }, month: null, schedule: null, method: "card", meta: {} });
 /** How the next subscription update answers: "paid" applies it; others as named. */
 let updateMode: "paid" | "declined" | "declined-paid-latest" | "declined-unexpanded" | "declined-latest-is-year" | "applied-open" | "timeout" | "timeout-applied" | "500" | "400" | "409" | "429" | "price-inactive" = "paid";
 let failInvoiceReadAt = -1; // 1-based count of GET /invoices/YEAR to answer 500
@@ -50,6 +52,7 @@ let invoiceReadCount = 0;
 let monthVoidFails = false;
 let yearVoidFails = false;
 let yearPaidOnVoid = false; // the year gets paid by the member right as we void
+let recordFails = false; // writing the membership's own record (metadata alone) answers 500
 
 const subJson = () => ({
   id: SUB,
@@ -63,7 +66,7 @@ const subJson = () => ({
   cancel_at: null,
   cancel_at_period_end: false,
   schedule: st.schedule,
-  metadata: { store: "harbor", product },
+  metadata: { store: "harbor", product, ...st.meta },
   pending_update: st.pendingUpdate ? { expires_at: 1 } : null,
   items: {
     data: [
@@ -98,6 +101,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json(yearJson());
   }
   if (method === "POST" && path === `/subscriptions/${SUB}`) {
+    const metadata = [...body.keys()].filter((k) => k.startsWith("metadata["));
+    // As Stripe: a change made only if paid takes only what a pending update may carry, metadata never among it.
+    if (metadata.length && body.get("payment_behavior") === "pending_if_incomplete") return err(400, "invalid_request_error", "parameter_unknown");
+    if (metadata.length && !body.has("items[0][price]")) {
+      if (recordFails) return err(500, "api_error");
+      for (const k of metadata) st.meta[k.slice(9, -1)] = body.get(k) as string;
+      return json(subJson());
+    }
     const mode = updateMode;
     if (mode === "timeout") throw new TypeError("fetch failed");
     if (mode === "timeout-applied") {
@@ -146,6 +157,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return json({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
+/** The moves asked of Stripe, never the record written after one. */
+const moves = () => calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}` && c.body.has("items[0][price]"));
 const posts = () => calls.filter((c) => c.method === "POST" && c.path !== "/prices").map((c) => `${c.path}${c.body.get("auto_advance") ? `:auto_advance=${c.body.get("auto_advance")}` : ""}`);
 const members = async (key: string) => ((await redisPipeline([["SMEMBERS", key]]))[0] as string[]) ?? [];
 const reason = (r: Awaited<ReturnType<typeof moveToMonthly>>) => (r.ok ? (r.paid ? "moved-paid" : "moved-unpaid") : r.reason);
@@ -158,6 +171,7 @@ async function reset(): Promise<void> {
   monthVoidFails = false;
   yearVoidFails = false;
   yearPaidOnVoid = false;
+  recordFails = false;
   await redisPipeline([["DEL", FALLBACK_VOID_KEY, FALLBACK_CHECK_KEY, FALLBACK_BOTH_KEY, `nl:yearly:fallback:try:${YEAR}`]]);
 }
 /** The year is safe when it is either retried (auto_advance true and open) or recorded for the daily job. */
@@ -165,6 +179,7 @@ const yearRecovered = async () => (st.year.status === "open" && st.year.auto_adv
 const doubleCharged = () => st.year.status === "paid" && st.month?.status === "paid";
 
 async function main(): Promise<void> {
+  const origPipelineL = redis.pipeline.bind(redis);
   // ===================== moveToMonthly ======================================
   redis.clear();
   await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
@@ -183,12 +198,13 @@ async function main(): Promise<void> {
   part("Move: cases that already hold");
   await reset();
   is("paid: moved, year voided, never both", [reason(await move()), st.year.status, st.month?.status, doubleCharged()], ["moved-paid", "void", "paid", false]);
-  is("double click AFTER a paid move: refused (sub is monthly now), nothing charged again", [reason(await move()), calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`).length], ["fallback", 1]);
+  is("…and the membership now says monthly to everything that reads metadata.every", [st.meta.every, st.meta.monthly_from, st.meta.monthly_replaced], ["month", "year", YEAR]);
+  is("double click AFTER a paid move: refused (sub is monthly now), nothing charged again", [reason(await move()), moves().length], ["fallback", 1]);
 
   await reset();
   const [a, b] = await Promise.all([move(), move()]);
   is("two clicks at the same instant: one moves, the other waits for the lock then reads monthly", [reason(a), reason(b)].sort(), ["fallback", "moved-paid"]);
-  is("…and Stripe is asked to move exactly once", calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`).length, 1);
+  is("…and Stripe is asked to move exactly once", moves().length, 1);
 
   await reset();
   updateMode = "declined";
@@ -203,7 +219,7 @@ async function main(): Promise<void> {
   const t1 = await move();
   updateMode = "paid";
   const t2 = await move();
-  is("timeout where Stripe DID apply the move: unknown, then the replayed click is refused, no second month", [reason(t1), reason(t2), calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`).length], ["unknown", "fallback", 1]);
+  is("timeout where Stripe DID apply the move: unknown, then the replayed click is refused, no second month", [reason(t1), reason(t2), moves().length], ["unknown", "fallback", 1]);
 
   for (const code of ["429", "400"] as const) {
     await reset();
@@ -226,6 +242,31 @@ async function main(): Promise<void> {
   await reset();
   await move();
   is("every Stripe call pinned to the version", calls.filter((c) => c.path !== "/prices").every((c) => c.version === FALLBACK_STRIPE_VERSION), true);
+
+  // L. Third review: metadata on the move itself is refused by Stripe, so the move never happened.
+  await reset();
+  is("L. every move is asked with no metadata (Stripe refuses it with pending_if_incomplete)", [reason(await move()), moves().every((c) => ![...c.body.keys()].some((k) => k.startsWith("metadata[")))], ["moved-paid", true]);
+  await reset();
+  updateMode = "applied-open";
+  await move();
+  is("L'. applied with the month not paid yet: the record is written all the same", st.meta.every, "month");
+  await reset();
+  recordFails = true;
+  const l2 = await move();
+  is(
+    "L''. the record could not be written: moved, the year voided, the record left on CHECK for the daily job and said in the result",
+    [reason(l2), l2.ok && l2.recordLeft, st.year.status, st.meta.every, await members(FALLBACK_CHECK_KEY)],
+    ["moved-paid", true, "void", undefined, [`${ACCOUNT}|${SUB}|${YEAR}`]],
+  );
+  await reset();
+  recordFails = true;
+  redis.pipeline = (async (cmds: (string | number)[][]) => {
+    if (cmds.some((c) => c[0] === "SADD")) throw new Error("redis down");
+    return origPipelineL(cmds);
+  }) as typeof redis.pipeline;
+  const l3 = await move();
+  redis.pipeline = origPipelineL;
+  is("L'''. and with Redis down as well: the result says the list was not written", [reason(l3), l3.ok && l3.recordLeft, l3.ok && l3.unrecorded], ["moved-paid", true, "check"]);
 
   // ===================== suspected bugs =====================================
   part("Move: found by the review (each failed before its fix)");

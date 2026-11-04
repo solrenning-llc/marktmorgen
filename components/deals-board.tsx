@@ -52,6 +52,7 @@ const MESSAGES: Record<string, string> = {
   pipeline_last: "A store keeps at least one pipeline.",
   moves: "Choose where the deals of each stage you remove go.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
+  crm_busy: "A file of deals is being brought into your store right now, so nothing was saved. Wait a minute, then make your change again.",
   server_error: "The change could not be confirmed. Check the saved CRM data before trying again.",
   crm_schema_read_unavailable: "The saved CRM configuration could not be checked before this change. Your current work is still here. Try again shortly.",
   crm_deal_read_unavailable: "Saved deals could not be checked before this change. Your current work is still here. Try again shortly.",

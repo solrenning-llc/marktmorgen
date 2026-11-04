@@ -88,7 +88,7 @@ function columnOf(header: readonly string[], label: string): number {
 }
 
 /** One line, no control characters, spaces collapsed. Never shortened. */
-const oneLine = (value: string | undefined) =>
+export const oneLine = (value: string | undefined) =>
   (value ?? "")
     .replace(/[\u0000-\u001f\u007f]+/g, " ")
     .replace(/\s+/g, " ")
@@ -197,9 +197,11 @@ function narrowSymbol(currency: string): string {
  * never assumed. Plain amounts read: 1500, 1500.50. A comma is never read
  * (1,500 may be one and a half), nor a point followed by more digits than
  * the currency has (1.500 may be fifteen hundred), nor a currency column
- * that is not a three-letter code. Anything else, more decimals than the
- * currency has (other than zeros), or more than a deal holds, is no amount,
- * with a sentence saying why: never a rounded or guessed one.
+ * that is not a three-letter code. More digits after the point than the
+ * currency has are read only when every one of them is a zero and there
+ * are not three of them (1500.00 in yen is 1500; 1.000 may be a thousand).
+ * Anything else, or more than a deal holds, is no amount, with a sentence
+ * saying why: never a rounded or guessed one.
  */
 export function readHubSpotAmount(raw: string, storeCurrency: string, columnCurrency = "", statedCurrency = ""): HubSpotAmount {
   const text = oneLine(raw);
@@ -223,8 +225,9 @@ export function readHubSpotAmount(raw: string, storeCurrency: string, columnCurr
   if (currency !== store) return { cents: null, note: `This amount is in ${currency.toUpperCase()} and your store uses ${store.toUpperCase()}, so this deal comes in with no amount. Type the amount in ${store.toUpperCase()} on the deal if you want one.` };
   if (sign && sign !== narrowSymbol(store)) return unreadable;
   const [whole, fraction = ""] = number.split(".");
-  // More digits after the point than the currency has: 1.500 may be fifteen hundred, written with a point between thousands.
-  if (fraction.length > digits) {
+  // More digits after the point than the currency has: 1.500 may be fifteen hundred, written with a point between
+  // thousands. Only zeros after the point, and not three of them, read the same either way.
+  if (fraction.length > digits && (fraction.length === 3 || /[^0]/.test(fraction))) {
     return { cents: null, note: `"${text}" has more digits after the point than ${store.toUpperCase()} has, so it could be read two ways and this deal comes in with no amount. Type it on the deal, ${example}.` };
   }
   const units = whole.replace(/^0+(?=\d)/, "") + fraction.slice(0, digits).padEnd(digits, "0");
@@ -293,7 +296,11 @@ export type HubSpotDealsOptions = {
   statedCurrency?: string;
   /** How many new pipelines the store may still make (its plan's limit less those it has; lib/crm-rules.ts, pipelineLimit). */
   pipelineRoom: number;
-  /** How many more deals the store may hold; at most MAX_DEALS. */
+  /**
+   * How many more deals the store may hold; at most MAX_DEALS. Infinity when
+   * the caller checks the deals that really come in itself, once the rows
+   * already here or past a pipeline are set aside (lib/hubspot-import.ts).
+   */
   dealRoom?: number;
   /** The name of the store's first pipeline, where a deal with no pipeline in the file goes; FIRST_PIPELINE_NAME when not said. */
   firstPipeline?: string;
@@ -397,7 +404,8 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
   });
 
   // Pipelines in the order they first appear, each named as first written; past the store's room, refused.
-  const finite = (n: number | undefined, otherwise: number) => (n === undefined ? otherwise : Number.isFinite(n) ? n : 0);
+  // Not a number is no room; Infinity is as much as there may be.
+  const finite = (n: number | undefined, otherwise: number) => (n === undefined ? otherwise : Number.isNaN(n) ? 0 : n);
   const pipelineRoom = Math.max(0, Math.min(MAX_PIPELINES, Math.floor(finite(options.pipelineRoom, 0))));
   const order: string[] = [];
   const named = new Map<string, string>();
@@ -464,7 +472,7 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
   refused.sort((a, b) => a.line - b.line);
 
   const room = Math.max(0, Math.min(MAX_DEALS, Math.floor(finite(options.dealRoom, MAX_DEALS))));
-  if (deals.length > room) {
+  if (options.dealRoom !== Number.POSITIVE_INFINITY && deals.length > room) {
     return { ok: false, reason: "too_many", count: deals.length, room, sentence: tooManyDealsSentence(deals.length, room) };
   }
   return { ok: true, pipelines, deals, refused, ignored: columns.ignored };

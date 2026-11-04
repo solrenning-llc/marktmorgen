@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
     const bytes = Buffer.byteLength(JSON.stringify({ header: file.header, rows: file.rows }));
     const result = await importHubSpotDeals(store, file, { write: action === "save", statedCurrency: typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency) ? body.currency : "", bytes });
     if (!result.ok) {
-      const status = result.reason === "busy" || result.reason === "changed" || result.reason === "store_full" ? 409 : result.reason === "rows_month" ? 429 : result.reason === "unavailable" ? 503 : result.reason === "unconfirmed" ? 502 : 400;
+      const status = result.reason === "busy" || result.reason === "changed" || result.reason === "store_full" || result.reason === "deals_full" ? 409 : result.reason === "rows_month" ? 429 : result.reason === "unavailable" ? 503 : result.reason === "unconfirmed" ? 502 : 400;
       return refuse(result.reason, result.message, status, result.limit === undefined ? {} : { limit: result.limit });
     }
     return Response.json({ ok: true, summary: result.summary }, { headers: NO_STORE });

@@ -27,6 +27,7 @@ import {
   hubSpotDealColumns,
   hubSpotFileOf,
   isHubSpotExport,
+  oneLine,
   planHubSpotDeals,
   readHubSpotAmount,
   readHubSpotDate,
@@ -148,6 +149,7 @@ is("an unreadable amount still lets the deal in, with its note", amounts.deals[1
 
 part("Edge cases read strictly");
 is("a point between thousands is never read as cents", ["1.500", "12.500", "1.5000", "EUR 1.500"].map((a) => readHubSpotAmount(a, "usd", "", "usd").cents), [null, null, null, null]);
+is("only zeros after the point, not three of them, read the same either way", [readHubSpotAmount("1500.00", "jpy", "", "jpy").cents, readHubSpotAmount("1500.0000", "usd", "", "usd").cents, readHubSpotAmount("1.000", "jpy", "", "jpy").cents, readHubSpotAmount("1500.000", "usd", "", "usd").cents, readHubSpotAmount("1500.10", "jpy", "", "jpy").cents], [1500, 150000, null, null, null]);
 is("and the note says it could be read two ways", /more digits after the point than USD has, so it could be read two ways/.test(readHubSpotAmount("1.500", "usd", "", "usd").note), true);
 is("a currency with no cents is never given a cents example", [/like 1500,/.test(readHubSpotAmount("lots", "jpy", "", "jpy").note), /1500\.50/.test(readHubSpotAmount("lots", "jpy", "", "jpy").note), readHubSpotAmount("1.5", "jpy", "", "jpy").cents, readHubSpotAmount("1500", "jpy", "", "jpy").cents], [true, false, null, 1500]);
 is("a day that does not exist is said as such", [readHubSpotDate("2026-02-29").date, /is not a real day/.test(readHubSpotDate("2026-02-29").note), readHubSpotDate("0000-01-01").date, /is not a real day/.test(readHubSpotDate("0000-01-01").note)], [null, true, null, true]);
@@ -161,6 +163,7 @@ is("so a pipeline never has two stages of one name", ownWon.pipelines[0].stages.
 is("and a second won label goes to the won stage", ownWon.deals.map((d) => d.stage), ["Pitch", "Won", "Lost", "Won"]);
 const firstRefused = ok(plan([row("8", "Other", "Contract sent", "P"), row("7", "Too far", "Contract sent", "Third"), row("7", "Same id", "Contract sent", "P")], { pipelineRoom: 1 }));
 is("a first copy refused for its pipeline does not refuse the second", [firstRefused.deals.map((d) => d.title), firstRefused.refused.map((r) => [r.line, r.column])], [["Other", "Same id"], [[3, "Pipeline"]]]);
+is("one line is the rule the server reads a pipeline's name by too (lib/hubspot-import.ts)", [oneLine(" Sales\t\u0000 Pipeline\n"), oneLine(undefined)], ["Sales Pipeline", ""]);
 is("a name with a line break or a NUL is one line", hubSpotContactRow(["1", "x@example.com", "Ada\nB\u0000"], { email: 1, firstName: 2, lastName: -1, ignored: [] })[1], "Ada B");
 
 part("Dates and associated contacts");
@@ -196,6 +199,9 @@ const atRoom = plan(Array.from({ length: 10 }, (_, i) => row(String(i), `Deal ${
 is("exactly the room is taken", atRoom.ok && atRoom.deals.length, 10);
 const capped = plan([row("1", "One", "Contract sent")], { dealRoom: MAX_DEALS * 5 });
 is("the room never passes MAX_DEALS", capped.ok, true);
+const unchecked = plan(Array.from({ length: MAX_DEALS + 200 }, (_, i) => row(String(i), `Deal ${i}`, "Contract sent")), { dealRoom: Number.POSITIVE_INFINITY });
+is("an unchecked room (the server checks the deals that really come in) never refuses the file here", unchecked.ok && unchecked.deals.length, MAX_DEALS + 200);
+is("and an infinite pipeline room is as many as a store holds, never none", (ok(plan([row("1", "A", "Contract sent", "P1"), row("2", "B", "Contract sent", "P2")], { pipelineRoom: Number.POSITIVE_INFINITY })).pipelines.length), 2);
 
 part("Stage cap");
 const labels = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"];

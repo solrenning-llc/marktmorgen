@@ -37,14 +37,18 @@
  *     an import may bring in (lib/import-limits.ts, takeImportRows) is
  *     refused whole and nothing is written: the room is taken first, then
  *     the rows, then the pipelines and every deal are written in one step
- *     (lib/crm.ts, IMPORT_CRM_DEALS). Whatever stops that step gives back
- *     the room and the rows.
- *   - One import of deals at a time per store, under the store's CRM lock
- *     (lib/crm.ts, takeCrmLock); a second one waits a moment, then is
- *     refused. The board does not take the lock: the one step writes only
- *     over the pipelines record read before, so a stage or pipeline removed
- *     on the board meanwhile never gets a deal, and only when every deal's
- *     id is still free and every deal fits; otherwise nothing is written.
+ *     (lib/crm.ts, IMPORT_CRM_DEALS). When that step writes nothing (the
+ *     pipelines changed, a deal's id was taken, the store filled up, or the
+ *     lock ran out), the room and the rows go back. When whether it wrote
+ *     cannot be confirmed, both stay counted, as for what was written.
+ *   - One import of deals or change of pipelines at a time per store, under
+ *     the store's CRM lock (lib/crm.ts, takeCrmLock): every change of
+ *     pipelines or stages on the board takes it too, so the board never
+ *     removes a stage from deals it read before an import wrote some there.
+ *     The next one waits a moment, then is refused. A single deal saved on
+ *     the board does not take the lock: the one step writes only over the
+ *     pipelines record read before, and only when every deal's id is still
+ *     free and every deal fits; otherwise nothing is written.
  *   - No workflow starts: a deal brought in from a file is not a deal
  *     entering a stage (lib/deal-stage-trigger.ts), so nobody is emailed.
  *
@@ -55,7 +59,7 @@
 import { createHash } from "node:crypto";
 import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
 import { type Deal, type Pipeline, type Stage, MAX_DEALS, MAX_PIPELINES, MAX_STAGES, allStages, newCrmId, parseDeal, parsePipelines, pipelineLimit } from "@/lib/crm-rules";
-import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
+import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, oneLine, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
 import { giveImportRows, takeImportRows } from "@/lib/imports";
 import { rowsWords } from "@/lib/import-limits";
 import { type Held, LockBusyError, releaseLock } from "@/lib/redis-lock";
@@ -112,6 +116,7 @@ export type HubSpotImportRefusal =
   | "not_hubspot"
   | "no_record_id"
   | "too_many"
+  | "deals_full"
   | "busy"
   | "changed"
   | "store_full"
@@ -123,6 +128,7 @@ export type HubSpotImportResult = { ok: true; summary: HubSpotImportSummary } | 
 
 /** What each refusal says, with what to do. */
 export const HUBSPOT_IMPORT_WORDS: Record<Exclude<HubSpotImportRefusal, "too_many" | "store_full" | "rows_month">, string> = {
+  deals_full: `Your store reached its ${MAX_DEALS.toLocaleString("en-US")} deals while this file was being brought in, so nothing was brought in. Delete deals you no longer need, then bring the file in again.`,
   not_hubspot:
     'This is not a deals file exported from HubSpot with English column names. In HubSpot, export your deals list, choose English under "Language of column headers", then bring that file in.',
   no_record_id:
@@ -315,9 +321,10 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     // The file's pipelines may be as many as a store holds, less the store's own ones the file does not name.
     const firstPipeline = snapshot.pipelines[0].name;
     const pipelineAt = hubSpotDealColumns(file.header).pipeline;
-    const named = new Set(file.rows.map((r) => ((pipelineAt >= 0 ? (r[pipelineAt] ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim() : "") || firstPipeline).toLowerCase()));
+    const named = new Set(file.rows.map((r) => ((pipelineAt >= 0 ? oneLine(r[pipelineAt]) : "") || firstPipeline).toLowerCase()));
     const fileRoom = MAX_PIPELINES - snapshot.pipelines.filter((p) => !named.has(p.name.toLowerCase())).length;
-    const plan = planHubSpotDeals(file, { currency: store.currency, statedCurrency: options.statedCurrency ?? "", pipelineRoom: fileRoom, dealRoom: MAX_DEALS, firstPipeline });
+    // The deals that really come in are counted below, once the rows already here or past a pipeline are set aside.
+    const plan = planHubSpotDeals(file, { currency: store.currency, statedCurrency: options.statedCurrency ?? "", pipelineRoom: fileRoom, dealRoom: Number.POSITIVE_INFINITY, firstPipeline });
     if (!plan.ok) return refuse("too_many", plan.sentence);
     // A pipeline past what a store holds is past the plan's too: its rows say the plan's room.
     const planRoom = Math.max(0, Math.min(pipelineLimit(store, nowSeconds), MAX_PIPELINES) - snapshot.pipelines.length);
@@ -342,12 +349,12 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     counted = 0;
     return { ok: true, summary: { ...summary, written: true } };
   } catch (error) {
-    // Nothing was written (or, unconfirmed, nothing is known to be): the month's rows go back.
-    if (counted) await giveImportRows(store, counted, now);
+    // The month's rows go back only when the step surely wrote nothing; unconfirmed, they stay counted, as the room does.
+    if (counted && (error instanceof CrmSchemaConflict || error instanceof CrmDealsFull || error instanceof LockBusyError)) await giveImportRows(store, counted, now);
     if (error instanceof LockBusyError) return refuse("busy", HUBSPOT_IMPORT_WORDS.busy);
     if (error instanceof DataRoomError) return refuse("store_full", error.message);
     if (error instanceof CrmSchemaConflict) return refuse("changed", HUBSPOT_IMPORT_WORDS.changed);
-    if (error instanceof CrmDealsFull) return refuse("too_many", `Your store reached its ${MAX_DEALS.toLocaleString("en-US")} deals while this file was being brought in, so nothing was brought in. Delete deals you no longer need, then bring the file in again.`);
+    if (error instanceof CrmDealsFull) return refuse("deals_full", HUBSPOT_IMPORT_WORDS.deals_full);
     if (error instanceof CrmSchemaReadUnavailable || error instanceof CrmDealReadUnavailable) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
     if (error instanceof CrmSchemaWriteUnconfirmed || error instanceof CrmDealWriteUnconfirmed) return refuse("unconfirmed", HUBSPOT_IMPORT_WORDS.unconfirmed);
     throw error;

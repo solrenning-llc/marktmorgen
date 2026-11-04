@@ -66,8 +66,253 @@ import { isHouseStore } from "@/lib/house-store";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { sendPaidOrders, sendRenewals, sendsFromServer } from "@/lib/ad-events";
 import { settleStoreList, storesWithRequests } from "@/lib/payment-request-store";
+import { createHash } from "node:crypto";
+import { TAKE_DATA, dataKey, monthOf, type DataStore } from "@/lib/store-data";
+import { contentRoomFor } from "@/lib/store-data-rules";
 
 const CURSOR_KEY = "nl:sweep:cursor";
+
+/** A diagnostic observation policy, never legal coverage or a sales gate.
+ * This stage has no production policy, environment setting or request input.
+ * A future policy needs reviewed scope, absolute retention and the cost of
+ * storage for its ENTIRE lifetime, in addition to bounded per-pass work.
+ */
+export type TaxObservationPolicy = {
+  schema: 1; purpose: "incomplete-checkout-observations";
+  reviewId: string; storeSid: string; stripeAccountId: string;
+  scopeEvidence: string; retentionEvidence: string; storageEvidence: string; costEvidence: string;
+  reviewedAtMs: number; expiresAtMs: number;
+  maxEntries: number; maxRecordBytes: number; maxDocumentBytes: number; maxRetainedBytes: number;
+  storageMicroUsdPerGiBMonth: number; retentionCostCeilingMicroUsd: number;
+  commandMicroUsdPerMillion: number; transferMicroUsdPerGiB: number;
+  maxChargedCommandsPerPass: number; maxTransferredBytesPerPass: number;
+  computeCeilingMicroUsdPerPass: number; ioCostCeilingMicroUsdPerPass: number;
+};
+export const CURRENT_TAX_OBSERVATION_POLICY: TaxObservationPolicy | null = null;
+/** Absolute diagnostic lifetime, not statutory retention or a customer entitlement. */
+export const TAX_OBSERVATION_KEEP_SECONDS = 86_400;
+/** Processing/diagnostic bounds, not statutory retention or customer rights. */
+export const TAX_OBSERVATION_LIMITS = Object.freeze({
+  maxEntries: 300, maxRecordBytes: 512, maxDocumentBytes: 512 * 1024,
+  maxLifetimeMs: TAX_OBSERVATION_KEEP_SECONDS * 1000, maxBudgetMonths: 32,
+  chargedCommandsPerPass: 720, transferredBytesPerPass: 1024 * 1024,
+});
+export type TaxObservationResult = {
+  legalCoverage: "incomplete";
+  state: "not-recorded" | "recorded" | "unknown";
+  reason: "policy" | "scope" | "source" | "budget" | "storage" | "confirmed" | "duplicate";
+  entries: number | null;
+};
+const taxResult = (state: TaxObservationResult["state"], reason: TaxObservationResult["reason"], entries: number | null = null): TaxObservationResult =>
+  ({ legalCoverage: "incomplete", state, reason, entries });
+const taxOwn = (value: unknown, key: string): unknown => {
+  if (!value || typeof value !== "object") return undefined;
+  const field = Object.getOwnPropertyDescriptor(value, key);
+  return field && Object.hasOwn(field, "value") ? field.value : undefined;
+};
+const taxInteger = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const taxText = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 1000;
+const taxHash = (value: string) => createHash("sha256").update(value).digest("hex");
+function taxDataRecord(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return false;
+  const keys = Reflect.ownKeys(value);
+  return keys.length <= 160 && keys.every(key => typeof key === "string"
+    && Object.hasOwn(Object.getOwnPropertyDescriptor(value, key) ?? {}, "value"));
+}
+
+function taxPolicy(value: unknown, now: number): TaxObservationPolicy | null {
+  if (!taxDataRecord(value) || !taxInteger(now)) return null;
+  const keys = ["schema", "purpose", "reviewId", "storeSid", "stripeAccountId", "scopeEvidence", "retentionEvidence", "storageEvidence", "costEvidence", "reviewedAtMs", "expiresAtMs", "maxEntries", "maxRecordBytes", "maxDocumentBytes", "maxRetainedBytes", "storageMicroUsdPerGiBMonth", "retentionCostCeilingMicroUsd", "commandMicroUsdPerMillion", "transferMicroUsdPerGiB", "maxChargedCommandsPerPass", "maxTransferredBytesPerPass", "computeCeilingMicroUsdPerPass", "ioCostCeilingMicroUsdPerPass"] as const;
+  if (Reflect.ownKeys(value as object).length !== keys.length) return null;
+  const out: Record<string, unknown> = Object.create(null);
+  for (const key of keys) out[key] = taxOwn(value, key);
+  if (out.schema !== 1 || out.purpose !== "incomplete-checkout-observations") return null;
+  for (const key of ["reviewId", "storeSid", "stripeAccountId", "scopeEvidence", "retentionEvidence", "storageEvidence", "costEvidence"] as const) if (!taxText(out[key])) return null;
+  for (const key of keys.filter(key => !["purpose", "reviewId", "storeSid", "stripeAccountId", "scopeEvidence", "retentionEvidence", "storageEvidence", "costEvidence"].includes(key))) if (!taxInteger(out[key])) return null;
+  const p = out as TaxObservationPolicy;
+  if (p.reviewedAtMs > now || p.expiresAtMs <= now || p.expiresAtMs > 253_402_300_799_999
+    || p.expiresAtMs - p.reviewedAtMs > TAX_OBSERVATION_LIMITS.maxLifetimeMs
+    || p.maxEntries < 1 || p.maxEntries > TAX_OBSERVATION_LIMITS.maxEntries
+    || p.maxRecordBytes < 1 || p.maxRecordBytes > TAX_OBSERVATION_LIMITS.maxRecordBytes
+    || p.maxDocumentBytes < 256 || p.maxDocumentBytes > TAX_OBSERVATION_LIMITS.maxDocumentBytes
+    || p.maxRetainedBytes < Math.ceil((p.maxDocumentBytes + 512) * 5 / 4)
+    || p.maxRetainedBytes > 1024 * 1024
+    || p.storageMicroUsdPerGiBMonth < 1 || p.commandMicroUsdPerMillion < 1 || p.transferMicroUsdPerGiB < 1
+    || p.computeCeilingMicroUsdPerPass < 1
+    || p.maxChargedCommandsPerPass < TAX_OBSERVATION_LIMITS.chargedCommandsPerPass
+    || p.maxTransferredBytesPerPass < TAX_OBSERVATION_LIMITS.transferredBytesPerPass) return null;
+  const ceiling = (n: bigint, d: bigint) => (n + d - BigInt(1)) / d;
+  // 28 days is the shortest calendar month: this errs upward, not toward a
+  // free quota. The quote and complete paid-cost review remain external facts.
+  const retained = ceiling(BigInt(p.maxRetainedBytes) * BigInt(p.storageMicroUsdPerGiBMonth) * BigInt(p.expiresAtMs - p.reviewedAtMs), BigInt(1024 ** 3) * BigInt(28 * 86_400_000));
+  const work = ceiling(BigInt(p.maxChargedCommandsPerPass) * BigInt(p.commandMicroUsdPerMillion), BigInt(1_000_000))
+    + ceiling(BigInt(p.maxTransferredBytesPerPass) * BigInt(p.transferMicroUsdPerGiB), BigInt(1024 ** 3))
+    + BigInt(p.computeCeilingMicroUsdPerPass);
+  return BigInt(p.retentionCostCeilingMicroUsd) >= retained && BigInt(p.ioCostCeilingMicroUsdPerPass) >= work ? p : null;
+}
+
+/** One SET with PXAT persists data, index and byte count together. A script
+ * error before it cannot leave a new journal without an expiry. The existing
+ * data-room reservation is reused BEFORE that SET, inside the same execution;
+ * uncertain acknowledgement retains the whole reservation, never releases it.
+ * The month list is validated and bounded before TAKE_DATA can enumerate it.
+ */
+export const WRITE_TAX_OBSERVATIONS = `-- marktmorgen:tax-observations:v1
+local journal, room = KEYS[1], KEYS[2]
+local expiry, maxRows, maxBytes = ARGV[1], tonumber(ARGV[2]), tonumber(ARGV[3])
+local reserve, limit, month, untilMonth, scope = tonumber(ARGV[4]), tonumber(ARGV[5]), ARGV[6], ARGV[7], ARGV[8]
+local n = tonumber(ARGV[9])
+local function integer(v) return v and v >= 0 and v % 1 == 0 and v <= 9007199254740991 end
+if not integer(tonumber(expiry)) or not integer(maxRows) or maxRows < 1 or maxRows > 300
+  or not integer(maxBytes) or maxBytes > 524288 or not integer(reserve) or not integer(limit)
+  or not integer(n) or n < 1 or n > 100 or #ARGV ~= 9 + n * 2 then return {-1} end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+if tonumber(expiry) <= now or tonumber(expiry) > now + 86400000 then return {-1} end
+local kind = redis.call('TYPE', journal)['ok']
+if kind ~= 'none' and kind ~= 'string' then return {-1} end
+local raw = redis.call('GET', journal)
+local doc = {schema=1, scope=scope, expiresAt=expiry, rows={}, order={}, bytes=0}
+if raw then
+  if #raw > maxBytes or redis.call('PEXPIRETIME', journal) ~= tonumber(expiry) then return {-1} end
+  local good, old = pcall(cjson.decode, raw)
+  if not good or type(old) ~= 'table' or old.schema ~= 1 or old.scope ~= scope or old.expiresAt ~= expiry
+    or type(old.rows) ~= 'table' or type(old.order) ~= 'table' or old.bytes ~= #raw then return {-1} end
+  doc = old
+end
+local fields = 0
+for _ in pairs(doc) do fields = fields + 1 end
+if fields ~= 6 then return {-1} end
+local ids, count = {}, 0
+for _, id in ipairs(doc.order) do
+  if type(id) ~= 'string' or #id ~= 64 or ids[id] or type(doc.rows[id]) ~= 'string' then return {-1} end
+  ids[id], count = true, count + 1
+  if count > maxRows then return {-1} end
+end
+local orderFields = 0
+for key in pairs(doc.order) do
+  if not integer(key) or key < 1 or key > count then return {-1} end
+  orderFields = orderFields + 1
+end
+if orderFields ~= count then return {-1} end
+local actual = 0
+for id, value in pairs(doc.rows) do
+  if not ids[id] or type(value) ~= 'string' or #value > 512 then return {-1} end
+  actual = actual + 1
+end
+if actual ~= count or count > maxRows then return {-1} end
+local changed = false
+for i = 1, n do
+  local id, value = ARGV[8 + i * 2], ARGV[9 + i * 2]
+  if #id ~= 64 or not string.match(id, '^[a-f0-9]+$') or #value > 512 then return {-1} end
+  local old = doc.rows[id]
+  if old and old ~= value then return {-1} end
+  if not old then
+    doc.rows[id] = value
+    table.insert(doc.order, id)
+    count, changed = count + 1, true
+  end
+end
+if count > maxRows then return {0} end
+if not changed then return {2, count, #raw, expiry} end
+local encoded
+for i = 1, 4 do
+  encoded = cjson.encode(doc)
+  if doc.bytes == #encoded then break end
+  doc.bytes = #encoded
+end
+encoded = cjson.encode(doc)
+if doc.bytes ~= #encoded or #encoded > maxBytes then return {0} end
+if redis.call('TYPE', room)['ok'] ~= 'hash' then return {-1} end
+local total = tonumber(redis.call('HGET', room, '#'))
+if not integer(total) or total > limit then return {-1} end
+local months = redis.call('HGET', room, '~') or ''
+if #months > 256 then return {-1} end
+local seen, monthsCount, heldSum = {}, 0, 0
+for m in string.gmatch(months, '[^,]+') do
+  if #m ~= 7 or not string.match(m, '^%d%d%d%d%-%d%d$') or seen[m] then return {-1} end
+  seen[m], monthsCount = true, monthsCount + 1
+  local held = tonumber(redis.call('HGET', room, '~' .. m))
+  if not integer(held) or held > total or monthsCount > 32 then return {-1} end
+  heldSum = heldSum + held + 64
+  if heldSum > total then return {-1} end
+end
+local held = redis.call('HGET', room, '~' .. untilMonth)
+if held and (not integer(tonumber(held)) or not seen[untilMonth]) then return {-1} end
+local function take()
+  local KEYS = {room}
+  local ARGV = {tostring(limit), '0', month, 'a', '~' .. untilMonth, tostring(reserve)}
+  ${TAKE_DATA}
+end
+local took = take()
+if type(took) ~= 'table' or took[1] ~= 1 then return {0} end
+redis.call('SET', journal, encoded, 'PXAT', expiry)
+return {1, count, #encoded, expiry}`;
+
+/** Called for the provider page the real sweep already read. This records
+ * diagnostic source facts only: creation is not the fiscal supply date,
+ * gross is not classified applicable revenue, and coverage never becomes true.
+ */
+export async function observeCheckoutTaxPage(store: Store, rows: unknown, value: unknown = CURRENT_TAX_OBSERVATION_POLICY, now = Date.now()): Promise<TaxObservationResult> {
+  try {
+    const policy = taxPolicy(value, now);
+    if (!policy) return taxResult("not-recorded", "policy");
+    const sid = taxOwn(store, "sid"), account = taxOwn(store, "stripeAccountId");
+    if (sid !== policy.storeSid || account !== policy.stripeAccountId) return taxResult("not-recorded", "scope");
+    const fields = ["sid", "statsId", "handle", "tier", "subscriptionActive", "subscriptionId", "trialEnds", "planEndedAt"] as const;
+    const owner: Record<string, unknown> = Object.create(null);
+    for (const key of fields) owner[key] = taxOwn(store, key);
+    if (typeof owner.sid !== "string" || typeof owner.statsId !== "string" || typeof owner.handle !== "string"
+      || typeof owner.tier !== "string" || !["creator", "pro", "scale"].includes(owner.tier) || typeof owner.subscriptionActive !== "boolean"
+      || !(owner.subscriptionId === null || typeof owner.subscriptionId === "string") || !taxInteger(owner.trialEnds)
+      || typeof owner.planEndedAt !== "string") return taxResult("not-recorded", "scope");
+    const dataOwner = owner as DataStore;
+    const room = dataKey(dataOwner);
+    const limit = contentRoomFor(dataOwner, now / 1000);
+    if (!room || policy.maxRetainedBytes > limit) return taxResult("not-recorded", "budget");
+    if (!Array.isArray(rows) || Object.getPrototypeOf(rows) !== Array.prototype || rows.length > 100
+      || Reflect.ownKeys(rows).length !== rows.length + 1) return taxResult("not-recorded", "source");
+    const entries: (string | number)[] = [];
+    const ids = new Set<string>();
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = taxOwn(rows, String(index));
+      if (!taxDataRecord(row)) return taxResult("not-recorded", "source");
+      const id = taxOwn(row, "id"), status = taxOwn(row, "payment_status"), meta = taxOwn(row, "metadata");
+      if (typeof id !== "string" || !/^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/.test(id) || ids.has(id)
+        || status !== "paid" || !taxDataRecord(meta) || taxOwn(meta, "store") !== owner.handle) return taxResult("not-recorded", "source");
+      ids.add(id);
+      const details = taxOwn(row, "customer_details"), address = taxOwn(details, "address");
+      if (details != null && !taxDataRecord(details) || address != null && !taxDataRecord(address)) return taxResult("not-recorded", "source");
+      const country = taxOwn(address, "country"), state = taxOwn(address, "state");
+      const currency = taxOwn(row, "currency"), amount = taxOwn(row, "amount_total"), created = taxOwn(row, "created");
+      const observation = JSON.stringify({
+        checkoutCreatedAt: taxInteger(created) ? created : null,
+        country: typeof country === "string" && /^[A-Z]{2}$/.test(country) ? country : null,
+        state: typeof state === "string" && /^[A-Z0-9]{1,8}$/.test(state) ? state : null,
+        currency: typeof currency === "string" && /^[a-z]{3}$/.test(currency) ? currency.toUpperCase() : null,
+        amountTotalMinor: taxInteger(amount) ? amount : null,
+        supplyOn: null, applicable: null,
+      });
+      if (Buffer.byteLength(observation) > policy.maxRecordBytes) return taxResult("not-recorded", "source");
+      entries.push(taxHash(`${account}|${id}`), observation);
+    }
+    if (!entries.length) return taxResult("not-recorded", "source");
+    const scope = taxHash(JSON.stringify(policy));
+    const key = `nl:taxobs:v1:${scope}:${taxHash(policy.storeSid)}`;
+    const reply = await redisPipeline([["EVAL", WRITE_TAX_OBSERVATIONS, 2, key, room,
+      String(policy.expiresAtMs), policy.maxEntries, policy.maxDocumentBytes, policy.maxRetainedBytes,
+      limit, monthOf(now), monthOf(policy.expiresAtMs), scope, entries.length / 2, ...entries]]);
+    const result = taxOwn(reply, "0");
+    if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(result) || result.length !== 4
+      || ![1, 2].includes(taxOwn(result, "0") as number) || !taxInteger(taxOwn(result, "1"))
+      || (taxOwn(result, "1") as number) < entries.length / 2 || (taxOwn(result, "1") as number) > policy.maxEntries
+      || !taxInteger(taxOwn(result, "2")) || (taxOwn(result, "2") as number) < 1
+      || (taxOwn(result, "2") as number) > policy.maxDocumentBytes
+      || taxOwn(result, "3") !== String(policy.expiresAtMs)) return taxResult("unknown", "storage");
+    return taxResult("recorded", taxOwn(result, "0") === 2 ? "duplicate" : "confirmed", taxOwn(result, "1") as number);
+  } catch { return taxResult("unknown", "storage"); }
+}
 /** At most this many pages of a hundred checkouts are read per store per pass. */
 export const MAX_PAGES_PER_STORE = 3;
 
@@ -100,7 +345,7 @@ function worthAsking(store: Store, requesting = false): boolean {
 }
 
 /** One store: its checkouts of the last day, each handed to what it needs. */
-async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting = false): Promise<void> {
+async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }): Promise<void> {
   // Refunds first: a key that should no longer open anything matters more
   // than a reminder. One failing never stops the checkouts below.
   if (storeHasKeys(store)) {
@@ -169,6 +414,15 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
 
     // Asked in one round trip: which of the paid ones were already confirmed.
     const paid = rows.filter((row) => isSettled(row) && typeof row.id === "string");
+    // This is independent of the email's sent mark and cannot hold up an
+    // existing buyer's confirmation. Without the reviewed policy it does no IO.
+    // SCAN may repeat an owner. The optional diagnostic work has a budget
+    // across the ENTIRE sweep, not a fresh three pages for a repeated owner.
+    if (taxPass.pagesLeft > 0 && taxOwn(taxPass.policy, "storeSid") === taxOwn(store, "sid")
+      && taxOwn(taxPass.policy, "stripeAccountId") === taxOwn(store, "stripeAccountId")) {
+      taxPass.pagesLeft -= 1;
+      await observeCheckoutTaxPage(store, paid, taxPass.policy);
+    }
     // An affiliate's sale is written down whether or not its buyer came back —
     // through a link, and through a discount code given to an affiliate, which
     // is the only trace left by a sale made on a podcast or from a stage. The
@@ -296,9 +550,10 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
  * of that batch were done, so a run that stops half way through a batch
  * starts the next one at the store after the last it finished.
  */
-export async function sweepCheckouts(deadline: number): Promise<SweepCounts> {
+export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown = CURRENT_TAX_OBSERVATION_POLICY): Promise<SweepCounts> {
   const counts: SweepCounts = { stores: 0, confirmed: 0, reminded: 0, failed: 0, revoked: 0, unrated: 0, listed: 0 };
   if (!isRedisConfigured() || !platformKey()) return counts;
+  const taxPass = { policy: taxPolicyValue, pagesLeft: MAX_PAGES_PER_STORE };
 
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
@@ -321,7 +576,7 @@ export async function sweepCheckouts(deadline: number): Promise<SweepCounts> {
       if (worthAsking(store, asks) || reviewed || store.paypalSeller) {
         counts.stores += 1;
         try {
-          await sweepStore(store, counts, deadline, reviewed, asks);
+          await sweepStore(store, counts, deadline, reviewed, asks, taxPass);
         } catch (error) {
           // One store's account refusing, or Stripe having a moment, does not
           // hold up everyone after it. It is reached again next time round.

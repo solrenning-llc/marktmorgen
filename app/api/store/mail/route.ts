@@ -1,3 +1,4 @@
+import { readSequenceCsv } from "@/lib/sequence-import";
 import { type NextRequest, after } from "next/server";
 import { rfmSummary } from "@/lib/rfm-rules";
 import { StoreFullError } from "@/lib/store-full";
@@ -52,6 +53,8 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
   broadcast: "send",
   cancel: "send",
   flow: "send",
+  // Reading a file of emails into a sequence's steps (lib/sequence-import.ts): nothing is saved, so it needs what saving one needs.
+  "flow-import": "send",
   "flow-remove": "send",
   // Switching a workflow on is its own, explicit step (lib/flows.ts, setFlowActive).
   "flow-activate": "send",
@@ -77,7 +80,7 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
  *   { action: "settings", fromName, address }
  *   { action: "import", text, confirm: true }
  *   { action: "count", productId, notProductId, who, narrow? }   who: "all" | "buyers" | "leads";
- *                            narrow: { minSpent, channel, quietDays } (lib/segments.ts); answers the
+ *                            narrow: { minSpent, channel, quietDays, group?, activeDays? } (lib/segments.ts); answers the
  *                            channels the store's buyers first came from too, when it reads them
  *   { action: "segment-save", name, who, productId, notProductId, narrow }  /  { action: "segment-remove", id }
  *   { action: "test", subject, body }
@@ -266,6 +269,14 @@ export async function POST(request: NextRequest) {
       const raw = body.flow && typeof body.flow === "object" ? (body.flow as Record<string, unknown>) : {};
       const result = await saveFlow(store, raw);
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason);
+    }
+
+    if (action === "flow-import") {
+      // Only read: the steps come back to the studio's editor, where the creator picks what starts it,
+      // reviews every email and saves it, paused (544 [SQ9]). Nothing is saved or sent here.
+      const csv = typeof body.csv === "string" ? body.csv : "";
+      const read = readSequenceCsv(csv);
+      return Response.json(read.ok ? { ok: true, steps: read.steps, report: read.report } : { ok: false, error: `import_${read.why}`, report: read.report }, { status: read.ok ? 200 : 400 });
     }
 
     if (action === "flow-activate") {

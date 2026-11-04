@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
     if (!job) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
     if (request.nextUrl.searchParams.get("report") === "1") {
       if (!(await withinLimit("import-report", store.sid, 60, 600))) return new Response("Too many downloads for now. Try again in a few minutes.", { status: 429 });
-      if (!(await withinMonth("import-report-month", store.sid, importAllowanceFor(store).reports, windowId(store)))) return new Response("Your plan's downloads of import reports for this month are used. They open again with your next billing month.", { status: 429 });
+      if (!(await withinMonth("import-report-month", store.sid, importAllowanceFor(store).reports, windowId(store)))) return new Response("Your store has downloaded all the import reports its figure allows for now.", { status: 429 });
       const csv = await reportCsv(job);
       const day = new Date(job.at).toISOString().slice(0, 10);
       return new Response(csv, {

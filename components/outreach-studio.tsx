@@ -1,5 +1,7 @@
 "use client";
 
+import type { AiOff } from "@/lib/ai";
+
 import { useState } from "react";
 import { toast } from "@/components/toast";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
@@ -211,7 +213,16 @@ function PitchCard({ pitch, onChange, onGone }: { pitch: Pitch; onChange: (next:
   );
 }
 
-export function OutreachStudio({ sender: saved, pitches: first, left, on, storeUrl }: { sender: Sender; pitches: Pitch[]; left: number; on: boolean; storeUrl: string }) {
+/** Why a pitch cannot be written here (lib/ai.ts, aiOffReason), in words true for that case only. */
+const OFF_WORDS: Record<AiOff, string> = {
+  plan: "Writing help comes with the Studio and Scale plans (Studio is labeled Pro in your studio) while the plan is paid up. This store is not on one of them now, so a pitch cannot be written here.",
+  trial: "Writing help is not part of the free trial. It needs the plan to be paid up, so a pitch cannot be written here yet.",
+  renewal_unpaid: "Your plan's renewal payment did not go through, so writing help is paused. Check the notice at the top of your studio to pay it.",
+  plan_disputed: "A payment for your plan is disputed with your bank, so writing help is paused. Check the notice at the top of your studio for what happens next.",
+  setup: "Writing help is not switched on for this store yet, so a pitch cannot be written here.",
+};
+
+export function OutreachStudio({ sender: saved, pitches: first, left, on, off = "setup", storeUrl }: { sender: Sender; pitches: Pitch[]; left: number; on: boolean; off?: AiOff | null; storeUrl: string }) {
   const [sender, setSender] = useState(saved);
   const [name, setName] = useState(saved.name);
   const [address, setAddress] = useState(saved.address);
@@ -312,7 +323,9 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, storeU
           Write to a business
         </h2>
         {!on ? (
-          <p className="notice notice-warn mt-4">Writing help is not switched on for this store yet, so a pitch cannot be written here.</p>
+          <p className="notice notice-warn mt-4">
+            {OFF_WORDS[off ?? "setup"]}
+          </p>
         ) : !senderReady ? (
           <p className="notice notice-info mt-4">Save your name and postal address above first.</p>
         ) : (

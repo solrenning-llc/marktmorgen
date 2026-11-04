@@ -17,8 +17,8 @@ import { type WindowFields, allowanceWindow, keepSecondsFor, resetWords } from "
 import { poolPlace } from "@/lib/free-pool";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { standingOf } from "@/lib/plan-standing";
-import { PRO_ON_SALE } from "@/lib/plan";
-import { POOL_FULL_WORDS } from "@/lib/free-pool-rules";
+import { planAboveSold } from "@/lib/larger-plan";
+import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type AllowanceKind, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
@@ -35,6 +35,18 @@ function idOf(store: AllowanceStore): string | null {
   return raw ? createHash("sha256").update(`allowance:${raw}`).digest("hex").slice(0, 32) : null;
 }
 
+
+/**
+ * The words for a page's "allowance-<reason>" code (lib/metered-limits.ts, serviceRefusalCode): the store's calls
+ * to connected services used, in its own window; no place this month; or not counted just now. Null for any other code.
+ */
+export function serviceAllowanceWords(store: AllowanceStore, code: string, now = Date.now()): string | null {
+  if (code === "allowance-pool") return poolFullWords(PLANS_ON_SALE);
+  if (code === "allowance-unknown") return "This can't be counted right now. Try again in a minute.";
+  if (code !== "allowance-used") return null;
+  return usedWords("integration", allowanceFor(store, "integration", now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended.integration === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
+}
+
 /**
  * Takes `n` of a kind from the store's window, or refuses with the sentence to
  * show. `asked`: a confirmation to an address a visitor typed, which may take
@@ -42,22 +54,6 @@ function idOf(store: AllowanceStore): string | null {
  * is for (lib/store-allowance-rules.ts, ASKED_SHARE_BPS). It is counted in the
  * same figure, by the same two commands.
  */
-/** Whether a plan above this one is sold: none above Scale, and Pro only while it is on sale. */
-function hasLarger(tier: Tier | undefined): boolean {
-  return tier === "creator" ? PRO_ON_SALE : tier === "pro";
-}
-
-/**
- * The words for a page's "allowance-<reason>" code (lib/metered-limits.ts, serviceRefusalCode): the store's calls
- * to connected services used, in its own window; no place this month; or not counted just now. Null for any other code.
- */
-export function serviceAllowanceWords(store: AllowanceStore, code: string, now = Date.now()): string | null {
-  if (code === "allowance-pool") return POOL_FULL_WORDS;
-  if (code === "allowance-unknown") return "This can't be counted right now. Try again in a minute.";
-  if (code !== "allowance-used") return null;
-  return usedWords("integration", allowanceFor(store, "integration", now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended.integration === 0), standingOf(store, now / 1000), PLANS_ON_SALE, hasLarger(store.tier));
-}
-
 export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, n = 1, now = Date.now(), asked = false): Promise<Taken> {
   const whole = allowanceFor(store, kind, now / 1000);
   const limit = asked ? askedCeiling(whole) : whole;
@@ -66,7 +62,7 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
   const window = allowanceWindow(store, now);
   if (!window) return refuse("unknown", resetWords(store, now));
   const standing = standingOf(store, now / 1000);
-  if (!Number.isSafeInteger(limit) || limit < n) return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, hasLarger(store.tier)));
+  if (!Number.isSafeInteger(limit) || limit < n) return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")));
   const id = idOf(store);
   if (!id || !isRedisConfigured()) return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   // Each outbound webhook attempt creates provider work and needs its paid cohort.
@@ -77,7 +73,7 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
   }
   // No place this month, or none could be counted: each is said as it is.
   const place = await poolPlace(store, now);
-  if (place === "full") return refuse("pool", POOL_FULL_WORDS);
+  if (place === "full") return refuse("pool", poolFullWords(PLANS_ON_SALE));
   if (place === "unknown") return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   try {
     const k = key(kind, id, window.id);
@@ -92,7 +88,7 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
     if (counted <= limit) return { ok: true, left: limit - counted };
     // Over: what this asked for is given back, so a refused use costs the figure nothing.
     await redisPipeline([["DECRBY", k, n]]).catch(() => {});
-    return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, hasLarger(store.tier)));
+    return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")));
   } catch {
     return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   }

@@ -14,6 +14,7 @@ import {
   type TeamLimits,
   type TeamMode,
   type TeamSetup,
+  HOST_LABEL_MAX,
   hostFromCall,
   teamLimitWords,
 } from "@/lib/team-scheduling-rules";
@@ -43,6 +44,8 @@ const MESSAGES: Record<string, string> = {
   team_host_buffer: "Pick each host's gap between calls.",
   team_host_notice: "Pick each host's notice.",
   team_host_cap: "Pick each host's daily cap.",
+  team_host_label: `Give each host a plain name buyers can see, up to ${HOST_LABEL_MAX} characters: no email address, link or website.`,
+  team_pick: "To let buyers choose, use round robin and give every host a different name.",
   team_plan: "Team event types need a plan, or its free trial.",
   team_plan_hosts: "Your plan allows fewer hosts on one team event.",
   team_plan_types: "Your plan allows no more team event types. Stop another one first.",
@@ -93,6 +96,8 @@ export function TeamEventEditor({ product }: { product: Product }) {
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<TeamMode>("round_robin");
+  // Round robin only: buyers choose who they book with, by each host's name, or "Any available" (520 [LB1], unit 6).
+  const [pick, setPick] = useState(false);
   const [hosts, setHosts] = useState<TeamHost[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +131,7 @@ export function TeamEventEditor({ product }: { product: Product }) {
   function edit() {
     if (!view || !setup) return;
     setMode(view.team?.mode ?? "round_robin");
+    setPick(view.team?.pick === true);
     setHosts(view.team ? view.team.hosts.map((h) => ({ ...h, weekly: h.weekly.map((d) => d.map((r) => [r[0], r[1]] as Range)) })) : [hostFromCall(view.owner, setup)]);
     setError(null);
     setOpen(true);
@@ -183,6 +189,7 @@ export function TeamEventEditor({ product }: { product: Product }) {
                 return (
                   <li key={h.email} className="break-words">
                     <span className="font-semibold text-ink">{h.email}</span>
+                    {team.pick && h.label ? ` · buyers see "${h.label}"` : ""}
                     {` · ${h.tz} · up to ${h.dailyCap} a day`}
                     {s ? ` · ${SYNC_WORDS[s.state] ?? s.state}${s.source !== "none" ? `, ${ago(s.lastSuccess)}` : ""}` : ""}
                   </li>
@@ -194,6 +201,7 @@ export function TeamEventEditor({ product }: { product: Product }) {
                 {`Not on sale: your plan allows ${teamLimitWords(limits)}, and this one is beyond that. The oldest team events stay on.`}
               </p>
             ) : null}
+            {team.pick ? <p className="mt-2 text-sm text-ink-soft">Buyers choose who they book with, or &quot;Any available&quot;.</p> : null}
             <p className="mt-2 text-sm text-ink-soft">Times come from each host&apos;s own hours and calendar; the call&apos;s own hours above are not used while it is a team event.</p>
           </>
         ) : (
@@ -228,7 +236,9 @@ export function TeamEventEditor({ product }: { product: Product }) {
       className="mt-3 space-y-5 rounded-[var(--r-sm)] border border-line bg-white p-4"
       onSubmit={(event) => {
         event.preventDefault();
-        void save({ mode, hosts }, "Team saved.");
+        // Names are sent only when buyers choose: a name nobody sees is not kept.
+        const choose = pick && mode === "round_robin";
+        void save({ mode, hosts: hosts.map(({ label, ...h }) => (choose ? { ...h, label: (label ?? "").trim() } : h)), ...(choose ? { pick: true } : {}) }, "Team saved.");
       }}
     >
       <fieldset>
@@ -244,6 +254,17 @@ export function TeamEventEditor({ product }: { product: Product }) {
             </label>
           ))}
         </div>
+        {mode === "round_robin" ? (
+          <label className="mt-3 flex cursor-pointer items-start gap-3 text-sm">
+            <input type="checkbox" checked={pick} onChange={(e) => setPick(e.target.checked)} className="mt-1 h-4 w-4 shrink-0" aria-describedby={`team-pick-help-${product.id}`} />
+            <span>
+              <span className="block font-semibold text-ink">Let buyers choose who they book with</span>
+              <span id={`team-pick-help-${product.id}`} className="mt-0.5 block text-ink-soft">
+                The booking page asks &quot;Who would you like to book with?&quot;, with each host&apos;s name and &quot;Any available&quot;. Give each host the name buyers see, below.
+              </span>
+            </span>
+          </label>
+        ) : null}
       </fieldset>
 
       <fieldset>
@@ -270,6 +291,20 @@ export function TeamEventEditor({ product }: { product: Product }) {
       {hosts.map((host) => (
         <fieldset key={host.email} className="rounded-[12px] border border-line p-3">
           <legend className="px-1 text-sm font-semibold text-ink break-all">{host.email}</legend>
+          {pick && mode === "round_robin" ? (
+            <label className="mb-3 block">
+              <span className="text-xs font-semibold text-ink-soft">Name buyers see (for example, Ana)</span>
+              <input
+                type="text"
+                className="field mt-1 !min-h-0 !py-1.5"
+                value={host.label ?? ""}
+                maxLength={HOST_LABEL_MAX}
+                autoComplete="off"
+                required
+                onChange={(e) => change(host.email, { label: e.target.value })}
+              />
+            </label>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="text-xs font-semibold text-ink-soft">Time zone</span>

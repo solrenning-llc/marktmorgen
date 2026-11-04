@@ -3,7 +3,7 @@
  * unit 20, added 2 November 2026), answered only by what the code does
  * today: the studio's Team page and its own words (components/team-manager.tsx),
  * who may manage it (lib/team-roles.ts, "team" is the owner's alone), and the
- * shared answer to "Can I try it before paying?" (lib/beginner-faq.ts). No
+ * shared answer to "Can I try teams before paying?" (lib/beginner-faq.ts). No
  * number of teams, stores or sales. Shown first in the page's own "Questions"
  * block.
  */
@@ -27,7 +27,7 @@ export function teamBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_
       a: `In your studio, open “${w.tool}”. Under “${w.invite}”, type their address under “${w.email}”, choose a role under “${w.role}”, and press “${w.send}”. We email them a link that works once, for ${INVITE_DAYS} days, with no password to make. If the studio says the email could not be sent, nothing was kept, and you can send it again later. Only the store's owner manages the team.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try teams before paying?",
       a: tryBeforePaying("A team", "a team", onSale, trialDays),
     },
     {

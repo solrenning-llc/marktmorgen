@@ -15,6 +15,7 @@ import {
   type CrmField,
   type Deal,
   FIELD_TYPES,
+  hasChoices,
   type FieldType,
   MAX_CRM_FIELDS,
   MAX_DEAL_NOTE,
@@ -33,6 +34,7 @@ import {
   pipelineTotals,
   stageLabel,
   starterStages,
+  copyPipeline,
 } from "@/lib/crm-rules";
 
 const MESSAGES: Record<string, string> = {
@@ -46,7 +48,7 @@ const MESSAGES: Record<string, string> = {
   fields: "Each field needs a name of its own, and a choice needs at least two options.",
   stages: "Keep at least one open stage, one won and one lost, each with a name.",
   pipelines: "Give the pipeline a name no other pipeline has, and keep at least one open stage, one won and one lost, each with a name.",
-  pipeline_limit: "Your plan has as many pipelines as it can keep. Remove one, or move to a larger plan.",
+  pipeline_limit: "Your store has all the pipelines it can keep now. Remove one to make another.",
   pipeline_last: "A store keeps at least one pipeline.",
   moves: "Choose where the deals of each stage you remove go.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
@@ -133,7 +135,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
     const answer = await call(body);
     setBusy(false);
     if (answer.ok) {
-      toast(answer.workflows === "not_checked" ? `${done} Your studio requests for this month are used up, so the workflow its stage starts was not checked.` : done);
+      toast(answer.workflows === "not_checked" ? `${done} The workflow for this stage was not started for this person.` : done);
       after?.();
       startRefresh(() => router.refresh());
       return;
@@ -247,6 +249,13 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                 New pipeline
               </button>
             ) : null}
+            {pipelines.length < pipelineMax ? (
+              /* 639 [GL7](8): the same stages under a new name, none of its deals; opened to read and save, nothing saved yet. */
+              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); const copy = copyPipeline(pipeline, pipelines); setPipelineDraft({ ...copy, isNew: true, moves: {}, removeTo: "" }); }}>
+                <Icon name="plus" size={16} />
+                {`Duplicate “${pipeline.name}”`}
+              </button>
+            ) : null}
           </div>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[32rem] text-left text-sm">
@@ -260,7 +269,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               ))}</tbody>
             </table>
           </div>
-          <p className="mt-2 text-xs text-ink-mute">{`Each total adds up the values recorded on its deals, in ${currency.toUpperCase()}. Nothing is weighted or forecast. You have ${pipelines.length} of the ${pipelineMax} ${pipelineMax === 1 ? "pipeline" : "pipelines"} your plan keeps.`}</p>
+          <p className="mt-2 text-xs text-ink-mute">{`Each total adds up the values recorded on its deals, in ${currency.toUpperCase()}. Nothing is weighted or forecast. You have ${pipelines.length} of the ${pipelineMax} ${pipelineMax === 1 ? "pipeline" : "pipelines"} your store can keep.`}</p>
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="block"><span className="field-label">Find a deal</span><input type="search" className="field mt-2" maxLength={80} value={search} onChange={e => setSearch(e.target.value)} placeholder="Name, email, next action or note" /></label><label className="block"><span className="field-label">Responsible teammate</span><select className="field mt-2" value={responsible} onChange={e => setResponsible(e.target.value)}><option value="all">Everyone</option><option value="unassigned">Unassigned</option>{responsibleChoices.map(email => <option key={email} value={"person:" + email}>{email}{assignees.includes(email) ? "" : " (no longer eligible)"}</option>)}</select></label></div>
@@ -558,7 +567,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setFieldDraft(fieldDraft.filter((_, j) => j !== i))} aria-label={`Remove field ${i + 1}`}>
                     <Icon name="minus" size={16} />
                   </button>
-                  {field.type === "choice" ? (
+                  {hasChoices(field.type) ? (
                     <label className="block min-w-0 sm:col-span-3">
                       <span className="text-sm text-ink-soft">Choices, separated by commas</span>
                       <input
@@ -586,7 +595,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                 disabled={locked || writeUnconfirmed}
                 onClick={() =>
                   void run(
-                    { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: f.type === "choice" ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
+                    { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: hasChoices(f.type) ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
                     "Fields saved.",
                     () => setFieldDraft(null),
                   )

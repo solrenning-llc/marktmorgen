@@ -204,9 +204,9 @@ export function dataRoomListWords(names: Record<Tier, string>): string {
   return `${dataWords(DATA_ROOM_BYTES.creator)} on ${names.creator}, ${dataWords(DATA_ROOM_BYTES.pro)} on ${names.pro} and ${dataWords(DATA_ROOM_BYTES.scale)} on ${names.scale}`;
 }
 
-/** What the creator is told when something does not fit. */
-export function dataFullWords(used: number, room: number): string {
-  return `Your store's data room is full (${dataWords(used)} of ${dataWords(room)}). Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan.`;
+/** What the creator is told when something does not fit; `larger` whether this store can move to a larger plan now (lib/larger-plan.ts). */
+export function dataFullWords(used: number, room: number, larger = false): string {
+  return `Your store's data room is full (${dataWords(used)} of ${dataWords(room)}). Delete something you no longer need, such as old posts, drafts, pages or contacts${larger ? ", or move to a larger plan" : ""}.`;
 }
 
 /** What a buyer or visitor is told when what they wrote does not fit: it is the store's room, not theirs. */

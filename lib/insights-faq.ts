@@ -30,7 +30,7 @@ export function insightsBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
       a: `Until a first visit or checkout is counted, the card says “${w.empty}” On your store's address here, you and your team are left out of the count while signed in, and so is a device set to “${w.device}”; on a domain of your own, you are counted. Until your Stripe account or PayPal is connected, the “${w.sales}” tile says “${w.noStripe}”.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I see my numbers before paying?",
       a: `${tryBeforePaying("Your numbers", "your store and see its numbers", onSale, trialDays)} Visits are one of those limits: once they are used, your store's pages rest and no more visits are counted until they open again.`,
     },
   ];

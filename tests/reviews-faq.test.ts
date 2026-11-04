@@ -34,13 +34,13 @@ is("a review only for a paid order, read from Stripe, and never on the demo stor
 part("The answers, in both states");
 const now = reviewsBeginnerQuestions(false);
 const later = reviewsBeginnerQuestions(true);
-is("three questions", now.map((x) => x.q), ["How do I get my first reviews?", "Where do I see and answer reviews?", "Can I try it before paying?"]);
+is("three questions", now.map((x) => x.q), ["How do I get my first reviews?", "Where do I see and answer reviews?", "Can I get reviews before I pay for a plan?"]);
 const first = answer(now, "How do I get my first reviews?");
 is("first reviews: from buyers, none promised, nothing to switch on, the email's steps on Studio or Scale", [first.startsWith("Only a buyer can write one"), first.includes("a sale does not bring one by itself"), first.includes("Nothing has to be switched on"), (() => { const at = [w.ask, w.askBox, w.save].map((x) => first.indexOf(`“${x}”`)); return at.every((x, k) => x >= 0 && (k === 0 || x > at[k - 1])); })(), first.endsWith(`it needs your email set up on ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale}.`)], [true, true, true, true, true]);
 const where = answer(now, "Where do I see and answer reviews?");
 is("answering: the studio's words in order", (() => { const at = [w.tool, w.all, w.reply, w.edit, w.post].map((x) => where.indexOf(`“${x}”`)); return at.every((x, k) => x >= 0 && (k === 0 || x > at[k - 1])); })(), true);
-const today = answer(now, "Can I try it before paying?");
-is("try before paying: today, the page with no card, a new store not selling, the demo taking none; later, yes once the store takes payments", [today.includes("a new store cannot take payments"), today.endsWith("The live demo store takes no reviews, because its purchases cost nothing."), /no store takes payments|To see a store working/.test(today), answer(later, "Can I try it before paying?").startsWith("Yes, once your store can take payments")], [true, true, false, true]);
+const today = answer(now, "Can I get reviews before I pay for a plan?");
+is("try before paying: today, the page with no card, a new store not selling, the demo taking none; later, yes once the store takes payments", [today.includes("a new store cannot take payments"), today.endsWith("The live demo store takes no reviews, because its purchases cost nothing."), /no store takes payments|To see a store working/.test(today), answer(later, "Can I get reviews before I pay for a plan?").startsWith("Yes, once your store can take payments")], [true, true, false, true]);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
 is("no figure, no percent, no number of reviews promised", [/\d/.test(all), /%|guarantee|more reviews|proven/i.test(all)], [false, false]);

@@ -24,7 +24,7 @@ import type { BumpChoice, ProductPaging } from "@/lib/catalog";
 import { ProductUpdateBox } from "@/components/product-update-box";
 import { ShippingEditor } from "@/components/shipping-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
-import { confirmsOptionWrite } from "@/lib/option-confirmation";
+import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
 import { ProductImageEditor } from "@/components/product-image-editor";
 import type { CoverLook } from "@/components/cover-maker";
@@ -924,9 +924,7 @@ function OptionsBlock({
               ? "Give this price a name the buyer will read, like “5 weeks.”"
               : reason === "price"
                 ? optionPrice(currency)
-                : reason && Object.hasOwn(OPTION_MESSAGES, reason)
-                  ? OPTION_MESSAGES[reason]
-                  : "The price change was not confirmed. Reload to check its status before trying again.",
+                : optionRefusalWords(reason, OPTION_MESSAGES),
         );
         return;
       }
@@ -934,7 +932,7 @@ function OptionsBlock({
       if (confirmation) toast(confirmation);
       router.refresh();
     } catch {
-      setError("The price change was not confirmed. Reload to check its status before trying again.");
+      setError(OPTION_NOT_CONFIRMED);
     } finally {
       inFlight.current = false;
       setBusy(false);

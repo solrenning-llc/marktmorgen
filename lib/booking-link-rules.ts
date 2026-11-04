@@ -210,7 +210,7 @@ export function linkStateWords(link: BookingLink, now: number, timeZone: string)
     case "held":
       return now >= link.expiresAt ? `A checkout is open on it now. The link expired on ${day(link.expiresAt)}, so no new checkout opens.` : `A checkout is open on it now. ${madeOut}, until ${day(link.expiresAt)}.`;
     case "paying":
-      return "A payment made from it is on its way. The call is booked when it arrives, if the time is still free. Otherwise the payment is refunded.";
+      return `A payment made from it is on its way. The call is booked when it arrives, if the time is still free. Otherwise the payment is refunded. ${now < link.expiresAt ? `If it fails or is refunded, the link opens again until ${day(link.expiresAt)}.` : `If it fails or is refunded, the link stays closed: it expired on ${day(link.expiresAt)}.`}`;
     case "open":
       return `${madeOut}, until ${day(link.expiresAt)}.`;
   }

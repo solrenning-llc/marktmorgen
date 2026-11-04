@@ -16,6 +16,12 @@
  * tests/plan-cost-registry.ts prices both (ORDERS_OPEN_READ, line
  * public-requests) and tests/plan-cost-registry.test.ts holds the units above
  * what they stand for.
+ *
+ * Taken from the public requests, never from the buyers' actions figure
+ * (takeAllowance(store, "buyer"), lib/buyer-actions.ts): that figure is the
+ * whole store's, with no share per person, so spending it on every opening
+ * would let one buyer reloading the page use it up and stop every other
+ * buyer's actions at the store.
  */
 export const ORDERS_OPEN_UNITS = 12;
 /** How long one opening may run at the most: the page's maxDuration (app/[handle]/orders/page.tsx). */
@@ -126,9 +132,9 @@ export const PLAN_REFUND_CALLS = 1 + 1 + 10;
  * drawn at those limits under it, and tests/plan-cost-registry.ts prices it
  * in ORDERS_OPEN_READ.
  */
-export const ORDERS_PAGE_BYTES = 3_000_000;
+export const ORDERS_PAGE_BYTES = 2_650_000;
 /** The most characters of a delivery's address the list shows as text; the whole address is the button's own, one click away. */
-export const LINK_SHOWN = 100;
+export const LINK_SHOWN = 60;
 
 /**
  * What showing a bundle's products takes (app/api/store/orders/bundle/route.ts;

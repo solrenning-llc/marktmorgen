@@ -223,7 +223,17 @@ The choice is one function, `profileKeyboard`, held by `tests/socials-keyboards.
 
   Only a save the option route takes is reviewed (a price in range, a name, no promise of fast money in its name or lines, a SKU it can keep), and the price is sent without spaces around it. Its plan sentences are the product's own (`planWords`).
 - a membership's free trial and the payments it ends after: **tested in a PR (2 November 2026).** Each is its own row ("Free trial", "Ends") in the same review, with a "Change" back to its field. Members who already joined keep theirs too: the trial and the end are set on each subscription at checkout, and the job that ends a membership reads them from it. They are read by the product route's own rule, so a value or a combination it refuses is not reviewed, and the save says why. For something bought once, "Ends" says "Not a membership".
-- still to do: adding or removing a price option, and changing which is recommended;
+- removing a price option: **tested in a PR (2 November 2026).** Its confirmation already asked ("Remove it" or "Keep it"), but it said "Nothing else on the product changes." even when that was not so. It now says what removing really changes (`optionRemovalWords`), each point from the code:
+  - the file on it goes with it;
+  - anyone who bought at it, when it handed over its own file or link, can no longer get that from their order, or gets the product's own instead when it was the last one; on a course or podcast they keep access but lose that extra file or link;
+  - the last one: buyers then pay the product's own price (once published, for a draft), said per period for a membership ("$20 a month"), with the introductory and yearly prices the checkout would then offer (`activeIntro`, `activeYearly`, with the plans members switch between), or it cannot be bought until it has a lesson, an episode, or its own file or link;
+  - on a membership, members who joined at it keep being charged;
+  - a payment plan that stops, or is offered again.
+
+  **Found, not fixed here:** a removed option leaves its past buyers' orders with nothing to download (`lib/buyer-orders.ts`, `deliveryOf`). The confirmation now says so; keeping a removed option's delivery for the orders made at it, or refusing to remove an option already sold, is its own unit.
+- not reviewed, with the reason:
+  - Adding a price option: the editor already says what a second price does.
+  - Changing which option is recommended: it changes which one is picked first, not what anyone pays (item 3 of this audit holds the open question about it).
 - the community announcement email. Its composer is on the community page, in the buyer's language, with its words in `lib/buyer-words` in seven languages. A review there needs its new sentences written in each of them, so it gets a unit of its own, under the rules for buyer languages.
 
 ## Pattern 7: a live preview at phone width beside each editor (1 November 2026, first pass)

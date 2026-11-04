@@ -28,6 +28,7 @@ import { GET as bundleRoute } from "@/app/api/store/orders/bundle/route";
 import { GET as olderRoute } from "@/app/api/store/orders/older/route";
 import type { OlderAnswer } from "@/components/older-purchases";
 import { store as redis } from "./redis-stub";
+import { afterTasks } from "./next-server-after-world";
 import { paidPeriod } from "./billing-period-fixture";
 import {
   MAX_LISTED,
@@ -51,6 +52,7 @@ import { MAX_PRODUCTS, MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalo
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { MAX_ROOM_LENGTH, readSetup } from "@/lib/call-setup";
 import { MAX_GROUPS, MAX_GROUP_LENGTH, MAX_PREFIX_LENGTH } from "@/lib/key-setup";
+import { MAX_KEY_LENGTH } from "@/lib/licence-keys";
 import { MAX_TITLE as MAX_AGREEMENT_TITLE, readDraft as readAgreementDraft } from "@/lib/agreement-rules";
 import { createAgreement, saveAgreement } from "@/lib/agreement-store";
 import { createRequest, changeRequest } from "@/lib/payment-request-store";
@@ -135,6 +137,7 @@ beforeEach(() => {
   calls = [];
   refundedInvoices = new Set();
   mails = 0;
+  afterTasks.length = 0;
   process.env.STRIPE_SECRET_KEY = "sk_test_orders_bounds_only";
   process.env.RESEND_API_KEY = "re_test_orders_bounds_only";
 });
@@ -285,11 +288,17 @@ test("a link request for an address whose purchases are not checked yet sends th
   for (let i = 0; i < checks; i++) refundedInvoices.add(`in_Bounds${String(i).padStart(12, "0")}`);
   const store = (await storeForEmail(OWNER))!;
   const links = async () => redis.keys().filter((key) => key.startsWith("nl:orders:link:")).length;
+  // The answer comes first; the reading, the grant and the email run after it (lib/buyer-orders.ts, afterAnswer).
+  const afterAnswers = async () => {
+    for (const task of afterTasks.splice(0)) await (task as () => Promise<unknown>)();
+  };
   assert.equal(await requestOrdersLink({ store, email: BUYER, ip: "203.0.113.70", origin: ORIGIN }), "sent");
+  await afterAnswers();
   assert.deepEqual([mails, await links()], [1, 1], "the link was made and emailed");
   // An address that bought nothing: the same answer, and nothing sent.
   checkouts = [];
   assert.equal(await requestOrdersLink({ store, email: "nobody@example.test", ip: "203.0.113.71", origin: ORIGIN }), "sent");
+  await afterAnswers();
   assert.deepEqual([mails, await links()], [1, 1]);
 });
 
@@ -380,7 +389,8 @@ test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES", 
   assert.equal(parsed.url.length, MAX_LINK_LENGTH);
   const drafts = await addDraftProducts(OWNER, Array.from({ length: MAX_LISTED * 4 }, (_, i) => ({ title: `${i}`.padEnd(MAX_TITLE_LENGTH, "'"), summary: "'".repeat(MAX_SUMMARY_LENGTH), priceCents: 1000, link: parsed.url })));
   assert.ok(drafts.ok);
-  // Each hands out a license key of the longest made shape.
+  // Each hands out a license key of the longest made shape. A key from the creator's own list may be longer and escaped
+  // longer (MAX_KEY_LENGTH characters at six bytes); the stand-in database cannot hand one out, so its most is added below.
   for (const id of drafts.ids) assert.ok((await setProductKeys(OWNER, id, { source: "generated", prefix: "K".repeat(MAX_PREFIX_LENGTH), groups: MAX_GROUPS, groupLength: MAX_GROUP_LENGTH, lowAt: 0 })).ok);
   // Forty calls still to come, each with the creator's own room link at its longest.
   const call = await addProduct(OWNER, "'".repeat(MAX_TITLE_LENGTH), "", "45", null);
@@ -421,8 +431,10 @@ test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES", 
   assert.equal(count(`>${words.addToCalendar}<`), MAX_LISTED, "forty calls");
   assert.ok(count("<code") >= MAX_LISTED * 4, "with their license keys");
   assert.ok(count("Read and sign") > 0 && count("payment request") > 0, "and what waits on the buyer");
-  assert.ok(bytes <= ORDERS_PAGE_BYTES, `${bytes} bytes`);
-  console.log(`a page at every limit: ${bytes} bytes of HTML, under ${ORDERS_PAGE_BYTES}`);
+  // Every key drawn from a creator's list at its longest, escaped at six bytes a character, on top of the key drawn here.
+  const listKeys = MAX_LISTED * 4 * MAX_KEY_LENGTH * 6;
+  assert.ok(bytes + listKeys <= ORDERS_PAGE_BYTES, `${bytes} + ${listKeys} bytes`);
+  console.log(`a page at every limit: ${bytes} bytes of HTML, ${bytes + listKeys} with every key from a creator's list at its longest, under ${ORDERS_PAGE_BYTES}`);
 });
 
 /** A store selling one bundle of twenty products, each a 2,000-character link with a key, bought by the buyer, and a link to their list. */

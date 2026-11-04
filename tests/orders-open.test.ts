@@ -40,6 +40,7 @@ import {
 import { importedKey, importedReference } from "@/lib/imported-purchases";
 import { requestLimitFor } from "@/lib/traffic-rules";
 import { NextRequest } from "next/server";
+import { afterTasks } from "./next-server-after-world";
 import { GET as downloadRoute } from "@/app/api/store/download/route";
 import { POST as ordersRoute } from "@/app/api/store/orders/route";
 import { ordersWords } from "@/lib/buyer-words/orders";
@@ -109,6 +110,7 @@ beforeEach(() => {
   mails = 0;
   stripeFails = false;
   senderFails = false;
+  afterTasks.length = 0;
   process.env.STRIPE_SECRET_KEY = "sk_test_orders_only_a_stand_in";
   // A sender, so the link can be asked for (lib/buyer-orders.ts, canRecover); what it sends goes to the stand-in fetch above.
   process.env.RESEND_API_KEY = "re_test_orders_only_a_stand_in";
@@ -308,7 +310,7 @@ test("purchases take their listings, pre-orders and what was brought over before
     payment_intent: { id: `pi_test${id.padEnd(10, "0")}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
   });
   sessions = [
-    // A guide with a bundle of two inside and a box ticked at checkout: two listings, the guide and the one ticked. The bundle's
+    // A guide with a bundle of two inside and a box checked at checkout: two listings, the guide and the one checked. The bundle's
     // two are read only when the buyer asks to see them (lib/buyer-orders.ts, bundleFor; C3-80).
     paid("a", { product: ids.Guide, bundle: `${ids.Templates},${ids.Checklist}`, bump: ids.Workbook }),
     // A pre-order: its listing, and its entry and when it ships.
@@ -335,11 +337,23 @@ test("the commands every opening makes are inside ORDERS_OPEN_COMMANDS", () => {
 
 const ORIGIN = "https://marktmorgen.com";
 
+/** Runs what a link request left for after its answer (lib/buyer-orders.ts, afterAnswer), as the route's after() does. */
+async function afterAnswers(): Promise<void> {
+  for (const task of afterTasks.splice(0)) await (task as () => Promise<unknown>)();
+}
+
+/** A link request and what it does after its answer. */
+async function askLink(input: Parameters<typeof requestOrdersLink>[0]): ReturnType<typeof requestOrdersLink> {
+  const answer = await requestOrdersLink(input);
+  await afterAnswers();
+  return answer;
+}
+
 test("a link request takes ORDERS_OPEN_UNITS after its limits, and its fixed commands are inside an opening's", async () => {
   const { store, folder, window } = await callStore();
   const before = await requestsIn(folder, window);
   sent.length = 0;
-  assert.equal(await requestOrdersLink({ store, email: "nobody@example.com", ip: "203.0.113.1", origin: ORIGIN }), "sent");
+  assert.equal(await askLink({ store, email: "nobody@example.com", ip: "203.0.113.1", origin: ORIGIN }), "sent");
   // A store that sells calls also takes the most moves up front, whatever the address, as an opening does.
   assert.equal((await requestsIn(folder, window)) - before, ORDERS_OPEN_UNITS + Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS));
   // Its two limits (a write and a count each); nothing bought, so no grant is written.
@@ -354,7 +368,7 @@ test("a link request for forty bookings takes, past its units, the moves an open
   const { store, product, folder, window } = await callStore(true);
   sessions = bookings(product, MAX_LISTED);
   const before = await requestsIn(folder, window);
-  await requestOrdersLink({ store, email: BUYER, ip: "203.0.113.2", origin: ORIGIN });
+  await askLink({ store, email: BUYER, ip: "203.0.113.2", origin: ORIGIN });
   // The moves taken up front hold the forty moves, the listing and the rooms, as for an opening.
   assert.ok(MAX_LISTED + ORDERS_LISTING_COMMANDS + MAX_LISTED * ORDERS_ROOM_COMMANDS <= ORDERS_CALL_MOVES);
   assert.equal((await requestsIn(folder, window)) - before, ORDERS_OPEN_UNITS + Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS));
@@ -365,13 +379,13 @@ test("a link request the store has no room for asks Stripe nothing, and the per-
   sessions = bookings(product, 2);
   const refused = { ...store, period: null };
   for (let i = 0; i < 5; i += 1) {
-    assert.equal(await requestOrdersLink({ store: refused, email: BUYER, ip: `203.0.113.${10 + i}`, origin: ORIGIN }), "busy");
+    assert.equal(await askLink({ store: refused, email: BUYER, ip: `203.0.113.${10 + i}`, origin: ORIGIN }), "busy");
   }
   assert.equal(asked, 0, "nothing was asked of Stripe");
   assert.deepEqual(sent.filter((command) => command.includes("nl:orders:link:") || command.includes("nl:call:")), []);
   // The sixth from the same address is limited before it takes anything, even from a store with room.
   const before = await requestsIn(folder, window);
-  assert.equal(await requestOrdersLink({ store, email: BUYER, ip: "203.0.113.99", origin: ORIGIN }), "limited");
+  assert.equal(await askLink({ store, email: BUYER, ip: "203.0.113.99", origin: ORIGIN }), "limited");
   assert.deepEqual([asked, (await requestsIn(folder, window)) - before], [0, 0]);
   // The route answers a refusal as it answers a store with no room at all.
   const route = readFileSync("app/api/store/orders/route.ts", "utf8");
@@ -505,7 +519,7 @@ test("a download in one click is handed over exactly when the list shows it", as
     ["a checkout the list hands over", {}, true],
     ["a checkout given back", { payment_intent: { id: "pi_testmoss000000", status: "succeeded", latest_charge: { refunded: true, amount_refunded: 1900 } } }, false],
     ["a checkout of something that hands nothing over", { metadata: { ...parent.metadata, product: bare.product.id } }, false],
-    ["a checkout with something ticked that hands over", { metadata: { ...parent.metadata, product: bare.product.id, bump: ids[0] } }, true],
+    ["a checkout with something checked that hands over", { metadata: { ...parent.metadata, product: bare.product.id, bump: ids[0] } }, true],
     ["a checkout without a customer", { customer: null }, false],
   ];
   for (const [what, change, shown] of cases) {
@@ -619,7 +633,7 @@ test("a link request whose meter is refused after its units says sent, as for an
   // Room for the units every request takes, none for what this address's bookings take past them.
   await leave(store, folder, window, ORDERS_OPEN_UNITS);
   sent.length = 0;
-  assert.equal(await requestOrdersLink({ store, email: BUYER, ip: "203.0.113.50", origin: ORIGIN }), "sent");
+  assert.equal(await askLink({ store, email: BUYER, ip: "203.0.113.50", origin: ORIGIN }), "sent");
   assert.deepEqual(sent.filter((command) => command.includes("nl:orders:link:")), [], "no link was made");
   assert.equal(mails, 0, "nothing was emailed");
   // The page's words hold for both: a link normally arrives; if it does not, try again later.
@@ -629,7 +643,7 @@ test("a link request whose meter is refused after its units says sent, as for an
 
 test("a link request says sent whatever happens past its units: the email not sent, the purchases not read", async () => {
   const { store } = await linkStore();
-  const ask = (email: string, ip: string) => requestOrdersLink({ store, email, ip, origin: ORIGIN });
+  const ask = (email: string, ip: string) => askLink({ store, email, ip, origin: ORIGIN });
   // An address that bought nothing.
   assert.equal(await ask("nobody@example.com", "198.51.100.1"), "sent");
   // One that bought, with the sender refusing (its figure used, or down): no link arrives, and the answer is the same.
@@ -648,6 +662,38 @@ test("a link request says sent whatever happens past its units: the email not se
   assert.deepEqual([answer.status, answer.headers.get("location")], [303, `${ORIGIN}/@moss/orders?status=sent`]);
   const route = readFileSync("app/api/store/orders/route.ts", "utf8");
   assert.ok(!route.includes("status=error"));
+});
+
+test("a link request answers sent before it reads anything for the address, writes a grant or emails, whether or not it bought; the link still goes after", async () => {
+  const { store } = await linkStore();
+  const grants = () => sent.filter((command) => command.startsWith("SET nl:orders:link:")).length;
+  // What was sent before the answer, by kind: the limits' keys differ by address and IP, and the window's
+  // expiry is set by its first request only, whoever made it.
+  const shape = () => sent.filter((command) => !command.startsWith("EXPIRE nl:traffic:")).map((command) => command.replace(/[0-9a-f]{32}/g, "#"));
+  const atAnswer: string[][] = [];
+  const bought = sessions;
+  for (const [email, ip, has] of [[BUYER, "192.0.2.1", bought], ["nobody@example.com", "192.0.2.2", []]] as const) {
+    // The stand-in Stripe lists whatever is set here, for any address.
+    sessions = [...has];
+    [asked, mails] = [0, 0];
+    sent.length = 0;
+    assert.equal(await requestOrdersLink({ store, email, ip, origin: ORIGIN }), "sent", email);
+    // At the answer: nothing asked of Stripe or the sender, no grant, the same commands for both; the rest waits for after it.
+    assert.deepEqual([asked, mails, grants(), afterTasks.length], [0, 0, 0, 1], email);
+    atAnswer.push(shape());
+    await afterAnswers();
+    assert.ok(asked > 0, "the purchases are read after the answer");
+    assert.deepEqual([grants(), mails], has.length ? [1, 1] : [0, 0], email);
+  }
+  assert.deepEqual(atAnswer[0], atAnswer[1], "the same commands before the answer, whoever asked");
+  sessions = bought;
+  // Through the route: the page it leads to is answered before Stripe is asked, and the link is sent after it.
+  [asked, mails] = [0, 0];
+  const body = new URLSearchParams({ handle: "moss", email: BUYER });
+  const answer = await ordersRoute(new NextRequest(`${ORIGIN}/api/store/orders`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "192.0.2.3" }, body: body.toString() }));
+  assert.deepEqual([answer.status, answer.headers.get("location"), asked, mails], [303, `${ORIGIN}/@moss/orders?status=sent`, 0, 0]);
+  await afterAnswers();
+  assert.equal(mails, 1, "the link is emailed after the answer");
 });
 
 test("a link request reads for ORDERS_LINK_READ_MS at the most, so its grant and email fit in the route's time", () => {

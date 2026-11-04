@@ -29,6 +29,7 @@ import { readPreorder, soonOne } from "@/lib/preorders";
 import { isGroupJob } from "@/lib/group-buy";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
+import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -869,7 +870,10 @@ export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable
  * ORDERS_LINK_READ_MS at the most so the link's grant and its email still fit
  * in the route's maxDuration. "busy" when the store had no room for those
  * units: nothing was read, whatever the address. Once they are taken, the
- * answer is always "sent", for an address that bought and one that did not:
+ * answer is always "sent", and at once, for an address that bought and one
+ * that did not: what the address has is read, and its link made and emailed,
+ * only after the answer is sent (afterAnswer), so neither its words nor its
+ * time tell them apart;
  * a refusal from the meter, a reading that failed or ran out of time, and an
  * email that could not be sent (its figure used, its provider down) go only
  * to the server's log, since anything else would tell who bought here. The
@@ -895,13 +899,27 @@ export async function requestOrdersLink(input: {
   if (!(await within(addressKey(email), ADDRESS_LIMIT))) return "limited";
 
   if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return "busy";
-  // From here the answer is "sent" whatever happens: what failed is said only in the server's log.
-  try {
-    await sendLink(store, raw, email, origin);
-  } catch (error) {
-    if (!(error instanceof OrdersBusy)) console.error("sending a purchases link failed", error);
-  }
+  // From here the answer is "sent" whatever happens, and at once: the reading, the grant and the email run after it,
+  // so how long the answer takes does not tell an address that bought from one that did not. What failed is said only in the server's log.
+  afterAnswer(() => sendLink(store, raw, email, origin));
   return "sent";
+}
+
+/**
+ * Runs a link's reading, grant and email after the answer is sent, inside the
+ * route's maxDuration (ORDERS_OPEN_SECONDS; ORDERS_LINK_READ_MS bounds the
+ * reading); at once, unwaited, when there is no request to wait for.
+ */
+function afterAnswer(task: () => Promise<void>): void {
+  const run = () =>
+    task().catch((error) => {
+      if (!(error instanceof OrdersBusy)) console.error("sending a purchases link failed", error);
+    });
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 /** Reads what the address has and, when it has anything, emails it the link; throws or logs what failed, never says it. */

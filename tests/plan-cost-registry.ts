@@ -74,7 +74,7 @@ import { MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/l
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { CLOSING_DAYS, DEL_BATCH, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
-import { MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
 import { BODIES_PER_READ } from "@/lib/course";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
@@ -98,8 +98,10 @@ import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
+import type { ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
-import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY } from "@/lib/agreement-rules";
+import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
+import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
@@ -234,30 +236,44 @@ export const NEXT_OFFER_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMAN
  */
 export const ASSIST_REMIND_READ = request("wait", ASSIST_REMIND_COMMANDS + TAKE_COMMANDS, 1_000_000 + ASSIST_REMIND_PRODUCTS * 16_384 + 4_096);
 /**
+ * The most one agreement's version may be as it is kept (lib/agreement-store.ts,
+ * readVersion reads it whole): its title, text and lines twice, once as typed
+ * and once inside the text a signature covers (agreementText), with the store's
+ * name, the person's name and address, and 2,000 characters for the text's own
+ * words, its amounts and the record's keys and numbers; every character at six
+ * bytes, what JSON makes of a lone surrogate or a control character (\uXXXX).
+ */
+export const AGREEMENT_VERSION_MOST =
+  6 * (2 * (AGREEMENT_TITLE + AGREEMENT_BODY + AGREEMENT_LINES * AGREEMENT_LINE_TEXT) + STORE_NAME_MOST + AGREEMENT_NAME + MAX_EMAIL_LENGTH + 2_000);
+/** Commands the orders page reads the store with (lib/store.ts, storeForPage): its handle and its record, MAX_STORE_BYTES at the most. */
+export const ORDERS_STORE_COMMANDS = 2;
+/**
  * What one opening of a buyer's orders page costs besides its metered reads
  * (app/[handle]/orders/page.tsx, lib/buyer-orders.ts openOrders), at the most:
  * the call; the page held at 2 GB for ORDERS_OPEN_SECONDS, its maxDuration,
  * which bounds every call to the creator's Stripe account it waits on however
  * many (the buyer's checkouts under both spellings of the address, the
  * payments after them, a payment plan's invoice, the store's bookings), and a
- * quarter of it in CPU, the heavy shape's share (SHAPES); its
- * ORDERS_OPEN_COMMANDS; what waits on the buyer through the database (every
- * agreement and payment request kept for the address at 16 KB, and the text
- * of each agreement shown at four bytes a character); and the page sent on at
- * ORDERS_PAGE_BYTES, the most a page drawn at every limit of the store sends
- * now that a bundle's products are read only when asked for
- * (tests/orders-page-bounds.test.ts; 2 MB until C3-80, when forty purchases of
- * four full bundles drew 14.19 MB). Counted
- * as ORDERS_OPEN_UNITS public requests taken before anything is read; every
- * read past it is a command of the meter, priced at ORDERS_METERED_COMMAND
- * (tests/plan-cost-registry.test.ts holds both).
+ * quarter of it in CPU, the heavy shape's share (SHAPES); the store read
+ * (ORDERS_STORE_COMMANDS, its record at MAX_STORE_BYTES), the units' own
+ * taking (TAKE_COMMANDS) and its ORDERS_OPEN_COMMANDS; what waits on the buyer
+ * through the database (every agreement and payment request kept for the
+ * address at 16 KB, and each agreement shown read whole, as one kept before
+ * its mark held its title is, at AGREEMENT_VERSION_MOST); and the page sent on
+ * at ORDERS_PAGE_BYTES, the most a page drawn at every limit of the store
+ * sends now that a bundle's products are read only when asked for
+ * (tests/orders-page-bounds.test.ts; 2 MB until C3-80, when forty purchases
+ * of four full bundles drew 14.19 MB).
+ * Counted as ORDERS_OPEN_UNITS public requests taken before anything is read;
+ * every read past it is a command of the meter, priced at
+ * ORDERS_METERED_COMMAND (tests/plan-cost-registry.test.ts holds both).
  */
 export const ORDERS_OPEN_READ =
   CALL
   + ORDERS_OPEN_SECONDS * MEMORY_SECOND
   + (ORDERS_OPEN_SECONDS / 4) * CPU_SECOND
-  + ORDERS_OPEN_COMMANDS * COMMAND
-  + ((AGREEMENTS_PER_PERSON + REQUESTS_PER_PERSON) * 16_384 + WAITING_SHOWN * 4 * AGREEMENT_BODY) * DB_BYTE
+  + (ORDERS_STORE_COMMANDS + TAKE_COMMANDS + ORDERS_OPEN_COMMANDS) * COMMAND
+  + (MAX_STORE_BYTES + (AGREEMENTS_PER_PERSON + REQUESTS_PER_PERSON) * 16_384 + WAITING_SHOWN * AGREEMENT_VERSION_MOST) * DB_BYTE
   + ORDERS_PAGE_BYTES * ORIGIN_PER_BYTE;
 /**
  * What one download's lookup of its purchase costs besides its metered reads
@@ -323,6 +339,21 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };
+/**
+ * An API reading that reads more than its request pays for (lib/api-read-rules.ts:
+ * a course's students, the affiliates, the bookings) takes further API requests
+ * for its work before it reads. What that work costs: each command; each byte
+ * read from the database and each byte sent on; each page of a Stripe list
+ * waited on EXPORT_PAGE_SECONDS at 2 GB with its hundred rows parsed; and each
+ * trip to the database waited on one after another, at ROUND_TRIP_SECONDS (a
+ * review ceiling far above a trip inside one region). Held under the units it
+ * takes, at every size, in tests/plan-cost-registry.test.ts.
+ */
+export const ROUND_TRIP_SECONDS = 0.25;
+export const STRIPE_LIST_PAGE = EXPORT_PAGE_SECONDS * MEMORY_SECOND + 0.1 * CPU_SECOND;
+export function apiReadCost(w: ReadWork): number {
+  return w.commands * COMMAND + w.bytes * DB_BYTE + w.sent * ORIGIN_PER_BYTE + w.stripePages * STRIPE_LIST_PAGE + w.roundTrips * ROUND_TRIP_SECONDS * MEMORY_SECOND;
+}
 /** A store figure in full, in dollars, for a plan or for a store that pays nothing. */
 export function figureCost(allowances: Record<AllowanceKind, number>, kind: AllowanceKind): number {
   return allowances[kind] * UNIT_COST[kind];
@@ -639,7 +670,7 @@ export const COST_LINES: CostLine[] = [
       // before it reads, its meter the rest before each read, and the store's "too many" answer without room (C3-78, MR, 4 November 2026).
       // A download from it reads only the purchase asked for, by its reference: DOWNLOAD_LOOKUP_UNITS before the grant, and only the
       // listings it hands over through the meter, never read again (DOWNLOAD_LOOKUP_READ in tests/plan-cost-registry.test.ts).
-      { file: "lib/buyer-orders.ts", names: ["export async function requestOrdersLink", "withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS)", "await sendLink(store, raw, email, origin)", "export async function findPurchase", "takePublicRequest(store, \"buyer\", Date.now(), DOWNLOAD_LOOKUP_UNITS)", "withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS)", "DOWNLOAD_LOOKUP_MS)) as Row", "await meter.take(Number(count) || 0)", "const find = finderFor(store, meter)", "function onlyFinder(store: Store, meter: OrdersMeter)"] },
+      { file: "lib/buyer-orders.ts", names: ["export async function requestOrdersLink", "withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS)", "afterAnswer(() => sendLink(store, raw, email, origin))", "export async function findPurchase", "takePublicRequest(store, \"buyer\", Date.now(), DOWNLOAD_LOOKUP_UNITS)", "withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS)", "DOWNLOAD_LOOKUP_MS)) as Row", "await meter.take(Number(count) || 0)", "const find = finderFor(store, meter)", "function onlyFinder(store: Store, meter: OrdersMeter)"] },
       { file: "lib/buyer-orders-rules.ts", names: ["DOWNLOAD_LOOKUP_UNITS", "DOWNLOAD_LOOKUP_MS", "DOWNLOAD_LOOKUP_COMMANDS", "ORDERS_LINK_READ_MS"] },
       { file: "app/api/store/orders/route.ts", names: ["export const maxDuration = 30", "requestOrdersLink", "if (result === \"busy\") return tooMany();"] },
       { file: "app/api/store/download/route.ts", names: ["findPurchase(store, token", "if (error instanceof OrdersBusy) return tooOften();", "const item = await listing(line.productId);", "const owner = await listing(bumped ? bumped.id : purchase.productId);"] },
@@ -695,8 +726,12 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "API_WRITE_UNITS"] },
       { file: "lib/api-guard.ts", names: ["takeAllowance", "API_RATE"] },
       { file: "lib/api-write.ts", names: ["ADDS_PER_DAY", "GIVES_PER_DAY", "monthly_limit"] },
+      // A course's students, the affiliates and the bookings take further requests for what they read, before reading it (4 November 2026).
+      { file: "lib/api-read-rules.ts", names: ["API_UNIT_COMMANDS", "API_UNIT_BYTES", "API_UNIT_SENT_BYTES", "API_UNIT_STRIPE_PAGES", "API_UNIT_ROUND_TRIPS", "studentsPageWork", "bookWork", "bookingsWork"] },
+      { file: "lib/api-read.ts", names: ["studentPage", "chargeBook", "bookingsWork"] },
+      { file: "lib/mcp-tools.ts", names: ["chargeBook"] },
     ],
-    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs (held below). The per-minute and daily limits only spread them.",
+    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs (held below). A reading that reads more than a page (a course's students, the affiliates, the bookings) takes further requests for its work before it reads, each priced above what it pays for at every size (apiReadCost, held below); refused, nothing more is read. The per-minute and daily limits only spread them.",
   },
   {
     id: "inbox",

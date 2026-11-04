@@ -45,8 +45,11 @@ const SWITCHABLE = new Set(["active", "trialing"]);
 /** A preview is honored for this long, so a member who reads it slowly pays what they read. */
 export const PREVIEW_SECONDS = 15 * 60;
 
-const priceKey = (account: string, product: Listing, currency: string) =>
-  `nl:tier:price:${account}:${product.id}:${product.priceCents}:${currency}:${product.recurring?.interval ?? ""}`;
+/** How a price made here treats tax, as checkout's own price data does (lib/tax.ts, applyTax): none when tax is off. */
+const taxMode = (store: Store): "inclusive" | "exclusive" | "" => (store.tax.enabled ? (store.tax.included ? "inclusive" : "exclusive") : "");
+/** One cached price per product, amount, currency, interval and tax treatment: a price's tax behavior never changes. */
+const priceKey = (account: string, product: Listing, currency: string, tax: string) =>
+  `nl:tier:price:${account}:${product.id}:${product.priceCents}:${currency}:${product.recurring?.interval ?? ""}${tax ? `:${tax}` : ""}`;
 
 /** The tiers members can switch between today: still memberships, still on sale. */
 export async function liveTiers(store: Store): Promise<Listing[]> {
@@ -93,7 +96,7 @@ export function choicesFor(store: Store, membership: Membership, tiers: Listing[
 
 /** The price a tier is switched onto, as Stripe is sent it: it names the product it hands over. */
 export function tierPriceBody(store: Store, product: Listing): URLSearchParams {
-  return new URLSearchParams({
+  const body = new URLSearchParams({
     currency: store.currency,
     unit_amount: String(product.priceCents),
     "recurring[interval]": product.recurring?.interval ?? "month",
@@ -105,6 +108,11 @@ export function tierPriceBody(store: Store, product: Listing): URLSearchParams {
     "metadata[store]": store.handle,
     "metadata[made_by]": "nimbus-labs",
   });
+  // With Stripe Tax on, the price says whether tax is inside it or on top, as every checkout line does
+  // (lib/tax.ts, applyTax); a price left unspecified would be charged as the account's default, not the store's.
+  const tax = taxMode(store);
+  if (tax) body.set("tax_behavior", tax);
+  return body;
 }
 
 /** Stripe's preview of a switch, worked out at the second `at`. */
@@ -135,7 +143,7 @@ export function switchBody(itemId: string, price: string, at: number): URLSearch
 /** The price a tier is switched onto, made once on the creator's account and reused. */
 export async function tierPrice(store: Store, product: Listing): Promise<string> {
   const account = store.stripeAccountId as string;
-  const key = priceKey(account, product, store.currency);
+  const key = priceKey(account, product, store.currency, taxMode(store));
   const [cached] = await redisPipeline([["GET", key]]);
   if (typeof cached === "string" && PRICE_PATTERN.test(cached)) return cached;
   const made = await onAccount("POST", account, "/prices", tierPriceBody(store, product));
@@ -143,6 +151,13 @@ export async function tierPrice(store: Store, product: Listing): Promise<string>
   if (!PRICE_PATTERN.test(id)) throw new Error("Stripe returned no price");
   await redisPipeline([["SET", key, id, "EX", 400 * 86_400]]);
   return id;
+}
+
+/** The cached price of a tier dropped, when Stripe says it no longer has or sells it: the next use makes a new one. */
+export async function forgetTierPrice(store: Store, product: Listing): Promise<void> {
+  const account = store.stripeAccountId;
+  if (!account) return;
+  await redisPipeline([["DEL", priceKey(account, product, store.currency, taxMode(store))]]);
 }
 
 export type Preview = {

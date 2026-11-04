@@ -508,19 +508,35 @@ const TLDS = new Set([
 ]);
 /** Names that end like a site but are a library or a technology. */
 const NOT_SITES = new Set(["socket.io", "asp.net", "ado.net", "vb.net"]);
-/** Top-level domains that are also words: written "It" before a space ("great.It helps"), the dot ends a sentence. */
-const WORD_TLDS = new Set(["it", "in", "me", "be", "at", "us", "no", "de", "es"]);
+/**
+ * Words of the store languages that start a sentence and are also top-level
+ * domains: written "Eu", "It", "Live" right after a dot with no space
+ * ("Uma aula.Eu gostei", "great.It's fun"), the dot ends a sentence. Only
+ * those of them in TLDS count (WORD_TLDS).
+ */
+const SENTENCE_WORDS = [
+  "me", "it", "in", "be", "at", "us", "no", "top", "live", "page", "fun", "art", "news", "online", "space", // English
+  "es", "se", "de", "la", "en", "el", "su", "mi", "si", // Spanish
+  "au", "ca", "ce", "ne", "tu", // French
+  "um", "so", "im", "an", // German
+  "io", "ci", "ma", // Italian
+  "net", "nu", "om", // Dutch
+  "eu", "ar", "um", "na", "do", // Portuguese
+];
+/** Top-level domains that are also such words (computed: SENTENCE_WORDS that are in TLDS). */
+const WORD_TLDS = new Set(SENTENCE_WORDS.filter((word) => TLDS.has(word)));
 /**
  * A bare domain ("cheap.shop", "Evil.Com", "evil.example/deal"): labels and
  * a dot, then a common top-level domain in any case, never a file or
  * library name ("logo.ai", "Node.js", "ASP.NET") nor a word that starts a
- * sentence after a dot ("great.It helps").
+ * sentence after a dot ("great.It helps", "lessons.Live sessions").
  */
 const DOMAIN = /(?<![\p{L}\p{N}@.\-])((?:[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?\.)+)([A-Za-z]{2,24})(?![\p{L}\p{N}])/gu;
 const sitesIn = (text: string) => {
   const normal = text.normalize("NFKC");
   return [...(/[.\uFF0E\u3002\uFE52]/u.test(text) ? normal.matchAll(DOMAIN) : [])]
-    .filter((m) => !(WORD_TLDS.has(m[2].toLowerCase()) && /^[A-Z][a-z]$/.test(m[2]) && normal[m.index + m[0].length] === " "))
+    // "Xx" only: a capitalized word, then anything but a path or another label (a space, an apostrophe, a line break, the end).
+    .filter((m) => !(WORD_TLDS.has(m[2].toLowerCase()) && /^[A-Z][a-z]+$/.test(m[2]) && !/^[/.]/.test(normal.slice(m.index + m[0].length))))
     .map((m) => ({ site: m[0].toLowerCase(), tld: m[2].toLowerCase() }))
     .filter(({ site, tld }) => TLDS.has(tld) && !NOT_SITES.has(site))
     .map(({ site }) => site);

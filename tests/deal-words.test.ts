@@ -165,7 +165,9 @@ is("more star ratings", caught(["\u22C6\u22C6\u22C6\u22C6\u22C6", "\u2B52", "\u{
 
 part("Seventh review: the vendored copy, its license, domains in any case, and look-alikes with a mark");
 is("the copy of confusables.txt is the one read on 4 November 2026", createHash("sha256").update(readFileSync("tooling/unicode/confusables-18.0.0.txt")).digest("hex"), "6ed3ee967c9dfdf6677d563c9985182fbc50a2efb7d6059cd57b2e2ce18f5b92");
-is("its license is beside it, and the generated table cites it", [readFileSync("tooling/unicode/LICENSE", "utf8").startsWith("UNICODE LICENSE V3"), readFileSync("lib/confusables-latin.ts", "utf8").includes("Unicode License v3 (tooling/unicode/LICENSE)")], [true, true]);
+is("its license is beside it, the one read from the same repository, and the generated table cites it", [
+  createHash("sha256").update(readFileSync("tooling/unicode/LICENSE")).digest("hex"), readFileSync("lib/confusables-latin.ts", "utf8").includes("Unicode License v3 (tooling/unicode/LICENSE)"),
+], ["fe5c62b543e287981db198f2acfa0ca732d12591a1024536dc8fd85dacd77104", true]);
 is("a domain in any case, or after a slash or an underscore, is refused", [
   heldToFacts("Visit Evil.Com today", probe), heldToFacts("Visit EVIL.COM today", probe), heldToFacts("See //evil.com/x", probe), heldToFacts("See /evil.com", probe), heldToFacts("See _evil.com", probe),
   heldToFacts("Visit Evil.Me/now", probe),
@@ -173,4 +175,15 @@ is("a domain in any case, or after a slash or an underscore, is refused", [
 is("a word that starts a sentence after a dot, and the library names, still pass", [heldToFacts("That was great.It helped.", probe), heldToFacts("Go there.In the morning.", probe), heldToFacts("Built with ASP.NET.", probe), heldToFacts("It uses socket.io.", probe)], [true, true, true, true]);
 is("a look-alike that confusables.txt reads as a letter with a mark is read as the letter", [heldToFacts("Use the \uABAF\uABBB\u13A0\u13AC.", deals), heldToFacts("Everything is o\u03B7 sale.", deals)], [false, false]);
 is("so the table has them", [table.get(0x03b7), table.get(0x13eb), table.get(0xabbb)], ["n", "o", "o"]);
+
+part("Final review: a sentence that starts right after a dot with a word that is also a domain ending");
+is("honest replies pass", [
+  heldToFacts("Uma aula.Eu gostei.", "Aula."), heldToFacts("Muito bom.Se quiser, pergunte.", "Aula."), heldToFacts("Twelve lessons.Live sessions too.", "Lessons."),
+  heldToFacts("Lessons.Top quality.", "Lessons."), heldToFacts("That was great.It's fun.", probe), heldToFacts("That was great.It\nhelps.", probe), heldToFacts("That was great.It", probe),
+  heldToFacts("Ottimo corso.Io lo consiglio.", "Corso."), heldToFacts("Goede cursus.Net als vorig jaar.", "Cursus."),
+], [true, true, true, true, true, true, true, true, true]);
+is("while a site in any case is still refused", [
+  heldToFacts("Visit Evil.Com today", probe), heldToFacts("Visit EVIL.COM today", probe), heldToFacts("See //evil.com/x", probe), heldToFacts("See /evil.com", probe),
+  heldToFacts("See _evil.com", probe), heldToFacts("Visit evil.eu today", probe), heldToFacts("Visit Evil.Eu/now", probe), heldToFacts("Visit EVIL.EU now", probe),
+], [false, false, false, false, false, false, false, false]);
 done();

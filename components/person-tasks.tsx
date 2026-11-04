@@ -1,12 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { toast } from "@/components/toast";
-import { MAX_PERSON_TASKS, MAX_TASK_TEXT, type PersonTask } from "@/lib/person-tasks";
+import { MAX_PERSON_TASKS, MAX_TASK_TEXT, type PersonTask, dayIn } from "@/lib/person-tasks";
 
 /** A calendar date as words, read as the date it is, never moved through a time zone. */
 function dayWords(day: string): string {
   return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+}
+
+/** The day it is where this browser is: the creator's own day, not the server's. */
+export function browserDay(nowMs = Date.now()): string {
+  return dayIn(nowMs, Intl.DateTimeFormat().resolvedOptions().timeZone);
+}
+
+const noSubscription = () => () => {};
+
+/**
+ * The creator's own day for comparing tasks' dates. The server's page is
+ * drawn with `serverDay` (the server cannot know the creator's time zone);
+ * once in the browser, React draws again with the browser's day, so a task
+ * due today in Fortaleza at 22:30 is due today there, not past, and the
+ * first drawing never mismatches the server's.
+ */
+export function useCreatorDay(serverDay: string): string {
+  return useSyncExternalStore(noSubscription, () => browserDay(), () => serverDay);
 }
 
 /**
@@ -16,7 +34,8 @@ function dayWords(day: string): string {
  * words as well as by the line, until they are removed. Seen by whoever may
  * read orders, as the notes are.
  */
-export function PersonTasks({ person, initial, assignees, today }: { person: string; initial: PersonTask[]; assignees: string[]; today: string }) {
+export function PersonTasks({ person, initial, assignees, today: serverDay }: { person: string; initial: PersonTask[]; assignees: string[]; /** The server's day, for its own drawing; the browser's day takes over. */ today: string }) {
+  const today = useCreatorDay(serverDay);
   const [tasks, setTasks] = useState(initial);
   const [text, setText] = useState("");
   const [due, setDue] = useState("");

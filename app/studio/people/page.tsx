@@ -16,8 +16,9 @@ import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
 import { readAllTasks, readFields, readPersonTasks, readValues } from "@/lib/crm";
-import { PERSON_KEY, addressForPerson, agendaGroups, personAddresses } from "@/lib/person-agenda";
-import { type PersonTask, tasksDue } from "@/lib/person-tasks";
+import { PERSON_KEY, addressForPerson, agendaForDays, daysAround, personAddresses } from "@/lib/person-agenda";
+import type { PersonTask } from "@/lib/person-tasks";
+import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
 import type { CrmField } from "@/lib/crm-rules";
 import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken } from "@/lib/buyer-profile";
@@ -181,11 +182,6 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   );
 }
 
-/** A calendar date as words, read as the date it is, never moved through a time zone. */
-function dayWords(date: string): string {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
-}
-
 function TasksAgendaWaiting() {
   return (
     <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8" aria-busy="true">
@@ -197,17 +193,17 @@ function TasksAgendaWaiting() {
 
 /**
  * Everyone's open tasks (lib/person-tasks.ts), past their date first, each
- * opening the page of the person it is about (lib/person-agenda.ts).
+ * opening the page of the person it is about (lib/person-agenda.ts). The
+ * server knows only its own (UTC) day, so the groups are made for each day
+ * the creator's may be and the browser shows its own (components/tasks-agenda.tsx).
  */
 async function TasksAgenda({ store }: { store: Store }) {
   const today = new Date().toISOString().slice(0, 10);
-  const read = await readAllTasks(store.statsId)
-    .then((tasks) => tasksDue(tasks, today))
-    .catch((error) => {
-      console.error("reading the tasks agenda failed", error);
-      return null;
-    });
-  if (!read) {
+  const all = await readAllTasks(store.statsId).catch((error) => {
+    console.error("reading the tasks agenda failed", error);
+    return null;
+  });
+  if (!all) {
     return (
       <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
@@ -215,47 +211,28 @@ async function TasksAgenda({ store }: { store: Store }) {
       </section>
     );
   }
-  const groups = agendaGroups(read, new Map());
-  const persons = new Set(groups.flatMap((group) => group.rows.map((row) => row.person)));
+  const agenda = agendaForDays(all, daysAround(today));
+  // Only the people of the tasks shown, on any of those days, are looked up.
+  const persons = new Set(agenda.rows.map((row) => row.person));
   const found = await personAddresses(store, persons).catch((error) => {
     console.error("reading the agenda's buyers failed", error);
     return null;
   });
-  const shown = agendaGroups(read, found?.addresses ?? new Map());
-  const open = read.overdue.length + read.today.length + read.upcoming.length + read.undated.length;
+  const rows = agenda.rows.map((row) => {
+    const email = found?.addresses.get(row.person) ?? null;
+    return { ...row, email, href: email ? studioPath(store, `who=${row.person}`, "people") : "" };
+  });
+  const open = all.filter((entry) => !entry.task.done).length;
   return (
     <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
       <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
       <p className="mt-2 text-sm text-ink-soft">
         {open
-          ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to tick one off or change it.`
+          ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to mark one done or change it.`
           : "No open tasks. Add one on a person's page, under Tasks."}
       </p>
       {!found && open ? <p className="notice notice-warn mt-4">Stripe could not be read just now, so who each task is about is not shown. Try again in a moment.</p> : null}
-      {shown.map((group) => (
-        <div key={group.key} className="mt-6">
-          <h3 className="text-base font-semibold text-ink">{`${group.title} (${group.rows.length + group.more})`}</h3>
-          <ul className="mt-2 divide-y divide-line">
-            {group.rows.map((row) => (
-              <li key={`${row.person}:${row.task.id}`} className="py-3 text-sm">
-                <p className="text-ink [overflow-wrap:anywhere]">{row.task.text}</p>
-                <p className="mt-1 text-xs text-ink-soft">
-                  {row.task.due ? (row.task.due < today ? `Was due ${dayWords(row.task.due)}` : `Due ${dayWords(row.task.due)}`) : "No date"}
-                  {row.task.assignee ? ` · ${row.task.assignee}` : " · Nobody named"}
-                </p>
-                {row.email ? (
-                  <Link href={studioPath(store, `who=${row.person}`, "people")} className="mt-1 inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
-                    {row.email}
-                  </Link>
-                ) : found ? (
-                  <p className="mt-1 text-xs text-ink-soft">{`About someone not among the buyers read from your Stripe account${found.partial ? " (the oldest are not read)" : ""}: find them by their address above.`}</p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          {group.more ? <p className="mt-2 text-sm text-ink-soft">{`And ${group.more} more ${group.more === 1 ? "task" : "tasks"} in this group, shown as the first ones are done.`}</p> : null}
-        </div>
-      ))}
+      <TasksAgendaList rows={rows} days={agenda.days} serverDay={today} found={found ? { partial: found.partial } : null} />
     </section>
   );
 }

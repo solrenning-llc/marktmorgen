@@ -1,5 +1,5 @@
 import { personKey } from "@/lib/person-key";
-import type { DueTask } from "@/lib/person-tasks";
+import { type DueTask, tasksDue } from "@/lib/person-tasks";
 import { buyerLedger } from "@/lib/segments";
 import type { Store } from "@/lib/store";
 
@@ -64,4 +64,42 @@ export function agendaGroups(due: { overdue: DueTask[]; today: DueTask[]; upcomi
       rows: due[key].slice(0, AGENDA_SHOWN).map((entry) => ({ ...entry, email: addresses.get(entry.person) ?? null })),
       more: Math.max(0, due[key].length - AGENDA_SHOWN),
     }));
+}
+
+/**
+ * The days the creator's own may be when the server's (UTC) is `day`: the
+ * one before, itself and the one after, since every time zone is within a
+ * day of UTC (UTC-12 to UTC+14).
+ */
+export function daysAround(day: string): string[] {
+  const at = Date.parse(`${day}T00:00:00Z`);
+  return [-1, 0, 1].map((n) => new Date(at + n * 86_400_000).toISOString().slice(0, 10));
+}
+
+/** One day's group, its rows given by their place in the agenda's list. */
+export type AgendaDayGroup = { key: AgendaGroup["key"]; title: string; rows: number[]; more: number };
+
+/**
+ * The agenda for each of these days (daysAround), so the browser shows the
+ * one for the creator's own day (components/tasks-agenda.tsx) and a task due
+ * today in Fortaleza at 22:30 is due today, not past. Each task is listed
+ * once; the groups point at it by place.
+ */
+export function agendaForDays(entries: readonly DueTask[], days: readonly string[]): { rows: DueTask[]; days: Record<string, AgendaDayGroup[]> } {
+  const rows: DueTask[] = [];
+  const places = new Map<string, number>();
+  const placeOf = (entry: DueTask) => {
+    const key = `${entry.person}:${entry.task.id}`;
+    let place = places.get(key);
+    if (place === undefined) {
+      place = rows.push({ person: entry.person, task: entry.task }) - 1;
+      places.set(key, place);
+    }
+    return place;
+  };
+  const byDay: Record<string, AgendaDayGroup[]> = {};
+  for (const day of days) {
+    byDay[day] = agendaGroups(tasksDue(entries, day), new Map()).map((group) => ({ key: group.key, title: group.title, rows: group.rows.map(placeOf), more: group.more }));
+  }
+  return { rows, days: byDay };
 }

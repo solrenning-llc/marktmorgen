@@ -19,6 +19,7 @@ import {
   holdGoodUntil,
   keptOnCharge,
   keptOnMove,
+  linkTried,
   afterMove as recordAfterMove,
   readCapture,
   startAttempt,
@@ -421,6 +422,28 @@ is("no heldAt: refunded to a buyer stopping in time, never kept on its creation 
 
 part("The creator is never told a charge happened before it did");
 is("being charged, not charged", seriesMoveMessage("en", "creator", "charged_now", moveInput).includes("so the buyer is being charged now."), true);
+
+part("Which plan a failed PaymentIntent belongs to, on our own clock");
+// Stripe's created is in whole seconds; charge.at and attemptAt carry milliseconds.
+const secs = (ms: number) => Math.floor(ms / 1000) * 1000;
+const insideMs = sessionCharge(2, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW + 500, "buyer");
+const declinedNow = rec(2, "requires_payment_method", { attempt: 2, attemptAt: NOW + 500, attemptBody: body }, { heldAt: null, capture: "automatic", created: secs(NOW + 500), attempt: 2 });
+is("(A) the charge after a buyer's move declined in the same second: its link stands, never a third attempt", chargeAttempt(SER, declinedNow, [], go(insideMs, NOW + 1500)), { do: "reuse", id: "pi_2", close: [] });
+const bookedMs = BOOKED + 250;
+const firstMs = sessionCharge(0, bookedMs + 50 * HOUR, bookedMs, 8000, 48);
+const firstDeclined = rec(0, "requires_payment_method", { attempt: 1, attemptAt: bookedMs, attemptBody: { ...body, capture_method: "manual" } }, { heldAt: null, capture: "manual", created: secs(bookedMs), attempt: 1 });
+is("(B) a first session's hold declined at booking: after its deadline, never charged off-session", chargeAttempt(SER, firstDeclined, [], go(firstMs, firstMs.captureAt + HOUR)), { do: "reuse", id: "pi_0", close: [] });
+// Moved an hour after the hold was declined, to 58 hours away: its new deadline 10 hours ahead, the hold due at once.
+const movedAtB2 = held.at + HOUR;
+const movedNear = sessionCharge(2, movedAtB2 + 58 * HOUR, BOOKED, 8000, 48, movedAtB2, "buyer");
+const holdDeclined = rec(2, "requires_payment_method", { attempt: 1, attemptAt: held.at, attemptBody: { ...body, capture_method: "manual" } }, { heldAt: null, created: held.at, attempt: 1 });
+is("(B2) a declined hold, then moved to less than a day before its new deadline: after that deadline, never charged off-session", [movedNear.way, chargeAttempt(SER, holdDeclined, [], go(movedNear, movedNear.captureAt + HOUR)), mc(movedNear, holdDeclined, movedAtB2 + 58 * HOUR, 48, movedAtB2)], ["hold", { do: "reuse", id: "pi_2", close: [] }, "pay_by_link"]);
+
+part("The pay link's tries are counted");
+is("linkTried counts each link asked for, and MAX_LINK_TRIES of them stop the next", [linkTried(linkTried(rec(2, null))).tries, chargeAttempt(SER, linkTried(linkTried(linkTried(sent({ attemptAt: held.at, attemptFailed: true })))), [], go())], [{ "link:2": 2 }, { do: "report", why: "link_failed", ids: [] }]);
+
+part("Spanish dates read right");
+is("the date after a colon, never \"a el\"; \"a más tardar\", never \"hasta\" for a last moment", [seriesMoveMessage("es", "buyer", "planned", { ...moveInput, date: "el viernes 20 de noviembre a las 9:00", by: "buyer" }).startsWith("Moviste tu sesión al nuevo horario: el viernes"), seriesMoveMessage("es", "buyer", "pay_by_link", moveInput).includes("a más tardar"), (["buyer", "creator"] as const).some((to) => (["paid_refundable_until", "pay_by_link"] as const).some((w) => seriesMoveMessage("es", to, w, moveInput).includes(" hasta ")))], [true, true, false]);
 
 part("Not with a deposit, a code or a package");
 is("refused, each said", [seriesBillingProblem({ deposit: true, code: false, fromPackage: false }), seriesBillingProblem({ deposit: false, code: true, fromPackage: false }), seriesBillingProblem({ deposit: false, code: false, fromPackage: true }), seriesBillingProblem({ deposit: false, code: false, fromPackage: false })], ["deposit", "code", "package", null]);

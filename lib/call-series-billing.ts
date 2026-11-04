@@ -353,7 +353,11 @@ export type IntentStatus = "requires_payment_method" | "requires_confirmation" |
  * A session's PaymentIntent as last read: `capture` its capture_method
  * (manual for a hold), `created` its creation, `heldAt` its latest charge's
  * creation and `captureBefore` that charge's, when known; `attempt` the
- * attempt it was created under (its metadata mm_attempt).
+ * attempt it was created under (its metadata mm_attempt). Every time here
+ * is in milliseconds: Stripe gives created, latest_charge.created and
+ * capture_before in whole seconds, so the next unit multiplies them by
+ * 1000. Being truncated, they never decide which plan a PaymentIntent
+ * belongs to: the attempt and our own attemptAt do.
  */
 export type Intent = { id: string; status: IntentStatus; capture: "manual" | "automatic"; created: number; heldAt: number | null; captureBefore: number | null; attempt: number | null };
 
@@ -442,6 +446,12 @@ export function readCapture(raw: string): "manual" | "automatic" {
 
 /** Parameters Stripe accepts only with confirm=true (docs.stripe.com/api/payment_intents/create, read 4 November 2026). */
 export const CONFIRM_ONLY_KEYS = ["off_session", "return_url", "mandate", "error_on_requires_action"] as const;
+
+/** The record once a pay link's unconfirmed PaymentIntent was asked for: its count in tries ("link:<session>"), which MAX_LINK_TRIES caps. Call it with every "link" sent. */
+export function linkTried(record: ChargeRecord): ChargeRecord {
+  const key = `link:${record.index}`;
+  return { ...record, tries: { ...record.tries, [key]: (record.tries[key] ?? 0) + 1 } };
+}
 
 /** Most retries of the pay link's unconfirmed PaymentIntent after Stripe refused it for good; then the creator is told (chargeAttempt "report", link_failed). */
 export const MAX_LINK_TRIES = 3;
@@ -798,8 +808,9 @@ export function chargeAttempt(
   if (best && open) {
     // A failed one from an earlier plan (the session moved later): canceled, and the session planned again at its time.
     if (input.now < input.charge.at) return { do: "wait", at: input.charge.at, close: close([]) };
-    // From an earlier plan, and the new plan is not what it was made for: charged now after the buyer moved the session inside its deadline (whatever failed before), or a hold now where a charge failed: canceled, and made as the plan says.
-    if (best.created < input.charge.at && (buyerInside(input.charge) || best.capture !== capture)) return { do: "create", attempt, key: chargeKey(series.id, record.index, attempt), capture, close: close([]) };
+    // From an earlier plan, read on our own clock (the attempt it belongs to and when that attempt started, never Stripe's created, in whole seconds), and the new plan is not what it was made for: charged now after the buyer moved the session inside its deadline (whatever failed before), or a hold now where a charge failed. Never a failed hold turned into a charge otherwise: its link and its "canceled, not charged" stand.
+    const earlier = best.attempt !== record.attempt || record.attemptAt === null || record.attemptAt < input.charge.at;
+    if (earlier && (buyerInside(input.charge) || (best.capture === "automatic" && capture === "manual"))) return { do: "create", attempt, key: chargeKey(series.id, record.index, attempt), capture, close: close([]) };
   }
   if (best) return { do: "reuse", id: best.id, close: close([best.id]) };
   if (input.now < input.charge.at) return { do: "wait", at: input.charge.at, close: close([]) };
@@ -1065,7 +1076,7 @@ export function moveCase(series: SeriesKey, record: ChargeRecord, found: readonl
     if (buyerInside(charge)) return at("charged_now");
     if (charge.at > movedAt) return at("planned");
     const want = charge.way === "hold" && movedAt < charge.captureAt ? "manual" : "automatic";
-    if (best.capture !== want) return creatorInside ? at("held_until_start") : at("planned");
+    if (best.capture === "automatic" && want === "manual") return creatorInside ? at("held_until_start") : at("planned");
     const step = best.capture === "manual" ? "hold" : "charge";
     return at("pay_by_link", payBy(start, creatorInside ? 0 : deadlineHours, step));
   }

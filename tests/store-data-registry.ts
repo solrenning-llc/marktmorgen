@@ -652,6 +652,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pk:auth:@lib/passkeys.ts": company("A passkey sign-in", "An account's, minutes."),
   "nl:pk:cred:@lib/passkeys.ts": company("A passkey's credential", "An account's."),
   "nl:pk:drop:@lib/passkeys.ts": company("Passkeys waiting to be removed", "An account's, the wait and thirty days."),
+  "nl:pk:lock:@lib/passkeys.ts": company("An account's passkeys being changed", "An account's, seconds."),
   "nl:pk:reg:@lib/passkeys.ts": company("A passkey being added", "An account's, minutes."),
   "nl:pwyw:@lib/pay-what-you-want.ts": short("A price made for a pay-what-you-want amount: at most one an order, a year", "order", 365, KEY),
   "nl:agree:r:@lib/agreement-store.ts": room("A proposal or agreement: who it is for, each version's fingerprint and signature; counted with room for its signatures and its two index entries before it is written, until it goes by itself (recordRoomBytes)", "lib/agreement-store.ts"),

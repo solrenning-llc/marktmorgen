@@ -23,9 +23,13 @@ export function makePasskey(email: string, id: string) {
   const record = { id, publicKey: cose.toString("base64url"), counter: 0, transports: ["internal"], name: "Phone", createdAt: "", lastUsedAt: "", synced: true };
   let counter = 0;
   return {
+    /** Kept beside the account's other passkeys, as adding one in the studio keeps it. */
     async keep() {
+      const list = `nl:pk:${hex(`nimbus-passkeys:${email}`).slice(0, 40)}`;
+      const [raw] = await redis.pipeline([["GET", list]]);
+      const before = typeof raw === "string" ? (JSON.parse(raw) as unknown[]) : [];
       await redis.pipeline([
-        ["SET", `nl:pk:${hex(`nimbus-passkeys:${email}`).slice(0, 40)}`, JSON.stringify([record])],
+        ["SET", list, JSON.stringify([...before, record])],
         ["SET", `nl:pk:cred:${hex(`nimbus-passkey-id:${id}`).slice(0, 40)}`, email],
       ]);
     },

@@ -174,7 +174,8 @@ async function main(): Promise<void> {
   is("the erase route itself refuses it, before anything is read or deleted", ((await erased.json()) as { error?: string }).error, "locked");
   const { POST: passkeyRoute } = await import("@/app/api/auth/passkey/route");
   const removedKey = await passkeyRoute(new NextRequest("https://marktmorgen.com/api/auth/passkey", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "remove", id: "a-passkey" }) }));
-  is("and a passkey cannot be taken away from the owner either", [removedKey.status, ((await removedKey.json()) as { error?: string }).error], [403, "locked"]);
+  // Not at once: a locked session may only ask for a removal that waits as long as its lock (tests/second-step-gate.test.ts), and none is asked for a passkey the account does not have.
+  is("and no passkey is taken away from the owner at once", [removedKey.status, ((await removedKey.json()) as { error?: string; removeOn?: number }).error], [404, "unknown"]);
   const { POST: twoStepRoute } = await import("@/app/api/auth/two-step/route");
   const tried = await twoStepRoute(new NextRequest("https://marktmorgen.com/api/auth/two-step", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "cancel" }) }));
   is("two-step login cannot be changed from it", [tried.status, ((await tried.json()) as { error?: string }).error], [403, "locked"]);

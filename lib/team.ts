@@ -205,7 +205,7 @@ export async function secondStepWay(email: string): Promise<SecondStepWay> {
 export const SECOND_STEP_WORDS: Readonly<Record<SecondStepWay, { title: string; body: string; action: string; href: string }>> = {
   passkey: {
     title: "Log in again with your passkey",
-    body: "You logged in with an emailed link. This store's owner asks everyone on the team to log in with a second step, and your passkey is one. Log in again with it to open the store. Anything you typed in another tab stays there: press Save again once you are back.",
+    body: "You logged in without your passkey or app code. This store's owner asks everyone on the team to log in with a second step, and your passkey is one. Log in again with it to open the store. Anything you typed in another tab stays there: press Save again once you are back.",
     action: "Log in with your passkey",
     href: "/signin",
   },

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { type PublicKeyCredentialCreationOptionsJSON, browserSupportsWebAuthn, startRegistration } from "@simplewebauthn/browser";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
+import { removalWhen } from "@/lib/removal-time";
 
 export type PasskeyRow = { id: string; name: string; createdAt: string; lastUsedAt: string; synced: boolean };
 
@@ -24,9 +25,7 @@ const MESSAGES: Record<string, string> = {
 
 type Answer = { ok?: boolean; error?: string; options?: unknown; passkeys?: PasskeyRow[]; removeOn?: number };
 
-function onDay(ms: number): string {
-  return new Date(ms).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
-}
+const onDay = removalWhen;
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -257,9 +256,11 @@ export function PasskeyManager({
       {blocked ? (
         <div className="mt-4 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line">
           <p className="text-sm text-ink-soft">{MESSAGES.second_step}</p>
-          <p className="mt-2 text-sm text-ink-soft">
-            {`Lost your passkey? Press Remove next to it. Because you did not log in with a passkey or an app code, it is removed after ${removalDays} days, and we email you now. Logging in with it before then keeps it. Once no passkey is left, you can add a new one here. Lost your authenticator app too? After the emailed link, the code page offers a way in that waits the same days.`}
-          </p>
+          {list.length ? (
+            <p className="mt-2 text-sm text-ink-soft">
+              {`Lost your passkey? Press Remove next to it. Because you did not log in with a passkey or an app code, it is removed after ${removalDays} days, and we email you now. Logging in with it before then keeps it. Once no passkey is left, you can add a new one here. Lost your authenticator app too? After the emailed link, the code page offers a way in that also waits ${removalDays} days; ask for the passkey's removal from there as well, and both waits run at the same time.`}
+            </p>
+          ) : null}
           <Link href="/signin?status=reauth" onClick={rememberReturn} className="btn btn-secondary mt-3">
             <Icon name="key" size={16} />
             Log in again with a passkey or a code

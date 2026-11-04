@@ -10,6 +10,8 @@ import { lockedUntil } from "@/lib/two-step";
 const MAX_BODY_BYTES = 16_000;
 /** Changes one account may make to its passkeys in an hour: each one emails the account. */
 const CHANGES_PER_HOUR = 30;
+/** Removals a session let in without its second step may ask for in an hour, on a count of its own: each emails the account. */
+const LOCKED_REMOVALS_PER_HOUR = 5;
 
 const ANSWERS: Record<string, number> = { expired: 400, invalid: 400, full: 409, taken: 409, unknown: 404, reauth: 403, second_step: 403 };
 
@@ -52,10 +54,24 @@ export async function POST(request: NextRequest) {
   }
 
   // A session let in without its second step cannot add a way in of its own, nor take one away from the owner
-  // (lib/two-step.ts): removing a passkey could lock the owner out, and it cannot be undone. Asked before
-  // the hourly count, so a locked session never spends the owner's own changes.
-  if ((body.action === "options" || body.action === "add" || body.action === "remove") && (await lockedUntil(session)) > 0) {
+  // at once (lib/two-step.ts): removing a passkey could lock the owner out, and it cannot be undone. Asked before
+  // the hourly count, so a locked session never spends the owner's own changes on them. It may only ask for a
+  // removal that waits (below), so somebody who lost the app and the passkey waits once, not twice.
+  const locked = (await lockedUntil(session)) > 0;
+  if ((body.action === "options" || body.action === "add") && locked) {
     return Response.json({ ok: false, error: "locked" }, { status: 403 });
+  }
+  if (body.action === "remove" && locked) {
+    if (!(await withinLimit("passkey-remove-locked", email, LOCKED_REMOVALS_PER_HOUR, 60 * 60))) {
+      return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+    }
+    try {
+      const at = await scheduleRemoval(email, typeof body.id === "string" ? body.id.slice(0, 1_400) : "");
+      return at === null ? Response.json({ ok: false, error: "unknown" }, { status: 404 }) : Response.json({ ok: true, removeOn: at });
+    } catch (error) {
+      console.error("asking for a passkey removal failed", error);
+      return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+    }
   }
   if (!(await withinLimit("passkey-change", email, CHANGES_PER_HOUR, 60 * 60))) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
@@ -88,7 +104,7 @@ export async function POST(request: NextRequest) {
         if (at === null) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         return Response.json({ ok: true, removeOn: at });
       }
-      if (!(await removePasskey(email, id))) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      if (!(await removePasskey(email, id, session))) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
       return Response.json({ ok: true });
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });

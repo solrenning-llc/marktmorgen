@@ -23,6 +23,7 @@
  *   nl:pk:drop:<hash>        passkeys a session without a second step asked to
  *                            remove, and the day they go (REMOVAL_DAYS later):
  *                            a login with a passkey or the app's code calls it off
+ *   nl:pk:lock:<hash>        the account's lock while its passkeys change, seconds
  *
  * A session opened with a passkey is the same session an emailed link opens
  * (lib/auth.ts), so "Log out of all devices" closes it like any other.
@@ -38,11 +39,13 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { normaliseEmail } from "@/lib/auth";
+import { dropSecondStep, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SITE_URL } from "@/lib/site-url";
 import { RESET_DAYS } from "@/lib/two-step";
+import { withLock } from "@/lib/redis-lock";
+import { removalWhen } from "@/lib/removal-time";
 
 /** Passkeys one account may hold. */
 export const MAX_PASSKEYS = 10;
@@ -70,6 +73,19 @@ const listKey = (email: string) => `nl:pk:${sha(`nimbus-passkeys:${normaliseEmai
 const credKey = (id: string) => `nl:pk:cred:${sha(`nimbus-passkey-id:${id}`).slice(0, 40)}`;
 const regKey = (session: string) => `nl:pk:reg:${sha(`nimbus-passkey-reg:${session}`).slice(0, 40)}`;
 const authKey = (nonce: string) => `nl:pk:auth:${sha(`nimbus-passkey-auth:${nonce}`).slice(0, 40)}`;
+const lockKey = (email: string) => `nl:pk:lock:${sha(`nimbus-passkey-lock:${normaliseEmail(email)}`).slice(0, 40)}`;
+
+/**
+ * Every read-change-write of an account's passkeys, and of the passkeys
+ * waiting to be removed, holds the account's lock (lib/redis-lock.ts): a
+ * sign-in writing its counter, a removal whose wait ran out, a request to
+ * remove and a login calling it off would otherwise each write back what they
+ * read, bringing back a passkey just removed or undoing a cancellation.
+ * Emails go after the lock is let go.
+ */
+function withPasskeys<T>(email: string, work: () => Promise<T>): Promise<T> {
+  return withLock(lockKey(email), 5, 4_000, work);
+}
 
 /** Reads a key and deletes it in one step, so a challenge answers once. */
 async function spend(key: string): Promise<string | null> {
@@ -208,24 +224,28 @@ export async function addPasskey(
   }
   if (!verified.verified) return { ok: false, reason: "invalid" };
 
-  const list = await listPasskeys(address);
-  if (list.length >= MAX_PASSKEYS) return { ok: false, reason: "full" };
   const { credential, credentialBackedUp } = verified.registrationInfo;
-  const [claimed] = await redisPipeline([["SET", credKey(credential.id), address, "NX"]]);
-  if (claimed === null) return { ok: false, reason: "taken" };
-
-  const now = new Date().toISOString();
-  const passkey: Passkey = {
-    id: credential.id,
-    publicKey: Buffer.from(credential.publicKey).toString("base64url"),
-    counter: credential.counter,
-    transports: (credential.transports ?? []).slice(0, 8),
-    name: rawName.replace(/\s+/g, " ").trim().slice(0, MAX_PASSKEY_NAME) || "Passkey",
-    createdAt: now,
-    lastUsedAt: "",
-    synced: credentialBackedUp,
-  };
-  await saveList(address, [...list, passkey]);
+  const kept = await withPasskeys(address, async (): Promise<AddResult> => {
+    const list = await listPasskeys(address);
+    if (list.length >= MAX_PASSKEYS) return { ok: false, reason: "full" };
+    const [claimed] = await redisPipeline([["SET", credKey(credential.id), address, "NX"]]);
+    if (claimed === null) return { ok: false, reason: "taken" };
+    const now = new Date().toISOString();
+    const made: Passkey = {
+      id: credential.id,
+      publicKey: Buffer.from(credential.publicKey).toString("base64url"),
+      counter: credential.counter,
+      transports: (credential.transports ?? []).slice(0, 8),
+      name: rawName.replace(/\s+/g, " ").trim().slice(0, MAX_PASSKEY_NAME) || "Passkey",
+      createdAt: now,
+      lastUsedAt: "",
+      synced: credentialBackedUp,
+    };
+    await saveList(address, [...list, made]);
+    return { ok: true, passkey: made };
+  });
+  if (!kept.ok) return kept;
+  const passkey = kept.passkey;
   await tell(address, "A passkey was added to your Marktmorgen account", `A passkey called “${headerText(passkey.name, 60)}” was added to your Marktmorgen account (${address}). It can now log in to your studio.`);
   return { ok: true, passkey };
 }
@@ -259,65 +279,92 @@ async function readDrop(email: string): Promise<PendingRemoval | null> {
 }
 
 /**
- * Asked by a session opened without a second step: the passkey is removed
- * REMOVAL_DAYS after the first such request (asking again does not move the
- * day), and the account is told now. Answers the day, or null when the
- * account has no such passkey.
+ * Asked by a session opened without a second step (an emailed link, Google,
+ * a recovery address, an invite, a session from before the mark, or one let
+ * in without the second step: lib/two-step.ts enterLocked, so its wait and
+ * this one run side by side): the passkey is removed REMOVAL_DAYS after the
+ * first such request (asking again does not move the day), and the account
+ * is told now. Answers the moment, or null when the account has no such passkey.
  */
 export async function scheduleRemoval(email: string, id: string, now = Date.now()): Promise<number | null> {
   const address = normaliseEmail(email);
-  const list = await listPasskeys(address);
-  const row = list.find((p) => p.id === id);
-  if (!row) return null;
-  const before = await readDrop(address);
-  const at = before?.at ?? now + REMOVAL_DAYS * 86_400_000;
-  const ids = [...new Set([...(before?.ids ?? []), id])];
-  const seconds = Math.max(60, Math.ceil((at - now) / 1000) + 30 * 86_400);
-  await redisPipeline([["SET", dropKey(address), JSON.stringify({ ids, at }), "EX", seconds]]);
-  const day = new Date(at).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const asked = await withPasskeys(address, async () => {
+    const row = (await listPasskeys(address)).find((p) => p.id === id);
+    if (!row) return null;
+    const before = await readDrop(address);
+    const at = before?.at ?? now + REMOVAL_DAYS * 86_400_000;
+    const ids = [...new Set([...(before?.ids ?? []), id])];
+    const seconds = Math.max(60, Math.ceil((at - now) / 1000) + 30 * 86_400);
+    await redisPipeline([["SET", dropKey(address), JSON.stringify({ ids, at }), "EX", seconds]]);
+    return { at, name: row.name };
+  });
+  if (!asked) return null;
   await tell(
     address,
     "A passkey is set to be removed from your Marktmorgen account",
-    `Somebody who logged in to your Marktmorgen account (${address}) with an emailed link, not with a passkey or an app code, asked to remove the passkey called “${headerText(row.name, 60)}”. It will be removed on ${day}. Logging in with any of your passkeys or your app's code before then calls this off.`,
+    `Somebody logged in to your Marktmorgen account (${address}) without a passkey or an app code and asked to remove the passkey called “${headerText(asked.name, 60)}”. It will be removed on ${removalWhen(asked.at)}. Logging in with any of your passkeys or your app's code before then calls this off.`,
   );
-  return at;
+  return asked.at;
 }
 
 /**
- * The passkeys waiting to be removed, after removing those whose day has
+ * The passkeys waiting to be removed, after removing those whose moment has
  * come; null when none wait. Read before anything asks whether the account
  * has a second step, so a removal that has waited its days counts at once.
+ * The sessions those passkeys opened are logged out with them.
  */
 export async function pendingRemoval(email: string, now = Date.now()): Promise<PendingRemoval | null> {
   const address = normaliseEmail(email);
   const pending = await readDrop(address);
   if (!pending) return null;
   if (now < pending.at) return pending;
-  const list = await listPasskeys(address);
-  const gone = list.filter((p) => pending.ids.includes(p.id));
-  await saveList(address, list.filter((p) => !pending.ids.includes(p.id)));
-  await redisPipeline([["DEL", dropKey(address), ...gone.map((p) => credKey(p.id))]]);
-  if (gone.length) await tell(address, "Passkeys were removed from your Marktmorgen account", `${gone.map((p) => `“${headerText(p.name, 60)}”`).join(", ")} ${gone.length === 1 ? "was" : "were"} removed from your Marktmorgen account (${address}) after the wait. ${gone.length === 1 ? "It cannot" : "They cannot"} log in anymore. You can add a new passkey in your studio.`);
+  const gone = await withPasskeys(address, async () => {
+    const again = await readDrop(address);
+    if (!again || now < again.at) return null;
+    const list = await listPasskeys(address);
+    const removed = list.filter((p) => again.ids.includes(p.id));
+    await saveList(address, list.filter((p) => !again.ids.includes(p.id)));
+    await redisPipeline([["DEL", dropKey(address), ...removed.map((p) => credKey(p.id))]]);
+    return removed;
+  });
+  if (gone === null) return readDrop(address);
+  if (gone.length) {
+    const ids = gone.map((p) => `passkey:${p.id}`);
+    await dropSecondStep(address, (mark) => ids.includes(mark));
+    await tell(address, "Passkeys were removed from your Marktmorgen account", `${gone.map((p) => `“${headerText(p.name, 60)}”`).join(", ")} ${gone.length === 1 ? "was" : "were"} removed from your Marktmorgen account (${address}) after the wait. ${gone.length === 1 ? "It cannot" : "They cannot"} log in anymore. You can add a new passkey in your studio.`);
+  }
   return null;
 }
 
-/** A login with a passkey or the app's code: whatever waited to be removed stays. True when something did. */
+/** A login with a passkey or the app's code, or Cancel in the studio: whatever waited to be removed stays. True when something did. */
 export async function cancelRemoval(email: string): Promise<boolean> {
   const address = normaliseEmail(email);
-  if (!(await readDrop(address))) return false;
-  await redisPipeline([["DEL", dropKey(address)]]);
-  await tell(address, "Your passkeys stay on your Marktmorgen account", `Your account (${address}) was just logged in with a passkey or an app code, so the passkeys that were set to be removed stay.`);
-  return true;
+  const called = await withPasskeys(address, async () => {
+    if (!(await readDrop(address))) return false;
+    await redisPipeline([["DEL", dropKey(address)]]);
+    return true;
+  });
+  if (called) await tell(address, "Your passkeys stay on your Marktmorgen account", `Your account (${address}) was just logged in with a passkey or an app code, or the removal was canceled in the studio, so the passkeys that were set to be removed stay.`);
+  return called;
 }
 
-/** Removes one of the account's passkeys. True when there was one to remove. */
-export async function removePasskey(email: string, id: string): Promise<boolean> {
+/**
+ * Removes one of the account's passkeys, at once (a session opened with a
+ * second step). True when there was one to remove. The sessions it opened
+ * are logged out; `keep`, the session removing it, only loses its mark.
+ */
+export async function removePasskey(email: string, id: string, keep?: string): Promise<boolean> {
   const address = normaliseEmail(email);
-  const list = await listPasskeys(address);
-  const gone = list.find((p) => p.id === id);
+  const gone = await withPasskeys(address, async () => {
+    const list = await listPasskeys(address);
+    const row = list.find((p) => p.id === id);
+    if (!row) return null;
+    await saveList(address, list.filter((p) => p.id !== id));
+    await redisPipeline([["DEL", credKey(id)]]);
+    return row;
+  });
   if (!gone) return false;
-  await saveList(address, list.filter((p) => p.id !== id));
-  await redisPipeline([["DEL", credKey(id)]]);
+  await dropSecondStep(address, (mark) => mark === `passkey:${id}`, keep);
   await tell(address, "A passkey was removed from your Marktmorgen account", `The passkey called “${headerText(gone.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.`);
   return true;
 }
@@ -338,7 +385,7 @@ export async function signInOptions(): Promise<{ options: PublicKeyCredentialReq
  * Checks a sign-in answer and says whose account it opens, or null. The
  * challenge is spent first, so an answer can only ever be used once.
  */
-export async function signInWith(nonce: string, response: AuthenticationResponseJSON): Promise<string | null> {
+export async function signInWith(nonce: string, response: AuthenticationResponseJSON): Promise<{ email: string; id: string } | null> {
   if (!/^[0-9a-f]{64}$/.test(nonce) || typeof response?.id !== "string") return null;
   const challenge = await spend(authKey(nonce));
   if (!challenge) return null;
@@ -369,13 +416,19 @@ export async function signInWith(nonce: string, response: AuthenticationResponse
   }
   if (!verified.verified) return null;
 
-  await saveList(
-    owner,
-    list.map((p) =>
-      p.id === passkey.id ? { ...p, counter: verified.authenticationInfo.newCounter, lastUsedAt: new Date().toISOString() } : p,
-    ),
-  );
-  return owner;
+  // Written under the account's lock, from the list as it is now: a passkey
+  // removed meanwhile (its wait ran out, or it was removed in the studio) logs
+  // nobody in and is never written back.
+  const still = await withPasskeys(owner, async () => {
+    const current = await listPasskeys(owner);
+    if (!current.some((p) => p.id === passkey.id)) return false;
+    await saveList(
+      owner,
+      current.map((p) => (p.id === passkey.id ? { ...p, counter: verified.authenticationInfo.newCounter, lastUsedAt: new Date().toISOString() } : p)),
+    );
+    return true;
+  });
+  return still ? { email: owner, id: passkey.id } : null;
 }
 
 /**

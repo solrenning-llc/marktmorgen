@@ -64,7 +64,7 @@
  *   nl:2fa:lockedset:<hash> the account's locked sessions, to log them out on Cancel
  */
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, endSession, normaliseEmail, openSession } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, dropSecondStep, endSession, normaliseEmail, openSession } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
@@ -376,6 +376,8 @@ export async function resetIfDue(email: string, now = Date.now()): Promise<boole
   const record = await read(email);
   if (!record || record.reset === 0 || now < record.reset) return false;
   await redisPipeline([["DEL", recordKey(email), lockedSetKey(email)]]);
+  // What the app opened goes with it (lib/auth.ts dropSecondStep).
+  await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
   await tell(email, "Two-step login is off for your Marktmorgen account", `Two-step login was turned off ${RESET_DAYS} days after you got in without it, and nothing in your studio is locked any more. You can turn it on again in your studio, with a new app setup and new recovery codes.`);
   return true;
 }
@@ -512,6 +514,8 @@ export async function spendRescue(token: string): Promise<string | null> {
   }
   if (typeof email !== "string" || !email || !(await twoStepOn(email))) return null;
   await redisPipeline([["DEL", recordKey(email)]]);
+  // What the app opened goes with it (lib/auth.ts dropSecondStep).
+  await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
   await tell(email, "Two-step login is off for your Marktmorgen account", "Two-step login was turned off with a link sent to your recovery address, and your account was logged in. Turn it on again in your studio, with your phone, to get new recovery codes.");
   return email;
 }

@@ -17,7 +17,7 @@
  *                              minutes, for the few changes that ask for a
  *                              recent login (adding a passkey)
  *   nl:auth:second:<hash>   -> the second step this session was opened with
- *                              ("app", "recovery" or "passkey"), as long as
+ *                              ("app", "recovery" or "passkey:<its id>"), as long as
  *                              the session; none for an emailed link, Google,
  *                              a recovery address or a move (sessionSecondStep)
  *   nl:auth:sessions:<hash> -> the set of a creator's live sessions, so that
@@ -107,8 +107,14 @@ export async function isFreshSession(id: string | undefined): Promise<boolean> {
   return Number(found) === 1;
 }
 
-const secondKey = async (id: string) =>
-  `nl:auth:second:${(await sha256Hex(`nimbus-auth-second:${id}`)).slice(0, 40)}`;
+/**
+ * Named after the session's own key rather than its id, so the account's set
+ * of sessions (which holds those keys) reaches every mark: taking a passkey
+ * or the app away takes the marks it made (dropSecondStep).
+ */
+const secondKeyOf = async (opened: string) =>
+  `nl:auth:second:${(await sha256Hex(`nimbus-auth-second:${opened}`)).slice(0, 40)}`;
+const secondKey = async (id: string) => secondKeyOf(await sessionKey(id));
 
 /**
  * The second step a session was opened with: a code from the authenticator
@@ -133,7 +139,43 @@ export async function sessionSecondStep(id: string | undefined, email: string): 
     ["GET", await secondKey(id)],
   ]);
   if (typeof owner !== "string" || !owner || owner !== normaliseEmail(email)) return null;
-  return SECOND_STEPS.find((step) => step === second) ?? null;
+  return SECOND_STEPS.find((step) => step === stepOf(second)) ?? null;
+}
+
+/** The step a mark names: "passkey:<id>" is a passkey. */
+function stepOf(mark: unknown): string {
+  return typeof mark === "string" ? mark.split(":")[0] : "";
+}
+
+/**
+ * Takes away what a second step that is gone had opened: every session of
+ * the account whose mark `gone` matches is logged out, except `keep` (the
+ * session making the change), which only loses its mark and stays logged in
+ * as an emailed link would leave it. Answers how many were logged out.
+ * Called when a passkey is removed ("passkey:<id>") and when the app is
+ * turned off ("app" and "recovery").
+ */
+export async function dropSecondStep(email: string, gone: (mark: string) => boolean, keep?: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const owned = await sessionsKey(normaliseEmail(email));
+  const [members] = await redisPipeline([["SMEMBERS", owned]]);
+  const keys = (Array.isArray(members) ? members : []).filter((key): key is string => typeof key === "string");
+  if (!keys.length) return 0;
+  const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
+  const read = await redisPipeline(marks.map((mark) => ["GET", mark]));
+  const kept = keep && /^[0-9a-f]{64}$/.test(keep) ? await sessionKey(keep) : "";
+  const commands: (string | number)[][] = [];
+  let ended = 0;
+  keys.forEach((key, i) => {
+    const mark = read[i];
+    if (typeof mark !== "string" || !gone(mark)) return;
+    commands.push(["DEL", marks[i]]);
+    if (key === kept) return;
+    commands.push(["DEL", key], ["SREM", owned, key]);
+    ended += 1;
+  });
+  if (commands.length) await redisPipeline(commands);
+  return ended;
 }
 
 const sessionsKey = async (email: string) =>
@@ -260,14 +302,14 @@ export async function spendMoveLink(
  * and, when it was opened with one, the second step it was opened with
  * (SecondStep), kept exactly as long as the session.
  */
-export async function openSession(email: string, second?: SecondStep): Promise<string> {
+export async function openSession(email: string, second?: SecondStep, passkeyId?: string): Promise<string> {
   const id = randomToken();
   const opened = await sessionKey(id);
   const owned = await sessionsKey(normaliseEmail(email));
   await redisPipeline([
     ["SET", opened, normaliseEmail(email), "EX", SESSION_TTL_SECONDS],
     ["SET", await freshKey(id), "1", "EX", FRESH_LOGIN_SECONDS],
-    ...(second ? [["SET", await secondKey(id), second, "EX", SESSION_TTL_SECONDS]] : []),
+    ...(second ? [["SET", await secondKey(id), second === "passkey" && passkeyId ? `passkey:${passkeyId}` : second, "EX", SESSION_TTL_SECONDS]] : []),
     ["SADD", owned, opened],
     ["EXPIRE", owned, SESSION_TTL_SECONDS + 86_400],
   ]);
@@ -405,7 +447,7 @@ export async function endSession(id: string | undefined): Promise<void> {
   try {
     const key = await sessionKey(id);
     const [email] = await redisPipeline([["GET", key]]);
-    const commands: (string | number)[][] = [["DEL", key], ["DEL", await secondKey(id)]];
+    const commands: (string | number)[][] = [["DEL", key], ["DEL", await secondKeyOf(key)]];
     if (typeof email === "string" && email) {
       commands.push(["SREM", await sessionsKey(email), key]);
     }
@@ -430,8 +472,10 @@ export async function endAllSessions(email: string): Promise<number> {
     const keys = Array.isArray(members)
       ? members.filter((key): key is string => typeof key === "string")
       : [];
+    const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
     await redisPipeline([
       ...keys.map((key) => ["DEL", key] as (string | number)[]),
+      ...marks.map((mark) => ["DEL", mark] as (string | number)[]),
       ["DEL", owned],
     ]);
     return keys.length;

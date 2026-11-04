@@ -1,10 +1,11 @@
 import type { NextRequest } from "next/server";
-import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
+import { SESSION_COOKIE, dropSecondStep, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { canSeal } from "@/lib/secret-box";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
 import { mayAddSecondStep } from "@/lib/second-step-gate";
+import { cancelRemoval } from "@/lib/passkeys";
 
 /** Changes one account may ask for in an hour: most of them email the account. */
 const CHANGES_PER_HOUR = 30;
@@ -68,11 +69,16 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "cancel") {
       await cancelReset(email, "studio");
+      // And passkeys set to be removed from a session without the step stay (lib/passkeys.ts scheduleRemoval).
+      await cancelRemoval(email);
       return Response.json({ ok: true });
     }
     if (body.action === "off") {
       const done = await turnOff(email, code);
-      return done === "app" || done === "recovery" ? Response.json({ ok: true }) : refuse(done, done === "limited" ? 429 : 400);
+      if (done !== "app" && done !== "recovery") return refuse(done, done === "limited" ? 429 : 400);
+      // What the app opened goes with it: other sessions it opened are logged out, this one loses its mark (lib/auth.ts).
+      await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery", session);
+      return Response.json({ ok: true });
     }
     if (body.action === "codes") {
       const done = await replaceCodes(email, code);

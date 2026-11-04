@@ -48,15 +48,16 @@ export async function POST(request: NextRequest) {
     if (body.action === "verify") {
       const nonce = request.cookies.get(PASSKEY_COOKIE)?.value ?? "";
       const answer = body.response as AuthenticationResponseJSON | undefined;
-      const email = answer && typeof answer === "object" ? await signInWith(nonce, answer) : null;
-      if (!email) return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
+      const signed = answer && typeof answer === "object" ? await signInWith(nonce, answer) : null;
+      const email = signed?.email ?? null;
+      if (!signed || !email) return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
 
       // As with the emailed link: whatever session this browser held before
       // is closed, and only the new one is kept.
       const previous = request.cookies.get(SESSION_COOKIE)?.value;
       if (previous) await endSession(previous);
       // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
-      const id = await openSession(email, "passkey");
+      const id = await openSession(email, "passkey", signed.id);
       // A passkey is the second step: a pending request to turn two-step login off is called off (lib/two-step.ts).
       await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
       await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));

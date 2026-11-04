@@ -25,7 +25,8 @@
  *   - events canceled, deleted or moved (each emails everyone coming);
  *   - notes, tasks, deals, pitches, segments and drafts deleted, a buyer's
  *     review photo taken off;
- *   - a passkey change does not spend the owner's hourly changes.
+ *   - a passkey change does not spend the owner's hourly changes; a removal
+ *     only waits (lib/passkeys.ts scheduleRemoval), on a count of its own.
  *
  * And what has a way back stays open: adding and editing, a post that emails
  * nobody, an event edited without moving it.
@@ -326,7 +327,7 @@ async function main(): Promise<void> {
     new NextRequest(`${ORIGIN}/api/auth/passkey`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "remove", id: "a-passkey" }) });
   // More than the hour's 30 changes (CHANGES_PER_HOUR in the route).
   for (let i = 0; i < 31; i += 1) await passkey(passkeyRequest(locked));
-  is("the locked session is told locked, every time", await answer(await passkey(passkeyRequest(locked))), LOCKED);
+  is("the locked session removes nothing at once: it may only ask for a wait, on a count of its own", await answer(await passkey(passkeyRequest(locked))), [429, "rate_limited"]);
   is("and the owner's own change is not refused for the hour", (await answer(await passkey(passkeyRequest(full))))[1] !== "rate_limited", true);
 
   part("Said the same way everywhere, and true");

@@ -2,7 +2,7 @@ import { goalClash, MAX_FLOW_WAIT_HOURS, readsEmailBefore } from "@/lib/flow-rul
 import { MAX_STEPS } from "@/lib/flow-limits";
 import { END, checkRoutes } from "@/lib/flow-paths";
 import { hasPlaceholder } from "@/lib/mail-body";
-import { fieldValue } from "@/lib/crm-rules";
+import { fieldValue, isFieldType } from "@/lib/crm-rules";
 import type { Flow } from "@/lib/flows";
 
 export type FlowReviewContext = {
@@ -54,7 +54,7 @@ export function flowConfigurationIssues(flow: Flow, context: FlowReviewContext):
     if (action?.do === "field") {
       const field = context.fields.find(field => field.id === action.field);
       if (!field) issues.push(prefix + "The contact field is unavailable. Choose a current field.");
-      else if (field.type !== "text" && field.type !== "number" && field.type !== "date" && field.type !== "choice") issues.push(prefix + "The contact field format could not be checked. Review the field configuration.");
+      else if (!isFieldType(field.type)) issues.push(prefix + "The contact field format could not be checked. Review the field configuration.");
       else if (fieldValue({ ...field, type: field.type }, action.value) === null) issues.push(prefix + "The saved value is incompatible with contact field “" + field.name + "”. Review its type and allowed values.");
     }
     if (action?.do === "deal" && !context.stages.some(stage => stage.id === action.stage)) issues.push(prefix + "The deal stage is unavailable. Choose a current stage.");

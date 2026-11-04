@@ -10,13 +10,14 @@ import { Stars } from "@/components/review-stars";
 import { toast } from "@/components/toast";
 import { HIDE_REASONS, MAX_REPLY_TEXT, hideReasonLabel } from "@/lib/review-summary";
 import { AiOn } from "@/components/ai-assist";
-import { DEFAULT_ASK_DAYS, MAX_ASK_DAYS, MIN_ASK_DAYS } from "@/lib/review-ask";
+import { DEFAULT_ASK_DAYS, MAX_AGAIN_DAYS, MAX_ASK_DAYS, MIN_AGAIN_DAYS, MIN_ASK_DAYS } from "@/lib/review-ask";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   days: `Pick between ${MIN_ASK_DAYS} and ${MAX_ASK_DAYS} days.`,
+  again: `Pick no reminder, or one ${MIN_AGAIN_DAYS} to ${MAX_AGAIN_DAYS} days after the first email.`,
   elsewhere: "That is not a review page on Google, Trustpilot or Facebook. Paste the https address of your page there.",
   email: "Review requests are email, so they need Pro with your email set up (the sender name and postal address). Set that up in Email first.",
   busy: "Someone else changed this review at the same moment. Try again.",
@@ -43,15 +44,16 @@ async function post(body: Record<string, unknown>): Promise<string | null> {
   }
 }
 
-/** The review-request email: off, or on some days after buying. */
-export function ReviewAskEditor({ days, canEmail, elsewhere = "" }: { days: number; canEmail: boolean; elsewhere?: string }) {
+/** The review-request email: off, or on some days after buying, with one reminder or none (636 [GL4](a)). */
+export function ReviewAskEditor({ days, canEmail, elsewhere = "", again = 0 }: { days: number; canEmail: boolean; elsewhere?: string; again?: number }) {
   const router = useRouter();
   const [on, setOn] = useState(days > 0);
   const [value, setValue] = useState(days > 0 ? days : DEFAULT_ASK_DAYS);
   const [page, setPage] = useState(elsewhere);
+  const [reminder, setReminder] = useState(again);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dirty = on !== days > 0 || (on && value !== days) || page.trim() !== elsewhere;
+  const dirty = on !== days > 0 || (on && value !== days) || page.trim() !== elsewhere || (on && reminder !== again);
 
   async function save() {
     setError(null);
@@ -64,7 +66,7 @@ export function ReviewAskEditor({ days, canEmail, elsewhere = "" }: { days: numb
       return;
     }
     setBusy(true);
-    const problem = await post({ action: "ask", days: on ? value : 0, elsewhere: page.trim() });
+    const problem = await post({ action: "ask", days: on ? value : 0, elsewhere: page.trim(), again: reminder });
     setBusy(false);
     if (problem) {
       setError(problem);
@@ -78,7 +80,7 @@ export function ReviewAskEditor({ days, canEmail, elsewhere = "" }: { days: numb
     <div>
       <label className="flex min-h-[44px] cursor-pointer items-center gap-3 font-semibold text-ink">
         <input type="checkbox" className="h-5 w-5" checked={on} disabled={!canEmail && !on} onChange={(e) => setOn(e.target.checked)} />
-        Email buyers once to ask for a review
+        Email buyers to ask for a review
       </label>
       {on ? (
         <label htmlFor="ask-days" className="mt-2 block max-w-xs">
@@ -88,6 +90,20 @@ export function ReviewAskEditor({ days, canEmail, elsewhere = "" }: { days: numb
               <option key={d} value={d}>{`${d} days`}</option>
             ))}
           </select>
+        </label>
+      ) : null}
+      {on ? (
+        <label htmlFor="ask-again" className="mt-3 block max-w-xs">
+          <span className="field-label">One reminder (optional)</span>
+          <select id="ask-again" className="field" value={reminder} onChange={(e) => setReminder(Number(e.target.value))} aria-describedby="ask-again-note">
+            <option value={0}>No reminder</option>
+            {Array.from({ length: MAX_AGAIN_DAYS - MIN_AGAIN_DAYS + 1 }, (_, i) => i + MIN_AGAIN_DAYS).map((d) => (
+              <option key={d} value={d}>{`${d} days after the first email`}</option>
+            ))}
+          </select>
+          <span id="ask-again-note" className="mt-1 block text-xs text-ink-soft">
+            Only to buyers who have not reviewed yet, and never more than one. The first email says it will come; the reminder says it is the last.
+          </span>
         </label>
       ) : null}
       {on ? (
@@ -107,7 +123,7 @@ export function ReviewAskEditor({ days, canEmail, elsewhere = "" }: { days: numb
       ) : null}
       <p className="mt-2 text-sm text-ink-soft">
         {canEmail
-          ? "One email per order, from your name, only for orders paid while this is on and not refunded, and never to someone who already reviewed it, left your list or pressed stop. It counts in your month's emails and carries your postal address and a one-click way to stop. It asks for an honest review and offers nothing in return."
+          ? `${reminder ? "One email per order, and one reminder if you chose it" : "One email per order"}, from your name, only for orders paid while this is on and not refunded, and never to someone who already reviewed it, left your list or pressed stop. It counts in your month's emails and carries your postal address and a one-click way to stop. It asks for an honest review and offers nothing in return.`
           : "Review requests are email, so they need Pro with your email set up: the sender name and postal address every email carries. Buyers can still review from their thank-you page and their list of purchases on every plan."}
       </p>
       {error ? (

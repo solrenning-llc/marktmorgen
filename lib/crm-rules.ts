@@ -38,15 +38,24 @@ export const MAX_DEAL_CENTS = 10_000_000_000;
 export const CRM_ID = /^[a-z0-9]{6}$/;
 export const DEAL_ID = /^[a-z0-9]{10}$/;
 
-export type FieldType = "text" | "number" | "date" | "choice";
+export type FieldType = "text" | "number" | "date" | "choice" | "phone" | "url" | "several";
 export const FIELD_TYPES: { type: FieldType; label: string }[] = [
   { type: "text", label: "Text" },
   { type: "number", label: "Number" },
   { type: "date", label: "Date" },
   { type: "choice", label: "One of a few choices" },
+  { type: "phone", label: "Phone number (with country code)" },
+  { type: "url", label: "Web address" },
+  { type: "several", label: "Several of a few choices" },
 ];
 
+/** Whether a kind of field holds a list of choices (one, or several). */
+export const hasChoices = (type: FieldType): boolean => type === "choice" || type === "several";
+
 export type CrmField = { id: string; name: string; type: FieldType; options: string[] };
+
+/** Whether a kind of field is one a store can keep. */
+export const isFieldType = (value: unknown): value is FieldType => FIELD_TYPES.some((kind) => kind.type === value);
 
 export type StageKind = "open" | "won" | "lost";
 export type Stage = { id: string; name: string; kind: StageKind };
@@ -106,10 +115,10 @@ export function parseFields(raw: unknown): CrmField[] {
     const type = FIELD_TYPES.find((t) => t.type === value.type)?.type;
     if (!id || !name || !type || out.some((f) => f.id === id || f.name.toLowerCase() === name.toLowerCase())) continue;
     const options =
-      type === "choice"
+      hasChoices(type)
         ? [...new Set((Array.isArray(value.options) ? value.options : []).map((o) => oneLine(o, MAX_FIELD_OPTION)).filter(Boolean))].slice(0, MAX_FIELD_OPTIONS)
         : [];
-    if (type === "choice" && options.length < 2) continue;
+    if (hasChoices(type) && options.length < 2) continue;
     out.push({ id, name, type, options });
   }
   return out;
@@ -117,6 +126,7 @@ export function parseFields(raw: unknown): CrmField[] {
 
 /** A value for a field as typed, made what the field keeps; "" clears it, null when it cannot be one. */
 export function fieldValue(field: CrmField, raw: unknown): string | null {
+  if (field.type === "several") return severalValue(field, raw);
   const text = oneLine(raw, MAX_FIELD_VALUE);
   if (!text) return "";
   switch (field.type) {
@@ -130,7 +140,79 @@ export function fieldValue(field: CrmField, raw: unknown): string | null {
       return validCrmDate(text) ? text : null;
     case "choice":
       return field.options.includes(text) ? text : null;
+    case "phone":
+      return crmPhone(text);
+    case "url":
+      // Read whole, never cut: a web address cut short is another address.
+      return crmUrl(raw);
   }
+}
+
+/**
+ * Several of a field's choices (639 [GL7](2)), as a list or as lines of text,
+ * kept one per line in the field's own order: a choice never holds a line
+ * break, so the lines always read back the same. "" when none is picked;
+ * null when one is not among the field's choices.
+ */
+export function severalValue(field: Pick<CrmField, "options">, raw: unknown): string | null {
+  const pieces = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split("\n") : null;
+  if (pieces === null) return null;
+  const picked = new Set(pieces.map((p) => oneLine(p, MAX_FIELD_OPTION)).filter(Boolean));
+  if ([...picked].some((p) => !field.options.includes(p))) return null;
+  return field.options.filter((o) => picked.has(o)).join("\n");
+}
+
+/** The choices a value of several holds. */
+export const severalPicked = (value: string): string[] => value.split("\n").filter(Boolean);
+
+/**
+ * A web address as a contact field keeps it (639 [GL7](2)): http or https
+ * only, with a real host, as the browser reads it; "example.com/page" is
+ * read as https. Nothing else (a mailto, a javascript: address, a bare word)
+ * is ever kept, since the contact's record shows it as a link.
+ */
+export function crmUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const typed = raw.trim();
+  if (!typed || typed.length > MAX_FIELD_VALUE || /\s/.test(typed)) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(typed) ? typed : `https://${typed}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if (url.username || url.password) return null;
+  // A host with a dot and letters in its last part (example.com), not a bare word or an address by numbers.
+  if (!/\.[a-z]{2,}$/i.test(url.hostname.replace(/\.$/, ""))) return null;
+  const kept = url.toString();
+  return kept.length <= MAX_FIELD_VALUE ? kept : null;
+}
+
+/**
+ * A phone number as a contact field keeps it: the international form, "+"
+ * then the country code and number, 7 to 15 digits (ITU-T E.164), from what
+ * was typed with spaces, dots, dashes or brackets and a leading "+" or "00".
+ * Without a country code it is refused, since no one could tell which
+ * country it dials; null when it cannot be one.
+ */
+export function crmPhone(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const typed = raw.trim().replace(/[\s().\-]/g, "");
+  const digits = typed.startsWith("+") ? typed.slice(1) : typed.startsWith("00") ? typed.slice(2) : null;
+  return digits !== null && /^[1-9][0-9]{6,14}$/.test(digits) ? "+" + digits : null;
+}
+
+/**
+ * The link that opens a chat with this number in the creator's own WhatsApp
+ * (https://wa.me/<digits>, the form WhatsApp documents for its click to chat
+ * links). It only opens the app: nothing is written or sent for them, and
+ * the store keeps nothing about it. null when the value is not a phone number.
+ */
+export function whatsappLink(value: unknown): string | null {
+  const phone = crmPhone(value);
+  return phone ? "https://wa.me/" + phone.slice(1) : null;
 }
 
 /** A store's stages as stored or sent: each named, once, at least one open, one won and one lost. */
@@ -296,6 +378,36 @@ export function parsePipelines(raw: unknown): Pipeline[] | null {
     out.push(pipeline);
   }
   return out;
+}
+
+/**
+ * A copy of a pipeline to start another from (639 [GL7](8); owner's
+ * HighLevel audit): the same stages, names and kinds in the same order, each
+ * with a new id no stage of the store has, and none of its deals. Named
+ * "<name> copy", then "<name> copy 2" and so on, never a name the store
+ * already uses, within MAX_PIPELINE_NAME. Nothing is saved: the board opens
+ * it for the creator to read, change and save as a new pipeline.
+ */
+export function copyPipeline(source: Pipeline, pipelines: readonly Pipeline[], newId: () => string = () => newCrmId()): Pipeline {
+  const taken = new Set(allStages(pipelines).map((s) => s.id));
+  const ids = new Set(pipelines.map((p) => p.id));
+  const fresh = (used: Set<string>) => {
+    for (;;) {
+      const id = newId();
+      if (!used.has(id)) {
+        used.add(id);
+        return id;
+      }
+    }
+  };
+  const names = new Set(pipelines.map((p) => p.name.toLowerCase()));
+  let name = "";
+  for (let n = 1; ; n += 1) {
+    const tail = n === 1 ? " copy" : ` copy ${n}`;
+    name = `${source.name.slice(0, MAX_PIPELINE_NAME - tail.length).trimEnd()}${tail}`;
+    if (!names.has(name.toLowerCase())) break;
+  }
+  return { id: fresh(ids), name, stages: source.stages.map((stage) => ({ id: fresh(taken), name: stage.name, kind: stage.kind })) };
 }
 
 /** Every stage of every pipeline, in order: what a deal's stage is checked against. */

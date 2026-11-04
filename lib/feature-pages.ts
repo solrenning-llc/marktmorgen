@@ -1,5 +1,6 @@
 import { PAGE_TEST_WORDS } from "@/lib/headline-test-words";
 import { PLANS_ON_SALE } from "@/lib/opening";
+import { SHARED_QUESTIONS, helpAnswer } from "@/lib/help-content";
 import { funnelBeginnerQuestions } from "@/lib/funnel-faq";
 import { courseBeginnerQuestions } from "@/lib/course-faq";
 import { membershipBeginnerQuestions } from "@/lib/membership-faq";
@@ -223,9 +224,9 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 5: what someone starting out asks, answered by the code (lib/store-page-faq.ts).
           ...storeBeginnerQuestions(),
-          { q: "Can I change my store address later?", a: "Yes, from your studio, whenever you want. The addresses your store holds keep working and send people to the current one, up to ten at once. An address you let go of stops working, and after 30 days anyone may take it." },
+          { q: SHARED_QUESTIONS.address, a: helpAnswer(SHARED_QUESTIONS.address) },
           { q: "Is the page up before I connect Stripe?", a: "Yes. The page, the editor and your address are free and stay free; without a plan, the page is shown for " + countWords(publicVisitLimit(SETUP_VISITS)) + " visits a month. Taking a card needs two things: Stripe has cleared your account, and your plan or its 14-day trial is running. Until then the page says plainly that it cannot take a payment." },
-          { q: "Can I use my own domain?", a: DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan. You add the records your studio shows where you bought the domain, and the certificate is made for you. Your marktmorgen.com address keeps working as well.` : "Not yet. It is planned for the Studio plan, and this page will say so on the day it works." },
+          { q: SHARED_QUESTIONS.domain, a: helpAnswer(SHARED_QUESTIONS.domain) },
           { q: "How do I see what the page looks like before I save?", a: "The studio shows the page with your photo, theme, color and letters as you change them, before anything is saved." },
           { q: "Is there a limit on how many people can visit?", a: `Your plan covers a number of visits a month: ${countWords(VISITS_INCLUDED.creator)} on the ${PLAN_AT.creator} plan, ${countWords(VISITS_INCLUDED.pro)} on the ${PLAN_AT.pro} plan and ${countWords(VISITS_INCLUDED.scale)} on the ${PLAN_AT.scale} plan. A visit is one person opening your store on one day, however many pages they look at, and you are never counted. Visits are never billed: public pages pause at ${(10_000 - BUYER_RESERVE_BPS) / 100}% of the figure until the month turns or a plan change gives a larger one, and the last ${BUYER_RESERVE_BPS / 100}% are kept for your buyers' courses, community and podcasts. Your studio shows the count as it grows.` },
           { q: "Can one account run more than one store?", a: "Yes, up to five, each with its own address, products and Stripe account, and a plan of its own to take payments. You switch between them at the top of your studio." }
@@ -695,7 +696,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           // 534 [FQ1], unit 8: what someone starting out asks, answered by the code (lib/your-stripe-faq.ts).
           ...stripeBeginnerQuestions(),
           { q: "What do I pay Marktmorgen?", a: feeWords().whatYouPay },
-          { q: "Who handles refunds and disputes?", a: "You do, in your own Stripe dashboard, with the same tools any business has. A refund is a refund you issue, not a request you file with us." },
+          { q: SHARED_QUESTIONS.refunds, a: helpAnswer(SHARED_QUESTIONS.refunds) },
           { q: "Can I charge in euros or pounds?", a: "Yes. Each store charges in one currency, which you choose in your studio from 15. The ways to pay are the ones you switch on in Stripe." },
           { q: "What happens to my money if Marktmorgen closes?", a: "Nothing. It was never here. Your Stripe account, your customers and your payouts carry on without us." },
         ],
@@ -1512,7 +1513,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "Tell your other tools",
     highlight: "what just happened",
     intro:
-      "Up to five addresses of your own, such as a Zapier Catch Hook, a Make scenario or your own server, told about sales, members, leads, bookings and refunds as they happen, in signed JSON.",
+      "Up to five addresses of your own, such as a Zapier Catch Hook, a Make scenario or your own server, told about sales, members, leads, bookings, refunds and disputes as they happen, in signed JSON.",
     visual: "webhooks",
     badge: WORKING,
     accent: "from-violet-brand to-sky-brand",
@@ -1532,10 +1533,12 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "features",
-        title: "Nine events, and how they arrive",
+        title: "Eleven events, and how they arrive",
         items: [
           { icon: "receipt", title: "sale.completed and refund.issued", body: "A paid checkout of any product, each one-click offer taken after it, and a refund, even one made in your Stripe dashboard." },
           { icon: "repeat", title: "membership.started and membership.canceled", body: "A membership bought, and a membership set to end or ended." },
+          { icon: "refresh", title: "membership.changed", body: "A membership moved to another price or quantity on your Stripe account, such as an upgrade or a switch to yearly: what it was and what it is now." },
+          { icon: "alert", title: "dispute.opened", body: "A buyer disputed a payment made at your checkout: the amount, the reason Stripe reports and, when Stripe gives one, the date your answer is due." },
           { icon: "gift", title: "lead.captured", body: "Someone confirmed their address for a free product." },
           { icon: "mail", title: "list.joined", body: "Someone confirmed their address to join your email list, from your store page, a form or the checkout script on your own site." },
           { icon: "calendar", title: "call.booked and call.moved", body: "A call or a seat in a session booked and paid, and a booking the buyer moved." },

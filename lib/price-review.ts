@@ -212,7 +212,7 @@ export function optionPriceReview(
     notes.push("Your payment plan is offered again on this product.");
     if (product.plan && total > price) notes.push(`${parts} pay ${money(product.plan.cents)} each, ${money(total)} in all.`);
   } else if (after && product.plan && total > price) {
-    notes.push(`${parts} still pay ${money(product.plan.cents)} each, ${money(total)} in all, until you change that payment in the plan.`);
+    notes.push(`${parts} still pay ${money(product.plan.cents)} each, ${money(total)} in all, until you change it in the plan.`);
   }
   return {
     rows: [{ key: "option", label: `“${option.label}”`, now: money(option.priceCents), then: money(price), field: "price" }],

@@ -15,20 +15,15 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const OWNER = "owner@example.com";
-const batches: { to: string[] }[][] = [];
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
-    batches.push(JSON.parse(String(init?.body)) as { to: string[] }[]);
-    return new Response(JSON.stringify({ data: [] }));
-  }
-  return new Response("{}", { status: 404 });
-}) as typeof fetch;
+const delivery = installSesMailFixture();
 
 async function main(): Promise<void> {
   redis.clear();
+  delivery.configure();
+  delivery.reset();
   process.env.RESEND_API_KEY = "re_test_label_broadcast_only_a_stand_in";
 
   part("A label, cleaned twice, is the same label");
@@ -55,13 +50,15 @@ async function main(): Promise<void> {
   is("the reach is only the people with the label, and the label is kept cleaned", [created.broadcast.total, created.broadcast.label], [2, "vip MEMBERS"]);
   const read = await readBroadcast(created.broadcast.id);
   is("read back, the label is there", read?.label, "vip MEMBERS");
-  batches.length = 0;
+  delivery.clearCaptured();
   const sent = (await advanceBroadcast(created.broadcast.id, storeForHandle, Date.now() + 60_000))!;
-  is("sent only to them", [sent.status, sent.sent, batches.flat().flatMap((m) => m.to).sort()], ["sent", 2, ["ana@example.com", "cy@example.com"]]);
+  is("sent only to them", [sent.status, sent.sent, delivery.sent.flatMap((m) => m.to).sort()], ["sent", 2, ["ana@example.com", "cy@example.com"]]);
+  is("list email uses SES without falling back to Resend", [delivery.ses.length, delivery.resend.length], [2, 0]);
 
   const plain = await createBroadcast(store, { subject: "News for all", body: "Hello.", productId: "", notProductId: "", sendAt: undefined });
   is("with no label, everyone, as before, and no label on the record", [plain.ok && plain.broadcast.total, plain.ok && "label" in plain.broadcast], [4, false]);
 
+  delivery.restore();
   done();
 }
 

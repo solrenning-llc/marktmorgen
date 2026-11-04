@@ -19,6 +19,7 @@ export const metadata: Metadata = {
 export default async function LostEmailPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   const params = await searchParams;
   const sent = params.status === "sent";
+  const unavailable = params.status === "unavailable";
   return (
     <div className="relative min-h-screen overflow-hidden">
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
@@ -36,10 +37,15 @@ export default async function LostEmailPage({ searchParams }: { searchParams: Pr
           <h2 className="mt-8 font-semibold text-ink">Your recovery address</h2>
           {sent ? (
             <p className="notice mt-2" role="status">
-              If that account has a recovery address, a link is on its way there. It works once, for 15 minutes.
+              Your request was received. Check your recovery inbox. If a link was sent, it works once, for 15 minutes.
             </p>
           ) : (
             <>
+              {unavailable ? (
+                <p className="notice notice-error mt-2" role="alert">
+                  Email is unavailable right now. Try again in a moment, or use a passkey you already added.
+                </p>
+              ) : null}
               <p className="mt-1 text-sm text-ink-soft">
                 {`Type the address you log in with. If your account has a recovery address, we email a link there that lets you in at once. Your products, pages, buyers and numbers are open straight away; ${LOCKED_LIST} open ${LOCK_DAYS} days later, unless you log in with your old inbox, a passkey or your app's code before then. That wait is only for what someone who got into an old inbox could take.`}
               </p>

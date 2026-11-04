@@ -84,6 +84,11 @@ test('minimum-base arithmetic never re-reads an assessed scenario through a get 
  }
 });
 
+test('minimum-base binds the mandatory TX review to the captured unit period',()=>{
+ assert.equal(assessMinimumCustomerBase([{months:12,scenario:scenario(10000,7000,1)}],fixed()).status,'unknown');
+ assert.equal(assessMinimumCustomerBase([{months:1,scenario:scenario(10000,7000,12)}],fixed()).status,'unknown');
+ assert.equal(assessMinimumCustomerBase([unit(22000,15401,12)],fixed(18342,15)).minimumCustomers,15);
+});
 test('minimum-base tax period uses the captured own months without a second supplied read',()=>{
  let monthDescriptors=0,getReads=0;
  const supplied=new Proxy(unit(),{

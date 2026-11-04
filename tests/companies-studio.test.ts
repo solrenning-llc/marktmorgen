@@ -15,7 +15,7 @@ import { done, is, part } from "./check";
 const ann = "a".repeat(32);
 const ghost = "b".repeat(32);
 const north: Company = { id: "aaaaaaaaaa", name: "North School", website: "https://north.example.com/", note: "Buys seats each term", people: [ann, ghost], createdAt: 1 };
-const draw = (companies: (Company & { addresses: Record<string, string> })[], addressesRead = true) => renderToStaticMarkup(createElement(CompaniesEditor, { initial: companies, peopleBase: "/studio/people?store=s1", addressesRead }));
+const draw = (companies: (Company & { addresses: Record<string, string> })[], addressesRead = true, addressesPartial = false) => renderToStaticMarkup(createElement(CompaniesEditor, { initial: companies, peopleBase: "/studio/people?store=s1", addressesRead, addressesPartial }));
 
 part("The list");
 const html = draw([{ ...north, addresses: { [ann]: "ann@example.com" } }]);
@@ -37,13 +37,20 @@ is("at the most a store can keep, the add button says why it does nothing, besid
 const screen = readFileSync("components/companies-editor.tsx", "utf8");
 
 part("The AAA audit of 4 November 2026");
-is("C1: busy buttons are said to be, never switched off, and do nothing then", !/(?<![-\w])disabled=\{/.test(screen) && (screen.match(/aria-disabled=\{busy \|\| undefined\}/g) ?? []).length === 3 && (screen.match(/if \(busy\) return;/g) ?? []).length === 2 && screen.includes("if (!gone || busy) return;") && screen.includes("if (busy || full) return;"), true);
+is("C1: busy buttons are said to be, never switched off, and do nothing then", !/(?<![-\w])disabled=\{/.test(screen) && (screen.match(/aria-disabled=\{busy \|\| undefined\}/g) ?? []).length === 3 && (screen.match(/if \(busy\) return;/g) ?? []).length === 3 && screen.includes("if (!gone || busy) return;"), true);
 is("C1: the focus is moved by refs once the change is drawn, never by a timer", screen.includes("useEffect(() => {") && screen.includes("}, [focusAsk]);") && !/setTimeout|requestAnimationFrame/.test(screen), true);
 is("C1: a delete takes the focus to Undo; an undo to the company put back; Cancel and a save to the Change button; an add to the name", screen.includes('focusAfterDrawing({ to: "undo" })') && screen.includes('focusAfterDrawing(back.added ? { to: "company", id: back.added } : { to: "list" })') && screen.includes('if (was) focusAfterDrawing({ to: "change", id: was })') && screen.includes('focusAfterDrawing(was ? { to: "change", id: was } : { to: "name" })'), true);
 is("C2: a refusal names its field, marked invalid and described by the message beside it", screen.includes('const FIELD_OF: Partial<Record<string, Field>> = { name: "name", taken: "name", website: "website", note: "note" };') && ["name", "website", "note"].every((field) => screen.includes(`aria-invalid={errorField === "${field}" || undefined}`)) && screen.includes("`${hint} company-${field}-error`") && screen.includes('className="field-error'), true);
 is("C3: an empty name is told at the field, not by a dead button", screen.includes(`if (!form.name.trim()) return refuse("Type the company's name.", "name");`), true);
 is("C6: a delete and its undo are said once, in the status line, never also in a toast", screen.includes('send({ action: "remove", id: company.id }, null)') && screen.includes("people: gone.people }, null)") && screen.includes("if (done) toast(done);") && !screen.includes('"Company deleted."') && !screen.includes('"Company put back."'), true);
 is("C7: a full store said in plain words", screen.includes("Your store has no room left for more records. Delete some you no longer need first.") && !screen.includes("data room"), true);
+
+part("The independent review of the audit fixes");
+is("HIGH 1: a refusal tied to a field is also said in the alert when the focus is already in that field, hidden there as it shows beside the field", screen.includes("=== document.activeElement);") && screen.includes('<span key={errorAsk} className={errorField') && screen.includes('"sr-only" : undefined}>') && screen.includes('{errorField && !spoken ? "" : error}') && screen.includes("setErrorAsk((n) => n + 1);"), true);
+is("MEDIUM 3: correcting the field at fault takes its refusal away", ["name", "website", "note"].every((field) => screen.includes(`onChange={(event) => type("${field}", event.target.value)}`)) && screen.includes("if (errorField === field) clearError();"), true);
+is("LIGHT 4: at the most a store can keep, a submit says why, shown once beside the button", screen.includes("if (full) return refuse(COMPANY_REFUSALS.full, null);") && screen.includes("(full && error === COMPANY_REFUSALS.full)"), true);
+is("LIGHT 5: a reading of Stripe cut short is said beside someone not found", [draw([{ ...north, addresses: {} }], true, true).includes("A person we could not find among your Stripe buyers (the oldest buyers are not read)"), html.includes("oldest")], [true, false]);
+is("the alert region is there before any refusal, its message drawn as a new node each time", html.includes('role="alert"><span></span></p>'), true);
 is("a delete keeps the people, and is undone in one change with them, saying who had moved and stays", screen.includes("Its people are still in your store.") && screen.includes('send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }') && screen.includes("moved to another company since") && !screen.includes('action: "link", id: added.id'), true);
 is("Change takes the focus to the form it opens, and the website field has its limit (review A6)", screen.includes('focusAfterDrawing({ to: "name", scroll: true })') && screen.includes("shown?.focus();") && screen.includes("maxLength={MAX_COMPANY_WEBSITE}"), true);
 
@@ -52,7 +59,7 @@ const page = readFileSync("app/studio/companies/page.tsx", "utf8");
 is("for those who see the people's pages", page.includes('"orders");'), true);
 is("the people found among the buyers, never stored by address", page.includes("personAddresses(store, people)"), true);
 is("said when Stripe or the companies cannot be read", page.includes("Stripe could not be read just now, so who works at each company is not shown.") && page.includes("Your companies could not be read just now. Nothing was changed."), true);
-is("the editor told when Stripe could not be read", page.includes("addressesRead={!people.size || Boolean(known)}"), true);
+is("the editor told when Stripe could not be read, or read only in part", page.includes("addressesRead={!people.size || Boolean(known)}") && page.includes("addressesPartial={known?.partial ?? false}"), true);
 is("where it is said by a breadcrumb back to the buyers (2.4.8)", page.includes('<nav aria-label="Breadcrumb"') && page.includes('<li aria-current="page">Companies</li>') && page.includes('<Link href={studioPath(store, "", "people")} className="inline-flex min-h-11') && !page.includes('<p className="eyebrow">Buyers</p>'), true);
 is("reached from the buyers page", readFileSync("app/studio/people/page.tsx", "utf8").includes('studioPath(store, "", "companies")') && readFileSync("app/studio/people/page.tsx", "utf8").includes("Companies you sell to"), true);
 

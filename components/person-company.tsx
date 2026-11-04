@@ -23,6 +23,9 @@ export function PersonCompany({ person, initial }: { person: string; initial: Co
   const [error, setError] = useState("");
   const [errorField, setErrorField] = useState<Field | null>(null);
   const [left, setLeft] = useState<Company | null>(null);
+  // Whether the alert says the error too: when the focus is already in the field at fault, moving it there says nothing.
+  const [spoken, setSpoken] = useState(true);
+  const [errorAsk, setErrorAsk] = useState(0);
   const [focusAsk, setFocusAsk] = useState(0);
   const working = useRef(false);
   const focusNext = useRef<FocusTo | null>(null);
@@ -45,15 +48,22 @@ export function PersonCompany({ person, initial }: { person: string; initial: Co
   function refuse(text: string, field: Field | null) {
     setError(text);
     setErrorField(field);
+    setSpoken(!field || (field === "choice" ? choiceField : nameField).current === document.activeElement);
+    // A new node each time, so the same refusal twice is said twice.
+    setErrorAsk((n) => n + 1);
     if (field) focusAfterDrawing(field);
+  }
+
+  function clearError() {
+    setError("");
+    setErrorField(null);
   }
 
   async function send(body: Record<string, unknown>, done: string | null): Promise<{ companies: Company[]; added?: string } | null> {
     if (working.current) return null;
     working.current = true;
     setBusy(true);
-    setError("");
-    setErrorField(null);
+    clearError();
     try {
       const response = await fetch("/api/store/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; added?: string; message?: string; error?: string };
@@ -152,11 +162,12 @@ export function PersonCompany({ person, initial }: { person: string; initial: Co
                 className="field mt-1"
                 value={choice}
                 aria-disabled={busy || undefined}
+                aria-invalid={errorField === "choice" || undefined}
                 aria-describedby={errorField === "choice" ? "company-choice-error" : undefined}
                 onChange={(event) => {
                   if (busy) return;
                   setChoice(event.target.value);
-                  if (errorField === "choice") setErrorField(null);
+                  if (errorField === "choice") clearError();
                 }}
               >
                 <option value="">None</option>
@@ -201,7 +212,7 @@ export function PersonCompany({ person, initial }: { person: string; initial: Co
             maxLength={MAX_COMPANY_NAME}
             onChange={(event) => {
               setName(event.target.value);
-              if (errorField === "name") setErrorField(null);
+              if (errorField === "name") clearError();
             }}
             aria-invalid={errorField === "name" || undefined}
             aria-describedby={errorField === "name" ? "company-add-hint company-add-error" : "company-add-hint"}
@@ -220,7 +231,10 @@ export function PersonCompany({ person, initial }: { person: string; initial: Co
         </button>
       </form>
       <p className="mt-2 text-sm text-danger-text" role="alert">
-        {errorField ? "" : error}
+        {/* Shown beside its field: here only said, once. */}
+        <span key={errorAsk} className={errorField ? "sr-only" : undefined}>
+          {errorField && !spoken ? "" : error}
+        </span>
       </p>
     </div>
   );

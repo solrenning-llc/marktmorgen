@@ -53,6 +53,12 @@ is("C2: a refusal of the add form names its field, marked invalid and described 
 is("C3: Add with nothing typed says what to do; Undo at the most a person can have says why", source.includes('if (!text.trim()) return refuse("Write what needs doing.", "text");') && source.includes('aria-describedby={full ? "task-undo-full" : undefined}') && source.includes("It cannot be put back now: this person has"), true);
 is("C6: a removal and its undo are said once each", !source.includes('"Task removed."') && source.includes('task.done ? null : "Task put back."') && (source.match(/"Task put back\."/g) ?? []).length === 2, true);
 is("a box checked off again is said in plain words", source.includes('"Marked as not done."') && !source.includes('"Open again."'), true);
+
+part("The independent review of the audit fixes");
+is("HIGH 1: a refusal tied to a field is also said in the alert when the focus is already in that field, hidden there as it shows beside the field", source.includes("=== document.activeElement);") && source.includes('<span key={errorAsk} className={errorField') && source.includes('"sr-only" : undefined}>') && source.includes('{errorField && !spoken ? "" : error}') && source.includes("setErrorAsk((n) => n + 1);"), true);
+is("MEDIUM 3: correcting the field at fault takes its refusal away", ["text", "due", "assignee"].every((field) => source.includes(`corrected("${field}");`)) && source.includes("if (errorField === field) clearError();"), true);
+is("the alert region is there before any refusal, its message drawn as a new node each time", html.includes('role="alert"><span></span></p>'), true);
+
 is("C7: a full store said in plain words", source.includes("Your store has no room left for more records. Delete some you no longer need first.") && !source.includes("data room"), true);
 
 part("On the person's page");

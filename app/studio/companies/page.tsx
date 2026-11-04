@@ -56,7 +56,7 @@ export default async function StudioCompaniesPage({ searchParams }: Params) {
           {companies ? (
             <div className="mt-8">
               {people.size && !known ? <p className="notice notice-warn mb-6">Stripe could not be read just now, so who works at each company is not shown. Try again in a moment.</p> : null}
-              <CompaniesEditor initial={shown} peopleBase={studioPath(store, "", "people")} addressesRead={!people.size || Boolean(known)} />
+              <CompaniesEditor initial={shown} peopleBase={studioPath(store, "", "people")} addressesRead={!people.size || Boolean(known)} addressesPartial={known?.partial ?? false} />
             </div>
           ) : (
             <p className="notice notice-warn mt-8">Your companies could not be read just now. Nothing was changed. Try again in a moment.</p>

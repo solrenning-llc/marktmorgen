@@ -19,7 +19,19 @@ const DATA_FULL = "Your store has no room left for more records. Delete some you
  * keeps its people, only no longer linked, and is undone by adding it back
  * with the same people.
  */
-export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: { initial: Shown[]; peopleBase: string; /** False when Stripe could not be read, so nobody's address is known just now. */ addressesRead?: boolean }) {
+export function CompaniesEditor({
+  initial,
+  peopleBase,
+  addressesRead = true,
+  addressesPartial = false,
+}: {
+  initial: Shown[];
+  peopleBase: string;
+  /** False when Stripe could not be read, so nobody's address is known just now. */
+  addressesRead?: boolean;
+  /** True when Stripe holds more buyers than one reading takes, so the oldest were not read. */
+  addressesPartial?: boolean;
+}) {
   const peopleHref = (person: string) => `${peopleBase}${peopleBase.includes("?") ? "&" : "?"}who=${person}`;
   const [companies, setCompanies] = useState(initial);
   const [form, setForm] = useState({ name: "", website: "", note: "" });
@@ -28,6 +40,9 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [errorField, setErrorField] = useState<Field | null>(null);
+  // Whether the alert says the error too: when the focus is already in the field at fault, moving it there says nothing.
+  const [spoken, setSpoken] = useState(true);
+  const [errorAsk, setErrorAsk] = useState(0);
   const [putBack, setPutBack] = useState("");
   const [focusAsk, setFocusAsk] = useState(0);
   const working = useRef(false);
@@ -60,17 +75,31 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
   }, [focusAsk]);
 
   function refuse(text: string, field: Field | null) {
+    const fields = { name: nameField, website: websiteField, note: noteField };
     setError(text);
     setErrorField(field);
+    setSpoken(!field || fields[field].current === document.activeElement);
+    // A new node each time, so the same refusal twice is said twice.
+    setErrorAsk((n) => n + 1);
     if (field) focusAfterDrawing({ to: field });
+  }
+
+  function clearError() {
+    setError("");
+    setErrorField(null);
+  }
+
+  /** A field typed in: its value, and its refusal gone once the person corrects it. */
+  function type(field: Field, value: string) {
+    setForm({ ...form, [field]: value });
+    if (errorField === field) clearError();
   }
 
   async function send(body: Record<string, unknown>, done: string | null): Promise<{ companies: Company[]; added?: string; skipped?: string[] } | null> {
     if (working.current) return null;
     working.current = true;
     setBusy(true);
-    setError("");
-    setErrorField(null);
+    clearError();
     try {
       const response = await fetch("/api/store/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; added?: string; skipped?: string[]; message?: string; error?: string };
@@ -97,7 +126,8 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    if (busy || full) return;
+    if (busy) return;
+    if (full) return refuse(COMPANY_REFUSALS.full, null);
     if (!form.name.trim()) return refuse("Type the company's name.", "name");
     const was = editing;
     const done = await send(was ? { action: "edit", id: was, ...form } : { action: "add", ...form }, was ? "Company saved." : "Company added.");
@@ -113,8 +143,7 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
     const was = editing;
     setEditing(null);
     setForm({ name: "", website: "", note: "" });
-    setError("");
-    setErrorField(null);
+    clearError();
     if (was) focusAfterDrawing({ to: "change", id: was });
   }
 
@@ -170,7 +199,7 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
               className="field mt-1"
               value={form.name}
               maxLength={MAX_COMPANY_NAME}
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
+              onChange={(event) => type("name", event.target.value)}
               aria-invalid={errorField === "name" || undefined}
               aria-describedby={described("name", "company-name-hint")}
             />
@@ -190,7 +219,7 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
               className="field mt-1"
               value={form.website}
               maxLength={MAX_COMPANY_WEBSITE}
-              onChange={(event) => setForm({ ...form, website: event.target.value })}
+              onChange={(event) => type("website", event.target.value)}
               aria-invalid={errorField === "website" || undefined}
               aria-describedby={described("website", "company-site-hint")}
             />
@@ -209,7 +238,7 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
               className="field mt-1"
               value={form.note}
               maxLength={MAX_COMPANY_NOTE}
-              onChange={(event) => setForm({ ...form, note: event.target.value })}
+              onChange={(event) => type("note", event.target.value)}
               aria-invalid={errorField === "note" || undefined}
               aria-describedby={described("note", "company-note-hint")}
             />
@@ -235,7 +264,10 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
           </p>
         ) : null}
         <p className="mt-2 text-sm text-danger-text" role="alert">
-          {errorField ? "" : error}
+          {/* Shown beside its field, or beside the button at the limit: here only said, once. */}
+          <span key={errorAsk} className={errorField || (full && error === COMPANY_REFUSALS.full) ? "sr-only" : undefined}>
+            {errorField && !spoken ? "" : error}
+          </span>
         </p>
       </form>
       <div role="status">
@@ -279,7 +311,7 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
                             <span className="sr-only">: open their page</span>
                           </a>
                         ) : (
-                          <span className="text-ink-soft">{addressesRead ? "A person we could not find among your Stripe buyers" : "A person whose address could not be read just now"}</span>
+                          <span className="text-ink-soft">{addressesRead ? `A person we could not find among your Stripe buyers${addressesPartial ? " (the oldest buyers are not read)" : ""}` : "A person whose address could not be read just now"}</span>
                         )}
                       </li>
                     ))}
@@ -299,8 +331,7 @@ export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: {
                       if (busy) return;
                       setEditing(company.id);
                       setForm({ name: company.name, website: company.website, note: company.note });
-                      setError("");
-                      setErrorField(null);
+                      clearError();
                       // The form it opens is above the list: the focus goes to it, so a keyboard or screen reader user lands where they type (review A6).
                       focusAfterDrawing({ to: "name", scroll: true });
                     }}

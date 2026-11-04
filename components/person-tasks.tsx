@@ -50,6 +50,9 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   const [error, setError] = useState("");
   const [errorField, setErrorField] = useState<Field | null>(null);
   const [removed, setRemoved] = useState<PersonTask | null>(null);
+  // Whether the alert says the error too: when the focus is already in the field at fault, moving it there says nothing.
+  const [spoken, setSpoken] = useState(true);
+  const [errorAsk, setErrorAsk] = useState(0);
   const [focusAsk, setFocusAsk] = useState(0);
   const working = useRef(false);
   const focusNext = useRef<FocusTo | null>(null);
@@ -78,9 +81,23 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   }, [focusAsk]);
 
   function refuse(message: string, field: Field | null) {
+    const fields = { text: textField, due: dueField, assignee: assigneeField };
     setError(message);
     setErrorField(field);
+    setSpoken(!field || fields[field].current === document.activeElement);
+    // A new node each time, so the same refusal twice is said twice.
+    setErrorAsk((n) => n + 1);
     if (field) focusAfterDrawing({ to: field });
+  }
+
+  function clearError() {
+    setError("");
+    setErrorField(null);
+  }
+
+  /** The refusal of a field gone once the person corrects it. */
+  function corrected(field: Field) {
+    if (errorField === field) clearError();
   }
 
   /** `form` when the change is the add form's own, so a refusal is told beside the field at fault. */
@@ -88,8 +105,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
     if (working.current) return null;
     working.current = true;
     setBusy(true);
-    setError("");
-    setErrorField(null);
+    clearError();
     try {
       const response = await fetch("/api/store/person-tasks", {
         method: "POST",
@@ -238,7 +254,10 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
               maxLength={MAX_TASK_TEXT}
               className="field mt-1"
               value={text}
-              onChange={(event) => setText(event.target.value)}
+              onChange={(event) => {
+                setText(event.target.value);
+                corrected("text");
+              }}
               aria-invalid={errorField === "text" || undefined}
               aria-describedby={described("text", "task-hint task-length")}
             />
@@ -252,14 +271,20 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
             <label htmlFor="task-due" className="field-label">
               Due (optional)
             </label>
-            <input id="task-due" ref={dueField} type="date" className="field mt-1" value={due} onChange={(event) => setDue(event.target.value)} aria-invalid={errorField === "due" || undefined} aria-describedby={described("due")} />
+            <input id="task-due" ref={dueField} type="date" className="field mt-1" value={due} onChange={(event) => {
+                setDue(event.target.value);
+                corrected("due");
+              }} aria-invalid={errorField === "due" || undefined} aria-describedby={described("due")} />
             {fieldError("due")}
           </div>
           <div className="block text-sm">
             <label htmlFor="task-assignee" className="field-label">
               Responsible (optional)
             </label>
-            <select id="task-assignee" ref={assigneeField} className="field mt-1" value={assignee} onChange={(event) => setAssignee(event.target.value)} aria-invalid={errorField === "assignee" || undefined} aria-describedby={described("assignee")}>
+            <select id="task-assignee" ref={assigneeField} className="field mt-1" value={assignee} onChange={(event) => {
+                setAssignee(event.target.value);
+                corrected("assignee");
+              }} aria-invalid={errorField === "assignee" || undefined} aria-describedby={described("assignee")}>
               <option value="">Nobody</option>
               {assignees.map((email) => (
                 <option key={email} value={email}>
@@ -279,7 +304,10 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
         <p ref={fullLine} tabIndex={-1} className="mt-4 text-sm text-ink-soft">{`This person has ${MAX_PERSON_TASKS} tasks, the most one person can have. Remove a done one to add another.`}</p>
       )}
       <p className="mt-2 text-sm text-danger-text" role="alert">
-        {errorField ? "" : error}
+        {/* Shown beside its field: here only said, once. */}
+        <span key={errorAsk} className={errorField ? "sr-only" : undefined}>
+          {errorField && !spoken ? "" : error}
+        </span>
       </p>
     </div>
   );

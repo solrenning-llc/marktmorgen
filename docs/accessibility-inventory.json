@@ -1706,6 +1706,7 @@
     "app/api/store/form-opportunity/route.ts",
     "app/api/store/form/route.ts",
     "app/api/store/forms/export/route.ts",
+    "app/api/store/forms/response-pdf/route.ts",
     "app/api/store/forms/route.ts",
     "app/api/store/free/download/route.ts",
     "app/api/store/free/route.ts",
@@ -1937,6 +1938,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 132
+    "pageTemplates": 133
   }
 }

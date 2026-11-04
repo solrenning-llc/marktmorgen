@@ -8,6 +8,8 @@ import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 const S = "\u00a0";
 
 const en = {
+  notYet: (when: string) => `This form opens on ${when}.`,
+  ended: "This form is closed and is not taking answers anymore.",
   send: "Send",
   required: "Required",
   choose: "Choose one",
@@ -37,6 +39,8 @@ const en = {
 export type FormWords = typeof en;
 
 const es: FormWords = {
+  notYet: (when: string) => `Este formulario se abre el ${when}.`,
+  ended: "Este formulario está cerrado y ya no recibe respuestas.",
   send: "Enviar",
   required: "Obligatorio",
   choose: "Elige una opción",
@@ -62,6 +66,8 @@ const es: FormWords = {
 };
 
 const fr: FormWords = {
+  notYet: (when: string) => `Ce formulaire ouvre le ${when}.`,
+  ended: "Ce formulaire est fermé et ne reçoit plus de réponses.",
   send: "Envoyer",
   required: "Obligatoire",
   choose: "Choisissez une option",
@@ -87,6 +93,8 @@ const fr: FormWords = {
 };
 
 const de: FormWords = {
+  notYet: (when: string) => `Dieses Formular öffnet am ${when}.`,
+  ended: "Dieses Formular ist geschlossen und nimmt keine Antworten mehr an.",
   send: "Senden",
   required: "Pflichtfeld",
   choose: "Bitte wählen",
@@ -112,6 +120,8 @@ const de: FormWords = {
 };
 
 const it: FormWords = {
+  notYet: (when: string) => `Questo modulo apre il ${when}.`,
+  ended: "Questo modulo è chiuso e non accetta più risposte.",
   send: "Invia",
   required: "Obbligatorio",
   choose: "Scegli un'opzione",
@@ -137,6 +147,8 @@ const it: FormWords = {
 };
 
 const nl: FormWords = {
+  notYet: (when: string) => `Dit formulier gaat open op ${when}.`,
+  ended: "Dit formulier is gesloten en neemt geen antwoorden meer aan.",
   send: "Versturen",
   required: "Verplicht",
   choose: "Kies er één",
@@ -162,6 +174,8 @@ const nl: FormWords = {
 };
 
 const pt: FormWords = {
+  notYet: (when: string) => `Este formulário abre em ${when}.`,
+  ended: "Este formulário está fechado e não recebe mais respostas.",
   send: "Enviar",
   required: "Obrigatório",
   choose: "Escolha uma opção",

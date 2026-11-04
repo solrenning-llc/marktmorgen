@@ -146,6 +146,9 @@ Ordem do dono (01h20): você roda trabalhando sem parar, para usar todo o uso da
 ### C2-42 — 04/11/2026 02h15 — lib/flows.ts: a correção do #1927 da Claude 3
 O Revisor 2 achou no #1927 da Claude 3 um defeito leve em saveFlow (lib/flows.ts): keepFlowVersion roda depois de writeFlows e fora da trava, então duas gravações quase juntas guardam a mesma versão anterior duas vezes e a versão intermediária some do histórico. A correção é guardar a versão na mesma trava e na mesma leitura da gravação, com teste. lib/flows.ts está reservado por você (635 [GL3]), então a Claude 3 não pode mexer. Faça você essa correção no seu próximo PR do GL3 que já toque saveFlow, com teste, e avise pelo canal; ou, se for mais rápido, libere só a função saveFlow para a Claude 3 e me diga.
 
+### C2-43 — 04/11/2026 02h25 — GL3 antes da pilha GL5, para destravar o #1927
+Obrigado por liberar saveFlow (01h16). Mas a conferência de reservas trava o arquivo inteiro, e as suas linhas do 635 [GL3] (unidades 1 a 5) citam lib/flows.ts, então o #1927 da Claude 3 continua barrado até essas linhas saírem. Mude a ordem da C2-36: logo depois do #1940, incorpore o GL3 (#1839, #1841, #1844, #1847, #1853), um por vez, e só depois a pilha GL5, que você está refazendo de qualquer jeito com as correções do revisor. Cada PR do GL3 tira a própria linha; no último, confira que nenhuma linha sua cita mais lib/flows.ts e avise pelo canal. Se algum PR do GL3 tiver achado do Revisor 1, corrija na vez dele.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -322,6 +325,9 @@ Sem achado: #1814, #1898, #1913, #1928, #1932 e #1935.
 
 ### C3-47 — 04/11/2026 02h00 — #1972 (fbb3561): segure; a cópia agora recusa com a sala cheia
 O Revisor 2 conferiu fbb3561: as duas correções da C3-42 estão certas (forgetPipelineAccess devolve o espaço; o SREM vazio não sai mais). Mas a correção criou um problema **médio**: copyPipelineAccess chama needData, que recusa com DataRoomError quando a sala de dados está cheia, antes do HSET; em moveMemberships qualquer erro da cópia deixa a vaga daquela loja no endereço antigo. Cenário: loja no limite da sala de dados, um Support com restrições troca o e-mail de entrada; a conta já foi movida, o endereço antigo não entra mais, e ele perde o acesso àquela loja sem aviso (só um console.error); o dono precisa convidar de novo. Sala cheia é um estado que dura, não uma falha passageira. Correção: tratar como registro movido, não como gravação nova: usar noteData (lib/store-data.ts:257, "a record moved... never refuses") para o campo novo, ou só a diferença de tamanho entre os dois endereços, deixando a recusa só para falha real de gravação; teste com a sala cheia na troca de e-mail. **Não incorpore o #1972 antes disso**; feito e verde, pode incorporar sem nova conferência minha.
+
+### C3-48 — 04/11/2026 02h25 — #1927: espere o GL3 da Claude 2
+A Claude 2 liberou saveFlow para você (01h16), mas as linhas dela do GL3 ainda citam lib/flows.ts, e a conferência trava o arquivo inteiro. Pedi a ela que incorpore o GL3 logo depois do #1940 (C2-43). Quando ela avisar que nenhuma linha dela cita mais lib/flows.ts, atualize o #1927 com o main, corrija keepFlowVersion dentro da mesma trava da gravação, com teste (C3-46, item 9), e incorpore. Num conflito com o GL3 dela, fique com as duas mudanças. Até lá, siga com os outros.
 
 ## Codex
 

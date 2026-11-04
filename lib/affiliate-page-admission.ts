@@ -12,8 +12,11 @@
  *     balance, a commission, a payment made; one approved before) is an
  *     approved affiliate's load: the same units, and, when the book is out of
  *     date, the same refresh under the same lock, so they always see what
- *     they are owed. With no part kept they never refresh it, and see the
- *     page as somebody waiting does.
+ *     they are owed. While the book is in date but could not be kept (too
+ *     large), they work out their own as an approved affiliate then does,
+ *     paid from their own connection's share, and see it when it holds
+ *     something. Otherwise they never refresh it, and see the page as
+ *     somebody waiting does.
  *   - An approved affiliate sees their own page, which rests only once the
  *     whole window is used (as a buyer's pages do). Its load takes
  *     affiliateLoadUnits: the page, its own part of the kept book
@@ -34,7 +37,7 @@
  */
 import type { Affiliate, Book } from "@/lib/affiliates";
 import { DISPUTE_PAGES, INVOICE_PAGES, REFUND_PAGES, affiliatesOn, bookSize, readBook } from "@/lib/affiliates";
-import { type SnapshotState, BOOK_FRESH_SECONDS, bookSlice, claimRefresh, hasSomething, needsRefresh, readSlice, refreshBook, releaseRefresh, snapshotState } from "@/lib/affiliate-book-snapshot";
+import { type SnapshotState, BOOK_SHORT_SECONDS, bookSlice, claimRefresh, hasSomething, needsRefresh, readSlice, refreshBook, releaseRefresh, snapshotState } from "@/lib/affiliate-book-snapshot";
 import { codeOwnerCount } from "@/lib/affiliate-codes";
 import { affiliateLoadUnits, affiliatePageUnits, listingUnits } from "@/lib/public-read-rules";
 import type { Store } from "@/lib/store";
@@ -44,10 +47,17 @@ export type AffiliatePageAdmission =
   | { admitted: false }
   /** No book on this page: a visitor, an affiliate waiting or declined, or one removed with nothing kept. */
   | { admitted: true; book: null }
-  /** The affiliate's own part of the book, when it was worked out and whether it is worked out again only once a day; "soon" while another load is working it out and none is kept. */
+  /** The affiliate's own part of the book and when it was worked out; "soon" while another load is working it out and none is kept. */
   | { admitted: true; book: KeptBook | "soon" };
 
-export type KeptBook = { book: Book; at: number; daily: boolean };
+/**
+ * When the figures are worked out again, said on the page only where it is
+ * true: "daily" for a kept book worked out at most once a day, "short" for
+ * an incomplete one worked out again after BOOK_SHORT_SECONDS, null for a
+ * book worked out for this load alone (none could be kept), which promises
+ * nothing.
+ */
+export type KeptBook = { book: Book; at: number; refresh: "daily" | "short" | null };
 
 const REFUSED = { admitted: false } as const;
 
@@ -90,8 +100,10 @@ async function refreshFor(store: Store, id: string, now: number): Promise<KeptBo
     if (!again || !needsRefresh(again, seconds)) return null;
     const units = await affiliatePageCost(store);
     if (units === null || !(await takePublicRequest(store, "buyer", now, units, { shared: true }))) return null;
-    const { book, short } = await refreshBook(store, seconds);
-    return { book: bookSlice(book, id), at: seconds, daily: !short };
+    const done = await refreshBook(store, seconds, held);
+    // Thrown away (its lock ran out, or a person was deleted while it read): nothing of it is shown.
+    if (!done) return null;
+    return { book: bookSlice(done.book, id), at: seconds, refresh: !done.kept ? null : done.short ? "short" : "daily" };
   } finally {
     await releaseRefresh(held);
   }
@@ -105,7 +117,7 @@ async function refreshFor(store: Store, id: string, now: number): Promise<KeptBo
 async function ownBook(store: Store, id: string, now: number): Promise<KeptBook | null> {
   const units = await affiliatePageCost(store);
   if (units === null || !(await takePublicRequest(store, "buyer", now, units))) return null;
-  return { book: await readBook(store, id), at: Math.floor(now / 1000), daily: true };
+  return { book: await readBook(store, id), at: Math.floor(now / 1000), refresh: null };
 }
 
 /** What a load that has paid its own part reads: the refresh when it is due, the kept part, or its own book when none could be kept. */
@@ -116,7 +128,7 @@ async function bookFor(store: Store, id: string, state: SnapshotState, now: numb
   if (state.at && !state.kept && !needsRefresh(state, seconds)) return (await ownBook(store, id, now)) ?? "soon";
   // Another load is working it out, or the window has no room for it: the last one kept, when there is one.
   const kept = state.sliceBytes > 0 ? await readSlice(store, id) : null;
-  return kept ? { ...kept, daily: state.freshFor === BOOK_FRESH_SECONDS } : "soon";
+  return kept ? { ...kept, refresh: state.freshFor === BOOK_SHORT_SECONDS ? "short" : "daily" } : "soon";
 }
 
 export async function admitAffiliatePage(store: Store, affiliate: Pick<Affiliate, "id" | "status" | "share"> | null, now = Date.now()): Promise<AffiliatePageAdmission> {
@@ -128,6 +140,11 @@ export async function admitAffiliatePage(store: Store, affiliate: Pick<Affiliate
       if (!(await takePublicRequest(store, "buyer", now, affiliateLoadUnits({ sliceBytes: state.sliceBytes, listings, codes: null })))) return REFUSED;
       const kept = await bookFor(store, affiliate.id, state, now);
       if (kept !== "soon" && hasSomething(kept.book)) return { admitted: true, book: kept };
+    } else if (state && state.at && !state.kept && !needsRefresh(state, Math.floor(now / 1000))) {
+      // In date but not kept (too large): no part to tell whether they are owed, so their own book, as ownBook works it out for an approved affiliate.
+      if (!(await takePublicRequest(store, "buyer", now, affiliateLoadUnits({ sliceBytes: 0, listings, codes: null })))) return REFUSED;
+      const own = await ownBook(store, affiliate.id, now);
+      if (own && hasSomething(own.book)) return { admitted: true, book: own };
     }
   }
   if (!affiliate || affiliate.status !== "approved") {

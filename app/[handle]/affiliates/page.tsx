@@ -38,6 +38,12 @@ import { aiAvailableFor } from "@/lib/ai";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { type LeadStatus, maskEmail } from "@/lib/affiliate-lead-rules";
 
+// The one load that works the program's book out for everybody reads up to 23 pages of Stripe
+// (lib/affiliate-book-snapshot.ts): it may take this long, never longer than the refresh's lock
+// (BOOK_LOCK_SECONDS), so a stopped load's lock is still held when it stops. Equal to
+// AFFILIATE_PAGE_MAX_SECONDS; a literal, as the build reads it.
+export const maxDuration = 300;
+
 type Params = {
   params: Promise<{ handle: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -354,7 +360,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     ))}
                   </dl>
                   <p className="st-muted mt-3 text-sm" data-figures-as-of="">
-                    {`${a.figuresAsOf(asOf)} ${kept && kept !== "soon" && !kept.daily ? a.figuresShort : a.figuresDaily}`}
+                    {[a.figuresAsOf(asOf), kept && kept !== "soon" ? (kept.refresh === "daily" ? a.figuresDaily : kept.refresh === "short" ? a.figuresShort : "") : ""].filter(Boolean).join(" ")}
                   </p>
                   <p className="st-muted mt-3 text-sm">
                     {a.paidSoFar(money(row.paid, book.currency), store.name)}

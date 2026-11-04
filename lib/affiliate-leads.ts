@@ -323,10 +323,17 @@ export async function forgetLeadPerson(store: Store, email: string): Promise<num
   return withLock(leadsLockKey(statsId), LOCK_SECONDS, LOCK_WAIT_MS, async () => {
     const [raw] = await redisPipeline([["HGET", leadsKey(statsId), id]]);
     const lead = parseLead(raw);
-    if (!lead || !lead.email) return 0;
+    if (!lead) return 0;
+    // The program's kept book shows the address masked (lib/affiliate-book-snapshot.ts): deleted whole, worked out again at the next load.
+    // After the address comes off the lead, so a refresh that read the lead before is thrown away by the raised version and one that
+    // reads it after never sees the address; and again when the address is already off, so a deletion tried again after this step
+    // failed still deletes the book. A failure throws, and the deletion is tried again.
+    if (!lead.email) {
+      await forgetBookSnapshot(statsId);
+      return 0;
+    }
     const json = JSON.stringify({ ...lead, email: "" });
     await redisPipeline([["HSET", leadsKey(statsId), id, json]]);
-    // The program's kept book shows the address masked (lib/affiliate-book-snapshot.ts): deleted whole, worked out again at the next load.
     await forgetBookSnapshot(statsId);
     const freed = dataBytes([id, String(raw)], 1) - dataBytes([id, json], 1);
     if (freed > 0) await giveData(store, [{ slot: LEADS_SLOT, bytes: freed }]);

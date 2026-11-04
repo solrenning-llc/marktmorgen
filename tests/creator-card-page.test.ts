@@ -143,6 +143,14 @@ async function main(): Promise<void> {
   is("the tab's title never reads the card", String((await generateMetadata({ params: Promise.resolve({ handle: "@anapottery" }), searchParams: Promise.resolve({}) })).title), "Contact card · Ana's Pottery — Marktmorgen");
   await redis.pipeline(spent.flatMap((key) => [["DEL", key], ["DEL", key.replace(":r:", ":n:")]]));
   is("its window open again, the file is given", (await file()).status, 200);
+  // Only the month's visits used, requests left: the page rests, so the file is not given either.
+  const visits = spent.map((key) => key.replace(":r:", ":n:"));
+  await redis.pipeline(visits.map((key) => ["SET", key, 1_000_000_000]));
+  is("visits used, requests left: the page rests", await open(), "resting");
+  is("and no file, as the page", (await file()).status, 429);
+  await redis.pipeline(visits.map((key) => ["DEL", key]));
+  const onDomain = (name: string) => GET(new NextRequest("https://marktmorgen.com/@anapottery/contact/vcard", { headers: { "x-nimbus-domain": name } }), { params: Promise.resolve({ handle: "@anapottery" }) });
+  is("on a domain that is not the store's, no file", (await onDomain("shop.example.com")).status, 404);
   is("an address that cannot be read is no file", (await GET(new NextRequest("https://marktmorgen.com/@%E0%A4%A/contact/vcard"), { params: Promise.resolve({ handle: "@%E0%A4%A" }) })).status, 404);
 
   part("Its own domain and an old address, as on the store page");

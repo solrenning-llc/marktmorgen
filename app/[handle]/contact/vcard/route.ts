@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { cardVcard, readCreatorCard, vcardFileName, vcardFileNameStar } from "@/lib/creator-card";
 import { SITE_URL } from "@/lib/site-url";
 import { normaliseHandle, storeForPage } from "@/lib/store";
-import { takePublicRequest } from "@/lib/traffic";
+import { isResting } from "@/lib/traffic";
+import { canUseDomain } from "@/lib/domains";
 
 const NOT_FOUND = () => new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
 
@@ -10,11 +11,13 @@ const NOT_FOUND = () => new Response("Not found", { status: 404, headers: { "Cac
  * The creator's business card as a file to save in a phone's or a
  * computer's contacts (vCard 4.0, lib/creator-card.ts; 639 [GL7](22)): only
  * what the creator typed for it, only while they have it on and the store
- * is not switched off. Each file is one of the store's public requests
- * (lib/traffic.ts), taken before the card is read; past the window's, none
- * is made. Made on request from the kept card, never stored as a file.
+ * is not switched off. Each file is one of the store's public requests,
+ * taken before the card is read by the same check the card's page and the
+ * store's page make (isResting, lib/traffic.ts): a store resting for its
+ * visits or its requests gives no file. Switched off is checked first, so a
+ * suspended store spends nothing. Made on request from the kept card, never stored as a file.
  */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ handle: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ handle: string }> }) {
   const { handle } = await params;
   let decoded = "";
   try {
@@ -26,8 +29,11 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const store = await storeForPage(normaliseHandle(decoded));
   // Switched off after notices about its content (lib/takedown.ts): its card is not given either.
   if (!store || store.suspended) return NOT_FOUND();
-  // One of the store's public requests for its window, as the store's other public answers.
-  if (!(await takePublicRequest(store))) return new Response("Please try again later.", { status: 429, headers: { "Cache-Control": "no-store" } });
+  // On a custom domain the store may no longer use, as its pages: nothing here.
+  const reachedOn = request.headers.get("x-nimbus-domain");
+  if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) return NOT_FOUND();
+  // Resting for its visits or its requests (one of them taken here), as the card's page.
+  if (await isResting(store)) return new Response("Please try again later.", { status: 429, headers: { "Cache-Control": "no-store" } });
   const card = await readCreatorCard(store.statsId);
   const file = cardVcard(card, store.name, `${SITE_URL}/@${store.handle}`);
   if (!file) return NOT_FOUND();

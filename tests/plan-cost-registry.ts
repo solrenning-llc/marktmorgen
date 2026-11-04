@@ -355,6 +355,8 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/traffic-rules.ts", names: ["VISITS_INCLUDED", "publicVisitLimit", "BUYER_RESERVE_BPS", "VISIT_CENTS_PER_THOUSAND_OVER"] },
       { file: "lib/traffic.ts", names: ["isResting"] },
+      { file: "app/[handle]/contact/page.tsx", names: ["isResting"] },
+      { file: "app/[handle]/contact/vcard/route.ts", names: ["isResting"] },
     ],
     basis: "The month's figure, every visit made by the heavy visitor a visit is costed as. Nothing is sold past it: public pages rest at 95% and buyers' pages at 100%.",
   },

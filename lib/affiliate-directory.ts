@@ -49,8 +49,9 @@ import { imageUrl } from "@/lib/product-image";
 import { DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
-import { signalsShortWords } from "@/lib/traffic";
+import { countGapNote } from "@/lib/traffic";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
+import { countGapWords } from "@/lib/traffic-rules";
 
 export { MIN_CLICKS_FOR_RATES };
 
@@ -129,9 +130,10 @@ export type DirectoryNumbers = {
   paidCents: number;
   /**
    * Said instead of the rates when the store's clicks were not all counted
-   * (lib/traffic.ts, signalsShortWords: a month brought more than its plan
-   * counts), so the share of clicks that became a sale is never shown too
-   * high; "" when every click was counted. Absent from rows cached before it.
+   * (lib/traffic.ts, countGap: a click refused for whatever reason since the
+   * program's first affiliate, or a record that cannot be read), so the share
+   * of clicks that became a sale is never shown too high; "" when every click
+   * was counted. Absent from rows cached before it.
    */
   incomplete?: string;
 };
@@ -252,7 +254,9 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
         stores.map(async (store) => {
           const row = store ? directoryRow(store) : null;
           if (!row || !store || !store.affiliates.numbers) return row;
-          const [raw, incomplete] = await Promise.all([programNumbers(store).catch(() => null), signalsShortWords(store).catch(() => "")]);
+          const raw = await programNumbers(store).catch(() => null);
+          // Its rates are from clicks since its first affiliate: shown only when none of them went uncounted (lib/traffic.ts, countGap).
+          const incomplete = raw ? await countGapNote(store, "clicks", raw.since).catch(() => countGapWords("unknown", "clicks", 0)) : "";
           return { ...row, numbers: directoryNumbers(raw, incomplete) };
         }),
       )

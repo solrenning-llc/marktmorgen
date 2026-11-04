@@ -847,7 +847,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:traffic:s:@lib/traffic.ts": { what: "Signals that are not a page in the window: link clicks, affiliate arrivals, funnel steps", parts: [capped(2 * KEY, "One a window.")] },
   // One field a connection a day, written SHARE_BATCH signals at a time and kept with the window: signals are SIGNALS_PER_VISIT a visit, at most twice a window's requests, so twice the requests' share.
   "nl:traffic:sc:@lib/traffic.ts": { what: "Each connection's share of the window's signals, by day", parts: [per("request", 33, 14, "A field for every ten signals at the most, kept to the window's end and a day.")] },
-  "nl:traffic:sshort:@lib/traffic.ts": { what: "The last window whose signals ran out", parts: [capped(KEY, "One key a store.")] },
+  "nl:traffic:sp:@lib/traffic.ts": { what: "Affiliates' visits from a paid search ad in the window", parts: [capped(2 * KEY, "One a window.")] },
+  "nl:traffic:gap:@lib/traffic.ts": { what: "When the store's counts were first and last not made", parts: [capped(2 * KEY, "Two fields under each address the store has answered to.")] },
   "nl:traffic:x:@lib/traffic.ts": { what: "The live room in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:nudge:@lib/trial-nudges.ts": company("A trial's nudges sent", "The company's emails to a creator about their own plan."),
   "nl:2fa:@lib/two-step.ts": company("An account's second step", "An account's."),

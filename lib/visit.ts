@@ -7,7 +7,7 @@ import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { type HitKind, isBot, recordHit } from "@/lib/stats";
 import type { Store } from "@/lib/store";
 import { affiliateCookieName, recordClick } from "@/lib/affiliates";
-import { recordVisit } from "@/lib/traffic";
+import { markCountGap, recordVisit } from "@/lib/traffic";
 import { countryOf, deviceOf } from "@/lib/source-rules";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { requestHost } from "@/lib/request-origin";
@@ -96,6 +96,8 @@ export async function countHit(
     if (today) await maybeBusyAlert(store, today);
   } catch (error) {
     console.error("counting a visit failed", error);
+    // A count not made is written down, so no rate is shown from it (lib/traffic.ts, markCountGap).
+    await markCountGap(store.handle);
   }
 }
 
@@ -141,5 +143,6 @@ export async function countAffiliateClick(
     else await write();
   } catch (error) {
     console.error("counting an affiliate click failed", error);
+    await markCountGap(store.handle);
   }
 }

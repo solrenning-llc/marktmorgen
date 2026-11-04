@@ -4,55 +4,15 @@
   {
    "scenario": "-0.5",
    "alternative": "A",
-   "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 779.3799,
-   "plans": {
-    "creator": {
-     "monthCents": 12900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    },
-    "pro": {
-     "monthCents": 88900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    },
-    "scale": {
-     "monthCents": 198900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    }
-   }
+   "status": "The problem is infeasible. (HiGHS Status 8: model_status is Infeasible; primal_status is None)",
+   "objective": null,
+   "plans": {}
   },
   {
    "scenario": "-0.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 804.3749,
+   "objective": 803.101,
    "plans": {
     "creator": {
      "monthCents": 12900,
@@ -98,55 +58,15 @@
   {
    "scenario": "-1",
    "alternative": "A",
-   "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 336.7268,
-   "plans": {
-    "creator": {
-     "monthCents": 12900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    },
-    "pro": {
-     "monthCents": 88900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    },
-    "scale": {
-     "monthCents": 198900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    }
-   }
+   "status": "The problem is infeasible. (HiGHS Status 8: model_status is Infeasible; primal_status is None)",
+   "objective": null,
+   "plans": {}
   },
   {
    "scenario": "-1",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 347.6348,
+   "objective": 347.0703,
    "plans": {
     "creator": {
      "monthCents": 12900,
@@ -192,58 +112,18 @@
   {
    "scenario": "-1.5",
    "alternative": "A",
-   "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 163.1555,
-   "plans": {
-    "creator": {
-     "monthCents": 11900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    },
-    "pro": {
-     "monthCents": 60900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    },
-    "scale": {
-     "monthCents": 162900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    }
-   }
+   "status": "The problem is infeasible. (HiGHS Status 8: model_status is Infeasible; primal_status is None)",
+   "objective": null,
+   "plans": {}
   },
   {
    "scenario": "-1.5",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 342.7276,
+   "objective": 314.2498,
    "plans": {
     "creator": {
-     "monthCents": 4900,
+     "monthCents": 5900,
      "shares": {
       "ai": 1.0,
       "video": 0.1,
@@ -256,7 +136,7 @@
      }
     },
     "pro": {
-     "monthCents": 14900,
+     "monthCents": 16900,
      "shares": {
       "ai": 0.1,
       "video": 0.1,
@@ -269,7 +149,7 @@
      }
     },
     "scale": {
-     "monthCents": 34900,
+     "monthCents": 41900,
      "shares": {
       "ai": 0.1,
       "video": 0.1,
@@ -286,58 +166,18 @@
   {
    "scenario": "-2",
    "alternative": "A",
-   "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 80.442,
-   "plans": {
-    "creator": {
-     "monthCents": 11900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    },
-    "pro": {
-     "monthCents": 60900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    },
-    "scale": {
-     "monthCents": 162900,
-     "shares": {
-      "ai": 1.0,
-      "video": 1.0,
-      "storage": 1.0,
-      "orders": 1.0,
-      "store-email": 1.0,
-      "transactional-email": 1.0,
-      "list-email": 1.0,
-      "visits": 1.0
-     }
-    }
-   }
+   "status": "The problem is infeasible. (HiGHS Status 8: model_status is Infeasible; primal_status is None)",
+   "objective": null,
+   "plans": {}
   },
   {
    "scenario": "-2",
    "alternative": "C",
    "status": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-   "objective": 357.3249,
+   "objective": 299.7123,
    "plans": {
     "creator": {
-     "monthCents": 4900,
+     "monthCents": 5900,
      "shares": {
       "ai": 1.0,
       "video": 0.1,
@@ -350,7 +190,7 @@
      }
     },
     "pro": {
-     "monthCents": 14900,
+     "monthCents": 16900,
      "shares": {
       "ai": 0.1,
       "video": 0.1,
@@ -363,7 +203,7 @@
      }
     },
     "scale": {
-     "monthCents": 34900,
+     "monthCents": 41900,
      "shares": {
       "ai": 0.1,
       "video": 0.1,

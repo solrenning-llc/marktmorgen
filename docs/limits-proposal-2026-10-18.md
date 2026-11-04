@@ -14,18 +14,18 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 
 | Line | Store monthly ($69) | Store yearly ($690) | Studio monthly ($449) | Studio yearly ($4490) | Scale monthly ($999) | Scale yearly ($9990) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Net today | 57.72% | 57.48% | 59.26% | 58.71% | 58.49% | 57.70% |
+| Net today | 55.69% | 55.05% | 58.33% | 57.61% | 56.87% | 55.76% |
 | AI drafts / answers a month | none today | none today | 40 / 250 → **4 / 25** | 40 / 250 → **4 / 25** | 80 / 400 → **8 / 40** | 80 / 400 → **8 / 40** |
 | Video hours watched a month | 4 → **1** | 4 → **1** | 32 → **3** | 32 → **3** | 64 → **6** | 64 → **6** |
-| Storage | 5 GiB → **0.5 GiB** | 5 GiB → **0.5 GiB** | 40 GiB → **17.5 GiB** | 40 GiB → **4 GiB** | 80 GiB → **8 GiB** | 80 GiB → **8 GiB** |
-| Orders a month | 200 → **20** | 200 → **20** | 450 | 450 → **45** | 1,500 → **150** | 1,500 → **150** |
-| Store emails a month | 75 → **7** | 75 → **7** | 300 | 300 → **30** | 800 → **80** | 800 → **80** |
-| Access emails a month | 150 → **15** | 150 → **15** | 400 | 400 → **40** | 1,000 → **100** | 1,000 → **100** |
-| List emails a month | none today | none today | 7,000 | 7,000 → **6,000** | 10,000 → **3,100** | 10,000 → **1,000** |
-| Visits a month | 3,400 → **1,900** | 3,400 → **2,000** | 10,000 | 10,000 | 40,000 | 40,000 → **34,000** |
-| Net with the cuts | **60.05%** | **60.02%** | **60.00%** | **60.01%** | **60.00%** | **60.00%** |
-| Every printed line at 10% / at zero | 61.57% / 62.01% | 61.97% / 62.47% | 62.60% / 62.97% | 62.54% / 62.97% | 62.55% / 63.00% | 62.42% / 62.94% |
-| Or every printed line cut alike to | 47.10% of today | 49.55% of today | 80.13% of today | 69.85% of today | 66.65% of today | 56.25% of today |
+| Storage | 5 GiB → **0.5 GiB** | 5 GiB → **0.5 GiB** | 40 GiB → **4 GiB** | 40 GiB → **4 GiB** | 80 GiB → **8 GiB** | 80 GiB → **8 GiB** |
+| Orders a month | 200 → **20** | 200 → **20** | 450 → **45** | 450 → **45** | 1,500 → **150** | 1,500 → **150** |
+| Store emails a month | 75 → **7** | 75 → **7** | 300 → **30** | 300 → **30** | 800 → **80** | 800 → **80** |
+| Access emails a month | 150 → **15** | 150 → **15** | 400 → **40** | 400 → **40** | 1,000 → **100** | 1,000 → **100** |
+| List emails a month | none today | none today | 7,000 → **3,000** | 7,000 → **700** | 10,000 → **1,000** | 10,000 → **1,000** |
+| Visits a month | 3,400 → **1,100** | 3,400 → **1,200** | 10,000 | 10,000 → **9,300** | 40,000 → **26,000** | 40,000 → **20,000** |
+| Net with the cuts | **60.13%** | **60.02%** | **60.00%** | **60.02%** | **60.00%** | **60.12%** |
+| Every printed line at 10% / at zero | 61.30% / 61.92% | 61.62% / 62.35% | 62.46% / 62.92% | 62.38% / 62.91% | 62.34% / 62.95% | 62.16% / 62.87% |
+| Or every printed line cut alike to | 30.97% of today | 32.28% of today | 63.79% of today | 54.92% of today | 48.57% of today | 40.45% of today |
 
 ## How each line compares
 

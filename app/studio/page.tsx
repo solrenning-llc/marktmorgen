@@ -67,7 +67,7 @@ import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
 import { readSpends } from "@/lib/ad-spend";
 import { metaView } from "@/lib/meta-ads";
-import { readRanges, recordSample } from "@/lib/benchmarks";
+import { readRanges, recordSample, visitsWhole } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
 import { weeklyTeam } from "@/lib/stats-report";
@@ -1067,7 +1067,7 @@ export default async function StudioPage({
   // Its rates beside those of stores its size (lib/benchmarks.ts): this page's numbers are kept as the
   // week's sample after it is sent, and the ranges, worked out once a day, are one read.
   if (current && counted) after(() => recordSample(current, counted));
-  const beside = counted ? compare(sampleFrom(counted), (await readRanges().catch(() => null))?.ranges ?? null) : null;
+  const beside = counted && current ? compare(sampleFrom(counted, await visitsWhole(current)), (await readRanges().catch(() => null))?.ranges ?? null) : null;
   // The biggest buyers carry their addresses, so only whoever may read orders
   // with the buyer's address sees them (lib/team-roles.ts, "orders").
   const numbers = counted && may("orders") ? { ...counted, topBuyers: salesRead?.value?.buyers?.top ?? [] } : counted;

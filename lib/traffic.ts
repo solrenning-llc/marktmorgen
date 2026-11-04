@@ -11,7 +11,8 @@
  *   nl:traffic:c:<folder>:<window>   each connection's share of them, by day (MM-SA-01)
  *   nl:traffic:s:<folder>:<window>   signals that are not a page: link clicks, affiliate arrivals, funnel steps
  *   nl:traffic:sc:<folder>:<window>  each connection's share of them, by day
- *   nl:traffic:sshort:<folder>       the last window whose signals ran out, so its rates are said to be incomplete
+ *   nl:traffic:sp:<folder>:<window>  affiliates' visits from a paid search ad, a pool of their own
+ *   nl:traffic:gap:<handle>          when a count of the store was first and last not made
  *   nl:traffic:folders:<month>       the stores that had any, that calendar month
  *
  * The window is the store's billing month when it pays us, and the calendar
@@ -44,8 +45,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { admitNonPaying } from "@/lib/free-pool";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { deriveKey } from "@/lib/secret-box";
-import { type Store, storeFolder, storeRef } from "@/lib/store";
-import { PARTS_PER_VISIT, SHARE_BATCH, SIGNALS_SHORT_BEFORE, SIGNALS_SHORT_THIS_MONTH, clientDayShare, publicVisitLimit, requestLimitFor, shareAddress, signalLimitFor, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
+import { type Store, saleHandles, storeFolder, storeRef } from "@/lib/store";
+import { PAID_ARRIVALS_PER_VISIT, PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, countGapWords, publicVisitLimit, requestLimitFor, shareAddress, signalLimitFor, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
 
 const dayKey = (folder: string, day: string) => `nl:traffic:day:${folder}:${day}`;
 const countKey = (folder: string, month: string) => `nl:traffic:n:${folder}:${month}`;
@@ -54,7 +55,8 @@ const requestsKey = (folder: string, window: string) => `nl:traffic:r:${folder}:
 const shareKey = (folder: string, window: string) => `nl:traffic:c:${folder}:${window}`;
 const signalsKey = (folder: string, window: string) => `nl:traffic:s:${folder}:${window}`;
 const signalShareKey = (folder: string, window: string) => `nl:traffic:sc:${folder}:${window}`;
-const signalsShortKey = (folder: string) => `nl:traffic:sshort:${folder}`;
+const paidArrivalsKey = (folder: string, window: string) => `nl:traffic:sp:${folder}:${window}`;
+const gapKey = (handle: string) => `nl:traffic:gap:${handle}`;
 const foldersKey = (month: string) => `nl:traffic:folders:${month}`;
 
 /** A day's set is kept until the day after it is over, and a little longer. */
@@ -307,83 +309,112 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
  * store's links, an arrival through an affiliate's link, a step of a funnel),
  * counted in the store's window on a count of its own, signalLimitFor
  * (lib/traffic-rules.ts), never one of the requests the store's pages are
- * drawn from: these never bring its pages to rest.
+ * drawn from: these never bring its pages to rest. An affiliate's visit from
+ * a paid search ad (`pool` "paid") is counted on a pool of its own,
+ * PAID_ARRIVALS_PER_VISIT for each visit of the figure, so the mark the
+ * paid-search hold reads never stops because the store's other clicks were
+ * many.
  *
  * `write` is what the signal records, answering whether it recorded
  * anything: a click on an affiliate's link made up or already counted today,
- * or a funnel's step its visitor had already opened, records nothing. The
- * signal's place is taken first and given back when nothing was recorded
- * (independent review of #1496, 4 November 2026), so only what is written
- * spends one, and nothing is written once they are spent. Each connection may
- * take its share of a day of them (clientDayShare of the window, as its
- * requests) and no more, so one machine cannot spend a store's month.
+ * or a funnel's step its visitor had already opened, records nothing, and its
+ * place is given back (with the count's expiry in the same write, so a count
+ * that expired meanwhile is not left without one). A write that throws, or
+ * whose answer is not known, keeps its place: it may have written.
  *
- * Once a window's signals are spent the store is marked (signalsShortWindow),
- * so a rate made from these counts is said to be incomplete rather than shown
- * too high. A store that pays nothing takes one only while it holds one of the
- * month's places, as its requests (lib/free-pool.ts). A count that cannot be
- * made records nothing. Answers whether `write` ran and recorded.
+ * Each connection may take its share of a day of them (clientDayShare of the
+ * pool); the share counts what a connection asks for, written or not, so one
+ * machine sending made-up codes spends its own share and nobody else's.
+ *
+ * Every count not made, for whatever reason (its pool spent, the connection's
+ * share, a store that pays nothing without a place, a funded window not
+ * reserved, a count that could not be made), is written down (markCountGap),
+ * and a rate made from these counts is then said to be incomplete, never
+ * shown. Answers whether `write` ran and recorded.
  */
-export async function takeSignal(store: Store, write: () => Promise<boolean> = async () => true, now = Date.now()): Promise<boolean> {
+export async function takeSignal(store: Store, write: () => Promise<boolean> = async () => true, now = Date.now(), pool: "signals" | "paid" = "signals"): Promise<boolean> {
   if (!isRedisConfigured()) return false;
+  const gap = () => markCountGap(store.handle, now);
+  const refuse = async () => {
+    await gap();
+    return false;
+  };
   let key = "";
+  let keep = 0;
   try {
     const window = allowanceWindow(store, now);
-    if (!window) return false;
-    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    const limit = signalLimitFor(store, now / 1000);
-    if (!Number.isSafeInteger(limit) || limit <= 0) return false;
+    if (!window) return refuse();
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return refuse();
+    const limit = pool === "paid" ? PAID_ARRIVALS_PER_VISIT * visitLimitFor(store, now / 1000) : signalLimitFor(store, now / 1000);
+    if (!Number.isSafeInteger(limit) || limit <= 0) return refuse();
     const folder = await storeFolder(storeRef(store));
-    if (!FOLDER_PATTERN.test(folder)) return false;
-    if (!(await admitNonPaying(store, now))) return false;
+    if (!FOLDER_PATTERN.test(folder)) return refuse();
+    if (!(await admitNonPaying(store, now))) return refuse();
     const client = await askingConnection();
-    if (client && (await overShare(signalShareKey, "signal", folder, window, clientDayShare(limit), client, 1, now))) return false;
-    key = signalsKey(folder, window.id);
-    const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, keepSecondsFor(window, now), "NX"]]);
+    if (client && (await overShare(signalShareKey, pool === "paid" ? "paid" : "signal", folder, window, clientDayShare(limit), client, 1, now))) return refuse();
+    key = (pool === "paid" ? paidArrivalsKey : signalsKey)(folder, window.id);
+    keep = keepSecondsFor(window, now);
+    const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, keep, "NX"]]);
     const n = Number(count);
-    if (!Number.isSafeInteger(n) || n < 1) return false;
+    if (!Number.isSafeInteger(n) || n < 1) return refuse();
     if (n > limit) {
-      key = "";
-      await redisPipeline([["DECR", signalsKey(folder, window.id)], ["SET", signalsShortKey(folder), window.id]]);
+      const [left] = await redisPipeline([["DECR", key], ["EXPIRE", key, keep, "NX"]]);
+      // Spent: written down unless the count fell back under its figure meanwhile (another signal was given back).
+      if (!(Number(left) < limit)) await gap();
       return false;
     }
   } catch {
+    await gap();
     return false;
   }
-  let wrote = false;
+  let wrote: boolean | null;
   try {
     wrote = await write();
   } catch {
-    wrote = false;
+    wrote = null;
   }
-  if (!wrote) await redisPipeline([["DECR", key]]).catch(() => undefined);
-  return wrote;
+  if (wrote === false) await redisPipeline([["DECR", key], ["EXPIRE", key, keep, "NX"]]).catch(() => undefined);
+  return wrote === true;
 }
 
 /**
- * The window whose signals ran out last, or null when none has: from it on,
- * the clicks, affiliates' visits and funnel steps the store's rates are made
- * from are not all counted (takeSignal), and a page that shows such a rate
- * says so (signalsShortWords) instead of a figure that is too high. Kept with
- * the store, as the counts it qualifies are.
+ * Writes down that a count of this store was not made now: the first time
+ * ever, and the last (lib/traffic-rules.ts, countGapWords). Kept with the
+ * store, as the counts it qualifies are; never throws.
  */
-export async function signalsShortWindow(store: Store): Promise<string | null> {
+export async function markCountGap(handle: string, now = Date.now()): Promise<void> {
+  if (!isRedisConfigured() || !handle) return;
+  await redisPipeline([["HSETNX", gapKey(handle), "first", now], ["HSET", gapKey(handle), "last", now]]).catch(() => undefined);
+}
+
+/**
+ * When counts of the store were first and last not made, null when never, and
+ * "unknown" when it cannot be read: a rate is shown only from counts known to
+ * be whole.
+ */
+export async function countGap(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles">): Promise<{ first: number; last: number } | null | "unknown"> {
   if (!isRedisConfigured()) return null;
   try {
-    const [raw] = await redisPipeline([["GET", signalsShortKey(await storeFolder(storeRef(store)))]]);
-    return typeof raw === "string" && WINDOW_ID.test(raw) ? raw : null;
+    // Under every address the store has answered to: a count refused before its record is read is written down under the address it came to.
+    const handles = [...saleHandles(store)];
+    const replies = await redisPipeline(handles.map((h) => ["HMGET", gapKey(h), "first", "last"]));
+    let out: { first: number; last: number } | null = null;
+    for (const raw of replies) {
+      if (!Array.isArray(raw)) return "unknown";
+      const [first, last] = raw.map((v) => (v === null || v === undefined ? null : Number(v)));
+      if (first === null && last === null) continue;
+      if (first === null || last === null || !Number.isFinite(first) || !Number.isFinite(last)) return "unknown";
+      out = out ? { first: Math.min(out.first, first), last: Math.max(out.last, last) } : { first, last };
+    }
+    return out;
   } catch {
-    return null;
+    return "unknown";
   }
 }
 
-/** What a page says beside a rate made from counts some of which were not kept, or "" when all were. */
-export async function signalsShortWords(store: Store, now = Date.now()): Promise<string> {
-  const short = await signalsShortWindow(store);
-  if (!short) return "";
-  return short === allowanceWindow(store, now)?.id
-    ? SIGNALS_SHORT_THIS_MONTH
-    : SIGNALS_SHORT_BEFORE;
+/** What a page says instead of a rate made from this store's counts since `since` (ms), or "" when they are whole. */
+export async function countGapNote(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles">, what: "clicks" | "steps" | "visits", since: number): Promise<string> {
+  return countGapWords(await countGap(store), what, since);
 }
 
 /**

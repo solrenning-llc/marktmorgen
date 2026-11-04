@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { handleTaken, normaliseHandle, storeForHandle } from "@/lib/store";
 import { classifySource, cleanTag } from "@/lib/stats";
 import { countAffiliateClick, countHit, countVisit, isStorePeople } from "@/lib/visit";
 import { isBot } from "@/lib/source-rules";
@@ -7,19 +7,11 @@ import { funnelMark, stepIndex } from "@/lib/page-funnel";
 import { countFunnelStep, funnelVisitor, readPageFunnel } from "@/lib/page-funnel-store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { productIdFor } from "@/lib/catalog";
-import { takeSignal } from "@/lib/traffic";
+import { markCountGap, takeSignal } from "@/lib/traffic";
+import { HIT_STORE_LIMIT, shareAddress } from "@/lib/traffic-rules";
 import { affiliatesOn } from "@/lib/affiliates";
 
 const MAX_BODY_BYTES = 1_500;
-
-/**
- * What one store's pages may say in ten minutes, from every address together,
- * before its record is read for them: a store's busiest real ten minutes stay
- * far under it (Scale's 40,000 visits a month are about nine a ten minutes,
- * each a handful of these), while a flood from many machines at once stops
- * costing a megabyte read each. Past it the counts are simply not made.
- */
-const HIT_STORE_LIMIT = 3_000;
 
 const done = () => new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
 
@@ -59,10 +51,25 @@ export async function POST(request: NextRequest) {
   // read (up to MAX_STORE_BYTES), and so is the store's own allowance, so a
   // refused count reads nothing but its counter (independent review of #1496,
   // 4 November 2026; until then the record was read first).
+  // A robot that says it is one is never counted (lib/visit.ts): left out
+  // before any allowance is asked, so it neither spends one nor marks the
+  // store's counts as not whole.
+  if (isBot(request.headers.get("user-agent") ?? "")) return done();
   const kind = read("k", 2);
   const allowance = kind === "f" ? (["hit-funnel", 60] as const) : (["hit", 120] as const);
-  if (!(await withinLimit(allowance[0], `${clientAddress(request)}|${handle}`, allowance[1], 600))) return done();
-  if (!(await withinLimit("hit-store", handle, HIT_STORE_LIMIT, 600))) return done();
+  // The address as one site is handed it (lib/traffic-rules.ts, shareAddress:
+  // a /48 for the new kind), so a machine with a block of its own is one.
+  const address = clientAddress(request);
+  const from = shareAddress(address) || address;
+  // Every count refused is written down for a store that exists, so no rate
+  // is shown from counts that were not whole (lib/traffic.ts, markCountGap).
+  const refused = async () => {
+    if (await handleTaken(handle).catch(() => false)) await markCountGap(handle);
+    return done();
+  };
+  if (!(await withinLimit(allowance[0], `${from}|${handle}`, allowance[1], 600))) return refused();
+  // The store's own ten minutes for what is not a page (lib/traffic-rules.ts, HIT_STORE_LIMIT): views and pages are never under it.
+  if (kind !== "v" && kind !== "p" && !(await withinLimit("hit-store", handle, HIT_STORE_LIMIT, 600))) return refused();
   const store = await storeForHandle(handle).catch(() => null);
   if (!store) return done();
 
@@ -114,8 +121,11 @@ export async function POST(request: NextRequest) {
   } else if (kind === "a") {
     // A visit through an affiliate's link: counted for them, once a day.
     // `p`: the link was reached from a paid search ad (components/affiliate-click.tsx), counted apart.
+    // One from a paid ad is counted on a pool of its own (lib/traffic-rules.ts, PAID_ARRIVALS_PER_VISIT), so the
+    // mark the creator's paid-search hold reads never stops because the store's other clicks were many.
     const code = read("c", 20).toLowerCase();
-    if (code && affiliatesOn(store)) await countAffiliateClick(request, store, code, read("p", 2) === "1", (write) => takeSignal(store, write));
+    const paid = read("p", 2) === "1";
+    if (code && affiliatesOn(store)) await countAffiliateClick(request, store, code, paid, (write) => takeSignal(store, write, Date.now(), paid ? "paid" : "signals"));
   }
   return done();
 }

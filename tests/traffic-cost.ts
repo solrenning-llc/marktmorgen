@@ -197,7 +197,11 @@ export const COMMANDS = {
    * paths measured too (a link's first click of the day, an affiliate's visit
    * from a paid ad by another affiliate's browser): 19 at the most. A store
    * in its trial reads its place in the pool as well, one more, priced in
-   * nonPayingWorst.
+   * nonPayingWorst. Fourth round (4 November 2026), measured again with the
+   * address taken as its /48, robots left out first, the paid-ad visit on
+   * its own pool and every count not made written down: still 15 to 19, the
+   * paid-ad visit the heaviest. Kept signals only: one given back or refused
+   * costs returnedSignalCost (two commands more), priced on its own line.
    */
   signal: 19,
 };
@@ -370,6 +374,24 @@ export const SIGNAL_READ_BYTES = 8_000;
 export function signalCost(): number {
   return CDN_PER_REQUEST + CALL + (COMMANDS.signal + SHARE_COMMANDS_PER_REQUEST) * COMMAND + evalCost(EVALS.signal) + storeReadCost(STORE_READS.signal) + SIGNAL_READ_BYTES * DB_BYTE + 0.01 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
 }
+
+/**
+ * A signal given back or refused (lib/traffic.ts, takeSignal): the same
+ * request, the same reads, and the count taken back with its expiry, two
+ * commands more. A visitor's own reload of a funnel step or an affiliate's
+ * link, or a click past the window's, costs this and is not counted.
+ */
+export function returnedSignalCost(): number {
+  return signalCost() + 2 * COMMAND;
+}
+
+/**
+ * Whether the signal's path through a funded window
+ * (reservePaidResourceWindow, an EVAL) has been measured and priced in
+ * signalCost. False: tests/traffic.test.ts fails if commercialMarginReady()
+ * turns true while it is.
+ */
+export const FUNDED_SIGNAL_PATH_MEASURED = false;
 
 /**
  * One look at what is new in a room, with the CDN holding no answer for it:

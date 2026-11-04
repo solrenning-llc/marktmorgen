@@ -20,7 +20,8 @@
  * says how many this needs and how many are left.
  */
 import { readFileSync } from "node:fs";
-import { EXTRA_READS, NOTE_ROOM, PLAN_OFF_NOTE, READS_HELD, READ_FAILED_NOTE, READ_RETRY_SECONDS, advanceBroadcast, cancelBroadcast, createBroadcast, readsSpentNote, studioWaitNote } from "@/lib/broadcasts";
+import { type Broadcast, EXTRA_READS, LIST_RETRY_SECONDS, NOTE_ROOM, NO_BUYERS_NOTE, PLAN_OFF_NOTE, READS_HELD, READ_FAILED_NOTE, READ_GAVE_UP_NOTE, READ_MISSES_ALLOWED, READ_RETRY_SECONDS, advanceBroadcast, cancelBroadcast, countTest, createBroadcast, readsSpentNote, studioWaitNote } from "@/lib/broadcasts";
+import { giveAllowanceIn } from "@/lib/store-allowance";
 import { allowanceWindow, opensAgainWords, windowAt, windowId } from "@/lib/allowance-window";
 import { StoreFullError } from "@/lib/store-full";
 import { dataKey } from "@/lib/store-data";
@@ -33,7 +34,7 @@ import { countLedger } from "@/lib/person-agenda-read";
 import { readListing } from "@/lib/catalog";
 import { redisPipeline } from "@/lib/redis";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { type Store, addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
+import { type Store, addProduct, claimHandle, clearStripeAccount, ensureListId, ensureStatsId, ensureStoreId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -228,12 +229,16 @@ async function main(): Promise<void> {
   const base = { subscriptionActive: true, subscriptionId: "sub_x", trialEnds: 0, planEndedAt: "" };
   const start = Date.UTC(2026, 0, 31) / 1000;
   const monthly = { ...base, cycle: "month" as const, period: { start, end: Date.UTC(2026, 1, 28) / 1000, renews: true } };
-  is("a monthly plan: the period running, then the months that follow its end", [windowAt(monthly, Date.UTC(2026, 1, 10))?.id, windowAt(monthly, Date.UTC(2026, 2, 5))?.id, windowAt(monthly, Date.UTC(2026, 3, 1))?.id], ["2026-01-31", "2026-02-28", "2026-03-28"]);
+  is("a monthly plan anchored on the 31st: the period running, then the periods Stripe makes from that anchor (cut to a short month, back to the 31st after)", [windowAt(monthly, Date.UTC(2026, 1, 10))?.id, windowAt(monthly, Date.UTC(2026, 2, 5))?.id, windowAt(monthly, Date.UTC(2026, 2, 30))?.id, windowAt(monthly, Date.UTC(2026, 3, 1))?.id, windowAt(monthly, Date.UTC(2026, 4, 1))?.id], ["2026-01-31", "2026-02-28", "2026-02-28", "2026-03-31", "2026-04-30"]);
+  const fromShort = { ...monthly, period: { start: Date.UTC(2026, 1, 28) / 1000, end: Date.UTC(2026, 2, 31) / 1000, renews: true } };
+  is("the same anchor read from a period that began cut short (28 February to 31 March)", [windowAt(fromShort, Date.UTC(2026, 4, 30))?.id, windowAt(fromShort, Date.UTC(2026, 5, 1))?.id], ["2026-04-30", "2026-05-31"]);
+  const on30 = { ...monthly, period: { start: Date.UTC(2026, 0, 30) / 1000, end: Date.UTC(2026, 1, 28) / 1000, renews: true } };
+  is("anchored on the 30th", [windowAt(on30, Date.UTC(2026, 2, 29))?.id, windowAt(on30, Date.UTC(2026, 2, 30))?.id], ["2026-02-28", "2026-03-30"]);
   const yearly = { ...base, cycle: "year" as const, period: { start: Date.UTC(2026, 0, 15) / 1000, end: Date.UTC(2027, 0, 15) / 1000, renews: true } };
   is("a yearly plan: its months on its own day, into the next year", [windowAt(yearly, Date.UTC(2026, 5, 20))?.id, windowAt(yearly, Date.UTC(2027, 1, 20))?.id], ["2026-06-15", "2027-02-15"]);
   is("a plan set to end has no month after its end; an ended one counts the calendar month, where holdAllowanceAt holds nothing; an unknown moment has none", [windowAt({ ...monthly, period: { ...monthly.period, renews: false } }, Date.UTC(2026, 2, 5)), windowAt({ ...monthly, subscriptionActive: false }, Date.UTC(2026, 2, 5))?.billing, windowAt(monthly, Number.NaN)], [null, false, null]);
 
-  part("MÉDIO 3: a reading that fails at Stripe spends nothing and never fails the email: it waits, saying so, and is tried again later");
+  part("MÉDIO 3: a reading that fails at Stripe never fails the email at once: what it drew stays spent, it waits, saying so, and stops after READ_MISSES_ALLOWED in a row");
   await copy();
   await setUsed(0);
   const flaky = await write({ sendAt: Date.now() + 3_600_000 });
@@ -243,18 +248,93 @@ async function main(): Promise<void> {
   const usedFlaky = await used();
   const missed = await run(flaky.broadcast.id);
   const missedAt = Math.floor(Date.now() / 1000);
-  is("waiting with the note, its hold whole, no reading counted, this month's requests untouched", [missed?.status, missed?.note, (await recordOf(flaky.broadcast.id)).hold?.units, missed?.reads, missed?.misses, await used()], ["waiting", READ_FAILED_NOTE, READS_HELD * worst, undefined, 1, usedFlaky]);
-  is("tried again after an hour", Math.abs((missed?.retryAt ?? 0) - (missedAt + READ_RETRY_SECONDS)) <= 2, true);
-  for (let i = 0; i < 3; i += 1) {
+  is("waiting with the note; what the try drew from its hold stays spent; no reading counted; this month's figure untouched", [missed?.status, missed?.note, (await recordOf(flaky.broadcast.id)).hold?.units, missed?.reads, missed?.misses, await used()], ["waiting", READ_FAILED_NOTE, READS_HELD * worst - BUYER_LEDGER_UNITS, undefined, 1, usedFlaky]);
+  is("tried again after an hour, and not before", [Math.abs((missed?.retryAt ?? 0) - (missedAt + READ_RETRY_SECONDS)) <= 2, (await run(flaky.broadcast.id))?.misses], [true, 1]);
+  const tries: string[] = [];
+  for (let i = 1; i < READ_MISSES_ALLOWED; i += 1) {
     await setRecord(flaky.broadcast.id, { retryAt: 0 });
-    await run(flaky.broadcast.id);
+    tries.push((await run(flaky.broadcast.id))?.status ?? "none");
   }
-  const still = await recordOf(flaky.broadcast.id);
-  is("failing again and again: still waiting, never failed, each wait longer, nothing spent", [still.status, still.misses, still.retryAt - Math.floor(Date.now() / 1000) >= 8 * READ_RETRY_SECONDS - 2, still.hold?.units, await used()], ["waiting", 4, true, READS_HELD * worst, usedFlaky]);
+  const gaveUp = await recordOf(flaky.broadcast.id);
+  is(`failing ${READ_MISSES_ALLOWED} times in a row: waiting until then, then failed, saying so, out of the queue`, [tries, gaveUp.status, gaveUp.note, gaveUp.misses, (await redisPipeline([["SISMEMBER", "nl:mail:queue", flaky.broadcast.id]]))[0]], [[...Array(READ_MISSES_ALLOWED - 2).fill("waiting"), "failed"], "failed", READ_GAVE_UP_NOTE, READ_MISSES_ALLOWED, 0]);
+  is("every try paid before it asked Stripe: the hold first, then this month", await used(), usedFlaky + (READ_MISSES_ALLOWED * BUYER_LEDGER_UNITS - READS_HELD * worst));
+  await copy();
+  const recovers = await write({ sendAt: Date.now() + 3_600_000 });
+  await dueNow(recovers.broadcast.id);
+  await redisPipeline([["DEL", ledgerKey]]);
+  await run(recovers.broadcast.id);
   stripeDown = false;
-  await setRecord(flaky.broadcast.id, { retryAt: 0 });
-  const back = await run(flaky.broadcast.id);
-  is("Stripe answering again, it is read and listed, with no wait left on it", [back?.listed, back?.reads, back?.misses, back?.retryAt], [true, 1, undefined, undefined]);
+  await setRecord(recovers.broadcast.id, { retryAt: 0 });
+  const back = await run(recovers.broadcast.id);
+  is("Stripe answering again, it is read and listed, with no wait or miss left on it", [back?.listed, back?.reads, back?.misses, back?.retryAt], [true, 1, undefined, undefined]);
+  is("its notes fit the room they were given", [READ_FAILED_NOTE, READ_GAVE_UP_NOTE, NO_BUYERS_NOTE, PLAN_OFF_NOTE].every((note) => note.length <= NOTE_ROOM), true);
+
+  part("ALTO (round 2): a narrowed email whose store no longer reads its buyers is never sent without its narrowing");
+  await upsertContact(shop.listId as string, "bea@example.com", { agreed: true, explicit: true, source: "import" }, ROOM);
+  await upsertContact(shop.listId as string, "cy@example.com", { agreed: true, explicit: true, source: "import" }, ROOM);
+  await copy();
+  await setUsed(0);
+  const vip = await write({ sendAt: Date.now() + 3_600_000 });
+  is("written to the one buyer who spent enough, of three on the list", vip.broadcast.total, 1);
+  await dueNow(vip.broadcast.id);
+  await clearStripeAccount(OWNER);
+  stripeCalls = 0;
+  const unread = await run(vip.broadcast.id);
+  is("Stripe disconnected, no PayPal and none brought over: canceled, saying why, sent to no one, its hold given back", [unread?.status, unread?.note, unread?.listed, unread?.sent, (await recordOf(vip.broadcast.id)).hold?.units, await used(), stripeCalls], ["cancelled", NO_BUYERS_NOTE, false, 0, 0, 0, 0]);
+  await setStripeAccount(OWNER, "acct_1TestLedger0001", true);
+
+  part("MÉDIO 2: a hold made under a larger plan never draws past the figure of the smaller plan of the month it is read in");
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "scale", period: paidPeriod() });
+  const scaleShop = await load();
+  await copy();
+  await setUsed(0);
+  const big = await createBroadcast(scaleShop, { ...narrowed, sendAt: Date.now() + 3_600_000 } as Parameters<typeof createBroadcast>[1], countLedger(scaleShop).count);
+  if (!big.ok) throw new Error("not written");
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", period: paidPeriod() });
+  // The rest of the month used up to 4 below Pro's figure, the hold beside it.
+  await setUsed(figure - 4 + READS_HELD * worst);
+  await dueNow(big.broadcast.id);
+  await redisPipeline([["DEL", ledgerKey]]);
+  stripeCalls = 0;
+  const smaller = await run(big.broadcast.id);
+  is("on Pro, its hold draws only the 4 Pro leaves, the rest given back; the reading needs more, so it waits for next month, unread", [smaller?.status, smaller?.note, stripeCalls, await used(), (await recordOf(big.broadcast.id)).hold?.units], ["waiting", studioWaitNote(opensAgainWords(allowanceWindow(shop)!)), 0, figure, 4]);
+
+  part("Refusals and waits that say what happened");
+  await copy();
+  await setUsed(figure - 3);
+  const tooFew = await createBroadcast(shop, { ...narrowed, sendAt: Date.now() + 3_600_000 } as Parameters<typeof createBroadcast>[1], countLedger(shop).count);
+  is("this month too few left: how many it needs and how many are left", [tooFew.ok, !tooFew.ok && "message" in tooFew && tooFew.message.startsWith(`This needs ${READS_HELD * worst} of your studio requests this month, and only 3 are left.`)], [false, true]);
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", trialEnds: Math.floor(Date.now() / 1000) + 7 * 86_400, period: null });
+  const trialShop = await load();
+  await setUsed(0);
+  const pastTrial = await createBroadcast(trialShop, { ...narrowed, sendAt: Date.now() + 20 * 86_400_000 } as Parameters<typeof createBroadcast>[1], countLedger(trialShop).count);
+  is("in a trial, a day past its end is refused with the day the trial ends", [pastTrial.ok, !pastTrial.ok && "message" in pastTrial && pastTrial.message.startsWith("Your trial ends on ")], [false, true]);
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", trialEnds: 0, period: paidPeriod() });
+  await copy();
+  await setUsed(0);
+  const uncounted = await write({ sendAt: Date.now() + 3_600_000 }, false);
+  await dueNow(uncounted.broadcast.id);
+  await redisPipeline([["DEL", ledgerKey]]);
+  const unsure = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => (commands.some((c) => c[0] === "INCRBY" && c[1] === nowKey()) ? [null, "lost"] : unsure(commands))) as typeof redis.pipeline;
+  stripeCalls = 0;
+  const notCounted = await run(uncounted.broadcast.id);
+  redis.pipeline = unsure;
+  is("a count that could not be made: not read, waiting an hour, saying so", [notCounted?.status, stripeCalls, (notCounted?.retryAt ?? 0) - Math.floor(Date.now() / 1000) > LIST_RETRY_SECONDS - 5, notCounted?.note.endsWith("It is tried again in an hour.")], ["waiting", 0, true, true]);
+  const ahead2 = windowAt(shop, Date.now() + 60 * 86_400_000)!.id;
+  const aheadKey = nowKey().replace(/:[^:]+$/, `:${ahead2}`);
+  await redisPipeline([["DEL", aheadKey]]);
+  await giveAllowanceIn(shop, "studio", 5, ahead2);
+  const [aheadLeft, aheadTtl] = await redisPipeline([["GET", aheadKey], ["TTL", aheadKey]]);
+  is("giving back to a counter that is not there never leaves one below zero, nor one without an expiry", [Number(aheadLeft ?? 0) >= 0, aheadLeft === null || Number(aheadTtl) > 0], [true, true]);
+  const testing = { id: "a".repeat(24), sendAt: Math.floor(Date.now() / 1000) - 3_600, test: { by: "sales" } } as unknown as Broadcast;
+  await setUsed(figure);
+  stripeCalls = 0;
+  const unpaid = await countTest(shop, testing);
+  is("a subject test decided by sales: without studio requests its sales are not read", [unpaid.sales, stripeCalls, await used()], [null, 0, figure]);
+  await setUsed(0);
+  const paidTest = await countTest(shop, testing);
+  is("with them, paid first, then read", [paidTest.sales !== null, stripeCalls > 0, await used()], [true, true, BUYER_LEDGER_UNITS]);
 
   part("MÉDIO 4 and the record's room: a full data room refuses the email and gives back what it held");
   await copy();
@@ -267,7 +347,13 @@ async function main(): Promise<void> {
   await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
   is("store_full, nothing written, and nothing held left taken", [full, written(), await used()], ["store_full", beforeFull, 0]);
   is("the studio says so, as a refusal, not as a write it cannot confirm", [broadcastAnswer(false, { ok: false, error: "store_full" }, {}), flat("components/email-studio.tsx").includes("so this email was not saved and nothing was sent. Nothing was set aside for it.")], [{ ok: false, error: "store_full" }, true]);
-  is("its room is sized at the record's widest, its readings, waits and hold too", ["reads: widest", "misses: widest", "retryAt: widest", 'hold: { window: "0000-00-00", units: widest }'].every((part) => flat("lib/broadcasts.ts").includes(part)), true);
+  const roomBefore = Number((await redisPipeline([["HGET", roomKey, "#"]]))[0] ?? 0);
+  const sized = await write({ sendAt: Date.now() + 3_600_000 });
+  const roomTaken = Number((await redisPipeline([["HGET", roomKey, "#"]]))[0] ?? 0) - roomBefore;
+  const widest = Number.MAX_SAFE_INTEGER;
+  const grownRecord = { ...(await recordOf(sized.broadcast.id)), status: "cancelled", note: "x".repeat(NOTE_ROOM), finishedAt: widest, total: widest, sent: widest, failures: widest, hold: { window: "2027-12-31", units: widest }, reads: widest, misses: widest, retryAt: widest };
+  is("the room it takes covers its record at its widest: its readings, misses, wait and hold too", roomTaken >= Buffer.byteLength(JSON.stringify(grownRecord)), true);
+  await cancelBroadcast(shop, sized.broadcast.id);
 
   part("LEVE 8: a draw that cannot be written down takes nothing from the hold");
   await copy();
@@ -295,7 +381,11 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const rounds = async (id: string, n: number) => {
     const seen: string[] = [];
-    for (let i = 0; i < n; i += 1) seen.push((await run(id))?.status ?? "none");
+    for (let i = 0; i < n; i += 1) {
+      // Its hour's wait waited out.
+      await setRecord(id, { retryAt: 0 });
+      seen.push((await run(id))?.status ?? "none");
+    }
     return seen;
   };
   const dataFull = "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent.";
@@ -309,7 +399,7 @@ async function main(): Promise<void> {
     const usedBefore = await used();
     const statuses = await rounds(fullList.broadcast.id, 3);
     const end = await recordOf(fullList.broadcast.id);
-    is(`an email ${kind}, its data room full for 3 rounds: read ${READS_HELD} times at the most, waiting with the data room's note until then, then failed`, [ledgerReads, end.reads, statuses], [READS_HELD, READS_HELD, [...Array(READS_HELD).fill("waiting"), ...Array(3 - READS_HELD).fill("failed")]]);
+    is(`an email ${kind}, its data room full for 3 rounds: read ${READS_HELD} times at the most, waiting with the data room's note until then, then failed`, [ledgerReads, end.reads, statuses], [READS_HELD, READS_HELD, [...Array(READS_HELD - 1).fill("waiting"), ...Array(4 - READS_HELD).fill("failed")]]);
     is("what it held and did not draw given back when it stops", [(await used()) - usedBefore, holds ? end.hold?.units : end.hold], [holds ? -(READS_HELD * worst) : 0, holds ? 0 : undefined]);
     is("then it stops, failed, with why it waited, out of the queue: never dropped without a word", [end.status, end.note, end.note.length <= NOTE_ROOM, (await redisPipeline([["SISMEMBER", "nl:mail:queue", fullList.broadcast.id]]))[0]], ["failed", `${dataFull} It was tried as many times as it can be, so it stopped. To send it, write it again.`, true, 0]);
     await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
@@ -320,7 +410,11 @@ async function main(): Promise<void> {
   await redisPipeline([["HSET", roomKey, "#", 10 ** 12]]);
   ledgerReads = 0;
   const whileFull = await rounds(freed.broadcast.id, 1);
+  const fullNote = (await recordOf(freed.broadcast.id)).note;
+  is("waiting, its note says what happens and when: tried again in an hour, once more, then it stops", [fullNote, (await recordOf(freed.broadcast.id)).retryAt - Math.floor(Date.now() / 1000) > LIST_RETRY_SECONDS - 5], [`${dataFull} Make room: it is tried again in an hour, once more, then it stops.`, true]);
+  is("and before that hour nothing is tried", (await run(freed.broadcast.id))?.reads, 1);
   await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
+  await setRecord(freed.broadcast.id, { retryAt: 0 });
   const once = await run(freed.broadcast.id);
   is("made room within its readings, its list is made at the next round and it goes on", [whileFull, once?.listed, once?.total, once?.status !== "failed" && !once?.note.startsWith(dataFull), ledgerReads], [["waiting"], true, 1, true, READS_HELD]);
   redis.pipeline = realPipeline;
@@ -353,7 +447,6 @@ async function main(): Promise<void> {
     is(`a record with ${JSON.stringify(bad)} is refused as malformed, never run`, await run(waitOff.broadcast.id).then(() => "ran", () => "refused"), "refused");
   }
   await redisPipeline([["DEL", offKey]]);
-  is("no code path reads the buyers over its hold without taking from the month", [flat("lib/broadcasts.ts").includes("over += units"), flat("lib/broadcasts.ts").includes("needed more studio requests than it held")], [false, false]);
 
   part("The routes and the studio");
   const history = flat("components/email-studio.tsx");

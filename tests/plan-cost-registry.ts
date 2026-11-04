@@ -407,7 +407,12 @@ export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER
  * (createBroadcast, lib/store-allowance.ts holdAllowanceAt; all held for one
  * month never passes that month's studio figure), and beyond that from the
  * month it is read in; with none left there it waits, never read unpaid. A
- * plan not paid and running when it is due reads nothing.
+ * plan not paid and running when it is due, or a store that reads no buyers
+ * any more, reads nothing. A hold made under a larger plan draws no more than
+ * the month's own figure leaves. A reading that fails at Stripe or PayPal keeps
+ * spent what it drew, READ_MISSES_ALLOWED times in a row at most. A subject
+ * test decided by sales (countTest) pays a reading of every sale before it
+ * reads its TEST_SALES_PAGES pages.
  */
 export const SCHEDULED_READS = { id: "scheduled-reads", each: BUYER_LEDGER, units: "studio" } as const;
 /**

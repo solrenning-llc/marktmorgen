@@ -136,12 +136,21 @@ export async function holdAllowanceAt(store: AllowanceStore, kind: AllowanceKind
   if (!current) return { ok: false, reason: "unknown", message: resetWords(store, now) };
   const target = atMs < current.end ? current : windowAt(store, atMs);
   if (!target || (target.id !== current.id && standingOf(store, atMs / 1000) !== "paid")) {
-    const ends = store.period && !store.period.renews && store.subscriptionActive ? opensAgainWords({ ...current, end: store.period.end * 1000 }, now) : null;
+    const dayOf = (ms: number) => opensAgainWords({ ...current, end: ms }, now);
+    // In a trial, the day it ends (what comes after is a month not paid for yet); a plan set to end, its last day.
+    if (standingOf(store, now / 1000) === "trial") return { ok: false, reason: "ended", message: `Your trial ends on ${dayOf(store.trialEnds * 1000)} (UTC), so this can only be set for a day before then.` };
+    const ends = store.period && !store.period.renews && store.subscriptionActive ? dayOf(store.period.end * 1000) : null;
     return { ok: false, reason: "ended", message: ends ? `Your plan ends on ${ends} (UTC), so this can only be set for a day before then.` : "This can only be set for a month your plan pays for." };
   }
   if (target.id === current.id) {
     const taken = await takeAllowance(store, kind, n, now);
-    return taken.ok ? { ok: true, window: current.id } : { ok: false, reason: taken.reason, message: taken.message };
+    if (taken.ok) return { ok: true, window: current.id };
+    // How many this needs and how many are left, when the count was read; otherwise the figure's own words.
+    if (taken.reason === "used" && taken.left !== undefined) {
+      const left = taken.left === 0 ? "none are left" : taken.left === 1 ? "only 1 is left" : `only ${taken.left.toLocaleString("en-US")} are left`;
+      return { ok: false, reason: "used", message: `This needs ${n.toLocaleString("en-US")} of your ${KIND_WORDS[kind].many} this month, and ${left}.${taken.reset ? ` ${taken.reset}` : ""}` };
+    }
+    return { ok: false, reason: taken.reason, message: taken.message };
   }
   const limit = allowanceFor(store, kind, atMs / 1000);
   const id = idOf(store);
@@ -177,7 +186,15 @@ export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind
   if (now > Date.parse(window.length === 7 ? `${window}-01T00:00:00Z` : `${window}T00:00:00Z`) + (LONGEST_WINDOW_DAYS + 1) * 86_400_000) return;
   const id = idOf(store);
   if (!id || !isRedisConfigured()) return;
-  await redisPipeline([["DECRBY", key(kind, id, window), n]]).catch(() => {});
+  const k = key(kind, id, window);
+  try {
+    // Only a counter that is there: one gone (expired, erased) is not made again below zero, with no expiry.
+    const [left] = await redisPipeline([["DECRBY", k, n]]);
+    const after = Number(left);
+    if (Number.isSafeInteger(after) && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
+  } catch {
+    // Best effort: counted higher, never lower.
+  }
 }
 
 /** Fixed-size own-data reply from the existing SET NX + INCRBY pipeline. */

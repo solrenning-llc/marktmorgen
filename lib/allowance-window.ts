@@ -170,12 +170,21 @@ export function windowAt(store: WindowFields, atMs: number): AllowanceWindow | n
   const period = store.period;
   if (!isPeriod(period) || !period.renews || atMs < period.end * 1000) return null;
   const yearly = store.cycle === "year";
-  let start = period.end * 1000;
+  const step = yearly ? 12 : 1;
+  // Stripe counts every period from its anchor, not from the last period's end: an anchor on the 29th to the 31st
+  // is cut to a short month's last day and comes back after it (31 January, 28 February, 31 March). Of the period's
+  // two ends, the later day of the month is the anchor's (the other may have been cut), so the next ends are that one
+  // moved by whole periods, each cut to its month as Stripe cuts it.
+  const startMs = period.start * 1000;
+  const endMs = period.end * 1000;
+  const anchor = new Date(endMs).getUTCDate() >= new Date(startMs).getUTCDate() ? endMs : startMs;
+  const offset = anchor === endMs ? 0 : step;
   // At most a year and a day ahead is ever asked (lib/broadcasts.ts, MAX_SCHEDULE_DAYS); bounded all the same.
-  for (let i = 0; i < 40; i += 1) {
-    const end = addMonthsMs(start, yearly ? 12 : 1);
+  for (let k = 0; k < 40; k += 1) {
+    const start = addMonthsMs(anchor, offset + k * step);
+    const end = addMonthsMs(anchor, offset + (k + 1) * step);
+    if (atMs < start) return null;
     if (atMs < end) return yearly ? monthOfPeriod({ start: start / 1000, end: end / 1000, renews: true }, "year", atMs) : { id: day(start), start, end, billing: true };
-    start = end;
   }
   return null;
 }

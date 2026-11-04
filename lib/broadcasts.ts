@@ -25,14 +25,15 @@ import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowa
 import { WINDOW_ID, allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { costStandingOf } from "@/lib/plan-standing";
-import { giveAllowance, giveAllowanceIn, holdAllowanceAt, takeAllowance } from "@/lib/store-allowance";
+import { allowancesUsedStrict, giveAllowance, giveAllowanceIn, holdAllowanceAt, takeAllowance } from "@/lib/store-allowance";
+import { paypalKept } from "@/lib/paypal-sales";
 import type { Store } from "@/lib/store";
 import { hasProduct, idsOfKind } from "@/lib/catalog";
 import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links";
 import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest, parseTest, partAt, splitFor } from "@/lib/mail-test";
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
-import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadingUnits, readNarrow, readsBuyers } from "@/lib/segments";
+import { BUYER_LEDGER_UNITS, LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadBytes, ledgerReadingUnits, ledgerUnits, readNarrow, readsBuyers } from "@/lib/segments";
 import { sameNarrow } from "@/lib/segments-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
@@ -112,7 +113,7 @@ export type Broadcast = {
    * why. A reading that failed at Stripe or PayPal is not one (`misses`).
    */
   reads?: number;
-  /** Readings that failed at Stripe or PayPal in a row: none of them spent, each waited out longer (READ_RETRY_SECONDS). */
+  /** Readings that failed at Stripe or PayPal in a row: each waited out longer (READ_RETRY_SECONDS), at most READ_MISSES_ALLOWED. */
   misses?: number;
   /** A waiting email is not tried before this moment (seconds): the month whose studio requests it waits for, or a failed reading's wait. */
   retryAt?: number;
@@ -145,10 +146,20 @@ export const READS_HELD = 1 + EXTRA_READS;
 /** The first wait after a reading failed at Stripe or PayPal; each failure in a row doubles it, up to a day. */
 export const READ_RETRY_SECONDS = 3_600;
 const readRetry = (misses: number) => Math.min(86_400, READ_RETRY_SECONDS * 2 ** Math.min(Math.max(misses - 1, 0), 5));
+/** Readings in a row that may fail at Stripe or PayPal before the email stops, failed, saying so (about four days of waits). */
+export const READ_MISSES_ALLOWED = 7;
+/** Said on a narrowed email whose readings of its buyers failed at Stripe or PayPal READ_MISSES_ALLOWED times in a row. */
+export const READ_GAVE_UP_NOTE = `Your sales could not be read after ${READ_MISSES_ALLOWED} tries, so the list of who it goes to could not be made and it stopped. Nothing was sent. To send it, write it again.`;
+/** Said on a narrowed email whose store reads no buyers any more (Stripe and PayPal disconnected, none brought over). */
+export const NO_BUYERS_NOTE = "Your store can no longer read its sales (Stripe and PayPal are not connected, and no buyers were brought over), so the buyers this email was narrowed to could not be found. It was canceled and sent to no one. Reconnect, then write it again.";
+/** A wait after the list could not be made for a reason of the store's or ours, before it is tried again (seconds). */
+export const LIST_RETRY_SECONDS = 3_600;
+/** Said when a narrowed email's list could not be made now for a reason that passes: tried again in an hour. */
+const LIST_WAIT_NOTE = "The list of who it goes to could not be prepared just now. Nothing was sent. It is tried again in an hour.";
 /** Said on a narrowed email canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
 export const PLAN_OFF_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent and none of your studio requests were used for it. To send it, write it again while your plan is on.";
 /** Said on a narrowed email whose reading of its buyers failed at Stripe or PayPal: nothing spent, tried again later. */
-export const READ_FAILED_NOTE = "Your sales could not be read just now, so the list of who it goes to could not be made. Nothing was sent and no studio requests were used. It is tried again automatically.";
+export const READ_FAILED_NOTE = `Your sales could not be read just now, so the list of who it goes to could not be made. Nothing was sent. What that try used of your studio requests stays used. It is tried again later, up to ${READ_MISSES_ALLOWED} times in a row, then it stops.`;
 /** Said on a narrowed email waiting for the month whose studio requests will pay for its reading of the buyers. */
 export function studioWaitNote(opens: string): string {
   return `Your studio requests for this month are used up, so the list of who it goes to could not be made. Nothing was sent. It goes out by itself when they open again, on ${opens} (UTC).`;
@@ -156,7 +167,7 @@ export function studioWaitNote(opens: string): string {
 
 /** The note of an email stopped because its readings of the buyers ran out: why it waited, without "tried again". */
 export function readsSpentNote(waiting: string): string {
-  const why = waiting.replace(/\s*(Make room, and it is tried again automatically|It will be checked again automatically|It is tried again automatically)\.$/, "").trim();
+  const why = waiting.replace(/\s*(Make room, and it is tried again automatically|It will be checked again automatically|It is tried again automatically|It is tried again in an hour|(Make room: it|It) is tried again in an hour, [^.]*)\.$/, "").trim();
   return `${why || "The list of who it goes to could not be made. Nothing was sent."} It was tried as many times as it can be, so it stopped. To send it, write it again.`;
 }
 
@@ -551,8 +562,18 @@ export async function advanceBroadcast(
         await save(b);
         return b;
       }
+      // Narrowed to buyers, and the store reads none any more: never sent without the narrowing (that would be to
+      // everyone); canceled, saying why, with what it held given back.
+      if (!given && isNarrowed(b.narrow) && !readsBuyers(store)) {
+        const left = b.hold?.units ? b.hold : null;
+        b = { ...b, status: "cancelled", note: NO_BUYERS_NOTE, finishedAt: now, ...(left ? { hold: { ...left, units: 0 } } : {}) };
+        await save(b);
+        await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
+        if (left) await giveAllowanceIn(store, "studio", left.units, left.window);
+        return b;
+      }
       let keep = given?.keep;
-      if (!given && isNarrowed(b.narrow) && readsBuyers(store)) {
+      if (!given && isNarrowed(b.narrow)) {
         const read = await readNarrowing(b, store, now);
         if (read.stop) return read.stop;
         b = read.b;
@@ -575,7 +596,23 @@ export async function advanceBroadcast(
       // Who it goes to takes room in the store's data room until the list expires by itself.
       const taken = await takeData(store, [{ until: Date.now() + (RECIPIENT_DAYS + 1) * 86_400_000, bytes: dataBytes(to, to.length) }]);
       if (!taken.ok) {
-        b = { ...b, status: "waiting", note: taken.reason === "full" ? "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent. Make room, and it is tried again automatically." : "The recipient list could not be prepared. Nothing was sent. It will be checked again automatically." };
+        const full = taken.reason === "full";
+        if (isNarrowed(b.narrow) && readsBuyers(store)) {
+          // Each try reads the buyers again, paid: at most READS_HELD of them, an hour apart, and the note says so.
+          const why = full ? "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent." : "The recipient list could not be prepared. Nothing was sent.";
+          const left = READS_HELD - (b.reads ?? 0);
+          if (left <= 0) {
+            const held = b.hold?.units ? b.hold : null;
+            b = { ...b, status: "failed", note: readsSpentNote(why), finishedAt: now, ...(held ? { hold: { ...held, units: 0 } } : {}) };
+            await save(b);
+            await redisPipeline([["SREM", QUEUE, id]]);
+            if (held) await giveAllowanceIn(store, "studio", held.units, held.window);
+            return b;
+          }
+          b = { ...b, status: "waiting", note: `${why} ${full ? "Make room: it" : "It"} is tried again in an hour, ${left === 1 ? "once more" : `${left} more times at most`}, then it stops.`, retryAt: now + LIST_RETRY_SECONDS };
+        } else {
+          b = { ...b, status: "waiting", note: full ? "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent. Make room, and it is tried again automatically." : "The recipient list could not be prepared. Nothing was sent. It will be checked again automatically." };
+        }
         await save(b);
         return b;
       }
@@ -722,10 +759,12 @@ export async function advanceBroadcast(
  * from that month (a hold made for another month is given back and the whole
  * taken from this one); each draw from the hold is written down before that
  * part is read, and lowers the hold in memory only once written. With no
- * studio requests left this month, it waits for the next month, saying when;
- * a reading that fails at Stripe or PayPal spends nothing (what its last part
- * drew is held again, or given back) and is tried again later, saying so.
- * At most READS_HELD readings are made, then it stops, failed, saying why.
+ * studio requests left this month, it waits for the next month, saying when.
+ * A hold made under a larger plan draws no more than the plan of this month
+ * leaves for it (the rest given back). A reading that fails at Stripe or
+ * PayPal keeps spent what it drew (pages may have been read) and is tried
+ * again later, at most READ_MISSES_ALLOWED times in a row, saying so. At most
+ * READS_HELD readings are made, then it stops, failed, saying why.
  */
 async function readNarrowing(start: Broadcast, store: Store, now: number): Promise<{ stop: Broadcast; b?: undefined; keep?: undefined } | { stop?: undefined; b: Broadcast; keep: ((email: string) => boolean) | undefined }> {
   let b = start;
@@ -740,11 +779,12 @@ async function readNarrowing(start: Broadcast, store: Store, now: number): Promi
   }
   const current = await refreshPeriod(store);
   const window = allowanceWindow(current, now * 1000);
-  if (!window) {
-    b = { ...b, status: "waiting", note: "The list of who it goes to could not be prepared. Nothing was sent. It will be checked again automatically." };
+  const wait = async (): Promise<{ stop: Broadcast }> => {
+    b = { ...b, status: "waiting", note: LIST_WAIT_NOTE, retryAt: now + LIST_RETRY_SECONDS };
     await save(b);
     return { stop: b };
-  }
+  };
+  if (!window) return wait();
   // Held for another month than the one it is read in: given back there once that is written down, and this month pays.
   if (b.hold && b.hold.window !== window.id) {
     const stale = b.hold;
@@ -753,15 +793,28 @@ async function readNarrowing(start: Broadcast, store: Store, now: number): Promi
     if (stale.units) await giveAllowanceIn(store, "studio", stale.units, stale.window);
   }
   let held = b.hold?.units ?? 0;
-  let last = { fromHold: 0, taken: 0 };
-  let refused = false;
+  if (held > 0) {
+    // Held under the plan it was scheduled on: when this month's plan is smaller, the hold draws no more than this
+    // month's figure leaves beside everything else taken in it; the rest is given back, once that is written down.
+    const counts = await allowancesUsedStrict(current, ["studio"], now * 1000).catch(() => null);
+    if (!counts) return wait();
+    const [{ used, figure }] = counts;
+    const usable = Math.max(0, Math.min(held, figure - (used - held)));
+    if (usable < held) {
+      b = { ...b, hold: { window: window.id, units: usable } };
+      await save(b);
+      await giveAllowanceIn(current, "studio", held - usable, window.id, now * 1000);
+      held = usable;
+    }
+  }
+  let refused: "used" | "other" | null = null;
   const draw = async (units: number): Promise<boolean> => {
     const fromHold = Math.min(units, held);
     const rest = units - fromHold;
     if (rest > 0) {
       const taken = await takeAllowance(current, "studio", rest, now * 1000).catch(() => null);
       if (!taken?.ok) {
-        refused = taken?.reason === "used";
+        refused = taken?.reason === "used" ? "used" : "other";
         return false;
       }
     }
@@ -775,7 +828,6 @@ async function readNarrowing(start: Broadcast, store: Store, now: number): Promi
       }
       held -= fromHold;
     }
-    last = { fromHold, taken: rest };
     return true;
   };
   const withHold = (units: number): Broadcast => (b.hold || units ? { ...b, hold: { window: window.id, units } } : b);
@@ -785,19 +837,31 @@ async function readNarrowing(start: Broadcast, store: Store, now: number): Promi
   } catch (error) {
     if (error instanceof LedgerNotCounted) {
       // Nothing more was read: this month has no studio requests left for it, or a draw could not be written down.
-      b = refused
-        ? { ...withHold(held), status: "waiting", note: studioWaitNote(opensAgainWords(window, now * 1000)), retryAt: Math.ceil(window.end / 1000) }
-        : { ...withHold(held), status: "waiting", note: "The list of who it goes to could not be prepared. Nothing was sent. It will be checked again automatically." };
+      // Nothing more was read: this month has no studio requests left for it (it waits for the next), or they could
+      // not be counted, or a draw could not be written down (tried again in an hour).
+      b = withHold(held);
+      if (refused === "used") {
+        b = { ...b, status: "waiting", note: studioWaitNote(opensAgainWords(window, now * 1000)), retryAt: Math.ceil(window.end / 1000) };
+        await save(b);
+        return { stop: b };
+      }
+      return wait();
+    }
+    // Stripe or PayPal did not answer, perhaps after some pages were read: what it drew stays spent. Tried again after
+    // a wait that grows, READ_MISSES_ALLOWED times in a row at most; then it stops, failed, saying so.
+    const misses = (b.misses ?? 0) + 1;
+    console.error("reading a scheduled email's buyers failed", b.id, error);
+    if (misses >= READ_MISSES_ALLOWED) {
+      const left = held;
+      b = { ...withHold(0), status: "failed", note: READ_GAVE_UP_NOTE, misses, finishedAt: now };
+      delete b.retryAt;
       await save(b);
+      await redisPipeline([["SREM", QUEUE, b.id]]);
+      if (left) await giveAllowanceIn(current, "studio", left, window.id, now * 1000);
       return { stop: b };
     }
-    // Stripe or PayPal did not answer: that reading is not spent. What its last part drew is held again (or given
-    // back to this month), and it is tried again after a wait that grows, never failed for it.
-    if (last.taken > 0) await giveAllowance(current, "studio", last.taken, now * 1000);
-    const misses = (b.misses ?? 0) + 1;
-    b = { ...withHold(held + last.fromHold), status: "waiting", note: READ_FAILED_NOTE, misses, retryAt: now + readRetry(misses) };
+    b = { ...withHold(held), status: "waiting", note: READ_FAILED_NOTE, misses, retryAt: now + readRetry(misses) };
     await save(b);
-    console.error("reading a scheduled email's buyers failed", b.id, error);
     return { stop: b };
   }
   // Read and paid: one reading more, and no wait or failed reading left on it.
@@ -806,6 +870,9 @@ async function readNarrowing(start: Broadcast, store: Store, now: number): Promi
   delete done.misses;
   return { b: done, keep };
 }
+
+/** Pages of sales a subject test decided by sales reads (countTest): within a reading of every sale (ALL_TIME_PAGES). */
+export const TEST_SALES_PAGES = 5;
 
 /** A random order, in place: every order as likely as any other. */
 function shuffle(list: string[]): void {
@@ -821,7 +888,7 @@ function shuffle(list: string[]): void {
  * account. Either is null when it could not be read; neither is guessed.
  * Sales are read only for a test that is decided by them.
  */
-async function countTest(store: Store, b: Broadcast): Promise<{ visits: Counted; sales: Counted }> {
+export async function countTest(store: Store, b: Broadcast): Promise<{ visits: Counted; sales: Counted }> {
   const a = variantCampaign(b.id, "a");
   const bee = variantCampaign(b.id, "b");
   let visits: Counted = null;
@@ -836,7 +903,13 @@ async function countTest(store: Store, b: Broadcast): Promise<{ visits: Counted;
   }
   if (b.test?.by === "sales" && store.stripeAccountId) {
     try {
-      const read = await readPaidSales(store, b.sendAt - 60, 5);
+      // Paid in the store's studio requests before it is read, as a reading of every sale is (TEST_SALES_PAGES of
+      // its pages, within that); without them the sales are not read, and the test is decided without them.
+      const kept = await paypalKept(store.statsId, Boolean(store.paypalSeller));
+      const units = BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: kept.sales, paypalRefunds: 0 }));
+      const paid = await takeAllowance(await refreshPeriod(store), "studio", units);
+      if (!paid.ok) throw new Error("a subject test's sales were not read: its studio requests could not be counted");
+      const read = await readPaidSales(store, b.sendAt - 60, TEST_SALES_PAGES);
       const by = moneyByCampaign(read.sales, store.currency);
       // A count of sales, so a sale in another currency counts too; no amount is added (22 [E5], unit 2d).
       sales = { a: (by[a]?.sales ?? 0) + (by[a]?.elsewhere ?? 0), b: (by[bee]?.sales ?? 0) + (by[bee]?.elsewhere ?? 0) };

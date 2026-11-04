@@ -1,6 +1,8 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
+import { TEST_SALES_PAGES } from "@/lib/broadcasts";
+import { ALL_TIME_PAGES } from "@/lib/stats";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
@@ -298,6 +300,8 @@ test("a scheduled email's readings of the buyers are each paid in studio request
  assert.deepEqual(source.match(/keepFor\([^)]*\)/g), ["keepFor(store, narrow, count)", "keepFor(store, b.narrow, draw)"], "every reading of the buyers in lib/broadcasts.ts is counted");
  assert.ok(source.includes('const taken = await takeAllowance(current, "studio", rest, now * 1000)') && source.includes("return true;") && !source.includes("over += units"), "what the hold does not cover is taken from the month it is read in, never read over it");
  assert.ok(source.includes('await holdAllowanceAt(await refreshPeriod(store), "studio", units, sendAt * 1000)'), "the hold is taken from the month it goes out");
+ // A subject test decided by sales reads TEST_SALES_PAGES pages of sales, paid as a reading of every sale (ALL_TIME_PAGES of them) first.
+ assert.ok(TEST_SALES_PAGES <= ALL_TIME_PAGES, `${TEST_SALES_PAGES} > ${ALL_TIME_PAGES}`);
 });
 
 test("the tasks agenda at its most fits the studio requests it counts", () => {

@@ -876,9 +876,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:cfg:@lib/webhooks.ts": { what: "The store's endpoints", parts: [capped(MAX_ENDPOINTS * 2 * KB, "MAX_ENDPOINTS endpoints.", src("lib/webhooks.ts", "MAX_ENDPOINTS"))] },
   "nl:hooks:d:@lib/webhooks.ts": { what: "One delivery and how it went, a week", parts: [
     per("webhook", 7, 4 * KB, "One delivery and how it went, a week"),
-    // A passed-over Stripe event leaves its line without taking a delivery: GIVEN_UP_LINES_PER_DAY events a store a day at most
-    // (counted in code), one line an endpoint, each kept a week.
-    capped(7 * GIVEN_UP_LINES_PER_DAY * MAX_ENDPOINTS * 2 * KB, "Lines of passed-over Stripe events: GIVEN_UP_LINES_PER_DAY a day, one an endpoint, a week.", src("lib/webhooks.ts", "GIVEN_UP_LINES_PER_DAY", "MAX_ENDPOINTS")),
+    // A passed-over Stripe event leaves its line without taking a delivery: GIVEN_UP_LINES_PER_DAY events a store a day (counted
+    // in code) get their own, every later one that day only rewrites one summary line; one line an endpoint, each kept a week.
+    capped(7 * (GIVEN_UP_LINES_PER_DAY + 1) * MAX_ENDPOINTS * 2 * KB, "Lines of passed-over Stripe events: GIVEN_UP_LINES_PER_DAY a day and one summary, one an endpoint, a week.", src("lib/webhooks.ts", "GIVEN_UP_LINES_PER_DAY", "MAX_ENDPOINTS")),
   ] },
   "nl:hooks:evt:@lib/webhooks.ts": { what: "An event already sent", parts: [
     per("order", 30, MARK, "A sale."), per("webhook", 30, MARK, "Any other."),
@@ -888,7 +888,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),
   "nl:hooks:q@lib/webhooks.ts": company("Deliveries waiting for a try", "One sorted set, members gone within a week: each a webhook's."),
   "nl:hooks:stores@lib/webhooks.ts": company("Stores with any endpoint", "One set for every store."),
-  "nl:hooks:wait:@lib/webhooks.ts": { what: "The Stripe event the store's reading waits on, and for how many runs", parts: [capped(KEY, "One a store, for thirty days at most."), capped(2 * KEY, "The count of the day's passed-over lines, kept two days: two a store at most.")] },
+  "nl:hooks:wait:@lib/webhooks.ts": { what: "The Stripe event the store's reading waits on, and for how many runs", parts: [capped(KEY, "One a store, for thirty days at most."), capped(2 * (288 / 3) * 128, "The day's passed-over events (a sorted set, gone at the end of the next UTC day: two a store at most). Not counted in code: bounded by the five-minute cron's calls, 288 visits a day and at least STRIPE_REFUSED_RUNS failed visits before an event is passed over.", src("lib/webhooks.ts", "STRIPE_REFUSED_RUNS", "STRIPE_WAIT_RUNS"))] },
   "nl:rl:hooks:test:@lib/webhooks.ts": short("Tests counted", "studio", 1, 128),
   "nl:wo:due@lib/welcome-offer-send.ts": company("Welcome offers due", "One sorted set for every store, each a sign-up's."),
   "nl:wo:n:@lib/welcome-offer-send.ts": short("Welcome offers counted", "day", 62, 128),

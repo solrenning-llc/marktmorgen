@@ -132,7 +132,13 @@ export const STRIPE_WAIT_RUNS = 288;
  * stores, one run after another) gives up long before Stripe's thirty days
  * would drop the anchor and lose the event with no line.
  */
-export const STRIPE_WAIT_SECONDS = 2 * 86400;
+export const STRIPE_WAIT_MAX_SECONDS = 2 * 86400;
+/**
+ * Visits an event must have failed before the time bound applies, so an
+ * event first stopped before a long pause (the plan's costs paused, the job
+ * not visiting) still gets a few more tries once the store is visited again.
+ */
+export const STRIPE_WAIT_TIME_VISITS = 6;
 /**
  * Visits an event waits on Stripe refusing the lookup itself (a 4xx other
  * than 429 or 409: a request Stripe will answer the same way every time):
@@ -141,9 +147,10 @@ export const STRIPE_WAIT_SECONDS = 2 * 86400;
  */
 export const STRIPE_REFUSED_RUNS = 3;
 /**
- * Lines passed-over Stripe events may leave in one store's delivery log in
- * a day (UTC); past them a passed-over event is said in the server's log
- * only, so what these uncharged lines keep stays small whatever Stripe does.
+ * Passed-over Stripe events that leave their own lines in one store's
+ * delivery log in a day (UTC); past them one summary line per endpoint says
+ * how many more were skipped that day, so what these uncharged lines keep
+ * stays small whatever Stripe does, and the creator still hears of each.
  */
 export const GIVEN_UP_LINES_PER_DAY = 3;
 const ANCHOR_SECONDS = 30 * 86400;
@@ -202,7 +209,7 @@ export const QUEUE_KEY = "nl:hooks:q";
 const anchorKey = (statsId: string) => `nl:hooks:anchor:${statsId}`;
 /** The event a store's Stripe reading is waiting on, and for how many runs: "<evt>|<runs>". */
 const waitKey = (statsId: string) => `nl:hooks:wait:${statsId}`;
-/** How many passed-over events left their lines in a store's log on one UTC day, kept two days. */
+/** The passed-over events of a store on one UTC day, a sorted set by when each was first passed over; gone at the end of the next day. */
 const givenUpDayKey = (statsId: string, day: number) => `nl:hooks:wait:${statsId}:day:${day}`;
 const testsKey = (statsId: string) => `nl:rl:hooks:test:${statsId}`;
 const POSITION_KEY = "nl:hooks:pos";
@@ -938,7 +945,7 @@ class StripeShapeError extends Error {}
  * Why an event could not be done with in this visit: "spent", the visit's
  * lookups ran out (not a failure, never a reason to give up); "refused",
  * Stripe will answer the same way again (STRIPE_REFUSED_RUNS); "passing",
- * a failure that may clear (STRIPE_WAIT_RUNS, STRIPE_WAIT_SECONDS).
+ * a failure that may clear (STRIPE_WAIT_RUNS, STRIPE_WAIT_MAX_SECONDS).
  */
 type Waits = "spent" | "refused" | "passing";
 /** True once an event is done with, or why it waits. */
@@ -1271,93 +1278,118 @@ function stripeEventPage(value: unknown): StripeEvent[] {
 }
 
 /**
- * What a Stripe event that can wait would have been sent as, the Stripe
- * object it is about, in the creator's words, and whether it is known to be
- * the store's: a membership's change is (its subscription names the store,
- * checked before the address is asked for); a refund or a dispute waits
- * only because whose its payment is could not be told, so it may be a
+ * What a Stripe event that can wait would have been sent as (any of
+ * `types`, by what each endpoint hears), the Stripe object it is about, in
+ * the creator's words, and whether it is known to be the store's: one that
+ * names the store in its own metadata is; a refund without it or a dispute
+ * waits only because whose its payment is could not be told, so it may be a
  * charge made on the same Stripe account outside Marktmorgen.
  */
-function waitedAs(event: StripeEvent): { type: WebhookEvent; about: string; known: boolean } | null {
-  const id = str(event.data?.object?.id) ?? "an unknown id";
-  if (event.type === "charge.dispute.created") return { type: "dispute.opened", about: `dispute ${id}`, known: false };
-  if (event.type === "charge.refunded") return { type: "refund.issued", about: `the refund of charge ${id}`, known: false };
-  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") return { type: "membership.canceled", about: `subscription ${id}`, known: true };
-  return null;
+function waitedAs(event: StripeEvent, handles: Set<string>): { types: WebhookEvent[]; about: string; known: boolean } {
+  const object = event.data?.object ?? {};
+  const id = str(object.id) ?? "an unknown id";
+  const own = handles.has(str((object.metadata as Record<string, unknown> | undefined)?.store) ?? "");
+  if (event.type === "checkout.session.completed") return { types: ["sale.completed", "membership.started"], about: `checkout ${id}`, known: own };
+  if (event.type === "payment_intent.succeeded") return { types: ["sale.completed"], about: `payment ${id}`, known: own };
+  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") return { types: ["membership.canceled", "membership.changed"], about: `subscription ${id}`, known: own };
+  if (event.type === "charge.refunded") return { types: ["refund.issued"], about: `the refund of charge ${id}`, known: own };
+  if (event.type === "charge.dispute.created") return { types: ["dispute.opened"], about: `dispute ${id}`, known: false };
+  return { types: [], about: `Stripe event ${str(event.id) ?? id}`, known: false };
+}
+
+/** A line of the delivery log no message is behind: the studio shows it "Not sent", with `words`. */
+function noticeLine(id: string, statsId: string, endpoint: string, eventId: string, type: WebhookEvent, words: string, now: number): Delivery {
+  return { id, statsId, endpoint, eventId, type, body: "", attempts: 0, state: "failed", next: 0, lastStatus: 0, lastError: words, lastAt: now, createdAt: now, givenUp: true };
+}
+
+/** Puts in the store's log those of `ids` it does not hold yet (one a visit that died left out, or one trimmed since). */
+async function pushMissing(statsId: string, ids: string[], known: string[] = []): Promise<void> {
+  let push = known;
+  if (ids.length) {
+    const [rawLog] = await redisPipeline([["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
+    const inLog = new Set(Array.isArray(rawLog) ? (rawLog as unknown[]).map(String) : []);
+    push = [...known, ...ids.filter((id) => !inLog.has(id))];
+  }
+  if (push.length) await redisPipeline([...push.map((id) => ["LPUSH", logKey(statsId), id]), ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]);
 }
 
 /**
  * The line a passed-over Stripe event leaves in the store's delivery log,
  * which the studio shows ("Not sent", with the reason), for each endpoint
  * that hears what it would have been, so the creator can look it up in
- * Stripe.
+ * Stripe. `cause` says whose the failure was: Stripe's (it kept refusing or
+ * failing to answer) or ours (our own handling of the event failed).
  *
  * It takes none of the store's webhook deliveries: no message is made and
  * no endpoint is called, and a count that could be lost or refused would
- * either charge the creator again or hold the store's later events. Its
- * keys are bounded instead by GIVEN_UP_LINES_PER_DAY a store a day
- * (tests/store-data-registry.ts).
+ * either charge the creator again or hold the store's later events.
+ *
+ * The first GIVEN_UP_LINES_PER_DAY events of a UTC day get their own line;
+ * every later one that day is counted in one summary line per endpoint,
+ * rewritten with the day's count. Which is which is the event's place in the
+ * day's sorted set (ZADD NX: a repeat keeps its first place), so a visit that
+ * dies half way, or a store read again, never counts an event twice.
  *
  * Written once, and never lost: each line's id is made from the event and
- * the endpoint, so a repeat finds it (SET NX) and puts it in the log only
- * when it is not there yet; the event's mark (eventKey, as a sent event
- * leaves) is set after every line is written, and a visit that finds it
- * writes nothing. A visit that dies half way leaves the event waiting at
- * its count, and the next one completes what is missing.
+ * the endpoint (the summary's from the day and the endpoint), so a repeat
+ * finds it (SET NX) and puts it in the log only when it is not there yet;
+ * an event's own line is followed by its mark (eventKey, as a sent event
+ * leaves), and a visit that finds the mark writes nothing.
  */
-async function markGivenUp(statsId: string, config: Config, event: StripeEvent, visits: number, now = Date.now()): Promise<void> {
-  const as = waitedAs(event);
-  if (!as) return;
-  const listening = config.endpoints.filter((e) => e.events.includes(as.type));
+async function markGivenUp(store: Store, statsId: string, config: Config, event: StripeEvent, visits: number, cause: "stripe" | "ours", now: number): Promise<void> {
+  const as = waitedAs(event, saleHandles(store));
+  const listening = config.endpoints.flatMap((endpoint) => {
+    const type = as.types.find((t) => endpoint.events.includes(t));
+    return type ? [{ endpoint, type }] : [];
+  });
   if (!listening.length) return;
-  const eventId = eventIdFor(statsId, as.type, `given-up|${str(event.id) ?? ""}`);
+  const eventId = eventIdFor(statsId, "stripe.given_up", str(event.id) ?? "");
   const [marked] = await redisPipeline([["GET", eventKey(eventId)]]);
   if (marked !== null && marked !== undefined) return;
-  // The day's lines: one more counted for this event (a visit that dies half way counts it again, never fewer).
-  const [count] = await redisPipeline([["INCR", givenUpDayKey(statsId, Math.floor(now / 86_400_000))], ["EXPIRE", givenUpDayKey(statsId, Math.floor(now / 86_400_000)), 2 * 86400]]);
-  if (Number(count) > GIVEN_UP_LINES_PER_DAY) {
-    console.error("more Stripe events were passed over today than the store's log is told of; this one is said here only", statsId, str(event.id), as.type);
+  const day = Math.floor(now / 86_400_000);
+  const dayKey = givenUpDayKey(statsId, day);
+  const [, card, fromTop] = await redisPipeline([
+    ["ZADD", dayKey, "NX", now, eventId],
+    ["ZCARD", dayKey],
+    ["ZREVRANK", dayKey, eventId],
+    // Gone at the end of the next UTC day: two days' sets at most.
+    ["EXPIREAT", dayKey, (day + 2) * 86400],
+  ]);
+  const place = Number(card) - 1 - Number(fromTop);
+  if (!Number.isSafeInteger(place) || place < 0) throw new Error("the day's passed-over events could not be counted");
+
+  if (place >= GIVEN_UP_LINES_PER_DAY) {
+    const more = Number(card) - GIVEN_UP_LINES_PER_DAY;
+    const words = `${more} more Stripe ${more === 1 ? "event was" : "events were"} skipped today because ${more === 1 ? "it" : "they"} could not be processed. Check your disputes and refunds in your Stripe dashboard.`;
+    const lines = listening.map(({ endpoint, type }) => noticeLine(
+      `dlv_${createHash("sha256").update(`${statsId}|${day}|${endpoint.id}|given-up-day`).digest("hex").slice(0, 24)}`,
+      statsId, endpoint.id, eventIdFor(statsId, "stripe.given_up_day", `${day}|${endpoint.id}`), type, words, now,
+    ));
+    // Rewritten with the day's count; in the log once.
+    await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "EX", DELIVERY_SECONDS]));
+    await pushMissing(statsId, lines.map((line) => line.id));
     return;
   }
-  const words = `Stripe kept refusing or failing to answer about ${as.about}, so it was skipped after ${visits} tries.${as.known ? "" : " It may not be from this store."} Look it up in your Stripe dashboard.`;
-  const lines: Delivery[] = listening.map((endpoint) => ({
-    id: `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
-    statsId,
-    endpoint: endpoint.id,
-    eventId,
-    type: as.type,
-    body: "",
-    attempts: 0,
-    state: "failed",
-    next: 0,
-    lastStatus: 0,
-    lastError: words,
-    lastAt: now,
-    createdAt: now,
-    givenUp: true,
-  }));
+
+  const start = cause === "ours" ? `We could not process this Stripe event about ${as.about}` : `Stripe kept refusing or failing to answer about ${as.about}`;
+  const words = `${start}, so it was skipped after ${visits} tries.${as.known ? "" : " It may not be from this store."} Look it up in your Stripe dashboard.`;
+  const lines = listening.map(({ endpoint, type }) => noticeLine(
+    `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
+    statsId, endpoint.id, eventId, type, words, now,
+  ));
   const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));
-  const fresh = lines.filter((_, at) => written[at] === "OK").map((line) => line.id);
-  // A line already there from a visit that died: in the log already, unless that visit died before putting it there.
-  const again = lines.filter((_, at) => written[at] !== "OK").map((line) => line.id);
-  let missing: string[] = [];
-  if (again.length) {
-    const [rawLog] = await redisPipeline([["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
-    const inLog = new Set(Array.isArray(rawLog) ? (rawLog as unknown[]).map(String) : []);
-    missing = again.filter((id) => !inLog.has(id));
-  }
-  const push = [...fresh, ...missing];
-  if (push.length) await redisPipeline([...push.map((id) => ["LPUSH", logKey(statsId), id]), ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]);
+  // A new line goes in the log; one already there from a visit that died, only when that visit died before putting it there.
+  await pushMissing(statsId, lines.filter((_, at) => written[at] !== "OK").map((line) => line.id), lines.filter((_, at) => written[at] === "OK").map((line) => line.id));
   await redisPipeline([["SET", eventKey(eventId), "1", "EX", EVENT_SECONDS]]);
 }
 
 /** One store: its Stripe events since the last one read, oldest first. */
-async function watchStore(store: Store, statsId: string, config: Config): Promise<number> {
+async function watchStore(store: Store, statsId: string, config: Config, now = Date.now()): Promise<number> {
   const account = store.stripeAccountId as string;
   const types = STRIPE_TYPES.map((t, i) => `types[${i}]=${encodeURIComponent(t)}`).join("&");
   const [anchorRaw, waitRaw] = await redisPipeline([["GET", anchorKey(statsId)], ["GET", waitKey(statsId)]]);
   const anchor = typeof anchorRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(anchorRaw) ? anchorRaw : "";
-  const nowSeconds = Math.floor(Date.now() / 1000);
+  const nowSeconds = Math.floor(now / 1000);
   // "<evt>|<visits>|<since>": the event waited on, the visits it failed and
   // when it first stopped (a record written before the time was kept counts from now).
   const waitMatch = typeof waitRaw === "string" ? /^(evt_[A-Za-z0-9]+)\|(\d{1,6})(?:\|(\d{1,12}))?$/.exec(waitRaw) : null;
@@ -1376,14 +1408,17 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
     for (const event of [...rows].reverse()) {
       const id = str(event.id) ?? "";
       let outcome: Outcome;
+      let cause: "stripe" | "ours" = "stripe";
       try {
         outcome = await fromStripe(store, event, lookups, heard);
       } catch (error) {
-        // A failure inside one event's handling that may repeat every visit
-        // (the store, a listing read) is counted like a lookup that failed,
+        // A failure of our own handling of the event (the store, a listing
+        // read, a shape the code did not expect), not of a Stripe lookup:
+        // said apart in the log, and counted like a failure that may clear,
         // so it too ends in a give-up instead of holding the store forever.
-        console.error("handling a Stripe event failed; it is read again next run", store.handle, id, error);
+        console.error("OUR CODE FAILED on a Stripe event (not a Stripe error); it is read again next run", store.handle, id, event.type, error);
         outcome = "passing";
+        cause = "ours";
       }
       if (outcome === true) {
         handled += 1;
@@ -1394,7 +1429,9 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
       const since = same ? waiting.since : nowSeconds;
       // The visit's lookups ran out: not a failure, nothing counted.
       const runs = (same ? waiting.runs : 0) + (outcome === "spent" ? 0 : 1);
-      const over = outcome !== "spent" && (runs >= STRIPE_WAIT_RUNS || nowSeconds - since >= STRIPE_WAIT_SECONDS || (outcome === "refused" && runs >= STRIPE_REFUSED_RUNS));
+      const over = outcome !== "spent" && (runs >= STRIPE_WAIT_RUNS ||
+        (runs >= STRIPE_WAIT_TIME_VISITS && nowSeconds - since >= STRIPE_WAIT_MAX_SECONDS) ||
+        (outcome === "refused" && runs >= STRIPE_REFUSED_RUNS));
       if (!over) {
         stuck = { event: id, runs, since };
         return false;
@@ -1402,8 +1439,8 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
       // Passed over, not handled: not counted among the events read, and
       // said where the creator sees it as well as in the server's log. The
       // endpoints as they are now, so one added during this visit is told too.
-      console.error(`WEBHOOK EVENT GIVEN UP: a Stripe event waited ${runs} visits since ${new Date(since * 1000).toISOString()} on a lookup that kept failing (${outcome}); it is passed over and not sent`, store.handle, id, event.type);
-      await markGivenUp(statsId, (await readConfig(statsId)) ?? config, event, runs);
+      console.error(`WEBHOOK EVENT GIVEN UP: a Stripe event waited ${runs} visits since ${new Date(since * 1000).toISOString()} (${cause === "ours" ? "our code failed" : `a Stripe lookup kept failing, ${outcome}`}); it is passed over and not sent`, store.handle, id, event.type);
+      await markGivenUp(store, statsId, (await readConfig(statsId)) ?? config, event, runs, cause, now);
       last = id || last;
     }
     return true;
@@ -1463,7 +1500,7 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
       if (error instanceof StripeError && (error.status === 400 || error.status === 404)) {
         await redisPipeline([["DEL", anchorKey(statsId)]]);
         const since = Math.max(config.since, Math.floor(Date.now() / 1000) - 29 * 86400);
-        return handled + (await watchStore(store, statsId, { ...config, since }));
+        return handled + (await watchStore(store, statsId, { ...config, since }, now));
       }
       throw error;
     }
@@ -1485,7 +1522,7 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
  * that wants what Stripe knows, until the deadline, carrying on next run
  * from the store after the last one it reached.
  */
-export async function watchStripe(deadline: number): Promise<{ stores: number; events: number }> {
+export async function watchStripe(deadline: number, now = Date.now()): Promise<{ stores: number; events: number }> {
   const counts = { stores: 0, events: 0 };
   if (!isRedisConfigured()) return counts;
   const [members, saved] = await redisPipeline([["SMEMBERS", STORES_KEY], ["GET", POSITION_KEY]]);
@@ -1517,7 +1554,7 @@ export async function watchStripe(deadline: number): Promise<{ stores: number; e
     }
     counts.stores += 1;
     try {
-      counts.events += await watchStore(store, statsId, config);
+      counts.events += await watchStore(store, statsId, config, now);
     } catch (error) {
       console.error("reading a store's Stripe events failed", store.handle, error);
     }
@@ -1541,8 +1578,7 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
     ["DEL", waitKey(statsId)],
-    ["DEL", givenUpDayKey(statsId, Math.floor(Date.now() / 86_400_000))],
-    ["DEL", givenUpDayKey(statsId, Math.floor(Date.now() / 86_400_000) - 1)],
+    ...[0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, Math.floor(Date.now() / 86_400_000) - back)]),
     ["DEL", logKey(statsId)],
     ...ids.flatMap((id) => [
       ["DEL", deliveryKey(id)],

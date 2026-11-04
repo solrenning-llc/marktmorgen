@@ -8,7 +8,7 @@
  * only; the endpoint's name resolves to a private address, so nothing leaves
  * this machine.
  */
-import { DISPUTE_LOOKUPS_PER_STORE, GIVEN_UP_LINES_PER_DAY, STRIPE_LOOKUPS_PER_STORE, STRIPE_REFUSED_RUNS, STRIPE_WAIT_RUNS, STRIPE_WAIT_SECONDS, addEndpoint, eventIdFor, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
+import { DISPUTE_LOOKUPS_PER_STORE, GIVEN_UP_LINES_PER_DAY, STRIPE_LOOKUPS_PER_STORE, STRIPE_REFUSED_RUNS, STRIPE_WAIT_RUNS, STRIPE_WAIT_MAX_SECONDS, STRIPE_WAIT_TIME_VISITS, addEndpoint, eventIdFor, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { allowanceUsed } from "@/lib/store-allowance";
@@ -254,10 +254,11 @@ async function main() {
   const usedBeforeDispute = await allowanceUsed(store, "webhook");
   await watchStripe(Date.now() + 10_000);
   is("the first visit sends what came before and counts one visit of waiting, with when it began", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitOf(), Math.abs(Number(String(await waitRecord()).split("|")[2]) - nowSeconds()) < 60], [["dp_kbefore"], "evt_KBefore", "evt_Refused|1", true]);
-  // Two days go by in the store: the anchor's expiry is renewed while it does not move (without it, 28 days would be left).
+  // Two days go by, for the job and for the store: the anchor's expiry is renewed while it does not move (without it, 28 days
+  // would be left), and with only two failed visits the time bound does not apply yet (STRIPE_WAIT_TIME_VISITS).
   redis.advance(2 * 86400 * 1000);
-  await watchStripe(Date.now() + 10_000);
-  is("each visit it waits is counted", await waitOf(), "evt_Refused|2");
+  await watchStripe(Date.now() + 10_000, Date.now() + 2 * 86400 * 1000 + 60_000);
+  is("each visit it waits is counted; two days with two visits is not enough to give up", await waitOf(), "evt_Refused|2");
   is("the anchor, not moving, is kept as long as Stripe keeps events", [await anchor(), (await anchorTtl()) > 29 * 86400], ["evt_KBefore", true]);
   // Jump to two visits before the cap.
   await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Refused|${STRIPE_WAIT_RUNS - 2}|${nowSeconds()}`, "EX", 30 * 86400]]);
@@ -287,15 +288,24 @@ async function main() {
   ];
   failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
   // Visited every few hours: only five visits so far, the first two days and a minute ago.
-  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Slow|5|${nowSeconds() - STRIPE_WAIT_SECONDS - 60}`, "EX", 30 * 86400]]);
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Slow|5|${nowSeconds() - STRIPE_WAIT_MAX_SECONDS - 60}`, "EX", 30 * 86400]]);
   await watchStripe(Date.now() + 10_000);
   is("two days after it first stopped, it is passed over with its line, and the next is sent", [(await webhooksView(store)).log.filter((d) => d.givenUp).length, await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [1, ["dp_slowafter"], "evt_SlowAfter", null]);
   store = await setup(["dispute.opened"]);
   timeline = [evt("evt_Slow2", "charge.dispute.created", 1_790_091_200, dispute("dp_slow2", "pi_Member"))];
   failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
-  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Slow2|5|${nowSeconds() - STRIPE_WAIT_SECONDS + 3600}`, "EX", 30 * 86400]]);
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Slow2|5|${nowSeconds() - STRIPE_WAIT_MAX_SECONDS + 3600}`, "EX", 30 * 86400]]);
   await watchStripe(Date.now() + 10_000);
   is("an hour short of two days it still waits", await waitOf(), "evt_Slow2|6");
+  store = await setup(["dispute.opened"]);
+  timeline = [evt("evt_AfterPause", "charge.dispute.created", 1_790_091_300, dispute("dp_afterpause", "pi_Member"))];
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
+  // First stopped a week ago, then the plan's costs were paused: one failed visit only.
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_AfterPause|1|${nowSeconds() - 7 * 86400}`, "EX", 30 * 86400]]);
+  for (let visit = 2; visit < STRIPE_WAIT_TIME_VISITS; visit += 1) await watchStripe(Date.now() + 10_000);
+  is(`after a long pause it still gets tries: waiting at ${STRIPE_WAIT_TIME_VISITS - 1} visits, no line`, [await waitOf(), (await webhooksView(store)).log.some((d) => d.givenUp)], [`evt_AfterPause|${STRIPE_WAIT_TIME_VISITS - 1}`, false]);
+  await watchStripe(Date.now() + 10_000);
+  is(`and is passed over at ${STRIPE_WAIT_TIME_VISITS}`, [await waitRecord(), (await webhooksView(store)).log.some((d) => d.givenUp)], [null, true]);
 
   part("Stripe refusing the request itself gives up after a few visits; a limit keeps the long wait");
   for (const [how, code] of [["400", "parameter_unknown"], ["403", "account_invalid"]] as const) {
@@ -329,7 +339,10 @@ async function main() {
   await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Broken|${STRIPE_WAIT_RUNS - 1}|${nowSeconds()}`, "EX", 30 * 86400]]);
   await watchStripe(Date.now() + 10_000);
   redis.pipeline = realPipelineEarly as typeof redis.pipeline;
-  is("at the cap it is passed over (a sale leaves no line) and the next one is sent", [await waitRecord(), await anchor(), (await recentMessages(store, "sale.completed")).map((m) => (m.data as { checkout_session: string }).checkout_session)], [null, "evt_NextSale", ["cs_Next01"]]);
+  is("at the cap it is passed over and the next one is sent", [await waitRecord(), await anchor(), (await recentMessages(store, "sale.completed")).map((m) => (m.data as { checkout_session: string }).checkout_session)], [null, "evt_NextSale", ["cs_Next01"]]);
+  const ours = (await webhooksView(store)).log.find((d) => d.givenUp);
+  is("a sale gets its line too, saying honestly the failure was ours", [ours?.type, ours?.lastError.startsWith("We could not process this Stripe event about checkout cs_Broken01"), ours?.lastError.includes("may not be")], ["sale.completed", true, false]);
+  is("our failure is logged apart from Stripe's", said.some((l) => l.startsWith("OUR CODE FAILED") && l.includes("evt_Broken")), true);
 
   part("membership.canceled waits for the member's address instead of going out without it");
   store = await setup(["membership.canceled"]);
@@ -392,10 +405,13 @@ async function main() {
   is("nothing asked of Stripe; the anchor and the wait both kept thirty days", [asked.length, pausedTtls.every((ttl) => ttl > 29 * 86400), await waitOf()], [0, true, "evt_Paused02|4"]);
 
   part("Forgetting a store's webhooks forgets its wait too");
-  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, "evt_Any|3", "EX", 60]]);
+  const today = Math.floor(Date.now() / 86_400_000);
+  const dayKeys = [today, today - 1, today - 2].map((d) => `nl:hooks:wait:${statsId}:day:${d}`);
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, "evt_Any|3", "EX", 60], ...dayKeys.map((k) => ["ZADD", k, 1, "evt_x"])]);
   const { forgetStoreWebhooks } = await import("@/lib/webhooks");
   await forgetStoreWebhooks(statsId);
   is("no wait record left", await waitRecord(), null);
+  is("no day's set of passed-over events left, today's or the two before", (await redis.pipeline(dayKeys.map((k) => ["ZCARD", k]))).map(Number), [0, 0, 0]);
 
   part("A given-up line takes no delivery, is written once and never lost");
   const givenUpLines = async () => (await webhooksView(store)).log.filter((d) => d.givenUp);
@@ -436,15 +452,34 @@ async function main() {
   await watchStripe(Date.now() + 10_000);
   is("read again from far back and given up again: the mark holds, no line written again, no delivery", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, await waitRecord()], [0, 0, null]);
 
-  part("Lines of passed-over events are capped a day");
+  part("Past the day's own lines, one summary line counts the rest; each event is counted once");
   store = await setup(["dispute.opened"]);
   failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
-  for (let n = 0; n <= GIVEN_UP_LINES_PER_DAY; n += 1) {
+  timeline = [];
+  const dayKey = `nl:hooks:wait:${statsId}:day:${Math.floor(Date.now() / 86_400_000)}`;
+  const dayCount = async () => Number((await redis.pipeline([["ZCARD", dayKey]]))[0]);
+  const summary = async () => (await givenUpLines()).filter((d) => d.lastError.includes("more Stripe"));
+  for (let n = 0; n < GIVEN_UP_LINES_PER_DAY + 2; n += 1) {
     timeline = [...timeline, evt(`evt_Day${n}`, "charge.dispute.created", 1_790_120_000 + n, dispute(`dp_day${n}`, "pi_Member"))];
     await seedWait(`evt_Day${n}`);
+    if (n === 0) {
+      // The first dies after it was counted, before its line is written: counted once, its line written next visit.
+      breakWhen((command) => command[0] === "SET" && String(command[1]).startsWith("nl:hooks:d:"));
+      await watchStripe(Date.now() + 10_000);
+      mend();
+      is("a visit dying between the day's count and the line leaves it counted, waiting", [await dayCount(), (await givenUpLines()).length, await waitOf()], [1, 0, `evt_Day0|${STRIPE_WAIT_RUNS}`]);
+    }
     await watchStripe(Date.now() + 10_000);
+    if (n === GIVEN_UP_LINES_PER_DAY) is("the first past the cap: a summary line saying one more was skipped", (await summary()).map((d) => d.lastError.split(" skipped")[0]), ["1 more Stripe event was"]);
   }
-  is(`${GIVEN_UP_LINES_PER_DAY} lines a day; one more is said in the server log only`, [(await givenUpLines()).length, said.some((l) => l.includes("more Stripe events were passed over today")), await anchor()], [GIVEN_UP_LINES_PER_DAY, true, `evt_Day${GIVEN_UP_LINES_PER_DAY}`]);
+  is(`${GIVEN_UP_LINES_PER_DAY} own lines and one summary whose count rose`, [(await givenUpLines()).length - (await summary()).length, (await summary()).map((d) => d.lastError)], [GIVEN_UP_LINES_PER_DAY, ["2 more Stripe events were skipped today because they could not be processed. Check your disputes and refunds in your Stripe dashboard."]]);
+  is("every event counted once, the anchor past them all", [await dayCount(), await anchor()], [GIVEN_UP_LINES_PER_DAY + 2, `evt_Day${GIVEN_UP_LINES_PER_DAY + 1}`]);
+  // Read again from far back: the last one passed over again is not counted twice.
+  await redis.pipeline([["DEL", `nl:hooks:anchor:${statsId}`]]);
+  await seedWait(`evt_Day${GIVEN_UP_LINES_PER_DAY + 1}`);
+  await watchStripe(Date.now() + 10_000);
+  is("passed over again: the same count, one summary line", [await dayCount(), (await summary()).length, (await summary())[0]?.lastError.startsWith("2 more")], [GIVEN_UP_LINES_PER_DAY + 2, 1, true]);
+  is("the day's set is gone at the end of the next UTC day", Number((await redis.pipeline([["TTL", dayKey]]))[0]) <= 2 * 86400, true);
 
   for (const [what, bad] of [
     ["the line written, the log not", (command: (string | number)[]) => command[0] === "LPUSH" && command[1] === `nl:hooks:log:${statsId}`],

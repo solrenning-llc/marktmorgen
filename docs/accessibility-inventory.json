@@ -1163,6 +1163,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/totals/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/totals",
+      "parameters": []
+    },
+    {
       "source": "app/takedown/[token]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/takedown/[token]",
@@ -1177,6 +1183,12 @@
       "source": "app/terms/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/terms",
+      "parameters": []
+    },
+    {
+      "source": "app/transparency/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/transparency",
       "parameters": []
     },
     {
@@ -1239,6 +1251,7 @@
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
     "components/certificate-actions.tsx",
+    "components/certificate-validity.tsx",
     "components/chat-summary-editor.tsx",
     "components/checkout-extras.tsx",
     "components/checkout-fields-editor.tsx",
@@ -1296,11 +1309,13 @@
     "components/exit-offer.tsx",
     "components/fair-price-editor.tsx",
     "components/faq-editor.tsx",
+    "components/faq-from-inbox.tsx",
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
     "components/form-answers.tsx",
     "components/form-branching.tsx",
+    "components/form-keep.tsx",
     "components/form-response-deal.tsx",
     "components/forms-editor.tsx",
     "components/funnel-ai-draft.tsx",
@@ -1351,6 +1366,7 @@
     "components/mail-picture-button.tsx",
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
+    "components/member-discount.tsx",
     "components/more-from.tsx",
     "components/morning-header.tsx",
     "components/mrr-chart.tsx",
@@ -1430,11 +1446,14 @@
     "components/report-form.tsx",
     "components/resend-purchase.tsx",
     "components/revenue-quality.tsx",
+    "components/review-ai-summaries.tsx",
     "components/review-form.tsx",
     "components/review-list.tsx",
     "components/review-photo-field.tsx",
+    "components/review-qr.tsx",
     "components/review-stars.tsx",
     "components/review-studio.tsx",
+    "components/review-themes.tsx",
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
     "components/sales-goal-card.tsx",
@@ -1505,6 +1524,7 @@
     "components/tier-editor.tsx",
     "components/tips-editor.tsx",
     "components/toast.tsx",
+    "components/today-panel.tsx",
     "components/tools-calculator.tsx",
     "components/topic-page.tsx",
     "components/translate-page.tsx",
@@ -1513,6 +1533,8 @@
     "components/url-field.tsx",
     "components/usage-meter.tsx",
     "components/video-embed.tsx",
+    "components/visit-us-block.tsx",
+    "components/visit-us-editor.tsx",
     "components/waitlist-panel.tsx",
     "components/webhook-editor.tsx",
     "components/weekly-ai-toggle.tsx",
@@ -1690,6 +1712,7 @@
     "app/api/store/form-opportunity/route.ts",
     "app/api/store/form/route.ts",
     "app/api/store/forms/export/route.ts",
+    "app/api/store/forms/response-pdf/route.ts",
     "app/api/store/forms/route.ts",
     "app/api/store/free/download/route.ts",
     "app/api/store/free/route.ts",
@@ -1733,6 +1756,7 @@
     "app/api/store/manage/pause/route.ts",
     "app/api/store/manage/route.ts",
     "app/api/store/manage/switch/route.ts",
+    "app/api/store/member-discount/route.ts",
     "app/api/store/meta-ads/route.ts",
     "app/api/store/move/open/route.ts",
     "app/api/store/next-offer/route.ts",
@@ -1779,6 +1803,7 @@
     "app/api/store/remind/route.ts",
     "app/api/store/rename/route.ts",
     "app/api/store/resend/route.ts",
+    "app/api/store/review-summary/route.ts",
     "app/api/store/review/route.ts",
     "app/api/store/reviews/route.ts",
     "app/api/store/sale/route.ts",
@@ -1809,6 +1834,7 @@
     "app/api/store/upsell/route.ts",
     "app/api/store/vault/route.ts",
     "app/api/store/via/route.ts",
+    "app/api/store/visit-us/route.ts",
     "app/api/store/voice/route.ts",
     "app/api/store/waitlist/confirm/route.ts",
     "app/api/store/waitlist/join/route.ts",
@@ -1832,6 +1858,7 @@
     "app/api/v1/access/route.ts",
     "app/api/v1/affiliates/route.ts",
     "app/api/v1/bookings/route.ts",
+    "app/api/v1/codes/route.ts",
     "app/api/v1/events/route.ts",
     "app/api/v1/hooks/route.ts",
     "app/api/v1/leads/labels/route.ts",
@@ -1919,6 +1946,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 131
+    "pageTemplates": 133
   }
 }

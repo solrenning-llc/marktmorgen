@@ -31,6 +31,7 @@ const GOALS: Record<string, StarterGoal> = {
   "recorded-workshop": "teaching",
   "digital-product": "sales",
   "course-launch": "teaching",
+  "physical-product": "sales",
 };
 
 /** Derived from the actual bundle so the preview cannot drift from what is created. */
@@ -95,6 +96,7 @@ export const NICHE_FIT: Record<StarterNiche, Record<string, string>> = {
     "digital-product": "For presets, templates or files people download.",
     "paid-call": "For a review or consultation people book and pay for.",
     "launch-waitlist": "For a collection you are still preparing.",
+    "physical-product": "For prints or pieces you make and ship.",
     "guide-signup": "For a free guide that starts your list.",
   },
 };

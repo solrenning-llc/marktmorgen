@@ -29,7 +29,7 @@ import { type Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { type ErasureScope } from "@/lib/erasure-rules";
 import { leadsKey, parseContact } from "@/lib/contacts";
-import { readDeals, readFields, readStages, readValues } from "@/lib/crm";
+import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
 import { listRequests } from "@/lib/payment-request-store";
@@ -83,7 +83,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/flows.ts": { how: "copied", what: "Which of the store's sequences and workflows you are in, and each step taken" },
   "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
   "lib/mail-health.ts": { how: "marks", what: "A mark that your address was counted in this week's delivery checks, with nothing else in it" },
-  "lib/crm.ts": { how: "copied", what: "The store's fields about you, and its deals with you" },
+  "lib/crm.ts": { how: "copied", what: "The store's fields about you, its deals with you, and the tasks its team wrote about you" },
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },
   "lib/agreement-store.ts": { how: "copied", what: "Proposals and agreements the store sent you, each version's text, and your signature" },
   "lib/buyer-profile.ts": { how: "copied", what: "Notes the store's team wrote about you" },
@@ -178,7 +178,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return contact ? [{ email: s.email, ...contact }] : [];
   },
   "lib/crm.ts": async (s) => {
-    const [fields, stages] = await Promise.all([readFields(s.statsId), readStages(s.statsId)]);
+    const [fields, stages, tasks] = await Promise.all([readFields(s.statsId), readStages(s.statsId), readPersonTasks(s.statsId, s.person)]);
     const values = await readValues(s.statsId, s.person, fields);
     const deals = (await readDeals(s.statsId, stages)).filter((d) => d.email && same(d.email, s.email));
     const stageName = new Map(stages.map((st) => [st.id, st.name]));
@@ -186,6 +186,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       ...fields.filter((f) => values[f.id]).map((f) => ({ field: f.name, value: values[f.id] })),
       // Who of the team the deal is given to is that teammate's, not yours.
       ...deals.map((d) => ({ deal: d.title, stage: stageName.get(d.stage) ?? "", value: d.cents, note: d.note, nextAction: d.nextAction ?? "", dueDate: d.dueDate ?? "", created: iso(d.createdAt), updated: iso(d.updatedAt) })),
+      // The team's tasks about you (639 [GL7](6)), at most MAX_PERSON_TASKS; the teammate responsible is theirs, left out.
+      ...tasks.map((t) => ({ task: t.text, dueDate: t.due, done: t.done, created: iso(t.createdAt), doneAt: iso(t.doneAt) })),
     ];
   },
   "lib/buyer-profile.ts": async (s) => (await readPersonNotes(s.statsId, s.person)).map((n) => ({ note: n.text, at: iso(n.at) })),

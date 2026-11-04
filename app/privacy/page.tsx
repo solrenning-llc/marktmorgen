@@ -2108,7 +2108,7 @@ export default function PrivacyPage() {
           <p>
             What is deleted: your place on the store&apos;s list and every link
             in its emails to you; what its team noted about you (its fields,
-            notes and deals); your form answers with their quiz results and
+            notes, deals and tasks); your form answers with their quiz results and
             scores, inbox conversations, reviews
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;

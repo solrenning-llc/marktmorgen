@@ -70,7 +70,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/imports.ts", how: "expires", days: 14, what: "A file you imported is kept for 14 days after the import began, then deleted with everything in it" },
 
   // ---------------------------------------------------------------- what the store keeps about them
-  { file: "lib/crm.ts", how: "erased", what: "Your fields about them, and every deal with them" },
+  { file: "lib/crm.ts", how: "erased", what: "Your fields about them, every deal with them, and your team's tasks about them" },
   { file: "lib/agreement-store.ts", how: "erased", what: "Every proposal and agreement you sent them, each version's text and any signature they gave: their name and address, the name they typed, when, and the one-way code made from their internet address. One waiting for a signature stops taking one. The signed copies already emailed stay with whoever received them" },
   { file: "lib/payment-request-store.ts", how: "erased", what: "Every payment request you sent them: their name and address, what it asked for and what became of it. An open one is withdrawn, so its link stops working and no reminder goes. What they paid stays on your Stripe account" },
   { file: "lib/buyer-profile.ts", how: "erased", what: "Your team's notes about them" },

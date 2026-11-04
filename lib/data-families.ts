@@ -203,7 +203,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- c
   "nl:cal:busy:": T("nl:cal:cfg:", 1), "nl:cal:cfg:": E, "nl:cal:err:": T("nl:cal:cfg:", 1), "nl:cal:good:": T("nl:cal:cfg:", 1),
   "nl:cal:lock:": T("nl:cal:cfg:", 1), "nl:cal:out:": E, "nl:cal:tok:": T("nl:cal:cfg:"),
-  // The private feed's counts (C4-4), by the store's id, go with it, as its copy does; the changed mark, by its handle, expires.
+  // The private feed's counts (C4-4), by the store's id, go with it, as its copy does; the changed mark and its makings, by the calls id, expire.
   "nl:cal:builds:": E, "nl:cal:pace:": E, "nl:cal:chg:": X(40),
   // A store's readings of its numbers (lib/store-readings.ts, C4-4): by its id, gone with it.
   "nl:reading:": E, "nl:reading:day:": E,

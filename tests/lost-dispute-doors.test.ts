@@ -241,9 +241,19 @@ async function main(): Promise<void> {
   is("the job looks up the calls lost, not the won one", [...lookedUp].sort(), ["pi_TestCallLost01", "pi_TestCallPart01"]);
   const gone = async (pi: string) => (await readRecord(scopeOf(pi)))?.gone;
   is("and their meetings end; the won call's stays", [await gone("pi_TestCallLost01"), await gone("pi_TestCallPart01"), await gone("pi_TestCallWon001")], [true, true, false]);
-  // The private calendar feed is made again at the app's next check, one making for each booking ended (inbox C4-18, M3).
-  const [changed, credits] = await redis.pipeline([["GET", bookingsChangedKey(callsId)], ["GET", bookingCreditsKey(callsId, new Date().toISOString().slice(0, 10))]]);
-  is("and the store's calendar feed is told its bookings changed, with a making for each", [Number(changed) > 0, Number(credits)], [true, 2]);
+  // A lost dispute leaves the booking in the private calendar feed (it reads the payment, which the dispute does not
+  // show refunded), so no making is spent on a file that would come out the same (review of #2111).
+  const today = new Date().toISOString().slice(0, 10);
+  const [changedAfterDisputes, creditsAfterDisputes] = await redis.pipeline([["GET", bookingsChangedKey(callsId)], ["GET", bookingCreditsKey(callsId, today)]]);
+  is("a lost dispute spends no making of the store's calendar feed", [changedAfterDisputes, creditsAfterDisputes], [null, null]);
+  closings = [];
+  // A call refunded in full, with no meeting room of its own: the feed is made again at the app's next check (inbox C4-18, M3).
+  sessionsByPayment.pi_TestCallRefd01 = call("pi_TestCallRefd01");
+  refunds = [{ id: "re_TestCallRefd01", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestCallRefd01", charge: { object: "charge", amount: 4900, amount_refunded: 4900, refunded: true } }];
+  await syncMeetings(async (handle) => (handle === "kilnworks" ? callStore : null), Date.now() + 10_000, "https://marktmorgen.com");
+  refunds = [];
+  const [changed, credits] = await redis.pipeline([["GET", bookingsChangedKey(callsId)], ["GET", bookingCreditsKey(callsId, today)]]);
+  is("a call refunded in full tells the store's calendar feed its bookings changed, one making", [Number(changed) > 0, Number(credits)], [true, 1]);
   closings = [];
 
   part("A review's verified buyer");

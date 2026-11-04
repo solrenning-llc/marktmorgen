@@ -72,12 +72,13 @@ export const CALENDAR_MAX_EVENTS = 1_000;
 export const CALENDAR_COPY_SECONDS = 40 * 86_400;
 /**
  * The copy is made again when a booking changed (lib/call-records.ts,
- * bookingsChangedKey: a booking made or moved, a time let go, or a booking
- * ended by a refund or a lost dispute, lib/call-meetings.ts), or once it is
- * this old. What marks nothing yet (a cancellation, a live session the
- * creator adds: their paths are other agents' files) shows at the next
- * making: within this, or up to a day when the UTC day's makings
- * (CALENDAR_BUILDS_PER_DAY) are spent.
+ * bookingsChangedKey: a booking made or moved, a time let go, or a call
+ * refunded in full, lib/call-meetings.ts), or once it is this old. What marks
+ * nothing yet (a cancellation, a live session the creator adds: their paths
+ * are other agents' files) shows at the next making: within this, or up to a
+ * day when the UTC day's makings (CALENDAR_BUILDS_PER_DAY) are spent. A
+ * booking whose dispute was lost stays in the file: it reads the payment
+ * (lib/calls.ts, callFromRow), which a lost dispute does not show refunded.
  */
 export const CALENDAR_REFRESH_SECONDS = 12 * 3_600;
 /** Times a store's file may be made again in a UTC day, every reason together. */

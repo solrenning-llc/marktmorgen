@@ -168,7 +168,9 @@ const TOTALS_PAYPAL_REFUNDS = PAYPAL_REFUNDS_READ;
  *                             days, once ever a store under a lock, is not
  *                             here: see LIFE_FILL_SHAPE;
  *   readSales                 the PayPal sales (ZREVRANGEBYSCORE and MGET: 2)
- *                             and refunds (ZRANGEBYSCORE and a GET each: 501);
+ *                             and refunds (ZRANGEBYSCORE and one MGET of up
+ *                             to PAYPAL_REFUNDS_READ: 2; counted here as one a
+ *                             refund, above what it is);
  *                             from Stripe, the sales (two lists of twenty
  *                             pages), renewals (ten), refunds (five) and
  *                             disputes (three);

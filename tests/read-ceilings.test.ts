@@ -20,6 +20,7 @@
  *
  * (A product update's reading is held by tests/product-update-ceiling.test.ts.)
  */
+import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -239,8 +240,8 @@ async function main(): Promise<void> {
 
   part("The totals: a page of each store's studio, as the Terms say; its numbers from its own readings (M1)");
   redis.run(["HSET", `nl:stats:${owner.statsId}:life`, "filled", "2031-01-01", "since", "2031-01-01", "vgap", "0"]);
-  // At its worst: TOTALS_PAYPAL_REFUNDS refunded PayPal orders to read one by one.
-  for (let i = 0; i < 500; i += 1) {
+  // At its worst: more refunded PayPal orders than one reading takes (PAYPAL_REFUNDS_READ), read in one MGET.
+  for (let i = 0; i < PAYPAL_REFUNDS_READ + 1; i += 1) {
     const order = `ORDER${String(i).padStart(8, "0")}`;
     redis.run(["ZADD", `nl:ppsell:refunded:${owner.statsId}`, Math.floor(Date.now() / 1000) - 60, order]);
     redis.run(["SET", `nl:ppsell:paid:${order}`, JSON.stringify({ store: owner.statsId, order, capture: `CAP${i}`, email: "", product: "p", cents: 100, currency: "usd", at: 1 })]);
@@ -248,8 +249,10 @@ async function main(): Promise<void> {
   const loaded = await load();
   const full = await counted(() => keptNumbers(loaded));
   const fullBound = STATS_READ_SHAPE.commands + SALES_READ_SHAPE.commands;
-  // The 500 refunded orders' records are read in one MGET (lib/paypal-sales.ts): the worst is reached when one command carries all of them.
-  is(`one store's visits and sales at the worst refunds (one command of ${full.widest} keys), measured (${full.commands}), within their readings' count (${fullBound})`, [full.widest >= 500, full.commands <= fullBound], [true, true]);
+  // The refunded orders' records are read in one MGET (lib/paypal-sales.ts): the worst is reached when one command carries as many as a reading takes.
+  is(`one store's visits and sales at the worst refunds (one command of ${full.widest} keys), measured (${full.commands}), within their readings' count (${fullBound})`, [full.widest >= PAYPAL_REFUNDS_READ, full.commands <= fullBound], [true, true]);
+  // And every record those reads may move, PayPal sales and refunds alike (both kept as nl:ppsell:paid:), at the most it weighs.
+  is("the sales reading's bytes hold every PayPal record it reads at its heaviest", SALES_READ_SHAPE.dbBytes >= (20 * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES, true);
   const again = await counted(() => keptNumbers(loaded));
   is("looked at again within the fresh time: read from what was kept, a few commands", again.commands <= 3 + 1, true);
   const studioBefore = await studioLeft();

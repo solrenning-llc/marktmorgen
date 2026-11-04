@@ -20698,6 +20698,7 @@ Complemento do dono (02/11/2026, 01h06, horário de Fortaleza; texto proposto pe
 Aplicar a regra VR.
 
 ## 570 [DR1] — Relatório de entrega de cada e-mail e saúde da lista, para o criador
+Andamento (Claude 4, 04/11/2026): unidade 1 **testada num PR** (ramo claude4/dr1-health-rules; arquivos: lib/list-health-rules.ts, tests/list-health-rules.test.ts): quanto falta para a pausa (roomBeforePause, conferido contra o overTheLine real: exatamente esse número pausa, um a menos não) numa frase para o lado do healthLine do 599 [KB20], e as explicações no lugar de bounce, spam complaint e delivered, com a frase honesta de que nenhum remetente sabe se um e-mail foi para o spam. Conferência antes de construir: o estado da lista (fine, watch, near, over), o conselho e a nota honesta já existem no estúdio pelo 599 [KB20] (lib/mail-health-levels.ts) e não foram refeitos. Próximas unidades: relatório de cada e-mail para a lista, com cada aviso contado uma vez onde é guardado, e as contagens de 30 dias, que precisam de armazenamento além dos 10 dias de lib/mail-health.ts.
 
 **Estado:** na fila. **Posição:** ACIMA DO MARCO MQ1, Grupo A, logo depois de 461 [EL5] (contatos ativos) na ordem vigente, pelo critério (c) da MQ2 (retenção: o criador confia no envio e continua no plano). O 309 [EM1] fica no Bloco de abertura (k) e não aparece na linha de ordem do Grupo A; por isso a posição foi ancorada no 461, o item de e-mail mais próximo nessa linha.
 

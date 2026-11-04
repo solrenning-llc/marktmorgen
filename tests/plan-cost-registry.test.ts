@@ -1,6 +1,7 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { CRM_VALUE_SAVE, CRM_VALUE_SAVE_SECONDS, SHAPES } from "./plan-cost-registry";
+import { ADD_NOTE_CALLS } from "@/lib/buyer-profile";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
 import { TEST_SALES_PAGES } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
@@ -31,7 +32,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
-import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { ERASED_GUARD_CALLS, WRITE_TASKS_CALLS, CRM_VALUE_MOST_BYTES, CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
@@ -315,6 +316,10 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(read("app/api/store/crm/route.ts").includes('body.action === "value" ? CRM_VALUE_SAVE_UNITS : 1'), "both are taken by the route's guard, with the first");
   assert.ok(!/takeAllowance\(store, "studio"/.test(read("lib/flows.ts")), "a workflow's field step takes no studio request");
   console.log(`a field saved from the studio: $${CRM_VALUE_SAVE.toFixed(6)} at most (${CRM_VALUE_SAVE_TRIPS} trips, ${CRM_VALUE_SAVE_SECONDS} s, ${CRM_VALUE_SAVE_COMMANDS} commands, ${CRM_VALUE_SAVE_BYTES} bytes), counted as ${CRM_VALUE_SAVE_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);
+  // What the deletion's checks add inside a write about a person (C3-123 (c)): two reads, the mark and the generation.
+  assert.equal(ERASED_GUARD_CALLS, 2);
+  assert.equal(WRITE_TASKS_CALLS, ERASED_GUARD_CALLS + 4);
+  assert.equal(ADD_NOTE_CALLS, ERASED_GUARD_CALLS + 5);
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
 });

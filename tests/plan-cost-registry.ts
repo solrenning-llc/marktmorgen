@@ -1005,6 +1005,10 @@ export const COST_LINES: CostLine[] = [
       // A field saved from the studio is counted as CRM_VALUE_SAVE_UNITS studio requests, the second taken before anything is
       // read (C3-125, 4 November 2026; tests/plan-cost-registry.ts, CRM_VALUE_SAVE).
       { file: "lib/crm.ts", names: ["CRM_VALUE_SAVE_UNITS", "CRM_VALUE_SAVE_TRIPS", "CRM_VALUE_SAVE_COMMANDS", "CRM_VALUE_SAVE_BYTES", "CRM_VALUE_SCRIPT_CALLS"] },
+      // A task or a note about a person checks the deletion's mark and generation inside its own write (C3-123 (c)): its
+      // commands, with what the scripts run inside, stay inside the one studio request it takes (tests/person-erased-writes.test.ts).
+      { file: "lib/crm.ts", names: ["WRITE_TASKS_CALLS", "ERASED_GUARD_CALLS", "erasedGuard"] },
+      { file: "lib/buyer-profile.ts", names: ["ADD_NOTE_CALLS", "ADD_PERSON_NOTE"] },
       { file: "app/api/store/crm/route.ts", names: ["body.action === \"value\" ? CRM_VALUE_SAVE_UNITS : 1"] },
       { file: "lib/store-request.ts", names: ["units ? units(body) : 1"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).

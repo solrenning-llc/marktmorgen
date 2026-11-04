@@ -5,11 +5,13 @@ import { StoreFullError, imageFolder, isFree, setProductPage } from "@/lib/store
 import { productIdFor, readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { EMPTY_PAGE, MAX_BLOCKS, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { claimPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
+import { takePictureDoor } from "@/lib/picture-door";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -76,6 +78,8 @@ export async function POST(request: NextRequest) {
     const stored = store.statsId && product.page ? await readPage(store.statsId, id) : null;
     const before = stored ? picturePaths(stored) : [];
     const shown = picturePaths(page);
+    // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
+    if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
     const fresh = shown.filter((path) => !before.includes(path));
     if (fresh.length > 0) {
       if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
@@ -91,6 +95,8 @@ export async function POST(request: NextRequest) {
         await releasePictures(store.statsId, id, fresh);
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
+      // Now on this page: no failed request elsewhere may delete it as a fresh upload (lib/picture-door.ts).
+      await takePictureDoor(fresh);
     }
 
     const marked = await setProductPage(guarded.ref, id, has);

@@ -51,6 +51,7 @@ import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
 import { readKind, readListing } from "@/lib/catalog";
 import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
+import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
 
@@ -565,6 +566,60 @@ export async function studentsOf(course: Course, limit = 500): Promise<{ student
       lastSeen: row.l,
       done: Array.isArray(done[i]) ? (done[i] as string[]).filter((id) => lessonIds.has(id)).length : 0,
       blocked: blocked.has(emailKey(row.e)),
+    })),
+  };
+}
+
+/**
+ * One page of a course's students, for the API (lib/api-read.ts): about
+ * `count` rows from `cursor`, in the order Redis keeps them, and how many
+ * there are in all. What each marked done and whether each is blocked is read
+ * only after `allow` said yes to the page's size (its rows, and how many are
+ * blocked in all), so what that reading costs can be taken first; null when
+ * it said no, with nothing more read. The blocked list is read whole up to
+ * BLOCKED_READ_MAX, past it one question a student. Null too when the counts
+ * did not come back: unknown is never read as small.
+ */
+export async function studentPage(
+  course: Course,
+  cursor: string,
+  count: number,
+  allow: (rows: number, blocked: number) => Promise<boolean>,
+): Promise<{ students: Student[]; total: number; next: string } | null> {
+  if (!isRedisConfigured()) return { students: [], total: 0, next: "0" };
+  const [reply, total, blockedCount] = await redisPipeline([
+    ["HSCAN", studentsKey(course.id), cursor, "COUNT", count],
+    ["HLEN", studentsKey(course.id)],
+    ["SCARD", blockedKey(course.id)],
+  ]);
+  const blockedAll = Number(blockedCount);
+  if (!Array.isArray(reply) || reply.length < 2 || !Number.isSafeInteger(blockedAll) || blockedAll < 0) return null;
+  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  const rows: StudentRow[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    try {
+      const row = JSON.parse(String(flat[i + 1])) as StudentRow;
+      if (typeof row?.e === "string") rows.push(row);
+    } catch {}
+  }
+  // Accepted race: the blocked list can grow between SCARD and SMEMBERS and be read past what was paid for,
+  // bounded by how fast the store blocks students.
+  if (!(await allow(rows.length, blockedAll))) return null;
+  const whole = blockedAll <= BLOCKED_READ_MAX;
+  const blockedReads: (string | number)[][] =
+    blockedAll === 0 ? [] : whole ? [["SMEMBERS", blockedKey(course.id)]] : rows.map((row) => ["SISMEMBER", blockedKey(course.id), emailKey(row.e)]);
+  const replies = rows.length ? await redisPipeline([...rows.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]), ...blockedReads]) : [];
+  const blockedSet = new Set(blockedAll > 0 && whole && Array.isArray(replies[rows.length]) ? (replies[rows.length] as string[]) : []);
+  const lessonIds = new Set(lessonsInOrder(course).map(({ lesson }) => lesson.id));
+  return {
+    total: Number(total) || 0,
+    next: String(reply[0]),
+    students: rows.map((row, i) => ({
+      email: row.e,
+      since: row.s,
+      lastSeen: row.l,
+      done: Array.isArray(replies[i]) ? (replies[i] as string[]).filter((id) => lessonIds.has(id)).length : 0,
+      blocked: blockedAll === 0 ? false : whole ? blockedSet.has(emailKey(row.e)) : Number(replies[rows.length + i]) === 1,
     })),
   };
 }

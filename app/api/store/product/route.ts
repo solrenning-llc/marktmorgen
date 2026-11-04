@@ -27,7 +27,8 @@ import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { dropPage } from "@/lib/sales-page-store";
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
@@ -36,7 +37,7 @@ import { dropCourse, filesInCourse, readCourse } from "@/lib/course";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
-import { idsOfKind, readAllListings, readListing, readProducts } from "@/lib/catalog";
+import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
@@ -322,6 +323,10 @@ export async function POST(request: NextRequest) {
     } else if (action === "link") {
       // The link is checked before anything is written, so a product is never
       // left pointing at something a buyer could not open.
+      // A link over the file deletes the file and the buyers' stamped copies: a session let in
+      // without its second step waits (lib/two-step.ts). The id may name a price option, whose file
+      // is its own, so the file is read where the id points (readDelivery), not on a product only.
+      if ((await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
       const read = readLink(link);
       if (!read.ok) {
         return Response.json(

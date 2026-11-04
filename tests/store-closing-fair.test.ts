@@ -85,6 +85,7 @@ const world = {
   /** One-off payments, each naming its store in its metadata (what the buyers' search finds). */
   payments: [] as Record<string, unknown>[],
   searches: 0,
+  planListHasMore: false,
   charges: new Map<string, Charge>(),
   refunds: [] as { id: string; payment_intent: string; amount: number; status: string; metadata: Record<string, string> }[],
   balance: 1_000_000,
@@ -171,7 +172,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (path === "/subscriptions" && method === "GET") {
       world.planListReads++;
       const customer = url.searchParams.get("customer");
-      return json({ object: "list", data: world.plans.filter((row) => (row.customer as { id: string }).id === customer && (url.searchParams.get("status") === "all" || row.status !== "canceled")), has_more: false });
+      return json({ object: "list", data: world.plans.filter((row) => (row.customer as { id: string }).id === customer && (url.searchParams.get("status") === "all" || row.status !== "canceled")), has_more: world.planListHasMore });
     }
     return json({ object: "list", data: [], has_more: false });
   }
@@ -597,7 +598,7 @@ async function main() {
   const half = await closeOne(ned, N + CLOSING_DAYS * DAY + 60_000, failing, Number.POSITIVE_INFINITY);
   console.error = real;
   is("the day began: its membership ended, the store not removed yet", [half.state, world.subs.get("sub_nedmonth")!.status], ["held", "canceled"]);
-  const lateNed = { id: "sub_nedlate001", status: "active", created: S(N + CLOSING_DAYS * DAY), customer: { id: "cus_ned0001", email: ned }, metadata: { store: "ned" } };
+  const lateNed = { id: "sub_nedlate001", status: "active", created: S(N + CLOSING_DAYS * DAY), customer: { id: "cus_ned0001", email: ned }, metadata: { store: "ned" }, items: { data: [{ quantity: 1, current_period_start: S(N + CLOSING_DAYS * DAY), current_period_end: S(N + (CLOSING_DAYS + 31) * DAY), price: { lookup_key: "nimbus_creator_month", unit_amount: 6900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } };
   world.plans.push(lateNed);
   world.failPlanSearch = true;
   const listsBefore = world.planListReads, lateWrites = world.writes.length;
@@ -605,6 +606,10 @@ async function main() {
   is("an unknown address search still reads the independent customer list and stops the late charge", [world.planListReads > listsBefore, world.writes.slice(lateWrites).some(w => w.method === "DELETE" && w.path === "/subscriptions/sub_nedlate001"), lateNed.status], [true, true, "canceled"]);
   is("unknown address coverage never advances the final closing to removed", unknownSearch.state, "held");
   world.failPlanSearch = false;
+  world.planListHasMore = true;
+  const incompleteOwn = await closeOne(ned, N + (CLOSING_DAYS + 1) * DAY, hands, Number.POSITIVE_INFINITY);
+  is("has_more on the own customer page refuses removal even after the late charge ended", incompleteOwn.state, "held");
+  world.planListHasMore = false;
   world.plans.length = 0;
   await setSubscription(ned, { customerId: "cus_ned0001", subscriptionId: "sub_nedplan02", active: true, tier: "creator", cycle: "month", trialEnds: 0 });
   const observedLateNed = { ...lateNed, id: "sub_nedlate002", status: "active" };

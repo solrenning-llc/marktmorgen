@@ -2,11 +2,14 @@ import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { StoreFullError, imageFolder, setSitePages } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
 import { claimPictures, dropPage, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
+import { takePictureDoor } from "@/lib/picture-door";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
@@ -118,6 +121,8 @@ export async function POST(request: NextRequest) {
       // Pictures: each new one a picture in this store's own folder, shown on no other page.
       const before = picturePaths(await readPage(statsId, key));
       const shown = picturePaths(page);
+      // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
+      if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "page", "replace"))) return refusedJson("locked");
       const fresh = shown.filter((path) => !before.includes(path));
       if (fresh.length) {
         const folder = await imageFolder(ref);
@@ -129,6 +134,8 @@ export async function POST(request: NextRequest) {
           await releasePictures(statsId, key, fresh);
           return refuse("pictures");
         }
+        // Now on this page: no failed request elsewhere may delete it as a fresh upload (lib/picture-door.ts).
+        await takePictureDoor(fresh);
       }
       await writePage(statsId, key, page, store);
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).

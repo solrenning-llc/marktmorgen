@@ -66,7 +66,9 @@ async function main(): Promise<void> {
   // as a visit by lib/embed-open.ts; pasted as a frame, it still counts nothing.
   is("only an open by the checkout script is counted, and elsewhere", /const open: ScriptOpen \| null = mode && store \? await readScriptOpen\(store, mode, query\) : null;/.test(page), true);
   const links = page.match(/<a\s[^>]*>/g) ?? [];
-  is("every link opens a new tab in a frame, and stays in the tab only as a page", links.length > 0 && links.every((tag) => /\{\.\.\.aside\}/.test(tag)), true);
+  // A call's own calendar in the frame (637 [GL5] unit 6) is the one exception: its links go to this same card's address (here()), which the frame may show.
+  is("every link opens a new tab in a frame, and stays in the tab only as a page", links.length > 0 && links.every((tag) => /\{\.\.\.aside\}/.test(tag) || /href=\{here\(/.test(tag)), true);
+  is("and the ones that stay in the frame stay on this card's own address", links.filter((tag) => !/\{\.\.\.aside\}/.test(tag)).every((tag) => /^<a\s+href=\{here\(/.test(tag.replace(/\s+/g, " "))), true);
   is("which is the one way out of each", /const aside = open\?\.mode === "page" \? \{ target: "_top" \} : \{ target: "_blank", rel: "noopener" \};/.test(page), true);
   is("and so does its checkout", /<form action="\/api\/store\/checkout" method="post" target="_blank" rel="noopener"/.test(page), true);
   is(

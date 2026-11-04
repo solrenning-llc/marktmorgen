@@ -1,21 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
-import { PLATFORM_SUBSCRIPTION_SEARCH } from "./plan-cost-registry";
+import { MAX_ADDRESSES } from "@/lib/store-field-rules";
+import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { COST_LINES, PLATFORM_SUBSCRIPTION_SEARCH as profile, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD as event } from "./plan-cost-registry";
 
-test("the real handle validator admits no JSON string below the byte floor used by the search cost bound", () => {
-  const floor = PLATFORM_SUBSCRIPTION_SEARCH.serializedHandleFloorBytes;
-  const bytes = (value: string) => Buffer.byteLength(JSON.stringify(value));
-  const check = (value: string) => {
-    if (bytes(value) < floor) assert.equal(HANDLE_PATTERN.test(value), false, JSON.stringify(value));
-  };
-  check("");
-  // All one-code-point strings of one or two UTF-8 bytes, and every pair of
-  // ASCII bytes, exhaust the strings whose quoted JSON can weigh under five.
-  for (let point = 0; point < 0x800; point++) check(String.fromCodePoint(point));
-  for (let first = 0; first < 0x80; first++) {
-    for (let last = 0; last < 0x80; last++) check(String.fromCharCode(first, last));
+test("CX-61 prices two full timeout waits using the highest published regional memory rate", () => {
+  assert.equal(MAX_ADDRESSES, 10);
+  assert.equal(profile.maxGets, 2);
+  assert.equal(profile.waitSeconds, STRIPE_TIMEOUT_MS / 1000);
+  assert.equal(profile.memoryUsdPerGbHour, 0.0183);
+  assert.equal(event, 2 * (STRIPE_TIMEOUT_MS / 1000) * profile.memoryGb * profile.memoryUsdPerGbHour / 3600);
+  assert.ok(event > 0);
+  assert.equal(profile.stripeGetFeeUsd, null, "an unconfirmed endpoint tariff is not zero");
+});
+
+test("only shared essential checkout/deletion events and daily closing receive the two-read cost", () => {
+  const line = COST_LINES.find(row => row.id === "platform-subscription-search")!;
+  assert.ok(line);
+  assert.equal(profile.essentialEventsPerWindow, 320);
+  assert.equal(profile.closingEventsPerWindow, 32);
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    assert.equal(line.monthlyUsd(tier), event * (320 + 32));
   }
-  assert.equal(HANDLE_PATTERN.test("abc"), true);
-  assert.equal(bytes("abc"), floor);
+  assert.equal(line.sources.some(source => source.file === "lib/traffic.ts"), false);
 });

@@ -33,6 +33,7 @@ import {
 } from "@/lib/plan";
 import { inTheCurrencyShown } from "@/lib/instant-pay";
 import { normaliseEmail } from "@/lib/auth";
+import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import {
   CUSTOMER_PATTERN,
   storeForRestartSource,
@@ -1484,7 +1485,7 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
   }
   const metadata = searchDataRecord(member.metadata, "member metadata");
   const named = metadata.store;
-  if (typeof named !== "string" || !HANDLE_PATTERN.test(named) || !handles.has(named)) {
+  if (typeof named !== "string" || !HANDLE_PATTERN.test(named)) {
     throw new Error("Subscription search member ownership is unknown");
   }
   const customer = searchDataRecord(member.customer, "expanded customer");
@@ -1495,7 +1496,7 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
     const valid = customer.object === "customer" && !Object.hasOwn(customer, "email") &&
       typeof customer.id === "string" && CUSTOMER_PATTERN.test(customer.id) && member.status === "canceled";
     if (valid && ownership.released.has(named) && customer.id !== ownership.customerId) return null;
-    if (valid && ownership.customerId) {
+    if (valid && ownership.customerId && handles.has(named)) {
       const marked = [member, metadata].some(record => Object.keys(record).some(key => /^(funding_|restart_|cf_)/.test(key)));
       if (customer.id === ownership.customerId && !marked) {
         member.metadata = metadata;
@@ -1505,6 +1506,7 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
     }
     throw new Error("Subscription search deleted customer ownership is unknown");
   }
+  if (!handles.has(named)) throw new Error("Subscription search member ownership is unknown");
   if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id) ||
       !Object.prototype.hasOwnProperty.call(customer, "email") ||
       customer.email !== null && typeof customer.email !== "string") {
@@ -1553,6 +1555,25 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
   return { subscription: member, terminalOwn: false };
 }
 
+/** A single full Search/List page, with no cursor, getter or omitted member. */
+function completeSubscriptionPage(page: unknown): unknown[] {
+  if (!page || typeof page !== "object" || Array.isArray(page)) throw new Error("Subscription search page is unknown");
+  const data = Object.getOwnPropertyDescriptor(page, "data");
+  const more = Object.getOwnPropertyDescriptor(page, "has_more");
+  const cursor = Object.getOwnPropertyDescriptor(page, "next_page");
+  if (!data || !Object.hasOwn(data, "value") || !Array.isArray(data.value) ||
+      !more || !Object.hasOwn(more, "value") || more.value !== false ||
+      cursor && (!Object.hasOwn(cursor, "value") || cursor.value !== null && cursor.value !== undefined) ||
+      data.value.length > SEARCH_LIMIT) throw new Error("Subscription search page is incomplete");
+  const rows: unknown[] = [];
+  for (let index = 0; index < data.value.length; index++) {
+    const entry = Object.getOwnPropertyDescriptor(data.value, String(index));
+    if (!entry || !Object.hasOwn(entry, "value")) throw new Error("Subscription search member is unknown");
+    rows.push(entry.value);
+  }
+  return rows;
+}
+
 /**
  * What Stripe already has for this store, looked up before a new checkout is
  * opened.
@@ -1563,7 +1584,8 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
  * store does not know about, and a second one started over the top of it,
  * both charged. So Stripe is asked by the handle the checkout wrote into the
  * subscription (Subscription Search: `metadata['store']:'<handle>'`), under
- * every address this store still answers to.
+ * current and previous addresses, and by the captured customer through the
+ * List API for names it has released. Each read must be one complete page.
  *
  * `live` is one in good standing, to be written down instead of starting
  * another; `customerId` is the customer this store last paid us from. Search
@@ -1573,18 +1595,16 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
 export async function findStoreSubscriptions(
   store: Store,
 ): Promise<{ live: StartedSubscription | null; customerId: string | null; lapsed: string[] }> {
-  // Stripe takes at most ten clauses in one query. An address the store let
-  // go of is looked under too, and kept only for its own customer (ownedBy).
+  // Capture ownership before either awaited read. Released names never enter
+  // the Search query: only the captured customer's complete List can recover
+  // them, with no number of provider calls proportional to address history.
   const releasedHandles = store.releasedHandles;
-  const handles = [...new Set([store.handle, ...store.previousHandles, ...releasedHandles])];
-  // A complete result page proves nothing about a handle left out of its
-  // query. Refuse unknown coverage instead of filtering it away.
-  if (handles.length === 0 ||
-      handles.some((handle) => typeof handle !== "string" || !HANDLE_PATTERN.test(handle))) {
+  const handles = [...new Set([store.handle, ...store.previousHandles])];
+  if (handles.length === 0 || handles.length > MAX_ADDRESSES ||
+      handles.some((handle) => typeof handle !== "string" || !HANDLE_PATTERN.test(handle)) ||
+      !Array.isArray(releasedHandles) || releasedHandles.some(handle => typeof handle !== "string" || !HANDLE_PATTERN.test(handle))) {
     throw new Error("Subscription search handle coverage is unknown");
   }
-  // Bind only the new DeletedCustomer exception to the identity and released
-  // handles captured for this query, before any awaited provider operation.
   const customerContext = Object.getOwnPropertyDescriptor(store, "stripeCustomerId");
   const releasedContext = Object.getOwnPropertyDescriptor(store, "releasedHandles");
   const ownership: SearchOwnership = {
@@ -1593,45 +1613,65 @@ export async function findStoreSubscriptions(
     released: releasedContext && Object.hasOwn(releasedContext, "value") && releasedContext.value === releasedHandles
       ? releasedSearchEvidence(releasedHandles) : new Set(),
   };
-  const entries: SearchMember[] = [];
-  // Ten clauses is Stripe's query protocol ceiling, not a limit on this
-  // store's history. Every chunk must be complete before any adoption.
-  for (let offset = 0; offset < handles.length; offset += 10) {
-    const chunk = handles.slice(offset, offset + 10);
-    const query = new URLSearchParams({
-      query: chunk.map((handle) => `metadata['store']:'${handle}'`).join(" OR "),
-      limit: String(SEARCH_LIMIT),
-    });
-    query.append("expand[]", "data.customer");
-    const page = await onPlatform("GET", `/subscriptions/search?${query}`);
-    // Only a complete, bounded page can be read as an empty result. Keep
-    // unknown provider evidence out of checkout and destructive maintenance.
-    // This does not make Stripe Search strongly consistent after a write.
-    if (!page || typeof page !== "object" || Array.isArray(page)) throw new Error("Subscription search page is unknown");
-    const data = Object.getOwnPropertyDescriptor(page, "data");
-    const more = Object.getOwnPropertyDescriptor(page, "has_more");
-    const cursor = Object.getOwnPropertyDescriptor(page, "next_page");
-    if (!data || !Object.hasOwn(data, "value") || !Array.isArray(data.value) ||
-        !more || !Object.hasOwn(more, "value") || more.value !== false ||
-        cursor && (!Object.hasOwn(cursor, "value") || cursor.value !== null && cursor.value !== undefined) ||
-        data.value.length > SEARCH_LIMIT) throw new Error("Subscription search page is incomplete");
-    const coveredHandles = new Set(chunk);
-    for (let index = 0; index < data.value.length; index++) {
-      const entry = Object.getOwnPropertyDescriptor(data.value, String(index));
-      if (!entry || !Object.hasOwn(entry, "value")) throw new Error("Subscription search member is unknown");
-      const member = searchMember(entry.value, coveredHandles, ownership);
-      if (member) entries.push(member);
+  const observedStore = {
+    handle: store.handle, previousHandles: [...store.previousHandles],
+    releasedHandles: [...ownership.released], stripeCustomerId: ownership.customerId,
+    email: store.email, statsId: store.statsId,
+  } as Store;
+  const query = new URLSearchParams({
+    query: handles.map(handle => `metadata['store']:'${handle}'`).join(" OR "),
+    limit: String(SEARCH_LIMIT),
+  });
+  query.append("expand[]", "data.customer");
+  const search = completeSubscriptionPage(await onPlatform("GET", `/subscriptions/search?${query}`));
+  const ownQuery = new URLSearchParams({ customer: ownership.customerId ?? "", status: "all", limit: String(SEARCH_LIMIT) });
+  ownQuery.append("expand[]", "data.customer");
+  // Both pages must be complete before any row can activate a cash grant.
+  const own = ownership.customerId
+    ? completeSubscriptionPage(await onPlatform("GET", `/subscriptions?${ownQuery}`)) : [];
+  const current = new Set(handles);
+  const all = new Set([...handles, ...ownership.released]);
+  const entries = new Map<string, SearchMember>();
+  const evidence = ({ subscription, terminalOwn }: SearchMember) => canonicalFinancialSnapshot({
+    id: subscription.id, status: subscription.status, created: subscription.created,
+    metadata: subscription.metadata, customer: customerOf(subscription), terminalOwn,
+    state: stateOf(subscription), trialStart: subscription.trial_start ?? null,
+  });
+  const add = (value: unknown, covered: Set<string>) => {
+    const member = searchMember(value, covered, ownership);
+    if (!member) return;
+    const id = member.subscription.id as string;
+    const previous = entries.get(id);
+    if (previous) {
+      // Overlap is one subscription, never two activations. Contradictory
+      // observations are unknown; page order cannot choose paid evidence.
+      const before = evidence(previous);
+      const after = evidence(member);
+      if (before === null || after === null || before !== after) throw new Error("Subscription search overlap is unknown");
+      return;
     }
+    entries.set(id, member);
+  };
+  for (const row of search) add(row, current);
+  for (const value of own) {
+    const row = searchDataRecord(value, "listed member");
+    const metadata = searchDataRecord(row.metadata, "listed metadata");
+    // The same Stripe customer may pay for another store or an add-on. Those
+    // rows are outside this store, even if they have no plan items at all.
+    if (typeof metadata.store !== "string" || !all.has(metadata.store)) continue;
+    const customer = searchDataRecord(row.customer, "listed customer");
+    if (customer.id !== ownership.customerId) throw new Error("Subscription search listed customer is unknown");
+    add(row, all);
   }
-  const rows = entries
-    .filter(({ subscription, terminalOwn }) => terminalOwn || ownedBy(store, subscription))
+  const rows = [...entries.values()]
+    .filter(({ subscription, terminalOwn }) => terminalOwn || ownedBy(observedStore, subscription))
     .map(({ subscription }) => subscription)
     .sort((a, b) => (b.created as number) - (a.created as number));
 
   let live: StartedSubscription | null = null;
   for (const subscription of rows) {
     if (stateOf(subscription).state !== "active") continue;
-    live = await startedFromObservedSubscription(store, subscription);
+    live = await startedFromObservedSubscription(observedStore, subscription);
     if (!live) throw new Error("Subscription search activation is unknown");
     break;
   }

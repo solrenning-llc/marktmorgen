@@ -1,4 +1,4 @@
-// Read-only CX-55 diagnostic of the existing cost model.
+// Read-only CX-61 component diagnostic of the existing compatibility cost model.
 // No provider access, financial approval, price change or deployment.
 import {createRequire} from 'node:module';
 import {mkdtempSync,rmSync} from 'node:fs';

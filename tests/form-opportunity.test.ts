@@ -5,7 +5,7 @@ import { addResponse, writeForm, dropForm } from "@/lib/form-store";
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { DEFAULT_STAGES, MAX_DEALS, type Deal } from "@/lib/crm-rules";
-import { readDeals } from "@/lib/crm";
+import { dealVersion, readDeals } from "@/lib/crm";
 import { putMember } from "@/lib/team";
 import { POST } from "@/app/api/store/form-opportunity/route";
 import { POST as editCrm } from "@/app/api/store/crm/route";
@@ -33,7 +33,7 @@ async function main() {
   const records = await Promise.all(replies.map(reply => reply.json()));
   is("simultaneous requests create one deal and return the same ID", [records.map(record => record.state).sort(), new Set(records.map(record => record.deal?.id)).size, (await readDeals(statsId, DEFAULT_STAGES)).length], [["created", "existing"], 1, 1]);
   const kept = (await readDeals(statsId, DEFAULT_STAGES))[0];
-  const edited = await editCrm(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie: SESSION_COOKIE + "=" + session }, body: JSON.stringify({ action: "deal", deal: { ...kept, note: "Later work", stage: "won000", formResponseRef: "f".repeat(64) } }) }));
+  const edited = await editCrm(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid, cookie: SESSION_COOKIE + "=" + session }, body: JSON.stringify({ action: "deal", version: dealVersion(String((await redis.pipeline([["HGET", "nl:crm:deals:" + statsId, kept.id]]))[0])), deal: { ...kept, note: "Later work", stage: "won000", formResponseRef: "f".repeat(64) } }) }));
   is("ordinary edits preserve the server-owned origin", [(await edited.json()).ok, (await readDeals(statsId, DEFAULT_STAGES))[0]?.formResponseRef], [true, ref]);
   const again = await (await send()).json();
   is("retry returns existing opportunity without undoing later edits", [again.state, again.deal.note, again.deal.stage, (await readDeals(statsId, DEFAULT_STAGES)).length], ["existing", "Later work", "won000", 1]);

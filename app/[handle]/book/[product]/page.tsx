@@ -1,4 +1,5 @@
 import { PackageOffer } from "@/components/store-product";
+import { placeLine } from "@/lib/call-place";
 import { DEMO_MOVED_NOTE, DEMO_STAYS_NOTE, isHouseStore } from "@/lib/house-store";
 import { boughtByToken, packageState } from "@/lib/call-packages";
 import { isSoon } from "@/lib/waitlist";
@@ -10,7 +11,9 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
+import { bookingLength, offeredLengths, ownLength } from "@/lib/call-lengths";
 import { type CallListing, canMove, catchUpBookings, icsLink, isCallProduct, slotsForMove, slotsForProduct, whyNotMove } from "@/lib/calls";
+import { chargeNow } from "@/lib/call-deposit";
 import { type CallSetup, MAX_MOVES, MEET_NAMES, movableUntil, readableTime, zoneName } from "@/lib/call-setup";
 import { isVideoRoom, roomLabel, roomOf } from "@/lib/call-rooms";
 import { readOrder } from "@/lib/store-checkout";
@@ -65,7 +68,31 @@ export default async function BookPage({ params, searchParams }: Params) {
   const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
   const pkgState = pkg ? await packageState(pkg.bought) : null;
   const open = canSellProduct(store, product) && !(await isSoon(store, product.id).catch(() => false));
-  const read = open ? await slotsForProduct(store, product) : null;
+  // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".
+  const withKey = typeof query.with === "string" && /^[0-5]$/.test(query.with) ? query.with : "";
+  // One of a call's lengths, each with its price (lib/call-lengths.ts): asked for by its link; the times are read at it,
+  // except on a team, which reads its hosts' times at the call's own length and says so (read.team).
+  const asked = typeof query.length === "string" ? query.length : undefined;
+  // The times are read at the length asked for only where lengths are offered at all (offeredLengths): with a deposit,
+  // for one, the page books the call's own length, so it shows that length's times.
+  const offerable = !pkgToken && product.call.kind === "weekly" && offeredLengths(product.call, product.priceCents, { pkg: false, team: false }).length > 0;
+  const askedLength = offerable ? bookingLength(product.call, product.priceCents, asked) : null;
+  const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null, askedLength?.minutes ?? null) : null;
+  const hostChoices = (read && "hosts" in read ? read.hosts : null) ?? [];
+  // Offered only where each can be booked and charged (holdAndCheckout): never from a package, with a deposit or on a team.
+  const choices = read ? offeredLengths(product.call, product.priceCents, { pkg: Boolean(pkgToken), team: read.team }) : [];
+  // Each length's link keeps the rest of the address (a campaign's tags, a chosen host) and goes straight to the times.
+  const lengthHref = (minutes: number) => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (key === "length" || key === "status" || typeof value !== "string") continue;
+      next.set(key, value);
+    }
+    next.set("length", String(minutes));
+    return `?${next.toString()}#times`;
+  };
+  const chosen = choices.length ? askedLength ?? choices[0] : null;
+  const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
   const starts = days ? days.flatMap((day) => day.starts) : [];
   // Paid calls whose buyer never came back from Stripe get their emails now,
@@ -73,8 +100,16 @@ export default async function BookPage({ params, searchParams }: Params) {
   if (read && read.paid.length) after(() => catchUpBookings(store, read.paid, SITE_URL));
   const setup = product.call;
   const live = setup.kind === "live";
-  const price = money(product.priceCents);
+  const price = money(chosen ? chosen.cents : product.priceCents);
   const fromPackage = Boolean(pkg && pkgState && pkgState.left > 0);
+  // A booking with a deposit: a discount code is typed here and taken off the whole price (lib/deposit-code.ts),
+  // shown only when the checkout would charge a deposit, as app/api/store/book reads it.
+  // A deposit on an in-person booking (lib/call-deposit.ts): what is paid now and what is left, as the checkout will charge it.
+  const due = fromPackage ? null : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: setup.deposit ?? null, inPerson: Boolean(setup.place) });
+  const deposit = due && due.rest > 0 ? due : null;
+  // The button says what is paid now: the deposit, never the whole price, when only the deposit is charged.
+  const payNow = deposit ? money(deposit.cents) : price;
+  const code = deposit && store.hasDiscounts ? { label: b.codeLabel, help: b.codeHelp } : undefined;
 
   return (
     <Shell store={store}>
@@ -102,7 +137,10 @@ export default async function BookPage({ params, searchParams }: Params) {
               </h1>
               <p className="st-price text-base">{price}</p>
             </div>
-            <p className="st-muted mt-2 text-sm font-semibold">{callLine(setup, b)}</p>
+            <p className="st-muted mt-2 text-sm font-semibold">{callLine(chosen ? { ...setup, minutes: chosen.minutes } : setup, b)}</p>
+            {deposit ? <p className="mt-2 text-sm" data-call-due="">{b.depositRest(money(deposit.rest), store.name)}</p> : null}
+            {/* The creator's cancellation deadline (lib/call-setup.ts), before paying; a session from a package pays nothing here. */}
+            {setup.cancelHours && !fromPackage ? <p className="mt-2 text-sm" data-call-cancel="">{b.cancelPolicy(setup.cancelHours, store.name)}</p> : null}
             {product.summary ? <p className="st-muted mt-3 leading-relaxed">{product.summary}</p> : null}
 
             {pkgState ? (
@@ -143,18 +181,63 @@ export default async function BookPage({ params, searchParams }: Params) {
                 creatorTz={setup.tz}
                 handle={store.handle}
                 productId={product.id}
-                words={sessionWords(store, b, read.sessions, price, false)}
+                words={{ ...sessionWords(store, b, read.sessions, payNow, false), code }}
               />
             ) : (
-              <SlotPicker
-                starts={starts}
-                creatorTz={setup.tz}
-                handle={store.handle}
-                productId={product.id}
-                seatsLeft={setup.seats > 1 ? seatLabels(read.left, b) : undefined}
-                pkg={fromPackage ? pkgToken : undefined}
-                words={slotWords(store, b, setup.minutes, price, false, fromPackage)}
-              />
+              <>
+                {chosen ? (
+                  // Each length is a link to its own times, followed only when the buyer asks (3.2.5): what is marked is
+                  // always what the times below and the button book and charge, never a choice the page has not drawn.
+                  <div className="mt-6" role="group" aria-labelledby={`length-${product.id}`} data-length-pick="">
+                    <p id={`length-${product.id}`} className="font-bold" style={{ color: "var(--st-text)" }}>{b.lengthPick}</p>
+                    <ul className="mt-2 grid gap-2">
+                      {choices.map((l) => (
+                        <li key={l.minutes}>
+                          <a
+                            href={lengthHref(l.minutes)}
+                            aria-current={l.minutes === chosen.minutes ? "true" : undefined}
+                            className={`btn ${l.minutes === chosen.minutes ? "st-btn" : "st-btn-ghost"} w-full justify-start`}
+                          >
+                            {b.lengthOption(l.minutes, money(l.cents))}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-sm">{b.lengthChosen(b.lengthOption(chosen.minutes, money(chosen.cents)))}</p>
+                  </div>
+                ) : null}
+                {hostChoices.length ? (
+                  // A plain form: the times are drawn again for the person chosen, only when the buyer asks (3.2.2).
+                  <form method="get" className="mt-6" data-host-pick="">
+                    {fromPackage ? <input type="hidden" name="pkg" value={pkgToken} /> : null}
+                    <label htmlFor={`host-${product.id}`} className="block font-bold" style={{ color: "var(--st-text)" }}>{b.hostPick}</label>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <select id={`host-${product.id}`} name="with" defaultValue={pickedHost?.key ?? ""} className="st-field min-w-0 flex-1">
+                        <option value="">{b.hostAny}</option>
+                        {hostChoices.map((h) => (
+                          <option key={h.key} value={h.key}>{h.label}</option>
+                        ))}
+                      </select>
+                      <button type="submit" className="btn st-btn-ghost">{b.hostShow}</button>
+                    </div>
+                    {pickedHost ? <p className="mt-2 text-sm" role="status">{b.withHost(pickedHost.label)}</p> : null}
+                  </form>
+                ) : null}
+                {/* Where a length's link lands, so the page scrolls and focus starts at the times it changed (2.4.3). */}
+                <span id="times" />
+                <SlotPicker
+                  starts={starts}
+                  creatorTz={setup.tz}
+                  handle={store.handle}
+                  productId={product.id}
+                  seatsLeft={setup.seats > 1 ? seatLabels(read.left, b) : undefined}
+                  pkg={fromPackage ? pkgToken : undefined}
+                  host={pickedHost}
+                  minutes={chosen ? chosen.minutes : undefined}
+                  shownCents={chosen ? chosen.cents : undefined}
+                  words={{ ...slotWords(store, b, chosen ? chosen.minutes : setup.minutes, payNow, false, fromPackage), code }}
+                />
+              </>
             )}
           </div>
         </div>
@@ -162,6 +245,12 @@ export default async function BookPage({ params, searchParams }: Params) {
         <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(true, false), store.name)}</p>
     </Shell>
   );
+}
+
+/** The length a booking moves at, as moveBooking keeps it (lib/call-lengths.ts, ownLength). */
+function movesAt(setup: CallListing["call"], booking: { start: number; end: number }): number {
+  const kept = ownLength(setup, booking.end - booking.start);
+  return typeof kept === "number" ? kept : setup.minutes;
 }
 
 /** What the time picker says, for this page, in the store's language. */
@@ -237,6 +326,12 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
 
 /** The line under a call's title: how long, how many, and where. */
 function callLine(setup: CallSetup, b: BookingWords): string {
+  // In person (lib/call-place.ts): the address, and no link at all.
+  if (setup.place) {
+    const address = placeLine(setup.place);
+    if (setup.kind === "live") return b.inPersonLiveLine(address);
+    return setup.seats > 1 ? b.inPersonGroupLine(setup.seats, setup.minutes, address) : b.inPersonLine(setup.minutes, address);
+  }
   // A meeting made on the creator's own Google or Zoom account comes first,
   // as it does when the booking is confirmed (lib/meet-links.ts).
   const where = setup.meet
@@ -296,8 +391,11 @@ async function MovePage({
   const moved = status === "moved";
   const notice = moved ? null : b.moveNotices[status] ?? null;
   const blocked = whyNotMove(setup, booking.start, booking.moves);
-  const movable = blocked === null;
-  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start) : null;
+  // A paid booking of a length no call may have is never moved at a guess (moveBooking refuses it): said as such,
+  // never as times that could not be read, which a refresh would not change.
+  const lengthStuck = ownLength(setup, booking.end - booking.start) === "unknown";
+  const movable = blocked === null && !lengthStuck;
+  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start, booking.end - booking.start) : null;
   const leftMoves = MAX_MOVES - booking.moves;
   const until = movableUntil(setup, booking.start);
   const price = money(product.priceCents);
@@ -316,6 +414,8 @@ async function MovePage({
           <p className="mt-0.5 text-sm">
             {b.bookedLine(zoneName(booking.start, tz, locale), Math.round((booking.end - booking.start) / 60_000), product.title)}
           </p>
+          {/* In person (lib/call-place.ts): where, as text. */}
+          {setup.place ? <p className="mt-1 text-sm" data-call-place="">{b.whereAt(placeLine(setup.place))}</p> : null}
         </div>
 
         {moved ? (
@@ -343,7 +443,9 @@ async function MovePage({
                 ? b.moveNotices.limit.title
                 : blocked === "late"
                   ? b.moveNotices.late.title
-                  : b.noOtherSession}
+                  : lengthStuck
+                    ? b.lengthNotMovable
+                    : b.noOtherSession}
             </p>
             <p className="mt-1 text-sm">{isHouseStore(store) ? DEMO_STAYS_NOTE : b.staysAsIs(store.name)}</p>
           </div>
@@ -380,7 +482,7 @@ async function MovePage({
                 productId={product.id}
                 seatsLeft={setup.seats > 1 ? seatLabels(offer.left, b) : undefined}
                 move={session}
-                words={slotWords(store, b, setup.minutes, price, true, false)}
+                words={slotWords(store, b, movesAt(setup, booking), price, true, false)}
               />
             )}
           </>

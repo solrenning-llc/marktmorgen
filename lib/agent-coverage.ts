@@ -166,6 +166,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/import": row("settings", read),
   "POST store/import": row("settings", execute, "An import writes a great deal at once and says who may be emailed."),
   "POST store/import/funnel": row("pages", draft),
+  "POST store/import/hubspot": row("buyers", execute, "An import writes a great deal at once: a whole file of deals, pipelines and stages."),
   "POST store/inbox": row("buyers", execute, "An answer in the inbox reaches the buyer."),
   "POST store/intro": row("pages", draft),
   "GET store/keys": row("products", read),

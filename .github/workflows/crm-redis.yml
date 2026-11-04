@@ -1,0 +1,83 @@
+name: CRM Redis checks
+run-name: PV8 source ${{ github.sha }}
+on:
+  schedule:
+    - cron: '37 5 * * *'
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: crm-redis-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+jobs:
+  documentation-scope:
+    name: Documentation scope (crm-redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test conservative documentation classification
+        run: |
+          python3 scripts/test_ci_documentation_scope.py
+          python3 scripts/test_ci_full_tree_proof.py
+      - name: Compare actual PR trees; uncertainty keeps full coverage
+        id: scope
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_REF: ${{ github.ref }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CI_TOKEN: ${{ github.token }}
+          CI_BASE: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/ci_documentation_scope.py
+  crm-import-redis:
+    needs: documentation-scope
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - "16379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Actual Redis CRM deals import checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_crm_import_redis.py
+
+  all-checks:
+    # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
+    # passes only when every job above passed, or was skipped for a documentation-only change.
+    name: All checks (crm-redis)
+    needs: [crm-import-redis, documentation-scope]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Read every job's result; a skip counts only for a documentation-only change
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 scripts/test_ci_all_checks.py
+          python3 scripts/ci_all_checks.py

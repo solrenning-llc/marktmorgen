@@ -176,12 +176,12 @@ export async function releaseMoved(store: Store, n: number, now = Date.now()): P
  * (lib/import-limits.ts), as an upload arrives. All or nothing: a batch
  * that does not fit is refused whole, and nothing is taken for it.
  */
-export async function takeImportRows(store: Store, n: number, now = Date.now(), bytes = 0): Promise<{ ok: true } | { ok: false; reason: "rows_month" | "unavailable"; limit: number }> {
+export async function takeImportRows(store: Store, n: number, now = Date.now(), bytes = 0): Promise<{ ok: true; counted: number } | { ok: false; reason: "rows_month" | "unavailable"; limit: number }> {
   // The plan's own rows even while its costs are paused: no import starts
   // then (app/api/store/import), so these are the rows of an upload already
   // under way, which is queued rather than lost (232 [CA1] unit 4b2).
   const limit = importRowsFor(store, now / 1000);
-  if (!Number.isSafeInteger(n) || n <= 0) return { ok: true };
+  if (!Number.isSafeInteger(n) || n <= 0) return { ok: true, counted: 0 };
   // A small upload still costs a request: each counts at least this many
   // rows; and a heavy one what it keeps until it is applied, a row for every
   // IMPORT_ROW_BYTES (lib/import-limits.ts).
@@ -196,12 +196,23 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
     ]);
     const counted = Number(total);
     if (!Number.isSafeInteger(counted)) return { ok: false, reason: "unavailable", limit };
-    if (counted <= limit) return { ok: true };
+    if (counted <= limit) return { ok: true, counted: n };
     await redisPipeline([["DECRBY", key, n]]);
     return { ok: false, reason: "rows_month", limit };
   } catch {
     return { ok: false, reason: "unavailable", limit };
   }
+}
+
+/**
+ * Gives back rows takeImportRows counted (`counted`, what it answered) for
+ * an import that then wrote nothing (lib/hubspot-import.ts), in the same
+ * month's figure. Never throws.
+ */
+export async function giveImportRows(store: Store, counted: number, now = Date.now()): Promise<void> {
+  const window = utcMonth(store, now);
+  if (!Number.isSafeInteger(counted) || counted <= 0 || !store.sid || !isRedisConfigured() || !window) return;
+  await redisPipeline([["DECRBY", `nl:imports:rows:${store.sid}:${window}`, counted]]).catch(() => undefined);
 }
 const KEEP_SECONDS = 14 * 86_400;
 /**

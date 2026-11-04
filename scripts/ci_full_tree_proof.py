@@ -23,6 +23,7 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 WORKFLOWS = {
     "product-checks": {"verify", "form-opportunity-redis", "Mobile render (candidate)", "Cross-browser (firefox)", "Cross-browser (webkit)"},
     "dependency-security": {"audit"},
+    "crm-redis": {"crm-import-redis"},
     "codeql": {"CodeQL (javascript-typescript)", "CodeQL (actions)"},
     "accessibility-real-readers": {"Real reader entry (windows-latest)", "Real reader entry (macos-latest)"},
 }

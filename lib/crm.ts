@@ -9,6 +9,8 @@
  *   nl:crm:pipes:<statsId>           the pipelines and their stages (JSON, lib/crm-rules.ts);
  *                                    absent until the creator first changes one, and then it wins
  *   nl:crm:deals:<statsId>           hash  deal id -> deal (JSON)
+ *   nl:crm:lock:<statsId>            one deals import (lib/hubspot-import.ts) or change of pipelines
+ *                                    at a time, a minute at most
  *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person
  *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
  *
@@ -17,10 +19,10 @@
  * however long the list is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { type Held, LockBusyError, holdLock, takeLock, withLock } from "@/lib/redis-lock";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataChange, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
-import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { type DueTask, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
@@ -59,6 +61,24 @@ export class CrmSchemaReadUnavailable extends Error {
 export class CrmSchemaWriteUnconfirmed extends Error {
   constructor() { super("CRM configuration change could not be confirmed"); this.name = "CrmSchemaWriteUnconfirmed"; }
 }
+/**
+ * The store's CRM lock could not be confirmed as still ours just before a
+ * write (it ran out on a slow request, or the database did not answer): the
+ * write was never sent, so nothing was written.
+ */
+export class CrmLockLost extends Error {
+  constructor() { super("CRM lock could not be confirmed before writing"); this.name = "CrmLockLost"; }
+}
+
+/** Whether the lock `held` is still ours: false, never an error, when that cannot be confirmed. */
+async function stillHeld(held: Held): Promise<boolean> {
+  try {
+    return await holdLock(held);
+  } catch {
+    return false;
+  }
+}
+
 /** Somebody else changed the pipelines between this change's read and its write: nothing was written. */
 export class CrmSchemaConflict extends Error {
   constructor() { super("CRM configuration changed meanwhile"); this.name = "CrmSchemaConflict"; }
@@ -69,6 +89,7 @@ const valuesKey = (statsId: string, field: string) => `nl:crm:v:${statsId}:${fie
 const stagesKey = (statsId: string) => `nl:crm:stages:${statsId}`;
 const dealsKey = (statsId: string) => `nl:crm:deals:${statsId}`;
 const pipesKey = (statsId: string) => `nl:crm:pipes:${statsId}`;
+const lockKey = (statsId: string) => `nl:crm:lock:${statsId}`;
 const tasksKey = (statsId: string) => `nl:crm:tasks:${statsId}`;
 const TASKS_SLOT = "crm:tasks";
 /**
@@ -235,9 +256,13 @@ return 1`;
 /**
  * Writes pipelines over the snapshot read, then the first pipeline's copy
  * for the board's old key, then moves each deal whose stage went to the
- * stage `target` names, over its exact record (MOVE_CRM_DEAL).
+ * stage `target` names, over its exact record (MOVE_CRM_DEAL). Only while
+ * the store's CRM lock `held` is still ours (CrmLockLost otherwise, and
+ * nothing is written): no deals import can land deals in a stage between
+ * the deals read and this write.
  */
-async function writePipelines(statsId: string, snapshotRaw: string, pipelines: Pipeline[], moved: { id: string; before: string; record: Record<string, unknown> }[], room: DataStore): Promise<void> {
+async function writePipelines(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[], moved: { id: string; before: string; record: Record<string, unknown> }[], room: DataStore): Promise<void> {
+  if (!(await stillHeld(held))) throw new CrmLockLost();
   const record = JSON.stringify(pipelines);
   // Their room in the store's data room first (DataRoomError when they do not fit, and nothing is written).
   await needData(room, [{ slot: PIPES_SLOT, bytes: dataBytes([record], 1), set: true }]);
@@ -267,9 +292,16 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
  * Saves one pipeline, adds one, or removes one (lib/crm-rules.ts,
  * changePipeline), with the deals of every stage that goes moved where
  * `moves` says. A refusal writes nothing. Moves made here start no
- * workflow: a stage removed is not a deal entering a stage.
+ * workflow: a stage removed is not a deal entering a stage. Under the
+ * store's CRM lock, as a deals import is: LockBusyError while another
+ * change or an import holds it, CrmLockLost when it could not be kept until
+ * the write; nothing is written either way.
  */
-export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore): Promise<PipelineChange> {
+export function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore): Promise<PipelineChange> {
+  return withCrmLock(statsId, (held) => changePipelines(statsId, held, change, moves, limit, room));
+}
+
+async function changePipelines(statsId: string, held: Held, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore): Promise<PipelineChange> {
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
   const counts = new Map<string, number>();
@@ -280,7 +312,7 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
   const fallback = result.pipelines[0].stages.find((s) => s.kind === "open")!.id;
   // A deal whose stage was already in no pipeline (written by an older board) is brought back to the first pipeline's first open stage.
   const moved = deals.filter((d) => !kept.has(String(d.record.stage))).map((d) => ({ ...d, record: { ...d.record, stage: result.moves[String(d.record.stage)] ?? fallback } }));
-  await writePipelines(statsId, raw, result.pipelines, moved, room);
+  await writePipelines(statsId, held, raw, result.pipelines, moved, room);
   return result;
 }
 
@@ -305,11 +337,16 @@ return 1`;
 /**
  * Saves the first pipeline's stages, as the board did before pipelines (the
  * studio's older "stages" request): a deal in a stage that is gone moves to
- * the first open one of them.
+ * the first open one of them. Under the store's CRM lock, as
+ * savePipelineChange.
  */
 export async function writeStages(statsId: string, stages: Stage[], room: DataStore): Promise<Stage[]> {
   const first = stages.find(s => s.kind === "open");
   if (!first) throw new CrmSchemaReadUnavailable();
+  return withCrmLock(statsId, (held) => replaceStages(statsId, held, stages, first, room));
+}
+
+async function replaceStages(statsId: string, held: Held, stages: Stage[], first: Stage, room: DataStore): Promise<Stage[]> {
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
   const next = parsePipelines([{ ...current[0], stages }, ...current.slice(1)]);
@@ -317,7 +354,7 @@ export async function writeStages(statsId: string, stages: Stage[], room: DataSt
   const kept = new Set(allStages(next).map(s => s.id));
   // Preserve every saved field; moving stages must not normalize away unrelated data.
   const moved = deals.filter(d => !kept.has(String(d.record.stage))).map(d => ({ ...d, record: { ...d.record, stage: first.id } }));
-  await writePipelines(statsId, raw, next, moved, room);
+  await writePipelines(statsId, held, raw, next, moved, room);
   return stages;
 }
 
@@ -472,6 +509,173 @@ export async function dropDeal(statsId: string, id: string, room: DataStore): Pr
   if (!Array.isArray(removed) || removed.length !== 1 || (removed[0] !== 0 && removed[0] !== 1)) throw new CrmDealWriteUnconfirmed();
   if (removed[0] === 1) await giveData(room, [{ slot: dealSlot(id), bytes: 0, set: true }]);
   return removed[0] === 1;
+}
+
+// ---------------------------------------------------------------- deals brought in from a file
+
+/** How long a deals import or a change of pipelines may hold the store's CRM lock, and how long the next one waits for it. */
+export const CRM_LOCK_SECONDS = 60;
+export const CRM_LOCK_WAIT_MS = 2_000;
+
+/**
+ * The store's CRM lock, taken by an import of deals (lib/hubspot-import.ts)
+ * and by every change of pipelines or stages on the board, so neither reads
+ * the deals while the other writes: LockBusyError when another holds it.
+ * A single deal saved on the board does not take it.
+ */
+export function takeCrmLock(statsId: string): Promise<Held> {
+  return takeLock(lockKey(statsId), CRM_LOCK_SECONDS, CRM_LOCK_WAIT_MS);
+}
+
+function withCrmLock<T>(statsId: string, work: (held: Held) => Promise<T>): Promise<T> {
+  return withLock(lockKey(statsId), CRM_LOCK_SECONDS, CRM_LOCK_WAIT_MS, work);
+}
+
+/**
+ * What an import of deals reads before it changes anything: the pipelines
+ * exactly as saved (the record a write is compared with) and the id of every
+ * deal. An unreadable or malformed record never stands in for an empty one.
+ */
+export async function importSnapshot(statsId: string): Promise<{ raw: string; pipelines: Pipeline[]; dealIds: Set<string> }> {
+  const { raw, pipelines } = await pipelineSnapshot(statsId);
+  let response: unknown;
+  try {
+    response = await redisPipeline([["HKEYS", dealsKey(statsId)]]);
+  } catch { throw new CrmDealReadUnavailable(); }
+  if (!Array.isArray(response) || response.length !== 1 || !Array.isArray(response[0])) throw new CrmDealReadUnavailable();
+  const ids: unknown[] = response[0];
+  if (ids.some((id) => typeof id !== "string" || !DEAL_ID.test(id))) throw new CrmDealReadUnavailable();
+  return { raw, pipelines, dealIds: new Set(ids as string[]) };
+}
+
+/** The room an import takes before it writes (`take`), and what goes back when it writes nothing (`back`). */
+export function importRoom(snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[]): { take: DataChange[]; back: DataChange[] } {
+  const pipes: DataChange[] = pipelines ? [{ slot: PIPES_SLOT, bytes: dataBytes([JSON.stringify(pipelines)], 1), set: true }] : [];
+  const pipesBack: DataChange[] = pipelines ? [{ slot: PIPES_SLOT, bytes: snapshotRaw ? dataBytes([snapshotRaw], 1) : 0, set: true }] : [];
+  return {
+    take: [...pipes, ...deals.map((deal) => ({ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }))],
+    back: [...pipesBack, ...deals.map((deal) => ({ slot: dealSlot(deal.id), bytes: 0, set: true }))],
+  };
+}
+
+/** The store reached MAX_DEALS between an import's read and its write: nothing was written. */
+export class CrmDealsFull extends Error {
+  constructor() { super("CRM deals ceiling reached meanwhile"); this.name = "CrmDealsFull"; }
+}
+
+/**
+ * An import of deals in one step (lib/hubspot-import.ts): only over the
+ * pipelines record read before (ARGV[1]; "" when none was saved), so a stage
+ * or pipeline changed meanwhile never gets a deal (-1); only deals whose ids
+ * are all new (-2 when one is there: never overwritten); only when all of
+ * them fit under the ceiling (-3). Then the pipelines (ARGV[2], with the
+ * first one's stages copied for the board's old key, ARGV[3]; "" keeps them)
+ * and every deal. Answers { how many deals were written } or, when nothing
+ * was, { -1, -2 or -3, the pipelines record as it is now ("" for none), then
+ * each id already there and its deal as it is }, so the room taken for the
+ * import goes back to what is really kept.
+ *   KEYS: deals hash, pipelines record, first pipeline's stages copy
+ *   ARGV: expected pipelines, new pipelines or "", stages copy, ceiling, then id, deal pairs
+ */
+export const IMPORT_CRM_DEALS = `-- marktmorgen:crm-deals-import:v2
+local current = redis.call("GET", KEYS[2]) or ""
+local n = (#ARGV - 4) / 2
+local taken = {}
+for i = 5, #ARGV, 2 do
+  local there = redis.call("HGET", KEYS[1], ARGV[i])
+  if there then
+    taken[#taken + 1] = ARGV[i]
+    taken[#taken + 1] = there
+  end
+end
+local function refused(code)
+  local reply = {code, current}
+  for _, value in ipairs(taken) do reply[#reply + 1] = value end
+  return reply
+end
+if current ~= ARGV[1] then return refused(-1) end
+if #taken > 0 then return refused(-2) end
+if redis.call("HLEN", KEYS[1]) + n > tonumber(ARGV[4]) then return refused(-3) end
+if ARGV[2] ~= "" then
+  redis.call("SET", KEYS[2], ARGV[2])
+  redis.call("SET", KEYS[3], ARGV[3])
+end
+for i = 5, #ARGV, 2 do redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1]) end
+return {n}`;
+
+/** What IMPORT_CRM_DEALS answered: written, or refused with what is kept now; null when the answer is not one of those. */
+function importReply(reply: unknown, sent: number): { written: true } | { written: false; code: -1 | -2 | -3; current: string; there: Map<string, string> } | null {
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) return null;
+  const answer: unknown[] = reply[0];
+  if (answer.length === 1 && answer[0] === sent) return { written: true };
+  const [code, current, ...pairs] = answer;
+  if ((code !== -1 && code !== -2 && code !== -3) || typeof current !== "string" || pairs.length % 2 !== 0) return null;
+  const there = new Map<string, string>();
+  for (let i = 0; i < pairs.length; i += 2) {
+    if (typeof pairs[i] !== "string" || typeof pairs[i + 1] !== "string") return null;
+    there.set(pairs[i] as string, pairs[i + 1] as string);
+  }
+  if (code === -2 && !there.size) return null;
+  return { written: false, code, current, there };
+}
+
+/**
+ * Writes an import of deals whose room was already taken (importRoom), under
+ * the CRM lock `held`, all or nothing (IMPORT_CRM_DEALS): CrmSchemaConflict
+ * when the pipelines changed since `snapshotRaw` was read or a deal's id is
+ * taken, CrmDealsFull past the ceiling; then nothing is written and the room
+ * goes back to what is kept: the pipelines' slot at the record as it is now,
+ * a deal that is there at its own weight, every other deal's slot emptied.
+ * Starts no workflow: a deal brought in from a file is not a deal entering a
+ * stage.
+ */
+export async function writeImport(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[], room: DataStore): Promise<void> {
+  // The lock may have run out on a slow request, or not be confirmed at all: then nothing is sent, and the room goes back.
+  if (!(await stillHeld(held))) {
+    await giveData(room, importRoom(snapshotRaw, pipelines, deals).back).catch(() => undefined);
+    throw new CrmLockLost();
+  }
+  if (!pipelines && !deals.length) return;
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([[
+      "EVAL", IMPORT_CRM_DEALS, 3, dealsKey(statsId), pipesKey(statsId), stagesKey(statsId),
+      snapshotRaw, pipelines ? JSON.stringify(pipelines) : "", pipelines ? JSON.stringify(pipelines[0].stages) : "", MAX_DEALS,
+      ...deals.flatMap((deal) => [deal.id, JSON.stringify(deal)]),
+    ]]);
+  } catch { throw new CrmDealWriteUnconfirmed(); }
+  const answer = importReply(reply, deals.length);
+  if (!answer) throw new CrmDealWriteUnconfirmed();
+  if (answer.written) return;
+  // Surely nothing was written: whatever happens while the room is put right, the caller is told so.
+  try {
+    const free = deals.filter((deal) => !answer.there.has(deal.id));
+    await giveData(room, importRoom(snapshotRaw, null, free).back);
+    // Counted as kept now, whatever it comes to: another write may have grown it since the room was taken.
+    const kept: DataChange[] = [...answer.there].map(([id, value]) => ({ slot: dealSlot(id), bytes: dataBytes([id, value], 1), set: true }));
+    if (pipelines) kept.push({ slot: PIPES_SLOT, bytes: answer.current ? dataBytes([answer.current], 1) : 0, set: true });
+    if (kept.length) await noteData(room, kept);
+  } catch {
+    // The room is put right as far as it can be; nothing was written either way.
+  }
+  throw answer.code === -3 ? new CrmDealsFull() : new CrmSchemaConflict();
+}
+
+/** The title and note of these deals as saved, by id (empty for one that is not there or cannot be read): what an import checks a deal it would bring in again against. */
+export async function readDealMarks(statsId: string, ids: readonly string[]): Promise<Map<string, { title: string; note: string }>> {
+  const out = new Map<string, { title: string; note: string }>();
+  if (!ids.length) return out;
+  let response: unknown;
+  try {
+    response = await redisPipeline([["HMGET", dealsKey(statsId), ...ids]]);
+  } catch { throw new CrmDealReadUnavailable(); }
+  if (!Array.isArray(response) || response.length !== 1 || !Array.isArray(response[0]) || response[0].length !== ids.length) throw new CrmDealReadUnavailable();
+  const values: unknown[] = response[0];
+  ids.forEach((id, i) => {
+    const record = json(values[i]) as { title?: unknown; note?: unknown } | null;
+    out.set(id, { title: typeof record?.title === "string" ? record.title : "", note: typeof record?.note === "string" ? record.note : "" });
+  });
+  return out;
 }
 
 /**

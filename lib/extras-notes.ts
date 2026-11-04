@@ -23,6 +23,7 @@
 import type { Listing, Product } from "@/lib/store";
 import { bumpPauseWords, bumpState, bumpStates, planPauseWords, planState } from "@/lib/product-extras";
 import { funnelHealth, stepPauseWords } from "@/lib/funnel";
+import { listedLengths } from "@/lib/call-lengths";
 
 export type ExtraNotes = {
   /**
@@ -137,7 +138,18 @@ export function quietedBy(
     if (product.id === changedId) {
       const plan = planState(product);
       if (plan && "paused" in plan) say(title, planPauseWords(plan.paused, plan.plan, product, currency));
+      // A call's other lengths (lib/call-lengths.ts), which a new price takes off sale until they are saved again
+      // (bookingLength): only the call's own length is booked meanwhile. A deposit never offers them, so it is not this.
+      const call = product.call;
+      if (call && call.kind === "weekly" && (call.lengths?.length ?? 0) > 1 && !call.deposit && listedLengths(call, product.priceCents).length === 0) {
+        say(title, lengthsPausedWords(call.minutes));
+      }
     }
   }
   return lines;
+}
+
+/** What the save says when a new price took a call's other lengths off sale: what still sells, and how to offer the others. */
+export function lengthsPausedWords(minutes: number): string {
+  return `Buyers can book only the ${minutes}-minute length now, because the price changed. To offer the other lengths again, open \u201cChange the hours\u201d on this product and save.`;
 }

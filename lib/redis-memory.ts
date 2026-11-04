@@ -113,6 +113,81 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // CX-67: existing exposure reservation used by held-store company work.
+        if (key.includes("local receiptField='case:'..ARGV[3]..':'..ARGV[4]") && args[0] === "1" && args.length === 9) {
+          const [, ledger, review, binding, scope, id, rawCharge, rawLimit, rawFunded] = args;
+          const amount = (raw: unknown): number | null => typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw) && Number.isSafeInteger(Number(raw)) && Number(raw) <= 1e12 ? Number(raw) : null;
+          if (this.run(["TYPE", ledger]) !== "hash" || this.run(["TTL", ledger]) !== -1) return 0;
+          if (this.run(["HGET", ledger, "review"]) !== review || this.run(["HGET", ledger, "policy"]) !== binding) return 0;
+          const reserved = amount(this.run(["HGET", ledger, "reserved"]));
+          const charge = amount(rawCharge), limit = amount(rawLimit), funded = amount(rawFunded);
+          const slots = amount(this.run(["HGET", ledger, "slots:" + scope]));
+          const field = "case:" + scope + ":" + id, raw = this.run(["HGET", ledger, field]);
+          if (reserved === null || charge === null || limit === null || funded === null || funded <= 0 || slots === null || slots > funded || reserved > limit) return 0;
+          if (raw !== null) return amount(raw) === charge && reserved >= charge && slots < funded ? 1 : 0;
+          if (slots <= 0 || charge > limit - reserved) return 0;
+          this.run(["HINCRBY", ledger, "slots:" + scope, -1]);
+          this.run(["HSET", ledger, field, rawCharge]);
+          this.run(["HINCRBY", ledger, "reserved", rawCharge]); return 1;
+        }
+        // CX-67: atomic held membership and aggregate observations.
+        if (key.startsWith("-- marktmorgen:held-state:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, index, month, held, ref, due] = args;
+          if (Array.isArray(this.data.get(index)) && (this.data.get(index) as unknown[]).length === 0) this.data.delete(index);
+          if (!["none", "zset"].includes(this.run(["TYPE", index]) as string) || !["none", "hash"].includes(this.run(["TYPE", month]) as string)) return -1;
+          if (held === "1") this.run(["ZADD", index, due, ref]); else this.run(["ZREM", index, ref]);
+          this.run(["HDEL", month, "complete"]); return 1;
+        }
+        if (key.startsWith("-- marktmorgen:held-month:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, index, month, day, complete, seconds] = args;
+          if (Array.isArray(this.data.get(index)) && (this.data.get(index) as unknown[]).length === 0) this.data.delete(index);
+          if (!["none", "zset"].includes(this.run(["TYPE", index]) as string) || !["none", "hash"].includes(this.run(["TYPE", month]) as string)) return -1;
+          const raw = this.run(["HGET", month, "peak"]);
+          if (raw !== null && !/^(0|[1-9][0-9]*)$/.test(String(raw))) return -1;
+          const peak = Number(raw ?? 0);
+          if (!Number.isSafeInteger(peak)) return -1;
+          const count = this.run(["ZCARD", index]) as number;
+          this.run(["HSET", month, "count", count, "peak", Math.max(count, peak), "day", day, "complete", complete]);
+          this.run(["EXPIRE", month, seconds]); return 1;
+        }
+        // CX-67: one funded held-store reconfirmation per UTC day, site ceiling.
+        if (key.startsWith("-- marktmorgen:held-recheck:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, ledger, ref, rawLimit, seconds] = args;
+          const type = this.run(["TYPE", ledger]);
+          if (type !== "none" && type !== "hash") return -1;
+          const raw = this.run(["HGET", ledger, "count"]);
+          if (type === "hash" && raw === null || raw !== null && !/^(0|[1-9][0-9]*)$/.test(String(raw))) return -1;
+          const count = raw === null ? 0 : Number(raw), limit = Number(rawLimit);
+          if (!Number.isSafeInteger(count) || count < 0 || count > limit) return -1;
+          const seen = this.run(["HGET", ledger, ref]);
+          if (seen !== null) return seen === "1" ? 0 : -1;
+          if (count >= limit) return 0;
+          this.run(["HINCRBY", ledger, "count", 1]);
+          this.run(["HSET", ledger, ref, "1"]);
+          this.run(["EXPIRE", ledger, seconds]); return 1;
+        }
+
+        // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
+        if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, target, token, value] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", target, value]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:fenced-set-new:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, target, token, value] = args;
+          if (this.run(["GET", lock]) !== token || Number(this.run(["EXISTS", target])) !== 0) return 0;
+          this.run(["SET", target, value]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:fenced-del:v1\n") && Number(args[0]) >= 2 && args.length === Number(args[0]) + 2) {
+          const count = Number(args[0]);
+          const lock = args[1];
+          const targets = args.slice(2, count + 1);
+          if (this.run(["GET", lock]) !== args[count + 1]) return 0;
+          for (const target of targets) this.run(["DEL", target]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:pause-due-observation:v1\n") && args[0] === "1" && args.length === 3) {
           const [,target,deadline]=args;
           if(!/^(0|[1-9][0-9]*)$/.test(deadline)||Number(deadline)>1_000_000_000_000)return [-1];
@@ -179,6 +254,19 @@ export class MemoryRedis {
           if (index !== undefined && (!Array.isArray(index) || (index.length > 0 && typeof index[0] !== "object"))) throw new Error("WRONGTYPE");
           if (this.run(["ZSCORE", due, ref]) !== String(p.until)) return 0;
           this.run(["DEL", target]); removeDue(); return 1;
+        }
+
+        // lib/review-ai-summary.ts KEEP_REVIEW_SUMMARY: the summary and its week kept only while the reviews' mark is the one read.
+        if (key.startsWith("-- marktmorgen:review-summary-keep:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, mark, summary, last, lock, expected, value, seconds, at, mine] = args;
+          this.live(mark); this.live(lock);
+          const held = this.data.get(mark), locked = this.data.get(lock);
+          if ((held !== undefined && typeof held !== "string") || (locked !== undefined && typeof locked !== "string")) throw new Error("WRONGTYPE");
+          if ((held ?? "-") !== expected) return 0;
+          if (locked !== mine) return 0;
+          this.run(["SET", summary, value, "EX", seconds]);
+          this.run(["SET", last, at, "EX", seconds]);
+          return 1;
         }
 
         if (key.startsWith("-- marktmorgen:ab-sale:v1\n") && args[0] === "2" && args.length === 6) {
@@ -527,6 +615,10 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
+        if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);
+        if (key.startsWith("-- marktmorgen:studio-demo-refuse:v1\n")) return this.studioDemo("refuse", args);
+        if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
+        if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
         this.live(target);
@@ -822,6 +914,10 @@ export class MemoryRedis {
       }
       case "SISMEMBER":
         return this.set(key).has(args[0]) ? 1 : 0;
+      case "SMISMEMBER": {
+        const members = this.set(key);
+        return args.map((member) => (members.has(member) ? 1 : 0));
+      }
       case "SMEMBERS":
         return [...this.set(key)];
       case "SUNION": {
@@ -1217,6 +1313,102 @@ export class MemoryRedis {
     total = Math.max(0, total + delta);
     keep();
     return [1, total];
+  }
+
+  /**
+   * lib/studio-demo.ts: the demo's door (the day and the address) counted, a refusal counted for the
+   * address and the day, a session's record and drafts made, and one action
+   * counted, step by step as each script runs them, with the commands run
+   * inside counted in scriptCalls.
+   */
+  private studioDemo(kind: "door" | "refuse" | "seed" | "take", args: string[]): unknown {
+    const n = Number(args[0]);
+    const keys = args.slice(1, 1 + n);
+    const argv = args.slice(1 + n);
+    if (!Number.isInteger(n) || n < 1 || keys.length !== n) throw new Error("ERR studio-demo: arguments");
+    for (const k of keys) this.live(k);
+    const field = (hash: Map<string, string> | undefined, name: string) => hash?.get(name);
+    const digits = (value: string | undefined) => (value === undefined ? null : /^\d{1,15}$/.test(value) ? Number(value) : -1);
+    const held = this.data.get(keys[0]);
+    if (held !== undefined && !(held instanceof Map) && kind !== "seed") throw new Error("WRONGTYPE");
+    const hash = held instanceof Map ? held : undefined;
+    if (kind === "refuse") {
+      // KEYS[1] the day's addresses; ARGV the address's refusals field, the day's cap, the address's cap, the end (s).
+      this.scriptCalls += 1;
+      const [mine, dayCap, addressCap, end] = [argv[0], Number(argv[1]), Number(argv[2]), Number(argv[3])];
+      const [r, q] = ["refused", mine].map((name) => digits(field(hash, name)) ?? 0);
+      if (r < 0 || q < 0) return -1;
+      if (r >= dayCap) return -2;
+      if (q >= addressCap) return -4;
+      const addresses = this.hash(keys[0]);
+      addresses.set("refused", String(r + 1));
+      addresses.set(mine, String(q + 1));
+      this.until.set(keys[0], end * 1000);
+      this.scriptCalls += 3;
+      return 1;
+    }
+    if (kind === "door") {
+      this.scriptCalls += 1;
+      const [s, c, u] = ["sessions", "commands", "sent"].map((name) => digits(field(hash, name)) ?? 0);
+      if (s < 0 || c < 0 || u < 0) return [-1, 0, 0];
+      const [sessionsCap, commandsCap, worst, start, keep, refusalsCap] = argv.slice(0, 6).map(Number);
+      const [addressField, addressCap, addressEnd, refusalsField, addressRefusalsCap] = [argv[6], Number(argv[7]), Number(argv[8]), argv[9], Number(argv[10])];
+      const addresses = this.data.get(keys[1]);
+      if (addresses !== undefined && !(addresses instanceof Map)) throw new Error("WRONGTYPE");
+      this.scriptCalls += 1;
+      const byAddress = addresses instanceof Map ? addresses : undefined;
+      const [r, a, q] = ["refused", addressField, refusalsField].map((name) => digits(field(byAddress, name)) ?? 0);
+      if (r < 0 || a < 0 || q < 0) return [-1, 0, 0];
+      if (r >= refusalsCap) return [-2, s, c];
+      if (q >= addressRefusalsCap) return [-4, s, c];
+      const refuse = (code: number) => {
+        const counts = this.hash(keys[1]);
+        counts.set("refused", String(r + 1));
+        counts.set(refusalsField, String(q + 1));
+        this.until.set(keys[1], addressEnd * 1000);
+        this.scriptCalls += 3;
+        return [code, s, c];
+      };
+      if (a >= addressCap) return refuse(-3);
+      if (s >= sessionsCap || c + worst > commandsCap) return refuse(0);
+      const day = this.hash(keys[0]);
+      day.set("sessions", String(s + 1));
+      day.set("commands", String(c + worst));
+      day.set("sent", String(u + start));
+      this.until.set(keys[0], this.now() + keep * 1000);
+      this.hash(keys[1]).set(addressField, String(a + 1));
+      this.until.set(keys[1], addressEnd * 1000);
+      this.scriptCalls += 6;
+      return [1, s + 1, c + worst];
+    }
+    if (kind === "seed") {
+      this.scriptCalls += 1;
+      if (held !== undefined) return 0;
+      const [end, day, startedAt, expiresAt, bytes, ...values] = argv;
+      if (values.length !== n - 1) throw new Error("ERR studio-demo: arguments");
+      this.data.set(keys[0], new Map([["day", day], ["startedAt", startedAt], ["expiresAt", expiresAt], ["actions", "0"], ["bytes", bytes]]));
+      this.until.set(keys[0], Number(end) * 1000);
+      this.scriptCalls += 2;
+      keys.slice(1).forEach((k, i) => {
+        this.data.set(k, values[i]);
+        this.until.set(k, Number(end) * 1000);
+        this.scriptCalls += 1;
+      });
+      return 1;
+    }
+    this.scriptCalls += 1;
+    const read = ["actions", "bytes", "expiresAt"].map((name) => field(hash, name));
+    if (read.every((v) => v === undefined)) return [0];
+    const [a, b, e] = read.map(digits);
+    if (a === null || b === null || e === null || a < 0 || b < 0 || e < 0) return [-1];
+    const [now, by, actionsCap, bytesCap] = argv.map(Number);
+    if (now >= e) return [-2];
+    if (a >= actionsCap) return [-3];
+    if (b + by > bytesCap) return [-4];
+    hash!.set("actions", String(a + 1));
+    hash!.set("bytes", String(b + by));
+    this.scriptCalls += 2;
+    return [1, a + 1, b + by];
   }
 
   /** lib/store-assistant.ts, ASSISTANT_POOL: the Store assistant's month, reserved, settled and given back. */

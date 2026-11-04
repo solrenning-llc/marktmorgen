@@ -774,6 +774,12 @@ export async function readDelivery(
   return option ? { product, option } : null;
 }
 
+/** The file a delivery holds: the option's own when the id named an option, else the product's. */
+export function deliveredFile(found: { product: Listing; option: ProductOption | null } | null): ProductFile | null {
+  if (!found) return null;
+  return (found.option ? found.option.file : found.product.file) ?? null;
+}
+
 /**
  * One page of the store: its listings, and the listings of what they offer
  * in a box at checkout, which may sit on another page. The first page is

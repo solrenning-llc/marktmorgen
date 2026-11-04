@@ -820,6 +820,25 @@ export function callCheckoutBody(input: {
   return body;
 }
 
+/**
+ * The listed site an embedded calendar booked from, kept on the sale: written
+ * after everything else (the platform's share included, lib/platform-share.ts),
+ * and only while Stripe's fifty metadata fields have room, as
+ * lib/store-checkout.ts writes it, so it is never what stops a booking.
+ */
+export function keepEmbedSite(body: URLSearchParams, site: string | null | undefined, fromPackage: boolean): void {
+  if (!site || !/^https:\/\//.test(site) || fromPackage) return;
+  // Back from Stripe's page, the listed site stays with the booking page, so a second try is still the site's (3.3.7).
+  const cancel = body.get("cancel_url");
+  if (cancel) {
+    const url = new URL(cancel);
+    url.searchParams.set("site", site.slice(0, 700));
+    body.set("cancel_url", url.toString());
+  }
+  if ([...body.keys()].filter((key) => key.startsWith("metadata[")).length >= 50) return;
+  body.set("metadata[embed_site]", site.slice(0, 300));
+}
+
 /** The API version a checkout with nothing to pay is made at (lib/call-packages.ts). */
 export const NO_COST_VERSION = "2026-08-26.dahlia";
 
@@ -851,6 +870,8 @@ export async function holdAndCheckout(input: {
   channel?: Record<string, string>;
   /** The length the buyer chose, in minutes, on a call with several (lib/call-lengths.ts); none is the setup's own. */
   minutes?: unknown;
+  /** The listed site the calendar embedded there booked from, already checked against the creator's list (app/api/store/book). */
+  embedSite?: string | null;
 }): Promise<HoldResult> {
   const { store, product, start, origin } = input;
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
@@ -922,6 +943,8 @@ export async function holdAndCheckout(input: {
       const mayComeOff = store.hasDiscounts && shareBps(store) > 0 && !input.code ? await codesMayTakeOff(store.stripeAccountId, store.currency) : [];
       applyShare(body, store, { recurring: false, least: leastPaid(linesTotal(body).cents, mayComeOff) });
     }
+    // Kept on the sale last, after the share (keepEmbedSite).
+    keepEmbedSite(body, input.embedSite, Boolean(pkg));
 
     // A session from a package is a checkout with nothing to pay, which Stripe
     // takes only at API version 2023-08-16 or later

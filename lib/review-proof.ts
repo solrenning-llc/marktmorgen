@@ -36,7 +36,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
-import { refundedInFull } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
@@ -135,12 +135,14 @@ export async function provePurchase(store: Store, reference: string): Promise<Pr
             : "";
       if (!email || products.length === 0) return { state: "no" };
       let pi = idOf(session.payment_intent);
-      let refunded = refundedInFull(session.payment_intent);
+      // Refunded in full or lost to a dispute (lib/refunds.ts); a dispute that
+      // could not be read counts as not lost, as everywhere a door lets in.
+      let refunded = refundedInFull(session.payment_intent) || (await keptUnlessLost(account, session.payment_intent));
       if (!INTENT_ID.test(pi) && session.mode === "subscription") {
         pi = await invoicePayment(account, session.invoice);
         if (pi) {
           const intent = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
-          refunded = refundedInFull(intent);
+          refunded = refundedInFull(intent) || (await keptUnlessLost(account, intent));
         }
       }
       return {
@@ -178,7 +180,7 @@ export async function provePurchase(store: Store, reference: string): Promise<Pr
           products,
           pi: reference,
           paidAt: typeof intent.created === "number" ? intent.created : 0,
-          refunded: refundedInFull(intent),
+          refunded: refundedInFull(intent) || (await keptUnlessLost(account, intent)),
         },
       };
     }
@@ -291,38 +293,69 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
   let marked = 0;
   let after = "";
   let complete = false;
-  for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
-    const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
-    query.append("expand[]", "data.charge");
-    if (after) query.set("starting_after", after);
-    const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-    const rows = Array.isArray(listed.data) ? (listed.data as Row[]) : [];
-    for (const refund of rows) {
-      const id = typeof refund.id === "string" ? refund.id : "";
-      const created = typeof refund.created === "number" ? refund.created : 0;
-      if (!id) continue;
-      if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      if (!refundedInFull(refund.charge)) continue;
-      const pi = idOf(refund.payment_intent);
-      const [seen] = await redisPipeline([["SISMEMBER", seenKey(statsId), id]]);
-      if (Number(seen) !== 1 && INTENT_ID.test(pi)) marked += await markRefunded(statsId, pi);
-      await redisPipeline([
-        ["SADD", seenKey(statsId), id],
-        ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS + 86_400],
-      ]);
-      newest = Math.max(newest, created);
+  // A failed or unfinished read of the lost disputes keeps the anchor.
+  let unsure = false;
+  let lostRead: LostRead | null = null;
+  try {
+    for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
+      const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
+      query.append("expand[]", "data.charge");
+      if (after) query.set("starting_after", after);
+      const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
+      const refunds = Array.isArray(listed.data) ? (listed.data as Row[]) : [];
+      // A dispute closed as lost marks its reviews as a
+      // full refund does (lib/refunds.ts, queue 388 [TB14]): read once, with
+      // the first page, from Stripe's closing events (kept thirty days).
+      const lost = page === 0 ? await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("rev", statsId)) : null;
+      if (lost) lostRead = lost;
+      if (lost && !lost.complete) unsure = true;
+      // What gives back on the page, and which of it an earlier pass already took: one request for the page, and
+      // nothing written again for one already taken (each pass reads the last days' refunds again).
+      const full = [...(lost?.rows ?? []), ...refunds]
+        .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
+        .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
+      const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
+      for (const [i, refund] of full.entries()) {
+        if (Number(seen[i]) !== 1) {
+          if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
+          // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
+          await redisPipeline([
+            ["SADD", seenKey(statsId), refund.id],
+            ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+          ]);
+        }
+        newest = Math.max(newest, refund.created);
+      }
+      const last = refunds[refunds.length - 1];
+      if (listed.has_more !== true || !last || typeof last.id !== "string") {
+        complete = true;
+        break;
+      }
+      after = last.id;
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
-      complete = true;
-      break;
-    }
-    after = last.id;
+  } finally {
+    // A refunded review leaves "What buyers say" on the store page (lib/store-quotes.ts), also when a busy review
+    // stopped the pass after others were marked.
+    if (marked > 0) await refreshStoreQuotes(store);
   }
-  // A refunded review leaves "What buyers say" on the store page (lib/store-quotes.ts).
-  if (marked > 0) await refreshStoreQuotes(store);
-  if (complete && Date.now() < deadline) {
-    await redisPipeline([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
+  // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
+  // meanwhile is read from the top next run (review of #2158, inbox C4-24).
+  if (lostRead) {
+    if (!(await confirmLostRead(lostRead, seenKey(statsId)))) unsure = true;
+    else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
+  }
+  // The place moves only past what was read to the end, sure and inside its time. A store with no place yet keeps
+  // the one it started from, so the next run reads the same window and the lost disputes' kept place still counts; its
+  // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
+  // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
+  const done = complete && !unsure && Date.now() < deadline;
+  if (done) await redisPipeline([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  else if (!(Number(anchorRaw) > 0)) {
+    await redisPipeline([
+      ["SET", anchorKey(statsId), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
+      ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+    ]);
   }
   return marked;
 }

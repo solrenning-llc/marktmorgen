@@ -159,8 +159,8 @@ async function everyFamily(world: World, tag: string): Promise<void> {
       await redisPipeline([["SET", key, JSON.stringify({ s: s.statsId, probe: tag })]]);
     } else if (rule.how === "index" && prefix !== "nl:plan:ended") {
       // (The stores whose plan ended are read by the daily job as stores: a probe there would be looked at as one.)
-      // (The stores whose members are held is a sorted set, as lib/closing-holds.ts keeps it.)
-      if (prefix === "nl:closing:held" || prefix === "nl:closing:final") await redisPipeline([["ZADD", prefix, 1, `${s.sid}|probe-${tag}`]]);
+      // Member holds, final closings and billing-coverage holds are sorted sets; generic indexes may be sets.
+      if (prefix === "nl:closing:held" || prefix === "nl:closing:final" || prefix === "nl:held:stores") await redisPipeline([["ZADD", prefix, 1, `${s.sid}|probe-${tag}`]]);
       else await addMember(prefix.endsWith(":") ? `${prefix}2026-11` : prefix, `${s.sid}|probe-${tag}`);
     } else if (rule.how === "expires") {
       await redisPipeline([["SET", `${prefix}${sha(`${prefix}${tag}`).slice(0, 32)}`, JSON.stringify({ s: s.statsId }), "EX", Math.min(rule.days, 2) * 86_400]]);
@@ -280,6 +280,8 @@ export async function runClosingJourney(is: Check, sent: Sent[], stripe: StripeW
   keep.store = (await storeForEmail(KEEPER))!;
   const keepFolder = await storeFolder(KEEPER);
   await everyFamily(keep, "keeping");
+  const [heldIndexType] = await redisPipeline([["TYPE", "nl:held:stores"]]);
+  is("the billing-coverage index fixture uses the sorted-set type its actual reader requires", heldIndexType, "zset");
   const reachedKeeping = await reachedThroughRecords(keep, "keeping", keepingPdf);
   const ended = Date.UTC(2026, 10, 2, 12, 0, 0);
   const soldKeeping = await soldThrough(keep, stripe, "keeping", keepingPdf, ended - 5 * DAY);

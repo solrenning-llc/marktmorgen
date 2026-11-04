@@ -25,11 +25,26 @@
  *   - a bundle: only while it holds enough to hand over, counted as its own
  *     page counts it (offeredItems in lib/bundles.ts and bundleReady in
  *     lib/bundle-rules.ts); a failed read leaves it out.
+ *
+ * What one call costs, read from the code: the pre-orders read (soonState),
+ * the bundles' items (offeredItems), and per product passed one stock read
+ * with up to its MAX_CHECKS questions to Stripe (stockLeft, lib/stock.ts)
+ * and one LLEN of its key pool (outOfKeys). Nothing calls it yet. Contract
+ * for the unit that sends an email with product cards (546 [EB1]), before it
+ * is switched on:
+ *   - pass only the products the email's blocks name (productBlocksIn,
+ *     lib/mail-product-block.ts), never the whole catalog;
+ *   - bound how many distinct products one email may name, so a call's reads
+ *     have a ceiling, and refuse an email over it in plain words;
+ *   - call this once per send or per batch of one email, never per reader;
+ *   - register those reads at that ceiling as the email's own line in
+ *     tests/plan-cost-registry.ts (Revisor 3, C2-73, 4 November 2026).
  */
 import type { Listing, Store } from "@/lib/store";
 import { offeredItems } from "@/lib/bundles";
 import { bundleReady } from "@/lib/bundle-rules";
 import { hasDateOnSale } from "@/lib/call-on-sale";
+import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { canGiveProduct } from "@/lib/free";
 import { outOfKeys } from "@/lib/licence-keys";
 import { paypalReady } from "@/lib/paypal-sales";
@@ -80,14 +95,18 @@ export async function productsBuyableNow(store: Store, products: readonly Listin
 /**
  * What a product's card says about its price, read from the store now
  * (`nowSeconds`). Never its introductory or yearly price, and never the
- * price for a visitor's country.
+ * price for a visitor's country. A call offering several lengths is said
+ * from the lowest of their prices (listedLengths), as the store's card says it.
  */
 export function mailPriceFacts(store: Store, product: Listing, nowSeconds: number): PriceFacts {
   const percent = store.sale ? saleOff(store.sale, product, nowSeconds) : 0;
+  // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices, as the store's card says it.
+  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
   return {
     free: isFree(product),
     priceCents: product.priceCents,
-    fromCents: fromPriceCents(product),
+    fromCents: lengths.length ? (fromPrice(lengths) as number) : fromPriceCents(product),
+    lengthCount: lengths.length,
     optionCount: sellableOptions(product).length,
     interval: product.recurring?.interval ?? null,
     pwyw: activePwyw(product) !== null,

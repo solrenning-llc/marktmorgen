@@ -5,7 +5,7 @@ import {syntheticResendCredential} from './resend-fixture-credentials';
 import {prepareResendFallbackFixture} from './resend-fallback-fixture';
 import {currentResendFallbackProofIsMissing} from '../lib/resend-fallback-transport';
 
-const keys=['re_test_call_lengths_said','re_test_stop_only_a_stand_in','re_test_auto_approve_stand_in','re_test_affiliate_idle_only','re_test_call_cancel_only','re_test_call_place_only','re_test_deposit_rest_only','re_test_inbox_affiliate_only'];
+const keys=['re_test_erasure_asked_only_a_stand_in','re_test_erasure_full_only_a_stand_in','re_test_erasure_scope_all_only_a_stand_in','re_test_erasure_timing_only_a_stand_in','re_test_invite_two_step_only_a_stand_in','re_test_orders_only_a_stand_in','re_test_orders_bounds_only','re_test_reset_notices_only_a_stand_in','re_test_second_step_gate_only','re_test_team_two_step_session_only','re_test_call_lengths_said','re_test_stop_only_a_stand_in','re_test_auto_approve_stand_in','re_test_affiliate_idle_only','re_test_call_cancel_only','re_test_call_place_only','re_test_deposit_rest_only','re_test_inbox_affiliate_only'];
 test('new inherited application journeys use only their exact declared synthetic credentials',async()=>{
  for(const key of keys){
   assert.equal(syntheticResendCredential(key),key);

@@ -519,22 +519,22 @@ async function main(): Promise<void> {
   let usageGetters = 0;
   let usageOutside = 0;
   const usageRow = (value: unknown) => {
-    const rows = Array<unknown>(24).fill(null);
-    rows[23] = value;
+    const rows = Array<unknown>(25).fill(null);
+    rows[24] = value;
     return rows;
   };
   const usageCases: [string, () => unknown][] = [
     ["missing envelope", () => undefined],
-    ["not an array", () => ({ length: 24, 0: "10" })],
+    ["not an array", () => ({ length: 25, 0: "10" })],
     ["empty envelope", () => []],
-    ["short envelope", () => Array(23).fill(null)],
-    ["sparse envelope", () => new Array(24)],
+    ["short envelope", () => Array(24).fill(null)],
+    ["sparse envelope", () => new Array(25)],
     ["inherited member", () => {
-      const rows = Array(24).fill(null);
-      delete rows[23];
-      return Object.setPrototypeOf(rows, { 23: "10" });
+      const rows = Array(25).fill(null);
+      delete rows[24];
+      return Object.setPrototypeOf(rows, { 24: "10" });
     }],
-    ["getter", () => Object.defineProperty(Array(24).fill(null), "23", { get() { usageGetters += 1; return null; } })],
+    ["getter", () => Object.defineProperty(Array(25).fill(null), "24", { get() { usageGetters += 1; return null; } })],
     ["missing member", () => usageRow(undefined)],
     ["empty string", () => usageRow("")],
     ["boolean", () => usageRow(true)],
@@ -551,7 +551,7 @@ async function main(): Promise<void> {
       rows[0] = String(Number.MAX_SAFE_INTEGER);
       return rows;
     }],
-    ["oversized", () => new Proxy(Array(25).fill(null), {
+    ["oversized", () => new Proxy(Array(26).fill(null), {
       getOwnPropertyDescriptor(target, key) {
         if (key !== "length") usageOutside += 1;
         return Reflect.getOwnPropertyDescriptor(target, key);
@@ -576,7 +576,7 @@ async function main(): Promise<void> {
     let reads = 0;
     redis.pipeline = async (commands) => {
       const reply = await originalPipeline(commands);
-      if (commands.length === 24 && commands.every(command => command[0] === "GET" && String(command[1]).startsWith("nl:ses:h:"))) {
+      if (commands.length === 25 && commands.every(command => command[0] === "GET" && String(command[1]).startsWith("nl:ses:h:"))) {
         reads += 1;
         return answer() as unknown[];
       }
@@ -590,7 +590,7 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = originalPipeline;
     }
-    is(`${name}: each existing call reads exactly its original 24-position pipeline`, reads, 3);
+    is(`${name}: each existing call reads exactly the 25-position pipeline`, reads, 3);
     is(`${name}: neither provider accepted and the stored usage remains`,
       [amazon.length, resend.length, redis.run(["GET", usageKey]), await sentThisMonth()], [0, 0, "10", counted]);
   }
@@ -601,11 +601,11 @@ async function main(): Promise<void> {
   if (oldUsage === null) await originalPipeline([["DEL", usageKey]]);
   else await originalPipeline([["SET", usageKey, String(oldUsage), "EX", 26 * 3_600]]);
   const usageAt = Date.UTC(2032, 0, 15, 12);
-  const usageKeys = Array.from({ length: 24 }, (_, i) => `nl:ses:h:${new Date(usageAt - i * 3_600_000).toISOString().slice(0, 13)}`);
-  is("24 explicitly absent hourly buckets are known zero", await sesSentLast24h(usageAt), 0);
+  const usageKeys = Array.from({ length: 25 }, (_, i) => `nl:ses:h:${new Date(usageAt - i * 3_600_000).toISOString().slice(0, 13)}`);
+  is("25 explicitly absent hourly buckets are known zero", await sesSentLast24h(usageAt), 0);
   await originalPipeline(usageKeys.map((key, i) => ["SET", key, String(i + 1), "EX", 26 * 3_600]));
-  is("all 24 explicit stored counters contribute, including the last", await sesSentLast24h(usageAt), 300);
-  await originalPipeline(usageKeys.map((key, i) => ["SET", key, i === 23 ? String(Number.MAX_SAFE_INTEGER) : "0", "EX", 26 * 3_600]));
+  is("all 25 explicit stored counters contribute, including the last", await sesSentLast24h(usageAt), 325);
+  await originalPipeline(usageKeys.map((key, i) => ["SET", key, i === 24 ? String(Number.MAX_SAFE_INTEGER) : "0", "EX", 26 * 3_600]));
   is("the last position can hold the largest exactly represented safe total", await sesSentLast24h(usageAt), Number.MAX_SAFE_INTEGER);
 
 

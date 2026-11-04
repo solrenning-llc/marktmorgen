@@ -1,6 +1,6 @@
-import { apiAdder, apiError, apiOk, apiStore } from "@/lib/api-guard";
-import { apiOkFields } from "@/lib/api-fields";
-import { leads } from "@/lib/api-read";
+import { apiAdder, apiError, apiOk, apiStore, holdMoreApi } from "@/lib/api-guard";
+import { apiOkFields, badFields } from "@/lib/api-fields";
+import { LEAD_FIELDS, chargedLeads } from "@/lib/api-read";
 import { WRITE_ERRORS, addLead, roomFor } from "@/lib/api-write";
 
 /**
@@ -11,9 +11,15 @@ import { WRITE_ERRORS, addLead, roomFor } from "@/lib/api-write";
 export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
+  // A ?fields= that cannot be answered is refused before any further request is taken or anything read.
+  const bad = badFields(request, LEAD_FIELDS);
+  if (bad) return bad;
   const params = new URL(request.url).searchParams;
   try {
-    return apiOkFields(request, await leads(store, params.get("cursor"), params.get("agreed") === "true"));
+    // A page at its most is set aside before the scan, and settled at what it read and sends before it is sent (lib/api-read-rules.ts, listPageMost, scannedPageWork).
+    const found = await chargedLeads(store, params.get("cursor"), params.get("agreed") === "true", (most) => holdMoreApi(store, most));
+    if (found instanceof Response) return found;
+    return apiOkFields(request, found);
   } catch (error) {
     console.error("api: leads failed", error);
     return apiError(502, "unavailable", "The list could not be read just now. Try again in a moment.");

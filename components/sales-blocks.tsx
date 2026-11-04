@@ -6,7 +6,7 @@ import { wordsIn } from "@/lib/buyer-words";
 import { DEFAULT_LANGUAGE, LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { imageUrl } from "@/lib/product-image";
 import { type Piece, aboutBlocks } from "@/lib/product-about";
-import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, bandsOf, quoteHost } from "@/lib/sales-page";
+import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, type RowBlock, type RowElement, bandsOf, quoteHost } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { PageFacts } from "@/lib/page-facts";
 import { MAX_LONG_ANSWER, MAX_SHORT_ANSWER, type FormDef, type FormField, branches, formOpen, offersKeep, scheduleWhen } from "@/lib/forms";
@@ -63,6 +63,23 @@ export type BlockContext = {
   formTarget?: { handle: string; page: string; funnel: string; listOpen: boolean };
   /** What happened to a form just sent from this page, to say above it. */
   formNotice?: { form: string; status: string };
+  /** The store's calls a booking block may show (lib/booking-cards.ts), by id: none, and the block is not drawn. */
+  bookings?: Record<string, BookingCard>;
+};
+
+/** A call, as a booking block shows it (552 [BB1]): today's name, length and place, and where its time is picked. */
+export type BookingCard = {
+  title: string;
+  /** How long and where, in the store's language: "30-minute call · online; you get the link when you book". */
+  line: string;
+  /** Its own booking page, or null when it has no date on sale right now (then `closed` says so). */
+  href: string | null;
+  /** The link's words: "Pick a time", or "Pick a session" for dated sessions. */
+  pick: string;
+  /** What joins them to the call's name for a screen reader: "Pick a time: Intro call". */
+  colon: string;
+  /** Said in place of the link when there is no date on sale; "" otherwise. */
+  closed: string;
 };
 
 /** Another product, as its card on a sales page shows it: today's name, picture and price. */
@@ -190,10 +207,10 @@ export function HeroView({ block, ctx, pill, rating }: { block: HeroBlock; ctx: 
             {pill}
             {rating}
           </div>
-          <h1 className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] sm:text-5xl">
+          <h1 className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] page-sm:text-5xl">
             {block.headline || ctx.productTitle}
           </h1>
-          {block.sub ? <p className="mt-4 whitespace-pre-line text-lg leading-relaxed sm:text-xl">{block.sub}</p> : null}
+          {block.sub ? <p className="mt-4 whitespace-pre-line text-lg leading-relaxed page-sm:text-xl">{block.sub}</p> : null}
           {button}
         </div>
       </header>
@@ -206,10 +223,10 @@ export function HeroView({ block, ctx, pill, rating }: { block: HeroBlock; ctx: 
           {pill}
           {rating}
         </div>
-        <h1 className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] sm:text-5xl">
+        <h1 className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] page-sm:text-5xl">
           {block.headline || ctx.productTitle}
         </h1>
-        {block.sub ? <p className="st-muted mt-4 whitespace-pre-line text-lg leading-relaxed sm:text-xl">{block.sub}</p> : null}
+        {block.sub ? <p className="st-muted mt-4 whitespace-pre-line text-lg leading-relaxed page-sm:text-xl">{block.sub}</p> : null}
         {button}
       </div>
       {video ? (
@@ -237,9 +254,101 @@ export function HeroView({ block, ctx, pill, rating }: { block: HeroBlock; ctx: 
 function Heading({ text, id }: { text: string; id?: string }) {
   if (!text) return null;
   return (
-    <h2 id={id} className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-[1.75rem]">
+    <h2 id={id} className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] page-sm:text-[1.75rem]">
       {text}
     </h2>
+  );
+}
+
+/**
+ * One element of a row (lib/sales-page.ts, RowBlock). `level` is the
+ * heading level the page outline gives it: a row's heading is a section
+ * heading like every block's (h2), and a subheading sits under the row's
+ * heading when one comes before it (h3), or stands as a section heading of
+ * its own when none does, so the outline never skips a level.
+ */
+function RowElementView({ element, ctx, level }: { element: RowElement; ctx: BlockContext; level: 2 | 3 }) {
+  switch (element.kind) {
+    case "heading":
+      return <Heading text={element.text} />;
+    case "subheading": {
+      const Tag = level === 3 ? "h3" : "h2";
+      return <Tag className="font-display text-lg font-semibold leading-snug page-sm:text-xl">{element.text}</Tag>;
+    }
+    case "paragraph":
+      return <PlainText text={element.text} preview={ctx.preview} className="text-[1.0625rem]" />;
+    case "list":
+      return (
+        <div className="st-about leading-relaxed">
+          <ul>
+            {element.items.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      );
+    case "icon":
+      // No label: decoration, hidden from screen readers. A label: what the icon says, read as an image.
+      return (
+        <span className="sp-row-icon">
+          <Icon name={element.name} size={32} label={element.label || undefined} />
+        </span>
+      );
+    case "button": {
+      if (!element.url) return <ActionButton ctx={ctx} label={element.label} />;
+      const className = "btn st-btn sp-row-btn";
+      if (ctx.preview) return <span className={className}>{element.label}</span>;
+      return (
+        <a href={element.url} className={className} target="_blank" rel="noopener noreferrer nofollow ugc">
+          {element.label}
+          <NewTab />
+        </a>
+      );
+    }
+    case "image": {
+      const { picture } = element;
+      return (
+        <figure className="sp-row-picture">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={imageUrl(picture)} alt={element.decorative ? "" : picture.alt} width={picture.width} height={picture.height} loading="lazy" decoding="async" />
+          {picture.caption ? <figcaption className="st-muted mt-2 text-sm leading-snug">{picture.caption}</figcaption> : null}
+        </figure>
+      );
+    }
+    case "video":
+      return (
+        <div className="sp-row-video">
+          <VideoEmbed video={element.video} title={element.title || ctx.productTitle} poster={null} inert={ctx.preview} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
+        </div>
+      );
+  }
+}
+
+/**
+ * A row of one to three columns: side by side once there is room, one
+ * column on a phone. The markup is in reading order, column by column, so
+ * a screen reader, the keyboard and a phone all meet the first column's
+ * elements before the second's; the grid only places them.
+ */
+function RowView({ block, ctx }: { block: RowBlock; ctx: BlockContext }) {
+  if (block.columns.every((column) => column.length === 0)) return null;
+  // Each part's heading level, in reading order, worked out before drawing: a
+  // subheading after the row's first heading sits under it (h3), else it is a
+  // section heading of its own (h2).
+  const firstHeading = block.columns.flat().findIndex((element) => element.kind === "heading");
+  const offsets = block.columns.map((_, i) => block.columns.slice(0, i).reduce((n, column) => n + column.length, 0));
+  return (
+    <section className="sp-section">
+      <div className={`sp-row sp-row-${block.columns.length}`}>
+        {block.columns.map((column, i) => (
+          <div key={i} className="sp-row-column">
+            {column.map((element, j) => (
+              <RowElementView key={j} element={element} ctx={ctx} level={firstHeading >= 0 && offsets[i] + j > firstHeading ? 3 : 2} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -273,7 +382,7 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
       return (
         <section className="sp-section">
           <Heading text={block.heading} />
-          <ul className={`grid gap-3 sm:grid-cols-2 ${block.heading ? "mt-5" : ""}`}>
+          <ul className={`grid gap-3 page-sm:grid-cols-2 ${block.heading ? "mt-5" : ""}`}>
             {block.items.map((item, i) => (
               <li key={i} className="sp-benefit">
                 <span className="sp-tick" aria-hidden="true">
@@ -636,6 +745,38 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
       const form = block.form ? ctx.forms?.[block.form] : undefined;
       if (!form) return null;
       return <FormView block={block} form={form} ctx={ctx} />;
+    }
+    case "row":
+      return RowView({ block, ctx });
+    case "booking": {
+      // One of the store's calls (lib/booking-cards.ts): gone, a draft, not a call or not on sale, and nothing is drawn.
+      const call = block.product ? ctx.bookings?.[block.product] : undefined;
+      if (!call) return null;
+      // The link's name says where it leads on its own (WCAG 2.4.9): the visible words, then the call's name for a screen reader.
+      const words = (
+        <>
+          {call.pick}
+          <span className="sr-only">{`${call.colon}${call.title}`}</span>
+        </>
+      );
+      return (
+        <section className="sp-section">
+          <Heading text={block.heading || call.title} />
+          {block.heading ? <h3 className="mt-3 text-lg font-semibold leading-snug">{call.title}</h3> : null}
+          <p className="st-muted mt-2 text-sm font-semibold">{call.line}</p>
+          <div className="mt-5">
+            {call.href === null ? (
+              <p className="st-muted text-sm">{call.closed}</p>
+            ) : ctx.preview ? (
+              <span className="btn st-btn sp-cta-btn">{words}</span>
+            ) : (
+              <a href={call.href} className="btn st-btn sp-cta-btn">
+                {words}
+              </a>
+            )}
+          </div>
+        </section>
+      );
     }
     case "facts": {
       // Only numbers the store counted, and only those the creator chose; none, and the block is not drawn.

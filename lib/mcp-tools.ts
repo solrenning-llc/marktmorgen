@@ -21,15 +21,21 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
  */
 import type { Store } from "@/lib/store";
 import { type StatsData, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
-import { readListings, readTitles } from "@/lib/catalog";
-import { membershipNumbers } from "@/lib/membership-numbers";
-import { listBroadcasts } from "@/lib/broadcasts";
-import { broadcastMoney, flowMoney, readMailRevenue } from "@/lib/mail-revenue";
-import { flowStats, readFlows } from "@/lib/flows";
+import { readListings } from "@/lib/catalog";
+import { listingsToRead } from "@/lib/catalog-read-count";
+import { keptMembershipBytes, membershipNumbersPaid } from "@/lib/membership-numbers";
+import { broadcastSizes, listBroadcasts } from "@/lib/broadcasts";
+import { broadcastMoney, flowMoney, keptMailRevenueBytes, readMailRevenuePaid } from "@/lib/mail-revenue";
+import { flowStats, flowsBytes, readFlows } from "@/lib/flows";
 import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
+import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
+import {
+  EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, emailsWork, listingsWork, mailRevenueColdWork, membershipsWork, settledUnits,
+} from "@/lib/api-read-rules";
+import { paypalCounts } from "@/lib/paypal-sales";
 import { insightsFrom } from "@/lib/insights";
-import { readPaths } from "@/lib/next-bought";
+import { pathsBytes, readPaths } from "@/lib/next-bought";
 import { campaignResultsFrom } from "@/lib/campaign-results";
 import { paymentComparisonFrom } from "@/lib/payment-comparison";
 import { paymentMixFrom } from "@/lib/payment-mix";
@@ -48,6 +54,19 @@ export function windowOf(raw: unknown): Window {
 
 /** The studio's numbers, with the products, for one store. */
 export async function readFullNumbers(store: Store, now = Date.now()): Promise<StatsData | null> {
+  return (await readFullNumbersPaid(store, null, now))?.data ?? null;
+}
+
+/**
+ * readFullNumbers, taking what reading the listings of the products the
+ * numbers name costs (lib/api-read-rules.ts, listingsWork) once they are
+ * known and before they are read. When the requests left do not cover them,
+ * the numbers come without them (`listed` false), as /api/v1/stats always
+ * comes: the numbers already read and paid for are never thrown away. The
+ * numbers themselves are taken before this, by the caller
+ * (lib/api-numbers.ts); `taken` is what that took.
+ */
+export async function readFullNumbersPaid(store: Store, charge: Charge | null, now = Date.now(), taken = 0): Promise<{ data: StatsData; listed: boolean } | null> {
   const stats = await readStats(store, now);
   if (!stats) return null;
   let state: StatsData["sales"] = readsSales(store) ? "ok" : "none";
@@ -57,8 +76,11 @@ export async function readFullNumbers(store: Store, now = Date.now()): Promise<S
         return null;
       })
     : null;
-  const listings = await readListings(store, productsInStats(store, stats, sales)).catch(() => []);
-  return studioStats(store, stats, sales, state, listings);
+  const named = productsInStats(store, stats, sales);
+  const refused = charge ? await charge(apiReadUnits(listingsWork(listingsToRead(store, named))), taken) : null;
+  if (refused) return { data: studioStats(store, stats, sales, state, []), listed: false };
+  const listings = await readListings(store, named).catch(() => []);
+  return { data: studioStats(store, stats, sales, state, listings), listed: true };
 }
 
 const share = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 10_000) / 10_000 : null);
@@ -182,12 +204,65 @@ export function funnelTool(data: StatsData, w: Window) {
   };
 }
 
-/** Each product for the window, and what its buyers went on to buy (lib/next-bought.ts). */
-export async function productsTool(store: Store, data: StatsData, w: Window) {
+/**
+ * The titles of the products `ids` names, for an answer: those already known
+ * (the numbers carry the products they name), and the rest from their
+ * listings, once what reading them costs is taken (lib/api-read-rules.ts,
+ * listingsWork, counted first). When that is not left, those are named by
+ * their id (`named` false): what was already read and paid for is never lost.
+ * Without `charge` (not the API), they are read as they are.
+ */
+async function titlesFor(store: Store, ids: Iterable<string>, known: Map<string, string>, charge: Charge | null, taken: number): Promise<{ titles: Map<string, string>; named: boolean }> {
+  const titles = new Map(known);
+  const missing = [...new Set(ids)].filter((id) => !titles.has(id));
+  if (!missing.length) return { titles, named: true };
+  if (charge && (await charge(apiReadUnits(listingsWork(listingsToRead(store, missing))), taken))) return { titles, named: false };
+  for (const listing of await readListings(store, missing).catch(() => [])) titles.set(listing.id, listing.title);
+  return { titles, named: true };
+}
+
+/**
+ * Each product for the window, and what its buyers went on to buy
+ * (lib/next-bought.ts). With `meter` (the MCP tool), what buyers bought next
+ * is measured, set aside at its most and settled at what is sent
+ * (lib/api-read-rules.ts, boughtNextWork); the products it names that the
+ * numbers do not are read once their listings are taken (titlesFor). When the
+ * requests left do not cover it, the products' numbers come without it
+ * (`bought_next` null), or with those products named by their id.
+ */
+export async function productsTool(store: Store, data: StatsData, w: Window, meter: { hold: Hold; charge: Charge } | null = null) {
   const known = paidFiguresComplete(data);
-  const paths = await readPaths(store.statsId).catch(() => null);
-  const titles = await readTitles(store).catch(() => new Map<string, string>());
+  let settle: ((actual: number) => Promise<Response | null>) | null = null;
+  let most = 0;
+  let pathSize = 0;
+  let skipped = false;
+  if (meter) {
+    const bytes = await pathsBytes(store.statsId);
+    if (bytes === null) throw new Error("what buyers bought next could not be measured");
+    pathSize = bytes;
+    most = apiReadUnits(boughtNextWork(pathSize));
+    const held = await meter.hold(most);
+    if (held instanceof Response) skipped = true;
+    else settle = held;
+  }
+  const paths = skipped ? null : await readPaths(store.statsId).catch(() => null);
+  const ids = paths ? [...Object.keys(paths.starts), ...Object.entries(paths.next).flatMap(([from, steps]) => [from, ...steps.map((step) => step.id)])] : [];
+  const { titles, named } = await titlesFor(store, ids, new Map(data.products.map((p) => [p.id, p.title])), meter?.charge ?? null, most);
   const name = (id: string) => titles.get(id) ?? id;
+  const boughtNext = paths
+    ? {
+        note: "From all sales: what the same buyers bought on a later visit, from three buyers up, with the median days between.",
+        bought_first_most: Object.entries(paths.starts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([id, buyers]) => ({ product: name(id), buyers })),
+        sequences: Object.entries(paths.next).flatMap(([from, steps]) => steps.map((s) => ({ first: name(from), then: name(s.id), buyers: s.buyers, days_later: s.days }))),
+        ...(named ? {} : { names_note: "Some products are named by their id: your store's API requests left did not cover reading their names." }),
+      }
+    : null;
+  // What was set aside is settled at what is sent of it; past it (it never is, at its most), it is not sent.
+  const over = settle ? await settle(settledUnits(boughtNextWork(pathSize, Buffer.byteLength(JSON.stringify(boughtNext, null, 2) ?? "")), most)) : null;
+  const shown = skipped || over ? null : boughtNext;
   return {
     window: NAMES[w],
     currency: data.currency,
@@ -205,24 +280,41 @@ export async function productsTool(store: Store, data: StatsData, w: Window) {
         sales_per_page_view: known ? share(row[w].sales, row[w].views) : null,
       }))
       .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0) || b.page_views - a.page_views),
-    bought_next: paths
-      ? {
-          note: "From all sales: what the same buyers bought on a later visit, from three buyers up, with the median days between.",
-          bought_first_most: Object.entries(paths.starts)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5)
-            .map(([id, buyers]) => ({ product: name(id), buyers })),
-          sequences: Object.entries(paths.next).flatMap(([from, steps]) => steps.map((s) => ({ first: name(from), then: name(s.id), buyers: s.buyers, days_later: s.days }))),
-        }
-      : null,
+    bought_next: shown,
+    ...(skipped || over ? { bought_next_note: "What buyers bought next was not read: your store's API requests left did not cover it." } : {}),
   };
 }
 
-/** Memberships as the Membership numbers page shows them, without anybody's address or words. */
-export async function membershipsTool(store: Store) {
-  const n = await membershipNumbers(store);
+/**
+ * Memberships as the Membership numbers page shows them, without anybody's
+ * address or words. Whether they are kept and how big is looked up first;
+ * then all that reading them costs is taken in one go, before anything is
+ * read: the kept numbers and the answer and, when they are not kept, every
+ * page of the creator's Stripe account they read (lib/api-read-rules.ts).
+ * Only a copy that was kept when measured and is gone a moment later takes
+ * its pages of Stripe as a second step (refused with its own words, nothing
+ * shown). The products they name are read once their listings are taken, or
+ * named by their id (titlesFor).
+ */
+export async function membershipsTool(store: Store, charge: Charge) {
+  if (!store.stripeAccountId || !store.statsId) return { memberships: null, note: "No memberships could be read: the store has no Stripe account connected, or sells none." };
+  const keptBytes = await keptMembershipBytes(store);
+  if (keptBytes === null) throw new Error("the memberships could not be measured");
+  const units = apiReadUnits(keptBytes > 0 ? membershipsWork(keptBytes) : addWork(membershipsWork(0), MEMBERSHIPS_COLD_WORK));
+  const first = await charge(units);
+  if (first) return first;
+  const said: { refused: Response | null } = { refused: null };
+  const read = await membershipNumbersPaid(store, async () => {
+    // Not kept when measured: its pages of Stripe were taken with the rest.
+    if (keptBytes === 0) return true;
+    said.refused = await charge(apiReadUnits(MEMBERSHIPS_COLD_WORK), units);
+    return said.refused === null;
+  });
+  if (said.refused) return said.refused;
+  const n = read === "refused" ? null : read;
   if (!n) return { memberships: null, note: "No memberships could be read: the store has no Stripe account connected, or sells none." };
-  const titles = await readTitles(store).catch(() => new Map<string, string>());
+  // The products they name, from their listings once those are taken; else by their id.
+  const { titles, named } = await titlesFor(store, n.byProduct.map((p) => p.product), new Map(), charge, units);
   return {
     currency: n.currency,
     mrr: Math.round(n.mrr),
@@ -234,6 +326,8 @@ export async function membershipsTool(store: Store) {
     churn_last_30_days: n.churn30,
     trials_ended_last_90_days: { ended: n.trialsEnded, became_paying: n.trialsConverted },
     by_product: n.byProduct.map((p) => ({ product: titles.get(p.product) ?? p.product, members: p.members, trialing: p.trialing, mrr: Math.round(p.mrr) })),
+    // False when the products are named by their id: the store's API requests left did not cover reading their names.
+    by_product_named: named,
     by_channel: (n.byChannel ?? []).map((c) => ({ channel: c.channel, started: c.started, running: c.running, still_running_at_3_months: c.stayed3, average_months: c.months })),
     why_members_left: n.leaving ? { canceled: n.leaving.canceled, answered: n.leaving.answered, reasons: n.leaving.reasons.map((r) => ({ reason: r.reason, members: r.members, mrr: Math.round(r.mrr) })), payment_failed: n.leaving.paymentFailed } : null,
     mrr_by_month: n.movements?.months ?? [],
@@ -244,14 +338,44 @@ export async function membershipsTool(store: Store) {
   };
 }
 
-/** The list and what each email sent to it did. */
-export async function emailsTool(store: Store) {
+/**
+ * The list and what each email sent to it did. Its broadcasts and sequences
+ * are measured by their bytes, what they sold is looked up (kept or not, and
+ * the PayPal sales it would read), and all that reading them costs is taken
+ * in one go before anything is read (lib/api-read-rules.ts, emailsWork and,
+ * when what they sold is not kept, mailRevenueColdWork). Only a copy that was
+ * kept when measured and is gone a moment later takes its sales as a second
+ * step (refused with its own words, nothing shown).
+ */
+export async function emailsTool(store: Store, charge: Charge) {
   if (!store.listId) return { list: null, note: "This store keeps no list yet." };
-  const [counts, broadcasts, flows] = await Promise.all([listCounts(store.listId), listBroadcasts(store.listId, 30), readFlows(store.listId)]);
-  const [revenue, flowCounts] = await Promise.all([
-    broadcasts.length || flows.length ? readMailRevenue(store).catch(() => null) : Promise.resolve(null),
+  const [sizes, flowBytes, revenueBytes, paypal] = await Promise.all([
+    broadcastSizes(store.listId, EMAILS_BROADCASTS),
+    flowsBytes(store.listId),
+    keptMailRevenueBytes(store),
+    paypalCounts(store.statsId),
+  ]);
+  if (!sizes || flowBytes === null || revenueBytes === null || !paypal) throw new Error("the emails could not be measured");
+  // What they sold is read when there is an email or a sequence to credit, and from Stripe when it is not kept.
+  const salesRead = Boolean(store.stripeAccountId && store.statsId) && revenueBytes === 0 && (sizes.count > 0 || flowBytes > 0);
+  const work = addWork(EMAILS_PROBE_WORK, emailsWork({ broadcasts: sizes.count, broadcastBytes: sizes.bytes, flowBytes }));
+  const units = apiReadUnits(salesRead ? addWork(work, mailRevenueColdWork(paypal.sales)) : work);
+  const first = await charge(units);
+  if (first) return first;
+  const [counts, broadcasts, flows] = await Promise.all([listCounts(store.listId), listBroadcasts(store.listId, EMAILS_BROADCASTS), readFlows(store.listId)]);
+  const said: { refused: Response | null } = { refused: null };
+  const [revenueRead, flowCounts] = await Promise.all([
+    broadcasts.length || flows.length
+      ? readMailRevenuePaid(store, async () => {
+          if (salesRead) return true;
+          said.refused = await charge(apiReadUnits(mailRevenueColdWork(paypal.sales)), units);
+          return said.refused === null;
+        }).catch(() => null)
+      : Promise.resolve(null),
     flowStats(flows).catch(() => new Map()),
   ]);
+  if (said.refused) return said.refused;
+  const revenue = revenueRead === "refused" ? null : revenueRead;
   return {
     currency: store.currency,
     list: { people: counts.total, agreed_to_hear: counts.agreed, left: counts.left, can_be_emailed: counts.mailable },
@@ -278,9 +402,16 @@ export async function emailsTool(store: Store) {
   };
 }
 
-/** The affiliate program, each affiliate by their link's code, never their address. */
-export async function affiliatesTool(store: Store) {
+/**
+ * The affiliate program, each affiliate by their link's code, never their
+ * address. Reading it takes the further API requests its size costs first
+ * (lib/api-read.ts, chargeBook), as /api/v1/affiliates does: the refusal is
+ * handed back as it is, with nothing read.
+ */
+export async function affiliatesTool(store: Store, charge: Charge) {
   if (!affiliatesOn(store)) return { program: null, note: "The affiliate program is off." };
+  const refused = await chargeBook(store, charge);
+  if (refused) return refused;
   const book = await readBook(store);
   return {
     currency: book.currency,

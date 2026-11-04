@@ -109,6 +109,7 @@ const MESSAGES: Record<string, string> = {
   keep_full: `That sequence already holds ${MAX_STEPS} steps. Remove one under Sequences first.`,
   too_many_flows: `A store keeps ${MAX_FLOWS} sequences at most. Remove one under Sequences first.`,
   server_error: "Something went wrong on our side. Try again in a moment.",
+  store_full: "Your store's data room is full, so this email was not saved and nothing was sent. Nothing was set aside for it. Delete something you no longer need, such as old drafts or contacts, then try again.",
 };
 
 type Answer = MailAnswer;
@@ -135,7 +136,8 @@ async function call(payload: Record<string, unknown>): Promise<Answer> {
   }
 }
 
-const message = (a: Answer) => MESSAGES[a.error ?? ""] ?? MESSAGES.server_error;
+// A refusal for the studio's requests carries its own sentence (how many this needs, how many are left).
+const message = (a: Answer) => (a.error === "studio_used" && typeof a.message === "string" && a.message ? a.message : MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
 const n = (x: number) => x.toLocaleString("en-US");
 
 type BroadcastRow = {
@@ -147,6 +149,8 @@ type BroadcastRow = {
   total: number;
   sent: number;
   note: string;
+  /** Whether its list of who it goes to was made: a waiting email without one, nothing sent, can still be canceled. */
+  listed?: boolean;
   productId: string | null;
   /** Everybody, only buyers, or only people who have not bought yet (lib/contacts.ts). */
   who: Who;
@@ -768,6 +772,8 @@ function Compose(props: {
   const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, activeDays, more, savedContent, uncertain: draftSaveBlocked, label, buyerGroup });
   useImperativeHandle(props.composerState, () => ({ dirty, busy: locked, snapshot }));
 
+  // The sentence the last count showed, so a count that then goes through takes away its own message and no other.
+  const countError = useRef<string | null>(null);
   useEffect(() => {
     if (invalidSpent) return;
     let live = true;
@@ -783,7 +789,13 @@ function Compose(props: {
           setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
         }
         if (typeof a.partial === "boolean") setPartial(a.partial);
-      } else if (a.error === "stripe") setError(message(a));
+        const shown = countError.current;
+        countError.current = null;
+        if (shown !== null) setError((current) => (current === shown ? null : current));
+      } else if (a.error === "stripe" || a.error === "studio_used") {
+        countError.current = message(a);
+        setError(countError.current);
+      }
     });
     return () => {
       live = false;
@@ -1254,7 +1266,15 @@ function Compose(props: {
               </div>
             </dl>
             <SubjectTestReview preview={testPreview} />
-            <p id="mail-send-note" className="mt-2">Eligibility is checked again when sending starts.</p>
+            <p id="mail-send-note" className="mt-2">
+              Eligibility is checked again when sending starts.
+              {/* A narrowed email holds its later readings of the buyers in the month it goes out (lib/broadcasts.ts, createBroadcast). */}
+              {minSpent || channel || quietDays || buyerGroup || activeDays
+                ? later
+                  ? " Scheduling it sets aside, from the month it goes out, the studio requests needed to find these buyers then, and to find them once more if it has to wait. If that month has too few left, it is not scheduled, and you see how many it needs. What it does not use, or all of it if you cancel, is given back."
+                  : " Sending it sets aside the studio requests needed to find these buyers once more if it has to wait. What it does not use is given back."
+                : null}
+            </p>
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
@@ -1698,11 +1718,11 @@ function History({
             {b.status === "sent" && b.tagged ? (
               <p className="mt-1 text-sm font-semibold text-ink">{broughtWords(b.visits, b.money, currency)}</p>
             ) : null}
-            {b.status === "scheduled" && canSend ? (
+            {(b.status === "scheduled" || (b.status === "waiting" && b.listed === false && b.sent === 0)) && canSend ? (
               <button
                 type="button"
                 aria-busy={busy} disabled={busy}
-                className="mt-2 text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+                className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
                 onClick={async () => {
                   if (busy) return;
                   setBusy(true);
@@ -1713,7 +1733,7 @@ function History({
                     setError("Cancellation of “" + b.subject + "” could not be confirmed. Reload to check its current status. " + message(a));
                     return;
                   }
-                  toast("Scheduled email canceled.");
+                  toast(b.status === "scheduled" ? "Scheduled email canceled." : "Waiting email canceled. Nothing was sent.");
                   refreshHistory();
                 }}
               >

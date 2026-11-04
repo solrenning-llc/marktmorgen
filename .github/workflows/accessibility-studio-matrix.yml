@@ -69,6 +69,8 @@ jobs:
       - run: npm ci
       - name: Verify the package matches the preinstalled browser image
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
+      - name: Deals board focus, confirmed removal, Move only on its button, errors tied to fields and one status region (synthetic, no server)
+        run: node tests/e2e/deals-board-focus.mjs
       - run: node scripts/ci-build.mjs
       - name: Authenticated studio and page editor at five widths with AAA and access modes
         run: node tests/e2e/accessibility-studio-matrix.mjs

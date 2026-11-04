@@ -35,9 +35,12 @@ export async function finishProvenSignIn(
   let sessionId: string | null = null;
   try {
     // An address in the middle of a move, or left by one that broke, takes no login without a second step until
-    // the move is over or repaired (lib/auth.ts isMoving, lib/move-repair.ts; review of 1daa9131e).
-    if (owner && (await isMoving(owner)) && !((await repairMove(owner)) && !(await isMoving(owner)))) return redirect("/signin?status=move-busy");
-    if (owner && (await twoStepOn(owner)) && !(await resetIfDue(owner))) {
+    // the move is over or repaired (lib/auth.ts isMoving, lib/move-repair.ts; reviews of 1daa9131e and
+    // b42237ca6): with the app, the login waits for its code as always (and a request to turn it off never
+    // ends here); without it, it is refused.
+    const blocked = owner ? (await isMoving(owner)) && !((await repairMove(owner)) && !(await isMoving(owner))) : false;
+    if (owner && blocked && !(await twoStepOn(owner))) return redirect("/signin?status=move-busy");
+    if (owner && (await twoStepOn(owner)) && (blocked || !(await resetIfDue(owner)))) {
       const held = await holdSignIn(owner, false, way === "google");
       const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
       const response = redirect("/signin/code");

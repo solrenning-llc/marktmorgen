@@ -64,7 +64,7 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   },
   "move-busy": {
     title: "Your account is in the middle of a move",
-    body: "Its sign-in address is being changed, so logging in with only the emailed link waits until that is over. Try again in a few minutes, or log in with your passkey. If this keeps happening, reply to any email from us.",
+    body: "Its sign-in address is being changed, so logging in with only the emailed link waits until that is over. Log in with your passkey, or with the emailed link and the code from your authenticator app. Without either, try again in a few minutes; if it still says this, reply to any email from us and we finish the move for you.",
   },
   "move-has-login": {
     title: "That address has its own passkeys or two-step login",

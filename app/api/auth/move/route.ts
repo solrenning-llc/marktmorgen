@@ -5,6 +5,7 @@ import { originFrom } from "@/lib/request-origin";
 import {
   endAllSessions,
   endMoving,
+  clearBrokenMove,
   markBrokenMove,
   markMoving,
   moveDevices,
@@ -70,17 +71,21 @@ export async function POST(request: NextRequest) {
   // A second move of either address waits until this one is over.
   const mark = await markMoving(from, to).catch(() => null);
   if (!mark) return away("/signin?status=move-error");
+  // Written before anything moves, with no expiry, and cleared only when the move finished or was undone
+  // without an error (lib/auth.ts markBrokenMove): a process that dies midway leaves it, so the store on one
+  // address and its ways in on the other are never left with a login by the emailed link let in, and the
+  // next login or move repairs it (lib/move-repair.ts, which waits while this move's mark is there).
+  // Not written: nothing moves, and the 5-minute mark lapses on its own.
+  if (!(await markBrokenMove(from, to).then(() => true, () => false))) return away("/signin?status=move-error");
   let broken = false;
   try {
     return await finishMove(from, to, away, () => {
       broken = true;
     });
   } finally {
-    // A move that could be neither finished nor undone keeps both addresses marked, durably, until it is
-    // repaired (lib/auth.ts markBrokenMove): never a store on one address and its ways in on the other
-    // with a login by the emailed link let in (review of 1daa9131e).
-    if (broken) await markBrokenMove(from, to).catch((error) => console.error("marking a broken move failed", error));
-    await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
+    const cleared = broken ? false : await clearBrokenMove(from, to).then(() => true, (error) => (console.error("clearing a move's record failed", error), false));
+    // Kept when the record could not be cleared either way: it holds the addresses until it is repaired.
+    if (cleared || broken) await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
   }
 }
 

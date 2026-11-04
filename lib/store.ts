@@ -2121,6 +2121,27 @@ export type MoveResult =
  * account's other stores keep their folders as they are, because their keys
  * never held the address.
  */
+/**
+ * A move that wrote the store at its new address and could not take it off
+ * the old one leaves it on both (lib/move-repair.ts). The address the store's
+ * handle points to (written in the same step that takes the old record away)
+ * decides which one is the store; the copy on the other is deleted. Answers
+ * the address that keeps it, or null when that cannot be told.
+ */
+export async function settleDoubledStore(fromEmail: string, toEmail: string): Promise<string | null> {
+  const from = fromEmail.toLowerCase();
+  const to = toEmail.toLowerCase();
+  const [rawFrom, rawTo] = await redisPipeline([["GET", await ownerKey(from)], ["GET", await ownerKey(to)]]);
+  const a = parseStore(rawFrom);
+  const b = parseStore(rawTo);
+  if (!a || !b || !a.handle || a.handle !== b.handle) return null;
+  const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
+  const home = typeof points === "string" ? points.toLowerCase() : "";
+  if (home !== from && home !== to) return null;
+  await redisPipeline([["DEL", await ownerKey(home === from ? to : from)]]);
+  return home;
+}
+
 export async function moveAccount(
   fromEmail: string,
   toEmail: string,

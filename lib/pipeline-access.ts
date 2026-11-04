@@ -66,6 +66,26 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
   return clean;
 }
 
+/**
+ * The first step of a teammate moving their sign-in to another address
+ * (lib/team.ts, moveMemberships): their restrictions are copied, as they
+ * are, unreadable or not, to the new address BEFORE the team record names
+ * it. Throws when the copy cannot be confirmed; the caller then leaves that
+ * store's membership on the old address, so the new one never has a store
+ * without its restrictions. The old field is deleted only once the team
+ * record has moved (forgetPipelineAccess).
+ */
+export async function copyPipelineAccess(statsId: string | null, from: string, to: string): Promise<void> {
+  if (!statsId || !isRedisConfigured()) return;
+  const before = normaliseEmail(from);
+  const after = normaliseEmail(to);
+  if (before === after) return;
+  const [raw] = await redisPipeline([["HGET", accessKey(statsId), before]]);
+  if (raw === null || raw === undefined || raw === "") return;
+  const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]);
+  if (written !== 0 && written !== 1) throw new Error("copying a teammate's pipeline access could not be confirmed");
+}
+
 /** A teammate who left: their restrictions go with them. */
 export async function forgetPipelineAccess(statsId: string | null, email: string): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;

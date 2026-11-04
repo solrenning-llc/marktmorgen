@@ -42,10 +42,17 @@ let events: Record<string, unknown>[] = [];
 let commands: (string | number)[][] = [];
 /** While true, the lease is refused, so a message made is kept untried (attempts 0), as when the try after it never ran. */
 let leaseOff = false;
+/** Answers the store's delivery log or its sizes broken, as Codex G did on #2192 (C3-124). */
+let fault: "partial-sizes" | "empty-sizes" | "null-log" | "text-sizes" | null = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: (string | number)[][]) => {
   commands.push(...batch);
   const [only] = batch;
+  if (fault === "null-log" && batch.length === 1 && only[0] === "LRANGE" && /^nl:hooks:log:/.test(String(only[1]))) return [null];
+  if (fault && fault !== "null-log" && batch.length > 0 && batch.every((c) => c[0] === "STRLEN")) {
+    const answers = (await pipeline(batch)) as unknown[];
+    return fault === "partial-sizes" ? answers.slice(0, 1) : fault === "empty-sizes" ? [] : answers.map((n, i) => (i === 0 ? "a lot" : n));
+  }
   // The webhook queue's lease (lib/webhooks.ts, LEASE_SCRIPT), as Redis runs it and tests/webhooks-delivery.test.ts models it.
   if (batch.length === 1 && only[0] === "EVAL" && String(only[1]).includes('redis.call("ZSCORE", KEYS[1], ARGV[1])')) {
     if (leaseOff) return [0];
@@ -187,6 +194,17 @@ async function main(): Promise<void> {
   is("with exactly what it may take left, answered", fits.status, 200);
   is("and what it did not need given back", await used(), allowanceFor(await mine(), "api") - (heldTen + 1 - due));
   await leave(1_000);
+
+  part("A log or sizes answered broken: unavailable before any delivery is read, nothing taken past the door's (C3-124)");
+  for (const kind of ["partial-sizes", "empty-sizes", "text-sizes", "null-log"] as const) {
+    const was = await used();
+    commands = [];
+    fault = kind;
+    const broken = await eventsRead(get(key, "/api/v1/events?type=sale.completed&limit=10"));
+    fault = null;
+    const brokenBody = (await broken.json()) as { error?: string; data?: unknown[] };
+    is(`${kind}: unavailable, never a list (empty or not), no delivery read, only the door's request taken`, [broken.status, brokenBody.error, brokenBody.data, commands.some((c) => c[0] === "GET" && /^nl:hooks:d:/.test(String(c[1]))), (await used()) - was], [502, "unavailable", undefined, false, 1]);
+  }
 
   part("Every text cleaned where the message is made: the worst a text can escape is a quotation mark, four bytes kept");
   is("control characters become a space, a text is cut at its most, a lone surrogate half becomes U+FFFD", [cleanText("a\u0001\u0000b\u007f"), cleanText("x".repeat(MESSAGE_TEXT_MAX + 9)).length, cleanText("\ud800x"), cleanText("\udc00"), cleanText("😀")], ["a b ", MESSAGE_TEXT_MAX, "\ufffdx", "\ufffd", "😀"]);

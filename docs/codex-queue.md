@@ -13481,6 +13481,8 @@ Benefício/retorno: uma base reutilizável pararelatar margemrealhonesta,semtran
 
 Pureza:nenhumIO/call/key/retenção/e-mail/serviçonovo,deltaoperaçãoStore/Studio/Scale mensal/anual0/0;CI/hospedagem/LLC/futurosintegraçãodesconhecidos nãocontamcomográtis. Integraçãooperacional futura exige cálculo6contratos/teto/reservaanteriores. Acessibilidade:semUI,0→0passos/decisõesdocliente,Markdowncomgaps;semcertificação. CIcompleto noheadnovo. BranchdependenteSR1sem editarbranchesMR1/SR1;aguardar1091/1092incorporados,retargetaomain evalidar árvore/pais/head. Preços/limites/comissão/flags/taxgate/art9a/exposição/custeio/conteúdo preservados;contador254.
 
+**Recorte de evidência fixa incorporado — Codex D, 04/11/2026:** PR #2233 incorporado em `e99d1e05dd2f43e724da93cd3edcf98895dbae88`, head `5e72c96c6f1e751c5311de9b4fe02d4fbed641af`, com nove agregadores verdes e revisões independentes do Codex C e do Revisor 2 sem achado grave ou médio nesse mesmo head. `lib/customer-base-rules.ts` e consumidores agora exigem evidência completa e coerente para cada custo fixo, inclusive itens adicionais e ocultos, sem aceitar ausência como zero; as regressões falharam antes e passaram depois. Estado: incorporado, não publicado nem validado no domínio. Não há dataset real, certificação de lucro ou conclusão de 465[MR2]; o trabalho geral permanece em andamento. Nenhum preço, limite, comissão, flag ou trava foi alterado.
+
 
 ## MR/SR — Incorporações verificadas e transição financeira em andamento (27/10/2026)
 

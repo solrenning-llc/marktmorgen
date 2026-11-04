@@ -344,7 +344,8 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     await needData(store, room.take);
     const rows = await takeImportRows(store, file.rows.length, now, options.bytes ?? 0);
     if (!rows.ok) {
-      await giveData(store, room.back);
+      // Nothing was written: the room goes back. A failure to give it back leaves it counted (more, never less) and is logged.
+      await giveData(store, room.back).catch((error: unknown) => console.error("giving back a HubSpot import's room failed", error));
       if (rows.reason === "unavailable") return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
       return refuse("rows_month", `Your store can bring in ${rowsWords(rows.limit)} a month from files, and this file would go past that. Nothing was brought in. Bring it in when your next billing month starts, or bring in a smaller file.`, rows.limit);
     }

@@ -1321,6 +1321,8 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             // rather than trying the same rows again every few minutes.
             if (!(error instanceof DataRoomError)) throw error;
             await note(job, [{ line: 0, column: "", problem: error.message, value: "" }], "errors");
+            // The contacts already brought in are of unknown age too: their next emails still go out in portions that double.
+            if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);
             job.state = "failed";
             job.finishedAt = Date.now();
             await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]]);

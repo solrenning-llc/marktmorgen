@@ -40,6 +40,9 @@ async function main(): Promise<void> {
   await upsertContact(store.listId!, "buyer@example.com", { agreed: false, explicit: false, source: "buyer", sid: store.sid, productId: "prod_x", title: "X", at: new Date().toISOString() }, orderRoom(store));
   is("counted with the order's records", slot("o") > ordersBefore, true);
   is("and not twice in the contacts' slot", slot("ct"), contactsBefore);
+  const legacyBefore = slot("o");
+  await upsertContact(store.listId!, "buyer2@example.com", { agreed: false, explicit: false, source: "buyer", sid: store.sid, productId: "prod_x", title: "X", at: new Date().toISOString() }, { order: store });
+  is("the older form, an object holding only `order`, is still an order's", [slot("o") > legacyBefore, slot("ct")], [true, contactsBefore]);
   done();
 }
 

@@ -138,7 +138,7 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
         const known = new Set(await storesKnownFor(email));
         if (!(await knows(store, email, known))) return;
         const answer = await emailLink([store], email, input.origin);
-        if (answer.status !== "sent") console.warn(`a deletion link asked from one store was not emailed: ${answer.status}`);
+        if (answer.status !== "sent") console.warn(`a deletion link asked from one store was not emailed: ${answer.status} (store ${store.sid})`);
       });
     }
     return { status: "sent" };
@@ -152,7 +152,7 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
     }
     if (!stores.length) return;
     const answer = await emailLink(stores, email, input.origin);
-    if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status}`);
+    if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status} (stores ${stores.map((s) => s.sid).join(",")})`);
   });
   return { status: "sent" };
 }

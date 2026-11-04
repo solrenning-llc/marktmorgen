@@ -10,7 +10,7 @@ import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { hasAccount } from "@/lib/account-exists";
 import { finishSetup, startSetup } from "@/lib/two-step";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { inviteMember } from "@/lib/team";
+import { inviteMember, readTeam } from "@/lib/team";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { POST as join_ } from "@/app/api/auth/join/route";
@@ -88,6 +88,10 @@ async function main(): Promise<void> {
   if (!fresh.ok) throw new Error("no second invitation");
   const newcomer = await take(tokenTo(NEW));
   is("an address with no account is logged in by the tap, the store open", [newcomer.session, new URL(newcomer.where).searchParams.get("team")], [true, "joined"]);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const members = (await readTeam(shop.sid)).members.map((m) => m.email).sort();
+  is("both are on the team after the tap", members.includes(HELPER) && members.includes(NEW), true);
+  is("and the owner was told of each, by email", mails.filter((m) => m.to === CREATOR).length >= 2, true);
   const again = await take(helperToken);
   is("an invitation already taken opens nothing", [again.session, (new URL(again.where).searchParams.get("status") ?? "").startsWith("invite-")], [false, true]);
 

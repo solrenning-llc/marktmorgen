@@ -33,7 +33,7 @@ import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
-import { lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
 import { readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
@@ -179,6 +179,7 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   let complete = false;
   // A failed or unfinished read of the lost disputes keeps the anchor.
   let unsure = false;
+  let lostRead: LostRead | null = null;
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
@@ -188,11 +189,10 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     // A dispute closed as lost ends the booking's meeting
     // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
     // with the first page, from Stripe's closing events (kept thirty days).
-    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("meet", callsId)) : { rows: [], complete: true, newest: 0 };
-    if (!lost.complete) unsure = true;
-    // The latest closing of the whole sweep (lib/refunds.ts, lostDisputesSince): reached the end, the place moves past it.
-    else newest = Math.max(newest, lost.newest);
-    const rows = [...lost.rows, ...refunds];
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("meet", callsId)) : null;
+    if (lost) lostRead = lost;
+    if (lost && !lost.complete) unsure = true;
+    const rows = [...(lost?.rows ?? []), ...refunds];
     for (const refund of rows) {
       if (Date.now() >= deadline) break;
       const id = typeof refund.id === "string" ? refund.id : "";
@@ -236,6 +236,13 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       break;
     }
     after = last.id;
+  }
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
+  // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
+  // meanwhile is read from the top next run (review of #2158, inbox C4-24).
+  if (lostRead) {
+    if (!(await confirmLostRead(lostRead, seenKey(callsId)))) unsure = true;
+    else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
   // Moved forward only past what was read to the end, as the license keys do.
   if ((complete && !unsure && lookups > 0 && Date.now() < deadline) || !(Number(anchorRaw) > 0)) {

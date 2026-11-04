@@ -9,6 +9,8 @@
  */
 import { LOST_DISPUTE_PAGES, lostCursorKey, lostDisputesSince } from "@/lib/refunds";
 import { markRefundedReviews } from "@/lib/review-proof";
+import { syncMeetings } from "@/lib/call-meetings";
+import { MEET_STORES } from "@/lib/meet-links";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -22,12 +24,16 @@ const events = Array.from({ length: TOTAL }, (_, i) => ({
   id: `evt_Cursor${String(i).padStart(6, "0")}`,
   object: "event",
   type: "charge.dispute.closed",
-  created: NOW - i,
+  created: NOW - i * 60,
   data: { object: { id: `du_${i}`, object: "dispute", status: "lost", charge: `ch_Cursor${String(i).padStart(6, "0")}`, payment_intent: `pi_Cursor${String(i).padStart(6, "0")}` } },
 }));
 let reads = 0;
+const lookedUp = new Set<string>();
+let refundsList: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
+  if (url.pathname === "/v1/checkout/sessions" && url.searchParams.get("payment_intent")) lookedUp.add(String(url.searchParams.get("payment_intent")));
+  if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ object: "list", data: refundsList, has_more: false }));
   if (url.pathname !== "/v1/events") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   if (url.searchParams.get("type") !== "charge.dispute.closed") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   reads += 1;
@@ -52,9 +58,12 @@ async function main(): Promise<void> {
   part("With the job's place kept");
   reads = 0;
   const one = await lostDisputesSince(ACCOUNT, since, Number.POSITIVE_INFINITY, LOST_DISPUTE_PAGES, key);
+  is("reading keeps no place by itself: only the job's confirmation does (review of #2158)", (await redis.pipeline([["GET", key]]))[0], null);
+  await one.commit();
   for (const row of one.rows) seen.add(String(row.id));
   is("the first run reads as many pages as it may, not complete, and keeps where it stopped", [one.complete, one.rows.length, reads, typeof (await redis.pipeline([["GET", key]]))[0]], [false, 100 * LOST_DISPUTE_PAGES, LOST_DISPUTE_PAGES, "string"]);
   const two = await lostDisputesSince(ACCOUNT, since, Number.POSITIVE_INFINITY, LOST_DISPUTE_PAGES, key);
+  await two.commit();
   for (const row of two.rows) seen.add(String(row.id));
   is("the next run reads on from there and reaches the end", [two.complete, two.rows.length, two.rows.some((r) => one.rows.some((o) => o.id === r.id))], [true, 200, false]);
   is("every lost dispute read once, across the two runs", seen.size, TOTAL);
@@ -70,8 +79,40 @@ async function main(): Promise<void> {
   await markRefundedReviews(shop, Date.now() + 60_000);
   is("its next run reaches the end and moves its place past the newest closing", Number((await redis.pipeline([["GET", placeKey]]))[0]), NOW);
 
+  part("A dispute that closes while a sweep goes on over several runs (review of #2158, inbox C4-24)");
+  // A run that went on from a kept place reads only older pages: its job may not move past the newest closing the
+  // sweep read, or a dispute closed meanwhile, older than a refund read in that run, would never be read.
+  const late = "q".repeat(32);
+  const lateShop = { statsId: late, stripeAccountId: ACCOUNT, handle: "cursor-late" } as unknown as Store;
+  const latePlace = `nl:rev:refunds:since:${late}`;
+  await markRefundedReviews(lateShop, Date.now() + 60_000);
+  const newer = { ...events[0], id: "evt_CursorNewer01", created: NOW + 120, data: { object: { ...events[0].data.object, id: "du_newer", charge: "ch_CursorNewer01", payment_intent: "pi_CursorNewer01" } } };
+  events.unshift(newer);
+  refundsList = [{ id: "re_CursorLater01", object: "refund", status: "succeeded", created: NOW + 3_600, payment_intent: "pi_CursorLater01", charge: { object: "charge", refunded: false, amount: 100, amount_refunded: 10 } }];
+  await markRefundedReviews(lateShop, Date.now() + 60_000);
+  is("the run that went on from the kept place moves the place no further than the newest closing it read", Number((await redis.pipeline([["GET", latePlace]]))[0]) <= NOW, true);
+  reads = 0;
+  const top = await lostDisputesSince(ACCOUNT, Number((await redis.pipeline([["GET", latePlace]]))[0]) - 300);
+  is("so the next run reads from the top, where the dispute that closed meanwhile is", top.rows.some((r) => r.id === "evt_CursorNewer01"), true);
+  events.shift();
+  refundsList = [];
+
+  part("Through a real job with a limit on its lookups (review of #2158, inbox C4-24)");
+  // The call job asks Stripe about at most REFUND_LOOKUPS payments a run: a place kept on reading alone skipped every
+  // row past them, and they were never read again. Kept only once every row read is handled, each is looked up.
+  const callsId = "c".repeat(16);
+  const callStore = { statsId: "m".repeat(32), callsId, stripeAccountId: ACCOUNT, handle: "cursor-calls", previousHandles: [] } as unknown as Store;
+  await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 86_400_000, `${callsId}|cursor-calls`]]);
+  lookedUp.clear();
+  await syncMeetings(async (handle) => (handle === "cursor-calls" ? callStore : null), Date.now() + 60_000, "https://marktmorgen.com");
+  is("a run that could look up only some of the rows it read keeps no place past the others", [lookedUp.size < 100 * LOST_DISPUTE_PAGES, (await redis.pipeline([["GET", lostCursorKey("meet", callsId)]]))[0]], [true, null]);
+  for (let run = 0; run < 2 * TOTAL && lookedUp.size < TOTAL; run += 1) {
+    await syncMeetings(async (handle) => (handle === "cursor-calls" ? callStore : null), Date.now() + 60_000, "https://marktmorgen.com");
+  }
+  is("every lost dispute's payment is looked up, across as many runs as it takes", lookedUp.size, TOTAL);
+
   part("A place of another window is never followed");
-  await lostDisputesSince(ACCOUNT, since, Number.POSITIVE_INFINITY, LOST_DISPUTE_PAGES, key);
+  await (await lostDisputesSince(ACCOUNT, since, Number.POSITIVE_INFINITY, LOST_DISPUTE_PAGES, key)).commit();
   const other = await lostDisputesSince(ACCOUNT, since - 60, Number.POSITIVE_INFINITY, LOST_DISPUTE_PAGES, key);
   is("a run with another window starts from the newest", other.rows[0].id, events[0].id);
   done();

@@ -205,6 +205,29 @@ export const LOST_DISPUTE_PAGES = 3;
 export const lostCursorKey = (job: string, id: string) => `nl:lostdispute:cursor:${job}:${id}`;
 const CURSOR_SECONDS = 30 * 86_400;
 
+/**
+ * What lostDisputesSince() read: its rows, whether it reached the end, the
+ * newest closing of the whole sweep, whether it went on from a place kept
+ * by an earlier run, and `commit`, which keeps the place for the next run.
+ */
+export type LostRead = { rows: GivenBackRow[]; complete: boolean; newest: number; resumed: boolean; commit: () => Promise<void> };
+
+/**
+ * Keeps a job's place in the lost disputes only when every row it read was
+ * handled, that is, is in the job's set of rows already read (one SMISMEMBER):
+ * a row passed over for the run's lookups, its time or an error leaves the
+ * place where it was, and the next run reads it again. True when kept.
+ */
+export async function confirmLostRead(read: LostRead, seenKey: string): Promise<boolean> {
+  const ids = read.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+  if (ids.length) {
+    const [flags] = await redisPipeline([["SMISMEMBER", seenKey, ...ids]]);
+    if (!Array.isArray(flags) || flags.length !== ids.length || flags.some((flag) => Number(flag) !== 1)) return false;
+  }
+  await read.commit();
+  return true;
+}
+
 /** The cursor of this window, and the newest closing the sweep has seen so far (0 when there is none). */
 async function readCursor(key: string | undefined, since: number): Promise<{ after: string; newest: number }> {
   if (!key) return { after: "", newest: 0 };
@@ -223,7 +246,7 @@ export async function lostDisputesSince(
   deadline = Number.POSITIVE_INFINITY,
   pages = LOST_DISPUTE_PAGES,
   cursor?: string,
-): Promise<{ rows: GivenBackRow[]; complete: boolean; newest: number }> {
+): Promise<LostRead> {
   const found: GivenBackRow[] = [];
   const window = Math.max(0, Math.floor(since));
   // Older pages a run before could not reach come first; the newest ones were handled then (each job keeps what it has read).
@@ -232,11 +255,19 @@ export async function lostDisputesSince(
   let newest = kept.newest;
   // `newest`: the latest closing of the whole sweep, so a job that reaches the end moves its place past every page it read,
   // not only past this run's older ones (which would read the same newest pages again, run after run).
-  const leave = async (complete: boolean) => {
-    if (cursor) {
-      await redisPipeline([complete ? ["DEL", cursor] : after ? ["SET", cursor, `${window}|${after}|${newest}`, "EX", CURSOR_SECONDS] : ["DEL", cursor]]);
-    }
-    return { rows: found, complete, newest };
+  // Nothing is written here (review of #2158, inbox C4-24): the job confirms the place with confirmLostRead() only once
+  // it has handled every row read, so a row skipped for its lookups, its time or an error is read again next run.
+  const leave = (complete: boolean): LostRead => {
+    const place: (string | number)[] | null = !cursor ? null : complete || !after ? ["DEL", cursor] : ["SET", cursor, `${window}|${after}|${newest}`, "EX", CURSOR_SECONDS];
+    return {
+      rows: found,
+      complete,
+      newest,
+      resumed: kept.after !== "",
+      commit: async () => {
+        if (place) await redisPipeline([place]);
+      },
+    };
   };
   for (let page = 0; page < Math.min(pages, LOST_DISPUTE_PAGES); page += 1) {
     if (Date.now() >= deadline) return leave(false);
@@ -278,12 +309,12 @@ export async function lostDisputesOrRetry(
   since: number,
   deadline = Number.POSITIVE_INFINITY,
   cursor?: string,
-): Promise<{ rows: GivenBackRow[]; complete: boolean; newest: number }> {
+): Promise<LostRead> {
   try {
     return await lostDisputesSince(account, since, deadline, LOST_DISPUTE_PAGES, cursor);
   } catch (error) {
     console.error("reading the disputes closed as lost failed", error);
-    return { rows: [], complete: false, newest: 0 };
+    return { rows: [], complete: false, newest: 0, resumed: false, commit: async () => {} };
   }
 }
 

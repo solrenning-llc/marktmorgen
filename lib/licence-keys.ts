@@ -62,7 +62,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -539,6 +539,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // A refund whose sale could not be told for sure is left unread, and the
   // anchor stays, so the next run looks at it again.
   let unsure = false;
+  let lostRead: LostRead | null = null;
   const handles = saleHandles(store);
 
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
@@ -548,11 +549,10 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     const listed = await onAccount("GET", account, `/refunds?${query}`);
     const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
     // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
-    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : { rows: [], complete: true, newest: 0 };
-    if (!lost.complete) unsure = true;
-    // The latest closing of the whole sweep (lib/refunds.ts, lostDisputesSince): reached the end, the place moves past it.
-    else newest = Math.max(newest, lost.newest);
-    const rows = [...lost.rows, ...refunds];
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : null;
+    if (lost) lostRead = lost;
+    if (lost && !lost.complete) unsure = true;
+    const rows = [...(lost?.rows ?? []), ...refunds];
     for (const refund of rows) {
       if (Date.now() >= deadline) break;
       const id = typeof refund.id === "string" ? refund.id : "";
@@ -631,6 +631,13 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // Only moved forward past what was read to the end: a run cut short by
   // its deadline, its pages or its lookups starts from the same place next
   // time, and the refunds it already handled are skipped as read.
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
+  // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
+  // meanwhile is read from the top next run (review of #2158, inbox C4-24).
+  if (lostRead) {
+    if (!(await confirmLostRead(lostRead, refundSeenKey(store)))) unsure = true;
+    else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
+  }
   if (complete && !unsure && lookups > 0 && Date.now() < deadline) {
     await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   }

@@ -25,7 +25,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/v1/events") return Response.json({ data: events, has_more: false });
   const intent = url.pathname.match(/^\/v1\/payment_intents\/(pi_\w+)$/)?.[1];
   if (intent && intents[intent]) return Response.json({ id: intent, metadata: intents[intent] });
-  return Response.json({ error: { message: "No such object" } }, { status: 404 });
+  // As Stripe answers an object it does not have: resource_missing (lib/webhooks.ts passes only that over).
+  return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such object" } }, { status: 404 });
 }) as typeof fetch;
 // The endpoint's name resolves to a private address: every try is refused before any socket opens.
 setSendHooksForTests({ fetch: { resolve: async () => [{ address: "127.0.0.1", family: 4 }] } });

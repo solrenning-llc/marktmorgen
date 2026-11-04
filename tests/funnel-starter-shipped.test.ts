@@ -80,8 +80,27 @@ is("a product that can ship has no problem", shipProblem(base), null);
 
 part("Where it shows");
 is("designers and photographers see it, with its line", [NICHE_FIT.designers["physical-product"], nicheCampaignLabels("designers").includes("Sell something you ship")], ["For prints or pieces you make and ship.", true]);
-is("not for cooks, until food has its own warnings on labels and ingredients", NICHE_FIT.cooks["physical-product"], undefined);
+is("not for cooks: food has its own campaign, with what to check first", NICHE_FIT.cooks["physical-product"], undefined);
 is("the Funnels page counts and names it", [startersFeature().body.startsWith(`${FUNNEL_STARTERS.length} campaigns`), startersFeature().body.includes("“Sell something you ship”")], [true, true]);
+
+part("The other things a creator ships (unit 4)");
+const SHIPPED = ["physical-product", "printed-book", "branded-apparel", "course-kit", "homemade-food"];
+const shippedStarters = SHIPPED.map((id) => funnelStarter(id)!);
+is("each exists, for selling, with one paid product and the same three steps", shippedStarters.map((s) => [Boolean(s), starterCard(s).goal, s.bundle.products.map((p) => p.wants), s.bundle.steps.map((st) => st.kind)]), SHIPPED.map(() => [true, "sales", ["paid"], ["page", "product", "page"]]));
+is("each says turning shipping on last among what to do first, so food's rules come before it", shippedStarters.map((s) => s.before?.at(-1)), SHIPPED.map(() => first));
+is("each asks the same questions before ordering, every answer in the creator's words", shippedStarters.map((s) => {
+  const faqBlock = s.bundle.pages[0].blocks.find((b) => b.kind === "faq");
+  return faqBlock && faqBlock.kind === "faq" ? faqBlock.items.map((i) => [i.q, /^\[.*\]$/.test(i.a)]) : null;
+}), SHIPPED.map(() => [["Where does it ship, and what does shipping cost?", true], ["When does it ship?", true], ["Can I return or exchange it?", true]]));
+is("none says a shipping time, date, cost or country as it stands", shippedStarters.filter((s) => /\d|business day|\bdays?\b|\bweeks?\b|within|overnight|express|tomorrow|ships in|free shipping|worldwide/i.test(said(s))).map((s) => s.id), []);
+is("no block id repeats on its page", (() => { const ids = shippedStarters.flatMap((s) => s.bundle.pages[0].blocks.map((b) => b.id)); return new Set(ids).size === ids.length; })(), true);
+const food = funnelStarter("homemade-food")!;
+is("food says first what only the creator can check, and that it is not said for them", [food.before?.[0].startsWith("Before you sell food, check the rules where you make it and where you ship it"), food.before?.[0].includes("Marktmorgen cannot tell you what the rules are or whether you meet them.")], [true, true]);
+is("the words before a shipping or food campaign are short sentences (3.1.5)", [food.before?.[0], ...FUNNEL_STARTERS.filter((s) => s.id === "physical-product").flatMap((s) => s.before ?? [])].every((t) => (t ?? "").split(/(?<=[.!?])\s/).every((sentence) => sentence.split(/\s+/).length <= 20)), true);
+is("food's page asks for ingredients and allergens as the label says, and how to keep it", food.bundle.pages[0].blocks.map((b) => ("heading" in b ? b.heading : b.kind)), ["hero", "What comes in the package", "Ingredients and allergens", "How to keep it", "Before you order", "cta"]);
+is("no rule, approval or safety of food is claimed", /approved|certified|compliant|safe to eat|meets? (the )?(rules|law|regulations)|organic|natural|healthy|gluten[- ]free|sugar[- ]free/i.test(said(food)), false);
+is("where they show", [NICHE_FIT.cooks["homemade-food"], NICHE_FIT.cooks["printed-book"], NICHE_FIT.coaches["course-kit"], NICHE_FIT.fitness["course-kit"], NICHE_FIT.designers["branded-apparel"]].every(Boolean), true);
+is("food is offered to cooks only", Object.entries(NICHE_FIT).filter(([, fit]) => fit["homemade-food"]).map(([n]) => n), ["cooks"]);
 
 part("What no campaign ever says");
 const FORBIDDEN = /less pain|pain relief|\baches?\b|posture|detox|burn fat|fat burn|weight loss|lose weight|\bslim|anti-aging|younger|wrinkle|glowing|\bskin\b|\bcur(e|es|ed|ing)\b|\bheal(s|ed|ing)?\b|clinically|doctor|\bfda\b|proven|guaranteed results?|results? guaranteed|best[- ]?sell|top[- ]?sell|top[- ]rated|most popular|award|★|\bout of 5\b|\b\d(\.\d)? stars?\b|five[- ]stars?|testimonial|#1|number one|as seen on|limited time|ends soon|only \w+ left|hurry/i;

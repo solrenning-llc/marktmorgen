@@ -27,7 +27,8 @@ import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { dropPage } from "@/lib/sales-page-store";
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
@@ -302,7 +303,12 @@ export async function POST(request: NextRequest) {
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).
-        const reviewPhotos = await dropReviews(removed.store.statsId, id).catch(() => [] as string[]);
+        // The deletion tried again up to three times when Redis fails, so the reviews and their AI summary go at
+        // once; said in the log if they cannot (the product is already gone, so nothing shows them).
+        const reviewPhotos = await dropReviews(removed.store.statsId, id, 3).catch((error: unknown) => {
+          console.error("could not drop a removed product's reviews", error);
+          return [] as string[];
+        });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (course) await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
         for (const file of had) {
@@ -317,6 +323,9 @@ export async function POST(request: NextRequest) {
     } else if (action === "link") {
       // The link is checked before anything is written, so a product is never
       // left pointing at something a buyer could not open.
+      // A link over the product's file deletes the file and the buyers' stamped copies:
+      // a session let in without its second step waits (lib/two-step.ts).
+      if ((await lockedFor(request, "products", "replace")) && (await readListing(guarded.store, id))?.file) return refusedJson("locked");
       const read = readLink(link);
       if (!read.ok) {
         return Response.json(

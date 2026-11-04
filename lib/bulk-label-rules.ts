@@ -65,15 +65,36 @@ export const BULK_REFUSALS: Record<BulkRefusal, string> = {
  * letters (Hangul fillers), Khmer inherent vowels, zero-width space, joiners
  * and direction marks, embeddings and isolates, invisible operators, the
  * byte-order mark, interlinear annotation, musical format controls, the
- * blank braille pattern and tag characters. Format characters that do show
- * or shape text (the Arabic number signs, the Mongolian vowel separator) are
- * not on it.
+ * blank braille pattern, tag characters, the combining grapheme joiner,
+ * variation selectors (U+FE00–FE0F, U+E0100–E01EF), the Mongolian free
+ * variation selectors and vowel separator, and the shorthand format controls.
+ * Format characters that do show (the Arabic number signs) are not on it; the
+ * selectors that change how the character before them looks are kept only
+ * there (keptSelector).
  */
-const TAKEN_OUT = /[\p{Cc}\p{Cs}\u00AD\u061C\u115F\u1160\u17B4\u17B5\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0001}\u{E0020}-\u{E007F}]/u;
+const TAKEN_OUT = /[\p{Cc}\p{Cs}\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0001}\u{E0020}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
 const JOINERS = new Set(["\u200C", "\u200D"]);
 const BLACK_FLAG = "\u{1F3F4}";
-// A character that shows, other than plain ASCII: what a joiner may follow (an emoji, a Malayalam chillu, a Persian word).
-const shownAfter = (char: string | undefined) => !!char && char > "\u007F" && !/\s/u.test(char) && !TAKEN_OUT.test(char);
+const EMOJI = /^\p{Extended_Pictographic}$/u;
+const KEYCAP_BASE = /^[#*0-9]$/u;
+const MONGOLIAN_LETTER = /^[\u1820-\u1878\u1880-\u18AA]$/u;
+/**
+ * A selector that changes how the character before it looks, kept there and
+ * only there: the emoji or text presentation selector (U+FE0F, U+FE0E) after
+ * an emoji, or in a keycap (#, *, a digit, then U+20E3), and a Mongolian free
+ * variation selector or vowel separator after a Mongolian letter. Anywhere
+ * else, as after "VIP", it changes nothing that shows, and is taken out.
+ */
+function keptSelector(char: string, before: string | undefined, next: string | undefined): boolean {
+  if (!before) return false;
+  if (char === "\uFE0E" || char === "\uFE0F") return EMOJI.test(before) || (KEYCAP_BASE.test(before) && next === "\u20E3");
+  if (char >= "\u180B" && char <= "\u180F") return MONGOLIAN_LETTER.test(before);
+  return false;
+}
+const SELECTORS = new Set(["\uFE0E", "\uFE0F", "\u180B", "\u180C", "\u180D", "\u180E", "\u180F"]);
+// A character that shows, other than plain ASCII: what a joiner may follow (an emoji, a Malayalam chillu, a Persian word),
+// or a selector kept after one (the U+FE0F of "❤️‍🔥").
+const shownAfter = (char: string | undefined) => !!char && char > "\u007F" && !/\s/u.test(char) && (!TAKEN_OUT.test(char) || SELECTORS.has(char));
 // CJK compatibility ideographs: NFC would turn each into its unified form, which is not how the creator wrote it.
 const COMPATIBILITY_IDEOGRAPHS = /([\uF900-\uFAFF\u{2F800}-\u{2FA1F}])/u;
 const composed = (text: string) =>
@@ -91,7 +112,8 @@ const TAG_FLAGS = ["gbeng", "gbsct", "gbwls"].map((code) => BLACK_FLAG + Array.f
 /**
  * The characters of a label without those that show nothing (TAKEN_OUT),
  * except a joiner after a character that shows (an emoji sequence, a
- * Malayalam chillu) and the tags of a subdivision flag (TAG_FLAGS). Any other
+ * Malayalam chillu), a selector where it changes the character before it
+ * (keptSelector) and the tags of a subdivision flag (TAG_FLAGS). Any other
  * run of tags, which could spell hidden letters, is taken out.
  */
 function visibleChars(chars: string[]): string[] {
@@ -106,7 +128,8 @@ function visibleChars(chars: string[]): string[] {
         continue;
       }
     }
-    if (!TAKEN_OUT.test(char) || (JOINERS.has(char) && shownAfter(kept[kept.length - 1]))) kept.push(char);
+    const before = kept[kept.length - 1];
+    if (!TAKEN_OUT.test(char) || (JOINERS.has(char) && shownAfter(before)) || (SELECTORS.has(char) && keptSelector(char, before, chars[i + 1]))) kept.push(char);
   }
   return kept;
 }

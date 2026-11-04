@@ -38,7 +38,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
-import { DataRoomError, type DataStore, needData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -137,6 +137,21 @@ async function needContacts(room: ContactRoom, pairs: { before: Contact | null; 
   if (!room || isOrderRoom(room)) return;
   const grown = pairs.reduce((sum, { before, next }) => sum + Math.max(0, contactBytes(next) - contactBytes(before)), 0);
   if (grown > 0) await needData(room, [{ slot: CONTACTS_SLOT, bytes: grown }]);
+}
+
+/**
+ * Puts the room right after writes needContacts was charged for: gives back
+ * the growth of each one not written (it lost the race, and is charged again
+ * when tried again), and what each one written shrank the record by (a label
+ * taken off). Nothing when the writes are an order's.
+ */
+async function settleContacts(room: ContactRoom, pairs: { before: Contact | null; next: Contact }[], written: boolean[]): Promise<void> {
+  if (!room || isOrderRoom(room)) return;
+  const back = pairs.reduce((sum, { before, next }, i) => {
+    const grown = contactBytes(next) - contactBytes(before);
+    return sum + (written[i] ? Math.max(0, -grown) : Math.max(0, grown));
+  }, 0);
+  if (back > 0) await giveData(room, [{ slot: CONTACTS_SLOT, bytes: back }]);
 }
 
 export const leadsKey = (listId: string) => `nl:store:leads:${listId}`;
@@ -660,9 +675,9 @@ export async function changeLabels(
   let pending = [...new Set(emails)];
   for (let round = 0; round < 3 && pending.length; round += 1) {
     const writes: { email: string; value: string; was: string }[] = [];
+    const sizes: { before: Contact | null; next: Contact }[] = [];
     try {
       const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
-      const sizes: { before: Contact | null; next: Contact }[] = [];
       pending.forEach((email, i) => {
         const raw = Array.isArray(rows) ? rows[i] : null;
         const contact = parseContact(raw);
@@ -692,12 +707,18 @@ export async function changeLabels(
     try {
       written = await casWrite(key, writes);
     } catch (error) {
+      // Its charge is given back only when a read after it shows that none of them landed; unknown stays counted.
+      const landed = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]])
+        .then(([now]) => (Array.isArray(now) && now.length === writes.length ? writes.some((w, i) => now[i] === w.value) : true))
+        .catch(() => true);
+      if (!landed) await settleContacts(room, sizes, writes.map(() => false));
       if (!options.keepWritten) throw error;
       failed = writes.map((w) => w.email);
       failure = error;
       unsure = true;
       break;
     }
+    await settleContacts(room, sizes, written);
     pending = writes.filter((_, i) => !written[i]).map((w) => w.email);
     writes.forEach((w, i) => {
       if (written[i]) changed.push(w.email);

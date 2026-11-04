@@ -10,6 +10,8 @@ type Taken = Removed & { email: string; forms?: number; cleaned?: true };
 type Done = { label: string; change: BulkChange; changed: string[]; taken: Taken[]; words: string };
 /** The field a refusal is about, read from the route's error code (BULK_REFUSALS). */
 type Field = "text" | "label" | "change";
+/** Where a refusal that is about no field is shown: at the end of the form, or next to the Apply or the Undo button pressed. */
+type Place = "form" | "apply" | "undo";
 /** Where focus goes once the screen has changed, so it is never left on something that went away. */
 type Focus = "review" | "undo" | "done" | "title";
 const counted = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
@@ -27,7 +29,8 @@ const DATA_FULL = "Your store has no room left for more records. Delete some you
  * Accessibility (AAA audit, 4 Nov 2026): a button in use is aria-disabled,
  * never disabled, so focus stays on it; when what had focus goes away,
  * focus moves to what came in its place; a refusal is shown and read next
- * to the field it is about, and goes once that field is changed; only one
+ * to the field it is about, and goes once that field is changed; one about
+ * no field, next to the button pressed (focus stays on it); only one
  * short sentence is live, never the whole review or every reason, which stay
  * on the screen; nothing is said twice (no toast beside it).
  */
@@ -42,6 +45,7 @@ export function BulkLabels() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [errorField, setErrorField] = useState<Field | null>(null);
+  const [errorAt, setErrorAt] = useState<Place>("form");
   // The one short sentence a screen reader is told after each step.
   const [live, setLive] = useState("");
 
@@ -57,10 +61,11 @@ export function BulkLabels() {
     ({ review: reviewTitle, undo: undoButton, done: doneLine, title: formTitle })[next].current?.focus();
   });
 
-  async function send(body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  async function send(body: Record<string, unknown>, place: Place = "form"): Promise<Record<string, unknown> | null> {
     setBusy(true);
     setError("");
     setErrorField(null);
+    setErrorAt(place);
     try {
       const response = await fetch("/api/store/contact-labels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer = (await response.json().catch(() => ({}))) as Record<string, unknown>;
@@ -110,7 +115,7 @@ export function BulkLabels() {
 
   async function apply() {
     if (busy || !review || review.changes === 0 || tooLong()) return;
-    const answer = await send({ action: "apply", label, change, text });
+    const answer = await send({ action: "apply", label, change, text }, "apply");
     if (!answer) return;
     const changed = Array.isArray(answer.changed) ? (answer.changed as string[]) : [];
     const taken = (Array.isArray(change === "remove" ? answer.removed : answer.replaced) ? (change === "remove" ? answer.removed : answer.replaced) : []) as Taken[];
@@ -127,7 +132,7 @@ export function BulkLabels() {
     const undoing = opposite(done.change);
     // Each contact sent once: with the form it had when there is one (its address is in it), otherwise by its address alone.
     const withForm = new Set(done.taken.map((entry) => entry.email));
-    const answer = await send({ action: "apply", label: done.label, change: undoing, emails: done.changed.filter((email) => !withForm.has(email)), restore: done.taken });
+    const answer = await send({ action: "apply", label: done.label, change: undoing, emails: done.changed.filter((email) => !withForm.has(email)), restore: done.taken }, "undo");
     if (!answer) return;
     const back = new Set(Array.isArray(answer.changed) ? (answer.changed as string[]) : []);
     const merged = done.taken.filter((entry) => (entry.forms ?? 1) > 1 && back.has(entry.email)).length;
@@ -142,6 +147,8 @@ export function BulkLabels() {
 
   // A refusal about one field is shown and read with that field; any other one at the end of the form.
   const fieldError = (field: Field) => (errorField === field ? error : "");
+  // A refusal about no field, shown in one place only: where the step it answers was asked.
+  const placeError = (place: Place) => (!errorField && errorAt === place ? error : "");
   const describedBy = (hint: string | null, field: Field) => [hint, errorField === field ? `bulk-${field}-error` : null].filter(Boolean).join(" ") || undefined;
 
   return (
@@ -193,7 +200,7 @@ export function BulkLabels() {
           Review the change
         </button>
         <p className="mt-2 text-sm text-danger-text" role="alert">
-          {errorField ? "" : error}
+          {placeError("form")}
         </p>
       </form>
       <p role="status" className="sr-only">
@@ -212,21 +219,29 @@ export function BulkLabels() {
               {review.full ? <li>{`${count(review.full, "contact has", "contacts have")} ${MAX_CONTACT_TAGS} labels already, the most a contact can have: left as they are.`}</li> : null}
               {review.notOnList ? <li>{`${count(review.notOnList, "address is", "addresses are")} not on your list: nothing is added for them.`}</li> : null}
               {review.skipped ? <li>{`${count(review.skipped, "piece", "pieces")} of what you pasted ${review.skipped === 1 ? "is" : "are"} not an email address.`}</li> : null}
-              <li>No automation starts and no email is sent. You can undo this right after.</li>
+              <li>No automation starts and no email is sent. You can undo this until you start another change or leave this page.</li>
             </ul>
-            <button type="button" className="btn btn-primary mt-4" aria-disabled={busy || review.changes === 0 || undefined} onClick={() => void apply()}>
+            <button type="button" className="btn btn-primary mt-4" aria-disabled={busy || review.changes === 0 || undefined} aria-describedby={placeError("apply") ? "bulk-apply-error" : undefined} onClick={() => void apply()}>
               {review.changes === 0 ? "Nothing to change" : `${change === "add" ? "Add it to" : "Take it off"} ${count(review.changes, "contact", "contacts")}`}
             </button>
+            <p id="bulk-apply-error" className="mt-2 text-sm text-danger-text" role="alert">
+              {placeError("apply")}
+            </p>
           </section>
         ) : done ? (
-          <p ref={doneLine} tabIndex={-1} className="flex flex-wrap items-center gap-3 text-sm text-ink">
-            <span id="bulk-done-line">{done.words}</span>
-            {done.changed.length ? (
-              <button type="button" ref={undoButton} className="btn btn-secondary btn-sm" aria-disabled={busy || undefined} aria-describedby="bulk-done-line" onClick={() => void undo()}>
-                Undo
-              </button>
-            ) : null}
-          </p>
+          <div>
+            <p ref={doneLine} tabIndex={-1} className="flex flex-wrap items-center gap-3 text-sm text-ink">
+              <span id="bulk-done-line">{done.words}</span>
+              {done.changed.length ? (
+                <button type="button" ref={undoButton} className="btn btn-secondary btn-sm" aria-disabled={busy || undefined} aria-describedby={placeError("undo") ? "bulk-done-line bulk-undo-error" : "bulk-done-line"} onClick={() => void undo()}>
+                  Undo
+                </button>
+              ) : null}
+            </p>
+            <p id="bulk-undo-error" className="mt-2 text-sm text-danger-text" role="alert">
+              {placeError("undo")}
+            </p>
+          </div>
         ) : note ? (
           <p className="text-sm text-ink">{note}</p>
         ) : null}

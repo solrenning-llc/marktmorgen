@@ -20,6 +20,9 @@ import { guardStoreWrite } from "@/lib/store-request";
  * (lib/bulk-labels.ts).
  */
 
+/** Seconds this route may run (route segment config): 1,000 contacts are read and written 200 at a time, each write tried up to three times, as the contacts import does. */
+export const maxDuration = 60;
+
 const NO_STORE = { "Cache-Control": "private, no-store" };
 
 export async function POST(request: NextRequest) {

@@ -16,7 +16,7 @@ import { BulkLabels } from "@/components/bulk-labels";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { BULK_REFUSALS, BULK_WRITE_BATCH, MAX_BULK_ADDRESSES, MAX_BULK_BODY_BYTES, MAX_BULK_TEXT_BYTES, applySummary, cleanLabel, jsonBytes, labelKey, labelsAfter, opposite, removedFrom, same, undoSummary } from "@/lib/bulk-label-rules";
 import { applyBulk, readBulk } from "@/lib/bulk-labels";
-import type { DataStore } from "@/lib/store-data";
+import { type DataStore, dataKey } from "@/lib/store-data";
 import { StoreFullError } from "@/lib/store-full";
 import { leadsKey, parseContact, stopWriting, upsertContact } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
@@ -254,6 +254,16 @@ async function main(): Promise<void> {
   is("any other run of tags after a black flag is taken out: it could spell hidden letters", [labelOf("\u{1F3F4}" + tagsOfText("vip") + "\u{E007F}"), labelOf("\u{1F3F4}" + tagsOfText("gbeng")), labelOf("VIP" + tagsOfText("gbeng") + "\u{E007F}")], ["\u{1F3F4}", "\u{1F3F4}", "VIP"]);
   is("England and Scotland stay two flags, not one black flag", [same(england, scotland), same(england, "\u{1F3F4}"), labelKey(england) === labelKey(england)], [false, false, true]);
   is("format characters that show or shape text are kept, and compatibility ideographs as typed", ["\u0600١٢", "ᠨ\u180Eᠠ", "\uF900"].map(labelOf), ["\u0600١٢", "ᠨ\u180Eᠠ", "\uF900"]);
+  // Selectors and joiners that change nothing after "VIP": each would be another label that looks the same.
+  const selectorLookAlikes = ["VIP\u034F", "VIP\u180B", "VIP\u180E", "VIP\uFE0F", "VIP\uFE00", "VIP\u{E0100}", "VIP\u{1BCA0}", "V\u{1BCA3}IP"];
+  is("a selector or shorthand control that changes nothing is taken out", selectorLookAlikes.map(labelOf), Array(selectorLookAlikes.length).fill("VIP"));
+  is("so each is the same label, already there to add", selectorLookAlikes.map((typed) => [same("VIP", typed), labelsAfter(["VIP"], cleanLabel(typed), "add")]), Array(selectorLookAlikes.length).fill([true, "same"]));
+  is("and taking off \"VIP\" reaches a contact holding such a form", selectorLookAlikes.map((form) => labelsAfter(["a", form], "VIP", "remove")), Array(selectorLookAlikes.length).fill(["a"]));
+  is(
+    "an emoji keeps its presentation selector, a keycap and a Mongolian letter theirs",
+    ["❤\uFE0F", "❤\uFE0F\u200D🔥", "1\uFE0F\u20E3", "☺\uFE0E", "ᠠ\u180B", "Café\uFE0F"].map(labelOf),
+    ["❤\uFE0F", "❤\uFE0F\u200D🔥", "1\uFE0F\u20E3", "☺\uFE0E", "ᠠ\u180B", "Café"],
+  );
   is("compared whatever the case, width, composition or hidden characters", [same("VIP", "ＶＩＰ"), same("VIP", "vip\u200B"), same("\u2066VIP\u2069", "Vip"), same("Cafe\u0301", "CAFÉ"), same("ｶﾌｪ", "カフェ"), same("VIP", "VIPS"), labelKey("\u200B")], [true, true, true, true, true, false, ""]);
   is("only width is folded: superscripts, circled and Roman numerals, subscripts stay apart", [same("x²", "x2"), same("①", "1"), same("Ⅳ", "IV"), same("H₂O", "H2O")], [false, false, false, false]);
   await put("look@example.com", ["VIP"]);
@@ -272,6 +282,9 @@ async function main(): Promise<void> {
   is("its undo puts the look-alike back exactly", [kanaBack.body.changed, await tagsOf("kana@example.com")], [["kana@example.com"], ["ｶﾌｪ", "x"]]);
   const hide = await post({ action: "apply", label: "VIP", change: "add", text: "hide@example.com" });
   is("a form with a hidden character is replaced too, and found by the send filter's comparison", [await tagsOf("hide@example.com"), hide.body.replaced, (await tagsOf("hide@example.com"))!.some((tag) => sameLabel(tag, "VIP"))], [["b", "VIP"], [{ email: "hide@example.com", label: "VIP", at: 1, cleaned: true }], true]);
+  await put("cgj@example.com", ["VIP\u034F", "c"]);
+  const cgjOff = await post({ action: "apply", label: "VIP", change: "remove", text: "cgj@example.com" });
+  is("through the route, taking off \"VIP\" reaches a contact showing \"VIP\" with a hidden selector", [cgjOff.body.changed, await tagsOf("cgj@example.com")], [["cgj@example.com"], ["c"]]);
   await put("forms@example.com", ["VIP", "b", "VIP\u200B", "ＶＩＰ"]);
   const allForms = await post({ action: "apply", label: "vip", change: "remove", text: "forms@example.com" });
   is("taking it off takes every form of it, and says how many it held", [await tagsOf("forms@example.com"), allForms.body.removed], [["b"], [{ email: "forms@example.com", label: "VIP", at: 0, forms: 3 }]]);
@@ -407,6 +420,39 @@ async function main(): Promise<void> {
   const none = await applyBulk(list, roomAsk(batchEmails.slice(BULK_WRITE_BATCH)), roomOnly).then(() => "written", (error: unknown) => (error instanceof StoreFullError ? "full" : String(error)));
   is("one that can write nothing is refused as a full store, as before", none, "full");
   roomAnswers = null;
+
+  // M2 (final review). What the data room is charged is what was written: a lost race is charged once, a label
+  // taken off gives its bytes back, and a write that failed with nothing landed gives back what it took.
+  const contactsSlot = () => Number(redis.run(["HGET", dataKey(store)!, "ct"]) ?? 0);
+  const roomEmails = Array.from({ length: MAX_BULK_ADDRESSES }, (_, i) => `undo-room${i}@example.com`);
+  await redisPipeline([["HSET", leadsKey(list), ...roomEmails.flatMap((email) => [email, contact([])])]]);
+  const roomBefore = contactsSlot();
+  const roomAdd = await post({ action: "apply", label: roomLabel, change: "add", text: roomEmails.join("\n") });
+  const roomAdded = contactsSlot();
+  const roomUndo = await post({ action: "apply", label: roomAdd.body.label, change: "remove", emails: roomAdd.body.changed });
+  is(
+    "adding a label to 1,000 contacts and undoing it leaves the store's room as it was",
+    [roomAdd.body.changed?.length, roomUndo.body.changed?.length, roomAdded > roomBefore, contactsSlot() - roomBefore],
+    [MAX_BULK_ADDRESSES, MAX_BULK_ADDRESSES, true, 0],
+  );
+  const named = (name: string) => JSON.stringify({ ...JSON.parse(contact([])), name });
+  await redisPipeline([["HSET", leadsKey(list), "calm@example.com", named("a"), "race@example.com", named("a")]]);
+  const calmBefore = contactsSlot();
+  await post({ action: "apply", label: roomLabel, change: "add", text: "calm@example.com" });
+  const oneAdd = contactsSlot() - calmBefore;
+  // Between the read and the write the contact changes, keeping its size: the first write loses, the second lands.
+  beforeWrite = () => redisPipeline([["HSET", leadsKey(list), "race@example.com", named("b")]]);
+  const raceBefore = contactsSlot();
+  const lostRace = await post({ action: "apply", label: roomLabel, change: "add", text: "race@example.com" });
+  is("a write that lost the race and was made on the next try is charged once", [lostRace.body.changed, await tagsOf("race@example.com"), oneAdd > 0, contactsSlot() - raceBefore], [["race@example.com"], [roomLabel], true, oneAdd]);
+  // The write fails and so does the read just after it (casWrite throws); a read after that shows nothing landed.
+  await put("nothing-landed@example.com", []);
+  beforeWrite = async () => {
+    readFails = true;
+  };
+  const failBefore = contactsSlot();
+  const nothingLanded = await post({ action: "apply", label: roomLabel, change: "add", text: "nothing-landed@example.com" });
+  is("a write that failed with nothing landed gives back what it took", [nothingLanded.body.failed, await tagsOf("nothing-landed@example.com"), contactsSlot() - failBefore], [1, [], 0]);
   redis.pipeline = pipeline;
 
   part("The screen");
@@ -424,18 +470,32 @@ async function main(): Promise<void> {
   is("the review's title takes focus when it arrives", screen.includes('id="bulk-review-title" ref={reviewTitle} tabIndex={-1}') && screen.includes('focusNext.current = "review";'), true);
   is("after Apply, focus goes to Undo (or the done line); after Undo, to the form's title", [screen.includes('focusNext.current = changed.length ? "undo" : "done";'), screen.includes("ref={undoButton}"), screen.includes("ref={doneLine} tabIndex={-1}"), screen.includes('focusNext.current = "title";'), html.includes('id="bulk-title" tabindex="-1"')], [true, true, true, true, true]);
   is("focus is moved by refs, after the screen changed", screen.includes("useEffect(() => {") && screen.includes(".current?.focus();"), true);
-  is("Undo says what it undoes", screen.includes('aria-describedby="bulk-done-line"'), true);
+  is("Undo says what it undoes", screen.includes('aria-describedby={placeError("undo") ? "bulk-done-line bulk-undo-error" : "bulk-done-line"}'), true);
+  is(
+    "a refusal of Apply or Undo is shown in an alert next to that button, and only there (3.3.1, 4.1.3)",
+    [
+      screen.includes('send({ action: "apply", label, change, text }, "apply")'),
+      screen.includes('restore: done.taken }, "undo")'),
+      screen.includes('<p id="bulk-apply-error" className="mt-2 text-sm text-danger-text" role="alert">'),
+      screen.includes('<p id="bulk-undo-error" className="mt-2 text-sm text-danger-text" role="alert">'),
+      screen.includes('aria-describedby={placeError("apply") ? "bulk-apply-error" : undefined}'),
+      screen.includes('const placeError = (place: Place) => (!errorField && errorAt === place ? error : "");'),
+      (screen.match(/role="status"/g) ?? []).length,
+    ],
+    [true, true, true, true, true, true, 1],
+  );
   is("a refusal is tied to its field: text, label or the choice (3.3.1)", ['none: "text"', 'many: "text"', 'label: "label"', 'change: "change"', 'aria-invalid={errorField === "text" || undefined}', 'aria-invalid={errorField === "label" || undefined}', '`bulk-${field}-error`'].every((piece) => screen.includes(piece)), true);
-  is("shown next to the field, the end of the form keeps only the others", [html.includes('id="bulk-text-error" class="field-error mt-1 block" role="alert"'), html.includes('id="bulk-label-error"'), html.includes('id="bulk-change-error"'), screen.includes('{errorField ? "" : error}')], [true, true, true, true]);
+  is("shown next to the field, the end of the form keeps only the others", [html.includes('id="bulk-text-error" class="field-error mt-1 block" role="alert"'), html.includes('id="bulk-label-error"'), html.includes('id="bulk-change-error"'), screen.includes('{placeError("form")}')], [true, true, true, true]);
   is("a refusal goes once its field is changed (3.3.1)", [screen.includes("const edit = <T,>(set: (value: T) => void, field: Field) => (value: T) => {"), screen.includes("if (errorField === field) {"), ['edit(setText, "text")', 'edit(setLabel, "label")', 'edit(setChange, "change")'].every((piece) => screen.includes(piece))], [true, true, true]);
   is("the live line gets only a short sentence after applying and undoing; every reason stays on the screen", [(screen.match(/setLive\(summary\.short\)/g) ?? []).length, screen.includes("setLive(summary.words)"), screen.includes("setNote(summary.words);")], [2, false, true]);
   is("nothing is said twice: no toast beside the live line (4.1.3)", [screen.includes("toast("), screen.includes("@/components/toast")], [false, false]);
   is("a full store is said in plain words (3.1.5)", [screen.includes("data room"), screen.includes("Your store has no room left for more records. Delete some you no longer need first.")], [false, true]);
-  is("the review lists how many, and that nothing is sent", screen.includes("will ${change === \"add\" ? \"get\" : \"lose\"} the label") && screen.includes("No automation starts and no email is sent. You can undo this right after."), true);
+  is("the review lists how many, and that nothing is sent", screen.includes("will ${change === \"add\" ? \"get\" : \"lose\"} the label") && screen.includes("No automation starts and no email is sent. You can undo this until you start another change or leave this page."), true);
   is("anything typed after a review asks for a new one", screen.includes("setReview(null);"), true);
   is("the undo sends back exactly what changed, with each label as it was", screen.includes("change: undoing, emails: done.changed.filter((email) => !withForm.has(email)), restore: done.taken") && screen.includes("const withForm = new Set(done.taken.map((entry) => entry.email));") && screen.includes("const undoing = opposite(done.change);"), true);
   is("and says what the route answered, kept on the screen", screen.includes("undoSummary(done.changed.length,") && screen.includes("setNote(summary.words);") && !screen.includes('toast("Undone. Every contact is as it was.")'), true);
   is("the server code never reaches the browser", !screen.includes('from "@/lib/bulk-labels"') && !readFileSync("lib/bulk-label-rules.ts", "utf8").includes('from "@/lib/contacts"'), true);
+  is("the route may run as long as the contacts import does", [/^export const maxDuration = 60;$/m.test(readFileSync("app/api/store/contact-labels/route.ts", "utf8")), /^export const maxDuration = 60;$/m.test(readFileSync("app/api/store/import/route.ts", "utf8"))], [true, true]);
   is("nothing here starts a workflow", !readFileSync("lib/bulk-labels.ts", "utf8").includes('from "@/lib/flows"') && !readFileSync("app/api/store/contact-labels/route.ts", "utf8").includes("enroll"), true);
   is("reached from the contacts import, for those who may use it", readFileSync("app/studio/import/page.tsx", "utf8").includes('kind === "contacts" && can(access.role, "send")') && readFileSync("app/studio/labels/page.tsx", "utf8").includes('"send");'), true);
 

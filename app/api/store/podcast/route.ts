@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
         // new, because the name gets its random ending only once it is stored (app/api/store/file, the vault), so
         // "this request's own upload" cannot be proved here. A file left behind stays, never deleted from under a
         // record; its cost is bounded where it was let in: the door reserved its full size from the store's monthly
-        // upload room (reserveStoreUpload, never refunded) and the store's storage brake counts it (storageUsed).
+        // upload room (reserveStoreUpload, never refunded) and the store's storage brake counts it (lib/storage-quota.ts).
         return fail(result.reason);
       }
       await savePodcast(result.podcast);

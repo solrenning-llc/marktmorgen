@@ -98,6 +98,9 @@ export function readCallLengths(
   call: { setup: Pick<CallSetup, "kind" | "seats" | "weekly">; currency: Currency; packaged: boolean; deposit: number | null; team: boolean },
 ): { ok: true; lengths: CallLength[] } | { ok: false; problem: LengthsProblem; index?: number; minutes?: number } {
   if (!Array.isArray(raw) || raw.length === 0) return { ok: false, problem: "none" };
+  // A dated call's lengths are its sessions' own (lib/call-setup.ts, SESSION_LENGTHS), never a list kept here: refused,
+  // so nothing can say "15-minute call" for sessions of two hours. A group with weekly hours keeps its one length.
+  if (call.setup.kind === "live" && raw.length > 0) return { ok: false, problem: "kind" };
   if (raw.length > 1 && (call.setup.kind !== "weekly" || call.setup.seats !== 1)) return { ok: false, problem: "kind" };
   if (raw.length > MAX_CALL_LENGTHS) return { ok: false, problem: "too_many" };
   if (raw.length > 1 && call.packaged) return { ok: false, problem: "package" };

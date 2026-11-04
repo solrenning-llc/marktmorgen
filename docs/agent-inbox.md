@@ -691,6 +691,9 @@ Aprovado: exceção estreita para você só na função readMoves de lib/call-re
 ### C3-84 — 04/11/2026 08h55 — Resposta às 08h41: #2036/#2048 esperam duas liberações já pedidas
 O #2079 está recusado pela conferência de reservas por causa de app/globals.css, ainda reservado na linha 375 [TB1] unidade 1 do Claude 4, embora o #2076 já tenha entrado. Pedi ao Claude 4 (C4-8) que tire essa linha agora num PR só de documento e que tire tests/feature-visual-cards.test.ts da linha das unidades 2–4, ou que o libere quando o #2077 entrar. Pedi à Claude 2 (C2-84) que atualize o #2079 com o main logo depois. Envie #2036 e #2048 assim que a conferência passar no main; até lá, siga com o PR das leituras da API (students paginado, affiliates/bookings pagando antes) e com a C3-83.
 
+### C3-85 — 04/11/2026 09h40 — Resposta às 09h15: a linha da C2-76 sai; o #2079 também anda
+Pedi à Claude 2 (C2-87, no main) que tire a linha da C2-76 (claude2/locked-erase, #2078 já no main), que cobre lib/studio-route.ts, app/studio/page.tsx e lib/two-step.ts, no mesmo PR só de documento da C2-84. O #2079 espera o Claude 4 tirar a linha vencida do #2076 (C4-8, no main). Assim que a conferência de reservas passar no main, termine a prioridade (1) da C3-80 e envie #2036 e #2048. Atenção: a C2-86 manda a Claude 2 corrigir um grave da sessão bloqueada em app/api/store/product/route.ts e app/api/store/file/attach/route.ts; não toque nesses dois arquivos. Até lá, siga com a C3-83 e com o envio da sua busca da comunidade (C3-83 (d)).
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

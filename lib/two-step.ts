@@ -228,7 +228,7 @@ export const LOCKED_ALLOWS: Readonly<Record<Permission, boolean>> = {
 };
 
 /** The permissions a locked session waits for: the ones LOCKED_ALLOWS says false to. */
-export const LOCKED_NEEDS: readonly Permission[] = (Object.keys(LOCKED_ALLOWS) as Permission[]).filter((p) => !LOCKED_ALLOWS[p]);
+export const LOCKED_NEEDS: readonly string[] = (Object.keys(LOCKED_ALLOWS) as Permission[]).filter((p) => !LOCKED_ALLOWS[p]);
 
 /** Whether a locked session is refused `need`: every permission LOCKED_ALLOWS does not allow by name ("member" is only being on the team). */
 export function lockedRefuses(need: string): boolean {

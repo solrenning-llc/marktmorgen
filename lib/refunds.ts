@@ -27,8 +27,19 @@
  * under_review, the warning_ stages) or won by the creator closes nothing:
  * only the final "lost" does. A partial refund keeps access, because the
  * creator chose to keep part of the price, and the buyer keeps what it paid
- * for; a dispute lost for less than the charge (with what was refunded) is
- * read the same way, as a partial refund.
+ * for. A lost dispute closes whatever its amount: Stripe says a dispute's
+ * amount is "usually the amount of the charge, but it can differ (usually
+ * because of currency fluctuation or because only part of the order is
+ * disputed)" (API reference, the Dispute object's `amount`, version
+ * 2026-09-30, read 4 November 2026), and nothing on the dispute or the
+ * charge tells the two apart. Reading a lost dispute for less than the
+ * charge as partial would leave a buyer whose bank took the whole payment
+ * back through an exchange rate with everything (inbox C4-9); no tolerance
+ * is invented, so a lost dispute is read as the whole payment taken back.
+ * The owner confirmed this rule on 4 November 2026 (inbox C4-13): a dispute
+ * closed as lost closes the whole order, whatever its amount, because the
+ * bank gave the money back to the buyer and Stripe does not say which part
+ * of the order was disputed.
  *
  * On the current API Stripe does not send a charge's dispute with it, so
  * refundedInFull() alone sees refunds only. Disputes are seen only through
@@ -61,22 +72,10 @@ type ChargeLike = {
   dispute?: unknown;
 };
 
-/**
- * Whether what was lost to disputes, with what was refunded, covers the
- * whole charge. A lost amount Stripe did not give counts as the whole.
- */
-function coversCharge(charge: ChargeLike, lost: number | null): boolean {
-  const amount = typeof charge.amount === "number" ? charge.amount : 0;
-  if (lost === null || amount <= 0) return true;
-  const back = typeof charge.amount_refunded === "number" ? charge.amount_refunded : 0;
-  return lost + back >= amount;
-}
-
-/** A dispute lost for the whole charge, as lostDisputesSince() writes it on the charge. */
+/** A dispute lost on this charge, as lostDisputesSince() writes it on the charge: the whole payment taken back, whatever its amount (above). */
 function lostOnCharge(charge: ChargeLike): boolean {
-  const dispute = charge.dispute as { status?: unknown; amount?: unknown } | null | undefined;
-  if (charge.disputed !== true || !dispute || typeof dispute !== "object" || dispute.status !== "lost") return false;
-  return coversCharge(charge, typeof dispute.amount === "number" ? dispute.amount : null);
+  const dispute = charge.dispute as { status?: unknown } | null | undefined;
+  return charge.disputed === true && !!dispute && typeof dispute === "object" && dispute.status === "lost";
 }
 
 function chargeRefunded(charge: ChargeLike): boolean {
@@ -114,9 +113,8 @@ const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
 
 /**
  * Whether the bank took this payment back from the creator for good: a
- * dispute on its charge that Stripe has closed as lost, for the whole charge
- * with what was refunded (a partial one keeps access, as a partial refund
- * does). Takes what
+ * dispute on its charge that Stripe has closed as lost, whatever its amount
+ * (the owner's rule of 4 November 2026; the header says why). Takes what
  * refundedInFull() takes. Stripe marks a disputed charge with `disputed` but
  * no longer sends the dispute with it, and nothing can expand it, so only
  * for a charge marked disputed (rare) is Stripe asked for that charge's
@@ -131,11 +129,8 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
   const id = typeof charge.id === "string" ? charge.id : "";
   if (!CHARGE_ID.test(id)) return false;
   const listed = await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as { status?: unknown; amount?: unknown }[]) : [];
-  const lost = rows.filter((row) => row && row.status === "lost");
-  if (!lost.length) return false;
-  const amounts = lost.map((row) => (typeof row.amount === "number" ? row.amount : null));
-  return coversCharge(charge, amounts.includes(null) ? null : (amounts as number[]).reduce((a, b) => a + b, 0));
+  const rows = Array.isArray(listed.data) ? (listed.data as { status?: unknown }[]) : [];
+  return rows.some((row) => !!row && row.status === "lost");
 }
 
 /**
@@ -169,7 +164,7 @@ export async function givenBack(account: string | null | undefined, payment: unk
  */
 export type GivenBackRow = Record<string, unknown>;
 
-/** Whether one row of a job's reading takes its sale back: a full refund going through, or a dispute lost for the whole charge. */
+/** Whether one row of a job's reading takes its sale back: a full refund going through, or a dispute lost. */
 export function rowGivesBack(row: GivenBackRow): boolean {
   if (row.object === "dispute") return row.status === "lost" && refundedInFull(row.charge);
   if (row.status !== "succeeded" && row.status !== "pending") return false;
@@ -177,23 +172,36 @@ export function rowGivesBack(row: GivenBackRow): boolean {
 }
 
 /**
+ * The most pages of closing events one job's run reads for one store: each
+ * a GET /events of up to 100, every five minutes, by the three jobs that
+ * take things back (lib/licence-keys.ts, lib/call-meetings.ts,
+ * lib/review-proof.ts). No other call: the dispute in the event says all a
+ * row needs.
+ */
+export const LOST_DISPUTE_PAGES = 3;
+
+/**
  * The disputes on the creator's account that Stripe closed as lost since
+ * (each the whole order taken back, whatever its amount: the owner's rule of
+ * 4 November 2026, in the header)
  * `since` (seconds), read from the closing events, which Stripe keeps thirty
  * days: each as a row rowGivesBack() takes, `id` the event's, `created` the
  * time it closed, `payment_intent` the payment it took back, `charge` the
- * charge read for its amount (one read per lost dispute, which is rare).
- * `complete` is false when there were more than the pages read, so the
+ * charge's id marked lost. `complete` is false when there were more than the
+ * pages read, or the job's `deadline` (milliseconds) came first, so the
  * caller keeps its place and reads them again next time. Throws when Stripe
  * cannot be asked; the jobs use lostDisputesOrRetry().
  */
 export async function lostDisputesSince(
   account: string,
   since: number,
-  pages = 3,
+  deadline = Number.POSITIVE_INFINITY,
+  pages = LOST_DISPUTE_PAGES,
 ): Promise<{ rows: GivenBackRow[]; complete: boolean }> {
   const found: GivenBackRow[] = [];
   let after = "";
-  for (let page = 0; page < pages; page += 1) {
+  for (let page = 0; page < Math.min(pages, LOST_DISPUTE_PAGES); page += 1) {
+    if (Date.now() >= deadline) return { rows: found, complete: false };
     const query = new URLSearchParams({ type: "charge.dispute.closed", limit: "100", "created[gte]": String(Math.max(0, Math.floor(since))) });
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/events?${query}`);
@@ -203,20 +211,13 @@ export async function lostDisputesSince(
       if (typeof event.id !== "string" || !dispute || dispute.status !== "lost") continue;
       const chargeId = idOf(dispute.charge);
       if (!CHARGE_ID.test(chargeId)) continue;
-      const charge = await onAccount("GET", account, `/charges/${encodeURIComponent(chargeId)}`);
       found.push({
         object: "dispute",
         id: event.id,
         status: "lost",
         created: typeof event.created === "number" ? event.created : 0,
         payment_intent: idOf(dispute.payment_intent) || null,
-        charge: {
-          ...charge,
-          object: "charge",
-          id: chargeId,
-          disputed: true,
-          dispute: { status: "lost", ...(typeof dispute.amount === "number" ? { amount: dispute.amount } : {}) },
-        },
+        charge: { object: "charge", id: chargeId, disputed: true, dispute: { status: "lost" } },
       });
     }
     const last = events[events.length - 1];
@@ -233,9 +234,13 @@ export async function lostDisputesSince(
  * place to read the disputes again next run. Stripe keeps events thirty
  * days: a job down longer than that misses lost disputes (not refunds).
  */
-export async function lostDisputesOrRetry(account: string, since: number): Promise<{ rows: GivenBackRow[]; complete: boolean }> {
+export async function lostDisputesOrRetry(
+  account: string,
+  since: number,
+  deadline = Number.POSITIVE_INFINITY,
+): Promise<{ rows: GivenBackRow[]; complete: boolean }> {
   try {
-    return await lostDisputesSince(account, since);
+    return await lostDisputesSince(account, since, deadline);
   } catch (error) {
     console.error("reading the disputes closed as lost failed", error);
     return { rows: [], complete: false };

@@ -94,7 +94,11 @@ async function main(): Promise<void> {
   const stringMoves = await post("sam", { action: "pipeline", pipeline: { ...workshops, stages: workshops.stages.filter((st) => st.id !== "wnew01") }, moves: "lead00" });
   is("a removed stage's deals sent by one stage for all (a string) into a pipeline they cannot change: refused", stringMoves.status, 403);
   is("and the deal did not move", (await post("owner", { action: "deal", version: await versionOf(ownerDeal), deal: { id: ownerDeal, title: "Ten seats", email: "", cents: 50_000, stage: "wnew01", note: "" } })).status, 200);
-  is("a deal that is not there, or cannot be read, is never removed by someone limited", (await post("sam", { action: "undeal", id: "zzzzzzzzzz" })).status, 403);
+  const dealsKeyOf = `nl:crm:deals:${statsId}`;
+  await redisPipeline([["HSET", dealsKeyOf, "unread0001", "{not json"]]);
+  const unreadRemoval = await post("sam", { action: "undeal", id: "unread0001" });
+  is("a deal that is not there, or cannot be read, is never removed by someone limited", [(await post("sam", { action: "undeal", id: "zzzzzzzzzz" })).status, unreadRemoval.status, (await redisPipeline([["HGET", dealsKeyOf, "unread0001"]]))[0]], [403, 403, "{not json"]);
+  await redisPipeline([["HDEL", dealsKeyOf, "unread0001"]]);
   const roomOf = async () => Number((await redisPipeline([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
   const roomBefore = await roomOf();
   await moveMemberships("sam@example.com", "sam2@example.com");

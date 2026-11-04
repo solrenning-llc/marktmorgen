@@ -5,6 +5,7 @@
  * lib/pipeline-access.ts, lib/team.ts, components/pipeline-access-editor.tsx).
  * Each check here failed before its fix.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST as CRM } from "@/app/api/store/crm/route";
@@ -328,6 +329,67 @@ async function main(): Promise<void> {
 
   part("Round 7: a logged access change names a real address");
   is("anything else is not read as one, and the line's own words are shown", [parseAccessLog({ email: "not an address", one: true, changes: [] }), parseAccessLog({ email: "sam@example.com", one: true, changes: [] })], [null, { email: "sam@example.com", one: true, changes: [] }]);
+
+  part("Round 8: the older stages request writes only the pipeline it checked");
+  const lineUp = await readPipelines(statsId);
+  is("(two pipelines or more to reorder)", lineUp.length >= 2, true);
+  const [checked, other] = lineUp;
+  await writePipelineAccess(statsId, "sam@example.com", { [other.id]: "none" }, store);
+  const swapped = JSON.stringify([other, checked, ...lineUp.slice(2)]);
+  const freshStages = (prefix: string) => [{ id: `${prefix}new01`, name: "Taken", kind: "open" }, { id: `${prefix}won01`, name: "Won", kind: "won" }, { id: `${prefix}lst01`, name: "Lost", kind: "lost" }];
+  // The owner reorders the pipelines, putting one Sam may not see first, after the route checked the first one and before the write reads them.
+  const reorderOnSecondRead = () => {
+    let reads = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "GET" && c[1] === pipesKey) && ++reads === 2) await real([["SET", pipesKey, swapped]]);
+      return real(commands);
+    }) as typeof redis.pipeline;
+  };
+  reorderOnSecondRead();
+  const racedStages = await crm("sam@example.com", { action: "stages", stages: freshStages("q") });
+  redis.pipeline = real;
+  const afterRace = await readPipelines(statsId);
+  is("Sam's stages are refused as changed meanwhile, and the pipeline now first keeps its own", [racedStages.status, racedStages.body.error, afterRace[0].id, JSON.stringify(afterRace[0].stages) === JSON.stringify(other.stages), JSON.stringify(afterRace[1].stages) === JSON.stringify(checked.stages)], [409, "crm_conflict", other.id, true, true]);
+  // The owner's own request is held to the pipeline it read the same way.
+  await redisPipeline([["SET", pipesKey, JSON.stringify(lineUp)]]);
+  reorderOnSecondRead();
+  const ownerRaced = await crm(owner, { action: "stages", stages: freshStages("r") });
+  redis.pipeline = real;
+  is("so is the owner's: nothing is written into a pipeline that was not the one read as first", [ownerRaced.status, ownerRaced.body.error, JSON.stringify((await readPipelines(statsId))[0].stages) === JSON.stringify(other.stages)], [409, "crm_conflict", true]);
+  await redisPipeline([["SET", pipesKey, JSON.stringify(lineUp)]]);
+  const calm = await crm("sam@example.com", { action: "stages", stages: [...checked.stages] });
+  is("with nothing in between, the first pipeline's stages are saved", [calm.status, (await readPipelines(statsId))[0].id], [200, checked.id]);
+  is("the route checks, and writeStages writes, the same pipeline", readFileSync("app/api/store/crm/route.ts", "utf8").includes("await writeStages(statsId, stages, store, first)"), true);
+
+  part("Round 8: an access record that cannot be read adds no pipeline either");
+  // One pipeline only, so the plan has room for another and only the access is in the way.
+  await redisPipeline([["SET", pipesKey, JSON.stringify([checked])], ["HSET", `nl:crm:pacc:${statsId}`, "sam@example.com", "{not json"]]);
+  const pipesBefore = String((await redisPipeline([["GET", pipesKey]]))[0]);
+  await writePipelineAccess(statsId, "sam@example.com", {}, store);
+  is("(with access that can be read, Sam could add it)", (await crm("sam@example.com", { action: "pipeline", pipeline: { id: "seen01", name: "Seen", stages: freshStages("s") }, moves: {} })).status, 200);
+  await redisPipeline([["SET", pipesKey, pipesBefore], ["HSET", `nl:crm:pacc:${statsId}`, "sam@example.com", "{not json"]]);
+  const addedBlind = await crm("sam@example.com", { action: "pipeline", pipeline: { id: "blind1", name: "Blind", stages: freshStages("b") }, moves: {} });
+  is("refused as access, and nothing added", [addedBlind.status, addedBlind.body.error, String((await redisPipeline([["GET", pipesKey]]))[0]) === pipesBefore], [403, "pipeline_access", true]);
+  await writePipelineAccess(statsId, "sam@example.com", {}, store);
+  await redisPipeline([["SET", pipesKey, JSON.stringify(lineUp)]]);
+
+  part("Round 8: a session let in without its second step takes nothing away here");
+  const lockedSession = await openSession(owner);
+  const lockedHash = createHash("sha256").update(`nimbus-2fa-locked:${lockedSession}`).digest("hex").slice(0, 40);
+  await redisPipeline([["SET", `nl:2fa:locked:${lockedHash}`, String(Date.now() + 86_400_000)]]);
+  const asLocked = async (body: Record<string, unknown>) => {
+    const response = await CRM(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${lockedSession}` }, body: JSON.stringify(body) }));
+    return { status: response.status, body: (await response.json()) as Reply };
+  };
+  const keptDeal = (await crm(owner, { action: "deal", deal: { title: "Kept", email: "", cents: 1, stage: checked.stages[0].id, note: "" } })).body.deal!.id;
+  const keptPipes = String((await redisPipeline([["GET", pipesKey]]))[0]);
+  const keptFields = (await redisPipeline([["GET", `nl:crm:fields:${statsId}`]]))[0];
+  const tried = [await asLocked({ action: "fields", fields: [] }), await asLocked({ action: "unpipeline", id: other.id, moveTo: checked.stages[0].id }), await asLocked({ action: "undeal", id: keptDeal })];
+  is("saving the fields, removing a pipeline and removing a deal are refused as locked", tried.map((t) => [t.status, t.body.error]), [[403, "locked"], [403, "locked"], [403, "locked"]]);
+  is("and nothing was taken away", [(await redisPipeline([["HGET", dealsKey, keptDeal]]))[0] !== null, String((await redisPipeline([["GET", pipesKey]]))[0]) === keptPipes, (await redisPipeline([["GET", `nl:crm:fields:${statsId}`]]))[0] === keptFields], [true, true, true]);
+  const stillOpen = await asLocked({ action: "deal", version: await versionOf(keptDeal), deal: { id: keptDeal, title: "Kept, renamed" } });
+  is("changing a deal is not", [stillOpen.status, stillOpen.body.ok], [200, true]);
+  is("a full session still removes it", [(await crm(owner, { action: "undeal", id: keptDeal })).status], [200]);
 
   done();
 }

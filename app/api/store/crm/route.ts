@@ -1,6 +1,9 @@
 import type { NextRequest } from "next/server";
 import { StoreFullError } from "@/lib/store-full";
 import { guardStoreWrite } from "@/lib/store-request";
+import { refusedJson } from "@/lib/studio-route";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { lockedUntil } from "@/lib/two-step";
 import { ensureStatsId } from "@/lib/store";
 import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
 import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
@@ -18,6 +21,8 @@ const MAX_BODY_BYTES = 20_000;
  * for whoever may read orders with buyers' addresses ("orders"):
  *
  *   { action: "fields", fields }               saves the fields; a field taken away takes its answers
+ *                                              ("fields", "unpipeline" and "undeal" wait in a session let in
+ *                                              without its second step: 403 locked, lib/two-step.ts)
  *   { action: "value", person, field, value }   one person's answer to one field; "" clears it
  *   { action: "stages", stages }               saves the first pipeline's stages (older studio pages)
  *   { action: "pipeline", pipeline, moves }     saves one pipeline, or adds one with a new id;
@@ -35,6 +40,9 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { body } = guarded;
   const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // What takes something away for good (a field with every person's answers, a pipeline, a deal) waits while
+  // the session was let in without its second step (lib/two-step.ts), as the other deleting routes do.
+  if ((body.action === "fields" || body.action === "unpipeline" || body.action === "undeal") && (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0) return refusedJson("locked");
   try {
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return refuse("unavailable", 503);
@@ -60,10 +68,10 @@ export async function POST(request: NextRequest) {
       return ok ? Response.json({ ok: true }) : refuse("value");
     }
     if (body.action === "stages") {
-      // Whatever pipeline is first now is the one these stages replace: that one is checked, and the write
-      // refuses (crm_conflict) when another became first since this read.
-      const first = restricted ? ((await readPipelines(statsId))[0]?.id ?? FIRST_PIPELINE_ID) : undefined;
-      if (first !== undefined && !mayEdit(first)) return noAccess();
+      // Whatever pipeline is first now is the one these stages replace: that one is checked, and writeStages
+      // writes that one only, refusing (crm_conflict) when another became first since this read.
+      const first = (await readPipelines(statsId))[0]?.id ?? FIRST_PIPELINE_ID;
+      if (restricted && !mayEdit(first)) return noAccess();
       const stages = parseStages(body.stages);
       if (!stages) return refuse("stages");
       return Response.json({ ok: true, stages: await writeStages(statsId, stages, store, first) });
@@ -75,6 +83,8 @@ export async function POST(request: NextRequest) {
       // Removing a pipeline sends every deal in it to the one stage the creator chose.
       const moves = removing ? moveTo : body.moves;
       if (restricted) {
+        // A record that could not be read opens nothing, adding a new pipeline included.
+        if (access === null) return noAccess();
         const pipelines = await readPipelines(statsId);
         const sent = body.pipeline && typeof body.pipeline === "object" ? (body.pipeline as { id?: unknown }).id : undefined;
         // Removing one that is not there is refused as access, as one they may not change is: the answer never tells which ids exist.

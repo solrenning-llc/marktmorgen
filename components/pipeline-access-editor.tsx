@@ -17,7 +17,7 @@ function currentOf(map: AccessMap | null | undefined, pipelineId: string): Pipel
  * Who on the team may see and change each sales pipeline (639 [GL7](7),
  * unit 3), on the team page. One choice per teammate and pipeline: can
  * change (as before), can only see, or no access. Admins and the owner are
- * never restricted, and the page says so. A teammate's choices are saved
+ * never restricted, and the page says so for the roles the team has. A teammate's choices are saved
  * together with their own Save button, never on each change of a choice
  * (moving through a choice with the arrow keys changes nothing until Save),
  * and what happened is said inside that teammate's group. A Save sends the
@@ -140,7 +140,7 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
           })}
         </ul>
       ) : (
-        <p className="mt-3 text-sm text-ink-soft">Nobody on your team can be restricted yet: only Support people can. Admins and you see and change every pipeline, and Editors do not open Deals.</p>
+        <p className="mt-3 text-sm text-ink-soft">Nobody on your team can be restricted yet: only Support people can.</p>
       )}
     </div>
   );

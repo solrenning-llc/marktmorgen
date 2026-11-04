@@ -139,7 +139,10 @@ async function main(): Promise<void> {
   part("On the team page");
   const page = readFileSync("app/studio/team/page.tsx", "utf8");
   is("a named section, only roles that open Deals offered, never an Admin", page.includes('aria-labelledby="pipeline-access-title"') && page.includes('(m.role === "editor" || m.role === "support") && can(m.role, "orders")'), true);
-  is("that Admins and the owner are never restricted is said above the editor, whether it shows, has nobody to restrict or cannot be read", page.indexOf("Admins and you always see and change every pipeline") > page.indexOf('id="pipeline-access-title"') && page.indexOf("Admins and you always see and change every pipeline") < page.indexOf("{pipelines && access ? ("), true);
+  const neverRestricted = '${hasAdmin ? "Admins and you always see" : "You always see"} and change every pipeline${hasEditor ? "; Editors do not open Deals at all" : ""}.';
+  is("that the owner (and Admins, when the team has some) is never restricted is said above the editor, whether it shows, has nobody to restrict or cannot be read", page.indexOf(neverRestricted) > page.indexOf('id="pipeline-access-title"') && page.indexOf(neverRestricted) < page.indexOf("{pipelines && access ? ("), true);
+  is("Admins and Editors are named only when the team has them", [page.includes('const hasAdmin = team.members.some((m) => m.role === "admin");'), page.includes('const hasEditor = team.members.some((m) => m.role === "editor");')], [true, true]);
+  is("and the editor, with nobody to restrict, does not say it again", renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [], pipelines: [], initial: {} })).includes("Admins"), false);
   is("said when it cannot be read", page.includes("Your pipelines or your team&apos;s access could not be read just now."), true);
 
   done();

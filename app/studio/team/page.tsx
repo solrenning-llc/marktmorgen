@@ -52,6 +52,9 @@ export default async function StudioTeamPage({
   // Only a role that opens Deals and is not Admin can be restricted (639 [GL7](7)): the owner and Admins always see and change every pipeline, and a role without Deals (Editor) sees none.
   // A pipeline-access line in the log names each pipeline as it is named now (accessLogNamer).
   const nameOf = accessLogNamer(pipelines);
+  // Who is never restricted is said only for the roles this team has: the owner always, Admins and Editors when there are some.
+  const hasAdmin = team.members.some((m) => m.role === "admin");
+  const hasEditor = team.members.some((m) => m.role === "editor");
   const restrictable = team.members.flatMap((m) => ((m.role === "editor" || m.role === "support") && can(m.role, "orders") ? [{ email: m.email, role: m.role }] : []));
 
   return (
@@ -85,7 +88,8 @@ export default async function StudioTeamPage({
               Who sees each sales pipeline
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-ink-soft">
-              Under Deals, each Support person can change every pipeline unless you choose otherwise here. Can only see shows its deals without changing them; No access hides it. Admins and you always see and change every pipeline; Editors do not open Deals at all.
+              Under Deals, each Support person can change every pipeline unless you choose otherwise here. Can only see shows its deals without changing them; No access hides it.
+              {` ${hasAdmin ? "Admins and you always see" : "You always see"} and change every pipeline${hasEditor ? "; Editors do not open Deals at all" : ""}.`}
             </p>
             {pipelines && access ? (
               <PipelineAccessEditor members={restrictable} pipelines={pipelines.map(({ id, name }) => ({ id, name }))} initial={Object.fromEntries(restrictable.map((m) => [m.email, access[m.email] === undefined ? {} : access[m.email]]))} />

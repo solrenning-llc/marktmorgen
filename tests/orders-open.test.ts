@@ -310,7 +310,8 @@ test("purchases take their listings, pre-orders and what was brought over before
     payment_intent: { id: `pi_test${id.padEnd(10, "0")}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
   });
   sessions = [
-    // A guide with a bundle of two inside and a box checked at checkout: four listings.
+    // A guide with a bundle of two inside and a box checked at checkout: two listings, the guide and the one checked. The bundle's
+    // two are read only when the buyer asks to see them (lib/buyer-orders.ts, bundleFor; C3-80).
     paid("a", { product: ids.Guide, bundle: `${ids.Templates},${ids.Checklist}`, bump: ids.Workbook }),
     // A pre-order: its listing, and its entry and when it ships.
     paid("b", { product: ids.Planner, preorder: "1" }),
@@ -319,8 +320,8 @@ test("purchases take their listings, pre-orders and what was brought over before
   const meter = new OrdersMeter(store);
   const purchases = await purchasesFor(store, BUYER, meter);
   assert.ok(purchases.length >= 3, String(purchases.length));
-  // Six listings (the Guide once, though bought and brought over), the pre-order's reads, and the two entries brought over.
-  const commands = 6 * ORDERS_LISTING_COMMANDS + ORDERS_PREORDER_COMMANDS + ORDERS_IMPORTED_COMMANDS + 2 * ORDERS_IMPORTED_ENTRY_COMMANDS;
+  // Four listings (the Guide once, though bought and brought over), the pre-order's reads, and the two entries brought over.
+  const commands = 4 * ORDERS_LISTING_COMMANDS + ORDERS_PREORDER_COMMANDS + ORDERS_IMPORTED_COMMANDS + 2 * ORDERS_IMPORTED_ENTRY_COMMANDS;
   assert.equal(meter.taken, Math.ceil(commands / ORDERS_UNIT_COMMANDS));
   // The store with no room reads none of them.
   const refused = { ...store, period: null };

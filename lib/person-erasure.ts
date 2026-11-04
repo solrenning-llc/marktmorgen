@@ -119,14 +119,14 @@ export const ERASERS: Eraser[] = [
   { module: "lib/crm.ts", run: (s) => forgetCrmPerson(s.statsId, s.person, s.email, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
-  { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
+  { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person, s.store) },
   { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email) },
   {
     module: "lib/learn.ts",
     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),
   },
   { module: "lib/course-finish.ts", run: (s) => forgetFinishPerson(s.courses.map((c) => c.courseId), s.email) },
-  { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner) },
+  { module: "lib/quiz.ts", run: (s) => forgetQuizPerson(s.courses.map((c) => ({ courseId: c.courseId, lessonIds: c.lessonIds })), s.learner, s.store) },
   {
     module: "lib/assignment.ts",
     run: async (s, files) => {
@@ -148,11 +148,11 @@ export const ERASERS: Eraser[] = [
       return records;
     },
   },
-  { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds) : Promise.resolve(0)) },
-  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
+  { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds, s.store) : Promise.resolve(0)) },
+  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email, s.store) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
   { module: "lib/affiliate-leads.ts", run: (s) => forgetLeadPerson(s.store, s.email) },
-  { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email) },
+  { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email, s.store) },
   { module: "lib/podcast-access.ts", run: (s) => forgetPodcastPerson(s.store, s.productIds, s.email) },
   { module: "lib/welcome-offer-send.ts", run: (s) => forgetWelcomePerson(s.statsId, s.email) },
   { module: "lib/winback-send.ts", run: (s) => forgetWinbackPerson(s.statsId, s.productIds, s.email) },

@@ -34,8 +34,9 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, needData } from "@/lib/store-data";
-import { orderWrite } from "@/lib/order-data";
+import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
+import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -143,6 +144,16 @@ export async function importedFor(store: Store, email: string): Promise<Imported
   return found;
 }
 
+/** Where what an import or the API's gift gives is counted in the store's data room (lib/store-data.ts). */
+const IMPORTED_SLOT = "imp";
+
+/** What one grant taken from the store's room was counted at (grantImported), and is given back at when it is deleted. */
+const grantBytes = (productId: string, v: { at?: unknown; job?: unknown; items?: unknown; option?: unknown }, email: string) =>
+  dataBytes([productId, JSON.stringify({ at: v.at, job: v.job, items: v.items, option: v.option ?? null }), email], 3);
+
+/** Whether a grant was taken from the store's room (an import, the API's gift) rather than written as an order's (lib/order-data.ts). */
+const fromRoom = (job: string) => IMPORT_JOB.test(job) || job.startsWith("api:");
+
 /**
  * Gives many addresses their products in one round trip. Returns, for each
  * grant, whether it was new (false: that address already had that product).
@@ -164,7 +175,7 @@ export async function grantImported(
 ): Promise<boolean[]> {
   if (!grants.length || !isRedisConfigured()) return grants.map(() => false);
   // Each grant at the most it weighs: its field, the address's key and place among those brought over, its library.
-  if (room) await needData(room, [{ slot: "imp", bytes: grants.reduce((sum, g) => sum + dataBytes([g.productId, JSON.stringify({ at: atSeconds, job, items: g.items, option: g.option ?? null }), g.email], 3), 0) }]);
+  if (room) await needData(room, [{ slot: IMPORTED_SLOT, bytes: grants.reduce((sum, g) => sum + grantBytes(g.productId, { at: atSeconds, job, items: g.items, option: g.option }, g.email), 0) }]);
   // Only what was bought on Marktmorgen puts a store in a buyer's library: a gift, a place, a pre-order,
   // a PayPal purchase (no room given); not an import or the API's gift, which take from the store's room.
   if (sid && !room) await rememberBuyers(sid, grants.map((g) => g.email));
@@ -203,8 +214,33 @@ export async function takeGiven(statsId: string, email: string, productId: strin
  * that an import brought them. Nothing was paid here for these, so no order
  * of ours stands behind them; the person loses access to them.
  */
-export async function forgetImportedPerson(statsId: string | null, email: string): Promise<number> {
+export async function forgetImportedPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const replies = await redisPipeline([["DEL", importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), normaliseEmail(email)]]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const address = normaliseEmail(email);
+  // Read and deleted in one step: two deletions at once give back once.
+  const [taken, who] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), address]]);
+  const given = takenPairs(taken);
+  if (room && given.length) {
+    // What an import or the API's gift took from the room comes back as it was
+    // counted; what an order wrote comes back to the orders' part, at the field's own share.
+    let imported = 0;
+    let ordered = 0;
+    for (const [productId, raw] of given) {
+      const value = json(raw);
+      if (value && typeof value.job === "string" && fromRoom(value.job)) imported += grantBytes(productId, value, address);
+      else ordered += fieldReleaseBytes(productId, raw);
+    }
+    if (imported > 0) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: imported }]);
+    await releaseOrderData(room, ordered);
+  }
+  return (given.length ? 1 : 0) + (Number(who) || 0);
+}
+
+function json(raw: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }

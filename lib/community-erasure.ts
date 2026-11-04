@@ -20,6 +20,7 @@
  * so before anyone deletes.
  */
 import { redisPipeline } from "@/lib/redis";
+import type { DataStore } from "@/lib/store-data";
 import { traceKey } from "@/lib/community-trace";
 import { forgetMemberRecord, readConfig } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
@@ -34,8 +35,13 @@ import { forgetRsvpsPerson } from "@/lib/community-events";
 import { forgetAccessPerson } from "@/lib/community-access";
 import { unindexMember } from "@/lib/community-index";
 
-/** Deletes one person from one community. Answers how many records went. */
-export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[]): Promise<number> {
+/**
+ * Deletes one person from one community. Answers how many records went.
+ * `room` is the store's data room: their devices, private conversations,
+ * the people they declined and their places at live events give back what
+ * they took there.
+ */
+export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[], room?: DataStore): Promise<number> {
   const config = await readConfig(id).catch(() => null);
   const member = await forgetMemberRecord(id, who);
   let records = member ? 1 : 0;
@@ -47,11 +53,11 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   records += Number(traced) || 0;
   records += await forgetPointsPerson(id, who);
   records += await forgetNoticesPerson(id, who);
-  records += await forgetPushPerson(id, who);
-  records += await forgetDmPerson(id, who);
+  records += await forgetPushPerson(id, who, room);
+  records += await forgetDmPerson(id, who, room);
   records += await forgetChatPerson(id, who);
   records += await forgetGrantPerson(id, who);
-  records += await forgetRsvpsPerson(id, who, email);
+  records += await forgetRsvpsPerson(id, who, email, room);
   records += await forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds);
   return records;
 }

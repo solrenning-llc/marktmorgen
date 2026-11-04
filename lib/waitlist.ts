@@ -14,7 +14,8 @@ import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { takeData } from "@/lib/store-data";
+import { type DataStore, giveData, noteData, takeData } from "@/lib/store-data";
+import { HASH_TAKE_FIELD } from "@/lib/redis-take";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
@@ -122,7 +123,7 @@ export async function joinWaitlist(input: {
   const grant = (k: TokenGrant["k"]): string => JSON.stringify({ s: sid, h: store.handle, p: product.id, e: email, k } satisfies TokenGrant);
   // A new address takes room in the store's data room, with its link to leave
   // (kept as long as the list); with no room the list is full for it.
-  if (!before && !(await takeData(store, [{ slot: `wl:${product.id}`, bytes: dataBytes([email, JSON.stringify(entry)], 1) + dataBytes([tokenKey(leave), grant("leave")], 1) }])).ok) return "full";
+  if (!before && !(await takeData(store, [{ slot: waitSlot(product.id), bytes: dataBytes([email, JSON.stringify(entry)], 1) + dataBytes([tokenKey(leave), grant("leave")], 1) }])).ok) return "full";
   await redisPipeline([
     ["HSET", listKey(sid, product.id), email, JSON.stringify(entry)],
     ["SET", tokenKey(confirm), grant("confirm"), "EX", CONFIRM_SECONDS],
@@ -130,6 +131,7 @@ export async function joinWaitlist(input: {
     ...noteForErasure(sid, email, tokenKey(confirm)),
     ...noteForErasure(sid, email, tokenKey(leave)),
   ]);
+  if (before && typeof existing === "string") await settleEntry(store, product.id, email, existing, JSON.stringify(entry));
 
   const link = `${origin}/@${store.handle}/waitlist?token=${confirm}`;
   const g = givingWords(store.language);
@@ -170,7 +172,9 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
   const entry = parseEntry(raw);
   if (!entry) return { ok: false };
   if (!entry.ok) {
-    await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+    const next = JSON.stringify({ ...entry, ok: now() });
+    await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, next]]);
+    await settleEntry(store, grant.p, grant.e, raw as string, next);
   }
   if (entry.c && store.listId) {
     await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
@@ -178,6 +182,20 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     );
   }
   return { ok: true, productId: grant.p };
+}
+
+/** Where one product's waitlist is counted in the store's data room (lib/store-data.ts). */
+const waitSlot = (productId: string) => `wl:${productId}`;
+
+/**
+ * Counts what rewriting a place changed (confirmed, or asked again with the
+ * boxes checked), as it is and never refused, so the room always holds what
+ * each place weighs and a deletion gives back exactly that.
+ */
+async function settleEntry(store: DataStore, productId: string, email: string, before: string, after: string): Promise<void> {
+  const grown = dataBytes([email, after], 1) - dataBytes([email, before], 1);
+  if (grown > 0) await noteData(store, [{ slot: waitSlot(productId), bytes: grown }]);
+  else if (grown < 0) await giveData(store, [{ slot: waitSlot(productId), bytes: -grown }]);
 }
 
 /** Takes an address off a waitlist. */
@@ -347,13 +365,24 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 /**
  * Takes one address off every waitlist of the store, out of any launch email
  * still going out, and deletes its confirm and leave links (lib/person-erasure.ts).
+ * Each place is read and deleted in one step, and what joining took for it
+ * (the place as it now is, and its link to leave) goes back to `room`, when
+ * it is given, once.
  */
-export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
+export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string, room?: DataStore): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
+  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, p), address])) : [];
+  const freed = productIds.flatMap((p, i) => {
+    const raw = replies[i];
+    if (typeof raw !== "string") return [];
+    const entry = parseEntry(raw);
+    const leave = entry ? dataBytes([tokenKey(entry.t), JSON.stringify({ s: sid, h: room?.handle ?? "", p, e: address, k: "leave" } satisfies TokenGrant)], 1) : 0;
+    return [{ slot: waitSlot(p), bytes: dataBytes([address, raw], 1) + leave }];
+  });
+  if (room && freed.length) await giveData(room, freed);
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
+  return freed.length + blanked;
 }
 
 /**

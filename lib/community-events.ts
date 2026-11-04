@@ -821,13 +821,16 @@ export function announcementText(store: Pick<Store, "handle">, event: CommunityE
  * were coming to, and forgets each event's answer about whether they may
  * come in (lib/community-erasure.ts).
  */
-export async function forgetRsvpsPerson(id: string, who: string, email: string): Promise<number> {
+export async function forgetRsvpsPerson(id: string, who: string, email: string, room?: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]);
   const events = (Array.isArray(raw) ? raw : []).map(String).slice(0, MAX_KEPT_EVENTS);
   if (!events.length) return 0;
   const replies = await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]);
-  return replies.slice(0, events.length).reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // Each place's room comes back only where this deletion removed it, as cancelRsvp gives it.
+  const gone = events.filter((_, i) => Number(replies[i]) === 1);
+  if (room && gone.length) await giveData(room, gone.map((e) => ({ slot: EVENT_SLOT(e), bytes: RSVP_BYTES })));
+  return gone.length;
 }
 
 /** The live events one member said they are coming to, and when they said it, for the copy of their data (619 [SZ3]). Only reads. */

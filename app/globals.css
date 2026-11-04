@@ -789,6 +789,15 @@ html {
     border-style: dashed;
     border-color: GrayText;
   }
+  /*
+   * No color of a button is animated in forced colors. WebKit animates them:
+   * a button that turned usable was still drawn, for a moment, in GrayText on
+   * the page's own sand (2.78:1, Studio AAA, inbox C4-35). It shows the
+   * system's colors at once instead.
+   */
+  .btn {
+    transition: none;
+  }
 }
 /*
  * 40px was below both platforms' guidance. 44 is Apple's number and the

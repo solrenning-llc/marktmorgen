@@ -35,7 +35,8 @@ const count = (html: string, re: RegExp) => (html.match(re) ?? []).length;
 function cells(html: string, label: string): string[] {
   const row = html.split("<tr").find((r) => r.includes(`>${label}</th>`));
   if (!row) return [];
-  return [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1].replace(/<[^>]+>/g, ""));
+  // The text between tags, joined (React escapes "<" in text, so no tag hides inside it); never a tag-stripping replace.
+  return [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1].split(/<[^>]*>/).join(""));
 }
 
 const WORDS: Record<HealthLevel, string> = {

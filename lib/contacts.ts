@@ -38,7 +38,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
-import { type DataStore, needData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -599,6 +599,10 @@ async function casWrite(key: string, writes: { email: string; value: string; was
  * only if the contact still holds what was read (casWrite), so an
  * unsubscribe or a purchase noted in the same moment is never written over;
  * one that changed is read again and decided again, three times at most.
+ * `gone` lists those no longer on the list when read. With `stopWhenFull`, a
+ * round whose new labels do not fit in the data room is not written and its
+ * contacts come back in `noRoom`, so what the earlier rounds wrote is still
+ * answered; without it the DataRoomError is thrown.
  */
 export async function changeLabels(
   listId: string,
@@ -607,10 +611,13 @@ export async function changeLabels(
   change: (tags: string[], email: string) => string[] | "same" | "skip",
   /** The store whose data room new labels take from (DataRoomError when they do not fit). */
   room: DataStore,
-): Promise<{ changed: string[]; same: string[] }> {
+  options: { stopWhenFull?: boolean } = {},
+): Promise<{ changed: string[]; same: string[]; gone: string[]; noRoom: string[] }> {
   const key = leadsKey(listId);
   const changed: string[] = [];
   const same: string[] = [];
+  const gone: string[] = [];
+  let noRoom: string[] = [];
   let pending = [...new Set(emails)];
   for (let round = 0; round < 3 && pending.length; round += 1) {
     const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
@@ -619,7 +626,10 @@ export async function changeLabels(
     pending.forEach((email, i) => {
       const raw = Array.isArray(rows) ? rows[i] : null;
       const contact = parseContact(raw);
-      if (!contact || typeof raw !== "string") return;
+      if (!contact || typeof raw !== "string") {
+        gone.push(email);
+        return;
+      }
       const next = change(contact.tags, email);
       if (next === "same") same.push(email);
       else if (next !== "skip") {
@@ -628,14 +638,20 @@ export async function changeLabels(
       }
     });
     if (!writes.length) break;
-    await needContacts(room, sizes);
+    try {
+      await needContacts(room, sizes);
+    } catch (error) {
+      if (!options.stopWhenFull || !(error instanceof DataRoomError)) throw error;
+      noRoom = writes.map((w) => w.email);
+      break;
+    }
     const written = await casWrite(key, writes);
     pending = writes.filter((_, i) => !written[i]).map((w) => w.email);
     writes.forEach((w, i) => {
       if (written[i]) changed.push(w.email);
     });
   }
-  return { changed, same };
+  return { changed, same, gone, noRoom };
 }
 
 /**

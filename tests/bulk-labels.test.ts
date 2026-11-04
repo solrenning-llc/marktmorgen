@@ -13,8 +13,10 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/contact-labels/route";
 import { BulkLabels } from "@/components/bulk-labels";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { BULK_REFUSALS, MAX_BULK_ADDRESSES, labelsAfter, opposite, removedFrom, undoSummary } from "@/lib/bulk-label-rules";
-import { readBulk } from "@/lib/bulk-labels";
+import { BULK_REFUSALS, BULK_WRITE_BATCH, MAX_BULK_ADDRESSES, MAX_BULK_BODY_BYTES, MAX_BULK_TEXT_BYTES, applySummary, cleanLabel, jsonBytes, labelKey, labelsAfter, opposite, removedFrom, same, undoSummary } from "@/lib/bulk-label-rules";
+import { applyBulk, readBulk } from "@/lib/bulk-labels";
+import type { DataStore } from "@/lib/store-data";
+import { StoreFullError } from "@/lib/store-full";
 import { leadsKey, parseContact, upsertContact } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
 import { enroll, saveFlow } from "@/lib/flows";
@@ -23,7 +25,7 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
-type Reply = { ok?: boolean; error?: string; message?: string; review?: Record<string, number>; changed?: string[]; label?: string; change?: string; already?: number; full?: number; notOnList?: number; removed?: { email: string; label: string; at: number }[] };
+type Reply = { ok?: boolean; error?: string; message?: string; review?: Record<string, number>; changed?: string[]; label?: string; change?: string; already?: number; full?: number; notOnList?: number; removed?: { email: string; label: string; at: number; forms?: number }[]; asked?: number; noRoom?: number };
 
 async function main(): Promise<void> {
   part("The rules");
@@ -34,7 +36,7 @@ async function main(): Promise<void> {
   is("a removal keeps the label as that contact had it, and where", [removedFrom(["a", "Vip", "b"], "VIP"), removedFrom(["a"], "VIP")], [{ label: "Vip", at: 1 }, null]);
   is("its undo puts that very label back in its place, or at the end", [labelsAfter(["a", "b"], "VIP", "add", { label: "Vip", at: 1 }), labelsAfter(["a"], "VIP", "add", { label: "Vip", at: 5 })], [["a", "Vip", "b"], ["a", "Vip"]]);
   is("never a label other than the one named", labelsAfter(["a"], "VIP", "add", { label: "Other", at: 0 }), ["a", "VIP"]);
-  is("an undo that took everything back says so", undoSummary(3, { changed: 2, already: 1, full: 0, notOnList: 0 }, "add"), { allBack: true, words: "Undone. Every contact is as it was." });
+  is("an undo that took everything back says so", undoSummary(3, { changed: 2, already: 1, full: 0, notOnList: 0 }, "add"), { allBack: true, short: "Undone. Every contact is as it was.", words: "Undone. Every contact is as it was." });
   is(
     "one that did not says how many, and why",
     [undoSummary(3, { changed: 1, already: 0, full: 1, notOnList: 1 }, "add").words, undoSummary(4, { changed: 1, already: 0, full: 0, notOnList: 2 }, "remove").words],
@@ -130,6 +132,134 @@ async function main(): Promise<void> {
     "Undone for 1 of 3 contacts. 2 contacts did not go back: 1 contact is no longer on your list; 1 contact has 10 labels now, the most a contact can have, so the label could not go back on.",
   );
 
+
+  part("Edge cases (review of 4 Nov 2026)");
+  const contact = (tags: string[]) => JSON.stringify({ agreed: true, agreedAt: "", firstAt: "", lastAt: "", titles: [], ids: [], source: "free", unsub: false, unsubAt: "", t: "", name: "", tags, importedAt: "" });
+  const put = (email: string, tags: string[]) => redisPipeline([["HSET", leadsKey(list), email, contact(tags)]]);
+  // Calls to the stand-in are watched: the contacts' atomic writes, a hook just before one, and the data room's answers.
+  const pipeline = redis.pipeline.bind(redis);
+  const casArgs: number[] = [];
+  let beforeWrite: (() => Promise<unknown>) | null = null;
+  let roomAnswers: number[] | null = null;
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    const [first] = commands;
+    if (commands.length === 1 && first[0] === "EVAL" && String(first[1]).includes("redis.sha1hex")) {
+      casArgs.push(first.length - 4);
+      if (beforeWrite) {
+        const hook = beforeWrite;
+        beforeWrite = null;
+        await hook();
+      }
+    }
+    if (roomAnswers && commands.length === 1 && first[0] === "EVAL" && String(first[1]).includes("marktmorgen:store-data:v1") && roomAnswers.length) return [[roomAnswers.shift(), 0]];
+    return pipeline(commands);
+  };
+
+  // 1. Pasted text past the limit is refused, never cut (a cut could turn ann@example.com into ann@example.co).
+  await put("ann@example.co", []);
+  await put("ann@example.com", []);
+  const longText = "x".repeat(MAX_BULK_TEXT_BYTES - 15) + " ann@example.com";
+  is("text past the limit is refused, not cut", [jsonBytes(longText) > MAX_BULK_TEXT_BYTES, readBulk({ change: "add", label: "Cut", text: longText })], [true, { ok: false, error: "long" }]);
+  const cutTry = await post({ action: "apply", label: "Cut", change: "add", text: longText });
+  is("through the route: a sentence tied to the text, and no contact changed", [cutTry.status, cutTry.body.error, cutTry.body.message, await tagsOf("ann@example.co"), await tagsOf("ann@example.com")], [400, "long", BULK_REFUSALS.long, [], []]);
+  is("the body the route reads holds the longest text the limit allows", MAX_BULK_BODY_BYTES > jsonBytes({ action: "apply", label: "x".repeat(40), change: "remove", text: "x".repeat(MAX_BULK_TEXT_BYTES - 2) }), true);
+  const thousand = Array.from({ length: MAX_BULK_ADDRESSES }, (_, i) => `${String(i).padStart(4, "0")}${"a".repeat(254 - 4 - "@example.com".length)}@example.com`);
+  is("1,000 of the longest addresses fit in the text", jsonBytes(thousand.join("\n")) <= MAX_BULK_TEXT_BYTES && thousand.every((email) => email.length === 254), true);
+
+  // 2 and 8. Undoing a removal of 1,000 of the longest addresses, each label at its longest.
+  const emojiLabel = "😀".repeat(20);
+  const controlLabel = "\u0001".repeat(39) + "V";
+  await redisPipeline([["HSET", leadsKey(list), ...thousand.flatMap((email) => [email, contact(["a", emojiLabel, controlLabel])])]]);
+  for (const [name, asked] of [["an emoji label (4 bytes each)", emojiLabel], ["a label written with control characters (6 bytes each as sent)", "V"]] as const) {
+    casArgs.length = 0;
+    const off = await post({ action: "apply", label: asked, change: "remove", text: thousand.join("\n") });
+    is(`removed from all 1,000: ${name}, written ${BULK_WRITE_BATCH} at a time`, [off.status, off.body.changed?.length, casArgs.length, casArgs.every((n) => n <= BULK_WRITE_BATCH * 3)], [200, 1000, MAX_BULK_ADDRESSES / BULK_WRITE_BATCH, true]);
+    const undoBody = { action: "apply", label: off.body.label, change: "add", restore: off.body.removed };
+    is(`its undo sends only what each lost, and fits (${jsonBytes(undoBody).toLocaleString("en-US")} bytes)`, [jsonBytes(undoBody) <= MAX_BULK_BODY_BYTES, "emails" in undoBody], [true, false]);
+    const back = await post(undoBody);
+    is(`and every one gets its own label back: ${name}`, [back.status, back.body.changed?.length, back.body.asked], [200, 1000, 1000]);
+  }
+  is("each kept exactly as it was written, in its place", [await tagsOf(thousand[0]), await tagsOf(thousand[999])], [["a", emojiLabel, controlLabel], ["a", emojiLabel, controlLabel]]);
+  // The worst any undo can be: 1,000 entries of the longest address and label, each character taking the most JSON bytes.
+  const worstUndo = { action: "apply", label: "\u0001".repeat(40), change: "add", restore: Array.from({ length: MAX_BULK_ADDRESSES }, () => ({ email: "\u0001".repeat(254), label: "\u0001".repeat(40), at: 9, forms: 10 })) };
+  const worstAddUndo = { action: "apply", label: "\u0001".repeat(40), change: "remove", emails: Array.from({ length: MAX_BULK_ADDRESSES }, () => "\u0001".repeat(254)) };
+  is("the route's cap is worked out from the limits: the worst undo of either kind fits", [jsonBytes(worstUndo) <= MAX_BULK_BODY_BYTES, jsonBytes(worstAddUndo) <= MAX_BULK_BODY_BYTES, readFileSync("app/api/store/contact-labels/route.ts", "utf8").includes('guardStoreWrite(request, "send", MAX_BULK_BODY_BYTES)')], [true, true, true]);
+
+  // 3. A contact deleted between the read and the write is said to be no longer on the list.
+  await put("m1@example.com", []);
+  await put("m2@example.com", []);
+  beforeWrite = () => redisPipeline([["HDEL", leadsKey(list), "m2@example.com"]]);
+  const raced = await post({ action: "apply", label: "Race", change: "add", emails: ["m1@example.com", "m2@example.com"] });
+  is("deleted between the read and the write: not on the list, not changed somewhere else", [raced.body.changed, raced.body.notOnList, raced.body.asked], [["m1@example.com"], 1, 2]);
+  is("and said so", applySummary(raced.body.asked!, { changed: 1, already: raced.body.already!, full: raced.body.full!, notOnList: raced.body.notOnList! }, "add").words, "Done: 1 contact changed. 1 was left out: 1 address is not on your list.");
+  await put("m2@example.com", ["Race"]);
+  beforeWrite = () => redisPipeline([["HDEL", leadsKey(list), "m2@example.com"]]);
+  const racedUndo = await post({ action: "apply", label: "Race", change: "remove", emails: ["m1@example.com", "m2@example.com"] });
+  is("the same in an undo", undoSummary(2, { changed: racedUndo.body.changed!.length, already: racedUndo.body.already!, full: racedUndo.body.full!, notOnList: racedUndo.body.notOnList! }, "remove").words, "Undone for 1 of 2 contacts. 1 contact did not go back: 1 contact is no longer on your list.");
+
+  // 4. Labels that show nothing, and look-alikes, are one label.
+  const labelOf = (typed: string) => {
+    const read = readBulk({ change: "add", label: typed, text: "ana@example.com" });
+    return read.ok ? read.ask.label : read.error;
+  };
+  is("a label of nothing that shows is refused", ["​", "‮", "⁠​", "⁦⁩", "ㅤ", " ­ "].map(labelOf), ["label", "label", "label", "label", "label", "label"]);
+  is("what shows nothing is taken out; letters are composed", ["VIP​", "⁦VIP⁩", "V⁠IP", "Café"].map(labelOf), ["VIP", "VIP", "VIP", "Café"]);
+  is("joiners that make one emoji or one word are kept", ["👨‍👩‍👧", "می‌خواهم"].map(labelOf), ["👨‍👩‍👧", "می‌خواهم"]);
+  is("compared whatever the case, width, composition or hidden characters", [same("VIP", "ＶＩＰ"), same("VIP", "vip​"), same("⁦VIP⁩", "Vip"), same("Café", "CAFÉ"), same("VIP", "VIPS"), labelKey("​")], [true, true, true, true, false, ""]);
+  await put("look@example.com", ["VIP"]);
+  const lookAlikes = await post({ action: "apply", label: "ＶＩＰ", change: "add", text: "look@example.com" });
+  const hidden = await post({ action: "apply", label: "VIP​", change: "add", text: "look@example.com" });
+  is("a look-alike is not added beside the label", [lookAlikes.body.already, hidden.body.already, await tagsOf("look@example.com")], [1, 1, ["VIP"]]);
+  await put("forms@example.com", ["VIP", "b", "VIP​", "ＶＩＰ"]);
+  const allForms = await post({ action: "apply", label: "vip", change: "remove", text: "forms@example.com" });
+  is("taking it off takes every form of it, and says how many it held", [await tagsOf("forms@example.com"), allForms.body.removed], [["b"], [{ email: "forms@example.com", label: "VIP", at: 0, forms: 3 }]]);
+  const formsBack = await post({ action: "apply", label: allForms.body.label, change: "add", restore: allForms.body.removed });
+  is("its undo puts the first form back, where it stood", [formsBack.body.changed, await tagsOf("forms@example.com")], [["forms@example.com"], ["VIP", "b"]]);
+  is("and says so, not that every contact is as it was", undoSummary(1, { changed: 1, already: 0, full: 0, notOnList: 0 }, "add", 1), { allBack: false, short: "Undone. Every contact has the label back.", words: "Undone. Every contact has the label back. 1 contact had this label written in more than one way; it went back on once, as first written." });
+
+  // 5. The 40 the screen says is counted after spaces are collapsed and what shows nothing is taken out.
+  is("counted after collapsing spaces", [labelOf("a  " + "b".repeat(38)), labelOf("x".repeat(40) + "​"), labelOf("x".repeat(41))], ["a " + "b".repeat(38), "x".repeat(40), "label"]);
+  is("an emoji counts as 2, as the screen says", [labelOf("😀".repeat(20)), labelOf("😀".repeat(21)), BULK_REFUSALS.label.includes("An emoji counts as 2."), readFileSync("components/bulk-labels.tsx", "utf8").includes("an emoji counts as 2")], ["😀".repeat(20), "label", true, true]);
+  is("the field no longer cuts what is pasted into it", /id="bulk-label"[^\n]*maxLength/.test(readFileSync("components/bulk-labels.tsx", "utf8")), false);
+  is("the screen shows the label as it will be written", [cleanLabel("  Workshop ​ May "), readFileSync("components/bulk-labels.tsx", "utf8").includes("the label “${cleanLabel(label)}”")], ["Workshop May", true]);
+
+  // 7. After applying, the screen says how many were left out and why.
+  is(
+    "what applying did, with every reason",
+    [
+      applySummary(5, { changed: 5, already: 0, full: 0, notOnList: 0 }, "add"),
+      applySummary(9, { changed: 3, already: 2, full: 1, notOnList: 1, noRoom: 1 }, "add").words,
+      applySummary(4, { changed: 1, already: 2, full: 0, notOnList: 0 }, "remove").words,
+      applySummary(9, { changed: 3, already: 2, full: 1, notOnList: 1, noRoom: 1 }, "add").short,
+    ],
+    [
+      { short: "Done: 5 contacts changed.", words: "Done: 5 contacts changed." },
+      "Done: 3 contacts changed. 6 were left out: 2 contacts already have the label; 1 contact has 10 labels already, the most a contact can have; 1 address is not on your list; 1 contact was not changed because your store has no room left for more records; 1 contact was being changed somewhere else at the same moment, so it was left as it is.",
+      "Done: 1 contact changed. 3 were left out: 2 contacts don't have it; 1 contact was being changed somewhere else at the same moment, so it was left as it is.",
+      "Done: 3 contacts changed. 6 were left out.",
+    ],
+  );
+  is("the screen shows it, and says only the short sentence", ["<span id=\"bulk-done-line\">{done.words}</span>", "setLive(summary.short);", "words: summary.words"].map((piece) => readFileSync("components/bulk-labels.tsx", "utf8").includes(piece)), [true, true, true]);
+
+  // 8. A data room that fills part way: what was written is answered, so it can be undone.
+  const batchEmails = Array.from({ length: BULK_WRITE_BATCH + 50 }, (_, i) => `room${i}@example.com`);
+  await redisPipeline([["HSET", leadsKey(list), ...batchEmails.flatMap((email) => [email, contact([])])]]);
+  // Long enough that every contact grows by more than a step of the data room. The room is the store's own
+  // fields without its page order: lib/contacts.ts needContacts reads a room with an `order` as an order's.
+  const roomLabel = "Room for the spring workshop, every seat";
+  const roomFields: Record<string, unknown> = { ...store };
+  delete roomFields.order;
+  const roomOnly = roomFields as DataStore;
+  const roomAsk = (emails: string[]) => ({ label: roomLabel, change: "add" as const, emails, skipped: 0 });
+  roomAnswers = [1, 0];
+  const partway = await applyBulk(list, roomAsk(batchEmails), roomOnly);
+  is("the first batch is written and answered; the rest is counted as not written", [partway.changed.length, partway.noRoom, partway.asked, await tagsOf(batchEmails[0]), await tagsOf(batchEmails[BULK_WRITE_BATCH])], [BULK_WRITE_BATCH, 50, BULK_WRITE_BATCH + 50, [roomLabel], []]);
+  roomAnswers = [0];
+  const none = await applyBulk(list, roomAsk(batchEmails.slice(BULK_WRITE_BATCH)), roomOnly).then(() => "written", (error: unknown) => (error instanceof StoreFullError ? "full" : String(error)));
+  is("one that can write nothing is refused as a full store, as before", none, "full");
+  roomAnswers = null;
+  redis.pipeline = pipeline;
+
   part("The screen");
   const html = renderToStaticMarkup(createElement(BulkLabels));
   is("every field labeled, with an example read with it", html.includes('<label for="bulk-text"') && html.includes("Their email addresses") && html.includes('aria-describedby="bulk-text-hint"') && html.includes('<label for="bulk-label"') && html.includes('aria-describedby="bulk-label-hint"'), true);
@@ -140,7 +270,7 @@ async function main(): Promise<void> {
 
   part("The screen: accessibility (AAA audit, 4 Nov 2026)");
   is("no control is disabled while busy, so focus stays on it (2.4.3)", [/\sdisabled=\{/.test(screen), screen.includes("aria-disabled={busy || undefined}"), screen.includes("aria-disabled={busy || review.changes === 0 || undefined}")], [false, true, true]);
-  is("a press while busy, or with nothing to change, does nothing", [screen.includes("if (busy) return;"), screen.includes("if (busy || !review || review.changes === 0) return;"), screen.includes("if (busy || !done) return;")], [true, true, true]);
+  is("a press while busy, or with nothing to change, does nothing", [screen.includes("if (busy) return;"), screen.includes("if (busy || !review || review.changes === 0 || tooLong()) return;"), screen.includes("if (busy || !done) return;")], [true, true, true]);
   is("the live region holds one short sentence, not the review", [html.includes('<p role="status" class="sr-only"></p>'), /role="status"[^>]*>\s*\{review/.test(screen), screen.includes("{live}")], [true, false, true]);
   is("the review's title takes focus when it arrives", screen.includes('id="bulk-review-title" ref={reviewTitle} tabIndex={-1}') && screen.includes('focusNext.current = "review";'), true);
   is("after Apply, focus goes to Undo (or the done line); after Undo, to the form's title", [screen.includes('focusNext.current = changed.length ? "undo" : "done";'), screen.includes("ref={undoButton}"), screen.includes("ref={doneLine} tabIndex={-1}"), screen.includes('focusNext.current = "title";'), html.includes('id="bulk-title" tabindex="-1"')], [true, true, true, true, true]);
@@ -148,6 +278,8 @@ async function main(): Promise<void> {
   is("Undo says what it undoes", screen.includes('aria-describedby="bulk-done-line"'), true);
   is("a refusal is tied to its field: text, label or the choice (3.3.1)", ['none: "text"', 'many: "text"', 'label: "label"', 'change: "change"', 'aria-invalid={errorField === "text" || undefined}', 'aria-invalid={errorField === "label" || undefined}', '`bulk-${field}-error`'].every((piece) => screen.includes(piece)), true);
   is("shown next to the field, the end of the form keeps only the others", [html.includes('id="bulk-text-error" class="field-error mt-1 block" role="alert"'), html.includes('id="bulk-label-error"'), html.includes('id="bulk-change-error"'), screen.includes('{errorField ? "" : error}')], [true, true, true, true]);
+  is("a refusal goes once its field is changed (3.3.1)", [screen.includes("const edit = <T,>(set: (value: T) => void, field: Field) => (value: T) => {"), screen.includes("if (errorField === field) {"), ['edit(setText, "text")', 'edit(setLabel, "label")', 'edit(setChange, "change")'].every((piece) => screen.includes(piece))], [true, true, true]);
+  is("the live line gets only a short sentence after applying and undoing; every reason stays on the screen", [(screen.match(/setLive\(summary\.short\)/g) ?? []).length, screen.includes("setLive(summary.words)"), screen.includes("setNote(summary.words);")], [2, false, true]);
   is("nothing is said twice: no toast beside the live line (4.1.3)", [screen.includes("toast("), screen.includes("@/components/toast")], [false, false]);
   is("a full store is said in plain words (3.1.5)", [screen.includes("data room"), screen.includes("Your store has no room left for more records. Delete some you no longer need first.")], [false, true]);
   is("the review lists how many, and that nothing is sent", screen.includes("will ${change === \"add\" ? \"get\" : \"lose\"} the label") && screen.includes("No automation starts and no email is sent. You can undo this right after."), true);

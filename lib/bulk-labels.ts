@@ -17,28 +17,29 @@
  * contact the moment before, writes only if it is still as read, and takes
  * room in the store's data room first.
  */
-import { BULK_REFUSALS, type BulkChange, type BulkRefusal, type BulkReview, MAX_BULK_ADDRESSES, type Removed, labelsAfter, opposite, removedFrom, same } from "@/lib/bulk-label-rules";
-import { MAX_CONTACT_TAGS } from "@/lib/contact-rules";
+import { BULK_REFUSALS, BULK_WRITE_BATCH, type BulkChange, type BulkRefusal, type BulkReview, MAX_BULK_ADDRESSES, MAX_BULK_TEXT_BYTES, type Removed, cleanLabel, jsonBytes, labelKey, labelsAfter, opposite, removedFrom, same } from "@/lib/bulk-label-rules";
+import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 import { changeLabels, leadsKey, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
 import type { DataStore } from "@/lib/store-data";
+import { StoreFullError } from "@/lib/store-full";
 
 export { BULK_REFUSALS, MAX_BULK_ADDRESSES, labelsAfter, opposite };
 export type { BulkChange, BulkRefusal, BulkReview, Removed };
 
 /** What one contact lost in a removal, by address: the route answers with these, and an undo sends them back. */
-export type RemovedFrom = Removed & { email: string };
+export type RemovedFrom = Removed & { email: string; forms?: number };
 
 /** `back`, only on an undo of a removal: each contact's own label as it was written and where it stood. */
 export type BulkAsk = { label: string; change: BulkChange; emails: string[]; skipped: number; back?: Record<string, Removed> };
 
 /**
- * What an undo of a removal says each contact had, kept only where it is one
- * of the addresses sent and the same label as asked (in any case), so it can
- * never put on a label other than the one named; a place outside a contact's
- * list means the end.
+ * What an undo of a removal says each contact had, kept only where it is the
+ * same label as asked (in any form), so it can never put on a label other
+ * than the one named, and, when the addresses are sent too, only for one of
+ * them; a place outside a contact's list means the end. Each address once.
  */
-function readBack(raw: unknown, emails: readonly string[], label: string): Record<string, Removed> {
+function readBack(raw: unknown, label: string, emails?: readonly string[]): Record<string, Removed> {
   const back: Record<string, Removed> = {};
   if (!Array.isArray(raw)) return back;
   for (const entry of raw.slice(0, MAX_BULK_ADDRESSES)) {
@@ -46,26 +47,50 @@ function readBack(raw: unknown, emails: readonly string[], label: string): Recor
     const { email: typedEmail, label: typedLabel, at } = entry as Record<string, unknown>;
     const [email] = readAddresses(typeof typedEmail === "string" ? typedEmail : "").emails;
     const [kept] = readTags([typeof typedLabel === "string" ? typedLabel : ""]);
-    if (!email || !emails.includes(email) || !kept || !same(kept, label)) continue;
+    if (!email || back[email] || (emails && !emails.includes(email)) || !kept || !same(kept, label)) continue;
     back[email] = { label: kept, at: Number.isInteger(at) && (at as number) >= 0 && (at as number) < MAX_CONTACT_TAGS ? (at as number) : MAX_CONTACT_TAGS };
   }
   return back;
 }
 
-/** What the creator sent, made safe, or what is wrong with it. Addresses from pasted text, or the exact list an undo sends back. */
+/**
+ * The label named, written as it will be kept (lib/bulk-label-rules.ts,
+ * cleanLabel), or null when nothing in it would show or it is longer than a
+ * contact's label can be. Counted after the spaces are collapsed, in the
+ * units a contact's labels are kept in (MAX_TAG_LENGTH), so the 40 the
+ * screen says is the 40 that is held; an emoji takes two.
+ */
+function readLabel(typed: unknown): string | null {
+  const label = cleanLabel(typeof typed === "string" ? typed : "");
+  return labelKey(label) && label.length <= MAX_TAG_LENGTH ? label : null;
+}
+
+/**
+ * What the creator sent, made safe, or what is wrong with it. Addresses from
+ * pasted text (never cut: more than MAX_BULK_TEXT_BYTES is refused), the
+ * exact list an undo of an add sends back, or, on an undo of a removal, the
+ * addresses of what it sends back (`restore`).
+ */
 export function readBulk(raw: Record<string, unknown>): { ok: true; ask: BulkAsk } | { ok: false; error: BulkRefusal } {
   const change = raw.change === "add" || raw.change === "remove" ? raw.change : null;
   if (!change) return { ok: false, error: "change" };
-  const typed = typeof raw.label === "string" ? raw.label : "";
-  const [label] = readTags([typed]);
-  if (!label || typed.trim().length > 40) return { ok: false, error: "label" };
+  const label = readLabel(raw.label);
+  if (!label) return { ok: false, error: "label" };
+  if (change === "add" && Array.isArray(raw.restore) && !Array.isArray(raw.emails)) {
+    if (raw.restore.length > MAX_BULK_ADDRESSES) return { ok: false, error: "many" };
+    const back = readBack(raw.restore, label);
+    const emails = Object.keys(back);
+    if (!emails.length) return { ok: false, error: "none" };
+    return { ok: true, ask: { label, change, emails, skipped: 0, back } };
+  }
+  if (!Array.isArray(raw.emails) && typeof raw.text === "string" && jsonBytes(raw.text) > MAX_BULK_TEXT_BYTES) return { ok: false, error: "long" };
   const read = Array.isArray(raw.emails)
     ? readAddresses(raw.emails.filter((e): e is string => typeof e === "string").join("\n"))
-    : readAddresses(typeof raw.text === "string" ? raw.text.slice(0, 400_000) : "");
+    : readAddresses(typeof raw.text === "string" ? raw.text : "");
   if (!read.emails.length) return { ok: false, error: "none" };
   if (read.emails.length > MAX_BULK_ADDRESSES) return { ok: false, error: "many" };
   const ask: BulkAsk = { label, change, emails: read.emails, skipped: read.skipped };
-  if (change === "add" && Array.isArray(raw.emails) && raw.restore !== undefined) ask.back = readBack(raw.restore, read.emails, label);
+  if (change === "add" && Array.isArray(raw.emails) && raw.restore !== undefined) ask.back = readBack(raw.restore, label, read.emails);
   return { ok: true, ask };
 }
 
@@ -88,42 +113,68 @@ export async function reviewBulk(listId: string, ask: BulkAsk): Promise<BulkRevi
 }
 
 export type BulkDone = {
+  /** How many different addresses were sent. */
+  asked: number;
   /** The addresses it changed. */
   changed: string[];
   /** Contacts already as asked. */
   already: number;
   /** Contacts that hold the most labels a contact can (adding only). */
   full: number;
-  /** Addresses not on the list (or no longer). */
+  /** Addresses not on the list (or no longer, when written). */
   notOnList: number;
+  /** Contacts not written because the store's data room was full (only after some were written). */
+  noRoom: number;
   /** On a removal: what each changed contact lost, exactly as written there, and where it stood. */
   removed: RemovedFrom[];
 };
 
 /**
- * The change applied, each contact as it is at that moment. The answer lists
- * the addresses it changed, how many were left and why, and on a removal the
- * label each contact lost as it was written there: an undo sends exactly
- * those back, with the opposite change. It starts no automation.
+ * The change applied, each contact as it is at that moment, BULK_WRITE_BATCH
+ * contacts per atomic write. The answer lists the addresses it changed, how
+ * many were left and why, and on a removal the label each contact lost as it
+ * was written there: an undo sends exactly those back, with the opposite
+ * change. When the data room fills part way, what was written is still
+ * answered, so it can be undone, and the rest is counted as not written; a
+ * change that could write nothing at all is refused as before. It starts no
+ * automation.
  */
 export async function applyBulk(listId: string, ask: BulkAsk, room: DataStore): Promise<BulkDone> {
+  const emails = [...new Set(ask.emails)];
   // The last reading of each contact decides why it was left: the rounds read again only those whose write lost a race.
-  const seen = new Map<string, "same" | "skip" | Removed | null>();
-  const { changed, same: already } = await changeLabels(
-    listId,
-    ask.emails,
-    (tags, email) => {
-      const next = labelsAfter(tags, ask.label, ask.change, ask.back?.[email]);
-      seen.set(email, typeof next === "string" ? next : ask.change === "remove" ? removedFrom(tags, ask.label) : null);
-      return next;
-    },
-    room,
-  );
+  const seen = new Map<string, "same" | "skip" | (Removed & { forms?: number }) | null>();
+  const changed: string[] = [];
+  const gone = new Set<string>();
+  let already = 0;
+  let noRoom = 0;
+  for (let from = 0; from < emails.length; from += BULK_WRITE_BATCH) {
+    const batch = emails.slice(from, from + BULK_WRITE_BATCH);
+    const done = await changeLabels(
+      listId,
+      batch,
+      (tags, email) => {
+        const next = labelsAfter(tags, ask.label, ask.change, ask.back?.[email]);
+        seen.set(email, typeof next === "string" ? next : ask.change === "remove" ? removedFrom(tags, ask.label) : null);
+        return next;
+      },
+      room,
+      { stopWhenFull: true },
+    );
+    changed.push(...done.changed);
+    already += done.same.length;
+    for (const email of done.gone) gone.add(email);
+    if (done.noRoom.length) {
+      noRoom = done.noRoom.length + emails.length - from - batch.length;
+      break;
+    }
+  }
+  if (noRoom && !changed.length) throw new StoreFullError();
+  const wrote = new Set(changed);
   const removed = changed.flatMap((email) => {
     const was = seen.get(email);
     return was && typeof was === "object" ? [{ email, ...was }] : [];
   });
-  const full = ask.emails.filter((email) => seen.get(email) === "skip").length;
-  const notOnList = ask.emails.filter((email) => !seen.has(email)).length;
-  return { changed, already: already.length, full, notOnList, removed };
+  // A contact counted full only when that was its last reading and it was not written.
+  const full = emails.filter((email) => seen.get(email) === "skip" && !wrote.has(email) && !gone.has(email)).length;
+  return { asked: emails.length, changed, already, full, notOnList: gone.size, noRoom, removed };
 }

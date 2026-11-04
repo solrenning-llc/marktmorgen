@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MAX_BULK_ADDRESSES, type BulkChange, type BulkReview, type Removed, count, opposite, undoSummary } from "@/lib/bulk-label-rules";
-import { MAX_CONTACT_TAGS } from "@/lib/contact-rules";
+import { BULK_REFUSALS, MAX_BULK_ADDRESSES, MAX_BULK_TEXT_BYTES, type BulkChange, type BulkReview, type Removed, applySummary, cleanLabel, count, jsonBytes, opposite, undoSummary } from "@/lib/bulk-label-rules";
+import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 
-type Done = { label: string; change: BulkChange; changed: string[]; removed: (Removed & { email: string })[] };
+/** `words`: what it changed and, when any address was left out, how many and why. */
+type Done = { label: string; change: BulkChange; changed: string[]; removed: (Removed & { email: string; forms?: number })[]; words: string };
 /** The field a refusal is about, read from the route's error code (BULK_REFUSALS). */
 type Field = "text" | "label" | "change";
 /** Where focus goes once the screen has changed, so it is never left on something that went away. */
 type Focus = "review" | "undo" | "done" | "title";
 const counted = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
-const FIELD_OF: Record<string, Field> = { label: "label", none: "text", many: "text", change: "change" };
+const FIELD_OF: Record<string, Field> = { label: "label", none: "text", many: "text", long: "text", change: "change" };
 const DATA_FULL = "Your store has no room left for more records. Delete some you no longer need first.";
 
 /**
@@ -24,8 +25,9 @@ const DATA_FULL = "Your store has no room left for more records. Delete some you
  * Accessibility (AAA audit, 4 Nov 2026): a button in use is aria-disabled,
  * never disabled, so focus stays on it; when what had focus goes away,
  * focus moves to what came in its place; a refusal is shown and read next
- * to the field it is about; only one short sentence is live, never the
- * whole review; nothing is said twice (no toast beside it).
+ * to the field it is about, and goes once that field is changed; only one
+ * short sentence is live, never the whole review or every reason, which stay
+ * on the screen; nothing is said twice (no toast beside it).
  */
 export function BulkLabels() {
   const [text, setText] = useState("");
@@ -71,11 +73,23 @@ export function BulkLabels() {
     return null;
   }
 
-  // Anything typed after a review makes it stale: it is asked again before applying.
-  const edit = <T,>(set: (value: T) => void) => (value: T) => {
+  // Anything typed after a review makes it stale: it is asked again before applying. A refusal about that field goes with the change.
+  const edit = <T,>(set: (value: T) => void, field: Field) => (value: T) => {
     set(value);
     setReview(null);
+    if (errorField === field) {
+      setError("");
+      setErrorField(null);
+    }
   };
+
+  // Text past what one change takes is refused here, by the route's own measure, so the sentence is the field's and nothing is cut.
+  function tooLong(): boolean {
+    if (jsonBytes(text) <= MAX_BULK_TEXT_BYTES) return false;
+    setError(BULK_REFUSALS.long);
+    setErrorField("text");
+    return true;
+  }
 
   async function askReview(event: React.FormEvent) {
     event.preventDefault();
@@ -83,6 +97,7 @@ export function BulkLabels() {
     setDone(null);
     setNote("");
     setLive("");
+    if (tooLong()) return;
     const answer = await send({ action: "review", label, change, text });
     if (!answer) return;
     const asked = answer.review as BulkReview;
@@ -92,27 +107,30 @@ export function BulkLabels() {
   }
 
   async function apply() {
-    if (busy || !review || review.changes === 0) return;
+    if (busy || !review || review.changes === 0 || tooLong()) return;
     const answer = await send({ action: "apply", label, change, text });
     if (!answer) return;
-    const changed = (answer.changed as string[]) ?? [];
-    setDone({ label: String(answer.label), change, changed, removed: Array.isArray(answer.removed) ? (answer.removed as Done["removed"]) : [] });
+    const changed = Array.isArray(answer.changed) ? (answer.changed as string[]) : [];
+    const summary = applySummary(counted(answer.asked), { changed: changed.length, already: counted(answer.already), full: counted(answer.full), notOnList: counted(answer.notOnList), noRoom: counted(answer.noRoom) }, change);
+    setDone({ label: String(answer.label), change, changed, removed: Array.isArray(answer.removed) ? (answer.removed as Done["removed"]) : [], words: summary.words });
     setNote("");
     setReview(null);
-    setLive(`${change === "add" ? "Label added to" : "Label taken off"} ${count(changed.length, "contact", "contacts")}.`);
+    setLive(summary.short);
     focusNext.current = changed.length ? "undo" : "done";
   }
 
   async function undo() {
     if (busy || !done) return;
     const undoing = opposite(done.change);
-    const answer = await send({ action: "apply", label: done.label, change: undoing, emails: done.changed, ...(done.change === "remove" ? { restore: done.removed } : {}) });
+    // An undo of a removal sends only what each contact lost (its address is in it); of an add, only the addresses.
+    const answer = await send(done.change === "remove" ? { action: "apply", label: done.label, change: undoing, restore: done.removed } : { action: "apply", label: done.label, change: undoing, emails: done.changed });
     if (!answer) return;
-    const changed = Array.isArray(answer.changed) ? answer.changed.length : 0;
-    const summary = undoSummary(done.changed.length, { changed, already: counted(answer.already), full: counted(answer.full), notOnList: counted(answer.notOnList) }, undoing);
-    // Kept on the screen either way; said once, in the live line.
+    const back = new Set(Array.isArray(answer.changed) ? (answer.changed as string[]) : []);
+    const merged = done.removed.filter((entry) => (entry.forms ?? 1) > 1 && back.has(entry.email)).length;
+    const summary = undoSummary(done.changed.length, { changed: back.size, already: counted(answer.already), full: counted(answer.full), notOnList: counted(answer.notOnList), noRoom: counted(answer.noRoom) }, undoing, merged);
+    // Every reason kept on the screen; one short sentence said, in the live line.
     setNote(summary.words);
-    setLive(summary.words);
+    setLive(summary.short);
     setDone(null);
     focusNext.current = "title";
   }
@@ -131,7 +149,7 @@ export function BulkLabels() {
           <label htmlFor="bulk-text" className="field-label block">
             Their email addresses
           </label>
-          <textarea id="bulk-text" className="field mt-1 min-h-32" value={text} onChange={(event) => edit(setText)(event.target.value)} aria-describedby={describedBy("bulk-text-hint", "text")} aria-invalid={errorField === "text" || undefined} rows={6} />
+          <textarea id="bulk-text" className="field mt-1 min-h-32" value={text} onChange={(event) => edit(setText, "text")(event.target.value)} aria-describedby={describedBy("bulk-text-hint", "text")} aria-invalid={errorField === "text" || undefined} rows={6} />
           <span id="bulk-text-hint" className="mt-1 block text-xs text-ink-soft">
             {`One per line, or separated by commas. Up to ${MAX_BULK_ADDRESSES.toLocaleString("en-US")} at a time. Example: ana@example.com`}
           </span>
@@ -143,9 +161,9 @@ export function BulkLabels() {
           <label htmlFor="bulk-label" className="field-label block">
             Label
           </label>
-          <input id="bulk-label" className="field mt-1" value={label} maxLength={40} onChange={(event) => edit(setLabel)(event.target.value)} aria-describedby={describedBy("bulk-label-hint", "label")} aria-invalid={errorField === "label" || undefined} />
+          <input id="bulk-label" className="field mt-1" value={label} onChange={(event) => edit(setLabel, "label")(event.target.value)} aria-describedby={describedBy("bulk-label-hint", "label")} aria-invalid={errorField === "label" || undefined} />
           <span id="bulk-label-hint" className="mt-1 block text-xs text-ink-soft">
-            Up to 40 characters. Example: Workshop May
+            {`Up to ${MAX_TAG_LENGTH} characters; an emoji counts as 2. Example: Workshop May`}
           </span>
           <span id="bulk-label-error" className="field-error mt-1 block" role="alert">
             {fieldError("label")}
@@ -156,7 +174,7 @@ export function BulkLabels() {
           <div className="mt-1 flex flex-wrap gap-x-6">
             {(["add", "remove"] as const).map((value) => (
               <label key={value} className="flex min-h-11 items-center gap-2 text-sm">
-                <input type="radio" name="bulk-change" className="h-5 w-5" checked={change === value} onChange={() => edit(setChange)(value)} aria-invalid={errorField === "change" || undefined} />
+                <input type="radio" name="bulk-change" className="h-5 w-5" checked={change === value} onChange={() => edit(setChange, "change")(value)} aria-invalid={errorField === "change" || undefined} />
                 {value === "add" ? "Add the label" : "Take the label off"}
               </label>
             ))}
@@ -183,7 +201,7 @@ export function BulkLabels() {
               Before you confirm
             </h2>
             <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink">
-              <li>{`${count(review.changes, "contact", "contacts")} will ${change === "add" ? "get" : "lose"} the label “${label.trim()}”.`}</li>
+              <li>{`${count(review.changes, "contact", "contacts")} will ${change === "add" ? "get" : "lose"} the label “${cleanLabel(label)}”.`}</li>
               {review.already ? <li>{`${count(review.already, "contact", "contacts")} ${change === "add" ? "already have it" : "don't have it"}: left as they are.`}</li> : null}
               {review.full ? <li>{`${count(review.full, "contact has", "contacts have")} ${MAX_CONTACT_TAGS} labels already, the most a contact can have: left as they are.`}</li> : null}
               {review.notOnList ? <li>{`${count(review.notOnList, "address is", "addresses are")} not on your list: nothing is added for them.`}</li> : null}
@@ -196,7 +214,7 @@ export function BulkLabels() {
           </section>
         ) : done ? (
           <p ref={doneLine} tabIndex={-1} className="flex flex-wrap items-center gap-3 text-sm text-ink">
-            <span id="bulk-done-line">{`Done: ${count(done.changed.length, "contact", "contacts")} changed.`}</span>
+            <span id="bulk-done-line">{done.words}</span>
             {done.changed.length ? (
               <button type="button" ref={undoButton} className="btn btn-secondary btn-sm" aria-disabled={busy || undefined} aria-describedby="bulk-done-line" onClick={() => void undo()}>
                 Undo

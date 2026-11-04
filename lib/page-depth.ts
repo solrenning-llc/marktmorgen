@@ -18,7 +18,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { cappedCount } from "@/lib/capped-count";
-import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
+import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES, TIME_RANGES, timeField } from "@/lib/page-depth-rules";
 import { BLOCK_ID_PATTERN } from "@/lib/sales-page";
 import { type WhyNot, isWhyNot } from "@/lib/why-not-rules";
 
@@ -56,12 +56,14 @@ export function depthField(blockId: string, whyNot = "", video = ""): string | n
   return field;
 }
 
-export async function countDepth(statsId: string | null, productId: string, blockId: string, whyNot = "", video = ""): Promise<void> {
+export async function countDepth(statsId: string | null, productId: string, blockId: string, whyNot = "", video = "", seconds: unknown = undefined): Promise<void> {
   const field = depthField(blockId, whyNot, video);
   if (!statsId || !isRedisConfigured() || !field) return;
   const k = key(statsId, productId);
+  // How long they stayed, in its range (639 [GL7](25)), counted in the same command.
+  const time = timeField(seconds);
   try {
-    const [count] = await cappedCount(k, DEPTH_FIELDS_MAX, [{ field, by: 1 }]);
+    const [count] = await cappedCount(k, DEPTH_FIELDS_MAX, time ? [{ field, by: 1 }, { field: time, by: 1 }] : [{ field, by: 1 }]);
     if (count === 1) await redisPipeline([["EXPIRE", k, KEEP_SECONDS]]);
   } catch {
     // A measure that fails is a visitor not counted, nothing more.
@@ -83,8 +85,8 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
 export async function readDepth(
   statsId: string | null,
   productId: string,
-): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach> }> {
-  if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {} };
+): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; time: Record<string, number> }> {
+  if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {}, time: {} };
   const [raw] = await redisPipeline([["HGETALL", key(statsId, productId)]]);
   const pairs: Record<string, string> = {};
   if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs[String(raw[i])] = String(raw[i + 1]);
@@ -92,9 +94,16 @@ export async function readDepth(
   const stopped: Record<string, number> = {};
   const whyNot: Partial<Record<WhyNot, number>> = {};
   const videos: Record<string, VideoReach> = {};
+  const time: Record<string, number> = {};
+  const timeFields = new Set<string>(TIME_RANGES.map((range) => range.field));
   let visitors = 0;
   for (const [field, value] of Object.entries(pairs)) {
     if (field === "_n" || !(Number(value) > 0)) continue;
+    // How long they stayed is counted beside the block, never as a visitor of its own.
+    if (timeFields.has(field)) {
+      time[field] = Number(value);
+      continue;
+    }
     const n = Number(value);
     const [head, video] = field.split("!");
     const [block, answer] = head.split("?");
@@ -116,5 +125,5 @@ export async function readDepth(
   }
   // Every visitor counted stopped at exactly one block, so the blocks add up
   // to the visitors; "_n", written until 11 October 2026, said the same.
-  return { visitors, stopped, whyNot, videos };
+  return { visitors, stopped, whyNot, videos, time };
 }

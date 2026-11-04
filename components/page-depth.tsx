@@ -55,6 +55,8 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
     if (blocks.length === 0 || typeof IntersectionObserver === "undefined") return;
     let furthest = -1;
     let sent = false;
+    // When the page was drawn, for how long it stayed open in front of them (639 [GL7](25)): a range is counted, never who.
+    const shownAt = performance.now();
     let started = false;
     let sawBuy = false;
     // The video played: its block, and how far into it, the furthest reached.
@@ -167,6 +169,7 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
         b: blocks[furthest].dataset.block ?? "",
         ...(answer.current ? { w: answer.current } : {}),
         ...(videoBlock && videoAt ? { v: `${videoBlock}.${videoAt}` } : {}),
+        s: Math.round((performance.now() - shownAt) / 1000),
       });
     };
     const hidden = () => {

@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   await countDepth("s1", "p1", "bene0001");
   await countDepth("s1", "p1", "bene0001");
   await countDepth("s1", "p1", "<script>");
-  is("counted, and nothing that is not a block id", await readDepth("s1", "p1"), { visitors: 2, stopped: { bene0001: 2 }, whyNot: {}, videos: {} });
+  is("counted, and nothing that is not a block id", await readDepth("s1", "p1"), { visitors: 2, stopped: { bene0001: 2 }, whyNot: {}, videos: {}, time: {} });
   done();
 }
 

@@ -1388,6 +1388,7 @@
     "components/page-funnel-editor.tsx",
     "components/page-order-editor.tsx",
     "components/page-style-picker.tsx",
+    "components/page-time.tsx",
     "components/pairs-editor.tsx",
     "components/passkey-manager.tsx",
     "components/passkey-signin.tsx",

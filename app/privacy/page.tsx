@@ -958,7 +958,10 @@ export default function PrivacyPage() {
           for one visitor in eight, and for nobody else. On a sales page it can
           also say how far into the page&apos;s video they got, and, where the
           creator turned the question on, which of five answers they tapped
-          when asked what was stopping them from buying. No cookie is set and
+          when asked what was stopping them from buying. On a sales page it also
+          says how long the page was open in front of them, as one of six ranges
+          (from under 10 seconds to 10 minutes or more), and we add one to that
+          range&apos;s count. No cookie is set and
           nothing about the visitor is sent or kept; the device remembers only
           that the question was asked, so it is not asked again.
         </p>

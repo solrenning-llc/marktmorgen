@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     // A sales page: the product it belongs to, and the furthest block seen.
     const product = text("p", 40);
     const statsId = readTokenStats(token, product);
-    if (statsId) await countDepth(statsId, product, text("b", 12), text("w", 10), text("v", 20));
+    if (statsId) await countDepth(statsId, product, text("b", 12), text("w", 10), text("v", 20), body.s);
   } else if (body.k === "s") {
     // The store's own page: where the furthest item seen stood, which it was, and the one clicked.
     const statsId = readTokenStats(token, STORE_SCOPE);

@@ -15,3 +15,35 @@ export const DEPTH_FIELDS_MAX = 120;
  * because a page already drawn can still send its reading (lib/store.ts).
  */
 export const DEPTH_RECORD_BYTES = (DEPTH_FIELDS_MAX + 1) * 96 + 128;
+
+/**
+ * How long a measured visitor stayed on a sales page (639 [GL7](25)): the
+ * seconds the page was open in front of them before they left or switched
+ * away, counted in one of these ranges, never as a number of its own, so the
+ * record holds at most TIME_RANGES.length more fields. No cookie and nothing
+ * about the visitor: only which range.
+ */
+export const TIME_RANGES = [
+  { field: "@t0", upTo: 10, words: "Under 10 seconds" },
+  { field: "@t1", upTo: 30, words: "10 to 30 seconds" },
+  { field: "@t2", upTo: 60, words: "30 seconds to 1 minute" },
+  { field: "@t3", upTo: 180, words: "1 to 3 minutes" },
+  { field: "@t4", upTo: 600, words: "3 to 10 minutes" },
+  { field: "@t5", upTo: Infinity, words: "10 minutes or more" },
+] as const;
+
+/** The field a stay of this many seconds is counted under, or null when it is not a time a page could have been open (negative, not a number, over a day). */
+export function timeField(seconds: unknown): string | null {
+  const n = typeof seconds === "number" ? seconds : typeof seconds === "string" && seconds.trim() ? Number(seconds) : NaN;
+  if (!Number.isFinite(n) || n < 0 || n > 86_400) return null;
+  return TIME_RANGES.find((range) => n < range.upTo)?.field ?? null;
+}
+
+/** Each range with how many of the measured visitors stayed that long and their share (0–100), from the record's counts. */
+export function timeShares(counts: Record<string, number>): { words: string; count: number; share: number }[] {
+  const total = TIME_RANGES.reduce((sum, range) => sum + (counts[range.field] ?? 0), 0);
+  return TIME_RANGES.map((range) => {
+    const count = counts[range.field] ?? 0;
+    return { words: range.words, count, share: total ? Math.round((count / total) * 100) : 0 };
+  });
+}

@@ -623,6 +623,9 @@ A ordem da sua mensagem das 04h53 está certa, com uma troca: **o PR só de docu
 ### C3-77 — 04/11/2026 07h20 — #2060: o teto tem de pagar o trabalho de cada abertura (Revisor 2, médio)
 Decisão (MR): no próprio #2060, a página de pedidos toma em takePublicRequest **unidades proporcionais ao que vai ler**, antes de ler: por exemplo `1 + ceil(reservas que vai ler / N)`, com N tal que cada unidade cubra o custo por requisição do modelo (REQUEST_COMMANDS / laterPageCost em tests/traffic-cost.ts), contando os 4 GET por reserva com sala (lib/call-rooms.ts:112-118), as compras no Stripe e os até 14 comandos do "o que espera"; ou limite o que a página lê por abertura ao que uma unidade cobre e ofereça "ver mais" com outra tomada. Sem vaga, o aviso busy que você já pôs. Teste que falha antes: uma abertura com 40 reservas toma as unidades certas. Depois do merge, o Codex mede a página inteira (CX-44). A unidade 3 do acesso por funil (93ef6c1) saiu sem achado: pode incorporar com CI verde.
 
+### C3-78 — 04/11/2026 08h40 — Uso: um pouco acima do ritmo; ajuste fino até segunda 02h00 (AV10)
+O dono viu agora (06h29): sua conta está em **34% da semana**, sessão em 65%, e o aviso diz que nesse ritmo o limite acaba **domingo à tarde**, umas 12 horas antes da renovação de segunda-feira às 02h00. O orçamento para chegar a segunda perto de 100% é de uns **13% por dia**; você está em ~15%. Ajuste fino, sem parar: mantenha 6 subagentes, mas use esforço **Médio** nos leitores e nas telas e textos, e **Alto** só em código de dinheiro, segurança, lei e na revisão independente (AV10 item 2); evite reler o que já está registrado e mande saídas longas de teste para arquivo. Confira o uso a cada 6 horas; se cair abaixo de 13%/dia, volte ao Alto em tudo.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

@@ -462,6 +462,11 @@ async function main() {
   store = await setup(["dispute.opened"]);
   failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
   timeline = [];
+  // Every visit below at one millisecond, as every event of one visit is: their places must still be the order they
+  // were passed over in, never their ids' (a later event taking an earlier one's own line, seen on a fast CI machine).
+  const realNow = Date.now;
+  const visitMs = realNow();
+  Date.now = () => visitMs;
   const today0 = Math.floor(Date.now() / 86_400_000);
   const dayKey = `nl:hooks:wait:${statsId}:day:${today0}:${(await webhooksView(store)).endpoints[0]?.id}`;
   const dayCount = async () => Number((await redis.pipeline([["ZCARD", dayKey]]))[0]);
@@ -480,6 +485,7 @@ async function main() {
     await watchStripe(Date.now() + 10_000);
     if (n === GIVEN_UP_LINES_PER_DAY) is("the first past the cap: a summary line saying one more, on which day", (await summary()).map((d) => d.lastError), [`1 more Stripe event could not be processed on ${date}. Look it up in your Stripe dashboard.`]);
   }
+  Date.now = realNow;
   const firstSummary = (await summary())[0];
   is(`${GIVEN_UP_LINES_PER_DAY} own lines and one summary whose count rose, generic for every kind of event`, [(await givenUpLines()).length - (await summary()).length, (await summary()).map((d) => d.lastError)], [GIVEN_UP_LINES_PER_DAY, [`2 more Stripe events could not be processed on ${date}. Look them up in your Stripe dashboard.`]]);
   is("every event counted once, the anchor past them all", [await dayCount(), await anchor()], [GIVEN_UP_LINES_PER_DAY + 2, `evt_Day${GIVEN_UP_LINES_PER_DAY + 1}`]);

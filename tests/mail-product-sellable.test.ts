@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", `nl:stock:${STATS}:limited004`, "cs_test_bad", "{"]]);
   is("stock that cannot be read is out", (await buyable([limited("limited004")])).size, 0);
 
-  part("Licence keys");
+  part("License keys");
   const keyed = listing({ id: "keyed00001", keys: { source: "pool" } });
   is("keys from an empty pool: out, as its page says Sold out", (await buyable([keyed])).size, 0);
   await redis.pipeline([["RPUSH", `nl:keys:${STATS}:keyed00001:pool`, "AAAA-BBBB-CCCC-DDDD"]]);

@@ -71,7 +71,7 @@ is("everything escaped", productCardHtml({ ...guide, title: "<script>\"x\"</scri
 const night = lookColours({ theme: "night", accent: "#4c1d95" } as Parameters<typeof lookColours>[0]);
 const nightCard = productCardHtml(guide, { ...style, button: { fill: night.accent, on: night.onAccent } });
 is("the store's own button pair, which keeps 7:1, even on the Night theme", [nightCard.includes(`background:${night.accent};color:${night.onAccent}`), contrast(night.accent, night.onAccent) >= 7], [true, true]);
-is("colours that cannot be read: the site's own pair", productCardHtml(guide, { ...style, button: { fill: "red", on: "#fff" } }).includes("background:#4c1d95;color:#ffffff"), true);
+is("colors that cannot be read: the site's own pair", productCardHtml(guide, { ...style, button: { fill: "red", on: "#fff" } }).includes("background:#4c1d95;color:#ffffff"), true);
 is("no pixel, discount, countdown, stock or rating", /width="1"|height="1"|discount|ends|left in stock|stars?|rating|% off/i.test(html), false);
 is("in plain text: name, price and page", productCardText(guide, price), `Sourdough & Co guide ($29): ${guide.href}`);
 

@@ -296,8 +296,28 @@ function functionMicroUsd(seconds: number, commands: number, dbBytes: number): n
 export const DEMO_ACTION_FUNCTION_MICRO_USD = functionMicroUsd(ACTION_SECONDS, DEMO_COMMANDS_PER_ACTION, 2 * DEMO_ACTION_MAX_BYTES + DEMO_TAKE_DB_BYTES);
 /** Opening a session at its worst: the bot check waited on up to 2.5 s, then the session written. */
 export const DEMO_START_FUNCTION_MICRO_USD = functionMicroUsd(START_SECONDS, DEMO_START_COMMANDS, DEMO_START_DB_BYTES);
-/** A session's bytes kept for its whole life. */
-export const DEMO_SESSION_KEPT_MICRO_USD = (UPSTASH_MICRO_USD_PER_GB_MONTH * DEMO_BYTES_PER_SESSION * DEMO_SESSION_SECONDS) / (1e9 * MONTH_SECONDS);
+/** How long a day's counts (nl:sdemo:day:<day>) are kept, in days (docs/studio-demo.md). */
+export const DEMO_DAY_KEEP_DAYS = 400;
+/**
+ * The most bytes a field of a demo hash holds, its name and its value
+ * together, and the most a demo key's name holds; priced as kept bytes
+ * (held in tests/studio-demo.test.ts on every key and field the demo writes).
+ */
+export const DEMO_FIELD_MAX_BYTES = 64;
+/** A session's record and keys: its six fields (day, startedAt, expiresAt, actions, bytes, refused) and its six keys' names. */
+const SESSION_RECORD_BYTES = 12 * DEMO_FIELD_MAX_BYTES;
+/** A session's bytes kept for its whole life: its drafts at their cap, its record and its keys' names. */
+export const DEMO_SESSION_KEPT_MICRO_USD = (UPSTASH_MICRO_USD_PER_GB_MONTH * (DEMO_BYTES_PER_SESSION + SESSION_RECORD_BYTES) * DEMO_SESSION_SECONDS) / (1e9 * MONTH_SECONDS);
+/**
+ * A day's own hashes kept: the day's counts (its key, the caps' three counters
+ * and DEMO_COUNTS) for DEMO_DAY_KEEP_DAYS, and the addresses' hash (its key,
+ * the day's refusals, a field for each address that opened a session, at most
+ * the day's sessions, and one for each that was refused, at most the day's
+ * refusals) until the day ends, one day at the most.
+ */
+export const DEMO_DAY_HASHES_KEPT_MICRO_USD =
+  (UPSTASH_MICRO_USD_PER_GB_MONTH * DEMO_FIELD_MAX_BYTES / (1e9 * MONTH_SECONDS))
+  * ((1 + 3 + DEMO_COUNTS.length) * DEMO_DAY_KEEP_DAYS * 86_400 + (2 + DEMO_SESSIONS_PER_DAY + DEMO_REFUSALS_PER_DAY) * 86_400);
 
 /** A refused request at its worst: up to the bot check's wait, its commands and its own count. */
 export const DEMO_REFUSAL_FUNCTION_MICRO_USD = functionMicroUsd(START_SECONDS, DEMO_REFUSAL_WORST_COMMANDS, DEMO_TAKE_DB_BYTES);
@@ -333,9 +353,9 @@ export function demoRefusalsFunctionWorstMicroUsd(): number {
   return DEMO_REFUSALS_PER_DAY * DEMO_REFUSAL_FUNCTION_MICRO_USD;
 }
 
-/** A day's worst of what the rates above price: one day's openings and the day's refusals. */
+/** A day's worst of what the rates above price: one day's openings, the day's refusals and the day's own hashes kept. */
 export function demoDayFunctionWorstMicroUsd(): number {
-  return demoCohortFunctionWorstMicroUsd() + demoRefusalsFunctionWorstMicroUsd();
+  return demoCohortFunctionWorstMicroUsd() + demoRefusalsFunctionWorstMicroUsd() + DEMO_DAY_HASHES_KEPT_MICRO_USD;
 }
 
 /**

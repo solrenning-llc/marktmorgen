@@ -32,18 +32,16 @@
  *     made: a random id, its record and the sandbox's fixed fictional drafts
  *     written in one script under `sandboxKey()` names only, every key ending
  *     at the same absolute moment (EXPIREAT), never extended.
- *   - `readStudioDemo` answers the live session named by the `nl_studio_demo`
- *     cookie, or null: the demo off (before any command), no cookie, a
- *     malformed id, an unknown or expired record, a record that does not read
- *     exactly as written, or Redis out of reach. A live session reads whatever
- *     the day's or the address's refusals are. Nothing else in the request is
- *     read but its address.
- *   - `takeDemoAction` checks a session's actions and bytes, its life and the
- *     day's commands (`demoActionAllowed`), and counts them, before the action
- *     writes anything; the session's count is taken in one script so two
- *     actions at the last place cannot both pass. The session's day is read
- *     from its record, never taken from the caller. Unknown or impossible
- *     counts refuse.
+ *   - `takeDemoAction` is the only way to reach a session: it reads the session
+ *     the `nl_studio_demo` cookie names and counts the request as one of the
+ *     session's actions in the same call, so no page or save can read a
+ *     session without counting it. It checks the session's actions and bytes,
+ *     its life and the day's commands (`demoActionAllowed`), and counts them,
+ *     before the caller writes anything; the session's count is taken in one
+ *     script so two requests at the last place cannot both pass. The
+ *     session's day is read from its record, never taken from the caller. A
+ *     live session goes on whatever the day's or the address's refusals are.
+ *     The demo off, nothing is read; unknown or impossible counts refuse.
  *
  * It imports nothing that reaches a store, the catalog, mail, AI, payments,
  * uploads or the house store: the demo store's values are copied below as
@@ -53,7 +51,7 @@ import { isAutomated } from "@/lib/bot-check";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { BodyTooLarge, clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import {
-  DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COMMANDS_PER_DAY, DEMO_COOKIE, DEMO_REFUSALS_PER_ADDRESS_PER_DAY, DEMO_REFUSALS_PER_DAY,
+  DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COMMANDS_PER_DAY, DEMO_COOKIE, DEMO_DAY_KEEP_DAYS, DEMO_REFUSALS_PER_ADDRESS_PER_DAY, DEMO_REFUSALS_PER_DAY,
   DEMO_REFUSALS_PER_SESSION, DEMO_SESSIONS_PER_ADDRESS_PER_DAY,
   DEMO_SESSIONS_PER_DAY, DEMO_SESSION_SECONDS, DEMO_SESSION_WORST_COMMANDS, DEMO_START_COMMANDS, STUDIO_DEMO_ON,
   type DemoRefusal, demoActionAllowed, demoAddressKey, demoDayKey, demoSessionAllowed, isDemoSessionId, sandboxKey,
@@ -235,7 +233,7 @@ redis.call('HINCRBY', KEYS[1], 'bytes', ARGV[2])
 return {1, a + 1, b + tonumber(ARGV[2])}`;
 
 /** How long a day's counts are kept (docs/studio-demo.md). */
-export const DEMO_DAY_KEEP_SECONDS = 400 * 86_400;
+export const DEMO_DAY_KEEP_SECONDS = DEMO_DAY_KEEP_DAYS * 86_400;
 
 /**
  * Commands takeDemoAction itself sends, as billed: the record with its own
@@ -407,71 +405,45 @@ function cookieOf(request: Request, name: string): string | null {
   return found.length === 1 ? found[0] : null;
 }
 
-/**
- * The live session the request's demo cookie names, or null. Off, nothing is
- * read. The record and the refusals are read in one round trip; a live
- * session is answered whatever the refusals are. A well-formed cookie that
- * names no live session is a refusal counted against the request's address
- * first, then the day, and past either nothing more is counted or written.
- */
-export async function readStudioDemo(request: Request, options: StudioDemoOptions = {}): Promise<StudioDemoSession | null> {
-  if (!(options.on ?? STUDIO_DEMO_ON)) return null;
-  const id = cookieOf(request, DEMO_COOKIE);
-  if (!isDemoSessionId(id) || !isRedisConfigured()) return null;
-  const key = sandboxKey(id, "session");
-  const now = (options.now ?? Date.now)();
-  if (!key || !plain(now)) return null;
-  const place = refusalPlace(request, now);
-  if (!place) return null;
-  let fields: unknown;
-  let refusals: unknown;
-  try {
-    [refusals, fields] = await redisPipeline([
-      ["HMGET", place.addressKey, "refused", place.field],
-      ["HMGET", key, "day", "startedAt", "expiresAt", "actions", "bytes"],
-    ]);
-  } catch {
-    return null;
-  }
-  const session = sessionOf(id, fields, now);
-  if (session) return session;
-  if (gateOf(refusals) === "open") await countRefusal(place);
-  return null;
-}
-
-/** A session record as read, or null when it is gone, over or does not read exactly as written. */
-function sessionOf(id: string, fields: unknown, now: number): StudioDemoSession | null {
-  if (!Array.isArray(fields) || fields.length !== 5) return null;
+/** A session record as read, or null when it does not read exactly as written. Its life is checked by demoActionAllowed. */
+function recordOf(id: string, fields: unknown[]): StudioDemoSession | null {
   const [day, ...rest] = fields;
   const [startedAt, expiresAt, actions, bytes] = rest.map(digits);
   if (typeof day !== "string" || !demoDayKey(day) || startedAt === null || expiresAt === null || actions === null || bytes === null) return null;
   if (expiresAt !== startedAt + DEMO_SESSION_SECONDS * 1000 || dayOf(startedAt) !== day) return null;
-  if (now >= expiresAt) return null;
   return { id, day, startedAt, expiresAt, actions, bytes };
 }
 
-export type DemoActionTaken = { ok: true; actions: number; bytes: number } | { ok: false; reason: DemoRefusal | "refusals" };
+export type DemoActionTaken =
+  | { ok: true; session: StudioDemoSession; actions: number; bytes: number }
+  | { ok: false; reason: DemoRefusal | "refusals" | "none" };
 
 /**
- * Checks and counts one action of a session before it writes anything.
- * `cost` is the action's whole worst: its commands, these counting ones
- * included, and the bytes it will write. The session's counts and its day are
- * read afresh from its record, never taken from `session` as the caller holds it.
- * A live session's refusals are counted in its own record, never held by the
- * day's or its address's; `request` is the one asking, whose address counts
- * the refusal only when the session's record is gone.
+ * The only way to reach a demo session: every request a session makes, a page
+ * drawn or a draft saved, comes here, so nothing reads a session without
+ * counting it as one of its DEMO_ACTIONS_PER_SESSION. Reads the session the
+ * request's `nl_studio_demo` cookie names, checks its actions and bytes, its
+ * life and the day's commands (`demoActionAllowed`), and counts them, before
+ * the caller writes anything; the session's count is taken in one script so
+ * two requests at the last place cannot both pass. `cost` is the request's
+ * whole worst: its commands, these ones included, and the bytes it will
+ * write. The session's counts and day are read from its record, never from
+ * the caller. A live session's refusals are counted in its own record, never
+ * held by the day's or its address's; a cookie that names no live session is
+ * the address's and the day's refusal, as at the door. Off, nothing is read.
  */
 export async function takeDemoAction(
   request: Request,
-  session: StudioDemoSession,
   cost: { commands: number; bytes: number },
   options: StudioDemoOptions = {},
 ): Promise<DemoActionTaken> {
   const on = options.on ?? STUDIO_DEMO_ON;
   if (!on) return { ok: false, reason: "off" };
   if (!plain(cost?.commands) || !plain(cost?.bytes) || cost.commands < DEMO_TAKE_COMMANDS) return { ok: false, reason: "unknown" };
-  if (!isRedisConfigured() || !isDemoSessionId(session?.id)) return { ok: false, reason: "unknown" };
-  const key = sandboxKey(session.id, "session");
+  const id = cookieOf(request, DEMO_COOKIE);
+  if (!isDemoSessionId(id)) return { ok: false, reason: "none" };
+  if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
+  const key = sandboxKey(id, "session");
   const now = (options.now ?? Date.now)();
   if (!key || !plain(now)) return { ok: false, reason: "unknown" };
   const place = refusalPlace(request, now);
@@ -479,17 +451,17 @@ export async function takeDemoAction(
 
   let fields: unknown;
   try {
-    [fields] = await redisPipeline([["HMGET", key, "actions", "bytes", "startedAt", "day", "refused"]]);
+    [fields] = await redisPipeline([["HMGET", key, "day", "startedAt", "expiresAt", "actions", "bytes", "refused"]]);
   } catch {
     return { ok: false, reason: "unknown" };
   }
-  if (!Array.isArray(fields) || fields.length !== 5) return { ok: false, reason: "unknown" };
+  if (!Array.isArray(fields) || fields.length !== 6) return { ok: false, reason: "unknown" };
   // No record: no live session, so the refusal is the address's and the day's, as a made-up cookie's.
-  if (fields.slice(0, 4).every((x) => x === null)) {
+  if (fields.slice(0, 5).every((x) => x === null)) {
     if ((await refusalsGate(place)) === "open") await countRefusal(place);
-    return { ok: false, reason: "expired" };
+    return { ok: false, reason: "none" };
   }
-  const own = fields[4] === null ? 0 : digits(fields[4]);
+  const own = fields[5] === null ? 0 : digits(fields[5]);
   if (own !== null && own >= DEMO_REFUSALS_PER_SESSION) return { ok: false, reason: "refusals" };
   const refuse = async (reason: DemoRefusal): Promise<DemoActionTaken> => {
     try {
@@ -499,9 +471,10 @@ export async function takeDemoAction(
     }
     return { ok: false, reason };
   };
-  const [actions, bytes, startedAt] = fields.slice(0, 3).map(digits);
-  const dayKey = typeof fields[3] === "string" ? demoDayKey(fields[3]) : null;
-  if (own === null || actions === null || bytes === null || startedAt === null || !dayKey) return refuse("unknown");
+  const session = recordOf(id, fields.slice(0, 5));
+  if (own === null || !session) return refuse("unknown");
+  const { actions, bytes, startedAt } = session;
+  const dayKey = demoDayKey(session.day)!;
 
   let sent: number | null;
   try {
@@ -533,7 +506,7 @@ export async function takeDemoAction(
     total = null;
   }
   if (!plain(total)) return { ok: false, reason: "unknown" };
-  return { ok: true, actions: taken[1], bytes: taken[2] };
+  return { ok: true, session: { ...session, actions: taken[1], bytes: taken[2] }, actions: taken[1], bytes: taken[2] };
 }
 
 // ---------------------------------------------------------------- the door, as the route answers

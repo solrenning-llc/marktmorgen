@@ -1,6 +1,6 @@
 import { remainingResourceCostCents } from './cost-envelope';
 import { customerTaxReviewFields, type CustomerTaxReview, type TaxContext } from './customer-tax-review';
-import { assessCustomerWorstCase, CUSTOMER_COST_CATEGORIES, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from './net-margin-rules';
+import { assessCustomerWorstCase, customerCostSnapshot, CUSTOMER_COST_CATEGORIES, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from './net-margin-rules';
 
 export type ReviewedResourceEnvelope = { approved: boolean; reason: string; remainingMicroUsd: number | null; affordableUnits: number | null };
 const denied = (reason: string): ReviewedResourceEnvelope => ({ approved: false, reason, remainingMicroUsd: null, affordableUnits: null });
@@ -18,14 +18,15 @@ function ownData(record: unknown, key: string): unknown {
 /** Read the review once into a plain snapshot so validation and arithmetic use identical data. */
 function snapshot(review: unknown): CustomerWorstCase | null {
   if (!review || typeof review !== 'object' || Array.isArray(review)) return null;
-  const costs = ownData(review, 'costCeilings');
+  const costs = customerCostSnapshot(ownData(review, 'costCeilings'));
+  if (costs === null) return null;
   const fiscal = customerTaxReviewFields(review);
   return {
     ...(fiscal.present ? { taxReview: fiscal.taxReview as CustomerTaxReview, taxContext: fiscal.taxContext as TaxContext } : {}),
     collectedRevenueCents: ownData(review, 'collectedRevenueCents') as number | null,
     refundableRevenueCents: ownData(review, 'refundableRevenueCents') as number | null,
     taxesCeilingCents: ownData(review, 'taxesCeilingCents') as number | null,
-    costCeilings: Object.fromEntries(CUSTOMER_COST_CATEGORIES.map(key => [key, ownData(costs, key)])) as CustomerWorstCase['costCeilings'],
+    costCeilings: costs,
     allCostsBounded: ownData(review, 'allCostsBounded') === true,
     allTaxesReviewed: ownData(review, 'allTaxesReviewed') === true,
     revenueCollected: ownData(review, 'revenueCollected') === true,

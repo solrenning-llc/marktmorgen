@@ -9,6 +9,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, setSubscription
 import { readListing } from "@/lib/catalog";
 import { parsePage } from "@/lib/sales-page";
 import { factsFor } from "@/lib/answers";
+import { MAX_FACTS_CHARS } from "@/lib/answers-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -63,6 +64,25 @@ async function main(): Promise<void> {
   is("a button's address is never told", facts.includes("secret-recipes"), false);
   is("a decorative picture says nothing", facts.includes("Swirls"), false);
   is("an empty row adds nothing", factsFor(store, product, "", parsePage({ blocks: [{ id: "row00002", kind: "row", columns: [[{ kind: "icon", name: "sparkle", label: "" }]] }] })).includes("Columns on the page"), false);
+
+  part("A picture's caption is printed under it, so it is a fact too (inbox C4-16 (e))");
+  const captioned = (alt: string, caption: string) => ({ ...picture(alt), caption });
+  const withCaptions = factsFor(store, product, "", parsePage({
+    blocks: [
+      { id: "row00003", kind: "row", columns: [[{ kind: "image", picture: captioned("A bowl of soup", "Ready in twelve minutes"), decorative: false }, { kind: "image", picture: captioned("Swirls", "Printed on recycled paper"), decorative: true }]] },
+      { id: "feat0001", kind: "feature", heading: "Shop once a week", body: "One list for the whole week.", picture: captioned("A full grocery bag", "Everything for seven dinners"), side: "left" },
+    ],
+  }));
+  is("a row's picture says its words and its caption", ["A bowl of soup", "Ready in twelve minutes"].map((words) => withCaptions.includes(words)), [true, true]);
+  is("a decorative picture's caption is printed, so it is told, its description is not", [withCaptions.includes("Printed on recycled paper"), withCaptions.includes("Swirls")], [true, false]);
+  is("a picture-and-text block says its words, its picture and its caption", ["One list for the whole week.", "A full grocery bag", "Everything for seven dinners"].map((words) => withCaptions.includes(words)), [true, true, true]);
+
+  part("The creator's own notes are never what the length cut takes (inbox C4-16 (f))");
+  const NOTES = "Orders placed on Sunday ship on Monday.";
+  const noted = { ...store, answers: { ...store.answers, facts: NOTES } };
+  const long = factsFor(noted, product, "A long description. ".repeat(2_000), page);
+  is("a page longer than the facts may be still keeps the notes, whole, at the end", [long.length <= MAX_FACTS_CHARS, long.endsWith(NOTES)], [true, true]);
+  is("and a short page keeps everything, the notes last", factsFor(noted, product, "", page).endsWith(NOTES) && factsFor(noted, product, "", page).includes("Fast dinners"), true);
 
   done();
 }

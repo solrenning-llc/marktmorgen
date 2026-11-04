@@ -146,9 +146,15 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
         if (block.headline || block.sub) parts.push(`Headline: ${[block.headline, block.sub].filter(Boolean).join(" — ")}`);
         break;
       case "text":
-      case "feature":
         if (block.body) parts.push(`${block.heading ? `${block.heading}:\n` : ""}${block.body}`);
         break;
+      case "feature": {
+        // The words beside the picture, then what the picture shows and its caption, as a visitor reads them.
+        const shown = block.picture ? pictureWords(block.picture, false) : "";
+        const words = [block.body, shown].filter(Boolean).join("\n");
+        if (words) parts.push(`${block.heading ? `${block.heading}:\n` : ""}${words}`);
+        break;
+      }
       case "benefits":
         if (block.items.length) parts.push(`${block.heading || "What the buyer gets"}:\n${block.items.map((item) => `- ${item}`).join("\n")}`);
         break;
@@ -201,7 +207,7 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
             case "button":
               return element.label ? `A button: ${element.label}` : "";
             case "image":
-              return element.decorative || !element.picture.alt ? "" : `A picture: ${element.picture.alt}`;
+              return pictureWords(element.picture, element.decorative);
             case "video":
               return element.title ? `A video: ${element.title}` : "";
             default:
@@ -216,8 +222,19 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
         break;
     }
   }
-  if (store.answers.facts) parts.push(`What ${store.name} wants buyers to know, in their words:\n${store.answers.facts}`);
-  return parts.join("\n\n").slice(0, MAX_FACTS_CHARS);
+  // The creator's own notes are never what the cut takes: the page's lines give way to them (inbox C4-16 (f)).
+  const notes = store.answers.facts ? `What ${store.name} wants buyers to know, in their words:\n${store.answers.facts}` : "";
+  if (!notes) return parts.join("\n\n").slice(0, MAX_FACTS_CHARS);
+  return `${parts.join("\n\n").slice(0, Math.max(0, MAX_FACTS_CHARS - notes.length - 2))}\n\n${notes}`.slice(0, MAX_FACTS_CHARS);
+}
+
+/**
+ * What a picture tells a visitor, in words: what it shows (its alternative
+ * text, unless it is only decoration) and its caption, which is printed under
+ * it whether it is decoration or not (inbox C4-16 (e)).
+ */
+function pictureWords(picture: { alt: string; caption: string }, decorative: boolean): string {
+  return [!decorative && picture.alt ? `A picture: ${picture.alt}` : "", picture.caption ? `Under it: ${picture.caption}` : ""].filter(Boolean).join("\n");
 }
 
 const SYSTEM = [

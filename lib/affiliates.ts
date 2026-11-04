@@ -74,7 +74,7 @@
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { type Paid, paypalPaymentId, readPayPalRefunds } from "@/lib/paypal-sales";
+import { type Paid, paypalPaymentId, paypalRefundedKey, readPayPalRefunds } from "@/lib/paypal-sales";
 import { saleHandles, storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -131,9 +131,9 @@ const APPLY_ADDRESS_LIMIT = 5;
 const CLICK_IP_LIMIT = 30;
 const RATE_WINDOW_SECONDS = 60 * 60;
 /** How many pages of a hundred refunds are read when the book is opened. */
-const REFUND_PAGES = 10;
+export const REFUND_PAGES = 10;
 /** And of a hundred disputes, which are far fewer. */
-const DISPUTE_PAGES = 3;
+export const DISPUTE_PAGES = 3;
 // DISPUTE_TAKES, the dispute states that take the money, is lib/retained-revenue.ts's: the numbers read the same set.
 
 /** The cookie an affiliate's own browser is signed in with, one per store. */
@@ -1846,6 +1846,35 @@ export function settleLine(referral: Referral, refunded: number): Line {
  * person, what an affiliate sees: their clicks, the sales through their link
  * with what each earns after refunds, and what the creator says they paid.
  */
+/**
+ * How much the book would read, counted before it is read (4 November 2026,
+ * lib/public-read-rules.ts): the fields of every hash readBook reads whole,
+ * and the records it then reads one command each, PayPal's refunds and the
+ * open bookings of the leads, at its caps. Eight commands whatever the size;
+ * null when they cannot be counted, which reads nothing.
+ */
+export async function bookSize(store: Store): Promise<{ fields: number; rows: number } | null> {
+  if (!store.statsId || !isRedisConfigured()) return { fields: 0, rows: 0 };
+  const statsId = store.statsId;
+  try {
+    const counts = (await redisPipeline([
+      ["HLEN", peopleKey(statsId)],
+      ["HLEN", clicksKey(statsId)],
+      ["HLEN", salesKey(statsId)],
+      ["HLEN", payoutsKey(statsId)],
+      ["HLEN", sharesKey(statsId)],
+      ["HLEN", paidClicksKey(statsId)],
+      ["HLEN", leadsKey(statsId)],
+      ["ZCARD", paypalRefundedKey(statsId)],
+    ])).map(Number);
+    if (counts.length !== 8 || counts.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+    const fields = counts.slice(0, 7).reduce((sum, n) => sum + n, 0);
+    return { fields, rows: Math.min(counts[7], 500) + Math.min(counts[6], 200) };
+  } catch {
+    return null;
+  }
+}
+
 export async function readBook(store: Store, only?: string): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
@@ -2010,7 +2039,7 @@ export async function readBook(store: Store, only?: string): Promise<Book> {
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */
-const INVOICE_PAGES = 10;
+export const INVOICE_PAGES = 10;
 const AFF_SUB_STRIPE_VERSION = "2026-08-26.dahlia";
 
 type InvoiceLike = {

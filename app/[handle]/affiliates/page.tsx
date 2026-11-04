@@ -1,4 +1,6 @@
 import { EmailField } from "@/components/email-field";
+import { StoreResting } from "@/components/store-resting";
+import { admitAffiliatePage } from "@/lib/affiliate-page-admission";
 import { SITE_URL } from "@/lib/site-url";
 import type { Metadata } from "next";
 import { readListings, recordListings } from "@/lib/catalog";
@@ -95,6 +97,9 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   const order = typeof query.order === "string" && /^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(query.order) ? query.order : "";
   const linkFor = token ? await linkEmail(store, token) : null;
   const affiliate = await affiliateForSession(store, (await cookies()).get(affiliateCookieName(store.handle))?.value);
+  // Paid for before anything that grows with the store is read (lib/affiliate-page-admission.ts):
+  // past the window, the resting page, and nothing more is read.
+  if (!(await admitAffiliatePage(store, affiliate))) return <StoreResting store={store} buyer={affiliate !== null} />;
   const on = affiliatesOn(store);
   const open = canApply(store);
   const terms = store.affiliates;

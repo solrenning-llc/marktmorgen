@@ -1,4 +1,5 @@
 import { apiAdder, apiError, apiOk, apiStore, apiWriter } from "@/lib/api-guard";
+import { apiOkFields } from "@/lib/api-fields";
 import { codeOut, refusalWords } from "@/lib/api-codes";
 import { createCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
   if (!selling(store)) return notSelling();
   try {
     const list = await listCodes(store.stripeAccountId as string);
-    return list.state === "ok" ? apiOk({ data: list.codes.map(codeOut) }) : unreadable();
+    return list.state === "ok" ? apiOkFields(request, { data: list.codes.map(codeOut) }) : unreadable();
   } catch (error) {
     console.error("api: codes failed", error);
     return unreadable();

@@ -762,6 +762,9 @@ Confirmado (pelo dono): a sessão aberta com a passkey marcada NÃO pode apertar
 ### C3-97 — 04/11/2026 13h10 — Resposta às 11h27: 10 no lote, aprovado
 Aprovado (pelo dono, MR, pela regra da C3-93): com a casca medida (400.000 bytes no build local), abertura 17, pacote 3 e lote de 8 compras mais antigas 10 (9 daria só 7,6% de folga). Pode abrir o PR de claude3/orders-page-bounds com esses números, a medida, a data e a folga no comentário de cada constante, e as frases que a loja lê sobre o que conta, atualizadas. O endereço longo que vira só o host com o título no botão está certo; confira que o nome acessível do link traz o destino completo (2.4.4) e que o href não muda.
 
+### C3-98 — 04/11/2026 13h15 — Resposta às 11h30: o #2140 entra primeiro
+A linha do Claude 4 que reserva lib/passkeys.ts e lib/two-step.ts é do #2136 (MM-SA-19), que já entrou no main; pedi que ele a tire agora (C4-22). O #2140 entra primeiro, quando a revisão independente sair limpa e os 9 ficarem verdes; avise no canal ao incorporar, para o Claude 4 atualizar o que tiver por cima.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar
@@ -846,6 +849,9 @@ O Revisor 3 (11h08) reproduziu o leve (a) da C4-15: no escopo "só esta loja", s
 
 ### C4-21 — 04/11/2026 12h50 — lib/review-proof.ts está livre: o cursor das avaliações é seu
 A Claude 3 (11h17) soltou lib/review-proof.ts (o #2160 tirou as linhas dela). Ponha você o cursor das contestações perdidas no job de avaliações, igual ao de lib/licence-keys.ts e lib/call-meetings.ts, no mesmo PR dos leves da C4-15, com teste. Isso substitui a C3-94.
+
+### C4-22 — 04/11/2026 13h15 — Tire a linha do #2136; #2103 com 1 médio latente antes de ligar
+(1) O #2136 (MM-SA-19) entrou, mas a sua linha que reserva lib/passkeys.ts e lib/two-step.ts continua e trava o #2140 da Claude 3, que mexia nesses arquivos antes. Tire-a agora num PR só de documento; o #2140 entra primeiro e você atualiza por cima. (2) **#2103 (no main, desligado): MÉDIO latente do Revisor 3 (11h30), corrija antes de ligar a demo:** lib/studio-demo.ts:383-401, cada readStudioDemo com cookie válido gasta 2 comandos (portão de recusas + HMGET) sem contar ação, sent nem recusa, e é a única forma de obter a sessão para takeDemoAction, então o teto de 60 pedidos por sessão depende de todo chamador futuro emparelhar read e take; DEMO_UNKNOWN_COSTS só cobre recusados, e a tabela do documento ("12 at the most: 8 + draft read/write") omite os 2 do read. Reproduzido: 1.000 leituras vivas = 2.000 comandos sem contar. Correção: um caminho só que lê e conta, ou o caso em DEMO_UNKNOWN_COSTS e na tabela, com teste read + take + rascunho. LEVES: docs/codex-queue.md (item 256) diz US$ 1,35/dia e US$ 41,57 em 30 dias, mas o documento e o registro dizem 1,38 e 42,47; antes de ligar, app/privacy/page.tsx não cita o cookie nl_studio_demo nem a impressão diária do endereço, e a linha de docs/funded-exposure-review.md não é cobrada por teste: acrescente as duas condições ao teste "on only when…"; o armazenamento de nl:sdemo:addr:<dia> e do hash do dia não entra em DEMO_SESSION_KEPT_MICRO_USD (centavos, mas todo custo contado).
 
 ## Codex
 

@@ -57,7 +57,8 @@ async function main(): Promise<void> {
       cancellation_details: { reason: "cancellation_requested", feedback: "too_expensive", comment: "Write to me at cy.private@example.com instead" },
     }),
   ];
-  const memberships = await membershipsTool(store);
+  const memberships = await membershipsTool(store, async () => null);
+  if (memberships instanceof Response) throw new Error("not charged here");
   const text = JSON.stringify(memberships);
   is("MRR, members and the membership by name", [memberships.mrr, memberships.paying, (memberships.by_product as { product: string }[] | undefined)?.[0]?.product], [4000, 2, "Weeknight Club"]);
   is("why members left, counted and never quoted", [text.includes("too_expensive") || text.includes("expensive"), text.includes("Write to me"), /@/.test(text)], [true, false, false]);

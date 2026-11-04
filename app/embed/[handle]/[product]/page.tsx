@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { NewTab } from "@/components/new-tab";
 import { forVisitor } from "@/lib/visitor";
 import { connection } from "next/server";
 import { headers } from "next/headers";
@@ -261,7 +262,11 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           ) : null}
           {chooses ? (
             <p className="mt-4">
-              <a href={tag(`/@${store.handle}/book/${product.id}`)} {...aside} className="btn st-btn btn-block">{label}</a>
+              {/* A team the buyer picks from opens the booking page in a new tab, and says so (G201). */}
+              <a href={tag(`/@${store.handle}/book/${product.id}`)} {...aside} className="btn st-btn btn-block">
+                {label}
+                <NewTab language={store.language} />
+              </a>
             </p>
           ) : read === null ? (
             <div className="st-note mt-4">
@@ -285,7 +290,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
             </>
           )}
           <p className="mt-4 text-center text-sm">
-            <a href={here({}, ["view", "length"])} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{b.backToCard(product.title)}</a>
+            <a href={here({}, ["view", "length"], "calendar-button")} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{b.backToCard(product.title)}</a>
           </p>
         </main>
         {/* Told what happened on the listed site the frame is on, as the card itself tells it. */}
@@ -295,9 +300,12 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   }
   const testMode = selling && sellsInTestMode(store);
   const { w, num, lang } = speech(store);
+  // The calendar opens its times in this same frame, so it says nothing of a new tab.
   const note = testMode
     ? w.cardTestMode
-    : action.kind === "checkout"
+    : calendar
+      ? ""
+      : action.kind === "checkout"
       ? open?.mode === "page" ? "" : w.cardCheckout
       : action.kind === "link" && open?.mode !== "page"
         ? w.cardOpens(store.name)
@@ -380,7 +388,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           )
         ) : calendar ? (
           // The call's times, drawn in this same frame (unit 6), never a new tab.
-          <a href={here({ view: "times" }, [], "times-title")} className="btn st-btn btn-block mt-3" data-embed-calendar="">
+          <a href={here({ view: "times" }, [], "times-title")} id="calendar-button" className="btn st-btn btn-block mt-3" data-embed-calendar="">
             {label}
           </a>
         ) : action.kind === "link" ? (

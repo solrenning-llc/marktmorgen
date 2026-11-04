@@ -67,12 +67,15 @@ export const BULK_REFUSALS: Record<BulkRefusal, string> = {
  * byte-order mark, interlinear annotation, musical format controls, the
  * blank braille pattern, tag characters, the combining grapheme joiner,
  * variation selectors (U+FE00–FE0F, U+E0100–E01EF), the Mongolian free
- * variation selectors and vowel separator, and the shorthand format controls.
+ * variation selectors and vowel separator, the shorthand format controls, the
+ * Egyptian hieroglyph format controls, the musical null notehead, every other
+ * character Unicode says to ignore when it is not shown
+ * (Default_Ignorable_Code_Point) and every code point not yet assigned.
  * Format characters that do show (the Arabic number signs) are not on it; the
  * selectors that change how the character before them looks are kept only
  * there (keptSelector).
  */
-const TAKEN_OUT = /[\p{Cc}\p{Cs}\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0001}\u{E0020}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
+const TAKEN_OUT = /[\p{Cc}\p{Cs}\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{1BCA0}-\u{1BCA3}\u{13430}-\u{1345F}\u{1D159}\u{1D173}-\u{1D17A}\u{E0000}-\u{E001F}\p{Default_Ignorable_Code_Point}\p{Cn}\u{E0020}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
 const JOINERS = new Set(["\u200C", "\u200D"]);
 const BLACK_FLAG = "\u{1F3F4}";
 const EMOJI = /^\p{Extended_Pictographic}$/u;
@@ -148,7 +151,8 @@ export const withoutHidden = (form: string) => visibleChars(Array.from(form)).jo
  * zero-width space, or wrapped in direction marks, is "VIP".
  */
 export function cleanLabel(typed: string): string {
-  return visibleChars(Array.from(composed(typed.replace(/\s+/gu, " "))).map(narrowLatin)).join("").replace(/\s+/gu, " ").trim();
+  // Composed again after the hidden characters go, so "Cafe" + U+034F + U+0301 is "Café" as the rest of the studio compares it.
+  return composed(visibleChars(Array.from(composed(typed.replace(/\s+/gu, " "))).map(narrowLatin)).join("")).replace(/\s+/gu, " ").trim();
 }
 
 /** Whether a label shows anything: a letter, a number, a mark of punctuation or a symbol. */
@@ -164,7 +168,8 @@ export function labelKey(label: string): string {
   const narrow = Array.from(cleanLabel(label))
     .map((char) => (char >= "\uFF00" && char <= "\uFFEF" ? char.normalize("NFKC") : char))
     .join("");
-  return composed(narrow).toLowerCase().replace(/\s+/gu, " ").trim();
+  // The presentation selectors only choose how an emoji is drawn: "⭐" and "⭐️", "1⃣" and "1️⃣" are one label.
+  return composed(narrow).replace(/[\uFE0E\uFE0F]/gu, "").toLowerCase().replace(/\s+/gu, " ").trim();
 }
 
 export const same = (a: string, b: string) => labelKey(a) === labelKey(b);

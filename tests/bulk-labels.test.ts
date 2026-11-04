@@ -53,6 +53,10 @@ async function main(): Promise<void> {
   is("every refusal says what to do", Object.values(BULK_REFUSALS).every((words) => /^(Type|Paste|Choose) /.test(words)), true);
 
   part("Through the studio's route");
+
+  is("ignorable and unassigned characters, hieroglyph format controls and the null notehead are taken out", ["VIP\u2065", "VIP\u{E0000}", "VIP\u{E0002}", "VIP\u{13430}", "VIP\u{1D159}"].map((l) => labelKey(l) === labelKey("VIP")), [true, true, true, true, true]);
+  is("an emoji with or without its presentation selector is one label", [same("\u2B50", "\u2B50\uFE0F"), same("1\u20E3", "1\uFE0F\u20E3")], [true, true]);
+  is("a label composed again after a hidden character goes", cleanLabel("Cafe\u034F\u0301"), "Caf\u00E9");
   redis.clear();
   const owner = "labels@example.com";
   await claimHandle(owner, "labelshop", "Label Shop", "");

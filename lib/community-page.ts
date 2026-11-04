@@ -9,22 +9,33 @@
  */
 import { type Viewer, communityViewer } from "@/lib/community-access";
 import { countDay } from "@/lib/day-visit";
-import { isResting, takePublicRequest } from "@/lib/traffic";
+import { isResting } from "@/lib/traffic";
 import { countStudio } from "@/lib/studio-route";
+import { takeAllowance } from "@/lib/store-allowance";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { redirect } from "next/navigation";
 import type { Store } from "@/lib/store";
 
 type CookieJar = Parameters<typeof communityViewer>[1];
 
 /**
- * `units` of the store's window for a read a community page does past the
- * page itself (the search, lib/read-ceilings.ts), taken before it reads:
- * a member's from the buyers' requests, the creator's from the studio's.
- * `why` is what the studio's paused page is told when the creator's is refused.
+ * A read a community page does past the page itself (the search,
+ * lib/read-ceilings.ts), taken before it reads: a member's from the store's
+ * own figure for buyers (lib/store-allowance-rules.ts, "buyer"), never from
+ * the visits' requests, whose spending would rest the storefront sooner
+ * (owner's decision of 4 November 2026, 06h51); the creator's from the
+ * studio's requests. `units` is a count of each figure's own units
+ * (`buyer` or `studio`). `why` is what the studio's paused page is told when
+ * the creator's is refused.
  */
-export async function takeCommunityRead(store: Store, owner: boolean, units: number): Promise<{ ok: true } | { ok: false; why: string }> {
-  if (!owner) return (await takePublicRequest(store, "buyer", Date.now(), units)) ? { ok: true } : { ok: false, why: "used" };
-  const counted = await countStudio(store, null, units).catch(() => null);
+export async function takeCommunityRead(store: Store, owner: boolean, units: { buyer: number; studio: number }): Promise<{ ok: true } | { ok: false; why: string }> {
+  if (!owner) {
+    // As every buyer action is taken (lib/buyer-actions.ts, takeBuyerAction): a funded store's paid window first.
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store).catch(() => false))) return { ok: false, why: "used" };
+    const taken = await takeAllowance(store, "buyer", units.buyer).catch(() => null);
+    return taken?.ok ? { ok: true } : { ok: false, why: "used" };
+  }
+  const counted = await countStudio(store, null, units.studio).catch(() => null);
   return counted?.ok ? { ok: true } : { ok: false, why: counted && !counted.ok ? counted.reason : "unknown" };
 }
 

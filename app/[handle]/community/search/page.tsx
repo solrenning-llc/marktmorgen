@@ -13,7 +13,7 @@ import { visibleSpaces } from "@/lib/community-access";
 import { communityVisitor, takeCommunityRead } from "@/lib/community-page";
 import { type SearchKind, MAX_QUERY_LENGTH, queryWords, search, searchEverything } from "@/lib/community-search";
 import { needsWalk, walkStep } from "@/lib/community-walk";
-import { WALK_STEP_UNITS, searchUnits } from "@/lib/read-ceilings";
+import { type SearchUnits, WALK_STEP_UNITS, searchUnits } from "@/lib/read-ceilings";
 import { studioPath } from "@/lib/studio-route";
 import { eventsFound, lessonsFound, membersFound } from "@/lib/community-found";
 import { readableTime } from "@/lib/call-setup";
@@ -117,9 +117,10 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   // space, the tab's lessons, events or posts, and the room and this person's
   // messages where they are on. So it takes its worst from the store's window
   // before it reads anything (owner's rule MR; lib/read-ceilings.ts): a
-  // member's from the buyers' requests, the creator's from the studio's.
-  // Past them it reads nothing, as the community's other pages rest.
-  const take = (units: number) => takeCommunityRead(store, owner, units);
+  // member's from the store's figure for buyers (never the visits' requests:
+  // spending those would rest the storefront sooner), the creator's from the
+  // studio's. Past them it reads nothing, as the community's other pages rest.
+  const take = (units: SearchUnits) => takeCommunityRead(store, owner, units);
   if (wanted.length) {
     const taken = await take(searchUnits({ chat: config.chat.on, dm: config.dm.on }));
     if (!taken.ok) redirect(owner ? studioPath(store, `why=${taken.why}`, "paused") : `/@${store.handle}/resting`);

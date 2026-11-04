@@ -218,13 +218,18 @@ test("the units a figure is taken in cost at least what they stand for", () => {
 });
 
 test("the four reads of C4-4 take at least their worst before reading (lib/read-ceilings.ts)", () => {
-  // The community search takes public requests from a member and studio requests from the creator: held at the cheaper of the two.
-  const either = Math.min(laterPageCost(), UNIT_COST.studio);
+  // The community search takes the buyers' figure from a member (never the visits' requests) and studio requests from the creator: each held in its own units.
+  const search: [string, typeof SEARCH_REQUEST_UNITS, number][] = [
+    ["community search", SEARCH_REQUEST_UNITS, readShapeCost(SEARCH_SHAPE)],
+    ["its room", SEARCH_ROOM_UNITS, readShapeCost(SEARCH_ROOM_SHAPE)],
+    ["its messages", SEARCH_DM_UNITS, readShapeCost(SEARCH_DM_SHAPE)],
+    ["a step of its one-time walk", WALK_STEP_UNITS, readShapeCost(WALK_STEP_SHAPE)],
+  ];
   const held: [string, number, number, number][] = [
-    ["community search", SEARCH_REQUEST_UNITS, either, readShapeCost(SEARCH_SHAPE)],
-    ["its room", SEARCH_ROOM_UNITS, either, readShapeCost(SEARCH_ROOM_SHAPE)],
-    ["its messages", SEARCH_DM_UNITS, either, readShapeCost(SEARCH_DM_SHAPE)],
-    ["a step of its one-time walk", WALK_STEP_UNITS, either, readShapeCost(WALK_STEP_SHAPE)],
+    ...search.flatMap(([what, units, worst]): [string, number, number, number][] => [
+      [`${what}, a member's (buyers' figure)`, units.buyer, UNIT_COST.buyer, worst],
+      [`${what}, the creator's (studio)`, units.studio, UNIT_COST.studio, worst],
+    ]),
     ["the booking calendar's answer", CALENDAR_READ_UNITS, UNIT_COST.studio, readShapeCost(CALENDAR_READ_SHAPE)],
     ["the booking calendar made again", CALENDAR_BUILD_UNITS, UNIT_COST.studio, readShapeCost(CALENDAR_BUILD_SHAPE)],
     ["a product update's reading of every sale", UPDATE_READ_UNITS, UNIT_COST.studio, readShapeCost(UPDATE_READ_SHAPE)],

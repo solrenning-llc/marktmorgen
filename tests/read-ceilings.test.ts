@@ -25,9 +25,14 @@ import { needsWalk, readPlace, walkStep } from "@/lib/community-walk";
 import { search } from "@/lib/community-search";
 import { bookedCalendar, CALENDAR_MAX_EVENTS } from "@/lib/calendar-sync";
 import { WALK_MEMBER_PAGE, WALK_STEP_SHAPE, searchUnits, SEARCH_DM_UNITS, SEARCH_REQUEST_UNITS, SEARCH_ROOM_UNITS } from "@/lib/read-ceilings";
-import type { Store } from "@/lib/store";
+import { type Store, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
+import { takeCommunityRead } from "@/lib/community-page";
+import { takeAllowance } from "@/lib/store-allowance";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+
+const OWNER = "walker@example.com";
 
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 /** Where `needle` first is in `source`, failing loudly when it is not there at all. */
@@ -52,11 +57,39 @@ async function main(): Promise<void> {
     charge < at(page, "visibleSpaces(store, config"),
   ], [true, true, true, true, true]);
   const door = read("lib/community-page.ts");
-  is("a member's from the buyers' window, the creator's from the studio's", [page.includes("takeCommunityRead(store, owner, units)"), door.includes('if (!owner) return (await takePublicRequest(store, "buyer", Date.now(), units))'), door.includes("countStudio(store, null, units)")], [true, true, true]);
+  // Owner's decision of 4 November 2026, 06h51: a buyer's units come from their own figure, never the visits' requests.
+  is("a member's from the buyers' figure, never the visits' requests; the creator's from the studio's", [
+    page.includes("takeCommunityRead(store, owner, units)"),
+    door.includes('takeAllowance(store, "buyer", units.buyer)'),
+    door.includes("countStudio(store, null, units.studio)"),
+    door.slice(door.indexOf("export async function takeCommunityRead"), door.indexOf("export async function communityVisitor")).includes("takePublicRequest"),
+  ], [true, true, true, false]);
   is("refused, it reads nothing: the member to the resting page, the creator to the paused studio", page.includes('if (!taken.ok) redirect(owner ? studioPath(store, `why=${taken.why}`, "paused") : `/@${store.handle}/resting`);'), true);
   is("a step of the walk takes its own first, and waits when there is no room", at(page, "(await take(WALK_STEP_UNITS)).ok") < at(page, "await walkStep(store)"), true);
   is("the whole walk at once is gone", page.includes("walkCommunity"), false);
-  is("the room and the messages are paid for only where they are on", [searchUnits({ chat: false, dm: false }), searchUnits({ chat: true, dm: true })], [SEARCH_REQUEST_UNITS, SEARCH_REQUEST_UNITS + SEARCH_ROOM_UNITS + SEARCH_DM_UNITS]);
+  is("the room and the messages are paid for only where they are on", [searchUnits({ chat: false, dm: false }), searchUnits({ chat: true, dm: true }).buyer], [SEARCH_REQUEST_UNITS, SEARCH_REQUEST_UNITS.buyer + SEARCH_ROOM_UNITS.buyer + SEARCH_DM_UNITS.buyer]);
+
+  part("A member's search is taken from the buyers' figure, not the visits' requests");
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_ceilings_only_a_stand_in";
+  await claimHandle(OWNER, "walker", "Walker Club", "");
+  await ensureStatsId(OWNER);
+  await setSubscription(OWNER, { customerId: "cus_Walker00001", subscriptionId: "sub_Walker00001", active: true, tier: "pro", period: paidPeriod() });
+  const paying = (await storeForEmail(OWNER))!;
+  const visitsWindow = () => (redis.run(["SCAN", "0", "MATCH", "nl:traffic:*"]) as [string, string[]])[1].map((k) => `${k}=${JSON.stringify(redis.run(["GET", k]))}`).sort();
+  const buyerLeft = async () => {
+    const taken = await takeAllowance(paying, "buyer", 1);
+    return taken.ok ? taken.left : -1;
+  };
+  const visitsBefore = visitsWindow();
+  const buyerBefore = await buyerLeft();
+  const units = searchUnits({ chat: true, dm: true });
+  is("taken", (await takeCommunityRead(paying, false, units)).ok, true);
+  is("from the buyers' figure, by its own units", buyerBefore - (await buyerLeft()), units.buyer + 1);
+  is("and nothing from the visits' requests", visitsWindow(), visitsBefore);
+  const rest = await buyerLeft();
+  if (rest > 0) await takeAllowance(paying, "buyer", rest);
+  is("past the figure the search is refused", (await takeCommunityRead(paying, false, units)).ok, false);
 
   part("The one-time walk goes a step at a time");
   redis.clear();

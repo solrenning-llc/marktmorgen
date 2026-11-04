@@ -574,13 +574,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
-      // A member's community search takes its worst first, the room and messages where on, and each step of the one-time walk (C4-4, 4 November 2026; lib/read-ceilings.ts, held in tests/plan-cost-registry.test.ts).
-      { file: "app/[handle]/community/search/page.tsx", names: ["takeCommunityRead(store, owner, units)", "searchUnits({ chat: config.chat.on, dm: config.dm.on })", "take(WALK_STEP_UNITS)", "export const maxDuration = 30;"] },
-      { file: "lib/community-page.ts", names: ["takePublicRequest(store, \"buyer\", Date.now(), units)"] },
-      { file: "lib/read-ceilings.ts", names: ["SEARCH_REQUEST_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_DM_UNITS", "WALK_STEP_UNITS", "SEARCH_SECONDS = 30;"] },
-      { file: "lib/community-walk.ts", names: ["walkStep", "WALK_MEMBER_PAGE"] },
     ],
-    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count. A member's community search, which reads far more than a page, takes as many of them as its worst costs at a later page each before it reads anything, the room, the messages and each step of the one-time walk their own (lib/read-ceilings.ts; held in tests/plan-cost-registry.test.ts).",
+    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
   },
   {
     id: "studio",
@@ -610,7 +605,7 @@ export const COST_LINES: CostLine[] = [
       // Four reads take their worst first (C4-4, 4 November 2026; lib/read-ceilings.ts, held in tests/plan-cost-registry.test.ts):
       // the creator's own community search, the private booking calendar (each answer, and each file made again), a product
       // update's reading of every paid sale, and each store's numbers on the totals page.
-      { file: "lib/community-page.ts", names: ["countStudio(store, null, units)"] },
+      { file: "lib/community-page.ts", names: ["countStudio(store, null, units.studio)"] },
       { file: "app/api/store/calendar/[token]/route.ts", names: ["countStudio(store, null, CALENDAR_READ_UNITS)", "countStudio(store, null, CALENDAR_BUILD_UNITS)"] },
       { file: "lib/calendar-sync.ts", names: ["CALENDAR_MAX_EVENTS", ".slice(0, CALENDAR_MAX_EVENTS)"] },
       { file: "lib/product-updates.ts", names: ["countStudio(store, null, UPDATE_READ_UNITS)"] },
@@ -682,8 +677,14 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       { file: "lib/lesson-comments-rules.ts", names: ["COMMENTS_PER_DAY", "COMMENTS_PER_MINUTE"] },
       { file: "lib/community-text.ts", names: ["RATE_LIMITS", "EVENT_WRITES_PER_HOUR"] },
+      // A member's community search takes its worst first from this figure, never the visits' requests (owner, 4 November 2026, 06h51), with the room and
+      // messages where on and each step of the one-time walk (C4-4; lib/read-ceilings.ts, held in tests/plan-cost-registry.test.ts).
+      { file: "app/[handle]/community/search/page.tsx", names: ["takeCommunityRead(store, owner, units)", "searchUnits({ chat: config.chat.on, dm: config.dm.on })", "take(WALK_STEP_UNITS)", "export const maxDuration = 30;"] },
+      { file: "lib/community-page.ts", names: ["takeAllowance(store, \"buyer\", units.buyer)", "reservePaidResourceWindow(store)"] },
+      { file: "lib/read-ceilings.ts", names: ["SEARCH_REQUEST_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_DM_UNITS", "WALK_STEP_UNITS", "SEARCH_SECONDS = 30;"] },
+      { file: "lib/community-walk.ts", names: ["walkStep", "WALK_MEMBER_PAGE"] },
     ],
-    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
+    basis: "Every action of the window at the heaviest one's cost; the creator's own acts there are studio requests (line studio), a deletion follows an action already counted, and the per-person limits only spread them. A member's community search takes as many units of the figure as its worst costs at the heaviest action's price, before it reads anything (lib/read-ceilings.ts). The reads beside them (pictures, calendar files, lesson downloads, sign-in links, podcast episodes) are public requests on the buyers' side (line public-requests), a picture as PICTURE_REQUEST_UNITS of them.",
   },
   {
     id: "webhooks",

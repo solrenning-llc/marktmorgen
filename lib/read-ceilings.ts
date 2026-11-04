@@ -5,12 +5,13 @@
  * inventory of public and studio reads without a ceiling (C4-4):
  *
  *   community search   app/[handle]/community/search/page.tsx: a member's
- *                      search takes SEARCH_REQUEST_UNITS of the buyers'
- *                      window (lib/traffic.ts, takePublicRequest), more for
- *                      the room and the messages when they are on, and
- *                      WALK_STEP_UNITS for each step of the one-time walk
- *                      (lib/community-walk.ts); the creator's own search takes
- *                      the same from the studio's window (countStudio).
+ *                      search takes SEARCH_REQUEST_UNITS of the store's
+ *                      figure for buyers (takeAllowance "buyer", never the
+ *                      visits' requests), more for the room and the messages
+ *                      when they are on, and WALK_STEP_UNITS for each step of
+ *                      the one-time walk (lib/community-walk.ts); the
+ *                      creator's own search takes its studio requests
+ *                      (countStudio), each counted in its figure's units.
  *   booking calendar   app/api/store/calendar/[token]/route.ts: the
  *                      creator's private feed, read by their calendar app,
  *                      takes CALENDAR_READ_UNITS studio requests on every
@@ -157,15 +158,22 @@ export const WALK_STEP_SHAPE: ReadShape = {
   stripePages: 0,
 };
 
-/** Units of the window one search takes before it reads anything: public requests for a member, studio requests for the creator. */
-export const SEARCH_REQUEST_UNITS = 23;
-export const SEARCH_ROOM_UNITS = 1;
-export const SEARCH_DM_UNITS = 20;
-export const WALK_STEP_UNITS = 41;
+/**
+ * Units one search takes before it reads anything, in each figure's own
+ * units: a member's from the store's figure for buyers (lib/store-allowance-rules.ts,
+ * "buyer"; never the visits' requests, owner's decision of 4 November 2026,
+ * 06h51), the creator's from the studio's requests.
+ */
+export type SearchUnits = { buyer: number; studio: number };
+export const SEARCH_REQUEST_UNITS: SearchUnits = { buyer: 5, studio: 22 };
+export const SEARCH_ROOM_UNITS: SearchUnits = { buyer: 1, studio: 1 };
+export const SEARCH_DM_UNITS: SearchUnits = { buyer: 5, studio: 19 };
+export const WALK_STEP_UNITS: SearchUnits = { buyer: 9, studio: 39 };
 
 /** What one search takes, by what this community has on. */
-export function searchUnits(on: { chat: boolean; dm: boolean }): number {
-  return SEARCH_REQUEST_UNITS + (on.chat ? SEARCH_ROOM_UNITS : 0) + (on.dm ? SEARCH_DM_UNITS : 0);
+export function searchUnits(on: { chat: boolean; dm: boolean }): SearchUnits {
+  const sum = (by: keyof SearchUnits) => SEARCH_REQUEST_UNITS[by] + (on.chat ? SEARCH_ROOM_UNITS[by] : 0) + (on.dm ? SEARCH_DM_UNITS[by] : 0);
+  return { buyer: sum("buyer"), studio: sum("studio") };
 }
 
 // ---- The booking calendar's private feed -----------------------------------

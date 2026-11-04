@@ -755,6 +755,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:product:page:@lib/sales-page-store.ts": { what: "Products' and pages' blocks", room: ["lib/sales-page-store.ts"] },
   "nl:product:pages:@lib/sales-page-store.ts": { what: "A page's earlier versions", room: ["lib/sales-page-store.ts"] },
   "nl:amem:@lib/assistant-memory-store.ts": { what: "The creator's notes for their assistant", room: ["lib/assistant-memory-store.ts"] },
+  "nl:amem:lock:@lib/assistant-memory-store.ts": short("The creator's notes for their assistant being changed, ten seconds at the most", "studio", 1, 128),
   "nl:product:pics:@lib/sales-page-store.ts": { what: "Which page a picture belongs to", room: ["lib/sales-page-store.ts"] },
   "nl:sblock:uses:@lib/saved-block-store.ts": { what: "The pages carrying a saved section", room: ["lib/sales-page-store.ts"] },
   "nl:sblocks:@lib/saved-block-store.ts": { what: "Saved sections", line: "funnel-share" },

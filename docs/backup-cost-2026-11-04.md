@@ -22,20 +22,21 @@ The queue item asks for 30 daily copies plus weekly copies for 3 months. The cod
 
 ## 2. Prices used, with source and date
 
-The official pages could not be read today: `developers.cloudflare.com` and `upstash.com` are refused by this session's network (proxy answered 403 on 4 November 2026). Every figure below is a rate the repository already records with its official source and the date it was read. None was reconfirmed today.
+This session's network refuses `developers.cloudflare.com`, `upstash.com` and `vercel.com`. Claude 1 reread the Cloudflare R2 and Upstash pages on 4 November 2026 (inbox C4-27); their figures are the same as the repository's, and the rows below say so. The Vercel rates were not reread: they are the ones the repository records, with their date.
 
 | Rate | Figure | Official source | Read on (as recorded) | Recorded in |
 |---|---|---|---|---|
-| R2 Standard storage | $0.015 per decimal GB-month | https://developers.cloudflare.com/r2/pricing/ | 2026-10-16, 2026-10-17, 2026-10-22; queue entry of 2026-10-31 | `lib/spend-cost-table.ts` (`R2_STORAGE_MICRO_USD_PER_GB_MONTH`), docs/backup.md, docs/tier-storage-limits.md |
-| R2 Class A operations | $4.50 per million | same | same | `R2_CLASS_A_MICRO_USD_PER_MILLION` |
-| R2 Class B operations | $0.36 per million | same | same | `R2_CLASS_B_MICRO_USD_PER_MILLION` |
-| R2 egress | $0 ("data out free"; "egress is uncharged; reads are still operations") | same | 2026-10-19; 2026-10-31 | docs/plan-capacity-provider-review.md, lib/picture-r2.ts, queue (CV1 unit 4) |
+| R2 Standard storage | $0.015 per decimal GB-month | https://developers.cloudflare.com/r2/pricing/ ("Last updated Oct 30, 2026") | **2026-11-04 (Claude 1, inbox C4-27)**; earlier 2026-10-16, 2026-10-17, 2026-10-22 | `lib/spend-cost-table.ts` (`R2_STORAGE_MICRO_USD_PER_GB_MONTH`), docs/backup.md, docs/tier-storage-limits.md |
+| R2 Class A operations | $4.50 per million; a PutObject answered 412 by If-None-Match counts as Class A | same | 2026-11-04 (C4-27) | `R2_CLASS_A_MICRO_USD_PER_MILLION` |
+| R2 Class B operations | $0.36 per million; a request refused for authentication is not billed | same | 2026-11-04 (C4-27) | `R2_CLASS_B_MICRO_USD_PER_MILLION` |
+| R2 egress | $0 ("data out free"; reads are still operations) | same | 2026-11-04 (C4-27); earlier 2026-10-19, 2026-10-31 | docs/plan-capacity-provider-review.md, lib/picture-r2.ts, queue (CV1 unit 4) |
 | R2 billing rounding | usage rounded up to the next billing unit | same | 2026-10-16, 2026-10-22 | docs/tier-storage-limits.md, docs/backup.md |
-| R2 free quota | exists; **amount not recorded in the repository and not reconfirmed today**; never credited here | same | — | docs/backup.md ("no free-tier credit") |
+| R2 free quota | 10 GB-month, 1 million Class A, 10 million Class B a month; **never credited** (MR) | same | 2026-11-04 (C4-27) | docs/backup.md ("no free-tier credit") |
 | R2 delete / lifecycle expiry | not recorded in the repository | — | — | **unknown** (see section 5) |
-| Upstash commands | $0.20 per 100,000 = $2.00 per million (pay as you go) | https://upstash.com/pricing/redis | 2026-10-17, 2026-10-22 | `UPSTASH_MICRO_USD_PER_MILLION_COMMANDS`, docs/backup.md |
-| Upstash billing of every command, pipelines included | yes | https://upstash.com/docs/redis/overall/billing | 2026-10-31 | docs/backup.md |
-| Upstash bandwidth | $0.03 per GB past a free 200 GB a month; free part **not credited** | https://upstash.com/pricing/redis | 2026-10-17, 2026-10-31 | `UPSTASH_MICRO_USD_PER_GB_TRANSFER` |
+| Upstash commands | $0.20 per 100,000 = $2.00 per million (pay as you go), reads and writes alike; operational commands (AUTH, PING) not billed | https://upstash.com/pricing/redis (page undated) | **2026-11-04 (C4-27)**; earlier 2026-10-17, 2026-10-22 | `UPSTASH_MICRO_USD_PER_MILLION_COMMANDS`, docs/backup.md |
+| Upstash billing of every command, pipelines and scripts included | yes (the pricing page does not say how scripts and pipelines count; the billing page does, and the worst case is used) | https://upstash.com/docs/redis/overall/billing | 2026-10-31 | docs/backup.md |
+| Upstash storage | $0.25 per GB; the first GB free is **not credited** | https://upstash.com/pricing/redis | 2026-11-04 (C4-27) | the three marks: under 1 KB |
+| Upstash bandwidth | $0.03 per GB past a free 200 GB a month; free part **not credited** | https://upstash.com/pricing/redis | 2026-11-04 (C4-27); earlier 2026-10-17, 2026-10-31 | `UPSTASH_MICRO_USD_PER_GB_TRANSFER` |
 | Vercel function memory | $0.0106 per GB-hour, 2 GB function | Vercel pricing | 2026-10-07 | `VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR`, tests/traffic-cost.ts |
 | Vercel CPU | $0.128 per CPU-hour | same | 2026-10-07 | `VERCEL_CPU_MICRO_USD_PER_HOUR` |
 | Vercel function call | $0.60 per million | same | 2026-10-07 | `VERCEL_CALL_MICRO_USD_PER_MILLION` |
@@ -93,9 +94,9 @@ The monthly and annual intervals have the same worst month (one run a day either
 
 ## 5. What is still unknown (each one fails the review; none is zero)
 
-1. **Official pages not reread today.** `developers.cloudflare.com`, `upstash.com` and `vercel.com` must be allowed in the session's network settings, or the owner must confirm the rates, before a review with today's date can be recorded.
+1. **Vercel's page not reread.** R2 and Upstash were reread on 4 November 2026 (Claude 1, inbox C4-27); the Vercel rates keep their recorded date of 7 October 2026 until someone rereads them.
 2. **R2 billing unit size** (taken as 1 GB-month and 1 million operations) and whether lifecycle expiry deletions are free. Neither is recorded in the repository with a source.
-3. **R2 free quota amount**: not recorded; not needed for the result, because it is never credited.
+3. **R2 free quota amount**: 10 GB-month, 1 million Class A and 10 million Class B a month (C4-27); not needed for the result, because it is never credited.
 4. **Vercel run duration**: no route exists, so there is no `maxDuration`; the figures assume 300 s. Also not verified: whether Vercel bills a function's outbound transfer to R2 and Upstash (the repository's traffic model has no such line).
 5. **`SCAN` answer size**: `COUNT 500` is a hint; the names of other products' keys in a shared database are not capped. The bandwidth line assumes at most 500 names of at most 1,024 bytes a page. A byte cap on the walk's answers would make this a bound instead of an assumption.
 6. **Ratio between `DUMP` length and Upstash's billed data size**: taken as at most 1 (copy = 4/3 × stored bytes). Not measured. The independent review in docs/backup.md measured a HyperLogLog `DUMP` of 5–12 KB, so it needs a real measurement.
@@ -123,7 +124,9 @@ None of this switches the backup on (docs/backup.md): `BACKUP_COST_REVIEW` is st
 - **Rule for the owner:** in the bucket `marktmorgen-backup`, an object lifecycle rule that deletes objects with prefix `backups/` **30 days** after they were created. The code has no delete (`lib/backup-store.ts`), so this rule is the only retention.
 - **Matching review figures:** `retentionDays` 30; `maxStoredBytes` = (30 + 1) × 4,259,840 = **132,055,040 bytes**, which `validReview` accepts, because (retentionDays + 1) × objectBound ≤ maxStoredBytes holds with equality.
 
-**Still blocking the review** (section 5, unchanged): the official price pages could not be read today. This session's network denies `developers.cloudflare.com`, `upstash.com` and `vercel.com`, so the prices in section 2 carry their earlier dates and are not re-read with today's date. The other open items in section 5 also remain. Until they are closed, this review is not admitted and `BACKUP_COST_REVIEW` stays `null`.
+**Retention approved** (owner, MR; inbox C4-27, 4 November 2026): 30 days, `maxStoredBytes` 132,055,040.
+
+**Still blocking the review:** the R2 and Upstash prices are reread with today's date (section 2). The Vercel rates keep their recorded date of 7 October 2026. The other open items in section 5 remain: the R2 billing unit's size and whether lifecycle expiry is billed, the route's duration, the `SCAN` answer size, the `DUMP`/billed-size ratio, and the missing fixed-cost line. Until they are closed, this review is not admitted and `BACKUP_COST_REVIEW` stays `null`.
 
 ## 6. Where each cost belongs
 

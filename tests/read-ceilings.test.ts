@@ -25,7 +25,7 @@ import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CALENDAR_BUILDS_PER_DAY, CALENDAR_CREDITS_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS, CALENDAR_REFUSED_PER_HOUR,
+  CALENDAR_BUILDS_PER_DAY, CALENDAR_CREDITS_PER_DAY, CALENDAR_RETRIES_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS, CALENDAR_REFUSED_PER_HOUR,
   FeedGone, bookedCalendar, bookedCalendarFeed, calendarView, ensureFeedToken, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
@@ -161,6 +161,36 @@ async function main(): Promise<void> {
   is("no copy at all and Stripe down: the route answers 503", [unavailable.status, unavailable.headers.get("Retry-After")], [503, "300"]);
   stripeDown = false;
 
+  part("A making that fails is given back once a day; the second failure that day stays counted (inbox C4-53)");
+  {
+    const retryDay = Date.UTC(2032, 6, 1, 9, 0);
+    const d = new Date(retryDay).toISOString().slice(0, 10);
+    const builds = `nl:cal:builds:${owner.statsId}:${d}`;
+    redis.run(["DEL", `nl:cal:out:${owner.statsId}`, `nl:cal:pace:${owner.statsId}`, `${builds}:r`]);
+    // One of the day's own makings left.
+    redis.run(["SET", builds, String(CALENDAR_BUILDS_PER_DAY - 1), "EX", 2 * 86_400]);
+    stripeDown = true;
+    const first = await bookedCalendarFeed(owner, make, retryDay).then((a) => a.state, () => "error");
+    const afterFirst = Number(redis.run(["GET", builds]));
+    const second = await bookedCalendarFeed(owner, make, retryDay + 60_000).then((a) => a.state, () => "error");
+    const afterSecond = Number(redis.run(["GET", builds]));
+    stripeDown = false;
+    const third = await bookedCalendarFeed(owner, make, retryDay + 120_000);
+    is(`the first failure gives its making back (${CALENDAR_RETRIES_PER_DAY} a day): the day still has one`, [first, afterFirst], ["error", CALENDAR_BUILDS_PER_DAY - 1]);
+    is("the second failure that day is counted: the day's makings are used", [second, afterSecond], ["error", CALENDAR_BUILDS_PER_DAY]);
+    is("so with Stripe back, nothing is made until the next day", third.state, "none");
+    is("the given-back count never goes below zero", afterFirst >= 0 && afterSecond >= 0, true);
+    redis.run(["DEL", `nl:cal:pace:${owner.statsId}`]);
+    const idle = await counted(() => bookedCalendarFeed(owner, make, retryDay + 180_000));
+    is("with no making left, an answer takes no count: the pace and one MGET", [idle.value.state, idle.commands <= 5 + 1], ["none", true]);
+    const triesDay = Date.UTC(2032, 6, 2, 9, 0);
+    const td = new Date(triesDay).toISOString().slice(0, 10);
+    redis.run(["DEL", `nl:cal:pace:${owner.statsId}`]);
+    redis.run(["SET", `nl:cal:builds:${owner.statsId}:${td}:a`, String(CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY), "EX", 86_400]);
+    const capped = await bookedCalendarFeed(owner, make, triesDay);
+    is(`the day's tries, made or failed, never pass the ${CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY} priced makings, own makings left or not`, [capped.state, Number(redis.run(["GET", `nl:cal:builds:${owner.statsId}:${td}`]) ?? 0)], ["none", 0]);
+  }
+
   part("A deleted store's copy is never answered again (M2), by the route itself");
   redis.run(["DEL", `nl:cal:pace:${owner.statsId}`, `nl:cal:builds:${owner.statsId}:${new Date().toISOString().slice(0, 10)}`]);
   is("before: the route answers the file", (await ask()).status, 200);
@@ -264,7 +294,7 @@ async function main(): Promise<void> {
   is("a store's one-time all-time filling has its own line, once for each store (M4)", (fill?.monthlyUsd("creator") ?? 0) >= readShapeCost(LIFE_FILL_SHAPE), true);
   const line = COST_LINES.find((l) => l.id === "calendar-feed");
   const feedMonth = line ? line.monthlyUsd("creator") : 0;
-  is("the feed is a cost line of its own, every making (its own and its credits) and answer of the month at its worst", feedMonth >= 32 * (CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY) * readShapeCost(CALENDAR_BUILD_SHAPE) + 31 * 24 * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE), true);
+  is("the feed is a cost line of its own, every try of a making (its own and its credits, a failure given back included) and answer of the month at its worst", feedMonth >= 32 * (CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY) * readShapeCost(CALENDAR_BUILD_SHAPE) + 31 * 24 * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE), true);
   const readings = COST_LINES.find((l) => l.id === "store-readings");
   const readingsMonth = readings ? readings.monthlyUsd("creator") : 0;
   const heavyWorst = readShapeCost(SALES_READ_SHAPE);
@@ -302,7 +332,7 @@ async function main(): Promise<void> {
     is("a reading's count, measured: light 3, heavy 5, as READING_COUNT_COMMANDS less its GET and SET", [lightTaken.commands, heavyTaken.commands, lightTaken.value && heavyTaken.value], [READING_COUNT_COMMANDS.light - 2, READING_COUNT_COMMANDS.heavy - 2, true]);
     is("refused, with its DECRBY: light 4, heavy 7, inside what KEPT_READINGS_SHAPE prices for a page that reads nothing", [lightRefused.commands, heavyRefused.commands, lightRefused.value || heavyRefused.value, 3 + 2 * lightRefused.commands + heavyRefused.commands + 2 <= KEPT_READINGS_SHAPE.commands], [4, 7, false, true]);
     const left = await counted(() => readingsLeft(fresh, day));
-    is("what is left of the day: two GET, and none left once used", [left.commands, left.value], [2, { any: false, heavy: false }]);
+    is("what is left of the day: two GET, and none left once used", [left.commands, left.value], [2, { any: false, heavy: false, anyLeft: 0, heavyLeft: 0 }]);
   }
   is("a store in its trial or past its plan keeps both, priced for it (M2)", nonPayingWorst() >= feedMonth + readingsMonth, true);
   console.log(`  calendar feed: a making $${readShapeCost(CALENDAR_BUILD_SHAPE).toFixed(6)}, an answer $${readShapeCost(CALENDAR_POLL_SHAPE).toFixed(6)}, the month $${feedMonth.toFixed(4)}`);

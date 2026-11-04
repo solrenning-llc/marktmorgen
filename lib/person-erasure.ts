@@ -88,6 +88,7 @@ import { forgetDiscordPerson } from "@/lib/discord-access";
 import { forgetSyncPerson } from "@/lib/email-sync";
 import { forgetLedgerCopy } from "@/lib/segments";
 import { forgetReadingsPerson } from "@/lib/store-readings";
+import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
@@ -179,6 +180,8 @@ export const ERASERS: Eraser[] = [
   { module: "lib/segments.ts", run: (s) => forgetLedgerCopy(s.statsId) },
   // The studio's kept reading of the sales names the biggest buyers by address (inbox C4-48): it goes, and is read again.
   { module: "lib/store-readings.ts", run: (s) => forgetReadingsPerson(s.statsId) },
+  // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
+  { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
   {
     module: "lib/reviews.ts",

@@ -50,7 +50,7 @@ import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
 import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
 import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";
-import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-limits";
+import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR, CALENDAR_RETRIES_PER_DAY } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
 import { MEET_STORES } from "@/lib/meet-links";
@@ -89,7 +89,7 @@ export const FEED_REFUNDS_SECONDS = 2 * 86_400;
 /** Times a store's file may be made again in a UTC day, every reason together. */
 export const CALENDAR_BUILDS_PER_DAY = 2;
 /** More makings a UTC day, one for each booking made, moved or let go (lib/calendar-limits.ts, CALENDAR_CREDITS_PER_DAY). */
-export { CALENDAR_CREDITS_PER_DAY };
+export { CALENDAR_CREDITS_PER_DAY, CALENDAR_RETRIES_PER_DAY };
 /** Answers and refusals an hour (lib/calendar-limits.ts, where the studio's editor reads them too). */
 export { CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR };
 /**
@@ -130,6 +130,9 @@ const outKey = (statsId: string) => `nl:cal:out:${statsId}`;
 const paceKey = (statsId: string) => `nl:cal:pace:${statsId}`;
 const buildsKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}`;
 const creditsUsedKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}:c`;
+const retriesKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}:r`;
+/** Every try of a making a UTC day, made or failed: never more than the priced figure (inbox C4-53). */
+export const calendarAttemptsKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}:a`;
 
 function parseConfig(raw: unknown): Config | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -624,6 +627,21 @@ async function takeCounted(key: string, ceiling: number, seconds: number): Promi
 }
 
 /**
+ * A count's unit given back: DECRBY, and a count found below zero (it had
+ * expired) set back to zero with its expiry, so a day is counted higher,
+ * never lower.
+ */
+async function giveCounted(key: string, seconds: number): Promise<void> {
+  try {
+    const [left] = await redisPipeline([["DECRBY", key, 1]]);
+    const after = Number(left);
+    if (Number.isSafeInteger(after) && after < 0) await redisPipeline([["INCRBY", key, -after], ["EXPIRE", key, seconds]]);
+  } catch {
+    // Counted higher, never lower.
+  }
+}
+
+/**
  * The copy written only while the store's calendar settings exist, in one step:
  * EXISTS, then SET with its expiry (lib/redis-memory.ts runs it the same way).
  */
@@ -704,6 +722,17 @@ export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "pac
  * copy of its file, which names its buyers, as a closed store's are
  * (lib/closed-store-data.ts, calendarKeys).
  */
+/**
+ * A person's erasure (lib/person-erasure.ts, a step of every door; review of
+ * #2111): the feed's kept file goes, which names who booked. The next check
+ * makes it again from the store's bookings, which Stripe keeps.
+ */
+export async function forgetFeedCopyPerson(statsId: string | null): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [gone] = await redisPipeline([["DEL", outKey(statsId)]]);
+  return Number(gone) || 0;
+}
+
 export async function forgetStoreCalendar(statsId: string | null | undefined): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
@@ -723,13 +752,15 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   try {
     // The changed mark and the day's credits are kept by the store's calls id (lib/call-records.ts), which a
     // rename does not change; settings written before they named it have neither, and the refresh stands.
+    // The day's counts are read in the same MGET, so an answer with no making left takes no count at all (C4-53).
     const marks = owner.callsId ? [bookingsChangedKey(owner.callsId), bookingCreditsKey(owner.callsId, day)] : ["", ""];
-    raw = await redisPipeline([["MGET", outKey(owner.statsId), storeHandleKey(owner.handle), ...marks.filter(Boolean)]]);
+    const counts = [calendarAttemptsKey(owner.statsId, day), buildsKey(owner.statsId, day), creditsUsedKey(owner.statsId, day)];
+    raw = await redisPipeline([["MGET", outKey(owner.statsId), storeHandleKey(owner.handle), ...counts, ...marks.filter(Boolean)]]);
   } catch {
     return { state: "none" };
   }
   const values = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : [];
-  const [copyRaw, handleRaw, changedRaw, creditsRaw] = [values[0] ?? null, values[1] ?? null, values[2] ?? null, values[3] ?? null];
+  const [copyRaw, handleRaw, attemptsRaw, ownRaw, creditsUsedRaw, changedRaw, creditsRaw] = [0, 1, 2, 3, 4, 5, 6].map((i) => values[i] ?? null);
   // The store was deleted or closed (its handle let go): what it kept, which names its buyers, goes now.
   if (!handleLeadsToStore(handleRaw)) {
     await redisPipeline([["DEL", outKey(owner.statsId)]]).catch(() => {});
@@ -752,10 +783,26 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // A booking made, moved or let go since the copy: one of the day's credits, which bookings give, up to
   // CALENDAR_CREDITS_PER_DAY. Otherwise (or with none left) one of the day's own CALENDAR_BUILDS_PER_DAY.
   const credits = Math.min(Number(creditsRaw) || 0, CALENDAR_CREDITS_PER_DAY);
-  const paid =
-    (changedSince && credits > 0 && (await takeCounted(creditsUsedKey(owner.statsId, day), credits, 2 * 86_400)))
-    || (await takeCounted(buildsKey(owner.statsId, day), CALENDAR_BUILDS_PER_DAY, 2 * 86_400));
-  if (!paid) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  const creditKey = creditsUsedKey(owner.statsId, day);
+  const ownKey = buildsKey(owner.statsId, day);
+  const attemptsKey = calendarAttemptsKey(owner.statsId, day);
+  const tries = CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY;
+  // No making left by the counts just read: the copy, with no count taken (an answer's priced shape has none).
+  const roomFor = (used: unknown, ceiling: number) => (Number(used) || 0) < ceiling;
+  if (!roomFor(attemptsRaw, tries) || !((changedSince && roomFor(creditsUsedRaw, credits)) || roomFor(ownRaw, CALENDAR_BUILDS_PER_DAY))) {
+    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  }
+  // Every try of the day, made or failed, or refused by a making that ran at the same moment, is one of the priced
+  // makings (inbox C4-53): a failure given back below tries again inside this figure, never past it.
+  if (!(await takeCounted(attemptsKey, tries, 2 * 86_400))) {
+    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  }
+  const taken =
+    changedSince && credits > 0 && (await takeCounted(creditKey, credits, 2 * 86_400)) ? creditKey
+    : (await takeCounted(ownKey, CALENDAR_BUILDS_PER_DAY, 2 * 86_400)) ? ownKey
+    : null;
+  // Refused by a making that ran at the same moment: the try stays counted, so its commands are priced.
+  if (!taken) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   let ics: string;
   try {
     ics = await make();
@@ -765,7 +812,10 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
       await redisPipeline([["SET", outKey(owner.statsId), JSON.stringify({ gone: true }), "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
       return { state: "gone" };
     }
-    // Stripe did not answer: the copy stands.
+    // Stripe did not answer: the making is given back once a day, so the app's next check tries again; past that
+    // one it stays counted. The try itself stays counted either way (calendarAttemptsKey), so what it read is priced
+    // (inbox C4-53). The copy stands.
+    if (await takeCounted(retriesKey(owner.statsId, day), CALENDAR_RETRIES_PER_DAY, 2 * 86_400)) await giveCounted(taken, 2 * 86_400);
     if (copy) return { state: "copy", ics: copy.ics };
     throw error;
   }
@@ -779,7 +829,7 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // not answered either (inbox C4-48, medium 1). When the step cannot be run, nothing is answered: the app asks again.
   const [written] = await redisPipeline([["EVAL", KEEP_COPY, 2, cfgKey(owner.statsId), outKey(owner.statsId), file, CALENDAR_COPY_SECONDS]]).catch(() => [null]);
   if (Number(written) === 0) return { state: "gone" };
-  if (Number(written) !== 1) return { state: "none" };
+  if (Number(written) !== 1) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
   // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):
   // for FEED_REFUNDS_SECONDS after each making, which a feed that is read makes at least every CALENDAR_REFRESH_SECONDS.

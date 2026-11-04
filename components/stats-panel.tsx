@@ -386,6 +386,10 @@ export type NumbersReading = {
   backAt: number;
   /** None of the sales kept and none may be read today. */
   salesUsed: boolean;
+  /** The last try failed after calling Stripe, and was counted (inbox C4-53). */
+  failed?: boolean;
+  /** Readings of this kind left today. */
+  left?: number;
 };
 
 /**
@@ -400,6 +404,9 @@ export function ReadingLine({ reading }: { reading: NumbersReading }) {
         <span>
           Updated at <LocalClock ms={reading.at} />.
         </span>
+      ) : null}
+      {reading.failed ? (
+        <span>{`The last reading failed and was counted; ${reading.left ?? 0} ${(reading.left ?? 0) === 1 ? "reading" : "readings"} left today.`}</span>
       ) : null}
       {reading.salesUsed ? <span>Your sales could not be read again today.</span> : null}
       {reading.canRefresh ? (

@@ -110,6 +110,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/email-sync.ts": { how: "copied", what: "The record of sending you to the store's connected email platform" },
   "lib/segments.ts": { how: "marks", what: "A ten-minute copy of the store's buyers, made from its Stripe account" },
   "lib/store-readings.ts": { how: "marks", what: "A day's copy of the store's sales numbers, which may name its biggest buyers, made from its Stripe account" },
+  "lib/calendar-sync.ts": { how: "marks", what: "A copy of the store's private booking calendar, which may name you if you booked, made from its bookings" },
   "lib/member-health.ts": { how: "marks", what: "A ten-minute copy of the store's members' scores, made from its Stripe account" },
   "lib/reviews.ts": { how: "copied", what: "Your reviews, and the store's replies to them" },
   "lib/buyer-library.ts": { how: "copied", what: "The note that you bought from or joined the store, for your library" },

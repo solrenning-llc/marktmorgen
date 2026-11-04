@@ -63,7 +63,7 @@ import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
 import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
 import { productsInStats, reachProducts, readAllTimeSales, studioStats } from "@/lib/stats";
-import { ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
+import { ReadingFailed, ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
 import { readSpends } from "@/lib/ad-spend";
@@ -1066,10 +1066,10 @@ export default async function StudioPage({
         keptStats(current, undefined, freshNumbers).then((kept) => kept, () => null),
         readsSales(current)
           ? keptSales(current, undefined, freshNumbers).then(
-              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false }),
-              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed }),
+              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true }),
+              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed }),
             )
-          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false }),
+          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false }),
         readNotes(current.statsId).catch(() => []),
         readSpends(current.statsId).catch(() => []),
         heardOff(current.handle).catch(() => false),
@@ -1082,7 +1082,7 @@ export default async function StudioPage({
   // When the numbers shown were read, whether the day still has a reading to read them again, and when the
   // day's readings come back: said on the panel, the kept copy shown as it is (inbox C4-33 (2), (3)).
   const readingAt = [visitsKept?.at, salesRead?.at].filter((at): at is number => typeof at === "number");
-  const left = current && visits ? await readingsLeft(current) : { any: false, heavy: false };
+  const left = current && visits ? await readingsLeft(current) : { any: false, heavy: false, anyLeft: 0, heavyLeft: 0 };
   const numbersReading = current && visits
     ? {
         at: readingAt.length ? Math.min(...readingAt) : null,
@@ -1090,6 +1090,9 @@ export default async function StudioPage({
         refreshHref: studioPath(current, "numbers=fresh"),
         backAt: readingsBackAt(),
         salesUsed: salesRead?.used === true,
+        // A reading that failed after calling Stripe was counted (inbox C4-53): said, with what is left of the day.
+        failed: salesRead?.failed === true || visitsKept?.failed === true,
+        left: readsSales(current) ? left.heavyLeft : left.anyLeft,
       }
     : null;
   const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]) : [];

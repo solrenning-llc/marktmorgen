@@ -6,6 +6,7 @@
  * written; applied to each contact as it is; undone exactly for those it
  * changed; never starting an automation, and saying so before confirming.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -17,7 +18,7 @@ import { BULK_REFUSALS, BULK_WRITE_BATCH, MAX_BULK_ADDRESSES, MAX_BULK_BODY_BYTE
 import { applyBulk, readBulk } from "@/lib/bulk-labels";
 import type { DataStore } from "@/lib/store-data";
 import { StoreFullError } from "@/lib/store-full";
-import { leadsKey, parseContact, upsertContact } from "@/lib/contacts";
+import { leadsKey, parseContact, stopWriting, upsertContact } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
 import { enroll, saveFlow } from "@/lib/flows";
 import { sameLabel } from "@/lib/flow-rules";
@@ -146,8 +147,27 @@ async function main(): Promise<void> {
   let failFromEval = 0;
   let broken = false;
   let casSeen = 0;
+  // `replyLost`: the next atomic write is made, as the script would, and then its answer is lost (then the read after it too, with `readLost`).
+  // `readFails`: the next read of the list fails, before anything is written.
+  let replyLost = false;
+  let readLost = false;
+  let readFails = false;
   redis.pipeline = async (commands: (string | number)[][]) => {
     const [first] = commands;
+    if (readFails && first[0] === "HMGET" && first[1] === leadsKey(list)) {
+      readFails = false;
+      throw new Error("injected: the read failed");
+    }
+    if (replyLost && commands.length === 1 && first[0] === "EVAL" && String(first[1]).includes("redis.sha1hex")) {
+      replyLost = false;
+      const [, , , key, ...argv] = first.map(String);
+      for (let i = 0; i < argv.length; i += 3) {
+        const [current] = await pipeline([["HGET", key, argv[i]]]);
+        if ((typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "") === argv[i + 1]) await pipeline([["HSET", key, argv[i], argv[i + 2]]]);
+      }
+      if (readLost) broken = true;
+      throw new Error("injected: the answer was lost");
+    }
     if (commands.length === 1 && first[0] === "EVAL" && String(first[1]).includes("redis.sha1hex")) {
       casSeen += 1;
       if (failFromEval && !broken && casSeen >= failFromEval) broken = true;
@@ -230,6 +250,8 @@ async function main(): Promise<void> {
   const england = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
   const scotland = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
   is("joiners and flag tags that make one emoji or one word are kept", ["👨\u200D👩\u200D👧", "می\u200Cخواهم", "അവന\u0D4D\u200D", england, scotland].map(labelOf), ["👨\u200D👩\u200D👧", "می\u200Cخواهم", "അവന\u0D4D\u200D", england, scotland]);
+  const tagsOfText = (text: string) => Array.from(text, (letter) => String.fromCodePoint(0xe0000 + letter.charCodeAt(0))).join("");
+  is("any other run of tags after a black flag is taken out: it could spell hidden letters", [labelOf("\u{1F3F4}" + tagsOfText("vip") + "\u{E007F}"), labelOf("\u{1F3F4}" + tagsOfText("gbeng")), labelOf("VIP" + tagsOfText("gbeng") + "\u{E007F}")], ["\u{1F3F4}", "\u{1F3F4}", "VIP"]);
   is("England and Scotland stay two flags, not one black flag", [same(england, scotland), same(england, "\u{1F3F4}"), labelKey(england) === labelKey(england)], [false, false, true]);
   is("format characters that show or shape text are kept, and compatibility ideographs as typed", ["\u0600١٢", "ᠨ\u180Eᠠ", "\uF900"].map(labelOf), ["\u0600١٢", "ᠨ\u180Eᠠ", "\uF900"]);
   is("compared whatever the case, width, composition or hidden characters", [same("VIP", "ＶＩＰ"), same("VIP", "vip\u200B"), same("\u2066VIP\u2069", "Vip"), same("Cafe\u0301", "CAFÉ"), same("ｶﾌｪ", "カフェ"), same("VIP", "VIPS"), labelKey("\u200B")], [true, true, true, true, true, false, ""]);
@@ -267,7 +289,32 @@ async function main(): Promise<void> {
   const ctl = await post({ action: "apply", label: "V", change: "remove", text: "ctl@example.com" });
   is("a form with control characters is answered cleaned, and marked so", ctl.body.removed, [{ email: "ctl@example.com", label: "V", at: 1, cleaned: true }]);
   const ctlBack = await post({ action: "apply", label: "V", change: "add", emails: [], restore: ctl.body.removed });
-  is("its undo puts back the form as it was shown, and says so", [await tagsOf("ctl@example.com"), undoSummary(1, { changed: ctlBack.body.changed!.length, already: 0, full: 0, notOnList: 0 }, "add", { cleaned: 1 }).words], [["a", "V"], "Undone. Every contact has the label back as it was shown. 1 contact got the label back as it looks, without the hidden differences it had."]);
+  is("its undo puts back the form as it was shown, and says so", [await tagsOf("ctl@example.com"), undoSummary(1, { changed: ctlBack.body.changed!.length, already: 0, full: 0, notOnList: 0 }, "add", { cleaned: 1 }).words], [["a", "V"], "Undone. Every contact has the label back as it was shown. 1 contact got the label back without the hidden characters it had."]);
+
+  // L3. An undo of an add that replaced a look-alike says what it did in its own words.
+  is(
+    "an undo of an add says its earlier forms went back",
+    [undoSummary(1, { changed: 1, already: 0, full: 0, notOnList: 0 }, "remove", { merged: 1 }).words, undoSummary(2, { changed: 2, already: 0, full: 0, notOnList: 0 }, "remove", { cleaned: 2 }).words],
+    [
+      "Undone. Every contact has its earlier form of the label back as it was shown. 1 contact had this label in more than one form before. It got back only the first of them.",
+      "Undone. Every contact has its earlier form of the label back as it was shown. 2 contacts got their earlier form of the label back without the hidden characters they had.",
+    ],
+  );
+  // L4. A form is put back exactly as written: its width and composition kept, only hidden characters taken out.
+  await put("exact@example.com", ["ＶＩＰ", "b"]);
+  await put("nfd@example.com", ["Cafe\u0301"]);
+  const exactOff = await post({ action: "apply", label: "VIP", change: "remove", text: "exact@example.com" });
+  const nfdOff = await post({ action: "apply", label: "Café", change: "remove", text: "nfd@example.com" });
+  is("a wide or decomposed form is answered as written, not marked cleaned", [exactOff.body.removed, nfdOff.body.removed], [[{ email: "exact@example.com", label: "ＶＩＰ", at: 0 }], [{ email: "nfd@example.com", label: "Cafe\u0301", at: 0 }]]);
+  await post({ action: "apply", label: "VIP", change: "add", emails: [], restore: exactOff.body.removed });
+  await post({ action: "apply", label: "Café", change: "add", emails: [], restore: nfdOff.body.removed });
+  is("and goes back exactly", [await tagsOf("exact@example.com"), await tagsOf("nfd@example.com")], [["ＶＩＰ", "b"], ["Cafe\u0301"]]);
+  // L5. An undo of a removal puts back the form it took, even if a look-alike appeared since.
+  await put("since@example.com", ["a", "VIP", "b"]);
+  const sinceOff = await post({ action: "apply", label: "VIP", change: "remove", text: "since@example.com" });
+  await put("since@example.com", ["a", "b", "VIP\u200B"]);
+  await post({ action: "apply", label: "VIP", change: "add", emails: [], restore: sinceOff.body.removed });
+  is("the look-alike that appeared is replaced by the form taken, where it stood", await tagsOf("since@example.com"), ["a", "VIP", "b"]);
 
   // 5. The 40 the screen says is counted after spaces are collapsed and what shows nothing is taken out, as the screen counts.
   is("counted after collapsing spaces", [labelOf("a  " + "b".repeat(38)), labelOf("x".repeat(40) + "\u200B"), labelOf("x".repeat(41))], ["a " + "b".repeat(38), "x".repeat(40), "label"]);
@@ -315,7 +362,33 @@ async function main(): Promise<void> {
   const brokeAll = await post({ action: "apply", label: "Broke", change: "add", text: failEmails.join("\n") });
   failFromEval = 0;
   broken = false;
-  is("an error before anything was written is refused, as before", [brokeAll.status, brokeAll.body.error, await tagsOf(failEmails[0])], [500, "server_error", []]);
+  is("a first write that failed, and may have landed, is answered as not known, never as nothing changed", [brokeAll.status, brokeAll.body.changed, brokeAll.body.failed], [200, [], BULK_WRITE_BATCH + 800]);
+  readFails = true;
+  const readBroke = await post({ action: "apply", label: "Broke", change: "add", text: failEmails.join("\n") });
+  is("an error before anything could be written is refused, as before", [readBroke.status, readBroke.body.error, await tagsOf(failEmails[0])], [500, "server_error", []]);
+
+  // M1 and M2 (review of 7bca2b7a). A write that landed but whose answer was lost counts as written.
+  await put("lost@example.com", ["a", "VIP"]);
+  replyLost = true;
+  const lostOff = await post({ action: "apply", label: "VIP", change: "remove", text: "lost@example.com" });
+  is("a removal whose answer was lost is still answered, with the form it took", [lostOff.body.changed, lostOff.body.removed, await tagsOf("lost@example.com")], [["lost@example.com"], [{ email: "lost@example.com", label: "VIP", at: 1 }], ["a"]]);
+  const lostBack = await post({ action: "apply", label: "VIP", change: "add", emails: [], restore: lostOff.body.removed });
+  is("so its undo puts the label back", [lostBack.body.changed, await tagsOf("lost@example.com")], [["lost@example.com"], ["a", "VIP"]]);
+  await put("gone-lost@example.com", []);
+  await redisPipeline([["HSET", leadsKey(list), "gone-lost@example.com", JSON.stringify({ ...JSON.parse(contact([])), agreed: true })]]);
+  replyLost = true;
+  is("the other writers share it: a bounce whose answer was lost is counted once", await stopWriting(list, "gone-lost@example.com", "bounced"), true);
+  await put("unsure@example.com", []);
+  replyLost = true;
+  readLost = true;
+  const unsure = await post({ action: "apply", label: "Unsure", change: "add", text: "unsure@example.com" });
+  readLost = false;
+  broken = false;
+  is(
+    "a write that may have landed, its answer and the read after it lost, is said as not known",
+    [unsure.status, unsure.body.changed, unsure.body.failed, await tagsOf("unsure@example.com"), applySummary(1, { changed: 0, already: 0, full: 0, notOnList: 0, failed: unsure.body.failed }, "add").words],
+    [200, [], 1, ["Unsure"], "Done: 0 contacts changed. 1 was left out: something went wrong with 1 contact, so it may not have changed; review again to see."],
+  );
 
   // 8. A data room that fills part way: what was written is answered, so it can be undone.
   const batchEmails = Array.from({ length: BULK_WRITE_BATCH + 50 }, (_, i) => `room${i}@example.com`);

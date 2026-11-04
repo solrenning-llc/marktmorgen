@@ -72,7 +72,6 @@ export const BULK_REFUSALS: Record<BulkRefusal, string> = {
 const TAKEN_OUT = /[\p{Cc}\p{Cs}\u00AD\u061C\u115F\u1160\u17B4\u17B5\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0001}\u{E0020}-\u{E007F}]/u;
 const JOINERS = new Set(["\u200C", "\u200D"]);
 const BLACK_FLAG = "\u{1F3F4}";
-const isTag = (char: string) => char >= "\u{E0020}" && char <= "\u{E007F}";
 // A character that shows, other than plain ASCII: what a joiner may follow (an emoji, a Malayalam chillu, a Persian word).
 const shownAfter = (char: string | undefined) => !!char && char > "\u007F" && !/\s/u.test(char) && !TAKEN_OUT.test(char);
 // CJK compatibility ideographs: NFC would turn each into its unified form, which is not how the creator wrote it.
@@ -86,25 +85,47 @@ const composed = (text: string) =>
 // Fullwidth Latin letters, digits and punctuation, as an input method types them, written as the plain ones.
 const narrowLatin = (char: string) => (char >= "\uFF01" && char <= "\uFF5E" ? char.normalize("NFKC") : char);
 
+// The subdivision flags emoji has (England, Scotland, Wales): a black flag, the tag letters of gbeng, gbsct or gbwls, and the cancel tag.
+const TAG_FLAGS = ["gbeng", "gbsct", "gbwls"].map((code) => BLACK_FLAG + Array.from(code, (letter) => String.fromCodePoint(0xe0000 + letter.charCodeAt(0))).join("") + "\u{E007F}");
+
+/**
+ * The characters of a label without those that show nothing (TAKEN_OUT),
+ * except a joiner after a character that shows (an emoji sequence, a
+ * Malayalam chillu) and the tags of a subdivision flag (TAG_FLAGS). Any other
+ * run of tags, which could spell hidden letters, is taken out.
+ */
+function visibleChars(chars: string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < chars.length; i += 1) {
+    const char = chars[i];
+    if (char === BLACK_FLAG) {
+      const flag = TAG_FLAGS.find((whole) => chars.slice(i, i + Array.from(whole).length).join("") === whole);
+      if (flag) {
+        kept.push(flag);
+        i += Array.from(flag).length - 1;
+        continue;
+      }
+    }
+    if (!TAKEN_OUT.test(char) || (JOINERS.has(char) && shownAfter(kept[kept.length - 1]))) kept.push(char);
+  }
+  return kept;
+}
+
+/**
+ * A form of a label kept on a contact, without the characters that show
+ * nothing and with nothing else changed (its width, its composition): what
+ * an undo puts back, so a look-alike goes back exactly as it was written.
+ */
+export const withoutHidden = (form: string) => visibleChars(Array.from(form)).join("").replace(/\s+/gu, " ").trim();
+
 /**
  * A label as it is written: composed (NFC, compatibility ideographs left as
- * typed), fullwidth Latin made plain ("ＶＩＰ" is "VIP"), spaces collapsed, with no character that shows nothing (TAKEN_OUT),
- * except a joiner after a character that shows (an emoji sequence, a
- * Malayalam chillu) and the tag characters of a subdivision flag (England,
- * Scotland, Wales). So "VIP" with a zero-width space, or wrapped in
- * direction marks, is "VIP".
+ * typed), fullwidth Latin made plain ("ＶＩＰ" is "VIP"), spaces collapsed,
+ * with no character that shows nothing (visibleChars). So "VIP" with a
+ * zero-width space, or wrapped in direction marks, is "VIP".
  */
 export function cleanLabel(typed: string): string {
-  const kept: string[] = [];
-  for (const char of Array.from(composed(typed.replace(/\s+/gu, " "))).map(narrowLatin)) {
-    const before = kept[kept.length - 1];
-    const keep =
-      !TAKEN_OUT.test(char) ||
-      (JOINERS.has(char) && shownAfter(before)) ||
-      (isTag(char) && !!before && (before === BLACK_FLAG || isTag(before)));
-    if (keep) kept.push(char);
-  }
-  return kept.join("").replace(/\s+/gu, " ").trim();
+  return visibleChars(Array.from(composed(typed.replace(/\s+/gu, " "))).map(narrowLatin)).join("").replace(/\s+/gu, " ").trim();
 }
 
 /** Whether a label shows anything: a letter, a number, a mark of punctuation or a symbol. */
@@ -162,7 +183,8 @@ export function replacedFrom(tags: readonly string[], label: string): (Removed &
  * One contact's labels after the change: a new list, "same" when already as
  * asked, or "skip" when it holds the most labels already. Adding to a contact
  * that holds only a look-alike form replaces it with the label, where the
- * first form stood. `back` is what an undo puts back, that contact's own form
+ * first form stood (or with `back`, when one appeared since the removal an
+ * undo takes back). `back` is what an undo puts back, that contact's own form
  * where it stood (or at the end when the list is shorter now): on an add,
  * what a removal took; on a removal, the look-alike an add replaced.
  */
@@ -175,7 +197,8 @@ export function labelsAfter(tags: readonly string[], label: string, change: Bulk
   };
   if (change === "remove") return at < 0 ? "same" : putBack(tags.filter((tag) => !same(tag, label)), back);
   if (tags.some((tag) => plainKey(tag) === plainKey(label))) return "same";
-  if (at >= 0) return putBack(tags.filter((tag) => !same(tag, label)), { label, at });
+  // A look-alike form is replaced: by the form an undo puts back, where it stood, or else by the label.
+  if (at >= 0) return putBack(tags.filter((tag) => !same(tag, label)), back && same(back.label, label) ? back : { label, at });
   if (tags.length >= MAX_CONTACT_TAGS) return "skip";
   return putBack([...tags], back);
 }
@@ -246,23 +269,35 @@ export function applySummary(asked: number, answer: BulkOutcome, change: BulkCha
  * not, and why, in plain words. A contact already as it was before (the label
  * taken off, or put back, some other way since) counts as back. `merged`:
  * contacts put back that had held the label in more than one form, which got
- * it back once, in the first form; `cleaned`: contacts whose label went back
- * without the characters in it that show nothing.
+ * the first one back; `cleaned`: contacts whose form went back without the
+ * hidden characters it had (withoutHidden). Each is said for the undo it is:
+ * of a removal (the label back) or of an add (the earlier form back).
  */
 export function undoSummary(asked: number, answer: BulkOutcome, undo: BulkChange, notes: { merged?: number; cleaned?: number } = {}): { allBack: boolean; short: string; words: string } {
   const back = Math.min(asked, answer.changed + answer.already);
   const notBack = asked - back;
   const merged = notes.merged ?? 0;
   const cleaned = notes.cleaned ?? 0;
+  // An undo of a removal puts the label back; an undo of an add puts back the earlier form an add replaced.
+  const it = (n: number) => (n === 1 ? "it" : "they");
   const extra = [
-    merged > 0 ? `${count(merged, "contact", "contacts")} had this label in more than one form. ${merged === 1 ? "It" : "They"} got the label back once, in the first form.` : "",
-    cleaned > 0 ? `${count(cleaned, "contact", "contacts")} got the label back as it looks, without the hidden differences it had.` : "",
+    merged > 0
+      ? undo === "add"
+        ? `${count(merged, "contact", "contacts")} had this label in more than one form. ${merged === 1 ? "It" : "They"} got the label back once, in the first form.`
+        : `${count(merged, "contact", "contacts")} had this label in more than one form before. ${merged === 1 ? "It" : "They"} got back only the first of them.`
+      : "",
+    cleaned > 0
+      ? undo === "add"
+        ? `${count(cleaned, "contact", "contacts")} got the label back without the hidden characters ${it(cleaned)} had.`
+        : `${count(cleaned, "contact", "contacts")} got ${cleaned === 1 ? "its" : "their"} earlier form of the label back without the hidden characters ${it(cleaned)} had.`
+      : "",
   ]
     .filter(Boolean)
     .map((words) => ` ${words}`)
     .join("");
   if (notBack <= 0) {
-    if (extra) return { allBack: false, short: "Undone. Every contact has the label back as it was shown.", words: `Undone. Every contact has the label back as it was shown.${extra}` };
+    const head = undo === "add" ? "Undone. Every contact has the label back as it was shown." : "Undone. Every contact has its earlier form of the label back as it was shown.";
+    if (extra) return { allBack: false, short: head, words: `${head}${extra}` };
     return { allBack: true, short: "Undone. Every contact is as it was.", words: "Undone. Every contact is as it was." };
   }
   const gone = Math.min(notBack, answer.notOnList);

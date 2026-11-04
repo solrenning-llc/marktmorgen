@@ -573,7 +573,10 @@ const CAS_HSET = [
  * Writes each field that still holds what was read; says which were written.
  * Upstash runs the script; where a Redis does not (the local stand-ins), the
  * same check is made as a read just before the write, which keeps the rule
- * and only narrows the gap rather than closing it.
+ * and only narrows the gap rather than closing it. A field that already holds
+ * what was to be written counts as written: the script ran and only its
+ * answer was lost, and reporting it as lost would leave that write out of
+ * what its caller answers (and of an undo).
  */
 async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
   try {
@@ -582,13 +585,13 @@ async function casWrite(key: string, writes: { email: string; value: string; was
     throw new Error("unexpected answer");
   } catch {
     const [now] = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]);
-    const same = writes.map((w, i) => {
-      const raw = Array.isArray(now) ? now[i] : null;
-      return (typeof raw === "string" ? sha1(raw) : "") === w.was;
-    });
+    const read = writes.map((_, i) => (Array.isArray(now) ? now[i] : null));
+    // A field that already holds what was to be written was written (the script ran and its answer was lost): not written again, never reported as lost.
+    const landed = writes.map((w, i) => read[i] === w.value);
+    const same = writes.map((w, i) => !landed[i] && (typeof read[i] === "string" ? sha1(read[i] as string) : "") === w.was);
     const pairs = writes.flatMap((w, i) => (same[i] ? [w.email, w.value] : []));
     if (pairs.length) await redisPipeline([["HSET", key, ...pairs]]);
-    return same;
+    return writes.map((_, i) => landed[i] || same[i]);
   }
 }
 
@@ -603,7 +606,8 @@ async function casWrite(key: string, writes: { email: string; value: string; was
  * round that fails stops there and what the earlier rounds wrote is still
  * answered: its contacts come back in `noRoom` when their new labels do not
  * fit in the data room, or in `failed` on any other error (a write that may
- * or may not have been made), with the `error`; without it the error is thrown.
+ * or may not have been made), with the `error` and `unsure` when the write
+ * itself failed (it may have landed); without it the error is thrown.
  */
 export async function changeLabels(
   listId: string,
@@ -613,7 +617,7 @@ export async function changeLabels(
   /** The store whose data room new labels take from (DataRoomError when they do not fit). */
   room: DataStore,
   options: { keepWritten?: boolean } = {},
-): Promise<{ changed: string[]; same: string[]; gone: string[]; noRoom: string[]; failed: string[]; error?: unknown }> {
+): Promise<{ changed: string[]; same: string[]; gone: string[]; noRoom: string[]; failed: string[]; error?: unknown; unsure: boolean }> {
   const key = leadsKey(listId);
   const changed: string[] = [];
   const same: string[] = [];
@@ -621,6 +625,7 @@ export async function changeLabels(
   let noRoom: string[] = [];
   let failed: string[] = [];
   let failure: unknown;
+  let unsure = false;
   let pending = [...new Set(emails)];
   for (let round = 0; round < 3 && pending.length; round += 1) {
     const writes: { email: string; value: string; was: string }[] = [];
@@ -659,6 +664,7 @@ export async function changeLabels(
       if (!options.keepWritten) throw error;
       failed = writes.map((w) => w.email);
       failure = error;
+      unsure = true;
       break;
     }
     pending = writes.filter((_, i) => !written[i]).map((w) => w.email);
@@ -666,7 +672,7 @@ export async function changeLabels(
       if (written[i]) changed.push(w.email);
     });
   }
-  return { changed, same, gone, noRoom, failed, ...(failure === undefined ? {} : { error: failure }) };
+  return { changed, same, gone, noRoom, failed, unsure, ...(failure === undefined ? {} : { error: failure }) };
 }
 
 /**

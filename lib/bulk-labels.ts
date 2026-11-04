@@ -17,7 +17,7 @@
  * contact the moment before, writes only if it is still as read, and takes
  * room in the store's data room first.
  */
-import { BULK_REFUSALS, BULK_WRITE_BATCH, type BulkChange, type BulkRefusal, type BulkReview, MAX_BULK_ADDRESSES, MAX_BULK_TEXT_BYTES, type Removed, cleanLabel, jsonBytes, labelsAfter, opposite, removedFrom, replacedFrom, same, sendableAddress, showsSomething } from "@/lib/bulk-label-rules";
+import { BULK_REFUSALS, BULK_WRITE_BATCH, type BulkChange, type BulkRefusal, type BulkReview, MAX_BULK_ADDRESSES, MAX_BULK_TEXT_BYTES, type Removed, cleanLabel, jsonBytes, withoutHidden, labelsAfter, opposite, removedFrom, replacedFrom, same, sendableAddress, showsSomething } from "@/lib/bulk-label-rules";
 import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 import { changeLabels, leadsKey, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
@@ -30,8 +30,9 @@ export type { BulkChange, BulkRefusal, BulkReview, Removed };
 /**
  * What a change took from one contact, by address: on a removal the form it
  * lost, on an add the look-alike form it replaced. The route answers with
- * these and an undo sends them back. The label is cleaned (cleanLabel):
- * `cleaned` when that took out characters that show nothing, so the undo
+ * these and an undo sends them back. The form is answered without its hidden
+ * characters (withoutHidden), its width and composition kept: `cleaned`
+ * when that took out characters that show nothing, so the undo
  * puts back the form as it was shown.
  */
 export type RemovedFrom = Removed & { email: string; forms?: number; cleaned?: true };
@@ -41,7 +42,8 @@ export type BulkAsk = { label: string; change: BulkChange; emails: string[]; ski
 
 /**
  * What an undo says each contact had, kept only where it is the same label as
- * asked (in any form), cleaned, so it can never put on another label nor a
+ * asked (in any form), without hidden characters (withoutHidden), so it can
+ * never put on another label nor a
  * character that shows nothing; a place outside a contact's list means the
  * end. Each address once.
  */
@@ -51,7 +53,7 @@ function readBack(raw: unknown[], label: string): Record<string, Removed> {
     if (!entry || typeof entry !== "object") continue;
     const { email: typedEmail, label: typedLabel, at } = entry as Record<string, unknown>;
     const [email] = readAddresses(typeof typedEmail === "string" ? typedEmail : "").emails.filter(sendableAddress);
-    const [kept] = readTags([cleanLabel(typeof typedLabel === "string" ? typedLabel : "")]);
+    const [kept] = readTags([withoutHidden(typeof typedLabel === "string" ? typedLabel : "")]);
     if (!email || back[email] || !kept || !same(kept, label)) continue;
     back[email] = { label: kept, at: Number.isInteger(at) && (at as number) >= 0 && (at as number) < MAX_CONTACT_TAGS ? (at as number) : MAX_CONTACT_TAGS };
   }
@@ -147,8 +149,10 @@ export type BulkDone = {
  * undo sends exactly those back, with the opposite change. When a batch
  * fails part way (a full data room or any other error), what was written is
  * still answered, so it can be undone, and the rest is counted as not
- * written (`noRoom`) or not known (`failed`); a change that wrote nothing is
- * refused with the error, as before. It starts no automation.
+ * written (`noRoom`) or not known (`failed`). A change that surely wrote
+ * nothing is refused with the error, as before; one whose write may have
+ * landed (its answer lost) is answered with nothing changed and all of it in
+ * `failed`, never as "nothing was changed". It starts no automation.
  */
 export async function applyBulk(listId: string, ask: BulkAsk, room: DataStore): Promise<BulkDone> {
   const emails = [...new Set(ask.emails)];
@@ -160,6 +164,8 @@ export async function applyBulk(listId: string, ask: BulkAsk, room: DataStore): 
   let noRoom = 0;
   let failed = 0;
   let failure: unknown;
+  // Whether a write that failed may still have landed (casWrite's own error), so "nothing was changed" cannot be said.
+  let unsure = false;
   for (let from = 0; from < emails.length; from += BULK_WRITE_BATCH) {
     const batch = emails.slice(from, from + BULK_WRITE_BATCH);
     const later = emails.length - from - batch.length;
@@ -190,16 +196,18 @@ export async function applyBulk(listId: string, ask: BulkAsk, room: DataStore): 
       noRoom = done.noRoom.length + (done.noRoom.length ? later : 0);
       failed = done.failed.length + (done.noRoom.length ? 0 : later);
       failure = done.error;
+      unsure = done.unsure;
       break;
     }
   }
   if (!changed.length && noRoom) throw new StoreFullError();
-  if (!changed.length && failed) throw failure ?? new Error("changing labels failed before anything was written");
+  if (!changed.length && failed && !unsure) throw failure ?? new Error("changing labels failed before anything was written");
+  if (failure) console.error("changing labels in bulk stopped part way", failure);
   const wrote = new Set(changed);
   const formsOf = (email: string): RemovedFrom[] => {
     const was = seen.get(email);
     if (!was || typeof was !== "object") return [];
-    const label = cleanLabel(was.label);
+    const label = withoutHidden(was.label);
     return [{ email, ...was, label, ...(label !== was.label ? { cleaned: true as const } : {}) }];
   };
   const taken = changed.flatMap(formsOf);

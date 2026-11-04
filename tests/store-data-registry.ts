@@ -455,6 +455,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:crm:v:@lib/crm.ts": { what: "People's values of the store's fields", room: ["lib/crm.ts"] },
   "nl:voice:@lib/customer-voice.ts": { what: "What buyers said, summed up a month", parts: [capped(14 * 16 * KB, "One summary a month, 400 days.")] },
   "nl:voice:lock:@lib/customer-voice.ts": short("One summary at a time", "studio", 1, 128),
+  "nl:rsum:@lib/review-ai-summary.ts": short("A product's AI summary of its reviews, kept eight days", "studio", 8, 4 * KB),
+  "nl:rsum:lock:@lib/review-ai-summary.ts": short("One review summary at a time", "studio", 1, 128),
 
   // ---------------------------------------------------------------- lib/ d–f
   "nl:store:delivery:@lib/delivery.ts": { what: "Bytes delivered, by the month", parts: [capped(14 * KEY, "One count a month, 400 days.")] },

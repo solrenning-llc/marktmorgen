@@ -1798,6 +1798,7 @@
     "app/api/store/remind/route.ts",
     "app/api/store/rename/route.ts",
     "app/api/store/resend/route.ts",
+    "app/api/store/review-summary/route.ts",
     "app/api/store/review/route.ts",
     "app/api/store/reviews/route.ts",
     "app/api/store/sale/route.ts",

@@ -1,4 +1,5 @@
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { productPromptsLeft } from "@/lib/product-outline";
 import type { NextRequest } from "next/server";
 import {
   MAX_SUMMARY_LENGTH,
@@ -126,7 +127,10 @@ export async function POST(request: NextRequest) {
       // never leaves an empty product behind it.
       const early = itemsProblem(items, await readListings(store, items));
       if (early) return refuse(early);
-      // A bundle is on the store at once: what the Terms forbid is refused first (567 [GD1] (d)).
+      // A bundle is on the store at once: never with a part of the products' ready outline in its words (lib/product-outline.ts).
+      const promptLeft = productPromptsLeft({ title: text(body.title, MAX_TITLE_LENGTH), summary: text(body.summary, MAX_SUMMARY_LENGTH), about: "" })[0];
+      if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });
+      // And what the Terms forbid is refused before it is made (567 [GD1] (d)).
       const refused = fastMoneyRefusal({ title: text(body.title, MAX_TITLE_LENGTH), summary: text(body.summary, MAX_SUMMARY_LENGTH), about: "" });
       if (refused) return Response.json({ ok: false, error: "fast_money", passage: refused }, { status: 409 });
       const added = await addProduct(ref, text(body.title, MAX_TITLE_LENGTH), text(body.summary, MAX_SUMMARY_LENGTH), text(body.price, 20));

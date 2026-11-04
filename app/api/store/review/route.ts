@@ -121,6 +121,7 @@ export async function POST(request: NextRequest) {
       rating,
       text: read("text"),
       name: read("name"),
+      paidAt: proof.paidAt,
     }, store);
     const written = saved.state === "created" || saved.state === "updated";
     if (!written) await dropReviewPhoto(photo);

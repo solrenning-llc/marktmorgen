@@ -191,7 +191,7 @@ async function main(): Promise<void> {
   const storeBusy = await forgetCrm(SAME).then(() => null, (error: unknown) => error);
   is("a busy tasks lock: the deletion fails and says so", storeBusy instanceof LockBusyError, true);
   is("the rest already gone", (await redis.pipeline([["EXISTS", `nl:crm:deals:${SAME}`]]))[0], 0);
-  is("the tasks wait for the next try", (await readAllTasks(SAME)).length > 0, true);
+  is("and the tasks too, without waiting for the lock", (await readAllTasks(SAME)).length, 0);
   await redis.pipeline([["DEL", lockKey]]);
   await forgetCrm(SAME);
   is("every task of the store deleted", (await redis.pipeline([["EXISTS", `nl:crm:tasks:${SAME}`]]))[0], 0);
@@ -236,6 +236,14 @@ async function main(): Promise<void> {
   is("an edit keeps the one the task already names", [reworded.status, reworded.body.tasks?.find((t) => t.id === id(30))?.text], [200, "Follow up by phone"]);
   is("but an edit cannot name someone else not on the team", (await post({ action: "edit", person: BEN, id: id(30), text: "Follow up", assignee: "stranger@example.com" })).body.error, "assignee");
   is("a day that is not one is not taken as the creator's", (await get("?today=2026-13-45")).day === "2026-13-45", false);
+
+  part("A change that waited while its store was deleted writes nothing back");
+  const kept = await readPersonTasks(statsId, ANA);
+  const late = await changePersonTasks(statsId, ANA, { ...ROOM, sid: "f".repeat(32) }, (t) => addTask(t, input({ text: "Too late" }), id(40), NOW));
+  is("no store under that id any more: refused", late, { ok: false, error: "unknown" });
+  is("and nothing written for it", await readPersonTasks(statsId, ANA), kept);
+  const other = await changePersonTasks(statsId, ANA, { ...ROOM, sid: (await storeForEmail(owner))!.sid }, (t) => addTask(t, input({ text: "Still here" }), id(41), NOW));
+  is("the store still there: the change is kept", other.ok, true);
 
   part("As kept: whatever is stored is checked again");
   is("broken entries and repeated ids dropped", parseTasks([{ id: id(1), text: "Fine", due: "", assignee: "", done: false, createdAt: NOW }, { id: id(1), text: "Repeated" }, { id: "BAD", text: "x" }, { id: id(2), text: "Bad date", due: "soon", assignee: "" }, null]).map((t) => t.text), ["Fine"]);

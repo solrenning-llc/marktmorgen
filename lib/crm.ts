@@ -17,6 +17,7 @@
  * however long the list is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { STORE_ID_PATTERN, storeForId } from "@/lib/store";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
@@ -410,14 +411,16 @@ export async function dropDeal(statsId: string, id: string, room: DataStore): Pr
 /**
  * Everything kept here for a store that is being deleted: its fields,
  * pipelines, deals and values, and then its tasks about people (639
- * [GL7](6)), under the tasks' lock, so a change read before cannot write
- * them back after. A lock still taken after the wait throws (LockBusyError),
- * with the rest already gone: the tasks are never skipped quietly.
+ * [GL7](6)). The tasks go at once, with the rest, and again under the
+ * tasks' lock, so a change read before cannot write them back after; a lock
+ * still taken after the wait throws (LockBusyError), with everything already
+ * deleted once. A change that reaches the lock after the store is gone finds
+ * no store and writes nothing (changePersonTasks).
  */
 export async function forgetCrm(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   const fields = await readFields(statsId);
-  await redisPipeline([["DEL", fieldsKey(statsId), stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))]]);
+  await redisPipeline([["DEL", fieldsKey(statsId), stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))]]);
   await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]]));
 }
 
@@ -449,8 +452,8 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   // wait throws (LockBusyError): the deletion fails and says so, never skips
   // them.
   records += await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, async () => {
-    const [before] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
-    const [gone] = await redisPipeline([["HDEL", tasksKey(statsId), person]]);
+    // One pipeline: what is given back is what the deletion removed.
+    const [before, gone] = await redisPipeline([["HGET", tasksKey(statsId), person], ["HDEL", tasksKey(statsId), person]]);
     const freed = taskWeight(person, before);
     if (gone === 1 && freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
     return gone === 1 ? 1 : 0;
@@ -501,6 +504,9 @@ export async function readAllTasks(statsId: string | null): Promise<DueTask[]> {
 export async function changePersonTasks(statsId: string, person: string, room: DataStore, change: (tasks: PersonTask[]) => TaskResult): Promise<TaskResult> {
   if (!PERSON.test(person)) return { ok: false, error: "unknown" };
   return withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, async (held) => {
+    // A change that waited while the store was deleted writes nothing back:
+    // its tasks are gone with it (forgetCrm).
+    if (room.sid && STORE_ID_PATTERN.test(room.sid) && (await storeForId(room.sid))?.statsId !== statsId) return { ok: false, error: "unknown" };
     const [before] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
     const tasks = tasksOf(before);
     const result = change(tasks);

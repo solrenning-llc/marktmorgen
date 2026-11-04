@@ -6,7 +6,7 @@
 import { createHmac } from "node:crypto";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/mail/inbound/route";
-import { recordSesEvent } from "@/app/api/mail/ses/route";
+import { recordSesEvent } from "@/lib/mail-report";
 import { healthTags } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, mailReportDay } from "@/lib/mail-report";
 import { readSesEvent } from "@/lib/sns";
@@ -43,6 +43,7 @@ const tags = { nl_store: STORE, nl_list: LIST, [MAIL_REPORT_TAG]: CAMPAIGN };
 async function main() {
   redis.clear();
   process.env.RESEND_WEBHOOK_SECRET = `whsec_${SECRET.toString("base64")}`;
+  is("an email with no recorded provider outcome is unavailable", await mailReportDay(STORE, CAMPAIGN), null);
 
   part("One shared email identity goes to the providers");
   is(

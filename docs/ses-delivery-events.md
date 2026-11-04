@@ -7,9 +7,9 @@ The application sends one `nl_mail` tag shared by every recipient of a broadcast
 ## Owner step in Amazon SES
 
 1. Open the **Amazon Simple Email Service (SES)** console in the same AWS Region as `AWS_SES_REGION`.
-2. Choose **Configuration** → **Configuration sets** → **marktmorgen**. This is the stack's `Events` resource and the production value of `AWS_SES_CONFIGURATION_SET`.
+2. Choose **Configuration** → **Configuration sets** → **marktmorgen**. This is the name declared by the repository's stack (`Events`). Before editing, confirm that the production value of `AWS_SES_CONFIGURATION_SET` is exactly `marktmorgen`; the account's live value has not been read by this code change. If it differs, use that configured set and reconcile the discrepancy with the owner first.
 3. Open **Event destinations**, select the existing destination **bounces-and-complaints**, and choose **Edit**. Do not add a second destination: two enabled destinations would duplicate every count.
-4. Keep the destination enabled and select exactly **Deliveries**, **Hard bounces**, **Complaints**, and **Delivery delays** (`delivery`, `bounce`, `complaint`, and `deliveryDelay` in the SES API). Do not select sends, rejects, rendering failures, subscriptions, opens or clicks; Marktmorgen uses no tracking pixel and does not need those events.
+4. Keep the destination enabled and select exactly **Deliveries**, **Hard bounces**, **Complaints**, and **Delivery delays** (`DELIVERY`, `BOUNCE`, `COMPLAINT`, and `DELIVERY_DELAY` in SES API v2). Do not select sends, rejects, rendering failures, subscriptions, opens or clicks; Marktmorgen uses no tracking pixel and does not need those events.
 5. Keep **Amazon SNS** as the destination and keep the existing topic **marktmorgen-email**. Its full ARN must be exactly the production value of `AWS_SES_TOPIC_ARN` (`arn:aws:sns:<AWS_SES_REGION>:<the existing account id>:marktmorgen-email`). Do not create or change a topic, subscription, role, account, Region or configuration set as part of this code change.
 6. Review the four selections and save the existing destination only after the 30-day cost unit above is complete.
 

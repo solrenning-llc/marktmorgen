@@ -2,12 +2,16 @@ import {join} from 'node:path';
 /** One wiring source for the repository runner and local parallel verification. */
 export function testAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
+ if(file==='flow-stop-action.test.ts')aliases['@/lib/ses']=join(here,'flow-stop-ses-network.ts');
+ if(!['order-email-fallback.test.ts','resend-fallback-budget.test.ts','auth-mail-unavailable.test.ts','course-link-mail-unavailable.test.ts','email-meter-preflight.test.ts'].includes(file))aliases['@/lib/resend-fallback-transport']=join(here,'resend-fallback-fixture.ts');
+ if(file==='customer-base-fixed-evidence.test.ts')for(const [name,fixture] of [['upload-budget-policy','upload-budget-approved-policy'],['ai-spend-policy','commercial-ai-approved-policy'],['llc-fixed-costs','llc-fixed-approved-policy']])aliases['@/lib/'+name]=join(here,fixture+'.ts');
  if(file==='meeting-withdrawal-page.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
   aliases['next/server']=join(here,'next-server-after-world.ts');
   aliases['@/lib/account-notice']=join(here,'meeting-disabled-world.ts');
  }
+ if(file==='public-reads-ceiling.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='failure-cleanup-paths.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='zoom-arrival.test.ts')aliases['next/navigation']=join(here,'meeting-withdrawal-page-world.ts');

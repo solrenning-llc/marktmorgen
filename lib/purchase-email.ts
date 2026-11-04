@@ -193,6 +193,25 @@ export function confirmationFor(
    */
   next: NextOffer | null = null,
 ): Confirmation | null {
+  return renderConfirmation(store, session, nowSeconds, keys, listings, note, next, true);
+}
+
+/** Only the selected, protected physical origin may outlive the old sweep.
+ * It grants no expiring digital link and reads no current product catalog.
+ * Payment and source binding must be independently checked by its worker.
+ */
+export function originalPhysicalConfirmation(store: Store, session: SessionRecord, product: Listing): Confirmation | null {
+  if (store.stripeAccountId === DEMO_CONNECTED_ACCOUNT || session.metadata?.mm_order_origin !== "physical-v1" || !wasShipped(session) || !product.shipping ||
+      product.call || product.course || product.podcast || product.recurring || product.bundle || product.keys || product.note ||
+      product.file || product.link || product.plan || product.pwyw || product.callPackage || product.options.length !== 0 ||
+      !Number.isSafeInteger(session.amount_total) || Number(session.amount_total) < 0 ||
+      session.payment_status === "no_payment_required" && session.amount_total !== 0 ||
+      typeof session.currency !== "string" || !/^[a-z]{3}$/.test(session.currency)) return null;
+  return renderConfirmation(store, session, Date.now() / 1000, [], [product], null, null, false);
+}
+
+function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: number, keys: KeyLine[], listings: Listing[],
+  note: ThanksNote | null, next: NextOffer | null, ageLimited: boolean): Confirmation | null {
   const id = typeof session.id === "string" ? session.id : "";
   if (!SESSION_ID_PATTERN.test(id)) return null;
   if (!isSettled(session)) return null;
@@ -203,7 +222,7 @@ export function confirmationFor(
   const product = listings.find((p) => p.id === meta.product);
   if (!product || product.call) return null;
   const created = typeof session.created === "number" ? session.created : 0;
-  if (nowSeconds - created > CONFIRM_WITHIN_SECONDS) return null;
+  if (ageLimited && nowSeconds - created > CONFIRM_WITHIN_SECONDS) return null;
   const typed = session.customer_details?.email;
   const email = typeof typed === "string" && typed ? typed : typeof session.customer_email === "string" ? session.customer_email : "";
   if (!email) return null;
@@ -453,6 +472,9 @@ async function confirmOnce(
     }
   }
   if (session.id !== sessionId) return "skip";
+  // The original reserved source owns confirmation and accounting. The
+  // thanks page/sweep must never start a second legacy sender or counter.
+  if (["physical-v1", "single-digital-v1"].includes(session.metadata?.mm_order_origin ?? "")) return "skip";
   read.session = session;
   // A gift through "Support my work" has nothing to hand over or confirm (lib/store-tips.ts).
   if (session.metadata?.kind === "tip") return "skip";

@@ -8,7 +8,7 @@ import { PageAnswers } from "@/components/page-answers";
 import type { WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
 
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
@@ -132,6 +132,7 @@ import {
   type RowPlace,
   addElement,
   addRefusal,
+  arrivePicture,
   blankElement,
   moveElement,
   removeElement,
@@ -139,6 +140,7 @@ import {
   rowElementCount,
   rowElementProblem,
   releaseHeld,
+  shiftHeld,
   rowProblem,
   setColumnCount,
 } from "@/lib/row-edit-rules";
@@ -496,6 +498,20 @@ export function PageEditor({
   const [overPlace, setOverPlace] = useState<number | null>(null);
   const [said, setSaid] = useState("");
   const focusNew = useRef<string | null>(null);
+  // Places held in a row for a picture still being sent there, by the row's id (lib/row-edit-rules.ts, RowHeld):
+  // kept here, not in the row's editor, so closing and reopening the row while it is sent never frees them.
+  const rowHeld = useRef(new Map<string, number[]>());
+  // Drawn again whenever a held place changes, so a row reopened while its picture is sent shows it ending.
+  // A copy to draw from, made whenever a held place changes, so a row reopened while its picture is sent shows it ending.
+  const [heldShown, setHeldShown] = useState<ReadonlyMap<string, number[]>>(() => new Map());
+  // Both versions as last drawn, for a picture that arrives: is its row still on the page?
+  const pagesNow = useRef({ drafts, other });
+  // Before anything else can run after a change is drawn: a picture that arrives always sees the page as drawn.
+  useLayoutEffect(() => {
+    pagesNow.current = { drafts, other };
+  }, [drafts, other]);
+  const heldElsewhere = (row: string) =>
+    [...heldShown].reduce((n, [id, counts]) => (id === row ? n : n + counts.reduce((a, b) => a + b, 0)), 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -1140,18 +1156,18 @@ export function PageEditor({
     const lit = placeLit(at);
     return (
       <div className="flex min-h-12 items-center gap-2 py-0.5" data-drop-at={at} onDragOver={dragOverPlace} onDragLeave={dragLeavePlace} onDrop={dropOnPlace}>
-        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand" : "bg-transparent"}`} />
+        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
         <button
           type="button"
           data-place={at}
           onClick={() => addHere(at)}
-          className={`inline-flex min-h-11 items-center gap-1 rounded-full bg-white px-3 text-xs font-semibold ring-1 transition hover:text-violet-deep hover:ring-violet-brand/50 focus-visible:ring-2 focus-visible:ring-violet-brand motion-reduce:transition-none ${lit ? "text-violet-deep ring-2 ring-violet-brand" : "text-ink-soft ring-line"}`}
+          className={`inline-flex min-h-11 items-center gap-1 rounded-full bg-white px-3 text-xs font-semibold ring-1 transition hover:text-violet-deep hover:ring-violet-brand/50 focus-visible:ring-2 focus-visible:ring-violet-brand motion-reduce:transition-none ${lit ? "text-violet-deep ring-2 ring-violet-brand forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "text-ink-soft ring-line"}`}
           aria-label={`Add here: ${armed ? `${kindLabel(armed)}, ` : "a block "}${placeWords(at, drafts.length)}`}
         >
           <Icon name="plus" size={13} />
           Add here
         </button>
-        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand" : "bg-transparent"}`} />
+        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
       </div>
     );
   };
@@ -1735,7 +1751,36 @@ export function PageEditor({
             block={block}
             // By the block's id, not its place: a picture still being sent when the block moves lands in the right one.
             onColumns={(columns) => setDrafts((all) => all.map((d) => (d.block.id === block.id && d.block.kind === "row" ? { ...d, block: { ...d.block, columns } } : d)))}
-            pictureRoom={MAX_PAGE_PICTURES - shown - onlyInOther}
+            // A picture that arrives is added to the row as it is then, in either version, never over the columns this
+            // editor drew when it was sent: it may have been closed and reopened, or another picture landed first.
+            // False when the row is in neither version any more (deleted, or its version dropped), so nothing is added.
+            onColumnsNow={(update) => {
+              const { drafts: nowDrafts, other: nowOther } = pagesNow.current;
+              if (![...nowDrafts, ...(nowOther ?? [])].some((d) => d.block.id === block.id && d.block.kind === "row")) return false;
+              // The same list when nothing changed, so a refused picture never leaves an empty Undo step.
+              const change = (list: Draft[]) => {
+                let changed = false;
+                const out = list.map((d) => {
+                  if (d.block.id !== block.id || d.block.kind !== "row") return d;
+                  const next = update(d.block.columns);
+                  if (!next) return d;
+                  changed = true;
+                  return { ...d, block: { ...d.block, columns: next as RowElement[][] } };
+                });
+                return changed ? out : list;
+              };
+              setDrafts(change);
+              setOther((all) => (all ? change(all) : all));
+              return true;
+            }}
+            // Said here when the row's own editor is no longer drawn (closed, or its version switched away): in a
+            // notice everyone sees, not only in the status line a screen reader reads.
+            sayAside={(text) => toast(text)}
+            held={rowHeld}
+            onHeld={() => setHeldShown(new Map(rowHeld.current))}
+            sendingNow={heldShown.get(block.id) ?? NONE_HELD}
+            // Pictures being sent to other rows count too, so two rows sending at once never pass the page's room.
+            pictureRoom={MAX_PAGE_PICTURES - shown - onlyInOther - heldElsewhere(block.id)}
             productId={product.id}
             pageId={site?.id}
             folder={folder}
@@ -2011,7 +2056,7 @@ export function PageEditor({
         // On a wide screen the page is drawn beside the blocks as they are edited, in one column it shares with
         // the side menu of blocks to add, switched at its top (375 [TB1]; two columns of their own left the
         // blocks 182 pixels at 1280, lib/side-panel.ts); on a narrow screen the gallery opens where a place is pressed.
-        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_24.5rem] items-start gap-5" : ""}>
+        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_25.5rem] items-start gap-5" : ""}>
         <div className="min-w-0">
           {drafts.length === 0 ? (
             <div className="mt-6 rounded-2xl bg-paper p-5 ring-1 ring-line sm:p-6">
@@ -2274,7 +2319,8 @@ export function PageEditor({
                       title={locked ? undefined : "Drag to move this block"}
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", block.id);
+                        // A type of its own, so a block dragged over a text field never writes its id into it.
+                        event.dataTransfer.setData("application/x-mm-block", block.id);
                         const row = event.currentTarget.closest("li");
                         if (row) event.dataTransfer.setDragImage(row, 24, 24);
                         setDragged(index);
@@ -2408,7 +2454,7 @@ export function PageEditor({
               <BlockPicker icons={KIND_ICONS} allowed={addable} where={placeWords(drafts.length, drafts.length)} onPick={(kind) => add(kind, drafts.length, true)} onClose={cancelPicking} />
             ) : (
               <div data-drop-at={drafts.length} onDragOver={dragOverPlace} onDragLeave={dragLeavePlace} onDrop={dropOnPlace}>
-                <span aria-hidden="true" className={`mb-2 block h-1 rounded-full ${placeLit(drafts.length) ? "bg-violet-brand" : "bg-transparent"}`} />
+                <span aria-hidden="true" className={`mb-2 block h-1 rounded-full ${placeLit(drafts.length) ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
                 <button
                   type="button"
                   data-place={drafts.length}
@@ -2564,7 +2610,8 @@ export function PageEditor({
             document.getElementById(`row-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
           }}
         >
-          <div className="mb-2">
+          {/* Room above and beside it, so its focus ring is never cut by the panel's own scrolling edge (WCAG 2.4.13). */}
+          <div className="mb-2 px-1 pt-2">
             <ScreenSwitch value={screen} onChange={setScreen} />
           </div>
           <p className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-ink-soft">
@@ -2682,10 +2729,17 @@ export function PageEditor({
  * column, or on the part that took the removed one's place (else the
  * column's Add control); what happened is said in a polite status line.
  */
+const NONE_HELD: readonly number[] = [0, 0, 0];
+
 function RowEditor({
   base,
   block,
   onColumns,
+  onColumnsNow,
+  sayAside,
+  held: heldByRow,
+  onHeld,
+  sendingNow,
   pictureRoom,
   productId,
   pageId,
@@ -2696,6 +2750,16 @@ function RowEditor({
   base: string;
   block: RowBlock;
   onColumns: (columns: RowElement[][]) => void;
+  /** Changes the row as it is now in the page editor's state; the update returns null to leave it as it is. */
+  onColumnsNow: (update: (now: RowColumns) => RowColumns | null) => boolean;
+  /** The page editor's own status line, for what happens once this editor is no longer drawn. */
+  sayAside: (text: string) => void;
+  /** The places held for pictures still being sent, by row id, kept by the page editor. */
+  held: React.MutableRefObject<Map<string, number[]>>;
+  /** Told when a held place changes, so the page editor draws the row again. */
+  onHeld: () => void;
+  /** The places held in this row as last drawn, for drawing; `held` is read when acting. */
+  sendingNow: readonly number[];
   /** How many more pictures the page may show. */
   pictureRoom: number;
   productId: string;
@@ -2706,18 +2770,44 @@ function RowEditor({
 }) {
   const columns = block.columns;
   const total = rowElementCount(columns);
-  const [said, setSaid] = useState("");
+  // What was just done, for a screen reader: the same words said twice are said again, a space apart, so the
+  // live region always speaks (inbox C4-31).
+  const [said, setSaidNow] = useState("");
+  const again = useRef(false);
+  const setSaid = (text: string) => {
+    again.current = !again.current;
+    setSaidNow(text ? `${text}${again.current ? "\u00a0" : ""}` : "");
+  };
   const [countNote, setCountNote] = useState<string | null>(null);
   const [addKind, setAddKind] = useState<RowElementKind[]>(["heading", "heading", "heading"]);
   const [addVideo, setAddVideo] = useState(["", "", ""]);
   // Places held in each column for a picture still being sent there (lib/row-edit-rules.ts, RowHeld): drawn from
   // `sending`, read from `held` by a picture that arrives after other changes. Nothing else can take such a place,
   // so the file sent always gets its part; there is no way here to delete a file sent and not used.
-  const [sending, setSending] = useState([0, 0, 0]);
-  const held = useRef([0, 0, 0]);
+  // Drawn from the page editor's copy of the held places (sendingNow), read from `held` when acting: a send that began
+  // before the row was closed and reopened ends in the editor drawn now (inbox C4-31).
+  const heldNow = () => heldByRow.current.get(block.id) ?? [0, 0, 0];
+  const sending = sendingNow;
+  // What this drawing's own picture fields said they are sending: the change is added to what is held, so a send
+  // begun in an earlier drawing of the row keeps its place (lib/row-edit-rules.ts, shiftHeld).
+  const mine = useRef([0, 0, 0]);
+  const [mineShown, setMineShown] = useState(mine.current);
+  // Whether this drawing is still on screen, so what happens after it closed is said by the page editor instead.
+  const drawn = useRef(true);
+  useEffect(() => {
+    drawn.current = true;
+    return () => {
+      drawn.current = false;
+    };
+  }, []);
   const hold = (column: number, count: number) => {
-    held.current = held.current.map((n, i) => (i === column ? count : n));
-    setSending(held.current);
+    const by = count - mine.current[column];
+    mine.current = mine.current.map((n, i) => (i === column ? count : n));
+    setMineShown(mine.current);
+    const next = shiftHeld(heldNow(), column, by);
+    if (next.every((n) => n === 0)) heldByRow.current.delete(block.id);
+    else heldByRow.current.set(block.id, next);
+    onHeld();
   };
   // Why a picture that arrived could not be added, said beside that column's Add control.
   const [uploadNote, setUploadNote] = useState<(string | null)[]>([null, null, null]);
@@ -3015,7 +3105,7 @@ function RowEditor({
     const video = kind === "video" ? readVideo(typedVideo) : null;
     const reason = why
       ? ROW_EDIT_WHY[why]
-      : kind === "image" && pictureRoom <= 0
+      : kind === "image" && pictureRoom - sending.reduce((n, count) => n + count, 0) <= 0
         ? `This page already shows ${MAX_PAGE_PICTURES} pictures, the most a page shows. Remove one first.`
         : kind === "video" && !video
           ? "Paste the video's address first: a link from YouTube, Vimeo or Loom."
@@ -3071,7 +3161,7 @@ function RowEditor({
             />
           </div>
         ) : null}
-        {(kind === "image" && !reason) || sending[column] > 0 ? (
+        {(kind === "image" && !reason && sending[column] - mineShown[column] === 0) || mineShown[column] > 0 ? (
           <PicturesEditor
             base={`${id}-p`}
             productId={productId}
@@ -3083,18 +3173,40 @@ function RowEditor({
             onSending={(count) => hold(column, count)}
             onChange={(items) => {
               if (!items[0]) return;
-              // Checked again now that it has arrived, against the row as it is, its own held place given back to it.
+              // Checked again now that it has arrived, against the row as it is in the page editor's state, with its own
+              // held place given back to it: never over the columns drawn when it was sent (inbox C4-31).
               const element: RowElement = { kind: "image", picture: items[0], decorative: false };
-              const places = releaseHeld(held.current, column);
-              const refused = addRefusal(latest.current, column, places);
-              if (refused) noteFor(column, `The picture you sent was not added: ${ROW_EDIT_WHY[refused]}`);
-              else add(column, element, latest.current, places);
+              const places = releaseHeld(heldNow(), column);
+              // Told once, after the update, and only what happened: an update may be run twice by React. Said by this
+              // editor while it is drawn, else by the page editor's own status line.
+              let told = false;
+              const say = (text: string) => (drawn.current ? setSaid(text) : sayAside(text));
+              const there = onColumnsNow((now) => {
+                const edit = arrivePicture(now, column, element, places);
+                queueMicrotask(() => {
+                  if (told) return;
+                  told = true;
+                  if (!edit.ok) {
+                    noteFor(column, `The picture you sent was not added: ${ROW_EDIT_WHY[edit.why]}`);
+                    say(`The picture you sent was not added to column ${column + 1}: ${ROW_EDIT_WHY[edit.why]}`);
+                    return;
+                  }
+                  noteFor(column, null);
+                  const part = edit.columns[column].indexOf(element) + 1;
+                  say(`Added picture as part ${part} of column ${column + 1}. Describe it there.`);
+                });
+                return edit.ok ? edit.columns : null;
+              });
+              if (!there) say(`The picture you sent was not added: its row is no longer on the page.`);
             }}
           />
         ) : null}
         <p id={reasonId} className={`text-xs ${uploadNote[column] || why || (kind === "image" && reason) ? "font-semibold text-danger" : "text-ink-soft"}`}>
           {uploadNote[column] ||
             reason ||
+            (sending[column] - mineShown[column] > 0
+              ? `A picture is still being sent to column ${column + 1}. It is added when it arrives.`
+              : null) ||
             (video
               ? `${PROVIDER_NAMES[video.provider]} video recognized. Press Add to put it in column ${column + 1}.`
               : `${columns[column].length} of ${MAX_COLUMN_ELEMENTS} parts in this column, ${total} of ${MAX_ROW_ELEMENTS} in the row.`)}

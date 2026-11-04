@@ -1,3 +1,4 @@
+import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
 /**
  * Every metered feature's per-store worst month, in one registry (added 17
  * October 2026). tests/plan-cost-model.ts sums COST_LINES into worstCost,
@@ -84,7 +85,9 @@ import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_LESSONS } from "@/lib/course";
-import { MAX_POSTS } from "@/lib/store-blog";
+import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
+import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
+import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
@@ -92,7 +95,7 @@ import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
-import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes } from "./store-data-registry";
+import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
   UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
@@ -104,11 +107,13 @@ import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import type { ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
+import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
 import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
+import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -140,6 +145,7 @@ export const DB_BYTE_MONTH = micro(UPSTASH_MICRO_USD_PER_GB_MONTH) / 1e9;
 const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1_000_000;
 const CPU_SECOND = micro(VERCEL_CPU_MICRO_USD_PER_HOUR) / 3600;
 const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCTION_GB) / 3600;
+
 
 /**
  * What an order leaves that outlives its store, for its whole life (18
@@ -187,7 +193,52 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
   return buyerNoticeCap(tier, paid) * CLOSING_BUYER_COST;
 }
 
-/** What one order costs at the most: its confirmation, the email that says it shipped, its compute, and what it leaves for its store's closing. */
+/** The existing two-email order envelope: confirmation, shipment email,
+ * compute and its share of closure. It does NOT price the new durable
+ * shipment outbox's indefinite pending/source/fence storage, copies,
+ * reservation pools, provider retries or repeated reconciliation. Those
+ * remain unpriced, not zero: CURRENT_SHIPMENT_MAIL_POLICY is null. The
+ * CURRENT_SHIPMENT_MAIL_LIFECYCLE is never_activated: status returns
+ * not_recorded and cleanup returns0 without Redis, and the UI does no GET.
+ * New storage/dispatch require active AND a valid independent policy. A finite
+ * active-month/closing-days room is not funding for an unknown pending tail.
+ * In active/retired, status and erasure remain available even with policy
+ * null; retirement permits no new enqueue or dispatch. Cleanup may write
+ * fences for an empty index, with an indefinite failure tail. Funding for
+ * cleanup/failures/retention must precede first activation; lifecycle is not
+ * financial evidence. Never restore never_activated after any use while
+ * payloads or uncertain reserves remain. Future tails are unknown/rejected.
+ * The new account-wide Resend budget is also NOT funded by this order
+ * coefficient or by a paid provider quota alone. Its permanent schema1
+ * ledger, schema2 claims, pending/unknown holds without TTL, exact35-day
+ * terminal receipts and partial-error reconciliation need their full own
+ * retention/copies/command/cleanup envelope. Measured EVAL+internal paths:
+ * 4 initialize,11 reserve,11 dispatch,14 accepted,10 receipt read,13 cancel.
+ * These are command observations, not an invoice or financial approval;
+ * CURRENT_RESEND_FALLBACK_REVIEW remains null, never an automatic bootstrap.
+ * The restricted physical-item createCheckout caller now reserves a complete
+ * confirmation origin BEFORE its payment POST/URL, but remains never_activated
+ * with policy null. This is a constructed pre-URL slice, not completed durable
+ * confirmation: no payment/accounting/email worker or origin erasure exists.
+ * Its five own families and five shared pool/index/fence references are in
+ * store-data-registry, not a second allocation of the shipment pool. A full
+ * future row reservation is not evidence of lifetime storage/copy/cleanup
+ * funding. No TTL bounds pending/unknown origins;23h limits creation replay
+ * only. Original-account read-only recovery persists its pagination cursor.
+ * Observed EVAL+internal commands:27 shared enqueue,17 create,18 bind,
+ * 15 already-bound replay,17 cursor; TS read adds3 and reserve adds1 TIME.
+ * Open/recovery repeats Redis/provider reads, so these are NOT a full call or
+ * lifetime envelope. Activation remains blocked on missing lifecycle work
+ * and unknown/rejected full retention/failure/cleanup costs.
+ * Its accounting hooks remain unconnected to a payment worker. Their68-byte
+ * OCI/OC1 receipt horizon is ORIGINAL window end+400
+ * days (at most767 from capture), first apply23 commands; the200-byte MEMORY
+ * fixture is not universal storage coverage. The legacy45-day '1' marker's
+ * priced part excludes this new path. Other effects can lose TTL after a
+ * partial Lua failure; the whole tail is unknown, not bounded by the receipt.
+ * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
+ * financial envelope or retention approval is changed/certified here.
+ */
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
@@ -247,6 +298,82 @@ export const NEXT_OFFER_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMAN
  * waited on at 2 GB.
  */
 export const ASSIST_REMIND_READ = request("wait", ASSIST_REMIND_COMMANDS + TAKE_COMMANDS, 1_000_000 + ASSIST_REMIND_PRODUCTS * 16_384 + 4_096);
+/**
+ * Review ceilings for the two public reads paid for since 4 November 2026
+ * (lib/public-read-rules.ts): a field of an affiliate program's records (an
+ * affiliate, with their note, address and shares, is the largest), a record
+ * read on its own (a PayPal payment, a moved booking), a product's listing,
+ * a page of the creator's Stripe account as it arrives (a hundred invoices
+ * with their payments, refunds or disputes, or the codes), a post's summary,
+ * and a line of the map or of an affiliate's page as it leaves.
+ */
+export const AFFILIATE_FIELD_BYTES = 4_096;
+export const AFFILIATE_ROW_BYTES = 2_048;
+export const PUBLIC_LISTING_BYTES = 16_384;
+export const STRIPE_PAGE_BYTES = 1_000_000;
+export const POST_META_BYTES = 2_048;
+export const SITEMAP_LINE_BYTES = 300;
+/**
+ * Working out an affiliate program's book, besides what scales: the book
+ * counted (eight), the seven hashes, the PayPal refunds' set, two reads of
+ * listings, the lock taken, read and let go, the kept book's state read
+ * again under it and its previous marks, and the parts written to a draft
+ * that is renamed into place.
+ */
+export const AFFILIATE_PAGE_COMMANDS = 50;
+/** And what it reads whatever the size: the store record's share. */
+export const AFFILIATE_PAGE_BYTES = 64_000;
+/** What one line of the kept book takes, written as it is kept (lib/affiliate-book-snapshot.ts): two per field (a sale and a second tier's line of it), one per record read and per invoice, at the most. */
+export const BOOK_LINE_BYTES = 1_024;
+/** And each affiliate's whole part around their lines: its row with their record (address, PayPal address and note left out) and its wrapping. */
+export const BOOK_PART_BYTES = 2_048;
+/** One load of an affiliate's page, besides a later page's own commands: the kept book's time and length, the codes counted, its part read. */
+export const AFFILIATE_LOAD_COMMANDS = 4;
+/** Working through a body past what a request's shape holds: a heavy request's CPU and wait for each megabyte. */
+const perMegabyte = (bytes: number) => (bytes / 1e6) * (SHAPES.heavy.cpu * CPU_SECOND + SHAPES.heavy.seconds * MEMORY_SECOND);
+/** One call to the creator's Stripe account, waited on at 2 GB, its body worked through. */
+const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_SECOND + perMegabyte(bytes);
+/**
+ * What working out a program's book costs at the most, for a book of that
+ * size (lib/affiliate-page-admission.ts, refreshBook): its reads, every
+ * page of Stripe it may read, and the book kept written (at most
+ * BOOK_SNAPSHOT_MAX_BYTES, past which it is not kept). Holding it is store
+ * data, priced all month at that cap in the store's data line
+ * (tests/store-data-registry.ts, nl:aff:@lib/affiliate-book-snapshot.ts),
+ * so not again here.
+ */
+export function affiliatePageRead(size: AffiliatePageSize): number {
+  const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
+  const bytes = AFFILIATE_PAGE_BYTES + size.fields * AFFILIATE_FIELD_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
+  // Every field could be an affiliate with a part of their own; every part its lines.
+  const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);
+  const writes = Math.ceil(kept / 512_000) + 1;
+  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes, bytes + kept) + perMegabyte(bytes + kept)
+    + size.stripePages * stripePage();
+}
+/** What one load of an approved affiliate's page costs at the most: the page, its own part of the kept book, its listings, and its codes when it reads them. */
+export function affiliateLoadRead(size: AffiliateLoadSize): number {
+  const bytes = size.sliceBytes + size.listings * PUBLIC_LISTING_BYTES + (size.codes ?? 0) * 256;
+  // Only its own part leaves with the page (the listings give titles, the codes a few lines).
+  return laterPageCost() + AFFILIATE_LOAD_COMMANDS * COMMAND + bytes * DB_BYTE + size.sliceBytes * ORIGIN_PER_BYTE + perMegabyte(bytes)
+    + (size.codes === null ? 0 : stripePage(64_000));
+}
+/** What the listings a visitor's affiliate page reads add to the page itself (a later page, counted by isResting). */
+export function publicListingsRead(listings: number): number {
+  return listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
+}
+/**
+ * What one drawing of a store's map costs at the most (lib/store-sitemap.ts):
+ * the request, the store's counts and the listings it reads, every page of
+ * posts paid for (three commands each), working through all of it, and the
+ * answer as it leaves, a line for each product, post, collection and page.
+ */
+export function sitemapRead(size: SitemapSize): number {
+  const posts = size.postPages * POSTS_PER_PAGE;
+  const bytes = size.listings * PUBLIC_LISTING_BYTES + posts * POST_META_BYTES;
+  const lines = size.listings + size.carried + posts + 2 + 12 + 10;
+  return request("heavy", 4 + TAKE_COMMANDS + 3 * size.postPages, bytes) + perMegabyte(bytes) + lines * SITEMAP_LINE_BYTES * ORIGIN_PER_BYTE;
+}
 /**
  * The most one agreement's version may be as it is kept (lib/agreement-store.ts,
  * readVersion reads it whole): its title, text and lines twice, once as typed
@@ -330,6 +457,11 @@ export const ORDERS_OLDER_READ =
 export const ORDERS_METERED_COMMAND = COMMAND + 1_024 * DB_BYTE;
 /** One listing it reads, at the most: the command and a product's whole record (lib/catalog.ts, MAX_PRODUCT_BYTES). */
 export const ORDERS_METERED_LISTING = COMMAND + MAX_PRODUCT_BYTES * DB_BYTE;
+/**
+ * One read of a hundred bookings' moves, at the most (lib/call-records.ts, readMoves): one MGET, its keys sent and its
+ * moves read back through the database (lib/call-moves-read.ts).
+ */
+export const ORDERS_METERED_MOVES = COMMAND + MOVES_PER_MGET * (MOVE_BYTES + MOVE_KEY_BYTES) * DB_BYTE;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database.
@@ -425,6 +557,23 @@ export const PAYPAL_LEDGER_BYTES = (ALL_TIME_PAGES * 100 + PAYPAL_REFUNDS_READ) 
 export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
+ * A narrowed email's reading of the store's buyers made by the scheduled job
+ * (lib/broadcasts.ts, readNarrowing; the "scheduled-reads" line): one
+ * BUYER_LEDGER at the most, at most READS_HELD of them an email, each paid in
+ * studio requests before it is read, exactly as buyerLedger counts them: from
+ * what the email held in the month it goes out when it was accepted
+ * (createBroadcast, lib/store-allowance.ts holdAllowanceAt; all held for one
+ * month never passes that month's studio figure), and beyond that from the
+ * month it is read in; with none left there it waits, never read unpaid. A
+ * plan not paid and running when it is due, or a store that reads no buyers
+ * any more, reads nothing. A hold made under a larger plan draws no more than
+ * the month's own figure leaves. A reading that fails at Stripe or PayPal keeps
+ * spent what it drew, READ_MISSES_ALLOWED times in a row at most. A subject
+ * test decided by sales (countTest) pays a reading of every sale before it
+ * reads its TEST_SALES_PAGES pages.
+ */
+export const SCHEDULED_READS = { id: "scheduled-reads", each: BUYER_LEDGER, units: "studio" } as const;
+/**
  * The tasks agenda on the buyers page at the most (app/studio/people/page.tsx,
  * TasksAgenda; 639 [GL7](6)): every task of the store read and its rows sent
  * on. Counted as AGENDA_UNITS studio requests besides the page's own, taken
@@ -443,7 +592,59 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
+
+/** CX-61: two bounded provider reads, independent of released-name history.
+ * Vercel's official regional table read 2026-11-04 has a highest memory rate
+ * of $0.0183/GB-hour. Use it for this row while deployment region is unknown.
+ * The Stripe endpoint tariff stays explicitly unknown, never certified zero.
+ */
+export const PLATFORM_SUBSCRIPTION_SEARCH = {
+  maxGets: 2,
+  waitSeconds: STRIPE_TIMEOUT_MS / 1000,
+  memoryGb: 2,
+  memoryUsdPerGbHour: 0.0183,
+  memoryUsdPerGet: STRIPE_TIMEOUT_MS / 1000 * 2 * 0.0183 / 3600,
+  essentialEventsPerWindow: ESSENTIAL_PER_DAY * DAY_WINDOWS,
+  closingEventsPerWindow: DAY_WINDOWS,
+  stripeGetFeeUsd: null,
+  deploymentRegionVerified: false,
+} as const;
+export const PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD = PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet;
 export const UTC_DAYS = 31;
+
+/** CX-67 company exposure, deliberately outside paid-unit COST_LINES. These
+ * modeled components are not a complete tariff/tax/retention certification. */
+export const HELD_EXPOSURE = {
+  dailyAttempts: HELD_RECHECKS_PER_DAY,
+  monthlyAttempts: HELD_RECHECKS_PER_DAY * 31,
+  retryCounterSeconds: HELD_RETRY_COUNTER_SECONDS,
+  monthlyAggregateSeconds: HELD_MONTH_COUNT_SECONDS,
+  retryCommands: 128,
+  retryReplyBytes: MAX_STORE_BYTES + 128 * 1024,
+  indexBytesPerStore: 4096,
+  globalCounterBytes: 3 * (HELD_RECHECKS_PER_DAY * 256 + 1024) + 15 * 1024 + 1024,
+  stripeEndpointTariffUsd: null,
+  completeMonthlyCostUsd: null,
+  reviewedGlobalCaseCeiling: null,
+} as const;
+/** A full held store, not its smaller ended-store allowance, for31days. All
+ * still-retained outside-room keys are charged at peak for the whole month. */
+export function heldStoreMonthlyExposure(tier: Tier) {
+  const fileBytes = paidStorageBytes(tier) + TASK_ROOM_BYTES[tier] + COMMUNITY_PICTURES[tier] * PICTURE_BYTES;
+  const databaseBytes = DATA_ROOM_BYTES[tier] + reservePeakBytes(tier) + HELD_EXPOSURE.indexBytesPerStore;
+  const retentionUsd = fileBytes / GB * STORAGE_PER_GB * 31 / 30 + databaseBytes * DB_BYTE_MONTH * 31 / 30;
+  const retryUsd = heldRecheckMemoryUsd() + HELD_EXPOSURE.retryCommands * COMMAND + HELD_EXPOSURE.retryReplyBytes * DB_BYTE;
+  return { fileBytes, databaseBytes, retentionUsd, retryUsd, modeledMonthlyUsd: retentionUsd + 31 * retryUsd, completeMonthlyUsd: null };
+}
+/** Explicit reviewed finite case cap, never inferred from missing data. Existing
+ * over-cap obligations stay counted and invalidate a financed company total. */
+export function heldCompanyMonthlyExposure(caseCap: number | null, observed: number | null): { modeledUsd: number | null; completeUsd: null } {
+  if (caseCap === null || observed === null || !Number.isSafeInteger(caseCap) || !Number.isSafeInteger(observed) || caseCap < 0 || observed < 0 || observed > caseCap) return { modeledUsd: null, completeUsd: null };
+  const retention = Math.max(...(["creator", "pro", "scale"] as const).map(tier => heldStoreMonthlyExposure(tier).retentionUsd));
+  const retry = heldStoreMonthlyExposure("scale").retryUsd;
+  return { modeledUsd: caseCap * retention + HELD_EXPOSURE.monthlyAttempts * retry + HELD_EXPOSURE.globalCounterBytes * DB_BYTE_MONTH, completeUsd: null };
+}
+
 
 /** Historical operating model only: encoded-size assumptions and fetched-ahead factor.
  * This is not a verified bound on provider bytes, replay, invoice rates or taxes. */
@@ -468,6 +669,22 @@ export type CostLine = {
 const ALL_TIERS_SAME = (usd: number) => () => usd;
 
 export const COST_LINES: CostLine[] = [
+  {
+    id: "platform-subscription-search",
+    feature: "Platform subscription recovery during checkout, store deletion and scheduled closing (CX-61)",
+    monthlyUsd: () => PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD * (PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow + PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow),
+    sources: [
+      { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
+      { file: "lib/fetch-timeout.ts", names: ["STRIPE_TIMEOUT_MS"] },
+      { file: "lib/billing.ts", names: ["findStoreSubscriptions", "completeSubscriptionPage"] },
+      { file: "lib/studio-allowance-rules.ts", names: ["ESSENTIAL_NEEDS", "ESSENTIAL_PER_DAY"] },
+      { file: "app/api/billing/checkout/route.ts", names: ["creatorFrom(request, \"billing\")", "findStoreSubscriptions(store)"] },
+      { file: "app/api/store/stores/route.ts", names: ["creatorFrom(request, \"delete\")", "findStoreSubscriptions(store)"] },
+      { file: "lib/plan-closing.ts", names: ["observeStoreSubscriptions(store)", "refuseLatePlans"] },
+      { file: "vercel.json", names: ["/api/cron/closing", "30 9 * * *"] },
+    ],
+    basis: "CX-61, sources read 2026-11-04: at most two GETs (one Search over at most MAX_ADDRESSES current names, one captured-customer List), each waited on for STRIPE_TIMEOUT_MS at 2 GB and the highest regional memory rate $0.0183/GB-hour (https://vercel.com/docs/functions/usage-and-pricing). Billing and deletion share ESSENTIAL_PER_DAY, not that many each; scheduled closing is counted at DAY_WINDOWS. Never multiplied by visits. This is a function-memory ceiling; existing CPU, invocation and other costs remain. Stripe GET tariff stays null (https://stripe.com/pricing does not establish an endpoint-specific zero); deployment region and financed post-cancellation exposure remain unverified. No sale, price, quota or gate is activated.",
+  },
   {
     id: "storage",
     feature: "Files and lesson files kept",
@@ -706,8 +923,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // An opening of a buyer's orders page takes ORDERS_OPEN_UNITS before anything is read, and its meter more before each read
       // that grows with what the buyer has (C3-77, MR, 4 November 2026; ORDERS_OPEN_READ in tests/plan-cost-registry.test.ts).
-      { file: "lib/buyer-orders.ts", names: ["takePublicRequest(store, \"buyer\", Date.now(), ORDERS_OPEN_UNITS)", "takePublicRequest(this.store, \"buyer\", Date.now(), units)", "callsFor(store: Store, email: string, meter?: OrdersMeter)", "meter.takeFor(ORDERS_CALL_MOVES, () => paidCalls(store), (calls) => calls.length)", "else this.left += most - n", "withinOpening", "purchasesFor(store: Store, email: string, meter?: OrdersMeter)"] },
-      { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_OPEN_UNITS", "ORDERS_OPEN_SECONDS", "ORDERS_OPEN_COMMANDS", "ORDERS_UNIT_COMMANDS", "ORDERS_READ_MS", "ORDERS_IMPORTED_ENTRY_COMMANDS", "ORDERS_CALL_MOVES", "ORDERS_LISTING_COMMANDS", "ORDERS_KEY_COMMANDS", "ORDERS_FEED_COMMANDS", "ORDERS_ROOM_COMMANDS"] },
+      { file: "lib/buyer-orders.ts", names: ["takePublicRequest(store, \"buyer\", Date.now(), ORDERS_OPEN_UNITS)", "takePublicRequest(this.store, \"buyer\", Date.now(), units)", "callsFor(store: Store, email: string, meter?: OrdersMeter)", "meter.takeFor(ORDERS_CALL_MOVES, () => paidCalls(store), (calls) => ordersMovesCommands(calls.length))", "else this.left += most - n", "withinOpening", "purchasesFor(store: Store, email: string, meter?: OrdersMeter)"] },
+      { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_OPEN_UNITS", "ORDERS_OPEN_SECONDS", "ORDERS_OPEN_COMMANDS", "ORDERS_UNIT_COMMANDS", "ORDERS_READ_MS", "ORDERS_IMPORTED_ENTRY_COMMANDS", "ORDERS_CALL_MOVES", "ORDERS_MOVES_READ_COMMANDS", "ordersMovesCommands", "ORDERS_LISTING_COMMANDS", "ORDERS_KEY_COMMANDS", "ORDERS_FEED_COMMANDS", "ORDERS_ROOM_COMMANDS"] },
+      // The bookings' moves are read a hundred at an MGET, all in one trip (C3-82, MR, 4 November 2026).
+      { file: "lib/call-moves-read.ts", names: ["MOVES_PER_MGET", "MOVE_BYTES", "MOVE_KEY_BYTES", "moveReads"] },
+      { file: "lib/call-records.ts", names: ["const perRead = 100;", '["MGET", ...lot.map(movedKey)]'] },
       // A request for the link to that list, and a download from it, read the same purchases the same way: each takes ORDERS_OPEN_UNITS
       // before it reads, its meter the rest before each read, and the store's "too many" answer without room (C3-78, MR, 4 November 2026).
       // A download from it reads only the purchase asked for, by its reference: DOWNLOAD_LOOKUP_UNITS after the grant (one read) and before the rest, and only the
@@ -737,8 +957,15 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
+      // An affiliate's own page and the store's map read in proportion to the store: counted first, paid before they read (4 November 2026).
+      { file: "lib/public-read-rules.ts", names: ["AFFILIATE_PAGE_UNITS", "AFFILIATE_STRIPE_PAGES_PER_UNIT", "AFFILIATE_FIELDS_PER_UNIT", "AFFILIATE_ROWS_PER_UNIT", "PUBLIC_LISTINGS_PER_UNIT", "AFFILIATE_LOAD_BYTES_PER_UNIT", "AFFILIATE_CODE_FIELDS_PER_UNIT", "SITEMAP_POST_PAGES_PER_UNIT", "SITEMAP_LINES_PER_UNIT", "affiliatePageUnits", "affiliateLoadUnits", "sitemapUnits"] },
+      { file: "lib/affiliate-page-admission.ts", names: ["bookSize(store)", "codeOwnerCount(store)", "takePublicRequest(store, \"buyer\", now, affiliateLoadUnits(", "takePublicRequest(store, \"buyer\", now, units, { shared: true })", "isResting(store, now)", "claimRefresh(store)"] },
+      { file: "lib/affiliate-book-snapshot.ts", names: ["BOOK_FRESH_SECONDS", "BOOK_KEEP_SECONDS", "BOOK_SNAPSHOT_MAX_BYTES", "BOOK_LOCK_SECONDS", "BOOK_READ_SECONDS", "AFFILIATE_PAGE_MAX_SECONDS"] },
+      { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
+      { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
+      { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
     ],
-    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
+    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. An affiliate's own page (lib/affiliate-page-admission.ts) and the store's map (lib/store-sitemap.ts) count what they would read first, with a few commands, and take that many of the window's requests before reading it (lib/public-read-rules.ts; affiliatePageRead, affiliateLoadRead and sitemapRead held in tests/plan-cost-registry.test.ts), so neither reads past the window; the affiliate program's book is worked out for all its affiliates at most every BOOK_FRESH_SECONDS and kept that long (lib/affiliate-book-snapshot.ts), the load that works it out paying for it in full outside its connection's share of the day, every other load paying for its own part. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
   },
   {
     id: "studio",
@@ -750,6 +977,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
+      // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
+      { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
+      // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).
+      { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).
       { file: "lib/path.ts", names: ["PATH_READ_UNITS", "countStudio(store, null, units)"] },
       { file: "lib/path-atomic.ts", names: ["WRITE_PATH", "FORGET_PATH", "PATH_DATA_CHANGE"] },
@@ -779,6 +1010,7 @@ export const COST_LINES: CostLine[] = [
       // A course's students, the affiliates and the bookings take further requests for what they read, before reading it (4 November 2026).
       { file: "lib/api-read-rules.ts", names: ["API_UNIT_COMMANDS", "API_UNIT_BYTES", "API_UNIT_SENT_BYTES", "API_UNIT_STRIPE_PAGES", "API_UNIT_ROUND_TRIPS", "studentsPageWork", "bookWork", "bookingsWork"] },
       { file: "lib/api-read.ts", names: ["studentPage", "chargeBook", "bookingsWork"] },
+      { file: "lib/call-moves-read.ts", names: ["MOVES_PER_MGET", "MOVE_BYTES", "MOVE_KEY_BYTES", "moveReads"] },
       { file: "lib/mcp-tools.ts", names: ["chargeBook"] },
     ],
     basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs (held below). A reading that reads more than a page (a course's students, the affiliates, the bookings) takes further requests for its work before it reads, each priced above what it pays for at every size (apiReadCost, held below); refused, nothing more is read. The per-minute and daily limits only spread them.",
@@ -1078,6 +1310,7 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  HELD_RECHECKS_PER_DAY: "Company recovery work plus separate post_cancellation retention exposure, never a paid plan allowance: HELD_EXPOSURE in this registry and docs/funded-exposure-review.md count50 global daily rechecks, two actual bounded reads each, retained full stores/keys and aggregate counters. Actual case cap/rates remain unknown until reviewed; no zero subsidy.",
   PAGE_INCLUDED_BYTES: "What one studio request's own price already moves through the database and on to the browser (lib/sent-bytes.ts; UNIT_COST.studio prices fifty kilobytes): a reading or a page's sending up to it counts nothing beyond the request that asked, and past it one studio request a megabyte (LEDGER_BYTES_PER_UNIT, STUDIO_UNIT_SENT_BYTES, held in tests/plan-cost-registry.test.ts). A threshold inside the studio line, not a figure of its own.",
   FREE_CALL_HOLDS_PER_DAY: "A pace on how often one email address may hold a free intro call's time in one store in a day (lib/free-call-rules.ts, 551 [FB1]): every hold is first taken from the plan's own monthly orders as FREE_CALL_ORDER_UNITS, before any email, so it adds no cost and only refuses.",
   BUYER_CAP_MONTHS: "Queue item 307 EC1: the cap on one closing's buyers (lib/closing-buyers-rules.ts, buyerNoticeCap), a post-cancellation funded exposure of docs/funded-exposure-review.md (closingBuyersCost above), the company's, not a plan's line.",
@@ -1149,7 +1382,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "<dynamic:scope: string>": guard("The definitions of withinLimit, withinMonth, withinStore and withinService themselves (lib/request-guard.ts, lib/metered-limits.ts)."),
   api: line("rest-api"), "studio-essential": line("studio"), "studio-paused": line("studio"), "bundle-picker": line("studio"),
   // Sign-in and account security.
-  join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
+  join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "passkey-remove-locked": ACCOUNT, "move-ask": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
   "two-step-rescue": ACCOUNT, "recovery-address": ACCOUNT, "recovery-address-change": ACCOUNT, "lost-email": ACCOUNT, "lost-email-ip": ACCOUNT,
   "discord-return": ACCOUNT, "metaads-return": ACCOUNT, "meet-return": ACCOUNT, report: guard("Takedown reports, per connection: a company cost."),
   "mail-ses": guard("The email provider's own notices: a company cost."), "mail-inbound": guard("The email provider's inbound notices, per connection: a company cost; what is sent on to a creator is one of their store's emails (lib/inbound-mail.ts)."),
@@ -1212,6 +1445,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/imports.ts": MONTHLY, "lib/product-updates.ts": MONTHLY, "lib/review-requests.ts": MONTHLY,
   "lib/mail.ts": ["monthly", "company"],
   "lib/call-packages.ts": ORDER, "lib/call-reminders.ts": ORDER, "lib/free.ts": ORDER, "lib/gifts.ts": ORDER, "lib/group-buy.ts": ["order", "store"],
+  // Active shipment delivery uses sendQueuedShipmentMail in lib/email.ts.
+  // The never-activated deployment retains its original one-shot ORDER sender.
   "lib/paypal-sales.ts": ORDER, "lib/preorders.ts": ORDER, "lib/shipments.ts": ORDER,
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,

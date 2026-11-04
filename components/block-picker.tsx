@@ -148,7 +148,8 @@ export function BlockPicker({
                       menu && onDragKind
                         ? (event) => {
                             event.dataTransfer.effectAllowed = "copy";
-                            event.dataTransfer.setData("text/plain", about.label);
+                            // A type of its own: dropped over a text field, a card never writes its name into it (inbox C4-31).
+                            event.dataTransfer.setData("application/x-mm-block", about.label);
                             onDragKind(kind);
                           }
                         : undefined

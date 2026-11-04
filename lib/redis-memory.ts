@@ -113,6 +113,81 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // CX-67: existing exposure reservation used by held-store company work.
+        if (key.includes("local receiptField='case:'..ARGV[3]..':'..ARGV[4]") && args[0] === "1" && args.length === 9) {
+          const [, ledger, review, binding, scope, id, rawCharge, rawLimit, rawFunded] = args;
+          const amount = (raw: unknown): number | null => typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw) && Number.isSafeInteger(Number(raw)) && Number(raw) <= 1e12 ? Number(raw) : null;
+          if (this.run(["TYPE", ledger]) !== "hash" || this.run(["TTL", ledger]) !== -1) return 0;
+          if (this.run(["HGET", ledger, "review"]) !== review || this.run(["HGET", ledger, "policy"]) !== binding) return 0;
+          const reserved = amount(this.run(["HGET", ledger, "reserved"]));
+          const charge = amount(rawCharge), limit = amount(rawLimit), funded = amount(rawFunded);
+          const slots = amount(this.run(["HGET", ledger, "slots:" + scope]));
+          const field = "case:" + scope + ":" + id, raw = this.run(["HGET", ledger, field]);
+          if (reserved === null || charge === null || limit === null || funded === null || funded <= 0 || slots === null || slots > funded || reserved > limit) return 0;
+          if (raw !== null) return amount(raw) === charge && reserved >= charge && slots < funded ? 1 : 0;
+          if (slots <= 0 || charge > limit - reserved) return 0;
+          this.run(["HINCRBY", ledger, "slots:" + scope, -1]);
+          this.run(["HSET", ledger, field, rawCharge]);
+          this.run(["HINCRBY", ledger, "reserved", rawCharge]); return 1;
+        }
+        // CX-67: atomic held membership and aggregate observations.
+        if (key.startsWith("-- marktmorgen:held-state:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, index, month, held, ref, due] = args;
+          if (Array.isArray(this.data.get(index)) && (this.data.get(index) as unknown[]).length === 0) this.data.delete(index);
+          if (!["none", "zset"].includes(this.run(["TYPE", index]) as string) || !["none", "hash"].includes(this.run(["TYPE", month]) as string)) return -1;
+          if (held === "1") this.run(["ZADD", index, due, ref]); else this.run(["ZREM", index, ref]);
+          this.run(["HDEL", month, "complete"]); return 1;
+        }
+        if (key.startsWith("-- marktmorgen:held-month:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, index, month, day, complete, seconds] = args;
+          if (Array.isArray(this.data.get(index)) && (this.data.get(index) as unknown[]).length === 0) this.data.delete(index);
+          if (!["none", "zset"].includes(this.run(["TYPE", index]) as string) || !["none", "hash"].includes(this.run(["TYPE", month]) as string)) return -1;
+          const raw = this.run(["HGET", month, "peak"]);
+          if (raw !== null && !/^(0|[1-9][0-9]*)$/.test(String(raw))) return -1;
+          const peak = Number(raw ?? 0);
+          if (!Number.isSafeInteger(peak)) return -1;
+          const count = this.run(["ZCARD", index]) as number;
+          this.run(["HSET", month, "count", count, "peak", Math.max(count, peak), "day", day, "complete", complete]);
+          this.run(["EXPIRE", month, seconds]); return 1;
+        }
+        // CX-67: one funded held-store reconfirmation per UTC day, site ceiling.
+        if (key.startsWith("-- marktmorgen:held-recheck:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, ledger, ref, rawLimit, seconds] = args;
+          const type = this.run(["TYPE", ledger]);
+          if (type !== "none" && type !== "hash") return -1;
+          const raw = this.run(["HGET", ledger, "count"]);
+          if (type === "hash" && raw === null || raw !== null && !/^(0|[1-9][0-9]*)$/.test(String(raw))) return -1;
+          const count = raw === null ? 0 : Number(raw), limit = Number(rawLimit);
+          if (!Number.isSafeInteger(count) || count < 0 || count > limit) return -1;
+          const seen = this.run(["HGET", ledger, ref]);
+          if (seen !== null) return seen === "1" ? 0 : -1;
+          if (count >= limit) return 0;
+          this.run(["HINCRBY", ledger, "count", 1]);
+          this.run(["HSET", ledger, ref, "1"]);
+          this.run(["EXPIRE", ledger, seconds]); return 1;
+        }
+
+        // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
+        if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, target, token, value] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", target, value]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:fenced-set-new:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, target, token, value] = args;
+          if (this.run(["GET", lock]) !== token || Number(this.run(["EXISTS", target])) !== 0) return 0;
+          this.run(["SET", target, value]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:fenced-del:v1\n") && Number(args[0]) >= 2 && args.length === Number(args[0]) + 2) {
+          const count = Number(args[0]);
+          const lock = args[1];
+          const targets = args.slice(2, count + 1);
+          if (this.run(["GET", lock]) !== args[count + 1]) return 0;
+          for (const target of targets) this.run(["DEL", target]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:pause-due-observation:v1\n") && args[0] === "1" && args.length === 3) {
           const [,target,deadline]=args;
           if(!/^(0|[1-9][0-9]*)$/.test(deadline)||Number(deadline)>1_000_000_000_000)return [-1];
@@ -373,6 +448,56 @@ export class MemoryRedis {
           if (!there && held instanceof Map && held.size >= Number(args[4])) return 0;
           this.hash(target).set(args[2], args[3]);
           return 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {
+          // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step.
+          const [, target, person, read, value, added, start, field] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          if ((held instanceof Map ? held.get(person) ?? "" : "") !== read) return -1;
+          const hash = this.hash(target);
+          if (value === "") hash.delete(person);
+          else hash.set(person, value);
+          const kept = hash.get(field);
+          const n = kept !== undefined && /^\d+$/.test(kept) ? Number(kept) : null;
+          if (n !== null) hash.set(field, String(Math.max(0, n + Number(added))));
+          else if (start !== "") hash.set(field, start);
+          else if (kept !== undefined) hash.delete(field);
+          if (hash.size === 0) this.data.delete(target);
+          return n === null && kept !== undefined ? 2 : 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-tasks-count-save:v1\n") && args[0] === "1" && args.length === 4) {
+          // lib/crm.ts SAVE_TASK_COUNT: the count saved once made, never over a whole number.
+          const [, target, field, value] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const kept = held instanceof Map ? held.get(field) : undefined;
+          if (kept !== undefined && /^\d+$/.test(kept)) return 0;
+          this.hash(target).set(field, value);
+          return kept === undefined ? 1 : 2;
+        }
+        if (key.startsWith("-- marktmorgen:crm-tasks-forget:v1\n") && args[0] === "1" && args.length === 6) {
+          // lib/crm.ts FORGET_PERSON_TASKS: a person's tasks deleted, the count moved with them or dropped.
+          const [, target, person, read, gone, field] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held === undefined) return ["", 0];
+          if (!(held instanceof Map)) throw new Error("WRONGTYPE");
+          const value = held.get(person);
+          if (value === undefined) return ["", 0];
+          held.delete(person);
+          const kept = held.get(field);
+          const n = kept !== undefined && /^\d+$/.test(kept) ? Number(kept) : null;
+          let dropped = 0;
+          if (n !== null && value === read) held.set(field, String(Math.max(0, n - Number(gone))));
+          else if (kept !== undefined) {
+            held.delete(field);
+            dropped = 1;
+          }
+          if (held.size === 0) this.data.delete(target);
+          return [value, dropped];
         }
         if (key.startsWith("-- marktmorgen:crm-value-take:v1\n") && args[0] === "1" && args.length === 3) {
           const target = args[1];

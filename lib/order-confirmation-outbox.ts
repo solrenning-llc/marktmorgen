@@ -2,6 +2,9 @@
  * Confirmation and shipment are separate intentions with separate sources.
  * This module shares the existing bounded pool/Lua, never a provider quota.
  */
+import { singleDigitalAccessCovered, checkSingleDigitalRenewal, singleDigitalRenewalCopy, singleDigitalMessage, readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity, verifySingleDigitalRenewal, singleDigitalRenewalDraft, activateSingleDigitalRenewal, type SingleDigitalRenewalDraft } from "@/lib/single-digital-access";
+import { storeForEmail, storeRef } from "@/lib/store";
+import { physicalOptionCovered } from "@/lib/physical-option-confirmation";
 import { createHash, randomBytes } from "node:crypto";
 import { openCourseOriginBinding, type OpenedCourseOriginBinding } from "@/lib/course-origin-binding";
 import { performance } from "node:perf_hooks";
@@ -37,6 +40,7 @@ export type ConfirmationOriginPayload = {
   settlementToken?: string;
   message?: { from: string; to: string; subject: string; text: string; replyTo: string };
   paidCents?: number;
+  accessUrl?: string;
   courseBindingToken?: string;
 };
 export type ConfirmationOrigin = {
@@ -149,24 +153,32 @@ function parse(raw: unknown): ConfirmationOrigin | null {
     return row as unknown as ConfirmationOrigin;
   } catch { return null; }
 }
-function keys(row: ConfirmationOrigin): string[] {
-  return [confirmationOriginRowKey(row.id), sourceKey(row.id), CONFIRMATION_ORIGIN_DUE,
+type CustodyIdentity = Pick<ConfirmationOrigin, "id" | "statsId" | "person"> & { originKind?: string; capsuleDigest?: string };
+function keys(row: CustodyIdentity): string[] {
+  const base = [confirmationOriginRowKey(row.id), sourceKey(row.id), CONFIRMATION_ORIGIN_DUE,
     `nl:order-confirmation:store:${row.statsId}`, `nl:order-confirmation:person:${row.statsId}:${row.person}`,
     "nl:ship:mail:pool", `nl:ship:mail:pool:${row.statsId}`, "nl:ship:mail:all",
     `nl:order-confirmation:closed:${row.statsId}`, `nl:order-confirmation:erased:${row.statsId}:${row.person}`];
+  return row.originKind === "single_digital_renewal" ? [...base,
+    `nl:order-confirmation:renewal:capsule:${row.statsId}:${row.capsuleDigest}`,
+    `nl:order-confirmation:renewal:store:${row.statsId}`] : base;
 }
 export function confirmationOutboxPolicy(runtime: ShipmentMailRuntime = {}, admission = true): ShipmentMailPolicy | null {
   const lifecycle = runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE;
   if (lifecycle !== "active") return null;
   return shipmentMailPolicy(runtime.policy === undefined ? CURRENT_SHIPMENT_MAIL_POLICY : runtime.policy, (runtime.now ?? Date.now)(), admission);
 }
-async function readOrigin(id: string, runtime: ShipmentMailRuntime = {}): Promise<{ row: ConfirmationOrigin; raw: string; payload: ConfirmationOriginPayload } | null> {
+async function readOrigin(id: string, runtime: ShipmentMailRuntime = {}, renewal?: { found?: RenewalFound }): Promise<{ row: ConfirmationOrigin; raw: string; payload: ConfirmationOriginPayload } | null> {
   if ((runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) === "never_activated" || !HASH.test(id)) return null;
   const pipeline = runtime.pipeline ?? redisPipeline;
   try {
     const reply = array(await pipeline([["TYPE", confirmationOriginRowKey(id)], ["GETRANGE", confirmationOriginRowKey(id), 0, SHIPMENT_MAIL_MAX_ROW_BYTES], ["GET", sourceKey(id)]]));
     if (reply?.length !== 3 || reply[0] !== "string") return null;
     const row = parse(reply[1]);
+    if (!row && renewal) {
+      const decoded = decodeRenewal(reply[1], reply[2]);
+      if (decoded?.row.id === id) renewal.found = decoded;
+    }
     if (!row || row.id !== id || reply[2] !== row.sourceValue) return null;
     const opened = unseal(row.sealed, context(id));
     if (!opened.ok || hash(opened.value) !== row.fingerprint) return null;
@@ -318,9 +330,18 @@ export async function reserveSingleDigitalConfirmationOrigin(input: Parameters<t
 
 /** Preserve the existing physical producer contract. Course bodies cannot
  * downgrade to a physical source and bypass explicit course funding/isolation. */
+function hasPhysicalOption(value: unknown): boolean {
+  const own = data(value), snapshot = data(own?.snapshot), product = data(snapshot?.product);
+  return typeof own?.body === "string" && (new URLSearchParams(own.body).has("metadata[option]") ||
+    product?.options !== undefined && array(product.options, 1)?.length !== 0);
+}
+function physicalOriginCovered(found: { row: ConfirmationOrigin; payload: ConfirmationOriginPayload }, policy: ShipmentMailPolicy | null, now: number): boolean {
+  return Boolean(policy && (found.row.originKind !== undefined || !hasPhysicalOption(found.payload) || physicalOptionCovered(found.payload, policy, now, false)));
+}
 export async function reserveConfirmationOrigin(input: Parameters<typeof reserveOrigin>[0], runtime: ShipmentMailRuntime = {}): Promise<{ ok: true; id: string } | { ok: false }> {
   const value = data(input);
   if (!value || typeof value.body !== "string" || new URLSearchParams(value.body).get("metadata[mm_order_origin]") !== "physical-v1") return { ok: false };
+  if (hasPhysicalOption(value) && !physicalOptionCovered(value, confirmationOutboxPolicy(runtime), (runtime.now ?? Date.now)())) return { ok: false };
   return reserveOrigin(value as Parameters<typeof reserveOrigin>[0], runtime);
 }
 
@@ -345,7 +366,10 @@ if not ok or type(r)~='table' or r.kind~='confirmation' or redis.call('GET',KEYS
 -- Reserve-only courses cannot acquire creation, cursor, bind or URL permission.
 if r.originKind~=nil and r.originKind~='single_digital' then return {'unknown'} end
 -- No verified original-file access recipe: digital creation and URL stay closed.
-if r.originKind=='single_digital' and op~='cursor' and op~='bind' then return {'unknown'} end
+if r.originKind=='single_digital' and op~='cursor' and op~='bind' then
+ local ok,a=pcall(cjson.decode,ARGV[6])
+ if not ok or type(a)~='table' or type(a.singleDigitalAccessEvidence)~='string' or #a.singleDigitalAccessEvidence==0 then return {'unknown'} end
+end
 if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then return {'held'} end
 local good,p=pcall(cjson.decode,ARGV[6])
 if not good or type(p)~='table' then return {'unknown'} end
@@ -393,7 +417,7 @@ export async function claimConfirmationCreation(id: string, runtime: ShipmentMai
   if (!found) return null;
   try {
     const pipeline = runtime.pipeline ?? redisPipeline, policy = confirmationOutboxPolicy(runtime, false), owner = randomBytes(24).toString("hex");
-    if (!policy) return null;
+    if (!physicalOriginCovered(found, policy, (runtime.now ?? Date.now)())) return null;
     const started = performance.now();
     const reply = array(await pipeline([["EVAL", CONFIRMATION_ORIGIN_SCRIPT, 10, ...keys(found.row), "create", found.raw, "", (runtime.now ?? Date.now)(), owner, JSON.stringify(policy)]]));
     const receipt = reply?.length === 1 ? array(reply[0], 4) : null;
@@ -537,7 +561,7 @@ async function recoverCreation(found: NonNullable<Awaited<ReturnType<typeof read
  */
 async function confirmationUrlPermission(found: NonNullable<Awaited<ReturnType<typeof readConfirmationOrigin>>>, runtime: ConfirmationOriginRuntime): Promise<boolean> {
   const policy = confirmationOutboxPolicy(runtime, false);
-  if (!policy) return false;
+  if (!physicalOriginCovered(found, policy, (runtime.now ?? Date.now)())) return false;
   try {
     const started = performance.now(), pipeline = runtime.pipeline ?? redisPipeline;
     const requestedAt = (runtime.now ?? Date.now)();
@@ -567,14 +591,16 @@ export async function openConfirmationOrigin(id: string, runtime: ConfirmationOr
   // This origin has a retention adapter, not a verified original-file access recipe.
   if (!confirmationOutboxPolicy(runtime, false)) return null;
   let found = await readConfirmationOrigin(id, runtime);
-  if (!found || found.row.originKind === "single_digital") return null;
+  if (!found || found.row.originKind === "single_digital" && !singleDigitalAccessCovered(confirmationOutboxPolicy(runtime, false))) return null;
+  if (!physicalOriginCovered(found, confirmationOutboxPolicy(runtime, false), (runtime.now ?? Date.now)())) return null;
   let bound = winner(found);
   if (!bound) {
     const claim = await claimConfirmationCreation(id, runtime);
     if (claim) {
       let created: Record<string, unknown> | null = null;
       try {
-        if ((runtime.now ?? Date.now)() >= claim.sendBeforeMs || performance.now() >= claim.sendBeforeMonotonicMs) return null;
+        if ((runtime.now ?? Date.now)() >= claim.sendBeforeMs || performance.now() >= claim.sendBeforeMonotonicMs ||
+            !physicalOriginCovered(claim, confirmationOutboxPolicy(runtime, false), (runtime.now ?? Date.now)())) return null;
         created = await (runtime.provider ?? onAccount)("POST", claim.row.accountId, "/checkout/sessions", new URLSearchParams(claim.payload.body), undefined, `confirmation-origin:${claim.row.id}`);
       } catch { /* Unknown stays charged; the next attempt reads/replays only the original source. */ }
       if (typeof created?.id === "string") {
@@ -618,13 +644,18 @@ if raw~=expected or #raw>131072 then return {'changed'} end
 local ok,r=pcall(cjson.decode,raw)
 local good,p=pcall(cjson.decode,ARGV[6])
 if not ok or not good or type(r)~='table' or type(p)~='table' or r.kind~='confirmation' or redis.call('GET',KEYS[2])~=r.sourceValue then return {'unknown'} end
-if r.originKind~=nil then return {'unknown'} end
+if r.originKind~=nil then
+ if r.originKind~='single_digital' or type(p.singleDigitalAccessEvidence)~='string' or #p.singleDigitalAccessEvidence==0 then return {'unknown'} end
+ local covered=false
+ if type(p.coveredOrigins)=='table' then for _,purpose in ipairs(p.coveredOrigins) do if purpose=='single-digital-confirmation' then covered=true end end end
+ if not covered then return {'unknown'} end
+end
 local supported=r.reviewId==p.reviewId
 if type(p.continuedReviewIds)=='table' then for _,id in ipairs(p.continuedReviewIds) do if id==r.reviewId then supported=true end end end
 if not supported or redis.call('EXISTS',KEYS[9],KEYS[10],KEYS[12])~=0 then return {'held'} end
 if op=='paid' then
  local good,n=pcall(cjson.decode,supplied)
- if not good or type(n)~='table' or r.session=='' or r.phase~='awaiting_payment' or r.state~='preparing' or r.owner~=ARGV[5] or r.leaseUntil<now then return {'held'} end
+ if not good or type(n)~='table' or r.session=='' or (r.phase~='awaiting_payment' and not (r.originKind=='single_digital' and r.phase=='queued')) or r.state~='preparing' or r.owner~=ARGV[5] or r.leaseUntil<now then return {'held'} end
  for _,field in ipairs({'originKind','courseBindingFingerprint','kind','id','statsId','nonce','accountId','bodyDigest','intentFingerprint','bindingFingerprint','session','sourceValue','bytes','created','authorizedAt','expiresAt','owner','leaseUntil','checks','createAttempts','reviewId','recoveryCursor','recoveryUpper','erasedPeople','erasureSaturated'}) do if n[field]~=r[field] then return {'unknown'} end end
  if type(r.erasedPeople)~='string' or #r.erasedPeople>4096 or #r.erasedPeople%64~=0 or type(r.erasureSaturated)~='boolean' then return {'held'} end
  for i=1,#r.erasedPeople,64 do if string.sub(r.erasedPeople,i,i+63)==n.person then return {'erased'} end end
@@ -671,9 +702,9 @@ function preparedMessage(found: FoundOrigin): ConfirmationOriginPayload["message
       !found.row.session || !found.payload.settlementToken) return null;
   return message as ConfirmationOriginPayload["message"];
 }
-async function confirmationMutation(op: string, found: FoundOrigin, p: ShipmentMailPolicy | null, runtime: ShipmentMailRuntime, owner = ""): Promise<unknown[] | null> {
+async function confirmationMutation(op: string, found: { row: CustodyIdentity; raw: string }, p: ShipmentMailPolicy | null, runtime: ShipmentMailRuntime, owner = ""): Promise<unknown[] | null> {
   try {
-    const reply = array(await (runtime.pipeline ?? redisPipeline)([["EVAL", SHIPMENT_MAIL_SCRIPT, 10, ...keys(found.row), op, found.raw, "",
+    const reply = array(await (runtime.pipeline ?? redisPipeline)([["EVAL", SHIPMENT_MAIL_SCRIPT, keys(found.row).length, ...keys(found.row), op, found.raw, "",
       (runtime.now ?? Date.now)(), SHIPMENT_MAIL_MAX_ROW_BYTES, JSON.stringify(p), owner]]));
     return reply?.length === 1 ? array(reply[0]) : null;
   } catch { return null; }
@@ -683,9 +714,13 @@ async function preparePaid(found: FoundOrigin, p: ShipmentMailPolicy, runtime: C
   if (!session || session.id !== found.row.session || !knownPhysicalPayment(session)) return null;
   const store = data(found.payload.snapshot.store), product = data(found.payload.snapshot.product);
   if (!store || !product || store.statsId !== found.row.statsId || store.stripeAccountId !== found.row.accountId) return null;
-  const letter = originalPhysicalConfirmation(store as unknown as Store, session as SessionRecord, product as unknown as Listing);
+  const letter = found.row.originKind === "single_digital"
+    ? await singleDigitalMessage(store as unknown as Store, product as unknown as Listing, session, p)
+    : originalPhysicalConfirmation(store as unknown as Store, session as SessionRecord, product as unknown as Listing);
   if (!letter || !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(letter.to) || letter.to.length > 320 || typeof store.email !== "string") return null;
-  const payload = { ...found.payload, paidCents: Number(session.amount_total), message: { ...letter, from: fromStore(store as unknown as Store), replyTo: store.email } };
+  const payload = { ...found.payload, paidCents: Number(session.amount_total),
+    ...("accessUrl" in letter ? { accessUrl: letter.accessUrl } : {}),
+    message: { to: letter.to, subject: letter.subject, text: letter.text, from: fromStore(store as unknown as Store), replyTo: store.email } };
   const plain = JSON.stringify(payload);
   if (Buffer.byteLength(plain) > p.maxPayloadBytes) return null;
   const row = { ...found.row, phase: "queued" as const, person: hash(letter.to.trim().toLowerCase()), sealed: seal(plain, context(found.row.id)), fingerprint: hash(plain) };
@@ -730,7 +765,8 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       if (reply[0] === "none" && reply[1] === "") return { raw: "" };
       if (reply[0] !== "string" || Buffer.byteLength(reply[1]) > SHIPMENT_MAIL_MAX_ROW_BYTES) return null;
       const row = parse(reply[1]);
-      if (!row || row.id !== id || row.originKind === "course") return { raw: reply[1] };
+      if (!row) { const renewal = decodeRenewal(reply[1], reply[2]); return renewal?.row.id === id ? { raw: reply[1], keys: keys(renewal.row) } : { raw: reply[1] }; }
+      if (row.id !== id || row.originKind === "course") return { raw: reply[1] };
       if (reply[2] !== row.sourceValue) return { raw: reply[1] };
       const opened = unseal(row.sealed, context(id));
       if (!opened.ok || hash(opened.value) !== row.fingerprint) return { raw: reply[1] };
@@ -738,6 +774,7 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       if (!payload || typeof payload.body !== "string" || confirmationBodyDigest(payload.body) !== row.bodyDigest ||
           typeof payload.preintentToken !== "string" || hash(payload.preintentToken) !== row.intentFingerprint ||
           payload.intentFingerprint !== row.intentFingerprint || !data(payload.snapshot)) return { raw: reply[1] };
+      if (!physicalOriginCovered({ row, payload: payload as unknown as ConfirmationOriginPayload }, p, now())) return { raw: reply[1] };
       return { raw: reply[1], keys: keys(row) };
     } catch { return null; }
   });
@@ -752,12 +789,20 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
   } catch { return { ...counts, unknown: 1 }; }
   for (const id of ids) {
     if (expired()) break;
-    let found = await readConfirmationOrigin(String(id), runtime);
+    const renewal: { found?: RenewalFound } = {};
+    let found = await readOrigin(String(id), runtime, renewal);
+    if (renewal.found) {
+      try { await processRenewal(renewal.found, p, runtime, dispatch, expired, counts); }
+      catch { counts.unknown++; } // retain source/lease and allow other paid work to proceed
+      continue;
+    }
+    if (found?.row.originKind === "course") { counts.unknown++; continue; }
     if (!found || found.row.accountId === DEMO_CONNECTED_ACCOUNT) { counts.unknown++; continue; }
-    if (found.row.originKind === "single_digital" && !p.coveredOrigins?.includes("single-digital-confirmation")) { counts.unknown++; continue; }
+    if (!physicalOriginCovered(found, p, now())) { counts.unknown++; continue; }
+    if (found.row.originKind === "single_digital" && (!p.coveredOrigins?.includes("single-digital-confirmation") || now() >= found.row.expiresAt)) { counts.unknown++; continue; }
     // A previous accepted outcome is never dispatched again. Its complete
     // protected source survives until original accounting is acknowledged.
-    if (found.row.originKind === "single_digital" && found.row.phase === "accepted") { counts.unknown++; continue; }
+    if (found.row.originKind === "single_digital" && found.row.phase === "accepted" && !singleDigitalAccessCovered(p)) { counts.unknown++; continue; }
     if (found.row.phase === "accepted") {
       let receipt: unknown[] | null = null;
       try {
@@ -787,11 +832,10 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
     // Finding the source is not proof that its original file can still be
     // delivered. Keep the exact rights and reservation; no stale thanks URL,
     // 40-entry purchase list, paid settlement or receipt can substitute for it.
-    if (found.row.originKind === "single_digital") {
-      await confirmationMutation("defer", found, p, runtime, owner);
-      counts.waiting++; continue;
+    if (found.row.originKind === "single_digital" && !singleDigitalAccessCovered(p)) {
+      await confirmationMutation("defer", found, p, runtime, owner); counts.waiting++; continue;
     }
-    if (found.row.phase === "awaiting_payment") found = await preparePaid(found, p, runtime, owner);
+    if (found.row.phase === "awaiting_payment" || found.row.originKind === "single_digital" && found.row.phase === "queued") found = await preparePaid(found, p, runtime, owner);
     if (!found || !preparedMessage(found)) {
       const current = await readConfirmationOrigin(String(id), runtime);
       if (current?.row.owner === owner) await confirmationMutation("defer", current, p, runtime, owner);
@@ -802,12 +846,20 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       `checkout:${found.row.session}`, found.payload.settlementToken!, found.payload.paidCents!, { now, pipeline });
     let barrier = false;
     const beforePost = async () => {
-      if (barrier || expired() || !confirmationOutboxPolicy(runtime, false)) return false;
+      if (barrier || expired() || !physicalOriginCovered(found!, confirmationOutboxPolicy(runtime, false), now())) return false;
       // A queued email may have waited through a refund. Recheck the original
       // account immediately before its permanent dispatch barrier; never use
       // the old paid checkout status alone as present refund evidence.
       const current = await readProviderSession(found!, found!.row.session, runtime, true);
       if (!current || current.id !== found!.row.session || !knownPhysicalPayment(current) || current.amount_total !== found!.payload.paidCents || expired()) return false;
+      if (!physicalOriginCovered(found!, confirmationOutboxPolicy(runtime, false), now())) return false;
+      if (found!.row.originKind === "single_digital") {
+        if (typeof found!.payload.accessUrl !== "string") return false;
+        const url = new URL(found!.payload.accessUrl);
+        const originalStore = found!.payload.snapshot.store as Store;
+        const currentStore = await storeForEmail(storeRef(originalStore));
+        if (!currentStore || !(await readSingleDigitalAccess(currentStore, url.searchParams.get("token") ?? "", url.searchParams.get("origin") ?? ""))) return false;
+      }
       const changed = await confirmationMutation("dispatch", found!, p, runtime, owner);
       if (changed?.[0] !== "dispatching") return false;
       const row = parse(changed[1]);
@@ -909,7 +961,8 @@ export async function forgetOrderConfirmationMail(statsId: string | null | undef
     }
     // Re-read after the atomic mark: a competing bind cannot substitute the
     // recipient, and a concurrent removal needs no second release of capacity.
-    const found = await readOrigin(String(id), runtime);
+    const renewal: { found?: RenewalFound } = {};
+    const found = await readOrigin(String(id), runtime, renewal) ?? renewal.found;
     if (!found || found.row.statsId !== statsId || person !== null && found.row.person !== person ||
         (await confirmationMutation("cancel", found, null, runtime))?.[0] !== "canceled") throw Error("Confirmation erasure is unknown");
     deleted++;
@@ -918,6 +971,123 @@ export async function forgetOrderConfirmationMail(statsId: string | null | undef
   const receipt = finished?.length === 1 ? array(finished[0]) : null;
   if (receipt?.length !== 1 || receipt[0] !== "finished") throw Error("Confirmation erasure completion is unknown");
   return deleted;
+}
+
+
+/** A renewal is an inbox-proof request, not another sale. It shares the
+ * existing bounded custody pool and source/index/erasure families, without
+ * creating a checkout, original admission, order count or settlement token. */
+type RenewalRow = {
+  kind: "confirmation"; originKind: "single_digital_renewal"; purpose: "single-digital-access-renewal";
+  id: string; statsId: string; nonce: string; person: string; accountId: string; capsuleDigest: string;
+  sourceValue: string; sealed: string; fingerprint: string; bytes: number;
+  created: number; authorizedAt: number; next: number; state: "queued" | "preparing" | "dispatching" | "refused";
+  phase: "renewal_queued"; owner: string; leaseUntil: number; checks: number; reviewId: string;
+};
+type RenewalPayload = { capsule: string; storeRef: string; draft?: SingleDigitalRenewalDraft };
+type RenewalFound = { row: RenewalRow; raw: string; payload: RenewalPayload };
+function decodeRenewal(raw: unknown, source: unknown): RenewalFound | null {
+  try {
+    if (typeof raw !== "string" || Buffer.byteLength(raw) > SHIPMENT_MAIL_MAX_ROW_BYTES) return null;
+    const r = data(JSON.parse(raw));
+    const names = ["kind","originKind","purpose","id","statsId","nonce","person","accountId","capsuleDigest","sourceValue","sealed","fingerprint","bytes","created","authorizedAt","next","state","phase","owner","leaseUntil","checks","reviewId"];
+    if (!r || Object.keys(r).length !== names.length || names.some(k => !Object.hasOwn(r,k)) || r.kind !== "confirmation" || r.originKind !== "single_digital_renewal" || r.purpose !== "single-digital-access-renewal" ||
+      ![r.id,r.nonce,r.person,r.capsuleDigest,r.fingerprint].every(v => typeof v === "string" && HASH.test(v)) || typeof r.statsId !== "string" || !STORE.test(r.statsId) ||
+      typeof r.accountId !== "string" || !ACCOUNT.test(r.accountId) || typeof r.sourceValue !== "string" || source !== r.sourceValue || typeof r.sealed !== "string" ||
+      typeof r.reviewId !== "string" || !r.reviewId || r.phase !== "renewal_queued" || !["queued","preparing","dispatching","refused"].includes(String(r.state)) ||
+      typeof r.owner !== "string" || !/^[a-f0-9]{0,48}$/.test(r.owner) ||
+      ![r.bytes,r.created,r.authorizedAt,r.next,r.leaseUntil,r.checks].every(v => typeof v === "number" && Number.isSafeInteger(v) && v >= 0) || Number(r.bytes) < Buffer.byteLength(raw)) return null;
+    if (r.id !== hash(`single-digital-renewal\n${r.statsId}\n${r.nonce}`) || r.sourceValue !== JSON.stringify({ kind:"confirmation", originKind:"single_digital_renewal", purpose:r.purpose, nonce:r.nonce, accountId:r.accountId, capsuleDigest:r.capsuleDigest })) return null;
+    const opened = unseal(r.sealed, context(String(r.id)));
+    if (!opened.ok || hash(opened.value) !== r.fingerprint) return null;
+    const payload = data(JSON.parse(opened.value));
+    if (!payload || typeof payload.capsule !== "string" || hash(payload.capsule) !== r.capsuleDigest || typeof payload.storeRef !== "string" || !payload.storeRef || payload.storeRef.length > 320 ||
+      Object.keys(payload).some(k => !["capsule","storeRef","draft"].includes(k))) return null;
+    return { row: r as unknown as RenewalRow, raw, payload: payload as unknown as RenewalPayload };
+  } catch { return null; }
+}
+export async function readSingleDigitalRenewalOrigin(id: string, runtime: ShipmentMailRuntime = {}): Promise<RenewalFound | null> {
+  const capture: { found?: RenewalFound } = {};
+  await readOrigin(id, runtime, capture); return capture.found ?? null;
+}
+function renewalRequestStatus(row: RenewalRow): { ok:true; id:string } | { ok:false; reason:"acceptance_unknown"|"on_hold"|"refused" } {
+  if (row.state === "dispatching") return { ok:false,reason:"acceptance_unknown" };
+  if (row.state === "refused") return { ok:false,reason:"refused" };
+  if (row.state === "queued" && row.next === 0) return { ok:false,reason:"on_hold" };
+  return { ok:true,id:row.id };
+}
+export async function enqueueSingleDigitalRenewal(store: Store, capsule: string, requestNonce: string, runtime: ConfirmationOriginRuntime = {}): Promise<{ ok:true; id:string } | { ok:false; reason:"not_paid"|"unknown"|"capacity"|"acceptance_unknown"|"on_hold"|"refused" }> {
+  const p = confirmationOutboxPolicy(runtime);
+  if (!p || !singleDigitalRenewalCovered(p) || !canSeal() || !HASH.test(requestNonce)) return { ok:false,reason:"unknown" };
+  const identity = singleDigitalRenewalIdentity(store, capsule);
+  if (!identity || !store.statsId) return { ok:false,reason:"unknown" };
+  const paid=await checkSingleDigitalRenewal(store,capsule);
+  if(paid.status!=="paid")return {ok:false,reason:paid.status==="not_paid"?"not_paid":"unknown"};
+  const pipeline = runtime.pipeline ?? redisPipeline, now = await serverNow(pipeline);
+  if (now === null || Math.abs(now-(runtime.now??Date.now)()) > 60_000) return { ok:false,reason:"unknown" };
+  const id = hash(`single-digital-renewal\n${store.statsId}\n${requestNonce}`), person = hash(identity.email), capsuleDigest = hash(capsule);
+  const payload: RenewalPayload = { capsule, storeRef:storeRef(store) }, plain = JSON.stringify(payload);
+  if (Buffer.byteLength(plain) > p.maxPayloadBytes) return { ok:false,reason:"unknown" };
+  const row: RenewalRow = { kind:"confirmation", originKind:"single_digital_renewal", purpose:"single-digital-access-renewal", id, statsId:store.statsId, nonce:requestNonce,
+    person, accountId:identity.accountId, capsuleDigest, sourceValue:JSON.stringify({kind:"confirmation",originKind:"single_digital_renewal",purpose:"single-digital-access-renewal",nonce:requestNonce,accountId:identity.accountId,capsuleDigest}),
+    sealed:seal(plain,context(id)), fingerprint:hash(plain), bytes:0, created:now, authorizedAt:now, next:now, state:"queued",phase:"renewal_queued",owner:"",leaseUntil:0,checks:0,reviewId:p.reviewId };
+  row.bytes = SHIPMENT_MAIL_MAX_ROW_BYTES + keys(row).reduce((n,k)=>n+Buffer.byteLength(k),0)*2+16_384;
+  const raw = JSON.stringify(row);
+  try {
+    const response = array(await pipeline([["EVAL", SHIPMENT_MAIL_SCRIPT,keys(row).length,...keys(row),"enqueue","",raw,now,SHIPMENT_MAIL_MAX_ROW_BYTES,JSON.stringify(p),""]]));
+    const receipt = response?.length === 1 ? array(response[0]) : null;
+    if (receipt?.[0] === "full") return {ok:false,reason:"capacity"};
+    if (receipt?.[0] === "duplicate") {
+      // Lua reads the bounded capsule pointer inside admission's atomic check.
+      // Re-read its authenticated row; a pointer alone is never proof of custody.
+      if (receipt.length !== 2 || typeof receipt[1] !== "string" || !HASH.test(receipt[1])) return {ok:false,reason:"unknown"};
+      const pending = await readSingleDigitalRenewalOrigin(receipt[1],runtime);
+      return pending && pending.row.statsId===store.statsId && pending.row.accountId===identity.accountId && pending.row.person===person && pending.row.capsuleDigest===capsuleDigest ? renewalRequestStatus(pending.row) : {ok:false,reason:"unknown"};
+    }
+    if (!receipt || !["queued","existing"].includes(String(receipt[0]))) return { ok:false,reason:"unknown" };
+    const found = await readSingleDigitalRenewalOrigin(id,runtime);
+    return found && found.row.capsuleDigest === capsuleDigest && found.row.person === person && found.row.sourceValue === row.sourceValue ? renewalRequestStatus(found.row) : {ok:false,reason:"unknown"};
+  } catch { return {ok:false,reason:"unknown"}; }
+}
+async function processRenewal(initial: RenewalFound, p: ShipmentMailPolicy, runtime: ConfirmationOriginRuntime, dispatch: ShipmentMailDispatch,
+ expired: ()=>boolean, counts: {accepted:number;waiting:number;unknown:number}): Promise<void> {
+  if (!singleDigitalRenewalCovered(p)) { counts.unknown++; return; }
+  const owner = randomBytes(24).toString("hex");
+  if ((await confirmationMutation("claim",initial,p,runtime,owner))?.[0] !== "preparing") {counts.unknown++;return;}
+  let found = await readSingleDigitalRenewalOrigin(initial.row.id,runtime);
+  if (!found || expired() || found.row.owner !== owner || found.row.state !== "preparing") {counts.unknown++;return;}
+  const current = await storeForEmail(found.payload.storeRef);
+  const verified = current ? await verifySingleDigitalRenewal(current,found.payload.capsule) : null;
+  if (!verified || verified.claim.accountId !== found.row.accountId || hash(verified.claim.email) !== found.row.person) {
+    await confirmationMutation("defer",found,p,runtime,owner);counts.waiting++;return;
+  }
+  const draft = singleDigitalRenewalDraft(verified.store,found.payload.capsule,verified.claim);
+  const plain = JSON.stringify({...found.payload,draft});
+  if (Buffer.byteLength(plain)>p.maxPayloadBytes) {await confirmationMutation("defer",found,p,runtime,owner);counts.waiting++;return;}
+  const next = {...found.row,sealed:seal(plain,context(found.row.id)),fingerprint:hash(plain)}, raw=JSON.stringify(next);
+  const reply = array(await (runtime.pipeline??redisPipeline)([["EVAL",SHIPMENT_MAIL_SCRIPT,keys(next).length,...keys(next),"renewal-prepare",found.raw,raw,(runtime.now??Date.now)(),SHIPMENT_MAIL_MAX_ROW_BYTES,JSON.stringify(p),owner]]));
+  if (reply?.length!==1 || array(reply[0])?.[0]!=="prepared") {counts.unknown++;return;}
+  found=await readSingleDigitalRenewalOrigin(next.id,runtime);
+  if (!found || found.raw!==raw || expired()) {counts.unknown++;return;}
+  let barrier=false;
+  const beforePost=async()=>{
+    if(barrier || expired() || !singleDigitalRenewalCovered(confirmationOutboxPolicy(runtime,false)))return false;
+    const store=await storeForEmail(found!.payload.storeRef);
+    const proof=store?await verifySingleDigitalRenewal(store,found!.payload.capsule):null;
+    if(!proof || hash(proof.claim.email)!==found!.row.person || proof.claim.accountId!==found!.row.accountId || expired())return false;
+    if(!(await activateSingleDigitalRenewal(proof.store,found!.payload.capsule,draft)) || expired())return false;
+    const changed=await confirmationMutation("dispatch",found!,p,runtime,owner);
+    if(changed?.[0]!=="dispatching")return false;
+    const saved=await readSingleDigitalRenewalOrigin(found!.row.id,runtime);
+    if(!saved || saved.row.state!=="dispatching" || saved.row.owner!==owner || expired())return false;
+    found=saved;barrier=true;return true;
+  };
+  let outcome:Awaited<ReturnType<ShipmentMailDispatch>>="unknown";
+  try{outcome=await dispatch(draft.message,beforePost,{id:found.row.id});}catch{/* Retain original request and any permanent barrier. */}
+  if(!barrier){await confirmationMutation("defer",found,p,runtime,owner);counts.waiting++;return;}
+  if(outcome==="unknown" || outcome==="waiting"){counts.unknown++;return;}
+  const changed=await confirmationMutation(outcome==="accepted"?"accepted":outcome==="not_accepted"?"not-accepted":"refused",found,p,runtime,owner);
+  if(outcome==="accepted" && changed?.[0]==="accepted")counts.accepted++;else if(outcome==="not_accepted" && changed?.[0]==="queued")counts.waiting++;else counts.unknown++;
 }
 
 /** One person's linked originals only. No provider call, lease or mutation.
@@ -936,12 +1106,64 @@ export async function orderConfirmationMailOf(statsId: string, email: string, ru
   const out: unknown[] = [];
   for (const id of ids) {
     const found = await readOrigin(String(id), runtime);
-    if (!found || found.row.statsId !== statsId || found.row.person !== person) throw Error("Confirmation copy source is unknown");
+    if (!found) {
+      const renewal = await readSingleDigitalRenewalOrigin(String(id), runtime);
+      if (!renewal || renewal.row.statsId !== statsId || renewal.row.person !== person) throw Error("Confirmation copy source is unknown");
+      const message = renewal.payload.draft?.message;
+      if (message && hash(message.to.trim().toLowerCase()) !== person) throw Error("Confirmation copy recipient is unknown");
+      const original = singleDigitalRenewalCopy(renewal.payload.capsule, statsId, renewal.row.accountId, email);
+      if (!original) throw Error("Confirmation copy original identity is unknown");
+      out.push({ ...original, purpose: renewal.row.purpose, phase: renewal.row.phase, state: renewal.row.state, created: renewal.row.created,
+        ...(message ? { subject: message.subject } : {}) });
+      continue;
+    }
+    if (found.row.statsId !== statsId || found.row.person !== person) throw Error("Confirmation copy source is unknown");
     const message = found.payload.message;
     if (message && hash(message.to.trim().toLowerCase()) !== person) throw Error("Confirmation copy recipient is unknown");
     out.push({ checkout: found.row.session, phase: found.row.phase, created: found.row.created,
       ...(found.payload.paidCents === undefined ? {} : { paidCents: found.payload.paidCents }),
-      ...(message ? { subject: message.subject, text: message.text } : {}) });
+      ...(message ? { subject: message.subject, ...(found.row.originKind === "single_digital" ? {} : { text: message.text }) } : {}) });
   }
   return out;
+}
+
+
+/** Owner aggregate reader for the existing isolated renewal custody families. */
+export const RENEWAL_NOTICE_ROWS = 8;
+/** One atomic index read: bounded before SMEMBERS, then at most eight rows.
+ * Internal JSON reads are bounded too; no capsule, recipient or row is returned. */
+export const RENEWAL_NOTICE_SCRIPT = `
+local kind=redis.call('TYPE',KEYS[1]).ok
+if kind=='none' then return {'ok',0,0,0} end
+if kind~='set' then return {'unknown'} end
+local count=redis.call('SCARD',KEYS[1])
+if count>8 then return {'unknown'} end
+local ids=redis.call('SMEMBERS',KEYS[1])
+local uncertain,held=0,0
+for _,id in ipairs(ids) do
+ if #id~=64 or string.find(id,'[^a-f0-9]') then return {'unknown'} end
+ local raw=redis.call('GETRANGE','nl:order-confirmation:row:'..id,0,tonumber(ARGV[3]))
+ if #raw==0 or #raw>tonumber(ARGV[3]) then return {'unknown'} end
+ local ok,row=pcall(cjson.decode,raw)
+ if not ok or type(row)~='table' or row.id~=id or row.originKind~='single_digital_renewal' or row.statsId~=ARGV[1] or row.accountId~=ARGV[2] then return {'unknown'} end
+ if type(row.next)~='number' or row.next<0 or row.next%1~=0 then return {'unknown'} end
+ if row.state=='dispatching' then uncertain=uncertain+1
+ elseif row.state=='refused' or row.state=='queued' and row.next==0 then held=held+1
+ elseif row.state~='queued' and row.state~='preparing' then return {'unknown'} end
+end
+return {'ok',#ids,uncertain,held}
+`;
+export type RenewalMailSummary = { pending: number; unconfirmed: number; held: number } | { unavailable: true };
+export async function renewalMailSummary(store: Pick<Store,"statsId"|"stripeAccountId">, runtime: ShipmentMailRuntime = {}): Promise<RenewalMailSummary | null> {
+  if ((runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) === "never_activated") return null;
+  // No unpriced read from a missing policy, including after retirement.
+  if (!shipmentMailPolicy(runtime.policy === undefined ? CURRENT_SHIPMENT_MAIL_POLICY : runtime.policy, (runtime.now ?? Date.now)(), false) ||
+      !store.statsId || !/^[A-Za-z0-9_-]{1,128}$/.test(store.statsId) || !store.stripeAccountId || !/^acct_[A-Za-z0-9]+$/.test(store.stripeAccountId)) return { unavailable:true };
+  try {
+    const reply: unknown = await (runtime.pipeline ?? redisPipeline)([["EVAL",RENEWAL_NOTICE_SCRIPT,1,`nl:order-confirmation:renewal:store:${store.statsId}`,store.statsId,store.stripeAccountId,SHIPMENT_MAIL_MAX_ROW_BYTES]]);
+    if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) return { unavailable:true };
+    const row = reply[0];
+    if (row.length !== 4 || row[0] !== "ok" || !row.slice(1).every(n => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= RENEWAL_NOTICE_ROWS) || row[2]+row[3] > row[1]) return { unavailable:true };
+    return { pending:row[1],unconfirmed:row[2],held:row[3] };
+  } catch { return { unavailable:true }; }
 }

@@ -7,10 +7,13 @@
  * and leaves Marktmorgen with nothing to hold, skim or lose. The 0% on the home
  * page is this file.
  */
+import { singleDigitalAccessCovered } from "@/lib/single-digital-access";
+import { selectedPhysicalOption } from "@/lib/physical-option-confirmation";
+import { canRecover } from "@/lib/buyer-orders";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
-import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
+import { confirmationBodyDigest, confirmationOutboxPolicy, openConfirmationOrigin, reserveConfirmationOrigin, reserveSingleDigitalConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
@@ -726,7 +729,7 @@ export async function createCheckout(
     !extras.buyerKey && !extras.upsellKey && !extras.news && !extras.held && !extras.remind && !recovering && !named &&
     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&
     !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
-  if (singleDigital) throw new Error("The payment page could not be opened");
+  if (singleDigital && (!singleDigitalAccessCovered(confirmationOutboxPolicy(confirmationRuntime)) || !canRecover(store))) throw new Error("The payment page could not be opened");
 
   // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
   // admitted here, before Stripe's page opens, so nobody is stopped while paying.
@@ -746,28 +749,32 @@ export async function createCheckout(
   // First durable category: a single physical item without expiring access,
   // mutable checkout variants or coupled fulfillment. Other producers remain
   // explicit follow-up work; none are silently relabeled as durable here.
+  const physicalOption = shipping && chosen ? selectedPhysicalOption({ options: [chosen] }, chosen.id) : null;
   const simplePhysical = Boolean(store.stripeAccountId !== DEMO_CONNECTED_ACCOUNT && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated" && shipping && !product.bundle && !product.course && !product.podcast && !product.keys && !product.note &&
-    !product.callPackage && !product.recurring && !product.plan && !product.pwyw && !product.file && !product.link && product.options.length === 0 &&
+    !product.callPackage && !product.recurring && !product.plan && !product.pwyw && !product.file && !product.link && (product.options.length === 0 || physicalOption !== null) &&
     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email && !extras.buyerKey &&
     !extras.upsellKey && !extras.news && !extras.held && !extras.remind && !recovering && !named && !store.tax.ids && !store.tax.invoices &&
     !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) && !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
-  if (simplePhysical) {
+  if (simplePhysical || singleDigital) {
     if ([...body.keys()].filter(key => key.startsWith("metadata[")).length > 47) throw new Error("The payment page could not be opened");
     const nonce = randomBytes(32).toString("hex");
     body.set("metadata[mm_order_intent]", nonce);
-    body.set("metadata[mm_order_origin]", "physical-v1");
+    body.set("metadata[mm_order_origin]", singleDigital ? "single-digital-v1" : "physical-v1");
     const bodyDigest = confirmationBodyDigest(body.toString());
     body.set("metadata[mm_order_hash]", bodyDigest);
     const accountId = store.stripeAccountId;
     const preintent = await prepareOrderConfirmationPreintent(store, admitted, { nonce, accountId, bodyDigest }, { now: confirmationRuntime.now });
     if (!preintent) throw new Error("The payment page could not be opened");
-    const reserved = await reserveConfirmationOrigin({ statsId: store.statsId, nonce, accountId, body: body.toString(), preintent,
+    const reserve = singleDigital ? reserveSingleDigitalConfirmationOrigin : reserveConfirmationOrigin;
+    const reserved = await reserve({ statsId: store.statsId, nonce, accountId, body: body.toString(), preintent,
       snapshot: { store: { handle: store.handle, name: store.name, email: store.email, sid: store.sid, extra: store.extra,
         previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], stripeAccountId: accountId,
         statsId: store.statsId, currency: store.currency, language: store.language, domain: null,
         affiliates: { enabled: false, buyers: false }, tax: { enabled: store.tax.enabled, included: store.tax.included } },
-        product: { id: product.id, title: product.title, priceCents: product.priceCents, options: [], call: null,
-          recurring: null, course: null, podcast: null, shipping: product.shipping, bundle: null, note: false, keys: null } },
+        product: { id: product.id, title: product.title, priceCents: product.priceCents, options: physicalOption ? [physicalOption] : [], call: null,
+          recurring: null, course: null, podcast: null, shipping: product.shipping, bundle: null, note: false, keys: null,
+          ...(singleDigital ? { file: product.file, link: null, fields: [], stamp: product.stamp } : physicalOption ? { file: null, link: null, fields: [] } : {}) },
+        ...(singleDigital ? { rights: { priceCents: product.priceCents, currency: store.currency, consent: body.get("metadata[dc]") } } : {}) },
     }, confirmationRuntime);
     if (!reserved.ok) throw new Error("The payment page could not be opened");
     const ready = await openConfirmationOrigin(reserved.id, confirmationRuntime);

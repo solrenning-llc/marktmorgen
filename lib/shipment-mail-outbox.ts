@@ -26,6 +26,10 @@ export type PendingMailRecoveryGrant = {
 export type ShipmentMailPolicy = {
   reviewId: string;
   evidence: string;
+  /** Same-review coverage of token lifetime/renewal and paid-access resources. */
+  singleDigitalAccessEvidence?: string;
+  /** Explicit same-review lifetime and trigger/send funding for renewal intents. */
+  singleDigitalRenewalEvidence?: string;
   ongoingStorageFunded: boolean;
   emptyInitializationVerified: boolean;
   globalItems: number;
@@ -39,7 +43,7 @@ export type ShipmentMailPolicy = {
   continuedReviewIds?: string[];
   /** Explicit extra source coverage in this same funded envelope; absence
    * preserves legacy physical/shipment coverage, never admits extra origins. */
-  coveredOrigins?: ("course-confirmation" | "single-digital-confirmation")[];
+  coveredOrigins?: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal" | "physical-option-confirmation")[];
   /** Separate quantified discovery/trigger coverage in this SAME review.
    * Storage funding is not recovery funding. Actual review remains NULL. */
   recovery?: PendingMailRecoveryGrant;
@@ -87,7 +91,7 @@ function data(value: unknown): Record<string, unknown> | null {
 export function shipmentMailPolicy(value: unknown, now = Date.now(), admission = true): ShipmentMailPolicy | null {
   try {
   const p = data(value);
-  const allowed = ["reviewId", "evidence", "ongoingStorageFunded", "emptyInitializationVerified", "globalItems", "globalBytes", "storeItems", "storeBytes", "maxPayloadBytes", "maximumChecks", "retryMilliseconds", "admissionsUntil", "continuedReviewIds", "coveredOrigins", "recovery"];
+  const allowed = ["reviewId", "evidence", "ongoingStorageFunded", "emptyInitializationVerified", "globalItems", "globalBytes", "storeItems", "storeBytes", "maxPayloadBytes", "maximumChecks", "retryMilliseconds", "admissionsUntil", "continuedReviewIds", "coveredOrigins", "recovery", "singleDigitalAccessEvidence", "singleDigitalRenewalEvidence"];
   if (p && Object.keys(p).some(key => !allowed.includes(key))) return null;
   if (!p || !integer(now) || typeof p.reviewId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId) ||
       typeof p.evidence !== "string" || !p.evidence.trim() || p.ongoingStorageFunded !== true || p.emptyInitializationVerified !== true) return null;
@@ -140,15 +144,17 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
     if (hasTotal) captured.checkpointTotalBytes = r.checkpointTotalBytes;
     p.recovery = captured;
   }
+  if (p.singleDigitalAccessEvidence !== undefined && (typeof p.singleDigitalAccessEvidence !== "string" || !p.singleDigitalAccessEvidence.trim() || p.singleDigitalAccessEvidence.length > 2000)) return null;
+  if (p.singleDigitalRenewalEvidence !== undefined && (typeof p.singleDigitalRenewalEvidence !== "string" || !p.singleDigitalRenewalEvidence.trim() || p.singleDigitalRenewalEvidence.length > 2000)) return null;
   if (p.coveredOrigins !== undefined) {
     const input = p.coveredOrigins;
     if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) return null;
     const length = Object.getOwnPropertyDescriptor(input, "length")?.value;
-    if (!Number.isSafeInteger(length) || length < 1 || length > 2 || Reflect.ownKeys(input).length !== length + 1) return null;
-    const origins: ("course-confirmation" | "single-digital-confirmation")[] = [];
+    if (!Number.isSafeInteger(length) || length < 1 || length > 4 || Reflect.ownKeys(input).length !== length + 1) return null;
+    const origins: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal" | "physical-option-confirmation")[] = [];
     for (let i = 0; i < length; i++) {
       const field = Object.getOwnPropertyDescriptor(input, String(i));
-      if (!field || !Object.hasOwn(field, "value") || !["course-confirmation", "single-digital-confirmation"].includes(field.value) || origins.includes(field.value)) return null;
+      if (!field || !Object.hasOwn(field, "value") || !["course-confirmation", "single-digital-confirmation", "single-digital-access-renewal", "physical-option-confirmation"].includes(field.value) || origins.includes(field.value)) return null;
       origins.push(field.value);
     }
     p.coveredOrigins = origins;
@@ -192,9 +198,10 @@ export const SHIPMENT_MAIL_SCRIPT = `-- marktmorgen:shipment-mail-outbox:v1
 local op, expected, supplied = ARGV[1], ARGV[2], ARGV[3]
 local now, maxbytes = tonumber(ARGV[4]), tonumber(ARGV[5])
 if not now or now < 0 or not maxbytes or maxbytes > 131072 then return {'unknown'} end
-local types = {'string','string','zset','set','set','hash','hash','set','string','string'}
+if #KEYS~=10 and #KEYS~=12 then return {'unknown'} end
+local types = {'string','string','zset','set','set','hash','hash','set','string','string','string','set'}
 local seen = {}
-for i=1,10 do
+for i=1,#KEYS do
  if not KEYS[i] or seen[KEYS[i]] then return {'unknown'} end
  seen[KEYS[i]] = true
  local kind = redis.call('TYPE',KEYS[i]).ok
@@ -208,6 +215,17 @@ if raw ~= '' then
  local ok,v = pcall(cjson.decode,raw)
  if not ok or type(v) ~= 'table' or type(v.bytes) ~= 'number' or v.bytes < #raw then return {'unknown'} end
  r=v
+end
+-- Only renewals own these two additional keys. No mixed confirmation index
+-- is read to deduplicate or count renewal requests.
+local function renewalKeys(v)
+ if v.originKind~='single_digital_renewal' then return #KEYS==10 end
+ return #KEYS==12 and type(v.statsId)=='string' and type(v.capsuleDigest)=='string' and #v.capsuleDigest==64 and not string.find(v.capsuleDigest,'[^a-f0-9]') and
+  KEYS[11]=='nl:order-confirmation:renewal:capsule:'..v.statsId..':'..v.capsuleDigest and KEYS[12]=='nl:order-confirmation:renewal:store:'..v.statsId
+end
+if r then
+ if not renewalKeys(r) then return {'unknown'} end
+ if r.originKind=='single_digital_renewal' and (redis.call('GETRANGE',KEYS[11],0,64)~=r.id or redis.call('SISMEMBER',KEYS[12],r.id)~=1) then return {'unknown'} end
 end
 local function pool(key)
  local v=redis.call('HMGET',key,'items','bytes')
@@ -229,6 +247,9 @@ local function drop()
   redis.call('HINCRBY',KEYS[7],'items',-1); redis.call('HINCRBY',KEYS[7],'bytes',-r.bytes)
   if b[1]==1 and b[2]==r.bytes then redis.call('DEL',KEYS[7]) end
  end
+ if r.originKind=='single_digital_renewal' then
+  redis.call('DEL',KEYS[11]); redis.call('SREM',KEYS[12],r.id)
+ end
  redis.call('DEL',KEYS[1]); redis.call('ZREM',KEYS[3],r.id)
  redis.call('SREM',KEYS[4],r.id); redis.call('SREM',KEYS[5],r.id); redis.call('SREM',KEYS[8],r.id)
  -- Pending work owns its source for as long as it waits. Start the existing
@@ -244,19 +265,29 @@ if op == 'enqueue' then
  -- Courses are a reserve/readback construction only. Funding must explicitly
  -- cover this origin in the SAME policy; no physical funding inheritance.
  if n.originKind~=nil then
-  if type(p.coveredOrigins)~='table' or #p.coveredOrigins<1 or #p.coveredOrigins>2 then return {'unknown'} end
+  if type(p.coveredOrigins)~='table' or #p.coveredOrigins<1 or #p.coveredOrigins>4 then return {'unknown'} end
   local covered={}
   for _,purpose in ipairs(p.coveredOrigins) do
-   if (purpose~='course-confirmation' and purpose~='single-digital-confirmation') or covered[purpose] then return {'unknown'} end
+   if (purpose~='course-confirmation' and purpose~='single-digital-confirmation' and purpose~='single-digital-access-renewal' and purpose~='physical-option-confirmation') or covered[purpose] then return {'unknown'} end
    covered[purpose]=true
   end
   if n.originKind=='course' then
    if n.phase~='course_reserved' or n.state~='queued' or n.next~=0 or type(n.courseBindingFingerprint)~='string' or #n.courseBindingFingerprint~=64 or string.find(n.courseBindingFingerprint,'[^a-f0-9]') or not covered['course-confirmation'] then return {'unknown'} end
   elseif n.originKind=='single_digital' then
    if n.kind~='confirmation' or n.phase~='awaiting_creation' or n.state~='queued' or not covered['single-digital-confirmation'] then return {'unknown'} end
+  elseif n.originKind=='single_digital_renewal' then
+   if n.kind~='confirmation' or n.purpose~='single-digital-access-renewal' or n.phase~='renewal_queued' or n.state~='queued' or not covered['single-digital-access-renewal'] or not covered['single-digital-confirmation'] or type(p.singleDigitalAccessEvidence)~='string' or #p.singleDigitalAccessEvidence==0 or type(p.singleDigitalRenewalEvidence)~='string' or #p.singleDigitalRenewalEvidence==0 then return {'unknown'} end
   else return {'unknown'} end
  end
+ if not renewalKeys(n) then return {'unknown'} end
  if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then return {'unknown'} end
+ if n.originKind=='single_digital_renewal' then
+  local pending=redis.call('GETRANGE',KEYS[11],0,64)
+  if pending~='' then
+   if #pending~=64 or string.find(pending,'[^a-f0-9]') or redis.call('SISMEMBER',KEYS[12],pending)~=1 then return {'unknown'} end
+   return {'duplicate',pending}
+  elseif redis.call('EXISTS',KEYS[11])~=0 then return {'unknown'} end
+ end
  local a,b=pool(KEYS[6]),pool(KEYS[7])
  if a==false or b==false then return {'unknown'} end
  if not a then
@@ -264,6 +295,12 @@ if op == 'enqueue' then
   a={0,0}
  end
  if not b then if redis.call('SCARD',KEYS[4])~=0 then return {'unknown'} end; b={0,0} end
+ -- Eight independent pending capsules at most, bounded by the same funded
+ -- pool. Keep one full physical source envelope in both item and byte limits.
+ -- A duplicate capsule returned above does not consume another slot.
+ if n.originKind=='single_digital_renewal' then
+  if redis.call('SCARD',KEYS[12])>=8 or a[1]+1>=p.globalItems or b[1]+1>=p.storeItems or a[2]+2*n.bytes>p.globalBytes or b[2]+2*n.bytes>p.storeBytes then return {'full'} end
+ end
  if a[1]>=p.globalItems or b[1]>=p.storeItems or a[2]+n.bytes>p.globalBytes or b[2]+n.bytes>p.storeBytes then return {'full'} end
  redis.call('HSET',KEYS[6],'items',a[1]+1,'bytes',a[2]+n.bytes)
  redis.call('HSET',KEYS[7],'items',b[1]+1,'bytes',b[2]+n.bytes)
@@ -273,15 +310,22 @@ if op == 'enqueue' then
  -- in the existing ownership indices, without an unbounded polling member.
  if n.originKind~='course' then redis.call('ZADD',KEYS[3],now,n.id) end
  redis.call('SADD',KEYS[4],n.id); redis.call('SADD',KEYS[5],n.id); redis.call('SADD',KEYS[8],n.id)
+ if n.originKind=='single_digital_renewal' then
+  redis.call('SET',KEYS[11],n.id,'NX'); redis.call('SADD',KEYS[12],n.id)
+ end
  return {'queued',supplied}
 end
 if not r then return {'missing'} end
 if raw ~= expected then return {'changed'} end
 if op == 'cancel' then drop(); return {'canceled'} end
 -- This construction has no claim, dispatch or acceptance protocol for courses.
-if r.originKind~=nil and r.originKind~='single_digital' then return {'unknown'} end
+if r.originKind~=nil and r.originKind~='single_digital' and r.originKind~='single_digital_renewal' then return {'unknown'} end
 -- Retention-only digital origins have no proved access/dispatch stage.
-if r.originKind=='single_digital' and op~='claim' and op~='defer' then return {'unknown'} end
+-- Claim/defer preserve retention-only compatibility; other stages require access evidence.
+if r.originKind=='single_digital' and op~='claim' and op~='defer' then
+ local ok,a=pcall(cjson.decode,ARGV[6])
+ if not ok or type(a)~='table' or type(a.singleDigitalAccessEvidence)~='string' or #a.singleDigitalAccessEvidence==0 then return {'unknown'} end
+end
 if source ~= r.sourceValue then return {'unknown'} end
 if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then return {'held',raw} end
 local good,p=pcall(cjson.decode,ARGV[6])
@@ -291,10 +335,21 @@ if r.originKind=='single_digital' then
  if type(p.coveredOrigins)=='table' then for _,purpose in ipairs(p.coveredOrigins) do if purpose=='single-digital-confirmation' then covered=true end end end
  if not covered then return {'unknown'} end
 end
+if r.originKind=='single_digital_renewal' then
+ local covered=false
+ if type(p.coveredOrigins)=='table' then for _,purpose in ipairs(p.coveredOrigins) do if purpose=='single-digital-access-renewal' then covered=true end end end
+ if r.purpose~='single-digital-access-renewal' or not covered or type(p.singleDigitalAccessEvidence)~='string' or #p.singleDigitalAccessEvidence==0 or type(p.singleDigitalRenewalEvidence)~='string' or #p.singleDigitalRenewalEvidence==0 then return {'unknown'} end
+end
 local supported = r.reviewId==p.reviewId
 if type(p.continuedReviewIds)=='table' then for _,id in ipairs(p.continuedReviewIds) do if id==r.reviewId then supported=true end end end
 if not supported then return {'unknown'} end
-if op == 'claim' then
+if op == 'renewal-prepare' then
+ local ok,n=pcall(cjson.decode,supplied)
+ if r.originKind~='single_digital_renewal' or not ok or type(n)~='table' or r.state~='preparing' or r.owner~=ARGV[7] or r.leaseUntil<now or #supplied>maxbytes or #supplied>r.bytes then return {'held',raw} end
+ for _,field in ipairs({'kind','originKind','purpose','id','statsId','nonce','person','accountId','capsuleDigest','sourceValue','bytes','created','authorizedAt','next','state','phase','owner','leaseUntil','checks','reviewId'}) do if n[field]~=r[field] then return {'unknown'} end end
+ if type(n.sealed)~='string' or type(n.fingerprint)~='string' then return {'unknown'} end
+ redis.call('SET',KEYS[1],supplied);return {'prepared',supplied}
+elseif op == 'claim' then
  if r.state~='queued' and not (r.state=='preparing' and r.leaseUntil<=now) then return {'held',raw} end
  if r.next>now then return {'held',raw} end
  if r.checks>=p.maximumChecks then
@@ -313,6 +368,9 @@ elseif op == 'not-accepted' then
  r.state='queued'; r.owner=''; r.next=now+p.retryMilliseconds
 elseif op == 'refused' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
+ -- Known non-delivery ends only a renewal request, never an unknown ACK.
+ -- drop preserves its source receipt while atomically releasing its slot.
+ if r.originKind=='single_digital_renewal' then drop(); return {'refused'} end
  r.state='refused'; r.next=0
 elseif op == 'accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
@@ -441,9 +499,6 @@ if op=='next' then
   end
   replaced=true
  end
- -- Capture starts in the shipment family too. A confirmation trigger arriving
- -- first must take the same held path, not spend discovery capacity capturing
- -- a snapshot for which it cannot receive a ticket.
  if (c.phase=='capturing' or c.phase=='active' or c.phase=='continuing') and c.family~=family then
   if replaced and not save() then return {'unknown'} end
   return {'held'}
@@ -519,11 +574,16 @@ if current~='' and ARGV[8]=='valid' then
  local good,row=pcall(cjson.decode,current)
  if not good or type(row)~='table' or row.id~=id then return {'unknown'} end
  do
-  if (family=='shipment' and row.kind~=nil) or (family=='confirmation' and (row.kind~='confirmation' or (row.originKind~=nil and row.originKind~='single_digital'))) then return {'unknown'} end
+  if (family=='shipment' and row.kind~=nil) or (family=='confirmation' and (row.kind~='confirmation' or (row.originKind~=nil and row.originKind~='single_digital' and row.originKind~='single_digital_renewal'))) then return {'unknown'} end
   if row.originKind=='single_digital' then
    local covered=false
    if type(g.coveredOrigins)=='table' then for _,purpose in ipairs(g.coveredOrigins) do if purpose=='single-digital-confirmation' then covered=true end end end
    if not covered then return {'unknown'} end
+  end
+  if row.originKind=='single_digital_renewal' then
+   local covered=false
+   if type(g.coveredOrigins)=='table' then for _,purpose in ipairs(g.coveredOrigins) do if purpose=='single-digital-access-renewal' then covered=true end end end
+   if not covered or row.purpose~='single-digital-access-renewal' or type(g.singleDigitalRenewalEvidence)~='string' or #g.singleDigitalRenewalEvidence==0 then return {'unknown'} end
   end
   if KEYS[4]~=sourcePrefix..(family=='shipment' and row.session or id) or type(row.statsId)~='string' or type(row.person)~='string' then return {'unknown'} end
   local dt,st=redis.call('TYPE',KEYS[5]).ok,redis.call('TYPE',KEYS[4]).ok
@@ -586,7 +646,7 @@ export async function recoverPendingMail(family: "shipment" | "confirmation", de
  const started = performance.now(), monotonicDeadline = started + Math.min(250, deadline - now());
  const expired = () => now() >= deadline || performance.now() >= monotonicDeadline;
  // Omitted coverage must keep the existing grant bytes and fingerprint.
- const grant = { recovery: p.recovery, reviewId: p.reviewId, maximumChecks: p.maximumChecks, globalItems: p.globalItems, globalBytes: p.globalBytes, continuedReviewIds: p.continuedReviewIds ?? [], ...(p.coveredOrigins === undefined ? {} : { coveredOrigins: p.coveredOrigins }) };
+ const grant = { recovery: p.recovery, reviewId: p.reviewId, maximumChecks: p.maximumChecks, globalItems: p.globalItems, globalBytes: p.globalBytes, continuedReviewIds: p.continuedReviewIds ?? [], ...(p.coveredOrigins === undefined ? {} : { coveredOrigins: p.coveredOrigins }), ...(p.singleDigitalRenewalEvidence === undefined ? {} : { singleDigitalRenewalEvidence: p.singleDigitalRenewalEvidence }) };
  const proof = JSON.stringify(grant), fp = digest(proof), owner = randomBytes(24).toString("hex"), pipeline = runtime.pipeline ?? redisPipeline;
  try {
   const response = ownArray(await pipeline([["EVAL", PENDING_MAIL_RECOVERY_SCRIPT, 2, POOL, ALL, "next", proof, fp, owner, family, now(), "", ""]]));

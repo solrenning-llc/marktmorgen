@@ -44,7 +44,9 @@
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
-import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
+import { RENEWAL_NOTICE_ROWS, RENEWAL_NOTICE_SCRIPT } from "@/lib/renewal-mail-notice";
+import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-mail-outbox";
+import { STUDIO_PAGE_UNITS, ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
@@ -368,7 +370,22 @@ export type CostLine = {
 
 const ALL_TIERS_SAME = (usd: number) => () => usd;
 
+/** CX-64, checked 2026-11-04: https://upstash.com/pricing/redis and
+ * https://upstash.com/docs/redis/howto/insights. $0.20/100k commands,
+ * $0.03/GB bandwidth at the full marginal rate (no free allowance).
+ * The aggregate response fits 4 KiB; price script ingress too conservatively.
+ * Lua-internal row bytes are not client/database transfer. */
+export function renewalNoticeCost(tier: Tier): number {
+  return Math.floor(STORE_ALLOWANCES[tier].studio / STUDIO_PAGE_UNITS) * request("studio", 4 + RENEWAL_NOTICE_ROWS, Buffer.byteLength(RENEWAL_NOTICE_SCRIPT) + 4096);
+}
 export const COST_LINES: CostLine[] = [
+  {
+    id: "renewal-mail-owner-notice",
+    feature: "Bounded owner reconciliation notice for uncertain download-link requests (CX-59)",
+    monthlyUsd: tier => CURRENT_SHIPMENT_MAIL_LIFECYCLE === "never_activated" ? 0 : renewalNoticeCost(tier),
+    sources: [{file:"lib/order-confirmation-outbox.ts",names:["RENEWAL_NOTICE_ROWS","RENEWAL_NOTICE_SCRIPT","renewalMailSummary"]}, {file:"components/renewal-mail-notice.tsx",names:["RenewalMailNotice"]}],
+    basis: "Never-activated lifecycle returns before all IO (actual use zero, not an unknown provider rate). Activation must price this line and pass every margin check; the CX-64 projected delta now preserves the Scale/Pro relative-margin invariant monthly and yearly; real funding/activation remain unapproved. One aggregate read per owner studio page, which is counted before rendering at STUDIO_PAGE_UNITS=4; floor(studio allowance/4) pages at most: TYPE/SCARD/SMEMBERS, up to eight bounded GETRANGEs and EVAL itself. CX-64 official Upstash pricing/insights checked 2026-11-04: $0.20/100k commands and $0.03/GB at the full marginal rate; script ingress plus 4 KiB aggregate egress, not Lua-internal reads; existing studio function/CPU review ceiling remains. Only aggregates leave Redis; no retry, provider request or pending-row mutation. Missing funding/lifecycle prevents the read. Future funding must include this line; no cost or activation certification from a null policy.",
+  },
   {
     id: "storage",
     feature: "Files and lesson files kept",

@@ -27,7 +27,8 @@
  *     silent when there is none.
  */
 import { readFileSync } from "node:fs";
-import { BACKUP_COST_REVIEW, BACKUP_RUN_CUTOFF_MS, backupKeptObjects, backupKey, backupLastFailure, backupListPages, backupPeakSets, backupStale, runBackup, validReview, type BackupCostReview } from "@/lib/backup-run";
+import { REDIS_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { BACKUP_COST_REVIEW, BACKUP_LOCK_MS, BACKUP_RUN_CUTOFF_MS, backupKeptObjects, backupKey, backupLastFailure, backupListPages, backupPeakSets, backupStale, runBackup, validReview, type BackupCostReview } from "@/lib/backup-run";
 import { openManifest } from "@/lib/backup-parts";
 import { BACKUP_SCAN_PAGES } from "@/lib/backup-parts";
 import type { BackupBucket } from "@/lib/backup-roundtrip";
@@ -51,7 +52,9 @@ let lists = 0;
 /** The most the bucket held, in bytes and in objects, right after any write. */
 let peakBytes = 0;
 let peakObjects = 0;
-const held = () => [...objects.values()].reduce((n, b) => n + b.byteLength, 0);
+/** What the bucket says an object weighs: its bytes, unless a test makes the listing say more. */
+let weigh = (id: string) => objects.get(id)!.byteLength;
+const held = () => [...objects.keys()].reduce((n, id) => n + weigh(id), 0);
 const store: BackupBucket = {
   putNew: async (id, bytes) => {
     if (objects.has(id)) throw new Error("exists");
@@ -66,7 +69,7 @@ const store: BackupBucket = {
     const ids = [...objects.keys()].sort();
     const from = next === null ? 0 : Number(next);
     const page = ids.slice(from, from + LIST_PAGE);
-    return { objects: page.map((id) => ({ id, writtenAt: writtenAt.get(id)!, bytes: objects.get(id)!.byteLength })), next: from + LIST_PAGE < ids.length ? String(from + LIST_PAGE) : null };
+    return { objects: page.map((id) => ({ id, writtenAt: writtenAt.get(id)!, bytes: weigh(id) })), next: from + LIST_PAGE < ids.length ? String(from + LIST_PAGE) : null };
   },
   delete: async (id) => {
     if (failDelete) throw new Error("delete refused");
@@ -85,6 +88,11 @@ async function main(): Promise<void> {
   const at = (ms: number) => {
     clock = ms;
     bucketClock = ms;
+  };
+  // A clean database on the test's clock (MemoryRedis.clear puts its clock back on the real one).
+  const wipe = () => {
+    redis.clear();
+    redis.now = () => clock;
   };
   redis.run(["SET", "nl:store:one", "a shop"]);
   redis.run(["HSET", "nl:stats:x", "v", "3"]);
@@ -206,7 +214,7 @@ async function main(): Promise<void> {
   is("with nothing ever kept, the report says there is no good copy", (redis.clear(), await backupStale(clock)), true);
 
   part("At most one run a day and one new try after a failure, counted before any cost (inbox C4-49)");
-  redis.clear();
+  wipe();
   redis.run(["SET", "nl:store:one", "a shop"]);
   at(T0 + 10 * DAY);
   is("the day's first run fails", (await runBackup({ now: clock, review, store: broken, key })).ok, false);
@@ -215,14 +223,14 @@ async function main(): Promise<void> {
   {
     const [was, listed, kept] = [sent, lists, objects.size];
     at(T0 + 10 * DAY + 2 * HOUR);
-    is("a third call that day: refused at the day's count, four commands (the lock, the count, the lock let go), nothing listed or written", [await runBackup({ now: clock, review, store, key }), sent - was, lists - listed, objects.size - kept], [{ ok: false, reason: "already_ran" }, 4, 0, 0]);
+    is("a third call that day: refused at the day's count, six commands (the lock; the count; the lock let go only if it is its own: a script, or its GET and DEL), nothing listed or written", [await runBackup({ now: clock, review, store, key }), sent - was, lists - listed, objects.size - kept], [{ ok: false, reason: "already_ran" }, 6, 0, 0]);
   }
   at(T0 + 11 * DAY);
   is("a day whose first run is done", (await runBackup({ now: clock, review, store, key })).ok, true);
   {
     const [was, kept] = [sent, objects.size];
     at(T0 + 11 * DAY + HOUR);
-    is("no new try after a good run: refused, four commands, nothing written", [await runBackup({ now: clock, review, store, key }), sent - was, objects.size - kept], [{ ok: false, reason: "already_ran" }, 4, 0]);
+    is("no new try after a good run: refused, six commands, nothing written", [await runBackup({ now: clock, review, store, key }), sent - was, objects.size - kept], [{ ok: false, reason: "already_ran" }, 6, 0]);
   }
   at(T0 + 12 * DAY);
   await runBackup({ now: clock, review, store: broken, key });
@@ -278,7 +286,7 @@ async function main(): Promise<void> {
   {
     objects.clear();
     writtenAt.clear();
-    redis.clear();
+    wipe();
     redis.run(["SET", "nl:store:one", "a shop"]);
     at(T0 + 100 * DAY);
     const good = await runBackup({ now: clock, review, store, key });
@@ -303,6 +311,25 @@ async function main(): Promise<void> {
     is("and the bucket stays within the review's ceiling", held() <= review.maxStoredBytes, true);
   }
 
+  part("When even deleting every other copy leaves no room, nothing is written");
+  {
+    objects.clear();
+    writtenAt.clear();
+    wipe();
+    redis.run(["SET", "nl:store:one", "a shop"]);
+    at(T0 + 110 * DAY);
+    const good = await runBackup({ now: clock, review, store, key });
+    // The last verified copy's part made to weigh all but a set's bound less one byte: kept, it leaves no room.
+    const partId = good.ok ? openManifest(objects.get(good.id)!, key).parts[0].id : "";
+    objects.set(partId, new Uint8Array(review.maxStoredBytes - SET_BOUND + 1 - objects.get(good.ok ? good.id : "")!.byteLength));
+    objects.set("bbbbbbbb-bbbb-4bbb-8bbb-000000000001", new Uint8Array(10));
+    writtenAt.set("bbbbbbbb-bbbb-4bbb-8bbb-000000000001", clock + 5);
+    at(T0 + 111 * DAY);
+    const kept = objects.size;
+    const none = await runBackup({ now: clock, review, store, key });
+    is("the others deleted, the last verified copy kept, and still no room: room_error, nothing written", [none, objects.has(partId), objects.has("bbbbbbbb-bbbb-4bbb-8bbb-000000000001"), objects.size, (await backupLastFailure())?.reason], [{ ok: false, reason: "room_error" }, true, false, kept - 1, "room_error"]);
+  }
+
   part("A listing longer than the ceiling allows: nothing written, said so");
   {
     at(T0 + 120 * DAY);
@@ -317,7 +344,7 @@ async function main(): Promise<void> {
   {
     objects.clear();
     writtenAt.clear();
-    redis.clear();
+    wipe();
     redis.run(["SET", "nl:store:one", "a shop"]);
     at(T0 + 150 * DAY);
     const slow: BackupBucket = {
@@ -332,18 +359,17 @@ async function main(): Promise<void> {
     is("the busy call left the day's new try untouched", redis.run(["GET", `nl:backup:ran:${new Date(clock).toISOString().slice(0, 10)}`]), String(1 + 2));
   }
 
-  part("What the code proves: never past the review's ceiling, and the last verified copy always kept");
-  {
+  // 90 days of runs at awkward times: just before midnight, writing past it; first runs that fail, new tries, deletes
+  // that fail now and then. The bucket's peaks are taken right after every write.
+  const ninetyDays = async (from: number) => {
     objects.clear();
     writtenAt.clear();
-    redis.clear();
+    wipe();
     peakBytes = 0;
     peakObjects = 0;
-    // 90 days of runs at awkward times: just before midnight, writing past it; first runs that fail, new tries, deletes
-    // that fail now and then.
     let seed = 7;
     const rand = () => ((seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) / 2_147_483_648);
-    const start = T0 + 200 * DAY - (T0 % DAY);
+    const start = from - (from % DAY);
     let lastGood: string[] = [];
     let lostGood = false;
     let oldest = 0;
@@ -360,18 +386,64 @@ async function main(): Promise<void> {
         if (result.ok && result.prune === "done") oldest = Math.max(oldest, ...[...writtenAt.values()].map((w) => when - w));
       }
     }
+    return { lostGood, oldest };
+  };
+
+  part("The lock: only its own run lets it go, it outlives the run's cutoff, and a busy call is reported");
+  {
+    objects.clear();
+    writtenAt.clear();
+    wipe();
+    redis.run(["SET", "nl:store:one", "a shop"]);
+    at(T0 + 160 * DAY);
+    is("the lock lives longer than the cutoff and the admission's two requests, with a minute to spare", BACKUP_LOCK_MS >= BACKUP_RUN_CUTOFF_MS + 2 * REDIS_TIMEOUT_MS + 60_000, true);
+    let ttl = -1;
+    const watched: BackupBucket = {
+      ...store,
+      putNew: async (id, bytes) => {
+        // Read at the first write, before the lock is taken over below.
+        if (ttl === -1) ttl = Number(redis.run(["PTTL", "nl:backup:lock"]));
+        // The lock ran out and another run took it, while this one was still writing.
+        redis.run(["SET", "nl:backup:lock", "someone-else"]);
+        return store.putNew(id, bytes);
+      },
+    };
+    const ran = await runBackup({ now: clock, review, store: watched, key });
+    is("held, while writing, for at least the cutoff", ttl >= BACKUP_RUN_CUTOFF_MS, true);
+    is("a lock taken by another run since is never let go by this one", [ran.ok, redis.run(["GET", "nl:backup:lock"])], [true, "someone-else"]);
+    at(T0 + 160 * DAY + HOUR);
+    const busy = await runBackup({ now: clock, review, store, key });
+    is("a call that finds the lock: busy, and the owner's report says so", [busy, await backupLastFailure()], [{ ok: false, reason: "busy" }, { at: clock, reason: "busy" }]);
+    redis.run(["DEL", "nl:backup:lock"]);
+  }
+
+  part("What the code proves: never past the review's ceiling in objects, and the last verified copy always kept");
+  {
+    const seen = await ninetyDays(T0 + 200 * DAY);
     is(`never more than the review's ${review.maxStoredBytes} bytes (seen ${peakBytes})`, peakBytes > 0 && peakBytes <= review.maxStoredBytes, true);
-    is(`never more than ${backupKeptObjects(review)} objects, one listing page of ${backupListPages(review)} (seen ${peakObjects})`, peakObjects <= backupKeptObjects(review), true);
-    is("the last verified copy is never deleted", lostGood, false);
-    is("after each run whose deletion finished, none of its own copies older than 30 days", oldest <= 30 * DAY, true);
+    is(`objects are what limits here: ${backupKeptObjects(review)} reached, never passed, one listing page of ${backupListPages(review)}`, peakObjects, backupKeptObjects(review));
+    is("the last verified copy is never deleted", seen.lostGood, false);
+    is("after each run whose deletion finished, none of its own copies older than 30 days", seen.oldest <= 30 * DAY, true);
     is(`the ceiling in sets: retention + 2 = ${backupPeakSets(30)}`, backupPeakSets(30), 32);
+  }
+
+  part("The same 90 days with copies that weigh more than half a set each: bytes are what limits");
+  {
+    // Every object listed at just over half a set's bound, so a whole set (a part and its manifest) weighs a little
+    // more than the bound and 31 sets would pass the ceiling of 32 × the bound: the byte ceiling binds before the count.
+    weigh = () => Math.floor(SET_BOUND / 2) + 1;
+    const seen = await ninetyDays(T0 + 600 * DAY);
+    weigh = (id: string) => objects.get(id)!.byteLength;
+    is(`never more than the review's ${review.maxStoredBytes} bytes as listed (seen ${peakBytes})`, peakBytes <= review.maxStoredBytes && peakBytes > review.maxStoredBytes - 2 * SET_BOUND, true);
+    is(`and fewer objects than the ${backupKeptObjects(review)} the count allows (seen ${peakObjects})`, peakObjects < backupKeptObjects(review), true);
+    is("the last verified copy is never deleted", seen.lostGood, false);
   }
 
   part("A run that passes its cutoff stops before its manifest (independent review of #2175)");
   {
     objects.clear();
     writtenAt.clear();
-    redis.clear();
+    wipe();
     redis.run(["SET", "nl:store:one", "a shop"]);
     at(T0 + 300 * DAY);
     const slow: BackupBucket = {

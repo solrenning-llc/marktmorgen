@@ -73,7 +73,7 @@ export const BACKUP_SCAN_NAME_BYTES = 1_024;
 /**
  * The backup's own small keys and their commands' bytes, at the most: the day counts of three days (each kept two days
  * from its first call, so the day before yesterday's lives into today), the last good copy, the last failure and the
- * lock.
+ * lock (a random token).
  */
 const MARK_KEYS = 6;
 const MARK_BYTES = 1_024;
@@ -92,7 +92,7 @@ export const BACKUP_COST_UNKNOWNS = [
   "vercel-transfer: whether Vercel bills the function's bytes sent to R2 and Upstash",
   "upstash-overshoot: the last batch of DUMPs is read before the cap refuses it, and a key's size is not capped by the backup",
   "scan-names: SCAN's COUNT is a hint, so a page's names are taken at 500, other products' key names in the shared database are not capped, and a name escaped in JSON can weigh more than its bytes",
-  "refused-calls: nothing limits how many calls a day reach the run; each one refused at the lock sends one command, at the day's count four, and is one Vercel call",
+  "refused-calls: nothing limits how many calls a day reach the run; each one refused at the lock sends two commands (the lock, the note in the report), at the day's count six, and is one Vercel call",
   "report-reads: no schedule calls the report yet, so its two reads a day are assumed",
   "billing-units: whether Upstash and Vercel round usage up to a block, as R2 does",
   "restore-reads: reading a set back to restore (lib/backup-parts.ts, readBackupSet) is priced when a restore is decided",

@@ -16,14 +16,17 @@
  *   - no backup bucket settings (backupStoreConfig()).
  *   - no 32-byte BACKUP_ENCRYPTION_KEY.
  *
- * One run at a time: a lock (SET NX PX) taken before anything else, held
- * longer than a run can write (BACKUP_LOCK_MS > the admission's own requests
- * + BACKUP_RUN_CUTOFF_MS); a call that finds it is refused as "busy" at one
- * command, without touching the day's count. At most BACKUP_RUNS_PER_DAY runs
+ * One run at a time: a lock (lib/redis-lock.ts: SET NX EX holding the run's
+ * own random token) taken before anything else, held longer than a run can
+ * write (BACKUP_LOCK_MS > the admission's own requests + BACKUP_RUN_CUTOFF_MS),
+ * and let go only if it still holds that token (a compare-and-delete script),
+ * so a run never lets go of a lock another run took after its own ran out. A
+ * call that finds it is refused as "busy", noted as the last failure (two
+ * commands), without touching the day's count. At most BACKUP_RUNS_PER_DAY runs
  * a UTC day (inbox C4-49): the day's count is taken next, and a run that ends
  * well raises it past the limit, so a second run that day is a new try after
- * a failure; a call past them is refused at four commands (the lock, the
- * count, the lock let go).
+ * a failure; a call past them is refused at six commands (the lock, the
+ * count, and the lock let go: the script and the two commands it runs).
  *
  * Retention by the run itself (inbox C4-49, C4-53): write first, delete after.
  *   1. Before it writes, the run lists every object of its own (complete, or
@@ -58,6 +61,7 @@ import { MAX_PARTS, copyInParts, manifestBound, openManifest, runStoredBound } f
 import { BACKUP_LIST_PAGE_KEYS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { redisPipeline } from "@/lib/redis";
+import { LockBusyError, releaseLock, takeLock, type Held } from "@/lib/redis-lock";
 
 /** The reviewed ceiling: one run's caps, the retention and storage ceiling, and when and from what it was reviewed. */
 export type BackupCostReview = {
@@ -87,11 +91,12 @@ export const BACKUP_COST_REVIEW: BackupCostReview | null = null;
 /** Runs a UTC day at the most: one, and one new try after a failure (inbox C4-49). */
 export const BACKUP_RUNS_PER_DAY = 2;
 /**
- * Commands a run sends besides the walk and the copy: the lock (SET NX PX), the day's count (SET NX with its expiry,
- * INCRBY), the last good copy read when room must be made (GET), and one outcome (the last good copy, the count raised
- * past the day's limit, a failed deletion's note, the lock let go; or the failure and the lock let go).
+ * Commands a run sends besides the walk and the copy: the lock (SET NX EX), the day's count (SET NX with its expiry,
+ * INCRBY), the last good copy read when room must be made (GET), one outcome (the last good copy, the count raised
+ * past the day's limit, a failed deletion's note; or the failure), and the lock let go only if it is its own (EVAL,
+ * and the GET and DEL inside it, which Upstash bills one by one; where scripts do not run, the same GET and DEL).
  */
-export const BACKUP_RUN_COMMANDS = 8;
+export const BACKUP_RUN_COMMANDS = 10;
 /**
  * The most a run's listing, deletions and copy may last, in ms (independent review of #2175): every request inside is
  * given up by then and none is sent after it (lib/fetch-timeout.ts, withCutoff), and the walk, each part and the
@@ -249,14 +254,19 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   const key = "key" in options ? options.key : backupKey();
   if (!key || key.length !== 32) return { ok: false, reason: "off_key" };
 
-  // One run at a time, before anything else (inbox C4-53): a call that finds a run going is refused at one command.
+  const keep = outcomeSeconds(review);
+  // One run at a time, before anything else (inbox C4-53): a call that finds a run going is refused, and noted so a
+  // run that did not happen shows in the owner's report.
+  let lock: Held;
   try {
-    const [held] = await redisPipeline([["SET", LOCK, String(now), "NX", "PX", BACKUP_LOCK_MS]]);
-    if (held !== "OK") return { ok: false, reason: "busy" };
-  } catch {
-    return { ok: false, reason: "mark_error" };
+    lock = await takeLock(LOCK, Math.ceil(BACKUP_LOCK_MS / 1_000), 0);
+  } catch (error) {
+    if (!(error instanceof LockBusyError)) return { ok: false, reason: "mark_error" };
+    await redisPipeline([["SET", LAST_FAIL, JSON.stringify({ at: now, reason: "busy" }), "EX", keep]]).catch(() => undefined);
+    return { ok: false, reason: "busy" };
   }
-  const letGo = () => redisPipeline([["DEL", LOCK]]).then(() => undefined, () => undefined);
+  // Only this run's own lock: one that ran out and was taken by another run is left alone.
+  const letGo = () => releaseLock(lock);
 
   // The day's count: kept two days, so the count of a run marked before a midnight that writes after it is still
   // there for the day after.
@@ -280,7 +290,6 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
     const pruned = await prune(review, store, now);
     return copied.ok ? { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state } : copied;
   });
-  const keep = outcomeSeconds(review);
   try {
     await redisPipeline(
       result.ok
@@ -289,13 +298,13 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
             // Done: no new try today; the count goes past the day's limit.
             ["INCRBY", day, BACKUP_RUNS_PER_DAY],
             ...(result.prune === "done" ? [] : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.prune }), "EX", keep]]),
-            ["DEL", LOCK],
           ]
-        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason }), "EX", keep], ["DEL", LOCK]],
+        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason }), "EX", keep]],
     );
   } catch {
-    // The copy stands as it is; a lost note only makes the report look older (the lock goes by itself).
+    // The copy stands as it is; a lost note only makes the report look older.
   }
+  await letGo();
   return result;
 }
 

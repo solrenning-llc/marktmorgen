@@ -24,14 +24,14 @@ import type { BackupCostReview } from "@/lib/backup-run";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, FIXED_COST_SOURCE_OBSERVATIONS, LLC_FIXED_COST_IDS, allocateEntireLlcFixedCosts } from "@/lib/llc-fixed-costs";
 import { done, is, part } from "./check";
 
-// The design as built: one part of at most 4 MiB, 10,000 keys, 20,208 commands (20,000 for the copy, 200 SCAN pages,
-// the run's eight: the lock, the day's count (SET NX and INCRBY), the last good copy's GET, and its outcome, four at the
-// most), 30 days kept. One set's stored bound: 4,194,304 + one part's seal room 65,536 + the manifest's 160 + 65,536 =
+// The design as built: one part of at most 4 MiB, 10,000 keys, 20,210 commands (20,000 for the copy, 200 SCAN pages,
+// the run's ten: the lock, the day's count (SET NX and INCRBY), the last good copy's GET, its outcome, three at the
+// most, and the lock let go only if it is its own, a script and the GET and DEL inside it), 30 days kept. One set's stored bound: 4,194,304 + one part's seal room 65,536 + the manifest's 160 + 65,536 =
 // 4,325,536 bytes; 30 + 2 = 32 sets (lib/backup-run.ts, backupPeakSets) = 138,417,152 bytes. 64 runs a month: 2 a day
 // on each of 32 UTC days.
 const builtAsIs: BackupCostReview = {
   maxRows: 10_000,
-  maxCommands: 20_208,
+  maxCommands: 20_210,
   maxBytes: 4_194_304,
   maxParts: 1,
   maxRunBytes: 4_194_304,
@@ -52,8 +52,8 @@ is("R2 storage: the review's ceiling of 32 sets, plus a GB-month of rounding", l
 is("R2 Class A: each object written and deleted, those alive at the month's start deleted, two listings a run, plus a million of rounding", line("r2-class-a"), 4_502_016);
 // 64 × (2 read-backs + 1 manifest read) = 192; (192 / 1,000,000 + 1) × 360,000 = 360,069.12 → 360,070.
 is("R2 Class B: each object read back, the last verified manifest read once a run, plus a million of rounding", line("r2-class-b"), 360_070);
-// 64 × 20,208 + 32 × 2 = 1,293,376 commands × 2 = 2,586,752.
-is("Upstash commands: every one the caps allow and the report's two reads a day", line("upstash-commands"), 2_586_752);
+// 64 × 20,210 + 32 × 2 = 1,293,504 commands × 2 = 2,587,008.
+is("Upstash commands: every one the caps allow and the report's two reads a day", line("upstash-commands"), 2_587_008);
 // A run: 200 pages × 500 × 1,024 = 102,400,000 + 4,194,304 + 10,000 × 2,112 + 6 × 1,024 = 127,720,448 bytes;
 // × 64 = 8.174108672 GB × 30,000 = 245,223.26 → 245,224.
 is("Upstash bytes: at most 200 full SCAN pages, every copied byte, each name sent twice, the marks", line("upstash-transfer"), 245_224);
@@ -61,17 +61,17 @@ is("Upstash bytes: at most 200 full SCAN pages, every copied byte, each name sen
 is("Upstash storage: the backup's six marks", line("upstash-storage"), 2);
 // 64 × (2 × 300/3,600 × 10,600 + 300/3,600 × 128,000 + 0.6) = 64 × 12,433.93 = 795,771.73 → 795,772.
 is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 795_772);
-// 17,077 + 4,502,016 + 360,070 + 2,586,752 + 245,224 + 2 + 795,772 = 8,506,913; × 10% = 850,691.3 → 850,692.
-is("the provider allowance on all of it", line("provider-allowance"), 850_692);
-// 8,506,913 + 850,692 = 9,357,605: $9.36 a month, $112.29 a year.
-is("the month: $9.36", month?.knownMicroUsd, 9_357_605);
+// 17,077 + 4,502,016 + 360,070 + 2,587,008 + 245,224 + 2 + 795,772 = 8,507,169; × 10% = 850,716.9 → 850,717.
+is("the provider allowance on all of it", line("provider-allowance"), 850_717);
+// 8,507,169 + 850,717 = 9,357,886: $9.36 a month, $112.29 a year.
+is("the month: $9.36", month?.knownMicroUsd, 9_357_886);
 is("no free quota anywhere: storage, operations and bytes all above zero", [line("r2-storage"), line("r2-class-a"), line("r2-class-b"), line("upstash-transfer")].every((n) => n > 0), true);
-// With fewer commands than the page cap, the walk can read only what its commands allow: 30 - 8 = 22 pages.
+// With fewer commands than the page cap, the walk can read only what its commands allow: 30 - 10 = 20 pages.
 const fewCommands = backupWorstMonth({ ...builtAsIs, maxRows: 2, maxCommands: 30 }, 300)?.lines.find((l) => l.id === "upstash-transfer")?.basis ?? "";
-is("the SCAN pages priced are the fewer of the cap and what the commands allow", fewCommands.includes(" 22 SCAN pages"), true);
+is("the SCAN pages priced are the fewer of the cap and what the commands allow", fewCommands.includes(" 20 SCAN pages"), true);
 
 part("Larger caps cost more, never less");
-const parts64: BackupCostReview = { ...builtAsIs, maxRows: 640_000, maxCommands: 1_292_808, maxParts: 64, maxRunBytes: 268_435_456, maxStoredBytes: 32 * (268_435_456 + 64 * 65_536 + 64 * 160 + 65_536) };
+const parts64: BackupCostReview = { ...builtAsIs, maxRows: 640_000, maxCommands: 1_292_810, maxParts: 64, maxRunBytes: 268_435_456, maxStoredBytes: 32 * (268_435_456 + 64 * 65_536 + 64 * 160 + 65_536) };
 const bigger = backupWorstMonth(parts64, 300);
 is("64 parts of 4 MiB: a review the run accepts", bigger !== null, true);
 is("and each line at least the one-part figure", (bigger?.lines ?? []).every((l) => l.microUsd >= line(l.id)), true);

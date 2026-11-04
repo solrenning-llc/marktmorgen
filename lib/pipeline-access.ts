@@ -125,13 +125,41 @@ export async function setPipelineAccess(statsId: string, email: string, pipeline
   const [claimed] = await redisPipeline([["SET", lockKey(statsId, who), token, "NX", "EX", LOCK_SECONDS]]);
   if (claimed !== "OK") throw new PipelineAccessBusyError();
   try {
-    const before = await readPipelineAccess(statsId, who);
-    const next: AccessMap = before === null ? Object.fromEntries(pipelineIds.map((id) => [id, "none" as const])) : { ...before };
-    if (access === "edit") delete next[pipelineId];
-    else next[pipelineId] = access;
-    return await writePipelineAccess(statsId, who, next, room);
+    return await writeChoices(statsId, who, pipelineIds, { [pipelineId]: access }, room);
   } finally {
     const [held] = await redisPipeline([["GET", lockKey(statsId, who)]]).catch(() => [null]);
     if (held === token) await redisPipeline([["DEL", lockKey(statsId, who)]]).catch(() => {});
   }
+}
+
+/**
+ * A teammate's access to several pipelines at once, from the team page's
+ * Save (one choice per pipeline), under the same lock as setPipelineAccess.
+ * A pipeline not chosen keeps what it had; one the store no longer has is
+ * dropped, so restrictions on deleted pipelines never pile up.
+ */
+export async function setPipelineChoices(statsId: string, email: string, pipelineIds: readonly string[], choices: Readonly<Record<string, PipelineAccess>>, room: DataStore): Promise<AccessMap> {
+  const who = normaliseEmail(email);
+  const token = randomBytes(12).toString("hex");
+  const [claimed] = await redisPipeline([["SET", lockKey(statsId, who), token, "NX", "EX", LOCK_SECONDS]]);
+  if (claimed !== "OK") throw new PipelineAccessBusyError();
+  try {
+    return await writeChoices(statsId, who, pipelineIds, choices, room);
+  } finally {
+    const [held] = await redisPipeline([["GET", lockKey(statsId, who)]]).catch(() => [null]);
+    if (held === token) await redisPipeline([["DEL", lockKey(statsId, who)]]).catch(() => {});
+  }
+}
+
+/** The new record from what was kept and what was chosen, for the store's pipelines only; held lock assumed. */
+async function writeChoices(statsId: string, who: string, pipelineIds: readonly string[], choices: Readonly<Record<string, PipelineAccess>>, room: DataStore): Promise<AccessMap> {
+  const before = await readPipelineAccess(statsId, who);
+  const next: AccessMap = {};
+  for (const id of pipelineIds) {
+    // A record that cannot be read opens nothing: every pipeline not chosen stays at no access.
+    const kept: PipelineAccess = before === null ? "none" : (before[id] ?? "edit");
+    const value = choices[id] ?? kept;
+    if (value !== "edit") next[id] = value;
+  }
+  return await writePipelineAccess(statsId, who, next, room);
 }

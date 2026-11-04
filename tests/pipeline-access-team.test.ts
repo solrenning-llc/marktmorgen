@@ -110,15 +110,25 @@ async function main(): Promise<void> {
   is("while the team is being changed, a save waits, then says so and writes nothing", [teamBusy.status, teamBusy.body.error, teamBusy.body.message, (await readPipelineAccess(store.statsId, "sam@example.com"))?.wkshp1 ?? "edit"], [409, "busy", "Someone else is changing your team right now. Try again in a moment.", "edit"]);
   is("the route reads the teammate and writes with the team's lock held", readFileSync("app/api/store/pipeline-access/route.ts", "utf8").includes("await withTeamLocked(store.sid, async () => {"), true);
 
+  part("Every pipeline at once, from the Save button");
+  await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "edit" });
+  const saveAll = await post(owner, { email: "sam@example.com", choices: { sales0: "view", wkshp1: "none" } });
+  is("one Save keeps every choice, and the log says them", [saveAll.status, saveAll.body.access, (await readLog(store.sid)).some((line) => line.what === "Set sam@example.com's pipeline access. Sales: can only see; Workshops: no access")], [200, { sales0: "view", wkshp1: "none" }, true]);
+  is("a choice that is not one, or a pipeline that is gone, changes nothing", [(await post(owner, { email: "sam@example.com", choices: { sales0: "all" } })).body.error, (await post(owner, { email: "sam@example.com", choices: { gone00: "view" } })).status, await readPipelineAccess(store.statsId, "sam@example.com")], ["invalid", 404, { sales0: "view", wkshp1: "none" }]);
+  await redis.pipeline([["HSET", `nl:crm:pacc:${store.statsId}`, "sam@example.com", JSON.stringify({ sales0: "view", wkshp1: "none", oldp01: "none" })]]);
+  is("a restriction on a pipeline the store no longer has is dropped at the next save", (await post(owner, { email: "sam@example.com", choices: { sales0: "edit" } })).body.access, { wkshp1: "none" });
+
   part("The screen");
   const html = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }, { id: "coach0", name: "Coaching" }], initial: { "sam@example.com": { coach0: "none" } } }));
   is("each teammate a group named by their address", html.includes("<fieldset") && html.includes(">sam@example.com</legend>"), true);
   is("each pipeline a labeled choice, as it stands", html.includes(">Sales</span>") && html.includes(">Coaching</span>") && /<option value="none" selected="">No access<\/option>/.test(html) && /<option value="edit" selected="">Can change<\/option>/.test(html), true);
   is("refusals said in an alert", html.includes('role="alert"'), true);
   const unread = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }], initial: { "sam@example.com": null } }));
-  is("a record that cannot be read is said to show nothing, and what saving does", unread.includes("they see no pipeline. Choose what they may do with each one; the others stay at No access until you do.") && /<option value="none" selected="">/.test(unread), true);
+  is("a record that cannot be read is said to show nothing, and what saving does", unread.includes("they see no pipeline. Choose what they may do with each one and save; the others stay at No access until you do.") && /<option value="none" selected="">/.test(unread), true);
   is("nobody to restrict, said why", renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [], pipelines: [], initial: {} })).includes("only Support people can"), true);
-  is("the choices stay enabled while saving, so the focus never leaves the one changed; the save is said in a status line", [/<select[^>]*disabled/.test(html), html.includes('role="status"'), readFileSync("components/pipeline-access-editor.tsx", "utf8").includes("if (busy) return;")], [false, true, true]);
+  const editorCode = readFileSync("components/pipeline-access-editor.tsx", "utf8");
+  is("a choice saves nothing by itself: each teammate has a Save that names them, and what happened is said in their own group", [/<select[^>]*disabled/.test(html), html.includes('role="status"'), html.includes(">Save<span class=\"sr-only\"> the access of sam@example.com</span>"), editorCode.includes("onChange={(event) => void choose"), editorCode.includes("body: JSON.stringify({ email, choices })")], [false, true, true, false, true]);
+  is("an error is tied to that teammate's choices, and the Save button is never disabled (it says why instead)", [editorCode.includes("aria-describedby={message?.kind === \"error\" ? errorId : undefined}"), editorCode.includes("aria-disabled={busy !== null || undefined}"), editorCode.includes("Another teammate's access is being saved. Press Save again in a moment.")], [true, true, true]);
 
   part("On the team page");
   const page = readFileSync("app/studio/team/page.tsx", "utf8");

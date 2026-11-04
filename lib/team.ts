@@ -416,11 +416,12 @@ export async function removeMember(store: Store, email: string): Promise<boolean
     const team = await readTeam(store.sid);
     if (!team.members.some((m) => m.email === address)) return false;
     await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
+    // What they could do with each pipeline (639 [GL7](7)) goes with them, under the same lock, so someone
+    // added back at once and restricted again never has that new restriction deleted by this removal.
+    await forgetPipelineAccess(store, address).catch(() => {});
     return true;
   });
   if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
-  // What they could do with each pipeline (639 [GL7](7)) goes with them.
-  if (removed) await forgetPipelineAccess(store, address).catch(() => {});
   return removed;
 }
 

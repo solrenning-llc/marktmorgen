@@ -59,15 +59,17 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 }) as typeof fetch;
 
 /** Commands the database is sent while `work` runs. */
-async function counted<T>(work: () => Promise<T>): Promise<{ value: T; commands: number }> {
+async function counted<T>(work: () => Promise<T>): Promise<{ value: T; commands: number; widest: number }> {
   const real = redis.pipeline;
   let commands = 0;
+  let widest = 0;
   redis.pipeline = async (batch) => {
     commands += batch.length;
+    for (const command of batch) widest = Math.max(widest, command.length - 1);
     return real(batch);
   };
   try {
-    return { value: await work(), commands };
+    return { value: await work(), commands, widest };
   } finally {
     redis.pipeline = real;
   }
@@ -246,7 +248,8 @@ async function main(): Promise<void> {
   const loaded = await load();
   const full = await counted(() => keptNumbers(loaded));
   const fullBound = STATS_READ_SHAPE.commands + SALES_READ_SHAPE.commands;
-  is(`one store's visits and sales at the worst refunds, measured (${full.commands}), within their readings' count (${fullBound})`, [full.commands > 500, full.commands <= fullBound], [true, true]);
+  // The 500 refunded orders' records are read in one MGET (lib/paypal-sales.ts): the worst is reached when one command carries all of them.
+  is(`one store's visits and sales at the worst refunds (one command of ${full.widest} keys), measured (${full.commands}), within their readings' count (${fullBound})`, [full.widest >= 500, full.commands <= fullBound], [true, true]);
   const again = await counted(() => keptNumbers(loaded));
   is("looked at again within the fresh time: read from what was kept, a few commands", again.commands <= 3 + 1, true);
   const studioBefore = await studioLeft();

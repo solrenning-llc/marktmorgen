@@ -41,6 +41,7 @@ import { MAX_UPDATE_RECIPIENTS } from "@/lib/product-updates-rules";
 import { ALL_TIME_PAGES, DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { CALENDAR_FILE_MAX_BYTES } from "@/lib/calendar-sync";
 import { READING_COPY_MAX_BYTES } from "@/lib/store-readings";
+import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 
 export type ReadShape = {
   /** Wall seconds, held at 2 GB. */
@@ -129,8 +130,8 @@ export const CALENDAR_REFUSED_PRICED_PER_HOUR = 4;
 
 // ---- Telling a product's buyers it was updated ------------------------------
 
-/** A PayPal sale's record, at the most: a review ceiling. */
-const PAYPAL_SALE_BYTES = 2_048;
+/** A PayPal sale's record, at the most, as lib/paypal-sales.ts weighs it (MAX_PAID_BYTES). */
+const PAYPAL_SALE_BYTES = MAX_PAID_BYTES;
 /**
  * Finding a product's buyers (lib/product-updates.ts, startUpdate): when it
  * may next go (GET); both of the store's Stripe lists, ALL_TIME_PAGES pages
@@ -154,7 +155,7 @@ export const UPDATE_READ_SHAPE: ReadShape = {
 const STATS_FIELD_BYTES = 128;
 /** The PayPal sales readSales reads (lib/stats.ts, readPaidSales(store, since, 20)) and the refunds (lib/paypal-sales.ts, up to 500). */
 const TOTALS_PAYPAL_SALES = 20 * 100;
-const TOTALS_PAYPAL_REFUNDS = 500;
+const TOTALS_PAYPAL_REFUNDS = PAYPAL_REFUNDS_READ;
 /**
  * One store's numbers for the totals, read by read:
  *

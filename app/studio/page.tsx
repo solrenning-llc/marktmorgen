@@ -1600,6 +1600,8 @@ export default async function StudioPage({
                   look={store.look}
                   ownHosts={store.domain?.name ? [store.domain.name] : []}
                   pairChoices={await publishedChoices(store)}
+                  tiers={store.tiers}
+                  taxOnTop={store.tax.enabled && !store.tax.included}
                 />
               </div>
             ) : (

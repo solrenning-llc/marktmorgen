@@ -1,6 +1,7 @@
 "use client";
 
 import { priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
+import { isBundle } from "@/lib/bundle-rules";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
@@ -1677,6 +1678,8 @@ export function ProductEditor({
   look = null,
   pairChoices = [],
   ownHosts = [],
+  tiers = [],
+  taxOnTop = true,
 }: {
   /** The products shown: every one, or one page of a long list. */
   products: Product[];
@@ -1728,6 +1731,10 @@ export function ProductEditor({
   pairChoices?: { id: string; title: string }[];
   /** The store's own domain, if it has one: not warned as "another site" in what the creator writes (493 [DE2]). */
   ownHosts?: string[];
+  /** The plans members switch between (lib/tier-switch.ts): none takes an introductory or yearly price. */
+  tiers?: readonly string[];
+  /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts); unknown is said as added. */
+  taxOnTop?: boolean;
 }) {
   const router = useRouter();
   const sid = useStudioStore();
@@ -2072,7 +2079,25 @@ export function ProductEditor({
             {editingId === product.id ? (() => {
               // What this save changes in what buyers pay, if anything (lib/price-review.ts): a price, a membership's, a price they choose.
               const review = reviewPrice(
-                { hidden: product.hidden, options: product.options.length, priceCents: product.priceCents, interval: product.recurring?.interval ?? null, suggestedCents: product.pwyw?.suggestedCents ?? null, intro: product.intro ? { cents: product.intro.cents, count: product.intro.count } : null, yearlyCents: product.yearly?.cents ?? null },
+                {
+                  hidden: product.hidden,
+                  options: product.options.length,
+                  priceCents: product.priceCents,
+                  interval: product.recurring?.interval ?? null,
+                  suggestedCents: product.pwyw?.suggestedCents ?? null,
+                  intro: product.intro ? { cents: product.intro.cents, count: product.intro.count } : null,
+                  yearlyCents: product.yearly?.cents ?? null,
+                  id: product.id,
+                  tiers,
+                  bounds: priceBounds(currency),
+                  // What the save refuses for this kind of product (lib/store.ts, editProduct; lib/pay-what-you-want.ts, pwywProblem).
+                  refuses: {
+                    free: Boolean(product.call || product.course || product.podcast || product.shipping) || isBundle(product),
+                    membership: Boolean(product.call || product.shipping) || isBundle(product),
+                    choose: Boolean(product.call || product.plan || product.bumps.length || product.shipping) || isBundle(product),
+                  },
+                  taxOnTop,
+                },
                 draft,
                 (typed) => readMoney(typed, currency),
                 (cents) => formatMoney(cents, currency),

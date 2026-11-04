@@ -1445,6 +1445,7 @@
     "components/report-form.tsx",
     "components/resend-purchase.tsx",
     "components/revenue-quality.tsx",
+    "components/review-ai-summaries.tsx",
     "components/review-form.tsx",
     "components/review-list.tsx",
     "components/review-photo-field.tsx",

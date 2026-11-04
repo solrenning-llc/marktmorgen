@@ -567,8 +567,8 @@ function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store
           <li key={request.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
             <p className="font-semibold">{`${rw.pageTitle}: ${said.money(request.total)}`}</p>
             <p className="st-muted mt-1 text-sm">{request.dueDate ? rw.due(day(request.dueDate)) : rw.until(said.date(request.expiresAt))}</p>
-            <Link href={`/@${store.handle}/pay/${request.id}`} className="btn st-btn mt-3 inline-flex min-h-11 items-center">
-              {words.openRequest}
+            <Link href={`/@${store.handle}/pay/${request.id}`} className="btn st-btn btn-wrap mt-3 inline-flex min-h-11 items-center [overflow-wrap:anywhere]">
+              {words.openRequest(said.money(request.total), request.dueDate ? day(request.dueDate) : "")}
             </Link>
           </li>
         ))}
@@ -576,8 +576,8 @@ function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store
           <li key={agreement.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
             <p className="font-semibold [overflow-wrap:anywhere]">{`${aw.pageTitle(agreement.kind)}: ${agreement.title}`}</p>
             <p className="st-muted mt-1 text-sm">{aw.until(said.date(agreement.expiresAt))}</p>
-            <Link href={`/@${store.handle}/sign/${agreement.id}`} className="btn st-btn mt-3 inline-flex min-h-11 items-center">
-              {words.openToSign}
+            <Link href={`/@${store.handle}/sign/${agreement.id}`} className="btn st-btn btn-wrap mt-3 inline-flex min-h-11 items-center [overflow-wrap:anywhere]">
+              {words.openToSign(agreement.title)}
             </Link>
           </li>
         ))}

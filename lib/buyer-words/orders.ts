@@ -72,8 +72,9 @@ const en = {
   bookedCalls: (count: number): string => (count === 1 ? "Your booking" : "Your bookings"),
   /** What the store waits on from them: payment requests and agreements still open (lib/buyer-waiting.ts). */
   waiting: "Waiting for you",
-  openRequest: "Open the payment request",
-  openToSign: "Read it and sign",
+  /** Each link names what it opens, so two of them never read the same (WCAG 2.4.9). `due` is a date already said, or "". */
+  openRequest: (amount: string, due: string): string => (due ? `Open the ${amount} payment request due ${due}` : `Open the ${amount} payment request`),
+  openToSign: (title: string): string => `Read and sign “${title}”`,
   nothingToOpen: (store: string) =>
     `There is nothing to open here anymore. A purchase that was refunded in full is no longer listed. If something is missing, reply to the order confirmation you were emailed when you paid, and it reaches ${store}.`,
   everythingSold: (store: string) =>
@@ -309,8 +310,8 @@ const es: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "Tu reserva" : "Tus reservas"),
   waiting: "Te espera",
-  openRequest: "Abrir la solicitud de pago",
-  openToSign: "Leer y firmar",
+  openRequest: (amount, due) => (due ? `Abrir la solicitud de pago de ${amount} con vencimiento el ${due}` : `Abrir la solicitud de pago de ${amount}`),
+  openToSign: (title) => `Leer y firmar «${title}»`,
   nothingToOpen: (store) =>
     `Aquí ya no hay nada que abrir. Una compra reembolsada por completo deja de aparecer. Si falta algo, responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
   everythingSold: (store) =>
@@ -522,8 +523,8 @@ const fr: OrdersWords = {
 
   bookedCalls: (count) => (count < 2 ? "Votre réservation" : "Vos réservations"),
   waiting: "Ce qui vous attend",
-  openRequest: "Ouvrir la demande de paiement",
-  openToSign: "Lire et signer",
+  openRequest: (amount, due) => (due ? `Ouvrir la demande de paiement de ${amount} à régler le ${due}` : `Ouvrir la demande de paiement de ${amount}`),
+  openToSign: (title) => `Lire et signer «${S}${title}${S}»`,
   nothingToOpen: (store) =>
     `Il n'y a plus rien à ouvrir ici. Un achat remboursé en totalité n'apparaît plus. S'il manque quelque chose, répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
   everythingSold: (store) =>
@@ -733,8 +734,8 @@ const de: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "Ihre Buchung" : "Ihre Buchungen"),
   waiting: "Wartet auf Sie",
-  openRequest: "Zahlungsanfrage öffnen",
-  openToSign: "Lesen und unterschreiben",
+  openRequest: (amount, due) => (due ? `Zahlungsanfrage über ${amount}, fällig am ${due}, öffnen` : `Zahlungsanfrage über ${amount} öffnen`),
+  openToSign: (title) => `„${title}“ lesen und unterschreiben`,
   nothingToOpen: (store) =>
     `Hier gibt es nichts mehr zu öffnen. Ein vollständig erstatteter Kauf wird nicht mehr aufgeführt. Wenn etwas fehlt, antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
   everythingSold: (store) =>
@@ -949,8 +950,8 @@ const it: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "La tua prenotazione" : "Le tue prenotazioni"),
   waiting: "Ti aspetta",
-  openRequest: "Apri la richiesta di pagamento",
-  openToSign: "Leggi e firma",
+  openRequest: (amount, due) => (due ? `Apri la richiesta di pagamento di ${amount} con scadenza ${due}` : `Apri la richiesta di pagamento di ${amount}`),
+  openToSign: (title) => `Leggi e firma «${title}»`,
   nothingToOpen: (store) =>
     `Qui non c'è più nulla da aprire. Un acquisto rimborsato per intero non compare più. Se manca qualcosa, rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
   everythingSold: (store) =>
@@ -1161,8 +1162,8 @@ const nl: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "Je boeking" : "Je boekingen"),
   waiting: "Wacht op jou",
-  openRequest: "Het betaalverzoek openen",
-  openToSign: "Lezen en ondertekenen",
+  openRequest: (amount, due) => (due ? `Het betaalverzoek van ${amount}, te betalen op ${due}, openen` : `Het betaalverzoek van ${amount} openen`),
+  openToSign: (title) => `‘${title}’ lezen en ondertekenen`,
   nothingToOpen: (store) =>
     `Hier valt niets meer te openen. Een aankoop die volledig is terugbetaald, staat er niet meer bij. Mist er iets, beantwoord dan de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
   everythingSold: (store) =>
@@ -1372,8 +1373,8 @@ const pt: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "A sua marcação" : "As suas marcações"),
   waiting: "À sua espera",
-  openRequest: "Abrir o pedido de pagamento",
-  openToSign: "Ler e assinar",
+  openRequest: (amount, due) => (due ? `Abrir o pedido de pagamento de ${amount} que vence a ${due}` : `Abrir o pedido de pagamento de ${amount}`),
+  openToSign: (title) => `Ler e assinar «${title}»`,
   nothingToOpen: (store) =>
     `Já não há nada para abrir aqui. Uma compra reembolsada na totalidade deixa de aparecer. Se faltar alguma coisa, responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
   everythingSold: (store) =>

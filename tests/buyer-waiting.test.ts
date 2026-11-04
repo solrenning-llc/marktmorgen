@@ -51,12 +51,20 @@ async function main(): Promise<void> {
   is("payment requests only where their page takes payment", page.includes("if (!requestsOpen(store)) waiting = { ...waiting, requests: [] };"), true);
   is("a list that cannot be read leaves the page as it was", page.includes("waitingFor(store, email).catch(() => waiting)"), true);
   is("the dates and amounts as their own pages say them", page.includes("rw.due(day(request.dueDate))") && page.includes("aw.until(said.date(agreement.expiresAt))") && page.includes("said.money(request.total)"), true);
-  is("buttons tall enough to tap", (page.match(/btn st-btn mt-3 inline-flex min-h-11/g) ?? []).length, 2);
+  is("buttons tall enough to tap", (page.match(/btn st-btn btn-wrap mt-3 inline-flex min-h-11/g) ?? []).length, 2);
+
+  part("Each link says by itself what it opens (WCAG 2.4.9)");
+  const en = ORDERS_WORDS.en;
+  is("two payment requests never read the same", en.openRequest("$50.00", "November 20, 2026") !== en.openRequest("$80.00", "November 20, 2026") && en.openRequest("$50.00", "November 10, 2026") !== en.openRequest("$50.00", "November 20, 2026"), true);
+  is("in plain words, with the amount and the date", [en.openRequest("$50.00", "November 20, 2026"), en.openRequest("$50.00", "")], ["Open the $50.00 payment request due November 20, 2026", "Open the $50.00 payment request"]);
+  is("two agreements never read the same", [en.openToSign("Website redesign"), en.openToSign("Monthly retainer")], ["Read and sign “Website redesign”", "Read and sign “Monthly retainer”"]);
+  is("in the link's own text, not only for screen readers", page.includes("{words.openRequest(said.money(request.total), request.dueDate ? day(request.dueDate) : \"\")}") && page.includes("{words.openToSign(agreement.title)}") && !/aria-label=\{words\.open/.test(page), true);
+  is("a long title wraps inside its card", (page.match(/btn-wrap mt-3 inline-flex min-h-11 items-center \[overflow-wrap:anywhere\]/g) ?? []).length, 2);
 
   part("In every language the store can speak");
-  const keys = ["waiting", "openRequest", "openToSign"] as const;
-  is("each language has the words", Object.values(ORDERS_WORDS).every((words) => keys.every((key) => typeof words[key] === "string" && words[key].length > 0)), true);
-  is("and its own, not English", Object.entries(ORDERS_WORDS).filter(([code]) => code !== "en").every(([, words]) => keys.every((key) => words[key] !== ORDERS_WORDS.en[key])), true);
+  const said = (words: (typeof ORDERS_WORDS)["en"]) => [words.waiting, words.openRequest("$50.00", "November 20, 2026"), words.openRequest("$50.00", ""), words.openToSign("Website redesign")];
+  is("each language has the words, with the amount, the date and the title in them", Object.values(ORDERS_WORDS).every((words) => { const [w, dated, undated, sign] = said(words); return w.length > 0 && dated.includes("$50.00") && dated.includes("November 20, 2026") && undated.includes("$50.00") && sign.includes("Website redesign"); }), true);
+  is("and its own, not English", Object.entries(ORDERS_WORDS).filter(([code]) => code !== "en").every(([, words]) => said(words).every((text, i) => text !== said(ORDERS_WORDS.en)[i])), true);
 
   done();
 }

@@ -18,6 +18,7 @@ import { canTier, currentMeta, direction, dueNow, parseTiers, productOfSub } fro
 import { choicesFor, liveTiers, previewSwitch, switchTier } from "@/lib/tier-switch";
 import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { membershipWords } from "@/lib/buyer-words/membership";
+import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -186,6 +187,11 @@ async function main(): Promise<void> {
   part("The switch");
   const old = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at - 16 * 60);
   is("a figure more than 15 minutes old is not used", old.ok ? "switched" : old.reason, "stale");
+  await redisPipeline([["SET", "nl:tier:sub_Member0001:lock", "another-change", "EX", 60]]);
+  const sentBefore = calls.length;
+  const held = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at);
+  await redisPipeline([["DEL", "nl:tier:sub_Member0001:lock"]]);
+  is("another change to the membership holding the lock: busy, never an error, and nothing sent", [held.ok ? "switched" : held.reason, calls.length - sentBefore], ["busy", 0]);
   declined = true;
   emails.length = 0;
   const refused = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at);

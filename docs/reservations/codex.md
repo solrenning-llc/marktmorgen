@@ -6,5 +6,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Codex B2 | CX-61: two-read platform plan recovery and cost | codex/b-cx55-platform-search-cost | `lib/billing.ts`, `lib/plan-closing.ts`, `lib/closing-plan-guard.ts`, `tests/contract-billing-metadata.test.ts`, `tests/plan-closing.test.ts`, `tests/store-closing-fair.test.ts`, `tests/closing-plan-guard.test.ts`, `tests/closing-plan-routes.test.ts`, `tests/pricing-optimization-table.ts`, `tests/pricing-optimization.test.ts`, `tests/plan-cost-registry.ts`, `tests/platform-subscription-search-cost.test.ts`, `scripts/diagnose_platform_subscription_search.mjs`, `docs/cx55-platform-subscription-search-cost.md` | 04/11/2026 |
 | Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |

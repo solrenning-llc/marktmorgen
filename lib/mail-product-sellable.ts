@@ -44,6 +44,7 @@ import type { Listing, Store } from "@/lib/store";
 import { offeredItems } from "@/lib/bundles";
 import { bundleReady } from "@/lib/bundle-rules";
 import { hasDateOnSale } from "@/lib/call-on-sale";
+import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { canGiveProduct } from "@/lib/free";
 import { outOfKeys } from "@/lib/licence-keys";
 import { paypalReady } from "@/lib/paypal-sales";
@@ -94,14 +95,18 @@ export async function productsBuyableNow(store: Store, products: readonly Listin
 /**
  * What a product's card says about its price, read from the store now
  * (`nowSeconds`). Never its introductory or yearly price, and never the
- * price for a visitor's country.
+ * price for a visitor's country. A call offering several lengths is said
+ * from the lowest of their prices (listedLengths), as the store's card says it.
  */
 export function mailPriceFacts(store: Store, product: Listing, nowSeconds: number): PriceFacts {
   const percent = store.sale ? saleOff(store.sale, product, nowSeconds) : 0;
+  // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices, as the store's card says it.
+  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
   return {
     free: isFree(product),
     priceCents: product.priceCents,
-    fromCents: fromPriceCents(product),
+    fromCents: lengths.length ? (fromPrice(lengths) as number) : fromPriceCents(product),
+    lengthCount: lengths.length,
     optionCount: sellableOptions(product).length,
     interval: product.recurring?.interval ?? null,
     pwyw: activePwyw(product) !== null,

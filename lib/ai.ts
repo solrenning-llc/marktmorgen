@@ -29,7 +29,7 @@ import { boundedAiRequest, isSupportedAiModel } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { inTrial } from "@/lib/mail";
 import type { Store } from "@/lib/store";
-import { LANGUAGES } from "@/lib/store-language";
+import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { MAX_SUMMARY_LENGTH } from "@/lib/catalog";
 import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { MAX_PITCH_BODY, MAX_PITCH_SUBJECT, type OutreachGoal } from "@/lib/outreach-rules";
@@ -406,7 +406,7 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
  */
 export async function translatePage(
   store: Store,
-  input: { page: SalesPage; language: string },
+  input: { page: SalesPage; language: string; to?: LanguageCode },
   now = Date.now(),
 ): Promise<AiResult<{ page: SalesPage; untranslated: number }> | { ok: false; reason: "long" }> {
   const words = pageWords(input.page);
@@ -438,7 +438,7 @@ export async function translatePage(
       );
       if (answers.some((a) => a === null)) return null;
       // A block kept whole that a longer translation would refuse stays as it was, counted (keepEveryBlock).
-      return keepEveryBlock(input.page, withWords(input.page, answers.flat() as string[]));
+      return keepEveryBlock(input.page, withWords(input.page, answers.flat() as string[]), input.to);
     },
     parts.length,
   );

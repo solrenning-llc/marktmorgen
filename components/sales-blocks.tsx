@@ -873,7 +873,8 @@ export function PageSections({
           block.screens ? `sp-only-${block.screens}` : "",
         ];
         return (
-          <div key={block.id} data-block={block.id} className={classes.filter(Boolean).join(" ")}>
+          // A block left in another language than the page's says so (lib/page-translate.ts, keepEveryBlock; WCAG 3.1.2).
+          <div key={block.id} data-block={block.id} className={classes.filter(Boolean).join(" ")} lang={block.lang}>
             {view}
           </div>
         );

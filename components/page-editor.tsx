@@ -119,6 +119,7 @@ import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
+import { keptMarks, marksOf } from "@/lib/page-translate";
 import { NewTab } from "@/components/new-tab";
 import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
 import { SidePanelSwitch, useSidePanel } from "@/components/side-panel-switch";
@@ -310,6 +311,13 @@ export function PageEditor({
   const [style, setStyle] = useState<PageStyle>(initial.style);
   const [hidden, setHidden] = useState(initial.hidden);
   const [showFrom, setShowFrom] = useState(initial.showFrom);
+  // The language the page's words are in (lib/sales-page.ts, SalesPage.lang): its own when it has one; the store's
+  // for a page begun here from nothing, whose words the creator types; unknown for a template or an older page.
+  const [pageLang, setPageLang] = useState<LanguageCode | undefined>(
+    (templateDraft ? templateDraft.lang : initial.lang) ?? (!templateDraft && initial.blocks.length === 0 ? lang : undefined),
+  );
+  // A block left in another language keeps its mark only while its words are the ones it was marked with (lib/page-translate.ts).
+  const [marks, setMarks] = useState(() => marksOf(templateDraft ?? initial));
   // How far down the saved page visitors read (lib/page-depth.ts), shown on each block.
   const [reach, setReach] = useState<{ shares: Record<string, number>; visitors: number } | null>(null);
   // What stopped measured visitors, how far the video was watched, and whether the page asks (components/page-answers.tsx).
@@ -410,7 +418,9 @@ export function PageEditor({
     const now = latest.current;
     const a = now.onB && now.other ? now.other : now.drafts;
     const b = now.other === null ? null : now.onB ? now.drafts : now.other;
-    return JSON.stringify({ a: a.map((d) => d.block), b: b ? b.map((d) => d.block) : null }) === JSON.stringify({ a: page.blocks, b: page.variant ? page.variant.blocks : null });
+    // By the words and settings only: a block's language mark is dropped from what is sent once its words changed (keptMarks), not an edit.
+    const plain = (value: unknown) => JSON.stringify(value, (key, v) => (key === "lang" ? undefined : v));
+    return plain({ a: a.map((d) => d.block), b: b ? b.map((d) => d.block) : null }) === plain({ a: page.blocks, b: page.variant ? page.variant.blocks : null });
   }
   /** The page's two versions as they came back, with the one being edited in front. */
   function putVersions(page: SalesPage, editB: boolean) {
@@ -922,6 +932,11 @@ export function PageEditor({
   }
 
   function pageToSend(): SalesPage {
+    // A block's language mark goes with it only while its words are the ones it was marked with (lib/page-translate.ts, keptMarks).
+    return keptMarks(pageDraft(), marks);
+  }
+
+  function pageDraft(): SalesPage {
     return {
       seoTitle: seoTitle.trim(),
       seoDescription: seoDescription.trim(),
@@ -934,6 +949,7 @@ export function PageEditor({
       style,
       hidden,
       showFrom: hidden ? showFrom : 0,
+      ...(pageLang ? { lang: pageLang } : {}),
     };
   }
 
@@ -2180,6 +2196,8 @@ export function PageEditor({
                   // Only over the words it was given: an edit made meanwhile is never lost.
                   if (!unchangedSince(sent)) return false;
                   putVersions(page, onB);
+                  setPageLang(page.lang);
+                  setMarks(marksOf(page));
                   setSeoTitle(page.seoTitle);
                   setSeoDescription(page.seoDescription);
                   if (page.test) {

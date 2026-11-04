@@ -17,6 +17,7 @@
  * Browser-safe.
  */
 import { CELL_NO, CELL_YES, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";
+import type { LanguageCode } from "@/lib/store-language";
 
 /** A block's own words. */
 const TEXT = ["headline", "sub", "heading", "body", "label", "note", "caption", "yesLabel", "noLabel", "columnA", "columnB"] as const;
@@ -119,28 +120,43 @@ export function withWords(page: SalesPage, words: string[]): SalesPage {
  * then is the page read: a second version that the translation made the same
  * as the first is dropped there, as it always was, rather than coming back
  * whole in the old language beside a translated first one.
+ *
+ * With `to`, the language asked for (inbox C4-19 (c)): the page says it is
+ * in `to`, a translated block carries no language of its own, and a block
+ * put back as it was says the language it is in, its own mark or else the
+ * original page's, so the page draws it with that lang (WCAG 3.1.2). When
+ * neither is known, nothing is marked: a wrong language is worse than none.
  */
-export function keepEveryBlock(original: SalesPage, translated: SalesPage): { page: SalesPage; untranslated: number } {
+export function keepEveryBlock(original: SalesPage, translated: SalesPage, to?: LanguageCode): { page: SalesPage; untranslated: number } {
   // The blocks put back as they were, by version: counted only once the page is read, so a second version dropped
   // there for being the same as the first does not count its blocks (inbox C4-19 (a)).
-  const restored = { main: new Set<PageBlock>(), variant: new Set<PageBlock>() };
+  const restored = { main: new Set<string>(), variant: new Set<string>() };
   const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1;
-  const fit = (from: PageBlock[], to: PageBlock[], kept: Set<PageBlock>): PageBlock[] =>
-    to.map((block, at) => {
-      if (reads(block)) return block;
+  const unmarked = (block: PageBlock): PageBlock => {
+    const { lang: _lang, ...rest } = block;
+    void _lang;
+    return rest as PageBlock;
+  };
+  const marked = (before: PageBlock): PageBlock => {
+    if (!to) return before;
+    const lang = before.lang ?? original.lang;
+    return lang && lang !== to ? { ...before, lang } : unmarked(before);
+  };
+  const fit = (from: PageBlock[], blocks: PageBlock[], kept: Set<string>): PageBlock[] =>
+    blocks.map((block, at) => {
+      if (reads(block)) return to ? unmarked(block) : block;
       const before = from[at];
       if (before && before.id === block.id && reads(before)) {
-        kept.add(before);
-        return before;
+        kept.add(before.id);
+        return marked(before);
       }
       return block;
     });
   const variant = translated.variant
     ? { ...translated.variant, blocks: fit(original.variant?.blocks ?? [], translated.variant.blocks, restored.variant) }
     : translated.variant;
-  const page = parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks, restored.main), variant });
-  const ids = (kept: Set<PageBlock>) => new Set([...kept].map((block) => block.id));
-  const left = (blocks: PageBlock[] | undefined, kept: Set<PageBlock>) => (blocks ?? []).filter((block) => ids(kept).has(block.id)).length;
+  const page = parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks, restored.main), variant, ...(to ? { lang: to } : {}) });
+  const left = (blocks: PageBlock[] | undefined, kept: Set<string>) => (blocks ?? []).filter((block) => kept.has(block.id)).length;
   return { page, untranslated: left(page.blocks, restored.main) + left(page.variant?.blocks, restored.variant) };
 }
 
@@ -160,4 +176,39 @@ export function translateParts(words: string[]): string[][] {
   }
   if (current.length) parts.push(current);
   return parts;
+}
+
+/**
+ * The words of each block marked with a language of its own (keepEveryBlock),
+ * by version and block id, as the studio last had them: a mark holds only
+ * while its block's words are those (inbox C4-19 (c)).
+ */
+export type PageMarks = { a: Record<string, string>; b: Record<string, string> };
+
+/** A block's words as one key, in the order the page reads them. */
+function wordsKey(block: PageBlock): string {
+  return JSON.stringify(pageWords({ blocks: [block], variant: null } as unknown as SalesPage));
+}
+
+/** The marked blocks' words, as the studio has them now: after loading a page and after a translation. */
+export function marksOf(page: SalesPage): PageMarks {
+  const of = (blocks: PageBlock[] | undefined) => Object.fromEntries((blocks ?? []).filter((block) => block.lang).map((block) => [block.id, wordsKey(block)]));
+  return { a: of(page.blocks), b: of(page.variant?.blocks) };
+}
+
+/**
+ * The page with each block's language mark kept only while its words are
+ * the ones it was marked with: a block the creator has since written in
+ * another way, by hand, carries no mark, since its language is no longer
+ * known. Nothing else changes.
+ */
+export function keptMarks(page: SalesPage, marks: PageMarks): SalesPage {
+  const keep = (blocks: PageBlock[], known: Record<string, string>): PageBlock[] =>
+    blocks.map((block) => {
+      if (!block.lang || (Object.hasOwn(known, block.id) && known[block.id] === wordsKey(block))) return block;
+      const { lang: _lang, ...rest } = block;
+      void _lang;
+      return rest as PageBlock;
+    });
+  return { ...page, blocks: keep(page.blocks, marks.a), variant: page.variant ? { ...page.variant, blocks: keep(page.variant.blocks, marks.b) } : page.variant };
 }

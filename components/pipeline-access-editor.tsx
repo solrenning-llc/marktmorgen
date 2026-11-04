@@ -30,6 +30,14 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
   const [draft, setDraft] = useState<Record<string, Record<string, PipelineAccess>>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [said, setSaid] = useState<Record<string, { kind: "status" | "error"; text: string }>>({});
+  // The one live region of the editor: each message is shown in its teammate's group and said once here,
+  // with the teammate's address first. A message said again (the same refusal twice) is said again,
+  // by turning a trailing no-break space on or off, so pressing Save is never met with silence.
+  const [heard, setHeard] = useState({ text: "", turn: false });
+  const say = (email: string, kind: "status" | "error", text: string) => {
+    setSaid((all) => ({ ...all, [email]: { kind, text } }));
+    setHeard((was) => ({ text: `${email}: ${text}`, turn: !was.turn }));
+  };
   // Two pipelines may share a name: each choice reads as the board shows it, "Sales" and "Sales (2)".
   const names = pipelineNames(pipelines);
   const nameOf = (p: { id: string; name: string }) => names.get(p.id) ?? p.name;
@@ -41,18 +49,18 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
 
   async function save(email: string) {
     if (busy) {
-      setSaid((all) => ({ ...all, [email]: { kind: "status", text: "Another teammate's access is being saved. Press Save again in a moment." } }));
+      say(email, "status", "Another teammate's access is being saved. Press Save again in a moment.");
       return;
     }
     if (!changed(email)) {
-      setSaid((all) => ({ ...all, [email]: { kind: "status", text: "Nothing to save: choose a different access for a pipeline first." } }));
+      say(email, "status", "Nothing to save: choose a different access for a pipeline first.");
       return;
     }
     const choices = Object.fromEntries(pipelines.map((p) => [p.id, chosen(email, p.id)]));
     // The record as this page has it: a change made since in another tab, or by someone else, is never written over.
     const was = access[email] === undefined ? {} : access[email];
     setBusy(email);
-    setSaid((all) => ({ ...all, [email]: { kind: "status", text: "Saving…" } }));
+    say(email, "status", "Saving…");
     try {
       const response = await fetch("/api/store/pipeline-access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, choices, was }) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; access?: AccessMap; message?: string; error?: string };
@@ -61,12 +69,12 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
         setAccess((all) => ({ ...all, [email]: kept }));
         setDraft((all) => ({ ...all, [email]: {} }));
         // Said from what was kept, never from what was asked.
-        setSaid((all) => ({ ...all, [email]: { kind: "status", text: `Saved. ${pipelines.map((p) => `${nameOf(p)}: ${WORDS[currentOf(kept, p.id)].toLowerCase()}`).join("; ")}.` } }));
+        say(email, "status", `Saved. ${pipelines.map((p) => `${nameOf(p)}: ${WORDS[currentOf(kept, p.id)].toLowerCase()}`).join("; ")}.`);
       } else {
-        setSaid((all) => ({ ...all, [email]: { kind: "error", text: answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need, then save again." : "That did not save. Try again in a moment.") } }));
+        say(email, "error", answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need, then save again." : "That did not save. Try again in a moment."));
       }
     } catch {
-      setSaid((all) => ({ ...all, [email]: { kind: "error", text: "That did not save. Check your connection and try again." } }));
+      say(email, "error", "That did not save. Check your connection and try again.");
     } finally {
       setBusy(null);
     }
@@ -74,6 +82,9 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
 
   return (
     <div>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {heard.text ? `${heard.text}${heard.turn ? "\u00a0" : ""}` : ""}
+      </p>
       {members.length ? (
         <ul className="mt-4 space-y-5">
           {members.map((member) => {
@@ -112,16 +123,15 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
                     ))}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <button type="button" className="btn btn-secondary btn-sm" aria-disabled={busy !== null || undefined} onClick={() => void save(member.email)}>
+                    <button type="button" className="btn btn-secondary btn-sm" aria-disabled={busy !== null || undefined} aria-describedby={message?.kind === "error" ? errorId : undefined} onClick={() => void save(member.email)}>
                       Save
                       <span className="sr-only">{` the access of ${member.email}`}</span>
                     </button>
                     {changed(member.email) ? <span className="text-sm text-ink-soft">Not saved yet.</span> : null}
                   </div>
-                  <p className="mt-2 text-sm text-ink-soft" role="status">
-                    {message?.kind === "status" ? message.text : ""}
-                  </p>
-                  <p id={errorId} className="mt-1 text-sm text-danger-text" role="alert">
+                  {/* Shown here, beside the Save button, and said once by the editor's one live region above. */}
+                  {message?.kind === "status" ? <p className="mt-2 text-sm text-ink-soft">{message.text}</p> : null}
+                  <p id={errorId} className="mt-2 text-sm text-danger-text" hidden={message?.kind !== "error"}>
                     {message?.kind === "error" ? message.text : ""}
                   </p>
                 </fieldset>

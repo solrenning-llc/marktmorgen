@@ -120,10 +120,13 @@ async function main(): Promise<void> {
   is("a restriction on a pipeline the store no longer has is dropped at the next save", (await post(owner, { email: "sam@example.com", choices: { sales0: "edit" } })).body.access, { wkshp1: "none" });
 
   part("The screen");
+  const editorCode0 = readFileSync("components/pipeline-access-editor.tsx", "utf8");
   const html = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }, { id: "coach0", name: "Coaching" }], initial: { "sam@example.com": { coach0: "none" } } }));
   is("each teammate a group named by their address", html.includes("<fieldset") && html.includes(">sam@example.com</legend>"), true);
   is("each pipeline a labeled choice, as it stands", html.includes(">Sales</span>") && html.includes(">Coaching</span>") && /<option value="none" selected="">No access<\/option>/.test(html) && /<option value="edit" selected="">Can change<\/option>/.test(html), true);
-  is("refusals said in an alert", html.includes('role="alert"'), true);
+  const two = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }, { email: "ana@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }], initial: { "sam@example.com": {}, "ana@example.com": {} } }));
+  is("what happened is said by one live region for the whole editor, however many teammates, never one per group", [(two.match(/<[^>]*(role="(status|alert)"|aria-live=)[^>]*>/g) ?? []).length, two.match(/role="status" aria-live="polite" aria-atomic="true"/g)?.length], [1, 1]);
+  is("a refusal is shown beside that teammate's Save button and tied to their choices and to the button", [editorCode0.indexOf("id={errorId}") > editorCode0.indexOf("the access of ${member.email}"), (editorCode0.match(/aria-describedby=\{message\?\.kind === "error" \? errorId : undefined\}/g) ?? []).length], [true, 2]);
   const unread = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }], initial: { "sam@example.com": null } }));
   is("a record that cannot be read is said to show nothing, and what saving does", unread.includes("they see no pipeline. Choose what they may do with each one and save; the others stay at No access until you do.") && /<option value="none" selected="">/.test(unread), true);
   is("a record that cannot be read can be saved as it shows, at No access for every pipeline: it is something to save, never \"Nothing to save\"", [unread.includes("Not saved yet."), html.includes("Not saved yet.")], [true, false]);
@@ -136,6 +139,7 @@ async function main(): Promise<void> {
   part("On the team page");
   const page = readFileSync("app/studio/team/page.tsx", "utf8");
   is("a named section, only roles that open Deals offered, never an Admin", page.includes('aria-labelledby="pipeline-access-title"') && page.includes('(m.role === "editor" || m.role === "support") && can(m.role, "orders")'), true);
+  is("that Admins and the owner are never restricted is said above the editor, whether it shows, has nobody to restrict or cannot be read", page.indexOf("Admins and you always see and change every pipeline") > page.indexOf('id="pipeline-access-title"') && page.indexOf("Admins and you always see and change every pipeline") < page.indexOf("{pipelines && access ? ("), true);
   is("said when it cannot be read", page.includes("Your pipelines or your team&apos;s access could not be read just now."), true);
 
   done();

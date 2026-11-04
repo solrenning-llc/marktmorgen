@@ -42,7 +42,7 @@ const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.l
  * one but the studio. The creator may check products whose holders alone
  * may read its words (lib/letter-access.ts); nothing checked, everyone can.
  */
-export function BlogEditor({ post, products, openers = [], back, look, language = "en" }: { post: EditedPost; products: { id: string; title: string }[]; /** Every product of the store, hidden ones too, that may open a post for members. */ openers?: { id: string; title: string }[]; back: string; /** The store's look, so the preview is drawn as the blog is. */ look: StoreLook; /** The store's language, so the preview is marked as the blog is. */ language?: LanguageCode }) {
+export function BlogEditor({ post, products, openers = [], openersKnown = true, back, look, language = "en" }: { post: EditedPost; products: { id: string; title: string }[]; /** Every product of the store, hidden ones too, that may open a post for members. */ openers?: { id: string; title: string }[]; /** False when the products' names could not be read: who can read the post is then shown but cannot change. */ openersKnown?: boolean; back: string; /** The store's look, so the preview is drawn as the blog is. */ look: StoreLook; /** The store's language, so the preview is marked as the blog is. */ language?: LanguageCode }) {
   const router = useRouter();
   const [title, setTitle] = useState(post.title);
   const [body, setBody] = useState(post.body);
@@ -252,12 +252,17 @@ export function BlogEditor({ post, products, openers = [], back, look, language 
         </select>
         <p className="field-hint mt-1">Its card, with today&apos;s picture and price, after the last line. Products among the first 24 on your store page can be shown.</p>
       </div>
-      {openers.length || members.length ? (
+      {openers.length || members.length || !openersKnown ? (
         <fieldset aria-describedby="post-members-hint">
           <legend className="field-label">Who can read it</legend>
           <p className="field-hint mt-1" id="post-members-hint">
-            {`Check nothing and everyone can. Check products and only people who have one of them can read its words (up to ${MAX_LETTER_PRODUCTS}). Everyone still sees its title, its date and which products open it; search engines and the blog's feed get no words of it.`}
+            {`Check nothing and everyone can. Check products and only people who have one of them can read its words (up to ${MAX_LETTER_PRODUCTS}). Everyone still sees its title, its date and which products open it. From then on, search engines and the blog's feed get no words of it; what they took while it was open to everyone may stay with them.`}
           </p>
+          {openersKnown ? null : (
+            <p className="notice mt-2 text-sm" role="status">
+              Your products&apos; names could not be loaded just now, so who can read this post cannot be changed here. Reload the page to try again.
+            </p>
+          )}
           <div className="mt-2 max-h-48 overflow-y-auto">
             {openers.map((p) => {
               const on = members.includes(p.id);
@@ -276,8 +281,8 @@ export function BlogEditor({ post, products, openers = [], back, look, language 
             {/* A product checked before and no longer listed stays checked, so saving never opens the post by itself. */}
             {members.filter((id) => !openers.some((p) => p.id === id)).map((id) => (
               <label key={id} className="flex min-h-11 items-center gap-2">
-                <input type="checkbox" checked disabled={busy !== null} onChange={() => setMembers((now) => now.filter((x) => x !== id))} />
-                <span>A product no longer on your store</span>
+                <input type="checkbox" checked disabled={busy !== null || !openersKnown} onChange={() => setMembers((now) => now.filter((x) => x !== id))} />
+                <span>{openersKnown ? "A product no longer on your store" : "A product whose name could not be loaded"}</span>
               </label>
             ))}
           </div>

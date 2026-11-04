@@ -42,7 +42,8 @@ export default async function StudioBlogPage({ searchParams }: Params) {
     editing && editing !== "new" ? readPost(store.statsId, editing) : Promise.resolve(null),
     aiAvailableFor(store) ? aiLeft(store).catch(() => 0) : Promise.resolve(0),
     // Every product's name, hidden ones too, in one command (lib/catalog.ts): those that may open a post for members.
-    readTitles(store).catch(() => new Map<string, string>()),
+    // A failed read is said as such (openersKnown), never shown as products gone: unchecking them would open the post.
+    readTitles(store).then((m) => ({ ok: true, m }), () => ({ ok: false, m: new Map<string, string>() })),
   ]);
   const back = studioPath(store, "", "blog");
   const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ id: p.id, title: p.title }));
@@ -93,7 +94,8 @@ export default async function StudioBlogPage({ searchParams }: Params) {
                     key={open?.id ?? "new"}
                     post={open ? { id: open.id, title: open.title, body: open.body, product: open.product, draft: open.draft, href: open.draft ? null : live(open.id, open.title), products: open.products ?? [] } : { id: null, title: "", body: "", product: null, draft: true, href: null, products: [] }}
                     products={products}
-                    openers={[...titles].map(([id, title]) => ({ id, title }))}
+                    openers={[...titles.m].map(([id, title]) => ({ id, title }))}
+                    openersKnown={titles.ok}
                     back={back}
                     look={store.look}
                     language={parseLanguage(store.language)}

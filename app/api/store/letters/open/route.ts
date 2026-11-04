@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const grant = await openLetterLink(token);
   const store = grant ? await storeForHandle(grant.h) : null;
   if (!grant || !store || storeKey(store) !== grant.k) {
-    return new Response("This link has expired or was already used too many times. Open the email's page and ask for a new one.", {
+    return new Response("This link has expired or was already used too many times. Go back to the page you were reading and ask for a new one.", {
       status: 410,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
     });

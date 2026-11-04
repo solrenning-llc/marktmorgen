@@ -87,7 +87,7 @@ export default async function PostPage({ params, searchParams }: Params) {
   const opens = kept ? await readListings(store, post.products) : [];
   const query = kept ? await searchParams : {};
   const linkState = typeof query.link === "string" ? query.link : "";
-  const asked = lw.linkNotices[linkState];
+  const asked = Object.hasOwn(lw.linkNotices, linkState) ? lw.linkNotices[linkState as keyof typeof lw.linkNotices] : undefined;
   const notice = kept && !readable && asked ? (linkState === "sent" ? { ...asked, body: pw.sentBody } : asked) : undefined;
   return (
     <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>

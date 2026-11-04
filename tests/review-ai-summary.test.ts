@@ -10,8 +10,8 @@ import { POST } from "@/app/api/store/review-summary/route";
 import { aiMonthKey } from "@/lib/ai";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { SUMMARY_REFRESH_SECONDS, summaryInputs } from "@/lib/review-ai-summary-rules";
-import { makeReviewSummary, readReviewSummary, summaryPrompt } from "@/lib/review-ai-summary";
-import { deleteReview, saveReview, visibleReviews } from "@/lib/reviews";
+import { KEEP_REVIEW_SUMMARY, makeReviewSummary, readReviewSummary, summaryPrompt } from "@/lib/review-ai-summary";
+import { deleteReview, forgetReviewsPerson, markOneRefunded, readReview, saveReview, setHidden, visibleReviews } from "@/lib/reviews";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -185,23 +185,62 @@ async function main(): Promise<void> {
   is("through the route: 429, with the next date", [weekRoute.status, weekBody.error, typeof weekBody.next], [429, "week", "number"]);
   is("a week later, made again", (await makeReviewSummary(store, kiln, day + 21 * 86_400_000 + 480_000)).ok, true);
 
-  part("Second review of 4 November 2026: a deletion that fails to take the summary, a lock that ran out");
-  is("the summary kept says which reviews it read", ((JSON.parse(String((await redis.pipeline([["GET", `nl:rsum:${statsId}:${kiln}`]]))[0])) as { k?: string[] }).k ?? []).length, 5);
+  part("Second review of 4 November 2026: a summary's deletion that fails fails the change with it");
+  const kilnKey = `nl:rsum:${statsId}:${kiln}`;
+  const keptRaw = String((await redis.pipeline([["GET", kilnKey]]))[0]);
+  is("the summary kept holds only its themes and counts: no review's id, words or writer", Object.keys(JSON.parse(keptRaw) as object).sort(), ["at", "read", "themes"]);
+  // The same summary put back before each change, so each is tested against one (no AI job for it).
+  const putBack = () => redis.pipeline([["SET", kilnKey, keptRaw, "EX", 8 * 86_400]]);
   const realPipeline = redis.pipeline.bind(redis);
-  redis.pipeline = (async (commands: (string | number)[][]) => {
-    // Redis fails for the summary's deletion only (lib/reviews.ts logs it and goes on).
-    if (commands.some((c) => String(c[1] ?? "").startsWith("nl:rsum:ver:"))) throw new Error("redis down for this test");
-    return realPipeline(commands);
-  }) as typeof redis.pipeline;
-  const goner = (await visibleReviews(statsId, kiln, 0, 10))[0];
-  const quiet = console.error;
-  console.error = () => {};
-  await deleteReview(statsId, kiln, goner.id, ROOM);
-  console.error = quiet;
-  redis.pipeline = realPipeline;
-  is("the deletion failed to take the summary away", (await redis.pipeline([["GET", `nl:rsum:${statsId}:${kiln}`]]))[0] !== null, true);
-  is("but it is never read while it counts the review gone", await readReviewSummary(statsId, kiln), null);
-  is("nor given back as this week's, and no AI job made for it", [(await makeReviewSummary(store, kiln, day + 21 * 86_400_000 + 540_000)).ok, prompts.length], [false, prompts.length]);
+  const failing = async (change: () => Promise<unknown>): Promise<boolean> => {
+    // Redis fails for any request that takes the summary away.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => String(c[1] ?? "").startsWith("nl:rsum:ver:"))) throw new Error("redis down for this test");
+      return realPipeline(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await change();
+      return false;
+    } catch {
+      return true;
+    } finally {
+      redis.pipeline = realPipeline;
+    }
+  };
+  const target = (await visibleReviews(statsId, kiln, 0, 10)).find((r) => r.text === "Useful tips again")!;
+  const stored = (await readReview(statsId, kiln, target.id))!;
+  const changes: [string, () => Promise<unknown>, (r: Awaited<ReturnType<typeof readReview>>) => boolean][] = [
+    ["deleted", () => deleteReview(statsId, kiln, target.id, ROOM), (r) => r !== null],
+    ["rewritten", () => saveReview(statsId, { productId: kiln, email: "kiln5@example.com", reference: "cs_test_kln50000000000", pi: "pi_kln5", rating: 5, text: "Different words now", name: "Kiln 5" }, ROOM), (r) => r?.text === stored.text],
+    ["hidden", () => setHidden(statsId, kiln, target.id, true, "private"), (r) => r?.hidden === false],
+    ["refunded", () => markOneRefunded(statsId, kiln, target.id), (r) => r?.refunded === false],
+  ];
+  for (const [what, change, unchanged] of changes) {
+    await putBack();
+    const threw = await failing(change);
+    is(`a review ${what} while the summary cannot be taken away: the change fails, the review as it was, the summary still true`, [threw, unchanged(await readReview(statsId, kiln, target.id)), (await readReviewSummary(statsId, kiln)) !== null], [true, true, true]);
+  }
+  is("the same review hidden when Redis answers: the summary goes with it", [Boolean(await setHidden(statsId, kiln, target.id, true, "private")), await readReviewSummary(statsId, kiln)], [true, null]);
+  const studioPage = readFileSync("app/studio/reviews/page.tsx", "utf8");
+  is("so the studio page only reads the summary: one small GET a product, no review read for it", [readFileSync("lib/review-ai-summary.ts", "utf8").match(/export async function readReviewSummary[\s\S]*?\n}/)?.[0].includes("visibleReviews"), studioPage.includes("readReviewSummary(store.statsId, p.id)")], [false, true]);
+
+  part("A person's deletion that cannot take the summary away fails as a whole");
+  await saveReview(statsId, { productId: kiln, email: "kiln8@example.com", reference: "cs_test_kln80000000000", pi: "pi_kln8", rating: 5, text: "Useful tips here", name: "Kiln 8" }, ROOM);
+  await putBack();
+  const person = (await visibleReviews(statsId, kiln, 0, 20)).find((r) => r.text === "Useful tips here")!;
+  is("their deletion fails, their review still there, so nothing counts a review that is gone", [await failing(() => forgetReviewsPerson(statsId, [kiln], "kiln8@example.com", ROOM)), (await readReview(statsId, kiln, person.id)) !== null], [true, true]);
+  is("tried again, it goes with the summary", [(await forgetReviewsPerson(statsId, [kiln], "kiln8@example.com", ROOM)).records, await readReview(statsId, kiln, person.id), await readReviewSummary(statsId, kiln)], [1, null, null]);
+
+  part("The keeping's script, pinned against its stand-in");
+  const memory = readFileSync("lib/redis-memory.ts", "utf8");
+  is("four keys and five values, the lock among them, read the same way by Redis and by the stand-in", [
+    ["KEYS[1]", "KEYS[2]", "KEYS[3]", "KEYS[4]", "ARGV[1]", "ARGV[2]", "ARGV[3]", "ARGV[4]", "ARGV[5]"].every((k) => KEEP_REVIEW_SUMMARY.includes(k)),
+    KEEP_REVIEW_SUMMARY.includes('if redis.call("GET", KEYS[4]) ~= ARGV[5] then return 0 end'),
+    KEEP_REVIEW_SUMMARY.includes('if held ~= ARGV[1] then return 0 end'),
+    memory.includes('key.startsWith("-- marktmorgen:review-summary-keep:v1\\n") && args[0] === "4" && args.length === 10'),
+    memory.includes("if (locked !== mine) return 0;"),
+    KEEP_REVIEW_SUMMARY.startsWith("-- marktmorgen:review-summary-keep:v1\n"),
+  ], [true, true, true, true, true, true]);
 
   const fifth = await addProduct(OWNER, "Wheel Basics", "", "45");
   if (!fifth.ok) throw new Error("no product");

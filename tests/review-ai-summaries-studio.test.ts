@@ -55,6 +55,12 @@ is("after a summary, focus moves to the status before the button is taken away",
 const refused = source.slice(source.indexOf("} else {"), source.indexOf("} catch {"));
 is("after a week's refusal too, never by a timer once the button is gone", refused.indexOf("statusRefs.current[product.id]?.focus();") > -1 && refused.indexOf("statusRefs.current[product.id]?.focus();") < refused.indexOf("setShown(") && !/setTimeout\(\(\) => statusRefs/.test(source), true);
 
+part("Fourth review of 4 November 2026: the reason written before focus, said in full, the summary focused");
+is("the status written first (flushSync), then focused, then the button replaced", /flushSync\(\(\) => setSaid[\s\S]*?statusRefs\.current\[product\.id\]\?\.focus\(\);\s*flushSync\(\(\) => setShown/.test(success), true);
+is("on a summary, focus moves to the summary itself", success.includes("summaryRefs.current[product.id]?.focus();") && source.includes("ref={(node) => { summaryRefs.current[product.id] = node; }}"), true);
+is("the live region says the full reason, the week's date and the AI job included", [refused.includes("say(`No summary of ${product.title}'s reviews was made. ${why}`);"), success.includes("say(`The summary of ${product.title}'s reviews is ready. ${left}`);")], [true, true]);
+is("the summary can take focus without being a tab stop", html.includes('<p class="mt-1 text-ink" tabindex="-1">'), true);
+
 part("The page");
 const page = readFileSync("app/studio/reviews/page.tsx", "utf8");
 is("opening the page only reads what was made, never makes one", page.includes("readReviewSummary(store.statsId, p.id)") && !page.includes("makeReviewSummary"), true);

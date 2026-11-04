@@ -244,19 +244,6 @@ export async function visibleReviews(
   return [...shownFirst, ...rest].slice(0, Math.max(limit, shownFirst.length));
 }
 
-/** Some of a product's reviews by id, each as kept (hidden and refunded ones too), or null when it is gone. At most 60. */
-export async function readReviewsById(statsId: string, productId: string, ids: readonly string[]): Promise<(Review | null)[]> {
-  const wanted = ids.filter((id) => REVIEW_ID_PATTERN.test(id)).slice(0, 60);
-  if (!wanted.length || !STATS_ID_PATTERN.test(statsId) || !PRODUCT_ID_PATTERN.test(productId) || !isRedisConfigured()) return ids.map(() => null);
-  const [rows] = await redisPipeline([["HMGET", productKey(statsId, productId), ...wanted]]);
-  const byId = new Map<string, Review>();
-  (Array.isArray(rows) ? rows : []).forEach((raw, i) => {
-    const review = parseReview(raw);
-    if (review && review.id === wanted[i]) byId.set(review.id, review);
-  });
-  return ids.map((id) => byId.get(id) ?? null);
-}
-
 /** One review, when it exists. */
 export async function readReview(statsId: string, productId: string, id: string): Promise<Review | null> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId) || !isRedisConfigured()) return null;
@@ -300,7 +287,8 @@ async function recount(statsId: string, productId: string): Promise<Summary> {
   return summary;
 }
 
-async function write(statsId: string, review: Review): Promise<void> {
+/** Writes a review; `also` goes in the same request (the AI summary's deletion), so a failure fails the write too. */
+async function write(statsId: string, review: Review, also: (string | number)[][] = []): Promise<void> {
   const member = `${review.productId}|${review.id}`;
   await redisPipeline([
     ["HSET", productKey(statsId, review.productId), review.id, JSON.stringify(review)],
@@ -308,6 +296,7 @@ async function write(statsId: string, review: Review): Promise<void> {
       ? ["ZREM", visibleKey(statsId, review.productId), review.id]
       : ["ZADD", visibleKey(statsId, review.productId), review.createdAt, review.id],
     ["ZADD", allKey(statsId), review.createdAt, member],
+    ...also,
   ]);
 }
 
@@ -374,9 +363,8 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     if (Number.isSafeInteger(paidAt) && (paidAt as number) > 0) review.paidAt = paidAt;
     const grown = reviewBytes(review) - reviewBytes(before);
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
-    await write(statsId, review);
-    // Words rewritten (perhaps to take something out): the AI summary built from the old words goes.
-    if (before && before.text !== review.text) await forgetReviewSummary(statsId, review.productId);
+    // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
+    await write(statsId, review, before && before.text !== review.text ? summaryGone(statsId, review.productId) : []);
     await redisPipeline([
       ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
       ["SADD", REVIEW_STORES_KEY, statsId],
@@ -405,15 +393,17 @@ export async function deleteReview(statsId: string, productId: string, id: strin
     const [raw] = await redisPipeline([["HGET", productKey(statsId, productId), id]]);
     const gone = parseReview(raw);
     if (!gone) return "missing" as const;
-    await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
     await redisPipeline([
       ["HDEL", productKey(statsId, productId), id],
       ["ZREM", visibleKey(statsId, productId), id],
       ["ZREM", allKey(statsId), `${productId}|${id}`],
       ["ZREM", newKey(statsId), `${productId}|${id}`],
+      // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it.
+      ...summaryGone(statsId, productId),
     ]);
+    // Its room given back only once it is gone: a deletion that failed keeps the review and its room.
+    await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
     await recount(statsId, productId);
-    await forgetReviewSummary(statsId, productId);
     return "deleted" as const;
   });
   return result;
@@ -438,25 +428,25 @@ async function creatorChange(
     const grown = reviewBytes(after) - reviewBytes(before);
     if (room && grown > 0) await needData(room, [{ slot: REVIEWS_SLOT(productId), bytes: grown }]);
     else if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
-    await write(statsId, after);
+    // A review hidden or refunded leaves the product's AI summary of its reviews (lib/review-ai-summary.ts) behind:
+    // it goes in the same request as the change, so a failure fails the change too.
+    const gone = (after.hidden && !before.hidden) || (after.refunded && !before.refunded);
+    await write(statsId, after, gone ? summaryGone(statsId, productId) : []);
     await recount(statsId, productId);
-    // A review hidden or refunded leaves the product's AI summary of its reviews (lib/review-ai-summary.ts) behind: it goes.
-    if ((after.hidden && !before.hidden) || (after.refunded && !before.refunded)) await forgetReviewSummary(statsId, productId);
     return after;
   });
 }
 
 /**
- * A new mark for a product's reviews (lib/review-ai-summary.ts keeps a summary only while the mark it read is
- * still there), set before the summary is deleted, so a summary being made now is never kept either. Kept eight
- * days, as the summary. When the week's last summary was made (nl:rsum:last:) is never deleted here.
+ * What takes the product's AI summary of its reviews (lib/review-ai-summary.ts) away when a review it may count
+ * goes or changes, sent in the same request as that change: a new mark first (a summary being made now is kept
+ * only while the mark it read is still there, so it is not kept either), then the summary. Kept eight days, as the
+ * summary. When the week's last summary was made (nl:rsum:last:) is never deleted here.
  */
-const markChange = (statsId: string, productId: string) => ["SET", `nl:rsum:ver:${statsId}:${productId}`, randomBytes(12).toString("hex"), "EX", 8 * 86_400];
-
-/** The product's AI summary of its reviews (lib/review-ai-summary.ts), which counts reviews that are gone: deleted. */
-async function forgetReviewSummary(statsId: string, productId: string): Promise<void> {
-  await redisPipeline([markChange(statsId, productId), ["DEL", `nl:rsum:${statsId}:${productId}`]]).catch((error: unknown) => console.error("forgetting a review summary failed", error));
-}
+const summaryGone = (statsId: string, productId: string): (string | number)[][] => [
+  ["SET", `nl:rsum:ver:${statsId}:${productId}`, randomBytes(12).toString("hex"), "EX", 8 * 86_400],
+  ["DEL", `nl:rsum:${statsId}:${productId}`],
+];
 
 /**
  * Puts a photo on a review, or takes it off (null): the buyer's own, or the
@@ -647,8 +637,7 @@ export async function dropReviews(statsId: string | null, productId: string): Pr
     ["DEL", productKey(statsId, productId)],
     ["DEL", visibleKey(statsId, productId)],
     ["HDEL", summaryKey(statsId), productId],
-    markChange(statsId, productId),
-    ["DEL", `nl:rsum:${statsId}:${productId}`],
+    ...summaryGone(statsId, productId),
     ...(members.length ? [["ZREM", allKey(statsId), ...members], ["ZREM", newKey(statsId), ...members]] : []),
   ]);
   return photos;

@@ -26,8 +26,7 @@ export const MAX_THEME_TITLE = 40;
 const MAX_TEXT = 300;
 export const SUMMARY_REFRESH_SECONDS = 7 * 86_400;
 
-/** id: the number the model is handed; review: the review's own id, kept with the summary to check it on every read. */
-export type SummaryInput = { id: number; text: string; review: string };
+export type SummaryInput = { id: number; text: string };
 export type SummaryTheme = { title: string; reviews: number };
 
 /** A review's words as they may be sent: one line, short, with addresses, handles, phone numbers and links taken out. */
@@ -74,9 +73,9 @@ export function summaryInputs(reviews: readonly Review[], productId: string): Su
     .filter((r) => r.productId === productId && !r.hidden && !r.refunded && r.text.trim())
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, MAX_SUMMARY_REVIEWS)
-    .map((r) => ({ review: r.id, text: cleanReviewText(r.text) }))
-    .filter(({ text }) => text.replace(/\[(email|link|number)\]/g, "").trim().length >= 2)
-    .map(({ review, text }, i) => ({ id: i + 1, text, review }));
+    .map((r) => cleanReviewText(r.text))
+    .filter((text) => text.replace(/\[(email|link|number)\]/g, "").trim().length >= 2)
+    .map((text, i) => ({ id: i + 1, text }));
 }
 
 /**
@@ -85,7 +84,7 @@ export function summaryInputs(reviews: readonly Review[], productId: string): Su
  * not, so the summary would count it and is not kept; a review written
  * since is only not counted yet, and does not undo the summary.
  */
-export function inputsStillShown(inputs: readonly Pick<SummaryInput, "text">[], reviews: readonly Review[], productId: string): boolean {
+export function inputsStillShown(inputs: readonly SummaryInput[], reviews: readonly Review[], productId: string): boolean {
   const shown = new Map<string, number>();
   for (const r of reviews) {
     if (r.productId !== productId || r.hidden || r.refunded || !r.text.trim()) continue;
@@ -101,7 +100,7 @@ export function inputsStillShown(inputs: readonly Pick<SummaryInput, "text">[], 
 }
 
 /** Whether a summary may be made now: enough reviews, and none made in the last week. */
-export function maySummarise(inputs: readonly unknown[], lastAt: number, nowSeconds: number): boolean {
+export function maySummarise(inputs: readonly SummaryInput[], lastAt: number, nowSeconds: number): boolean {
   return inputs.length >= MIN_SUMMARY_REVIEWS && (lastAt <= 0 || nowSeconds - lastAt >= SUMMARY_REFRESH_SECONDS);
 }
 
@@ -111,7 +110,7 @@ export function maySummarise(inputs: readonly unknown[], lastAt: number, nowSeco
  * figure, rating, address or handle, each said by two different reviews
  * sent or more, the most said first, at most MAX_SUMMARY_THEMES, a name once.
  */
-export function readThemes(answer: unknown, inputs: readonly Pick<SummaryInput, "id" | "text">[]): SummaryTheme[] {
+export function readThemes(answer: unknown, inputs: readonly SummaryInput[]): SummaryTheme[] {
   const ids = new Set(inputs.map((i) => i.id));
   const raw = answer && typeof answer === "object" && Array.isArray((answer as { themes?: unknown }).themes) ? ((answer as { themes: unknown[] }).themes) : [];
   const out: SummaryTheme[] = [];

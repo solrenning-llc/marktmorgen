@@ -13,7 +13,7 @@ const review = (n: number, over: Partial<Review> = {}): Review => ({ id: String(
 
 part("What is read");
 const inputs = summaryInputs([review(1, { rating: 1 }), review(2, { hidden: true }), review(3, { refunded: true }), review(4, { productId: "p2" }), review(5, { text: "  " }), review(6, { rating: 3, text: "Write me at ana@example.com" })], "p1");
-is("only what the page shows of this product, newest first, numbered, with each review's own id", inputs, [{ id: 1, text: "Write me at [email]", review: review(6).id }, { id: 2, text: "Words 1", review: review(1).id }]);
+is("only what the page shows of this product, newest first, numbered", inputs, [{ id: 1, text: "Write me at [email]" }, { id: 2, text: "Words 1" }]);
 is("a one-star review is read as a five-star one", summaryInputs([review(1, { rating: 1 }), review(2, { rating: 5 })], "p1").length, 2);
 is("addresses, links and phone numbers taken out", cleanReviewText("See www.example.com or call " + "+" + "1 555 010 2030"), "See [link] or call [number]");
 is("a web address with neither http nor www is taken out too", [cleanReviewText("More at janesmith.dev"), cleanReviewText("my shop: shop.jane-smith.co.uk/pots?x=1 thanks"), cleanReviewText("Visit JaneSmith.DEV")], ["More at [link]", "my shop: [link] thanks", "Visit [link]"]);

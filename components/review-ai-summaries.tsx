@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { MIN_SUMMARY_REVIEWS, SUMMARY_REFRESH_SECONDS, type SummaryTheme, summaryLine } from "@/lib/review-ai-summary-rules";
 
 type Kept = { at: number; read: number; themes: SummaryTheme[] } | null;
@@ -37,6 +38,7 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
   // after a refusal the button stays, and focus goes back to it.
   const statusRefs = useRef<Record<string, HTMLParagraphElement | null>>({});
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const summaryRefs = useRef<Record<string, HTMLParagraphElement | null>>({});
   // One short sentence for screen readers, said once; the full one stays beside the product.
   const [announce, setAnnounce] = useState("");
   // The same sentence twice is not read again by screen readers: the region is emptied first, the sentence put back on the next tick.
@@ -61,24 +63,33 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
       const response = await fetch("/api/store/review-summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product: product.id }) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; summary?: Kept; error?: string; left?: number | null; next?: number | null };
       if (answer.ok && answer.summary) {
-        // The button goes with the summary shown: focus moves to the status first, so it never falls to the page.
+        const summary = answer.summary;
+        const left = typeof answer.left === "number" ? `Made. ${answer.left} AI ${answer.left === 1 ? "job" : "jobs"} left this month.` : "This week's summary.";
+        // The status is written and focused while the button is still there, then the summary replaces the button
+        // and takes the focus: it never falls to the page in between.
+        flushSync(() => setSaid((all) => ({ ...all, [product.id]: left })));
         statusRefs.current[product.id]?.focus();
-        setShown((all) => all.map((p) => (p.id === product.id ? { ...p, summary: answer.summary! } : p)));
-        setSaid((all) => ({ ...all, [product.id]: typeof answer.left === "number" ? `Made. ${answer.left} AI ${answer.left === 1 ? "job" : "jobs"} left this month.` : "This week's summary." }));
-        say(`The summary of ${product.title}'s reviews is ready.`);
+        flushSync(() => setShown((all) => all.map((p) => (p.id === product.id ? { ...p, summary } : p))));
+        summaryRefs.current[product.id]?.focus();
+        say(`The summary of ${product.title}'s reviews is ready. ${left}`);
       } else {
-        const why = answer.error === "week" && typeof answer.next === "number" ? `A summary of this product was made in the last 7 days. A new one can be made from ${day(answer.next)} (UTC).` : REFUSALS[answer.error ?? "failed"] ?? REFUSALS.failed;
-        setSaid((all) => ({ ...all, [product.id]: why }));
-        // A week's refusal takes the button away: focus moves to what is said first, so it never falls to the page.
-        if (answer.error === "week" && typeof answer.next === "number") statusRefs.current[product.id]?.focus();
-        if (answer.error === "week" && typeof answer.next === "number") setShown((all) => all.map((p) => (p.id === product.id ? { ...p, lastAt: answer.next! - SUMMARY_REFRESH_SECONDS } : p)));
-        say(`No summary of ${product.title}'s reviews was made.`);
-        if (!(answer.error === "week" && typeof answer.next === "number")) window.setTimeout(() => buttonRefs.current[product.id]?.focus(), 0);
+        const week = answer.error === "week" && typeof answer.next === "number" ? answer.next : null;
+        const why = week !== null ? `A summary of this product was made in the last 7 days. A new one can be made from ${day(week)} (UTC).` : REFUSALS[answer.error ?? "failed"] ?? REFUSALS.failed;
+        flushSync(() => setSaid((all) => ({ ...all, [product.id]: why })));
+        if (week !== null) {
+          // A week's refusal takes the button away: the reason, already written, takes the focus first.
+          statusRefs.current[product.id]?.focus();
+          flushSync(() => setShown((all) => all.map((p) => (p.id === product.id ? { ...p, lastAt: week - SUMMARY_REFRESH_SECONDS } : p))));
+        } else {
+          buttonRefs.current[product.id]?.focus();
+        }
+        say(`No summary of ${product.title}'s reviews was made. ${why}`);
       }
     } catch {
-      setSaid((all) => ({ ...all, [product.id]: "That did not work. Check your connection and try again." }));
-      say(`No summary of ${product.title}'s reviews was made.`);
-      window.setTimeout(() => buttonRefs.current[product.id]?.focus(), 0);
+      const why = "That did not work. Check your connection and try again.";
+      flushSync(() => setSaid((all) => ({ ...all, [product.id]: why })));
+      buttonRefs.current[product.id]?.focus();
+      say(`No summary of ${product.title}'s reviews was made. ${why}`);
     } finally {
       setBusy(null);
     }
@@ -105,7 +116,7 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
               <li key={product.id} className="text-sm">
                 <h3 className="font-semibold text-ink [overflow-wrap:anywhere]">{product.title}</h3>
                 {product.summary ? (
-                  <p className="mt-1 text-ink">
+                  <p className="mt-1 text-ink" tabIndex={-1} ref={(node) => { summaryRefs.current[product.id] = node; }}>
                     <span className="font-semibold">AI-sorted summary: </span>
                     {line || "No theme was repeated by two reviews or more."}
                     <span className="block text-sm text-ink-soft">{`Made ${day(product.summary.at)} (UTC) from ${product.summary.read} ${product.summary.read === 1 ? "review" : "reviews"}.`}</span>

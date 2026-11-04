@@ -84,3 +84,25 @@ The fourth scenario keeps the same catalogue, calls, waiting block and paid addi
 Redis counts remain 1439/1359 because this path adds provider reads rather than Redis commands. The actual render still shows the newest forty digital purchases and forty buyer calls, the full waiting block, and no unrelated buyer calls. All eight cases pass their functional/provider/privacy assertions and then reject only the unchanged eighteen-command ceiling. Metadata and rendering remain inside the measured entry; setup and the explicit warm request remain outside it.
 
 The payment-list limit of ten is the synthetic response in this case, not a locally enforced array cap; oversized provider replies are still a separate required case. This observation rules out treating the previous sixteen GETs as a whole-page provider ceiling. It does not establish a supplier price, function-duration allowance, complete worst-case bound or positive MR result. No product, tax, cost table, request window, price, visible allowance or flag is changed.
+
+
+## Maximum catalogue, twenty-item bundles and three additions follow-up
+
+The fifth scenario creates the actual catalogue ceiling of 2000 products through public writers: the existing call product, 600 hidden bundle products and 1399 hidden link-delivery products. Public setProductBundle validates and saves twenty eligible content products in each bundle. bundleMeta encodes the historical item lists, and each of the hundred checkout purchases names the main bundle and all three distinct added bundles. Those one-time checkout totals include all four bundle prices. The five hundred older one-click purchases each carry their own twenty-item bundle. These are ordinary one-time purchases; this case is not claimed to be combinable with every installment path.
+
+The actual page shows the forty newest checkout purchases, in order, each retaining all eighty included deliveries: twenty in the main bundle and twenty in each of three additions. The test counts all 3200 external delivery links, preserves all forty buyer calls and excludes the 460 unrelated call IDs. It also checks the top-level purchase headings separately from nested bundle/addition titles, rather than mistaking repeated nested titles for extra purchases. No catalogue, payment, waiting or rendering reader is replaced.
+
+| Measured full waiting + bundle entry | New rooms | Existing rooms |
+| --- | ---: | ---: |
+| Total Redis commands | 7021 | 6941 |
+| Catalogue listing GETs | 6262 | 6262 |
+| Waiting commands | 14 | 14 |
+| Stripe GETs | 16 | 16 |
+| Logical JSON Redis request bytes | 477611 | 468050 |
+| Logical JSON Redis response bytes | 4238515 | 4238114 |
+| Synthetic Stripe JSON response bytes | 674784 | 674784 |
+| Rendered HTML bytes in this run | 1397232 | 1397232 |
+
+The public writers and product/bundle limits are part of fixture setup, outside the measured entry; all actual page, metadata and rendering work is counted. Catalogue memoization while assembling historical purchases does not remove the per-delivery key eligibility reads or the later reviewability reads for the forty rendered purchases and their contents. At the recorded command input alone these observations amount to 0.014042 and 0.013882 dollars. They are not a verified supplier bill, byte ceiling, function-duration bound or complete cost.
+
+All ten cases retain the original actual-command <= eighteen-command comparison and reject it, after passing functional/privacy/provider checks. This broader valid scenario supersedes the simple purchase scenario as a lower bound for command and response work, not as a complete worst case. Imports, feeds, active licence keys, larger record fields, provider error/oversize behavior, caches and the missing actual-entry request budget still need coverage and coordination. No cost table, runtime, price, visible limit, commission or flag is changed, no MR approval is granted, and this rejected study has no PR.

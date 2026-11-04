@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import OrdersPage, { generateMetadata } from "@/app/[handle]/orders/page";
-import { addDraftProducts, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addDraftProducts, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductBundle, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { readSetup } from "@/lib/call-setup";
 import { store as redis } from "./redis-stub";
@@ -16,9 +16,10 @@ import { readDraft as readAgreementDraft } from "@/lib/agreement-rules";
 import { createRequest, changeRequest } from "@/lib/payment-request-store";
 import { readDraft as readRequestDraft } from "@/lib/payment-request-rules";
 import { COMMANDS, COMMAND } from "./traffic-cost";
+import { BUMP_KEYS, MAX_BUNDLE_ITEMS, bundleMeta } from "@/lib/bundle-rules";
 
 const OWNER = "buyer-page-cost@example.test", BUYER = "buyer@example.test", ACCOUNT = "acct_1TestLoom00001";
-async function world(pending = false, purchases = false, installments = false) {
+async function world(pending = false, purchases = false, installments = false, bundles = false) {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_tax_journey_only";
   process.env.RESEND_API_KEY = "re_SYNTHETIC_ACCESS_ONLY";
@@ -30,13 +31,18 @@ async function world(pending = false, purchases = false, installments = false) {
   const setup = readSetup({ kind: "weekly", minutes: 30, tz: "UTC", weekly: [[], [[540,1020]], [[540,1020]], [[540,1020]], [[540,1020]], [[540,1020]], []],
     noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "", video: true, meet: null, seats: 1, sessions: [] });
   assert.ok(setup && typeof setup === "object"); await setProductCall(OWNER, added.product.id, setup);
-  const digitalTitles = Array.from({ length: purchases ? 600 : 0 }, (_, i) => `Cost digital ${String(i).padStart(6, "0")}`);
+  const digitalTitles = Array.from({ length: purchases ? (bundles ? 1999 : 600) : 0 }, (_, i) => `${i<600?"Cost digital":"Bundle content"} ${String(i).padStart(6, "0")}`);
   let digitalIds: string[] = [];
   if (purchases) {
-    const drafts = await addDraftProducts(OWNER, digitalTitles.map(title => ({ title, summary: "Historical paid delivery", priceCents: 1000, link: "https://example.test/paid-digital" })));
-    assert.ok(drafts.ok); digitalIds = drafts.ids; assert.equal(digitalIds.length, 600);
+    const drafts = await addDraftProducts(OWNER, digitalTitles.map((title,i) => ({ title, summary: "Historical paid delivery", priceCents: 1000, link: bundles && i<600 ? null : "https://example.test/paid-digital" })));
+    assert.ok(drafts.ok); digitalIds = drafts.ids; assert.equal(digitalIds.length, bundles?1999:600);
+  }
+  const contentsFor = (index: number) => Array.from({length:MAX_BUNDLE_ITEMS}, (_, i) => digitalIds[600+(index*MAX_BUNDLE_ITEMS+i)%(digitalIds.length-600)]);
+  if(bundles) for(let i=0;i<600;i++) {
+    const saved=await setProductBundle(OWNER,digitalIds[i],contentsFor(i)); assert.ok(saved.ok);
   }
   const store = (await storeForEmail(OWNER))!; assert.ok(store.callsId);
+  if(bundles)assert.equal(store.catalog.items.length,2000,"the actual public catalogue ceiling, including the call product");
   const requestIds: string[] = [], agreementIds: string[] = [];
   if (pending) {
     const requestDraft = readRequestDraft({ email: BUYER, name: "Synthetic Buyer", consent: true, lines: [{ text: "A private session", quantity: 1, amount: "10" }], note: "", dueDate: "", autoReminders: 0 }, "usd");
@@ -62,19 +68,21 @@ async function world(pending = false, purchases = false, installments = false) {
       metadata: { store: store.handle, kind: "call", product: added.product.id, title: "Coaching cost baseline", start: String(start), end: String(start+1_800_000), tz: "UTC" } };
   });
   const customers = Array.from({ length: 10 }, (_, i) => `cus_BuyerCost${String(i).padStart(8, "0")}`);
-  const purchasedAt = Math.floor(Date.now()/1000) - 600;
+  const purchasedAt = Math.floor(Date.now()/1000) - (bundles?1600:600);
   const bought = digitalIds.slice(0,100).map((product, i) => ({
     object: "checkout.session", id: `cs_test_CostPurchase${String(i).padStart(12,"0")}`, mode: installments ? "subscription" : "payment", status: "complete", payment_status: "paid",
     invoice: installments ? `in_CostInvoice${String(i).padStart(12,"0")}` : null,
-    created: purchasedAt + i, amount_total: 1000, currency: "usd", customer: customers[i%10], customer_details: { email: BUYER },
+    created: purchasedAt + (bundles?1000:0) + i, amount_total: bundles?4000:1000, currency: "usd", customer: customers[i%10], customer_details: { email: BUYER },
     payment_intent: installments ? null : { id: `pi_CostPurchase${i}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
-    metadata: { store: store.handle, product, ...(installments ? { kind: "plan" } : {}) },
+    metadata: { store: store.handle, product, ...(installments ? { kind: "plan" } : {}),
+      ...(bundles ? { ...bundleMeta("bundle",contentsFor(i)), ...Object.fromEntries(BUMP_KEYS.flatMap((key,j)=>{ const index=(i+j+1)%600; return [[key,digitalIds[index]],...Object.entries(bundleMeta(`${key}_bundle`,contentsFor(index)))]; })) } : {}) },
   }));
-  const upsells = digitalIds.slice(100).map((product, i) => ({
+  const upsells = digitalIds.slice(100,600).map((product, i) => ({
     object: "payment_intent", id: `pi_CostUpsell${String(i).padStart(12,"0")}`, status: "succeeded", amount: 1000, currency: "usd",
     created: purchasedAt + 100 + i, customer: customers[Math.floor(i/50)], latest_charge: { refunded: false, amount_refunded: 0 },
-    metadata: { kind: "upsell", store: store.handle, product },
+    metadata: { kind: "upsell", store: store.handle, product, ...(bundles ? bundleMeta("bundle",contentsFor(100+i)) : {}) },
   }));
+  assert.ok([...bought,...upsells].every(payment=>payment.created<=Math.floor(Date.now()/1000)),"all historical paid fixture timestamps are in the past");
   const provider = { calls: 0, callPages: 0, returned: 0, purchaseRows: 0, intentPages: 0, intentRows: 0, invoiceGets: 0, invoicePaymentPages: 0, refundIntentGets: 0, responseBytes: 0 };
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input)); assert.equal(url.hostname, "api.stripe.com");
@@ -115,11 +123,11 @@ async function world(pending = false, purchases = false, installments = false) {
   const link=await ordersLinkFor(store,BUYER,`https://example.test/@${store.handle}`); assert.ok(link);
   const params={params:Promise.resolve({handle:"@"+store.handle}),searchParams:Promise.resolve({token:new URL(link).searchParams.get("token")!})};
   const visit=async()=>{await generateMetadata(params);return renderToStaticMarkup(await OrdersPage(params));};
-  return { provider,visit,sessions,requestIds,agreementIds,digitalTitles };
+  return { provider,visit,sessions,requestIds,agreementIds,digitalTitles: digitalTitles.slice(0,600) };
 }
-for(const scenario of ["calls", "waiting", "purchases", "installments"] as const) for(const warm of [false,true]) test(`real buyer page cost baseline (${scenario}): ${warm?"existing":"new"} rooms`,async()=>{
-  const pending=scenario!=="calls", purchases=scenario==="purchases" || scenario==="installments", installments=scenario==="installments";
-  const w=await world(pending,purchases,installments); if(warm)await w.visit();
+for(const scenario of ["calls", "waiting", "purchases", "installments", "bundles"] as const) for(const warm of [false,true]) test(`real buyer page cost baseline (${scenario}): ${warm?"existing":"new"} rooms`,async()=>{
+  const pending=scenario!=="calls", purchases=scenario!=="calls" && scenario!=="waiting", installments=scenario==="installments", bundles=scenario==="bundles";
+  const w=await world(pending,purchases,installments,bundles); if(warm)await w.visit();
   Object.assign(w.provider,{calls:0,callPages:0,returned:0,purchaseRows:0,intentPages:0,intentRows:0,invoiceGets:0,invoicePaymentPages:0,refundIntentGets:0,responseBytes:0});
   const actual=redis.pipeline.bind(redis),commands:(string|number)[][]=[];let requestBytes=0,responseBytes=0;
   redis.pipeline=async list=>{commands.push(...list);requestBytes+=Buffer.byteLength(JSON.stringify(list));const replies=await actual(list);responseBytes+=Buffer.byteLength(JSON.stringify(replies));return replies;};
@@ -129,9 +137,10 @@ for(const scenario of ["calls", "waiting", "purchases", "installments"] as const
   assert.equal(w.provider.invoiceGets,installments?100:0); assert.equal(w.provider.invoicePaymentPages,installments?100:0); assert.equal(w.provider.refundIntentGets,installments?1000:0);
   assert.equal(w.provider.purchaseRows,purchases?100:0); assert.equal(w.provider.intentPages,purchases?10:0); assert.equal(w.provider.intentRows,purchases?500:0);
   if(purchases) {
-    assert.equal(w.digitalTitles.filter(title=>html.includes(title)).length,40,"all 600 paid records are considered before only the newest forty render");
-    for(const title of w.digitalTitles.slice(560))assert.ok(html.includes(title),"the newest paid additions are present");
-    for(const title of w.digitalTitles.slice(0,560))assert.equal(html.includes(title),false,"older paid records stay outside the forty-card result");
+    const topTitles=[...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><p class="font-semibold">([^<]+)<\/p>/g)].map(m=>m[1]).filter(title=>title.startsWith("Cost digital "));
+    const expected=w.digitalTitles.slice(bundles?60:560,bundles?100:600).reverse();
+    assert.deepEqual(topTitles,expected,"only the newest forty primary paid records render, preserving their order even with nested bundle/addition titles");
+    if(bundles)assert.equal(html.split('href="https://example.test/paid-digital"').length-1,40*(1+BUMP_KEYS.length)*MAX_BUNDLE_ITEMS,"all twenty deliveries in the main bundle and each of three added bundles remain available");
   }
   assert.equal(html.split("Coaching cost baseline").length-1,40,"the actual page renders forty of the buyer's calls");
   for(const s of w.sessions.slice(0,40))assert.ok(html.includes(s.id));
@@ -147,9 +156,9 @@ for(const scenario of ["calls", "waiting", "purchases", "installments"] as const
     assert.equal(w.agreementIds.filter(id=>html.includes(id)).length,10);
   }
   const catalogReads=commands.filter(c=>c[0]==="GET" && /^nl:catalog:[^:]+:l:/.test(String(c[1]))).length;
-  if(purchases)assert.ok(catalogReads>=600,"six hundred distinct historical paid products actually reach the catalogue reader");
+  if(purchases)assert.ok(catalogReads>=(bundles?1999:600),"all distinct historical paid products actually reach the catalogue reader");
   const modeled=COMMANDS.laterPage+COMMANDS.laterCount;
-  const profile={source:"actual OrdersPage+generateMetadata+render",scenario:warm?"existing-rooms":"new-rooms",pending,purchases,installments,catalogReads,waitingCommands,redisCommands:commands.length,moves,roomReads,roomWrites,
+  const profile={source:"actual OrdersPage+generateMetadata+render",scenario:warm?"existing-rooms":"new-rooms",pending,purchases,installments,bundles,catalogReads,waitingCommands,redisCommands:commands.length,moves,roomReads,roomWrites,
     logicalRedisRequestBytes:requestBytes,logicalRedisResponseBytes:responseBytes,htmlBytes:Buffer.byteLength(html),provider:w.provider,
     modeledCommands:modeled,redisCommandCostOnly:commands.length*COMMAND,financialApproval:false,completeWorstCase:false};
   console.log(JSON.stringify(profile));

@@ -1248,66 +1248,58 @@ function waitedAs(event: StripeEvent): { type: WebhookEvent; about: string; know
  * The line a passed-over Stripe event leaves in the store's delivery log,
  * which the studio shows ("Not sent", with the reason), for each endpoint
  * that hears what it would have been, so the creator can look it up in
- * Stripe. Written once per event, whatever happens after: the same mark an
- * event that was sent leaves (eventKey) is set first, so a visit that dies
- * later, or a store read again from far back, never writes or charges a
- * second line.
+ * Stripe.
  *
- * Only an event known to be the store's takes the store's webhook
- * deliveries for its month, one per line, taken before the lines are
- * written (as a try in attempt is: a write that fails after it leaves the
- * deliveries counted without the lines). One that may not be the store's
- * takes none and says so; it is at most one a day per store, the job's
- * visits being five minutes apart and the wait STRIPE_WAIT_RUNS of them
- * (tests/store-data-registry.ts). Returns false when the deliveries could
- * not be counted at all (a passing failure): nothing is written and the
- * event waits for the next visit. With the month's deliveries used, or no
- * place in the month's pool, only the server log says it.
+ * It takes none of the store's webhook deliveries: no message is made and
+ * no endpoint is called, and a count that could be lost or refused would
+ * either charge the creator again or hold the store's later events. Its
+ * keys are bounded by the job's cadence instead (tests/store-data-registry.ts).
+ *
+ * Written once, and never lost: each line's id is made from the event and
+ * the endpoint, so a repeat finds it (SET NX) and puts it in the log only
+ * when it is not there yet; the event's mark (eventKey, as a sent event
+ * leaves) is set after every line is written, and a visit that finds it
+ * writes nothing. A visit that dies half way leaves the event waiting at
+ * its count, and the next one completes what is missing.
  */
-async function markGivenUp(store: Store, statsId: string, config: Config, event: StripeEvent, visits: number, now = Date.now()): Promise<boolean> {
+async function markGivenUp(statsId: string, config: Config, event: StripeEvent, visits: number, now = Date.now()): Promise<void> {
   const as = waitedAs(event);
-  if (!as) return true;
+  if (!as) return;
   const listening = config.endpoints.filter((e) => e.events.includes(as.type));
-  if (!listening.length) return true;
+  if (!listening.length) return;
   const eventId = eventIdFor(statsId, as.type, `given-up|${str(event.id) ?? ""}`);
-  const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
-  if (fresh === null) return true;
-  if (as.known) {
-    const taken = await takeAllowance(store, "webhook", listening.length, now);
-    if (!taken.ok && taken.reason === "unknown") {
-      await redisPipeline([["DEL", eventKey(eventId)]]);
-      console.error("a passed-over Stripe event's line could not be counted; it waits for the next visit", store.handle, str(event.id));
-      return false;
-    }
-    if (!taken.ok) {
-      console.error("a passed-over Stripe event could not be written in the store's log:", taken.message, store.handle, str(event.id));
-      return true;
-    }
-  }
+  const [marked] = await redisPipeline([["GET", eventKey(eventId)]]);
+  if (marked !== null && marked !== undefined) return;
   const words = `Stripe kept refusing or failing to answer about ${as.about}, so it was skipped after ${visits} tries.${as.known ? "" : " It may not be from this store."} Look it up in your Stripe dashboard.`;
-  const commands: (string | number)[][] = [];
-  for (const endpoint of listening) {
-    const id = `dlv_${randomBytes(12).toString("hex")}`;
-    const line: Delivery = {
-      id,
-      statsId,
-      endpoint: endpoint.id,
-      eventId,
-      type: as.type,
-      body: "",
-      attempts: 0,
-      state: "failed",
-      next: 0,
-      lastStatus: 0,
-      lastError: words,
-      lastAt: now,
-      createdAt: now,
-      givenUp: true,
-    };
-    commands.push(["SET", deliveryKey(id), JSON.stringify(line), "EX", DELIVERY_SECONDS], ["LPUSH", logKey(statsId), id]);
+  const lines: Delivery[] = listening.map((endpoint) => ({
+    id: `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
+    statsId,
+    endpoint: endpoint.id,
+    eventId,
+    type: as.type,
+    body: "",
+    attempts: 0,
+    state: "failed",
+    next: 0,
+    lastStatus: 0,
+    lastError: words,
+    lastAt: now,
+    createdAt: now,
+    givenUp: true,
+  }));
+  const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));
+  const fresh = lines.filter((_, at) => written[at] === "OK").map((line) => line.id);
+  // A line already there from a visit that died: in the log already, unless that visit died before putting it there.
+  const again = lines.filter((_, at) => written[at] !== "OK").map((line) => line.id);
+  let missing: string[] = [];
+  if (again.length) {
+    const [rawLog] = await redisPipeline([["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
+    const inLog = new Set(Array.isArray(rawLog) ? (rawLog as unknown[]).map(String) : []);
+    missing = again.filter((id) => !inLog.has(id));
   }
-  await redisPipeline([...commands, ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]);
-  return true;
+  const push = [...fresh, ...missing];
+  if (push.length) await redisPipeline([...push.map((id) => ["LPUSH", logKey(statsId), id]), ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]);
+  await redisPipeline([["SET", eventKey(eventId), "1", "EX", EVENT_SECONDS]]);
 }
 
 /** One store: its Stripe events since the last one read, oldest first. */
@@ -1336,10 +1328,7 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
         // said where the creator sees it as well as in the server's log.
         console.error(`WEBHOOK EVENT GIVEN UP: a Stripe event waited ${waiting.runs} visits on a lookup that kept failing; it is passed over and not sent`, store.handle, id, event.type);
         // The endpoints as they are now, so one added during this visit is told too.
-        if (!(await markGivenUp(store, statsId, (await readConfig(statsId)) ?? config, event, waiting.runs))) {
-          stuck = id;
-          return false;
-        }
+        await markGivenUp(statsId, (await readConfig(statsId)) ?? config, event, waiting.runs);
       } else if (!(await fromStripe(store, event, lookups, heard))) {
         stuck = id;
         return false;

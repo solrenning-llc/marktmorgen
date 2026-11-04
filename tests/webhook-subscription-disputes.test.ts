@@ -35,6 +35,8 @@ const customers: Record<string, string> = {};
 /** Customers deleted on the account: Stripe answers 200 with { deleted: true } and no address. */
 const deletedCustomers = new Set<string>();
 const asked: { path: string; version: string | null }[] = [];
+/** Run once when the next visit reads its events: something that happens while a visit is under way. */
+let duringEvents: (() => Promise<unknown>) | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -51,6 +53,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return Response.json({ error: { type: "api_error", message: "Something went wrong on Stripe's end." } }, { status: 500 });
   }
   if (url.pathname === "/v1/events") {
+    if (duringEvents) {
+      const run = duringEvents;
+      duringEvents = null;
+      await run();
+    }
     const before = url.searchParams.get("ending_before");
     const at = before ? timeline.findIndex((e) => e.id === before) : -1;
     const rows = (at >= 0 ? timeline.slice(at + 1) : timeline).slice().reverse();
@@ -262,13 +269,6 @@ async function main() {
   is("and no message made of it", (await recentMessages(store, "dispute.opened", 10)).map((m) => (m.data as { dispute: string }).dispute).sort(), ["dp_kafter", "dp_kbefore"]);
   is("said loudly in the log", said.some((line) => line.startsWith("WEBHOOK EVENT GIVEN UP") && line.includes("evt_Refused")), true);
   is("what came after is sent, the anchor moves on and the wait is let go", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_kafter", "dp_kbefore"], "evt_KAfter", null]);
-  store = await setup(["dispute.opened"]);
-  store = await setup(["membership.canceled"]);
-  timeline = [{ ...cancel(90), id: "evt_NoRoom", data: { object: cancel(90).data.object, previous_attributes: cancelPrevious } }];
-  failing["/v1/customers/cus_Cancel90"] = { left: 1_000_000, how: "403" };
-  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_NoRoom|${STRIPE_WAIT_RUNS}`, "EX", 30 * 86400]]);
-  await watchStripe(Date.now() + 10_000);
-  is("a store with no webhook delivery left this month: passed over, said in the server log only", [(await webhooksView(store)).log.some((d) => d.givenUp), said.some((l) => l.includes("could not be written in the store's log")), await anchor()], [false, true, "evt_NoRoom"]);
   is("about a day of five-minute runs", STRIPE_WAIT_RUNS * 5 / 60, 24);
 
   part("membership.canceled waits for the member's address instead of going out without it");
@@ -328,7 +328,7 @@ async function main() {
   await forgetStoreWebhooks(statsId);
   is("no wait record left", await waitRecord(), null);
 
-  part("A given-up line is written and charged once, and only for an event known to be the store's");
+  part("A given-up line takes no delivery, is written once and never lost");
   const givenUpLines = async () => (await webhooksView(store)).log.filter((d) => d.givenUp);
   const seedWait = (evtId: string) => redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `${evtId}|${STRIPE_WAIT_RUNS}`, "EX", 30 * 86400]]);
   // A paid plan, and the store read again with it, so its month's deliveries can be counted.
@@ -355,15 +355,31 @@ async function main() {
   breakWhen((command) => command[1] === saleMark);
   await watchStripe(Date.now() + 10_000);
   mend();
-  is("a visit that gives up and then dies: one line, one delivery taken, the wait still at the cap", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, await waitRecord(), await anchor()], [1, 1, `evt_Cancel0|${STRIPE_WAIT_RUNS}`, null]);
+  is("a visit that gives up and then dies: one line, no delivery taken, the wait still at the cap", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, await waitRecord(), await anchor()], [1, 0, `evt_Cancel0|${STRIPE_WAIT_RUNS}`, null]);
   is("a known event's line does not say it may not be the store's", (await givenUpLines())[0]?.lastError.includes("may not be"), false);
   await watchStripe(Date.now() + 10_000);
-  is("the next visit gives up again but writes and charges nothing more, and sends the sale", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, (await recentMessages(store, "sale.completed")).length, await anchor(), await waitRecord()], [1, 1, 1, "evt_SaleAfter", null]);
+  is("the next visit gives up again but writes nothing more, and sends the sale", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, (await recentMessages(store, "sale.completed")).length, await anchor(), await waitRecord()], [1, 0, 1, "evt_SaleAfter", null]);
   // Stripe lost the anchor: everything is read again from far back and the same event waits to the cap again.
   await redis.pipeline([["DEL", `nl:hooks:anchor:${statsId}`]]);
   await seedWait("evt_Cancel0");
   await watchStripe(Date.now() + 10_000);
-  is("read again from far back and given up again: still one line, one delivery", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0], [1, 1]);
+  is("read again from far back and given up again: still one line, no delivery", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0], [1, 0]);
+
+  for (const [what, bad] of [
+    ["the line written, the log not", (command: (string | number)[]) => command[0] === "LPUSH" && command[1] === `nl:hooks:log:${statsId}`],
+    ["the lines and the log written, the event's mark not", (command: (string | number)[]) => command[0] === "SET" && String(command[1]).startsWith("nl:hooks:evt:") && command[3] === "EX"],
+  ] as const) {
+    store = await setup(["membership.canceled"]);
+    failing["/v1/customers/cus_Cancel3"] = { left: 1_000_000, how: "403" };
+    timeline = [heldCancel(3)];
+    await seedWait("evt_Cancel3");
+    breakWhen((command) => bad(command));
+    await watchStripe(Date.now() + 10_000);
+    mend();
+    is(`${what}: the visit dies and the event still waits at the cap`, [await waitRecord(), await anchor()], [`evt_Cancel3|${STRIPE_WAIT_RUNS}`, null]);
+    await watchStripe(Date.now() + 10_000);
+    is(`${what}: the next visit leaves exactly one line in the log and moves on`, [(await givenUpLines()).length, await anchor(), await waitRecord()], [1, "evt_Cancel3", null]);
+  }
 
   store = await setup(["membership.canceled"]);
   store = await paid();
@@ -373,22 +389,16 @@ async function main() {
   await seedWait("evt_Cancel1");
   const used1 = await allowanceUsed(store, "webhook");
   await watchStripe(Date.now() + 10_000);
-  is("two endpoints, one hearing it: one line, for that one, and exactly one delivery", [(await givenUpLines()).map((d) => d.endpoint), (await allowanceUsed(store, "webhook")) - used1], [["hooks.example.net/in"], 1]);
+  is("two endpoints, one hearing it: one line, for that one, and no delivery taken", [(await givenUpLines()).map((d) => d.endpoint), (await allowanceUsed(store, "webhook")) - used1], [["hooks.example.net/in"], 0]);
 
   store = await setup(["membership.canceled"]);
-  store = await paid();
   failing["/v1/customers/cus_Cancel2"] = { left: 1_000_000, how: "403" };
   timeline = [heldCancel(2)];
   await seedWait("evt_Cancel2");
-  const used2 = await allowanceUsed(store, "webhook");
-  // The month's count cannot be made (the store blinks on the count itself).
-  breakWhen((command) => command[0] === "INCRBY");
+  // An endpoint added while the visit is under way, after the visit read the store's endpoints.
+  duringEvents = () => addEndpoint(store, "https://hooks.example.org/late", ["membership.canceled"]);
   await watchStripe(Date.now() + 10_000);
-  mend();
-  const lineMark = `nl:hooks:evt:${eventIdFor(statsId, "membership.canceled", "given-up|evt_Cancel2")}`;
-  is("a count that could not be made writes nothing, leaves no mark and keeps waiting", [(await givenUpLines()).length, (await redis.pipeline([["GET", lineMark]]))[0], await waitRecord(), await anchor()], [0, null, `evt_Cancel2|${STRIPE_WAIT_RUNS + 1}`, null]);
-  await watchStripe(Date.now() + 10_000);
-  is("the next visit writes the line and takes the one delivery", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used2, await anchor(), await waitRecord()], [1, 1, "evt_Cancel2", null]);
+  is("an endpoint added during the visit gets its line too", (await givenUpLines()).map((d) => d.endpoint).sort(), ["hooks.example.net/in", "hooks.example.org/late"]);
 
   part("The call budget per run is the same as before");
   is("ten calls for refunds and addresses, ten for disputes", [STRIPE_LOOKUPS_PER_STORE, DISPUTE_LOOKUPS_PER_STORE], [10, 10]);

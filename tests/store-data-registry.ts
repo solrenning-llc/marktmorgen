@@ -876,12 +876,14 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:cfg:@lib/webhooks.ts": { what: "The store's endpoints", parts: [capped(MAX_ENDPOINTS * 2 * KB, "MAX_ENDPOINTS endpoints.", src("lib/webhooks.ts", "MAX_ENDPOINTS"))] },
   "nl:hooks:d:@lib/webhooks.ts": { what: "One delivery and how it went, a week", parts: [
     per("webhook", 7, 4 * KB, "One delivery and how it went, a week"),
-    // A passed-over Stripe event that may not be the store's leaves its line without taking a delivery: at most one a day (one event waits STRIPE_WAIT_RUNS five-minute visits), one line an endpoint, for a week.
-    capped(7 * MAX_ENDPOINTS * 2 * KB, "Lines of passed-over events not known to be the store's: seven a week at most, one an endpoint.", src("lib/webhooks.ts", "STRIPE_WAIT_RUNS", "MAX_ENDPOINTS")),
+    // A passed-over Stripe event leaves its line without taking a delivery. Not counted in code: bounded by the cron's calls,
+    // a visit to the store at most once a run of the five-minute job (vercel.json) and one event passed over per STRIPE_WAIT_RUNS
+    // visits, so seven a week; one line an endpoint, each kept a week.
+    capped(7 * MAX_ENDPOINTS * 2 * KB, "Lines of passed-over Stripe events: bounded by the five-minute cron's calls, seven a week, one an endpoint.", src("lib/webhooks.ts", "STRIPE_WAIT_RUNS", "MAX_ENDPOINTS")),
   ] },
   "nl:hooks:evt:@lib/webhooks.ts": { what: "An event already sent", parts: [
     per("order", 30, MARK, "A sale."), per("webhook", 30, MARK, "Any other."),
-    capped(30 * MARK, "The mark of a passed-over event not known to be the store's: one a day at most, thirty days.", src("lib/webhooks.ts", "STRIPE_WAIT_RUNS")),
+    capped(30 * MARK, "The mark of a passed-over Stripe event: bounded by the five-minute cron's calls (one per STRIPE_WAIT_RUNS visits), kept thirty days.", src("lib/webhooks.ts", "STRIPE_WAIT_RUNS")),
   ] },
   "nl:hooks:log:@lib/webhooks.ts": { what: "The store's last deliveries", parts: [capped(HOOK_LOG * 64, "The newest LOG_SIZE.", src("lib/webhooks.ts", "LOG_SIZE"))] },
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),

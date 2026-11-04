@@ -121,12 +121,13 @@ async function main(): Promise<void> {
   part("Where it is read");
   const route = readFileSync("app/api/store/course/start/route.ts", "utf8");
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
-  const orders = readFileSync("app/[handle]/orders/page.tsx", "utf8");
+  // The list of purchases draws each purchase from lib/purchase-cards.ts (cardOf), on the page and in a batch of older ones.
+  const orders = readFileSync("lib/purchase-cards.ts", "utf8");
   is("the route opens only what courseToStart allows", [route.includes("courseToStart(order, asked)"), route.includes("order.items?.items")], [true, false]);
   is("the thanks page writes every course down as bought", thanks.includes("for (const course of orderCourses(order))"), true);
   const box = thanks.slice(thanks.indexOf("{t.alsoYours}"));
   is("and draws an added course's button before saying nothing is attached", box.indexOf('name="product" value={added.product.id}') > 0 && box.indexOf('name="product" value={added.product.id}') < box.indexOf("nothingAttached"), true);
-  is("the list of purchases names its button", orders.includes("href={`/@${store.handle}/course/${added.courseProduct}`}") && orders.includes("words.openTitle(added.title)"), true);
+  is("the list of purchases names its button", orders.includes("href: `/@${handle}/course/${added.courseProduct}`, label: words.openTitle(added.title)"), true);
 
   done();
 }

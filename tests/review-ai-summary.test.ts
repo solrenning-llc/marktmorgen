@@ -177,7 +177,9 @@ async function main(): Promise<void> {
   const weekly = await makeReviewSummary(store, kiln, day + 14 * 86_400_000 + 420_000);
   is("made", weekly.ok && weekly.fresh, true);
   const asked = prompts.length;
-  const hidden = (await visibleReviews(statsId, kiln, 0, 10))[0];
+  // By its words, never by its place: "Arrived late" and "Useful tips again" can be written in the same millisecond,
+  // and then their order is their ids' (random with the store), so the first could be the review the next part needs.
+  const hidden = (await visibleReviews(statsId, kiln, 0, 10)).find((r) => r.text === "Arrived late")!;
   await deleteReview(statsId, kiln, hidden.id, ROOM);
   is("a review deleted takes the summary", await readReviewSummary(statsId, kiln), null);
   const reset = await makeReviewSummary(store, kiln, day + 14 * 86_400_000 + 480_000);

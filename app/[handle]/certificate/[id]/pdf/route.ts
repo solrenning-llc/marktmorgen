@@ -5,8 +5,10 @@ import { CERT_ID_PATTERN, readCertificate } from "@/lib/certificate";
 import { canDraw, certificatePdf } from "@/lib/certificate-pdf";
 import { speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
+import { parseLanguage } from "@/lib/store-language";
 import { SITE_URL } from "@/lib/site-url";
 import { readCourseListing } from "@/lib/catalog";
+import { monogram } from "@/lib/store-app";
 import { readCourse } from "@/lib/course";
 
 /**
@@ -47,10 +49,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     certifies: w.certifies,
     hasCompleted: w.hasCompleted,
     taughtBy: w.taughtBy(certificate.creator, said.date(certificate.issuedAt * 1000)),
-    idLine: sample ? w.sampleId : w.certId(certificate.id),
+    // A certificate that expires says until when, on the file too (639 [GL7](32)).
+    idLine: sample ? w.sampleId : certificate.validUntil ? `${w.certId(certificate.id)} · ${w.validUntil(said.date(certificate.validUntil * 1000))}` : w.certId(certificate.id),
     checkLine: sample ? w.sampleCheck : w.checkAt(`${SITE_URL}${page}`.replace(/^https?:\/\//, "")),
     stamp: sample ? w.stampSample : "",
     accent: store.look.accent,
+    // What a screen reader reads the file in: the store's language.
+    lang: parseLanguage(store.language),
+    // In the store's own look: its letters, its backdrop and its initial (630 [HN6](8), unit 2).
+    look: { font: store.look.font, backdrop: store.look.backdrop },
+    monogram: monogram(store),
   });
   const file = `${certificate.title}-${certificate.name}`.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 80) || "certificate";
   return new Response(new Uint8Array(bytes), {

@@ -27,6 +27,7 @@
  * is the standard way to do it and the only one that survives the two days a
  * year the clocks move.
  */
+import { type CallPlace, parsePlace } from "@/lib/call-place";
 
 /** Call lengths a creator may pick, in minutes. */
 export const CALL_LENGTHS = [15, 20, 30, 45, 60, 90, 120] as const;
@@ -118,7 +119,66 @@ export type CallSetup = {
   seats: number;
   /** The dated sessions, soonest first. Empty for weekly hours. */
   sessions: LiveSession[];
+  /**
+   * In person, at this address (lib/call-place.ts; 520 [LB1], unit 2): then
+   * there is no meeting at all, so the link, the video room and the meeting
+   * above are always off. Absent for every setup that is a call, which is
+   * every setup saved before it existed.
+   */
+  place?: CallPlace;
+  /**
+   * In person only: the part of the price paid on the site, in the store
+   * currency's smallest unit; the rest is paid in person (lib/call-deposit.ts,
+   * 520 [LB1] unit 5a). Checked against the price where it is saved and again
+   * when paying. Absent for every setup without one.
+   */
+  deposit?: number;
+  /**
+   * The creator's cancellation deadline, in hours before the start (520
+   * [LB1], unit 7a; one of CANCEL_HOURS): cancelled at least this long
+   * before, what was paid online is refunded; later, or not coming, it is
+   * not. Said before paying, on Stripe's page and in the confirmation.
+   * Absent: no deadline is said, and a cancellation is between the buyer
+   * and the creator, as before.
+   */
+  cancelHours?: number;
+  /**
+   * Several lengths, each with its own price (637 [GL5]; lib/call-lengths.ts
+   * has the rules): two to MAX_SETUP_LENGTHS, shortest first, the first
+   * being this setup's own `minutes` at the product's own price. Weekly
+   * hours with one person a time only. Absent for one length, which is
+   * every setup saved before it existed: then `minutes` and the product's
+   * price are the only length and price.
+   */
+  lengths?: { minutes: number; cents: number }[];
 };
+
+/** The most lengths one call may offer (lib/call-lengths.ts, MAX_CALL_LENGTHS, holds the same). */
+export const MAX_SETUP_LENGTHS = 3;
+
+/** The cancellation deadlines a creator may set, in hours before the start. */
+export const CANCEL_HOURS = [2, 12, 24, 48, 72] as const;
+
+/**
+ * The deadline a buyer was promised when paying, as the sale keeps it
+ * (lib/calls.ts, callCheckoutBody: metadata cancel_hours, and cancel_late
+ * when the time was already inside it). Read from the sale, never from the
+ * product as it is now, so a deadline changed later never changes a promise.
+ */
+export type CancelPromise = { hours: number; late: boolean };
+
+export function readCancelPromise(meta: Record<string, string | undefined> | null | undefined): CancelPromise | null {
+  const raw = meta?.cancel_hours;
+  if (typeof raw !== "string" || !/^[1-9]\d{0,2}$/.test(raw)) return null;
+  const hours = Number(raw);
+  return (CANCEL_HOURS as readonly number[]).includes(hours) ? { hours, late: meta?.cancel_late === "1" } : null;
+}
+
+/** A cancellation deadline as sent: none is null; anything not in CANCEL_HOURS refuses the setup. */
+function readCancel(raw: unknown): number | null | "cancel" {
+  if (raw === undefined || raw === null || raw === 0) return null;
+  return typeof raw === "number" && (CANCEL_HOURS as readonly number[]).includes(raw) ? raw : "cancel";
+}
 
 export const MAX_ROOM_LENGTH = 500;
 
@@ -165,6 +225,10 @@ export type SetupProblem =
   | "horizon"
   | "buffer"
   | "room"
+  | "place"
+  | "deposit"
+  | "cancel"
+  | "lengths"
   | "seats"
   | "sessions"
   | "session_time"
@@ -185,7 +249,7 @@ export function newSessionId(): string {
  * with the same daylight-saving rules as everything else; storage sends the
  * instant itself.
  */
-function readSession(raw: unknown, tz: string): LiveSession | SetupProblem {
+function readSession(raw: unknown, tz: string, inPersonHere = false): LiveSession | SetupProblem {
   if (!raw || typeof raw !== "object") return "sessions";
   const value = raw as Record<string, unknown>;
   let start: number | null = null;
@@ -204,7 +268,8 @@ function readSession(raw: unknown, tz: string): LiveSession | SetupProblem {
   if (!(SESSION_LENGTHS as readonly number[]).includes(minutes)) return "session_time";
   const seats = Number(value.seats);
   if (!Number.isInteger(seats) || seats < 1 || seats > MAX_SESSION_SEATS) return "session_seats";
-  const room = cleanRoom(value.room);
+  // In person (lib/call-place.ts): no link, so one left over in the form is not read at all.
+  const room = inPersonHere ? null : cleanRoom(value.room);
   if (room === "bad") return "session_room";
   const id = typeof value.id === "string" && SESSION_ID.test(value.id) ? value.id : newSessionId();
   return { id, start, minutes, seats, room };
@@ -222,9 +287,11 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     if (!Array.isArray(value.sessions) || value.sessions.length === 0 || value.sessions.length > MAX_SESSIONS) {
       return "sessions";
     }
+    const livePlace = parsePlace(value.place);
+    if (!livePlace.ok) return "place";
     const sessions: LiveSession[] = [];
     for (const item of value.sessions) {
-      const read = readSession(item, value.tz as string);
+      const read = readSession(item, value.tz as string, livePlace.place !== null);
       if (typeof read === "string") return read;
       sessions.push(read);
     }
@@ -236,6 +303,12 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     }
     const ids = new Set(sessions.map((s) => s.id));
     if (ids.size !== sessions.length) return "sessions";
+    const liveDeposit = readDepositShape(value.deposit, livePlace.place !== null);
+    if (liveDeposit === "deposit") return "deposit";
+    const liveCancel = readCancel(value.cancelHours);
+    if (liveCancel === "cancel") return "cancel";
+    const liveRules = liveCancel ? { cancelHours: liveCancel } : {};
+    if (livePlace.place) return { ...inPerson(sessions), tz: value.tz as string, noticeHours, minutes: sessions[0].minutes, place: livePlace.place, ...(liveDeposit ? { deposit: liveDeposit } : {}), ...liveRules };
     return {
       kind: "live",
       minutes: sessions[0].minutes,
@@ -249,6 +322,7 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
       meet: isMeetProvider(value.meet) ? value.meet : null,
       seats: 1,
       sessions,
+      ...liveRules,
     };
   }
 
@@ -284,12 +358,21 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
   }
   if (!any) return "weekly";
 
-  const room = cleanRoom(value.room);
+  const place = parsePlace(value.place);
+  if (!place.ok) return "place";
+  // In person: no link, so one left over in the form is not read at all.
+  const room = place.place ? null : cleanRoom(value.room);
   if (room === "bad") return "room";
+  const deposit = readDepositShape(value.deposit, place.place !== null);
+  if (deposit === "deposit") return "deposit";
+  const cancelHours = readCancel(value.cancelHours);
+  if (cancelHours === "cancel") return "cancel";
 
   // A setup saved before group calls existed is a one-to-one call.
   const seats = Number(value.seats ?? 1);
   if (!Number.isInteger(seats) || seats < 1 || seats > MAX_SEATS) return "seats";
+  const lengths = readLengthsShape(value.lengths, { minutes, seats, weekly, deposit });
+  if (lengths === "lengths") return "lengths";
 
   return {
     kind: "weekly",
@@ -299,12 +382,69 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     noticeHours,
     horizonDays,
     bufferMinutes,
-    room,
-    video: value.video === true,
-    meet: isMeetProvider(value.meet) ? value.meet : null,
+    // In person: no link, no video room, no meeting (lib/call-place.ts).
+    room: place.place ? null : room,
+    video: place.place ? false : value.video === true,
+    meet: place.place ? null : isMeetProvider(value.meet) ? value.meet : null,
     seats,
     sessions: [],
+    ...(place.place ? { place: place.place } : {}),
+    ...(deposit ? { deposit } : {}),
+    ...(cancelHours ? { cancelHours } : {}),
+    ...(lengths ? { lengths } : {}),
   };
+}
+
+/**
+ * Several lengths' shape, as kept (lib/call-lengths.ts, readCallLengths,
+ * reads what the editor sends, with the store's currency and the product's
+ * package and team): absent, empty or one length is none; otherwise two to
+ * MAX_SETUP_LENGTHS lengths a call may have, shortest first, none twice,
+ * the first being the setup's own, each fitting in one stretch of the hours,
+ * each with a whole positive price above any deposit. One person a time
+ * only. Anything else refuses the setup, so nothing read from storage can
+ * charge a length the rules never let through.
+ */
+function readLengthsShape(
+  raw: unknown,
+  setup: { minutes: number; seats: number; weekly: Range[][]; deposit: number | null },
+): { minutes: number; cents: number }[] | null | "lengths" {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) return "lengths";
+  if (raw.length <= 1) return raw.length === 1 && !sameLength(raw[0], setup.minutes) ? "lengths" : null;
+  if (raw.length > MAX_SETUP_LENGTHS || setup.seats !== 1) return "lengths";
+  const lengths: { minutes: number; cents: number }[] = [];
+  for (const item of raw) {
+    const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    const { minutes, cents } = row;
+    if (typeof minutes !== "number" || !(CALL_LENGTHS as readonly number[]).includes(minutes)) return "lengths";
+    if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents <= 0) return "lengths";
+    if (lengths.length && minutes <= lengths[lengths.length - 1].minutes) return "lengths";
+    if (!setup.weekly.some((day) => day.some(([from, to]) => to - from >= minutes))) return "lengths";
+    if (setup.deposit !== null && setup.deposit >= cents) return "lengths";
+    lengths.push({ minutes, cents });
+  }
+  return lengths[0].minutes === setup.minutes ? lengths : "lengths";
+}
+
+const sameLength = (row: unknown, minutes: number) =>
+  Boolean(row && typeof row === "object" && (row as Record<string, unknown>).minutes === minutes);
+
+/**
+ * A deposit's shape, before the price is known (lib/call-deposit.ts checks it
+ * against the price): a whole positive amount, only in person. None is null;
+ * a deposit on a call, or one that is not a whole amount, refuses the setup.
+ */
+function readDepositShape(raw: unknown, inPersonHere: boolean): number | null | "deposit" {
+  if (raw === undefined || raw === null || raw === 0) return null;
+  const cents = typeof raw === "number" ? raw : Number.NaN;
+  if (!Number.isSafeInteger(cents) || cents <= 0 || !inPersonHere) return "deposit";
+  return cents;
+}
+
+/** Dated sessions held in person: no link, no video room, no meeting, for any of them. */
+function inPerson(sessions: LiveSession[]): Omit<CallSetup, "tz" | "noticeHours" | "minutes"> {
+  return { kind: "live", weekly: [[], [], [], [], [], [], []], horizonDays: 30, bufferMinutes: 0, room: null, video: false, meet: null, seats: 1, sessions };
 }
 
 /** Whatever came back from storage, made safe to use, or null. */

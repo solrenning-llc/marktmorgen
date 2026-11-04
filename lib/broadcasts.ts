@@ -30,6 +30,7 @@ import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest,
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
 import { type Narrow, isNarrowed, keepFor, readNarrow } from "@/lib/segments";
+import { sameNarrow } from "@/lib/segments-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
 
@@ -174,7 +175,7 @@ function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadc
     if (typeof value.narrow !== "object" || Array.isArray(value.narrow)) throw new Error("Invalid campaign audience");
     const narrow = value.narrow as Record<string, unknown>;
     const normalized = readNarrow(narrow);
-    if (narrow.minSpent !== normalized.minSpent || narrow.channel !== normalized.channel || narrow.quietDays !== normalized.quietDays) throw new Error("Invalid campaign audience fields");
+    if (!sameNarrow(narrow, normalized)) throw new Error("Invalid campaign audience fields");
   }
   return b;
 }

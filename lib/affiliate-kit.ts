@@ -33,14 +33,18 @@ const monthKey = (store: Store, now: Date): string | null => {
   return window ? `nl:affkit:${store.statsId}:${window}` : null;
 };
 
-/** A product an affiliate earns on: paid, sold once, on the store, and not left out at 0% for them. */
+/**
+ * A product an affiliate earns on: paid, on the store, and not left out at 0%
+ * for them; sold once (paid in full, also when a payment plan is offered), or
+ * a membership when the store credits memberships (397 [SL1], as the
+ * affiliate directory lists them).
+ */
 export function kitProduct(store: Store, affiliate: Affiliate, listing: Listing | null): listing is Listing {
   return Boolean(
     listing &&
       listing.priceCents > 0 &&
       !listing.hidden &&
-      !listing.recurring &&
-      !listing.plan &&
+      (!listing.recurring || store.affiliates.recurring > 0) &&
       commissionRate(store.affiliates, listing.id, affiliate.rate) > 0,
   );
 }

@@ -182,7 +182,7 @@ async function tellOwner(store: Store, email: string): Promise<void> {
     text: [
       `${email} asked, through the link we emailed them, to be deleted from ${store.name}, and it is done.`,
       "",
-      "Deleted: their place on your list, your fields, notes and deals about them, their form answers, workflow history, course progress, community record, reviews, waitlist places and inbox conversations. Your store will not email them again; only they can change that, by joining your list again themselves.",
+      "Deleted: their place on your list, your fields, notes and deals about them, your team's tasks about them, their form answers, workflow history, course progress, community record, reviews, waitlist places and inbox conversations. Your store will not email them again; only they can change that, by joining your list again themselves.",
       "",
       "Not deleted yet: posts and comments they wrote in your community stay, shown without their name. Delete them from the community if they ask.",
       "",

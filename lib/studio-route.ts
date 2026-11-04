@@ -33,7 +33,8 @@ import { redirect } from "next/navigation";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite as crossSite } from "@/lib/request-guard";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
-import { LOCKED_NEEDS, lockedUntil } from "@/lib/two-step";
+import { LOCKED_MESSAGE } from "@/lib/locked-words";
+import { lockedOut, lockedUntil } from "@/lib/two-step";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
@@ -173,7 +174,7 @@ export async function studioAccess(
   const email = await emailForSession(session);
   if (!email) return { ok: false, reason: "signed_out" };
   // Let in without the second step: what moves money or data out waits (lib/two-step.ts).
-  if (LOCKED_NEEDS.includes(need) && (await lockedUntil(session)) > 0) return { ok: false, reason: "locked" };
+  if (lockedOut(need, action) && (await lockedUntil(session)) > 0) return { ok: false, reason: "locked" };
   const result = await resolveAccess(
     email,
     { pinned: pinnedStore(request), remembered: request.cookies.get(STORE_COOKIE)?.value ?? null },
@@ -244,7 +245,7 @@ export function refusedJson(reason: Refusal, message = ""): Response {
     case "gone":
       return Response.json({ ok: false, error: "store_gone" }, { status: 409 });
     case "locked":
-      return Response.json({ ok: false, error: "locked" }, { status: 403 });
+      return Response.json({ ok: false, error: "locked", message: LOCKED_MESSAGE }, { status: 403 });
     case "two_step":
       return Response.json({ ok: false, error: "two_step_required" }, { status: 403 });
   }

@@ -78,7 +78,8 @@ const DECLINED = new Set(["INSTRUMENT_DECLINED", "PAYER_ACTION_REQUIRED", "ORDER
 const ownKey = (statsId: string, email: string, productId: string) => `nl:ppsell:own:${statsId}:${addressHash(email)}:${productId}`;
 /** Every paid order, scored by when it was paid, and those refunded in full: what the store's numbers read. */
 const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
-const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
+/** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
+export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
 const SALES_KEPT_SECONDS = 400 * 86_400;
 
 type Partner = { client: string; secret: string; merchant: string; bn: string };

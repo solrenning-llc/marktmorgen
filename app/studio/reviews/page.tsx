@@ -14,7 +14,7 @@ import { ReviewAskEditor, ReviewRow, SeenAllButton, type StudioReview } from "@/
 import { ReviewQr } from "@/components/review-qr";
 import { ReviewThemes } from "@/components/review-themes";
 import { ReviewAiSummaries } from "@/components/review-ai-summaries";
-import { readReviewSummary } from "@/lib/review-ai-summary";
+import { readReviewSummaries } from "@/lib/review-ai-summary";
 import { readVoice } from "@/lib/customer-voice";
 import { canRecover } from "@/lib/buyer-orders";
 import { storeBase } from "@/lib/purchase-email";
@@ -89,10 +89,11 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   }));
   const pages = Math.max(1, Math.ceil(current.total / PAGE_SIZE));
   const reviewed = named.filter((p) => (numbers.get(p.id)?.visible ?? 0) + (numbers.get(p.id)?.hidden ?? 0) > 0);
-  // Each reviewed product's AI summary kept this week (636 [GL4](d)): read only, nothing made by opening the page.
-  const aiSummaries = await Promise.all(
-    reviewed.slice(0, 30).map(async (p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: await readReviewSummary(store.statsId, p.id).catch(() => null) })),
-  );
+  // Each reviewed product's AI summary kept this week (636 [GL4](d)): read only, nothing made by opening the page,
+  // every product's in one request.
+  const summed = reviewed.slice(0, 30);
+  const keptSummaries = await readReviewSummaries(store.statsId, summed.map((p) => p.id)).catch(() => new Map<string, never>());
+  const aiSummaries = summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
   const tab = (view: "new" | "all", label: string) => (
     <Link
       href={studioPath(store, view === "new" ? "" : "view=all", "reviews")}

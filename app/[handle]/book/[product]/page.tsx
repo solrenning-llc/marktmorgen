@@ -12,6 +12,7 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { bookingLength, offeredLengths, ownLength } from "@/lib/call-lengths";
+import { slotWords } from "@/lib/slot-words";
 import { type CallListing, canMove, catchUpBookings, icsLink, isCallProduct, slotsForMove, slotsForProduct, whyNotMove } from "@/lib/calls";
 import { chargeNow } from "@/lib/call-deposit";
 import { type CallSetup, MAX_MOVES, MEET_NAMES, movableUntil, readableTime, zoneName } from "@/lib/call-setup";
@@ -19,12 +20,12 @@ import { isVideoRoom, roomLabel, roomOf } from "@/lib/call-rooms";
 import { readOrder } from "@/lib/store-checkout";
 import { SITE_URL } from "@/lib/site-url";
 import { imageUrl } from "@/lib/product-image";
-import { SlotPicker, type SlotWords } from "@/components/slot-picker";
+import { SlotPicker } from "@/components/slot-picker";
 import { type SessionChoice, SessionPicker, type SessionWords } from "@/components/session-picker";
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
-import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
+import { type BookingWords, bookingNotice, bookingWords } from "@/lib/buyer-words/booking";
 import { NewTab } from "@/components/new-tab";
 
 type Params = {
@@ -61,7 +62,6 @@ export default async function BookPage({ params, searchParams }: Params) {
 
   const { w, money, lang } = speech(store);
   const b = bookingWords(store.language);
-  const notice = b.notices[status] ?? null;
   // Booking from a package (lib/call-packages.ts): how many are left, said up top.
   const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
@@ -92,6 +92,8 @@ export default async function BookPage({ params, searchParams }: Params) {
     return `?${next.toString()}#times`;
   };
   const chosen = choices.length ? askedLength ?? choices[0] : null;
+  // A length taken off meanwhile asks for a length again only while the page still offers several (bookingNotice).
+  const notice = bookingNotice(b, status, choices, product.call.minutes);
   const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
   const starts = days ? days.flatMap((day) => day.starts) : [];
@@ -251,23 +253,6 @@ export default async function BookPage({ params, searchParams }: Params) {
 function movesAt(setup: CallListing["call"], booking: { start: number; end: number }): number {
   const kept = ownLength(setup, booking.end - booking.start);
   return typeof kept === "number" ? kept : setup.minutes;
-}
-
-/** What the time picker says, for this page, in the store's language. */
-function slotWords(store: Store, b: BookingWords, minutes: number, price: string, move: boolean, fromPackage: boolean): SlotWords {
-  const { w, lang } = speech(store);
-  return {
-    locale: lang.locale,
-    pickDay: b.pickDay,
-    pickTime: w.pickTime,
-    noneTitle: move ? b.noOtherTimes : b.noTimes,
-    noneBody: move ? b.noOtherTimesBody : b.noTimesBody,
-    yours: b.timesInYours("{zone}"),
-    creators: b.timesInCreators("{zone}"),
-    chosen: b.chosenLength(minutes),
-    submit: move ? b.moveToTime : fromPackage ? b.bookFromPackage : b.continueToPay(price),
-    note: move ? b.moveNoCharge : fromPackage ? b.packageNoCharge : b.timeKept,
-  };
 }
 
 /** What the session picker says, for this page, in the store's language. */

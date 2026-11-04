@@ -37,11 +37,9 @@ import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { deliversDigitally } from "@/lib/digital-consent";
-import { type StripeChecks, heldCheckout, holdCookieValue, releaseCartStockHolds, shownOnly, stockLeft, stockReading, withCartStockHolds } from "@/lib/stock";
+import { HOLD_COOKIE_PATH, type ReleaseOutcome, type StripeChecks, heldCheckouts, holdCookieNames, holdCookieValue, releaseCartStockHolds, releaseStockHold, shownOnly, stockLeft, stockReading, withCartStockHolds } from "@/lib/stock";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 
-/** The cart's checkout last opened in this browser, whose held units are handed back when it pays for a cart again (lib/stock.ts). */
-const CART_HOLD_COOKIE = "nl_cart_hold";
 
 /**
  * What a cart holds, as the store has it now (`GET ?handle=&ids=a,b`): each
@@ -65,7 +63,8 @@ export async function GET(request: NextRequest) {
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
   // The unit this browser holds with the cart's checkout it last opened is its own (the signed cookie it was given then):
   // a buyer back from Stripe is not told it is sold out. Paying again closes that checkout before holding anew.
-  const hold = heldCheckout(store, request.cookies.get(CART_HOLD_COOKIE)?.value) ?? undefined;
+  // Its cart's checkout and a product's bought alone, from the store's two signed cookies (lib/stock.ts, heldCheckouts).
+  const hold = heldCheckouts(store, (name) => request.cookies.get(name)?.value).mine;
   // Only shown: Stripe is never asked here (lib/stock.ts, shownOnly), so the open cart never waits on it. A hold that ran
   // out and is not settled yet is counted as used, and its product said not available right now, never sold out; the
   // store's and the product's pages settle it, and the checkout does under its locks.
@@ -340,9 +339,12 @@ export async function POST(request: NextRequest) {
     const offerFrom = await cartOfferOwner(store, products).catch(() => null);
     const upsell = offerFrom ? newUpsellKey() : null;
     // A buyer who went back from Stripe's page hands back the units that checkout held before holding them again (lib/stock.ts).
-    // Only a checkout named by the signed cookie this route gave (heldCheckout), so nobody can close another person's.
-    const previous = heldCheckout(store, request.cookies.get(CART_HOLD_COOKIE)?.value);
-    if (previous) await releaseCartStockHolds(store, products, previous).catch(() => {});
+    // Only checkouts named by the store's signed cookies (lib/stock.ts, heldCheckouts), so nobody can close another person's:
+    // the cart's last checkout, and one of a product bought alone that is in this cart.
+    const cookies = heldCheckouts(store, (name) => request.cookies.get(name)?.value);
+    const previous = cookies.cart;
+    const released: ReleaseOutcome = previous ? await releaseCartStockHolds(store, products, previous).catch(() => "kept" as const) : "kept";
+    if (cookies.product) for (const product of products) await releaseStockHold(store, product, cookies.product).catch(() => {});
     // One unit of each limited product held for this checkout, or nothing opened (lib/stock.ts, withCartStockHolds).
     const holding = await withCartStockHolds(store, products, async (held) => createCartCheckout(store, products, linkOrigin(request, store), {
       held,
@@ -360,7 +362,8 @@ export async function POST(request: NextRequest) {
     if (!holding.ok) {
       const back = away(`/@${store.handle}?cart=${holding.reason === "soldout" ? "changed" : "error"}#cart`);
       // Sold out: the old checkout holds nothing of this cart any more (paid, or let go), so its cookie goes too.
-      if (holding.reason === "soldout" && previous) back.headers.append("Set-Cookie", `${CART_HOLD_COOKIE}=; Path=/api/store/cart; Max-Age=0; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
+      // Only once that checkout is known closed or paid: one Stripe did not answer about may still hold a unit of it.
+      if (holding.reason === "soldout" && previous && released !== "kept") back.headers.append("Set-Cookie", `${holdCookieNames(store).cart}=; Path=${HOLD_COOKIE_PATH}; Max-Age=0; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
       return back;
     }
     const opened = holding.value;
@@ -371,7 +374,7 @@ export async function POST(request: NextRequest) {
     if (upsell) headers.append("Set-Cookie", `${UPSELL_COOKIE}=${upsell.secret}; Path=/; Max-Age=7200; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
     const signed = products.some((product) => product.stock !== null) ? holdCookieValue(store, opened.id) : null;
     if (signed) {
-      headers.append("Set-Cookie", `${CART_HOLD_COOKIE}=${signed}; Path=/api/store/cart; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
+      headers.append("Set-Cookie", `${holdCookieNames(store).cart}=${signed}; Path=${HOLD_COOKIE_PATH}; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
     }
     return new Response(null, { status: 303, headers });
   } catch (error) {

@@ -3,6 +3,7 @@
 import { useHydrated } from "@/components/use-hydrated";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/toast";
+import { FaqFromInbox } from "@/components/faq-from-inbox";
 import {
   type Conversation,
   type InboxSetting,
@@ -72,6 +73,7 @@ export function InboxStudio({
   canSettings,
   chatBlock,
   readAt,
+  faq = null,
 }: {
   me: string;
   initial: Conversation[];
@@ -80,6 +82,8 @@ export function InboxStudio({
   setting: InboxSetting;
   ai: { on: boolean; left: number };
   canSettings: boolean;
+  /** For whoever may edit the store page: how many more questions it can show, and the studio home where they are edited (630 [HN6](32)). */
+  faq?: { room: number; href: string } | null;
   /** Why the chat cannot be turned on: "demo" for the demo store, "setup" for a store not ready yet, "" when it can. */
   chatBlock: "" | "demo" | "setup";
   /** When the server read the conversations on the page, in milliseconds: the first "checked at" said. */
@@ -360,6 +364,7 @@ export function InboxStudio({
                   answers and this conversation; their address, phone numbers and links are taken out before it is written.
                 </p>
               </form>
+              {faq ? <FaqFromInbox key={`${c.id}-${thread.messages.length}`} messages={thread.messages} name={c.name} room={faq.room} studioHref={faq.href} /> : null}
             </>
           ) : (
             <p className="text-ink-soft">Choose a conversation to read and answer it.</p>

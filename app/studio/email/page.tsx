@@ -1,3 +1,5 @@
+import { agreementsAllowed } from "@/lib/agreement-rules";
+import { requestsOpen } from "@/lib/payment-requests";
 import { randomBytes } from "node:crypto";
 import { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";
 import { storeBase } from "@/lib/purchase-email";
@@ -287,12 +289,17 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             segments={await listSegments(store.listId).catch(() => [])}
             preset={typeof query.who === "string" && (WHO as readonly string[]).includes(query.who) ? { who: query.who as Who } : undefined}
             courses={idsOfKind(store, "course")}
+            calls={idsOfKind(store, "call")}
             paidProducts={idsOfKind(store, "paid")}
             automation={{
               forms: (await readForms(store.statsId).catch(() => [])).filter((f) => f.fields.some((x) => x.type === "email")).map((f) => ({ id: f.id, name: f.name, outcomes: f.outcomes.map((o) => ({ id: o.id, title: o.title })) })),
               fields: (await readFields(store.statsId).catch(() => [])).map((f) => ({ id: f.id, name: f.name, type: f.type, options: f.options })),
               // Each stage named with its pipeline once there is more than one (lib/crm-rules.ts).
               stages: labeledStages(await readPipelines(store.statsId).catch(() => [])).map((st) => ({ id: st.id, name: st.name })),
+              // Whether the plan has proposals and agreements, so a sequence may start when one is signed (635 [GL3]).
+              signing: agreementsAllowed(store),
+              // Whether the store can take payment requests now (lib/payment-requests.ts), so a sequence may start when one is paid.
+              requests: requestsOpen(store),
             }}
             workflowLimits={{
               maxActive: activeFlowLimit(store),

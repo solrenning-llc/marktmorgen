@@ -5,7 +5,12 @@ import concurrent.futures
 import os
 from pathlib import Path
 import re
+import json
+import subprocess
+import tempfile
+import threading
 import uuid
+from http.server import ThreadingHTTPServer
 from test_form_opportunity_redis import Redis
 
 
@@ -15,6 +20,138 @@ def script(path, name):
     if not match or "${" in match.group(1):
         raise RuntimeError("Expected static application script " + name)
     return match.group(1)
+
+
+def tax_observations(root):
+    """Actual TypeScript caller + composed Lua + real disposable Redis.
+
+    Quotes, records and evidence here are synthetic, never a production policy.
+    The HTTP fixture forwards commands once; a lost reply is not a Lua mock.
+    """
+    import test_self_hosted_redis_http as http_fixture
+    # Extend only this local fixture instance; it still reaches loopback:16379.
+    original_allowed = http_fixture.ALLOWED.copy()
+    http_fixture.ALLOWED.update({"DEL", "TYPE", "PEXPIRETIME", "INFO"})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), http_fixture.Fixture)
+    server.daemon_threads = True
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    prefix = "synthetic-tax-" + uuid.uuid4().hex
+    source = r'''
+import assert from "node:assert/strict";
+import { observeCheckoutTaxPage, CURRENT_TAX_OBSERVATION_POLICY } from "@/lib/checkout-sweep";
+import { redisPipeline } from "@/lib/redis";
+import { dataKey } from "@/lib/store-data";
+async function main(){
+const now=Date.now(), expiry=now+120_000;
+const store={sid:process.env.TAX_FIXTURE_ID, statsId:"synthetic", handle:"synthetic-tax",tier:"creator",stripeAccountId:"acct_fixtureTax",subscriptionActive:true,subscriptionId:"sub_SyntheticTax0001",trialEnds:0,planEndedAt:""} as any;
+const policy={schema:1,purpose:"incomplete-checkout-observations",reviewId:"synthetic-not-approval",storeSid:store.sid,stripeAccountId:store.stripeAccountId,scopeEvidence:"Synthetic scope",retentionEvidence:"Synthetic two minutes",storageEvidence:"Synthetic bounded document",costEvidence:"Synthetic quotes, not real funding",reviewedAtMs:now,expiresAtMs:expiry,maxEntries:10,maxRecordBytes:512,maxDocumentBytes:16384,maxRetainedBytes:32768,storageMicroUsdPerGiBMonth:250000,retentionCostCeilingMicroUsd:100,commandMicroUsdPerMillion:2000000,transferMicroUsdPerGiB:1000000,maxChargedCommandsPerPass:720,maxTransferredBytesPerPass:1048576,computeCeilingMicroUsdPerPass:100,ioCostCeilingMicroUsdPerPass:10000};
+const row=(n:number,amount=100)=>({id:"cs_test_SyntheticTax"+String(n).padStart(8,"0"),payment_status:"paid",created:Math.floor(now/1000),currency:"usd",amount_total:amount,metadata:{store:store.handle},customer_details:{email:"never-kept@example.test",address:{country:"CA",state:"ON",line1:"never-kept"}}});
+const room=dataKey(store)!; const keys=new Set<string>([room]);
+const original=globalThis.fetch; let loseAck=false, sent=0, journal="", journalRequestBytes=0;
+globalThis.fetch=(async(input:any,init:any)=>{
+ const url=new URL(String(input)); assert.equal(url.origin,new URL(process.env.UPSTASH_REDIS_REST_URL!).origin);
+ const commands=JSON.parse(String(init.body));
+ for(const c of commands) if(c[0]==="EVAL"&&String(c[1]).startsWith("-- marktmorgen:tax-observations:v1")){
+  sent++; journalRequestBytes+=Buffer.byteLength(String(init.body)); journal=String(c[3]); keys.add(journal);
+  if(loseAck){loseAck=false;init={...init,headers:{...init.headers,"X-Fixture-Lose-Ack":"1"}};}
+ }
+ return original(input,init);
+}) as typeof fetch;
+const one=async(c:any[]) => (await redisPipeline([c]))[0];
+const observed=async(rows:any[],p:any=policy)=>observeCheckoutTaxPage(store,rows,p,now);
+const missing=async()=>assert.equal(await one(["GET",journal]),null);
+try {
+ assert.equal(CURRENT_TAX_OBSERVATION_POLICY,null);
+ assert.equal((await observeCheckoutTaxPage(store,[row(1)])).state,"not-recorded"); assert.equal(sent,0);
+ await one(["HSET",room,"#",0]);
+ const raced=await Promise.all(Array.from({length:16},()=>observed([row(1)])));
+ assert.equal(raced.filter(r=>r.reason==="confirmed").length,1);
+ assert.equal(raced.filter(r=>r.reason==="duplicate").length,15);
+ assert.ok(raced.every(r=>r.legalCoverage==="incomplete"&&r.entries===1));
+ const charged=Number(await one(["HGET",room,"#"])); assert.equal(charged,32768+64);
+ const raw=String(await one(["GET",journal])); const doc=JSON.parse(raw);
+ assert.equal(doc.bytes,Buffer.byteLength(raw));assert.equal(doc.order.length,1);
+ assert.equal(await one(["PEXPIRETIME",journal]),expiry);
+ assert.ok(!raw.includes("never-kept"));
+ assert.deepEqual(JSON.parse(Object.values(doc.rows)[0] as string),{checkoutCreatedAt:Math.floor(now/1000),country:"CA",state:"ON",currency:"USD",amountTotalMinor:100,supplyOn:null,applicable:null});
+ assert.equal((await observed([row(1,999)])).state,"unknown");assert.equal(await one(["GET",journal]),raw);
+ assert.equal(Number(await one(["HGET",room,"#"])),charged);
+ loseAck=true; assert.equal((await observed([row(2)])).state,"unknown");
+ const afterLost=Number(await one(["HGET",room,"#"])); assert.equal(afterLost,charged+32768);
+ const lostRaw=String(await one(["GET",journal])); assert.equal(JSON.parse(lostRaw).order.length,2);
+ assert.equal(await one(["PEXPIRETIME",journal]),expiry);
+ assert.equal((await observed([row(2)])).reason,"duplicate");assert.equal(Number(await one(["HGET",room,"#"])),afterLost);
+ const capped=await Promise.all(Array.from({length:16},(_,i)=>observed([row(i+3)])));
+ assert.equal(capped.filter(r=>r.state==="recorded").length,8);
+ assert.equal(JSON.parse(String(await one(["GET",journal]))).order.length,10);
+ assert.equal(Number(await one(["HGET",room,"#"])),10*32768+64);
+ await one(["DEL",journal]); await one(["HSET",journal,"bad",1]);
+ assert.equal((await observed([row(3)])).state,"unknown");assert.equal(await one(["TYPE",journal]),"hash");
+ await one(["DEL",journal,room]);await one(["SET",room,"wrong"]);
+ assert.equal((await observed([row(3)])).state,"unknown");await missing();
+ await one(["DEL",room]);await one(["HSET",room,"#","unreadable"]);
+ assert.equal((await observed([row(3)])).state,"unknown");await missing();
+ await one(["DEL",room]);await one(["HSET",room,"#",0,"~","2026-10,2026-10","~2026-10",1]);
+ assert.equal((await observed([row(3)])).state,"unknown");await missing();
+ await one(["DEL",room]);await one(["HSET",room,"#",0]);
+ // No expiry, corrupted bytes or extra fields never becomes an acknowledged journal.
+ for(const value of [raw,"{}",JSON.stringify({...doc,unexpected:true})]){
+  await one(["SET",journal,value]);assert.equal((await observed([row(3)])).state,"unknown");
+  assert.equal(await one(["GET",journal]),value);assert.equal(Number(await one(["HGET",room,"#"])),0);
+ }
+ await one(["DEL",journal]);
+ const before=sent;
+ for(const bad of [{...policy,expiresAtMs:now+86400001},{...policy,retentionCostCeilingMicroUsd:0},{...policy,maxRetainedBytes:1}])assert.equal((await observed([row(3)],bad)).state,"not-recorded");
+ assert.equal(sent,before);await missing();
+ // Maximum three pages, a full month list and the largest document ceiling.
+ // INFO commandstats includes commands invoked inside the actual Lua; the
+ // extra INFO itself errs upward. This proves bounds, not real paid quotes.
+ await one(["DEL",room]);
+ const months=Array.from({length:32},(_,i)=>new Date(Date.UTC(2020,i,1)).toISOString().slice(0,7));
+ await one(["HSET",room,"#",32*65,"~",months.join(","),...months.flatMap(m=>["~"+m,1])]);
+ const wide={...policy,maxEntries:300,maxDocumentBytes:524288,maxRetainedBytes:660000};
+ const commandCount=(text:any)=>[...String(text).matchAll(/^cmdstat_[^:]+:calls=(\d+)/gm)].reduce((sum,m)=>sum+Number(m[1]),0);
+ const commandsBefore=commandCount(await one(["INFO","commandstats"]));const bytesBefore=journalRequestBytes;
+ for(let page=0;page<3;page++)assert.equal((await observed(Array.from({length:100},(_,i)=>row(page*100+i+100)),wide)).state,"recorded");
+ const measuredCommands=commandCount(await one(["INFO","commandstats"]))-commandsBefore;
+ const measuredRequestBytes=journalRequestBytes-bytesBefore;
+ assert.ok(measuredCommands>100&&measuredCommands<=wide.maxChargedCommandsPerPass);
+ assert.ok(measuredRequestBytes+3*1024<wide.maxTransferredBytesPerPass); // replies fit in 1KiB each
+ const full=String(await one(["GET",journal]));
+ assert.equal(JSON.parse(full).order.length,300);assert.equal(JSON.parse(full).bytes,Buffer.byteLength(full));
+ assert.equal(Number(await one(["HGET",room,"#"])),3*660000+64);
+ assert.equal((await observed([row(999)],wide)).state,"unknown");assert.equal(await one(["GET",journal]),full);
+ console.log(`PASS: actual maximum diagnostic pass measured ${measuredCommands} Redis commands and ${measuredRequestBytes} request bytes; full-retention price/funding remain synthetic`);
+ console.log("PASS: actual diagnostic caller + real Redis: concurrency, conflict, absolute expiry, byte accounting, wrong types, missing policy and lost ACK (synthetic facts only)");
+} finally {
+ globalThis.fetch=original;await redisPipeline([["DEL",...keys]]);
+}
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});
+'''
+    try:
+        with tempfile.TemporaryDirectory(prefix="marktmorgen-tax-redis-") as tmp:
+            bundle = str(Path(tmp) / "caller.cjs")
+            build = "import{build}from'esbuild';await build(" + json.dumps({
+                "stdin": {"contents": source, "resolveDir": str(root),
+                          "loader": "ts", "sourcefile": "synthetic-tax-redis.ts"},
+                "bundle": True, "platform": "node", "format": "cjs",
+                "alias": {"@": str(root)}, "outfile": bundle,
+                "logLevel": "error",
+            }) + ");"
+            subprocess.run(["node", "--input-type=module", "-e", build], cwd=root, check=True, timeout=60)
+            env = {"PATH": os.environ["PATH"], "UPSTASH_REDIS_REST_URL":
+                   "http://127.0.0.1:" + str(server.server_address[1]),
+                   "UPSTASH_REDIS_REST_TOKEN": http_fixture.TOKEN,
+                   "TAX_FIXTURE_ID": prefix}
+            subprocess.run(["node", bundle], cwd=root, env=env, check=True, timeout=60)
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+        http_fixture.ALLOWED.clear()
+        http_fixture.ALLOWED.update(original_allowed)
 
 
 def main():
@@ -108,6 +245,7 @@ def main():
     finally:
         redis.command("DEL", count, held, room, holding)
         redis.close()
+    tax_observations(root)
 
 
 if __name__ == "__main__":

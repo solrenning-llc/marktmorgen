@@ -1,5 +1,6 @@
 "use client";
 
+import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
 import { WaitlistPanel } from "@/components/waitlist-panel";
@@ -121,6 +122,7 @@ const PWYW_MESSAGES: Record<string, string> = {
 };
 
 const MESSAGES: Record<string, string> = {
+  outline_left: PRODUCT_OUTLINE_LEFT,
   ...STUDIO_MESSAGES,
   title: "Give it a name before saving.",
   // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
@@ -273,6 +275,10 @@ async function send(
       return wrong(why === "suggested" || !PWYW_MESSAGES[why] ? pwywSuggested(currency) : PWYW_MESSAGES[why]);
     }
     if (data.error === "price") return wrong(productPrice(currency));
+    if (data.error === "outline_left") {
+      const said = data as { left?: unknown; product?: unknown };
+      return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
+    }
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {
@@ -311,6 +317,9 @@ function ProductForm({
   preview?: { look: StoreLook; language: LanguageCode } | null;
 }) {
   const id = product?.id ?? "new";
+  // A ready outline for the description of a new product (487 [IT4], item 5), decided when the form opens: it never comes and goes while typing.
+  const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
+  const aboutField = useRef<HTMLTextAreaElement>(null);
   // The preview starts at a phone's width, where most product pages are read.
   const [phone, setPhone] = useState(true);
   const toggle = (on: boolean) => `inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold ${on ? "bg-white text-ink shadow-sm" : "text-ink-soft"}`;
@@ -449,6 +458,7 @@ function ProductForm({
           The full description <span className="font-normal text-ink-soft">(optional)</span>
         </label>
         <textarea
+          ref={aboutField}
           id={`product-about-${id}`}
           name="about"
           rows={7}
@@ -465,6 +475,38 @@ function ProductForm({
             ? "Reading what you wrote…"
             : `On this product's own page, which the card links to. A blank line starts a new paragraph. ${(MAX_ABOUT_LENGTH - draft.about.length).toLocaleString("en-US")} characters left.`}
         </p>
+        {offerOutline && !loadingAbout ? (
+          <div className="mt-2 rounded-[var(--r-sm)] border border-line bg-white p-3" data-product-outline="">
+            <p id={`product-outline-help-${id}`} className="text-sm text-ink-soft">
+              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace with your own words, including the brackets. This product can&apos;t go on your store until you replace every one.
+            </p>
+            {draft.about.trim() ? (
+              <p className="mt-2 text-sm text-ink-soft">The outline goes only into an empty description. Clear the description to use it.</p>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm mt-2"
+                aria-describedby={`product-outline-help-${id}`}
+                onClick={() => {
+                  // Only into an empty description: nothing typed is replaced.
+                  if (draft.about.trim()) return;
+                  setDraft({ ...draft, about: PRODUCT_OUTLINE });
+                  setOfferOutline(false);
+                  // The button goes with the box: the focus moves to the description, the first part to replace selected.
+                  requestAnimationFrame(() => {
+                    const field = aboutField.current;
+                    if (!field) return;
+                    field.focus();
+                    const start = PRODUCT_OUTLINE.indexOf("[");
+                    field.setSelectionRange(start, PRODUCT_OUTLINE.indexOf("]", start) + 1);
+                  });
+                }}
+              >
+                Start from an outline
+              </button>
+            )}
+          </div>
+        ) : null}
         {loadingAbout ? null : (
           <TermsCheckPanel
             id={id}

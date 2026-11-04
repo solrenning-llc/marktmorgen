@@ -62,10 +62,15 @@ export function lessonBlocks(text: string): LessonBlock[] {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const out: LessonBlock[] = [];
   let outside: string[] = [];
+  // The fewest backticks an opening was found never closed with: no line after it closes as many or more, so a later opening with that many is text at once (each line is searched past at most once per smaller count, never once per opening).
+  let neverClosed = Infinity;
   for (let i = 0; i < lines.length; i += 1) {
     const open = fence(lines[i]);
     let end = -1;
-    if (open) for (let j = i + 1; j < lines.length; j += 1) if (closes(lines[j], open.ticks)) { end = j; break; }
+    if (open && open.ticks < neverClosed) {
+      for (let j = i + 1; j < lines.length; j += 1) if (closes(lines[j], open.ticks)) { end = j; break; }
+      if (end < 0) neverClosed = open.ticks;
+    }
     if (!open || end < 0) {
       outside.push(lines[i]);
       continue;

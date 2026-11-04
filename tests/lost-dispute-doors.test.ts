@@ -154,7 +154,9 @@ async function main(): Promise<void> {
   const ran = await revokeRefunded(store, Date.now() + 10_000).then((n) => n, () => "stopped");
   is("a full refund still revokes its key", [ran, await checkKey(store, app, given.key)], [1, "revoked"]);
   const [anchor] = await redis.pipeline([["GET", `nl:keys:${store.statsId}:refunds:since`]]);
-  is("and the anchor is not moved, so the disputes are read next run", anchor, null);
+  // A store with no anchor yet keeps the one it started from, thirty days back, never one moved forward (review of #2158).
+  const notMoved = (value: unknown) => value === null || Number(value) <= NOW - 29 * 86_400;
+  is("and the anchor is not moved, so the disputes are read next run", notMoved(anchor), true);
   eventsStatus = 200;
   refunds = [];
 
@@ -199,7 +201,7 @@ async function main(): Promise<void> {
   }
   const [keysAnchor, reviewsAnchor] = await redis.pipeline([["GET", `nl:keys:${store.statsId}:refunds:since`], ["GET", `nl:rev:refunds:since:${store.statsId}`]]);
   is("past the deadline after /refunds, no job reads the closing events", eventReads, 0);
-  is("and neither the key job nor the review job moves its place", [keysAnchor, reviewsAnchor], [null, null]);
+  is("and neither the key job nor the review job moves its place", [notMoved(keysAnchor), notMoved(reviewsAnchor)], [true, true]);
   is("the key stays until a run in time reads its dispute", await checkKey(store, app, lateKey.key), "valid");
   await revokeRefunded(store, Date.now() + 10_000);
   is("the next run in time revokes it", await checkKey(store, app, lateKey.key), "revoked");

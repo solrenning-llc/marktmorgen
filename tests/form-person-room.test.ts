@@ -3,9 +3,10 @@
  * and gives back to the store's data room exactly what each took when it
  * was kept (lib/form-store.ts, addResponse), once.
  */
-import { parseForm, type FormResponse } from "@/lib/forms";
+import { KEPT_RESPONSES, parseForm, type FormResponse } from "@/lib/forms";
 import { addResponse, forgetFormsPerson, readResponses, writeForm } from "@/lib/form-store";
-import { dataUsed } from "@/lib/store-data";
+import { dataUsed, noteData } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -41,6 +42,38 @@ async function main(): Promise<void> {
   await addResponse(STATS, form.id, twice, ROOM);
   is("both deleted", await forgetFormsPerson(STATS, "cy@example.com", ROOM), 2);
   is("both given back", await used(), withBen);
+
+  part("A deletion between a full list's read and its keep leaves the room exact");
+  const full = parseForm({ id: "fullform01", name: "Full", fields: [{ id: "email1", type: "email", label: "Email", required: true }, { id: "note1", type: "text", label: "Note", required: false }], offerList: false })!;
+  await writeForm(STATS, full);
+  const key = `nl:form:r:${STATS}:${full.id}`;
+  // A full list, its responses written directly and counted as addResponse counts them.
+  const filler = Array.from({ length: KEPT_RESPONSES }, (_, i) => JSON.stringify(answer(i === 0 ? "dan@example.com" : `p${i}@example.com`, 1000 + i)));
+  await redis.pipeline([["RPUSH", key, ...filler.slice().reverse()]]);
+  await noteData(ROOM, [{ slot: `fr:${full.id}`, bytes: filler.reduce((sum, raw) => sum + dataBytes([raw], 1), 0) }]);
+  const before = await used();
+  const original = redis.pipeline;
+  let raced = false;
+  redis.pipeline = async (commands) => {
+    if (!raced && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:form-keep:")) {
+      raced = true;
+      redis.pipeline = original;
+      // Dan's response (the oldest, the one the keep was about to let go) is deleted in between.
+      await forgetFormsPerson(STATS, "dan@example.com", ROOM);
+    }
+    return original.call(redis, commands);
+  };
+  const newest = answer("eve@example.com", 9999, "x".repeat(40));
+  try {
+    await addResponse(STATS, full.id, newest, ROOM);
+  } finally {
+    redis.pipeline = original;
+  }
+  is("the deletion ran in between", raced, true);
+  const keptNow = (await redis.pipeline([["LRANGE", key, 0, -1]]))[0] as string[];
+  const shouldBe = before - dataBytes([filler[0]], 1) + dataBytes([JSON.stringify(newest)], 1) - (keptNow.length === KEPT_RESPONSES ? 0 : 0);
+  is("the list is still full, nothing else let go", keptNow.length, KEPT_RESPONSES);
+  is("the room counts exactly what is kept", await used(), shouldBe);
 
   part("Without a room nothing is counted, and nothing breaks");
   is("Ben deleted", await forgetFormsPerson(STATS, "ben@example.com"), 2);

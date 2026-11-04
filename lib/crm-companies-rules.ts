@@ -12,6 +12,33 @@ export const COMPANY_ID = /^[a-f0-9]{10}$/;
 export const PERSON_KEY = /^[0-9a-f]{32}$/;
 /** A company's website address, at most this many characters as typed. */
 export const MAX_COMPANY_WEBSITE = 200;
+/**
+ * The most one company's record weighs as kept, in bytes: its name and note
+ * at three bytes a character at most (a character outside the Basic
+ * Multilingual Plane is two characters of four bytes; a quote escaped is
+ * two), its website as the browser writes it (ASCII), its people's keys
+ * quoted, and its id, date and field names.
+ */
+export const MAX_COMPANY_RECORD_BYTES = 3 * (MAX_COMPANY_NAME + MAX_COMPANY_NOTE) + MAX_COMPANY_WEBSITE + MAX_COMPANY_PEOPLE * 35 + 256;
+/** The most a store's companies weigh, every record and its id: what reading them all moves at the most. */
+export const MAX_COMPANIES_BYTES = MAX_COMPANIES * (MAX_COMPANY_RECORD_BYTES + 10);
+/**
+ * Studio requests a companies request counts, its own included: each one
+ * reads every company (MAX_COMPANIES_BYTES, about a megabyte at the most)
+ * and sends them on, more than one studio request is priced at
+ * (tests/plan-cost-registry.ts, COMPANIES_REQUEST).
+ */
+export const COMPANIES_REQUEST_UNITS = 3;
+/** The most one person's address and key weigh as the companies page sends them on, in bytes. */
+export const MAX_COMPANY_ADDRESS_BYTES = 320;
+/** The most one company weighs in a person's page, where only its id and name are sent (companiesForPerson). */
+export const MAX_COMPANY_LISTED_BYTES = 3 * MAX_COMPANY_NAME + 160;
+/**
+ * Studio requests the companies page counts besides its own page: it reads
+ * every company and sends them on with the address of everyone at them
+ * (tests/plan-cost-registry.ts, COMPANIES_PAGE).
+ */
+export const COMPANIES_PAGE_UNITS = 5;
 const PERSON = PERSON_KEY;
 
 export type Company = { id: string; name: string; website: string; note: string; people: string[]; createdAt: number };
@@ -36,7 +63,10 @@ export type CompanyResult = { ok: true; companies: Company[] } | { ok: false; er
  * Characters that change how the text around them is drawn without being
  * seen: the bidirectional embeddings, overrides and isolates (a name that
  * reads backwards from where it is shown, Unicode Technical Report 36), the
- * byte order mark and the invisible "function" signs.
+ * byte order mark and the invisible "function" signs. The marks that only
+ * set a direction (U+200E, U+200F, U+061C) stay, since Arabic or Hebrew text
+ * mixed with Latin needs them, as do the joiners (U+200C, U+200D) that some
+ * scripts and emoji need.
  */
 const UNSEEN = /[\u202a-\u202e\u2066-\u2069\ufeff\u2060-\u2064]/g;
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
@@ -55,17 +85,25 @@ function line(raw: unknown, max: number): string | null {
   return value.length <= max ? value : null;
 }
 
-/** True when the text has a character that is drawn: not only spaces, joiners, marks or fillers. */
+/**
+ * True when the text has a character that is drawn: not only spaces,
+ * joiners, marks or fillers. Private-use characters count as not drawn, so a
+ * name of only those (a font's own icons) is refused.
+ */
 const seen = (value: string) => /[^\s\p{C}\p{M}\u115f\u1160\u3164\uffa0\u2800]/u.test(value);
 
 /**
  * What a company's name is compared by, so one name is kept once: the
- * compatibility form (NFKC: "ＮＯＲＴＨ" is "NORTH"), without the signs that
- * are not drawn (a zero-width space), and with case folded fully ("Straße"
- * is "STRASSE", a final sigma is a sigma).
+ * compatibility form (NFKC: wide letters are the usual ones), without the
+ * signs that are not drawn (a zero-width space), and with case folded fully
+ * (sharp s is "ss", a final sigma is a sigma).
  */
 export function companyNameKey(name: string): string {
-  return name.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim().toUpperCase().toLowerCase();
+  const plain = name.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim();
+  // Each character folded on its own, as Unicode's full case folding does: the Turkish dotless ı has no folding
+  // there and stays itself ("Ilık" and "Ilik" are two names), and İ folds to i with its dot ("İstanbul" and
+  // "Istanbul" are two names too), never through the upper case, where ı would become I and then i.
+  return [...plain].map((ch) => (ch === "\u0131" ? ch : ch.toUpperCase().toLowerCase())).join("");
 }
 
 /** What the creator typed for a company, made safe, or what is wrong with it. Never cut. */
@@ -123,7 +161,9 @@ export function restoreCompany(companies: readonly Company[], value: Pick<Compan
 export function editCompany(companies: readonly Company[], id: string, value: Pick<Company, "name"> & Partial<Pick<Company, "website" | "note">>): CompanyResult {
   const at = companies.findIndex((c) => c.id === id);
   if (at < 0) return { ok: false, error: "unknown" };
-  if (companies.some((c) => c.id !== id && sameName(c.name, value.name))) return { ok: false, error: "taken" };
+  // Taken only when the name compared changes: two companies kept before the names were compared this way can still
+  // have their website or note changed, or their name written another way.
+  if (companyNameKey(value.name) !== companyNameKey(companies[at].name) && companies.some((c) => c.id !== id && sameName(c.name, value.name))) return { ok: false, error: "taken" };
   const next = [...companies];
   const { name, website = companies[at].website, note = companies[at].note } = value;
   next[at] = { ...companies[at], name, website, note };
@@ -149,6 +189,15 @@ export function linkPerson(companies: readonly Company[], id: string, person: st
 /** A person taken off every company. */
 export function unlinkPerson(companies: readonly Company[], person: string): Company[] {
   return companies.map((c) => (c.people.includes(person) ? { ...c, people: c.people.filter((p) => p !== person) } : c));
+}
+
+/**
+ * The companies a person's page sends on: the one they work at whole, and
+ * every other by its id and name only (what the choice of a company shows),
+ * so the page never sends every company's note and people.
+ */
+export function companiesForPerson(companies: readonly Company[], person: string): Company[] {
+  return companies.map((c) => (c.people.includes(person) ? c : { id: c.id, name: c.name, website: "", note: "", people: [], createdAt: c.createdAt }));
 }
 
 /** The company a person works at, or null. */

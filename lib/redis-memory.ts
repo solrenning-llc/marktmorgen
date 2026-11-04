@@ -354,7 +354,9 @@ export class MemoryRedis {
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-companies-write:v1\n") && args[0] === "2" && args.length >= 4 && (args.length - 4) % 2 === 0) {
-          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token.
+          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token. It differs
+          // from Redis only on keys of the wrong type: a lock key that is not a string reads here as not ours (0), where
+          // Redis's GET would fail the script; a hash key that is not a hash fails in both.
           const [lock, target, token] = [args[1], args[2], args[3]];
           this.live(lock);
           this.live(target);

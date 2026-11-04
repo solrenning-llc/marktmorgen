@@ -18,16 +18,19 @@
  * writing back what it read over the newer one.
  *
  * The store's data room counts what the companies weigh as they are kept
- * (one slot, set to the weight of every record in the hash): taken first
- * when a change grows it, set back when the write did not land, and set down
- * after a change or a deletion that shrinks it. What is read back is checked
- * again; a person deleted from the store is taken off every company
+ * (one slot, moved by what each change grows or shrinks the hash by, read
+ * from the records as they are, unreadable ones included): taken first when
+ * a change grows it, given back when its lock was lost and nothing landed,
+ * and after a change or a deletion that shrinks it. A write that fails
+ * without saying whether it landed keeps what it took: the room may count a
+ * little more than is kept, never less. What is read back is checked again;
+ * a person deleted from the store is taken off every company
  * (forgetCompanyPerson, from forgetCrmPerson in lib/crm.ts).
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
-import { type DataStore, needData, noteData } from "@/lib/store-data";
+import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Company, type CompanyResult, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_PEOPLE, PERSON_KEY, parseCompany, unlinkPerson } from "@/lib/crm-companies-rules";
 
@@ -93,10 +96,10 @@ const total = (weights: Map<string, number>) => [...weights.values()].reduce((su
 /**
  * Writes what changed between the companies read and the result, only while
  * `held` is still this change's lock: each company changed is set, each gone
- * is deleted. The room's slot is set to what the hash weighs after the
- * change, taken first when that is more (DataRoomError when it does not fit,
- * and nothing is written), and set to what it weighs when the write did not
- * land. False when the lock was lost and nothing was written.
+ * is deleted. The room's slot changes by what the hash grows or shrinks by:
+ * taken first when it grows (DataRoomError when it does not fit, and nothing
+ * is written), given back when the lock was lost and nothing was written, or
+ * after a written change that shrank it. False when the lock was lost.
  */
 async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null): Promise<boolean> {
   const was = new Map(stored.companies.map((c) => [c.id, c]));
@@ -116,26 +119,18 @@ async function writeChanges(statsId: string, held: Held, stored: Stored, after: 
     pairs.push(company.id, "");
   }
   if (!pairs.length) return true;
-  const before = total(stored.weights);
-  const next = total(weights);
-  const slot = (bytes: number) => [{ slot: COMPANIES_SLOT, bytes, set: true }];
-  // Room first: a change that does not fit throws DataRoomError and nothing is written.
-  if (room && next > before) await needData(room, slot(next));
-  let written = false;
-  try {
-    const [reply] = await redisPipeline([["EVAL", WRITE_COMPANIES, 2, lockKey(statsId), companiesKey(statsId), held.token, ...pairs]]);
-    written = reply === 1;
-  } finally {
-    // Counted as kept: the new weight once written (taken already when it grew). When nothing landed (a lost
-    // lock, a failed write), what the hash weighs now, read again, since another change may have written in
-    // between; when even that cannot be read, the room taken stays taken until the next change counts it, never
-    // less than what is kept.
-    if (room && written && next < before) await noteData(room, slot(next));
-    else if (room && !written && next > before) {
-      const now = await readStored(statsId).catch(() => null);
-      if (now) await noteData(room, slot(total(now.weights)));
-    }
-  }
+  // What the change grows (or shrinks) the hash by, against what every record in it weighs as read under the lock.
+  const grown = total(weights) - total(stored.weights);
+  const slot = (bytes: number) => [{ slot: COMPANIES_SLOT, bytes }];
+  // Room first, by what it grows: a change that does not fit throws DataRoomError and nothing is written.
+  if (room && grown > 0) await needData(room, slot(grown));
+  // A write that throws may or may not have landed: the room it took stays taken (never less than what is kept).
+  const [reply] = await redisPipeline([["EVAL", WRITE_COMPANIES, 2, lockKey(statsId), companiesKey(statsId), held.token, ...pairs]]);
+  const written = reply === 1;
+  // Given back by difference, never set to a total read outside the lock, so another change's own room is never
+  // undone: what a change that certainly did not land took (the lock was lost), or what a written one shrank by.
+  if (room && !written && grown > 0) await giveData(room, slot(grown));
+  if (room && written && grown < 0) await giveData(room, slot(-grown));
   return written;
 }
 

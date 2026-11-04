@@ -1,5 +1,7 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
+import { COMPANIES_PAGE, COMPANIES_REQUEST, PERSON_COMPANY_PAGE } from "./plan-cost-registry";
+import { COMPANIES_PAGE_UNITS, COMPANIES_REQUEST_UNITS } from "@/lib/crm-companies-rules";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
 /**
@@ -240,6 +242,14 @@ test("the uses the owner named on October 18, 2026 have left the open list, the 
 
 test("Path page and its actual usage count fit its reserved studio page", () => {
  assert.ok(PATH_PAGE <= UNIT_COST.studio * STUDIO_PAGE_UNITS);
+});
+
+test("a companies request fits its studio requests, and each page that reads every company fits what it counts", () => {
+ assert.ok(COMPANIES_REQUEST <= UNIT_COST.studio * COMPANIES_REQUEST_UNITS, `${COMPANIES_REQUEST} > ${COMPANIES_REQUEST_UNITS} x ${UNIT_COST.studio}`);
+ assert.ok(COMPANIES_REQUEST > UNIT_COST.studio * (COMPANIES_REQUEST_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_REQUEST_UNITS");
+ assert.ok(COMPANIES_PAGE <= UNIT_COST.studio * (STUDIO_PAGE_UNITS + COMPANIES_PAGE_UNITS), `${COMPANIES_PAGE} > ${STUDIO_PAGE_UNITS + COMPANIES_PAGE_UNITS} x ${UNIT_COST.studio}`);
+ assert.ok(COMPANIES_PAGE > UNIT_COST.studio * (STUDIO_PAGE_UNITS + COMPANIES_PAGE_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_PAGE_UNITS");
+ assert.ok(PERSON_COMPANY_PAGE <= UNIT_COST.studio * STUDIO_PAGE_UNITS, `${PERSON_COMPANY_PAGE} > ${STUDIO_PAGE_UNITS} x ${UNIT_COST.studio}`);
 });
 
 test("Path push fits its reserved studio requests", () => {

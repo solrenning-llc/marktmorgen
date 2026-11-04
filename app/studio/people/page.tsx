@@ -11,7 +11,7 @@ import { PersonNotes } from "@/components/person-notes";
 import { PersonTasks } from "@/components/person-tasks";
 import { PersonCompany } from "@/components/person-company";
 import { readCompanies } from "@/lib/crm-companies";
-import type { Company } from "@/lib/crm-companies-rules";
+import { type Company, companiesForPerson } from "@/lib/crm-companies-rules";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
@@ -477,7 +477,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
       <section aria-labelledby="company-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="company-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Company</h2>
         {profile.person && companies ? (
-          <PersonCompany key={profile.person} person={profile.person} initial={companies} />
+          <PersonCompany key={profile.person} person={profile.person} initial={companiesForPerson(companies, profile.person)} />
         ) : profile.person ? (
           <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s company could not be read just now. Open this page again in a moment.</p>
         ) : null}

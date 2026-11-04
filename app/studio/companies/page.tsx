@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { CompaniesEditor } from "@/components/companies-editor";
-import { readCompanies } from "@/lib/crm-companies";
+import { COMPANIES_PAGE_UNITS, readCompanies } from "@/lib/crm-companies";
 import { personAddresses } from "@/lib/person-agenda";
 
 export const metadata: Metadata = {
@@ -31,7 +31,10 @@ export default async function StudioCompaniesPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
-  const companies = await readCompanies(store.statsId).catch(() => null);
+  // Every company and the addresses of everyone at them, up to some megabytes: more than a studio page is priced at,
+  // so the page counts COMPANIES_PAGE_UNITS more studio requests first (tests/plan-cost-registry.ts, COMPANIES_PAGE).
+  const counted = await countStudio(store, null, COMPANIES_PAGE_UNITS).catch(() => null);
+  const companies = counted?.ok ? await readCompanies(store.statsId).catch(() => null) : null;
   const people = new Set((companies ?? []).flatMap((c) => c.people));
   const known = companies && people.size ? await personAddresses(store, people).catch(() => null) : null;
   const shown = (companies ?? []).map((company) => ({ ...company, addresses: Object.fromEntries(company.people.flatMap((p) => (known?.addresses.get(p) ? [[p, known.addresses.get(p)!]] : []))) }));
@@ -59,7 +62,7 @@ export default async function StudioCompaniesPage({ searchParams }: Params) {
               <CompaniesEditor initial={shown} peopleBase={studioPath(store, "", "people")} addressesRead={!people.size || Boolean(known)} addressesPartial={known?.partial ?? false} />
             </div>
           ) : (
-            <p className="notice notice-warn mt-8">Your companies could not be read just now. Nothing was changed. Try again in a moment.</p>
+            <p className="notice notice-warn mt-8">{counted && !counted.ok && counted.message ? counted.message : "Your companies could not be read just now. Nothing was changed. Try again in a moment."}</p>
           )}
         </main>
       </StudioStorePin>

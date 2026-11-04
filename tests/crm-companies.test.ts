@@ -6,13 +6,20 @@
  * writing; a deleted person taken off every company; through the real
  * route, session and store.
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/store/companies/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { forgetCrmPerson } from "@/lib/crm";
 import {
+  COMPANIES_REQUEST_UNITS,
   COMPANY_REFUSALS,
+  MAX_COMPANIES_BYTES,
+  MAX_COMPANY_NOTE,
+  MAX_COMPANY_RECORD_BYTES,
+  MAX_COMPANY_WEBSITE,
   changeCompanies,
+  companiesForPerson,
   companyNameKey,
   forgetCompanyPerson,
   restoreCompany,
@@ -79,6 +86,14 @@ async function main(): Promise<void> {
   is("one name once, typed wide or with a zero-width space", [addCompany([base("aaaaaaaaaa", "North")], { name: "\uff2e\uff2f\uff32\uff34\uff28", website: "", note: "" }, "bbbbbbbbbb", 2), addCompany([base("aaaaaaaaaa", "North School")], { name: "North\u200b School", website: "", note: "" }, "bbbbbbbbbb", 2)].map((r) => (r.ok ? "added" : r.error)), ["taken", "taken"]);
   is("one name once, with an accent typed either way", addCompany([base("aaaaaaaaaa", "Caf\u00e9 Uno")], { name: "Cafe\u0301 uno", website: "", note: "" }, "bbbbbbbbbb", 2), { ok: false, error: "taken" });
   is("the name compared is the folded one", companyNameKey("\u03a3\u0399\u03a3\u03a5\u03a6\u039f\u03a3"), companyNameKey("\u03c3\u03b9\u03c3\u03c5\u03c6\u03bf\u03c2"));
+  // Round 2, L4 (the choice, recorded): Unicode's full case folding, character by character. The Turkish dotless
+  // \u0131 has no folding there and stays itself, and \u0130 folds to i with a dot above, so neither is merged with
+  // the plain i: names that differ only there are two names.
+  is("the dotless \u0131 and the dotted \u0130 are kept apart from i, as full case folding does", [companyNameKey("Il\u0131k") === companyNameKey("Ilik"), companyNameKey("\u0130stanbul") === companyNameKey("Istanbul"), companyNameKey("IL\u0130K") === companyNameKey("il\u0069\u0307k")], [false, false, true]);
+  // Round 2, L3: two companies kept before names were compared this way (only a folding apart) can still be edited.
+  const twins = [base("aaaaaaaaaa", "Stra\u00dfe AG"), base("bbbbbbbbbb", "STRASSE AG")];
+  is("a company whose name folds like another's can still have its note changed, or its name written another way", [editCompany(twins, "aaaaaaaaaa", { name: "Stra\u00dfe AG", note: "Pays by card" }).ok, editCompany(twins, "bbbbbbbbbb", { name: "Strasse AG" }).ok], [true, true]);
+  is("but a new name that another company already has is still taken", editCompany(twins, "aaaaaaaaaa", { name: "strasse ag " + "x" }).ok && editCompany([...twins, base("cccccccccc", "North")], "aaaaaaaaaa", { name: "NORTH" }), { ok: false, error: "taken" });
   const kept = { ...base("aaaaaaaaaa", "North"), website: "https://north.example.com/", note: "Pays by invoice" };
   is("an edit keeps a website and a note it leaves out", editCompany([kept], "aaaaaaaaaa", { name: "North Academy" }), { ok: true, companies: [{ ...kept, name: "North Academy" }] });
   is("an edit clears one sent empty", editCompany([kept], "aaaaaaaaaa", { name: "North", website: "", note: "" }), { ok: true, companies: [{ ...kept, website: "", note: "" }] });
@@ -153,19 +168,16 @@ async function main(): Promise<void> {
     for (let i = 0; i + 1 < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
     return bytes;
   };
-  is("before: what the room counts is what the companies weigh", await slotOf(), await weighs());
+  // The write that failed above ("Failing School") kept the room it took, since it may have landed: the room counts
+  // that much more than is kept, and every change below moves the room by exactly what it moves the companies by.
+  const over = (await slotOf()) - (await weighs());
+  is("before: the room counts what the companies weigh, and what a write that may have landed took", over > 0, true);
+  const exact = async () => (await slotOf()) - (await weighs()) - over;
   const leaving = Array.from({ length: 6 }, (_, i) => personKey(statsId, `leaving${i}@example.com`));
   for (const person of leaving) await post({ action: "link", id, person });
   const withThem = await slotOf();
   for (const [i, person] of leaving.entries()) await forgetCrmPerson(statsId, person, `leaving${i}@example.com`, store);
-  is("people deleted from the store give back the room their links took", [(await slotOf()) < withThem, await slotOf()], [true, await weighs()]);
-  redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-companies-write:"))) throw new Error("down");
-    return pipe(commands);
-  }) as typeof redis.pipeline;
-  const lost = await post({ action: "add", name: "Never Written", note: "n".repeat(300) });
-  redis.pipeline = pipe;
-  is("a write that failed gives back the room it took", [lost.status, await slotOf()], [500, await weighs()]);
+  is("people deleted from the store give back the room their links took", [(await slotOf()) < withThem, await exact()], [true, 0]);
 
   part("A change whose lock ran out never writes over the next one (edge review)");
   const target = (await post({ action: "add", name: "Race School" })).body.added!;
@@ -189,8 +201,61 @@ async function main(): Promise<void> {
   redis.pipeline = pipe;
   const raced = await readCompanies(statsId);
   is("the late change is refused as busy and writes nothing; the one that went through is kept", [first, race.second?.ok, raced.find((c) => c.id === target)?.people, raced.find((c) => c.id === other)?.people], [{ ok: false, error: "busy" }, true, [quick], []]);
-  is("and the room counts what is kept", await slotOf(), await weighs());
-  for (const c of raced) if (c.id !== id) await post({ action: "remove", id: c.id });
+  is("and the room counts what is kept", await exact(), 0);
+
+  part("The room is moved by difference, never set to a total read outside the lock (round 2, M1)");
+  // A change grows the companies, loses its lock just before its write (which so does not land), and the next
+  // change, which grows them too, runs while the first is still finishing: what each one took or gave back stays its own.
+  const grower = personKey(statsId, "grower@example.com");
+  let lost = false;
+  let late: Promise<unknown> | null = null;
+  const lateChange = () => changeCompanies(statsId, store, (companies) => addCompany(companies, { name: "Late School", website: "", note: "n".repeat(300) }, "abcdef0123", 1));
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!lost && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-companies-write:"))) {
+      lost = true;
+      await pipe([["DEL", lock]]);
+      return pipe(commands);
+    }
+    const out = await pipe(commands);
+    // Whatever the first change reads after its lost write, the next one goes through meanwhile.
+    if (lost && !late && commands.some((c) => c[0] === "HGETALL" && c[1] === `nl:crm:co:${statsId}`)) {
+      redis.pipeline = pipe;
+      late = lateChange();
+      await late;
+    }
+    return out;
+  }) as typeof redis.pipeline;
+  const lostWrite = await changeCompanies(statsId, store, (companies) => linkPerson(companies, target, grower));
+  redis.pipeline = pipe;
+  if (!late) await lateChange();
+  const afterLost = await readCompanies(statsId);
+  is("the change whose lock was lost is refused and writes nothing; the next one is kept", [lostWrite, afterLost.find((c) => c.id === target)?.people.includes(grower), afterLost.some((c) => c.name === "Late School")], [{ ok: false, error: "busy" }, false, true]);
+  is("and the room still counts exactly what is kept", await exact(), 0);
+  for (const c of await readCompanies(statsId)) if (c.id !== id) await post({ action: "remove", id: c.id });
+  is("removing what was added gives its room back", await exact(), 0);
+
+  part("A write that fails without saying whether it landed (round 2, M1)");
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-companies-write:"))) throw new Error("down");
+    return pipe(commands);
+  }) as typeof redis.pipeline;
+  const roomBefore = await slotOf();
+  const failedAdd = await post({ action: "add", name: "Never Written", note: "n".repeat(300) });
+  redis.pipeline = pipe;
+  const keptRoom = (await slotOf()) - roomBefore;
+  is("keeps the room it took, so the room never counts less than is kept", [failedAdd.status, keptRoom > 0, await weighs() <= (await slotOf())], [500, true, true]);
+
+  part("What reading the companies costs (round 2, M2)");
+  const worst = parseCompany({ id: "abcdef0123", name: "\u4e2d".repeat(MAX_COMPANY_NAME), website: "https://example.com/" + "a".repeat(MAX_COMPANY_WEBSITE - 21), note: "\u4e2d".repeat(MAX_COMPANY_NOTE), people: Array.from({ length: MAX_COMPANY_PEOPLE }, (_, i) => i.toString(16).padStart(32, "0")), createdAt: 4_102_444_800 });
+  const quoted = parseCompany({ ...worst, name: '"'.repeat(MAX_COMPANY_NAME), note: "\\".repeat(MAX_COMPANY_NOTE) });
+  is("the heaviest company kept weighs no more than MAX_COMPANY_RECORD_BYTES", [worst, quoted].map((c) => c !== null && Buffer.byteLength(JSON.stringify(c)) <= MAX_COMPANY_RECORD_BYTES), [true, true]);
+  is("so every company weighs no more than MAX_COMPANIES_BYTES", MAX_COMPANIES_BYTES >= MAX_COMPANIES * (MAX_COMPANY_RECORD_BYTES + 10), true);
+  const route = readFileSync("app/api/store/companies/route.ts", "utf8");
+  is("every companies request counts COMPANIES_REQUEST_UNITS studio requests before it reads them all", [COMPANIES_REQUEST_UNITS > 1, route.includes("countStudio(store, null, COMPANIES_REQUEST_UNITS - 1)"), (route.match(/if \(\(refused = await countRead\(store\)\)\) return refused;\n\s+result = await changeCompanies\(/g) ?? []).length, route.includes("const refused = await countRead(store);\n    if (refused) return refused;\n    const companies = await readCompanies(")], [true, true, 5, true]);
+  is("the companies page counts COMPANIES_PAGE_UNITS more first", readFileSync("app/studio/companies/page.tsx", "utf8").includes("countStudio(store, null, COMPANIES_PAGE_UNITS)"), true);
+  const slim = companiesForPerson([{ ...base("aaaaaaaaaa", "North"), note: "Big note", website: "https://north.example.com/", people: [b] }, { ...base("bbbbbbbbbb", "South"), note: "Theirs", people: [a] }], a);
+  is("a person's page sends their own company whole and every other by its id and name", slim.map((c) => [c.name, c.note, c.website, c.people]), [["North", "", "", []], ["South", "Theirs", "", [a]]]);
+  is("as the people page does", readFileSync("app/studio/people/page.tsx", "utf8").includes("initial={companiesForPerson(companies, profile.person)}"), true);
 
   part("An edit through the route keeps what it leaves out (edge review)");
   await post({ action: "edit", id, name: "North School", website: "north.example.com", note: "Pays by invoice" });

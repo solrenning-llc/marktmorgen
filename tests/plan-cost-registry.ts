@@ -99,6 +99,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
+import { MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_ADDRESS_BYTES, MAX_COMPANY_LISTED_BYTES, MAX_COMPANY_PEOPLE, MAX_COMPANY_RECORD_BYTES } from "@/lib/crm-companies-rules";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -287,6 +288,26 @@ export const PATH_REMINDER_PUSH = request("wait", 45, 500_000);
 export const PATH_STUDIO_PAGE = request("heavy", 81, 404_096);
 export const PATH_PAGE = request("heavy", 54, 120_000);
 export const PATH_BOARD_JOIN = request("heavy",70,30_000);
+/**
+ * One companies request at the most (app/api/store/companies, lib/crm-companies.ts;
+ * 639 [GL7](4)): every company read (MAX_COMPANIES_BYTES, about a megabyte), the
+ * two records a link moves written back, the lock taken and let go, the room
+ * taken and given back, its studio requests counted, and every company sent on
+ * to the browser. Counted as COMPANIES_REQUEST_UNITS studio requests, taken
+ * before it reads (tests/plan-cost-registry.test.ts).
+ */
+export const COMPANIES_REQUEST = request("heavy", 12 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES + 2 * MAX_COMPANY_RECORD_BYTES + 4_096) + MAX_COMPANIES_BYTES * ORIGIN_PER_BYTE;
+/**
+ * The companies page at the most (app/studio/companies/page.tsx): a studio page that reads every company besides its
+ * own reads, and sends them on with the address of everyone at them. Counted as STUDIO_PAGE_UNITS and
+ * COMPANIES_PAGE_UNITS studio requests.
+ */
+export const COMPANIES_PAGE = request("heavy", 80, 400_000 + MAX_COMPANIES_BYTES) + (MAX_COMPANIES_BYTES + MAX_COMPANIES * MAX_COMPANY_PEOPLE * MAX_COMPANY_ADDRESS_BYTES) * ORIGIN_PER_BYTE;
+/**
+ * A person's page with their company (app/studio/people/page.tsx): every company read, and sent on by its id and
+ * name only but the person's own (companiesForPerson). Within STUDIO_PAGE_UNITS.
+ */
+export const PERSON_COMPANY_PAGE = request("heavy", 80, 400_000 + MAX_COMPANIES_BYTES) + (MAX_COMPANIES * MAX_COMPANY_LISTED_BYTES + MAX_COMPANY_RECORD_BYTES) * ORIGIN_PER_BYTE;
 export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
 
 export const PATH_READ = request("heavy", 26, LIFE_WRITE_MAX * 96 + 20_480) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;

@@ -37,7 +37,7 @@ import type { Store } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { readMoves } from "@/lib/call-records";
 import { affiliateCookieName, affiliatesOn, attributedAffiliate, canonicalEmail, payAddress, readAffiliate } from "@/lib/affiliates";
-import { viaCookieName } from "@/lib/affiliate-setting";
+import { creditsContacts, viaCookieName } from "@/lib/affiliate-setting";
 import {
   LEAD_REASONS,
   type LeadKind,
@@ -112,6 +112,45 @@ export function visitCookies(request: { cookies: { get(name: string): { value: s
 function isOwn(store: Store, affiliate: { email: string; paypal: string }, email: string): boolean {
   const person = canonicalEmail(email);
   return person === canonicalEmail(store.email) || person === canonicalEmail(affiliate.email) || person === canonicalEmail(payAddress(affiliate));
+}
+
+/**
+ * The affiliate who brought this buyer as a confirmed lead, or "" (630 [HN6](1)).
+ *
+ * Read only for a sale that no click, no code and no bond could credit, and
+ * only where the creator switched it on (creditsContacts). One HGET on the
+ * lead the address would be, when the sale is written down (the thank-you
+ * page; the checkout sweep once lib/checkout-sweep.ts passes such sales on):
+ * nothing new is kept, because the lead and its fingerprint were written when
+ * it was confirmed. Only a lead confirmed before the checkout was opened
+ * (`before`, seconds), and never the lead made by this checkout itself
+ * (`checkout`, a paid booking's own session), so writing a sale down again
+ * later never reaches back to a lead that came after it. A lead counts from
+ * when it was confirmed, in its hold or past the day's cap alike: those decide
+ * what the lead itself earns, not who brought the person. Never a lead the
+ * creator reversed as not genuine before the sale was written down, and never
+ * one whose person asked to be deleted: their address came off it
+ * (forgetLeadPerson), and what is left is only there so they are not counted
+ * as a lead again, never to tie a new purchase back to them. Whether the
+ * affiliate is still approved is checked by the caller, as for a code or a bond.
+ */
+export async function contactFor(store: Store, email: string, before: number, checkout = ""): Promise<string> {
+  if (!affiliatesOn(store) || !creditsContacts(store.affiliates) || !store.statsId || !email || !isRedisConfigured()) return "";
+  const address = normaliseEmail(email);
+  if (!EMAIL_PATTERN.test(address)) return "";
+  try {
+    const [raw] = await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, address)]]);
+    const lead = parseLead(raw);
+    if (!lead || !lead.email || lead.state === "reversed") return "";
+    if (!(lead.at > 0 && lead.at < before) || (checkout && lead.ref === checkout)) return "";
+    // The fingerprint is of the address written any way; the address kept must be the same person's.
+    if (canonicalEmail(lead.email) !== canonicalEmail(address)) return "";
+    return lead.aff;
+  } catch (error) {
+    // A read that fails costs this sale its contact credit, never the sale.
+    console.error("reading an affiliate's contact failed", error);
+    return "";
+  }
 }
 
 export type LeadResult = "recorded" | "duplicate" | "self" | "off" | "full" | "unavailable";

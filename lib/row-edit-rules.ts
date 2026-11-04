@@ -43,9 +43,31 @@ export type RowHeld = readonly number[];
 const heldIn = (held: RowHeld, column: number) => Math.max(0, held[column] ?? 0);
 const heldAll = (held: RowHeld) => held.reduce((n, count) => n + Math.max(0, count), 0);
 
+/**
+ * The held places after one picture field's count in a column changed by `by`
+ * (its new count less the one it said before). Added to what is held, never
+ * written over it: a send begun before the row was closed and reopened keeps
+ * its place while the reopened row starts another. Never below zero.
+ */
+export function shiftHeld(held: RowHeld, column: number, by: number): number[] {
+  return held.map((count, i) => (i === column ? Math.max(0, count + by) : count));
+}
+
 /** The places held with one fewer in `column`: what a picture that has arrived takes its own place from. */
 export function releaseHeld(held: RowHeld, column: number): number[] {
   return held.map((count, i) => (i === column ? Math.max(0, count - 1) : count));
+}
+
+/**
+ * A picture that finished sending, added to the row as it is now: checked
+ * against it, with the picture's own held place given back (`places` is the
+ * held places without it, releaseHeld). Pure, so the page editor can apply it
+ * as an update of its current state, whatever changed while it was sent.
+ */
+export function arrivePicture(now: RowColumns, column: number, element: RowElement, places: readonly number[]): RowEdit {
+  const refused = addRefusal(now, column, places);
+  if (refused) return { ok: false, why: refused };
+  return addElement(now, column, element, places);
 }
 
 /** A change made, with where the element it concerns now is (null when it is gone), or refused with why. */

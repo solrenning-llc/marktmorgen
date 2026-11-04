@@ -16,6 +16,9 @@
  *   safety net.
  * - The walk reads at most BACKUP_SCAN_PAGES pages; a walk not done by then
  *   is refused ("scan_pages") before anything is written.
+ * - Inside a cutoff (lib/fetch-timeout.ts, withCutoff; the run's is
+ *   BACKUP_RUN_CUTOFF_MS), no page, batch, part or manifest is begun after it
+ *   ("cutoff"); outside one there is none.
  * - The walk's and the copy's commands are counted against the run's cap
  *   before the first DUMP; the parts and the bytes are counted as the copy
  *   goes, each row at the bytes it adds to its part's JSON: a database larger
@@ -29,6 +32,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { openBackup, sealBackup, type BackupRow, type BackupSnapshot } from "@/lib/backup-codec";
 import { BACKUP_MAX_BYTES, BACKUP_MAX_ROWS, BACKUP_PREFIX } from "@/lib/backup-export";
 import type { BackupObjectStore } from "@/lib/backup-roundtrip";
+import { timeLeft } from "@/lib/fetch-timeout";
 import { redisPipeline, redisPipelineBase64 } from "@/lib/redis";
 
 /** The most one part holds, as the backup format seals it (JSON), and its rows. */
@@ -80,7 +84,7 @@ export type BackupManifest = { version: 1; capturedAt: number; parts: PartEntry[
 
 export type PartsResult =
   | { ok: true; id: string; keys: number; bytes: number; parts: number; commands: number }
-  | { ok: false; reason: "limits" | "budget" | "scan_pages" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify"; commands: number; parts: number };
+  | { ok: false; reason: "limits" | "budget" | "cutoff" | "scan_pages" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify"; commands: number; parts: number };
 
 const whole = (n: unknown, most = Number.MAX_SAFE_INTEGER) => typeof n === "number" && Number.isSafeInteger(n) && n > 0 && n <= most;
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -169,6 +173,7 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     let pages = 0;
     do {
       if (pages === BACKUP_SCAN_PAGES) return fail("scan_pages");
+      if (timeLeft() <= 0) return fail("cutoff");
       if (commands + 1 > maxCommands) return fail("budget");
       const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", `${BACKUP_PREFIX}*`, "COUNT", SCAN_COUNT]]);
       commands += 1;
@@ -197,6 +202,7 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     const close = async () => {
       if (rows.length === 0) return;
       if (entries.length + 1 > maxParts) throw new RangeError("too_many_parts");
+      if (timeLeft() <= 0) throw new RangeError("cutoff");
       writing = true;
       entries.push(await putPart({ version: 1, capturedAt: now, rows }, key, store));
       writing = false;
@@ -205,6 +211,7 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
       filled = 0;
     };
     for (let at = 0; at < sorted.length; at += batch) {
+      if (timeLeft() <= 0) return fail("cutoff");
       const names = sorted.slice(at, at + batch);
       const replies = await redisPipelineBase64(names.flatMap((name) => [["DUMP", name], ["PEXPIRETIME", name]]));
       commands += 2 * names.length;
@@ -229,7 +236,9 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     }
     await close();
 
-    // The manifest last: the set is one only when it is read back naming every part and its sums.
+    // The manifest last: the set is one only when it is read back naming every part and its sums, and never after the
+    // run's cutoff (lib/backup-run.ts), so a run's writes all land before it.
+    if (timeLeft() <= 0) return fail("cutoff");
     writing = true;
     const manifest: BackupManifest = { version: 1, capturedAt: now, parts: entries, rows: copied };
     const sealed = sealManifest(manifest, key);
@@ -241,6 +250,8 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
     return { ok: true, id, keys: copied, bytes, parts: entries.length, commands };
   } catch (error) {
     if (error instanceof RangeError && error.message === "too_many_parts") return fail("too_many_parts");
+    // The run's cutoff passed, here or inside a request given up at it: said as such.
+    if ((error instanceof RangeError && error.message === "cutoff") || timeLeft() <= 0) return fail("cutoff");
     // The database failing while it was read: said as such, nothing referenced written.
     if (!writing) return fail("error");
     // A seal, a write or a read-back failed: what was written stays unreferenced; every earlier set as it was.

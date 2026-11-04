@@ -26,8 +26,10 @@
  *     when written and one more when deleted (the run's DeleteObject is free,
  *     but the lifecycle rule, kept as a safety net, may come first, and whether
  *     its deletion is billed is not said: taken as billed, never zero), one
- *     Class B when read back; each run's listing pages (backupListPages) are
- *     Class A; the rounding adds one more million of each class;
+ *     Class B when read back; the objects alive when the month starts (at
+ *     most backupPeakSets sets) may be deleted in it too; each run's listing
+ *     pages (backupListPages) are Class A; the rounding adds one more million
+ *     of each class;
  *   - Upstash: every command each run may send (maxCommands) and the two reads
  *     a day the report makes; the bytes a run may move: every SCAN page it may
  *     read (at most BACKUP_SCAN_PAGES, and no more than its commands allow) at
@@ -123,7 +125,8 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
   const scanPages = Math.min(review.maxCommands - BACKUP_RUN_COMMANDS, BACKUP_SCAN_PAGES);
 
   const storage = up((((sets * setBytes) / GB) + 1) * R2_STORAGE_MICRO_USD_PER_GB_MONTH);
-  const classA = up(((runs * (2 * objects + listPages)) / 1_000_000 + 1) * R2_CLASS_A_MICRO_USD_PER_MILLION);
+  // Deleted in a month: what it writes, and what was alive when it started (at most `sets` sets).
+  const classA = up(((runs * (2 * objects + listPages) + sets * objects) / 1_000_000 + 1) * R2_CLASS_A_MICRO_USD_PER_MILLION);
   const classB = up(((runs * objects) / 1_000_000 + 1) * R2_CLASS_B_MICRO_USD_PER_MILLION);
   const commands = runs * review.maxCommands + days * BACKUP_REPORT_READS_PER_DAY;
   const upstashCommands = up((commands / 1_000_000) * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS);
@@ -139,7 +142,7 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
 
   const used: BackupCostLine[] = [
     { id: "r2-storage", microUsd: storage, basis: `${sets} sets (${BACKUP_RUNS_PER_DAY} × (${review.retentionDays} + 2)) of ${setBytes} bytes at the daily peak, plus one GB-month of rounding` },
-    { id: "r2-class-a", microUsd: classA, basis: `${runs} runs × (${objects} objects × 2 (written, then deleted) + ${listPages} listing page), plus one million of rounding` },
+    { id: "r2-class-a", microUsd: classA, basis: `${runs} runs × (${objects} objects × 2 (written, then deleted) + ${listPages} listing page) + ${sets} sets × ${objects} objects alive at the month's start, deleted, plus one million of rounding` },
     { id: "r2-class-b", microUsd: classB, basis: `${runs} runs × ${objects} read-backs, plus one million of rounding` },
     { id: "upstash-commands", microUsd: upstashCommands, basis: `${runs} × ${review.maxCommands} commands + ${days} × ${BACKUP_REPORT_READS_PER_DAY} report reads` },
     { id: "upstash-transfer", microUsd: upstashTransfer, basis: `${runs} runs × ${runTransfer} bytes: ${scanPages} SCAN pages of ${BACKUP_SCAN_NAMES_PER_PAGE} names of ${BACKUP_SCAN_NAME_BYTES} bytes, ${runBytes} copied bytes, each key's name sent twice, the marks and the report's reads` },

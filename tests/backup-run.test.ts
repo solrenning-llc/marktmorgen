@@ -13,8 +13,8 @@
  *   - more than a run and one new try after a failure in a day, or a call past
  *     them that sends more than the day's count;
  *   - a walk past its 200 SCAN pages taken as anything but its own failure;
- *   - a copy older than the retention left after a run that passed the day's
- *     count, a write after a deletion that did not complete, or more sets kept
+ *   - a copy of its own older than the retention left after a run whose
+ *     deletion finished, a write after a deletion that did not complete, or more sets kept
  *     at once than the code proves (2 × (retention + 2));
  *   - a copy that does not read back the same counted as done;
  *   - a good copy's time lost to a later failure, a failure's reason not kept,
@@ -25,7 +25,7 @@
  *     silent when there is none.
  */
 import { readFileSync } from "node:fs";
-import { BACKUP_COST_REVIEW, backupKey, backupLastFailure, backupListPages, backupPeakSets, backupStale, runBackup, validReview, type BackupCostReview } from "@/lib/backup-run";
+import { BACKUP_COST_REVIEW, BACKUP_RUN_CUTOFF_MS, backupKey, backupLastFailure, backupListPages, backupPeakSets, backupStale, runBackup, validReview, type BackupCostReview } from "@/lib/backup-run";
 import { BACKUP_SCAN_PAGES } from "@/lib/backup-parts";
 import type { BackupBucket } from "@/lib/backup-roundtrip";
 import { store as redis } from "./redis-stub";
@@ -116,6 +116,15 @@ async function main(): Promise<void> {
     const was = sent;
     is("a cap behind a getter: refused, off, nothing sent, the getter never run", [validReview(getter), await runBackup({ now: T0, review: getter, store, key }), sent - was, reads], [false, { ok: false, reason: "off_review" }, 0, 0]);
     is("a review inherited from another object: refused, nothing sent", [await runBackup({ now: T0, review: Object.create(review) as BackupCostReview, store, key }), sent - was], [{ ok: false, reason: "off_review" }, 0]);
+    // The copy the run uses carries no prototype: nothing on Object.prototype can stand in for a field.
+    const proto = Object.prototype as Record<string, unknown>;
+    proto.maxParts = 40;
+    proto.maxRunBytes = 40_000_000;
+    const polluted = validReview(review);
+    delete proto.maxParts;
+    delete proto.maxRunBytes;
+    is("a field added to Object.prototype is never read into the copy", polluted, true);
+    is("a retention of 3 days is admitted", validReview({ ...review, retentionDays: 3 }), true);
     const { proxy, revoke } = Proxy.revocable(review, {});
     revoke();
     is("a revoked proxy: refused as a result, never an exception", [(() => {
@@ -131,6 +140,10 @@ async function main(): Promise<void> {
     ["a date that is not one", { ...review, reviewedAt: "2026-13-40" }],
     ["no source", { ...review, source: " " }],
     ["no retention", { ...review, retentionDays: 0 }],
+    // The run deletes before it writes: under 3 days, one or two failed days could delete the last good copy before
+    // the report (no good copy for 48 hours) says so.
+    ["a retention of 1 day", { ...review, retentionDays: 1 }],
+    ["a retention of 2 days", { ...review, retentionDays: 2 }],
     ["a storage ceiling the kept copies could pass", { ...review, maxStoredBytes: 30 * 1_000_000 }],
     // 33 sets: the ceiling of the lifecycle rule's reading (inbox C4-38), no longer enough.
     ["a storage ceiling of retention + 3 sets", { ...review, maxStoredBytes: 33 * 1_131_232 }],
@@ -280,12 +293,48 @@ async function main(): Promise<void> {
         bucketClock = when + 800_000;
         const result = await runBackup({ now: when, review, store: bad ? broken : store, key });
         most = Math.max(most, objects.size);
-        // A call refused at the day's count deletes nothing; every other run deleted first.
+        // A call refused at the day's count deletes nothing; here every other run's deletion finishes.
         if (result.ok || result.reason !== "already_ran") oldest = Math.max(oldest, ...[...writtenAt.values()].map((w) => when - w));
       }
     }
     is(`at most ${backupPeakSets(30)} sets of 2 objects at once (seen ${most})`, most <= 2 * backupPeakSets(30) && most > 2 * 30, true);
-    is("after each run that passed the day's count, nothing older than 30 days", oldest <= 30 * DAY, true);
+    is("after each run whose deletion finished, none of its own copies older than 30 days", oldest <= 30 * DAY, true);
+  }
+
+  part("A run that passes its cutoff stops before its manifest (independent review of #2175)");
+  {
+    objects.clear();
+    writtenAt.clear();
+    redis.clear();
+    redis.run(["SET", "nl:store:one", "a shop"]);
+    at(T0 + 300 * DAY);
+    const slow: BackupBucket = {
+      ...store,
+      putNew: async (id, bytes) => {
+        await new Promise((done) => setTimeout(done, 300));
+        return store.putNew(id, bytes);
+      },
+    };
+    is("the run's cutoff: 800 s, under a day (the retention's proof needs it)", BACKUP_RUN_CUTOFF_MS, 800_000);
+    const late = await runBackup({ now: clock, review, store: slow, key, cutoffMs: 200 });
+    is("past the cutoff: refused as such, its part left unreferenced, no manifest written", [late, objects.size, (await backupLastFailure())?.reason], [{ ok: false, reason: "export_cutoff" }, 1, "export_cutoff"]);
+  }
+
+  part("With the shortest retention, the report says no good copy before the last one can be deleted");
+  {
+    objects.clear();
+    writtenAt.clear();
+    const short = { ...review, retentionDays: 3 };
+    at(T0 + 400 * DAY);
+    const good = await runBackup({ now: clock, review: short, store, key });
+    const kept = [...objects.keys()];
+    for (let day = 1; day <= 2; day += 1) {
+      at(T0 + 400 * DAY + day * DAY);
+      await runBackup({ now: clock, review: short, store: broken, key });
+      at(T0 + 400 * DAY + day * DAY + HOUR);
+      await runBackup({ now: clock, review: short, store: broken, key });
+    }
+    is("two failed days: the good copy is still there, and the report already says no good copy for 48 hours", [good.ok, kept.length, kept.every((id) => objects.has(id)), await backupStale(T0 + 402 * DAY + 2 * HOUR)], [true, 2, true, true]);
   }
 
   part("Nothing schedules it");

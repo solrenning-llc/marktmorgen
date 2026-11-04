@@ -30,6 +30,7 @@ part("Placeholders");
 is("only the two, written exactly", [unknownFields("Hi {client_name}, from {store_name}"), unknownFields("Hi {name}"), unknownFields("Hi {{client_name}}"), unknownFields("Hi { Client_Name }"), unknownFields("a set {1, 2}")], [[], ["{name}"], ["{{client_name}}"], ["{ Client_Name }"], []]);
 is("a brace stuck to one is refused", [unknownFields("Dear {{client_name},"), unknownFields("Dear {client_name}},")], [["{"], ["}"]]);
 is("full-width braces are read as plain ones", unknownFields("Hi ｛name｝"), ["{name}"]);
+is("full-width letters in braces are read as the placeholder they spell", unknownFields("Hi ｛ｃｌｉｅｎｔ＿ｎａｍｅ｝ and {store_name}"), []);
 is("refused saying which and where", [templateProblem({ ...coaching, title: "For {first_name}" }, 0, "usd"), templateProblem({ ...coaching, lines: [{ text: "For {client}", quantity: 1, amount: "1" }] }, 0, "usd")], [{ why: "unknown_field", found: "{first_name}", where: { part: "title" } }, { why: "unknown_field", found: "{client}", where: { part: "line", line: 1 } }]);
 is("as the studio says it", templateProblemWords({ why: "unknown_field", found: "{client}", where: { part: "line", line: 1 } }), "Only {client_name} and {store_name} are replaced with real names. Check the spelling of “{client}” in line 1, or take it out.");
 is("the placeholders as the studio names them", TEMPLATE_FIELDS, ["{client_name}", "{store_name}"]);
@@ -39,6 +40,8 @@ unknownFields("{".repeat(12_000));
 is("a long text is read at once", Date.now() - started < 200, true);
 
 part("Making an agreement from it");
+const typed = draftFrom({ ...coaching, title: "Studio of 40 m² for ｛client_name｝", body: "Area: 40 m², x² + ½ hour, ﬁne print, ①.", lines: [{ ...coaching.lines[0], text: "Room of 12 m² for {client_name}" }] }, store, "Ana", "usd");
+is("the creator's own words stay exactly as typed: only what is in braces is made plain (an agreement's meaning never changes)", typed.ok ? [typed.draft.title, typed.draft.body, typed.draft.lines[0].text] : typed, ["Studio of 40 m² for Ana", "Area: 40 m², x² + ½ hour, ﬁne print, ①.", "Room of 12 m² for Ana"]);
 const made = draftFrom(coaching, store, "  Ana   Souza ", "usd");
 is("the names put in, and the client's name given back for the agreement's own name", made.ok ? [made.draft.name, made.draft.title, made.draft.body, made.draft.lines[0].text] : null, ["Ana Souza", "Coaching for Ana Souza", "Bright Coaching will coach Ana Souza for three months, one call a week.", "Three months of coaching for Ana Souza"]);
 is("no name where one is put in: why, never an empty gap", [draftFrom(coaching, store, " ", "usd"), draftFrom(coaching, { name: " " }, "Ana", "usd")], [{ ok: false, problem: { why: "client_name" } }, { ok: false, problem: { why: "store_name" } }]);

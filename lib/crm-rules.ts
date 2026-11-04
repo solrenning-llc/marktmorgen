@@ -88,7 +88,8 @@ export const DEFAULT_STAGES: Stage[] = [
   { id: "lost00", name: "Lost", kind: "lost" },
 ];
 
-const oneLine = (value: unknown, max: number) =>
+/** One line as the deals board keeps it: controls made spaces, spaces made one, trimmed (exported for a workflow step, lib/flow-rules.ts). */
+export const oneLine = (value: unknown, max: number) =>
   typeof value === "string"
     ? value
         .replace(/[\u0000-\u001f\u007f]+/g, " ")

@@ -619,6 +619,20 @@ export function PageEditor({
     },
     [],
   );
+  // The screen turned wide while a place waits for a block: a press that came before the screen was measured, or a
+  // window made wider. The picker under the blocks is no longer drawn there, so the column beside them shows the
+  // blocks to add rather than the page, and the focus, when it went with the picker, goes to its search. Only on that
+  // turn, so "Preview" pressed while a place waits is kept.
+  const wasBeside = useRef(false);
+  useEffect(() => {
+    const turned = sideBySide && !wasBeside.current;
+    wasBeside.current = sideBySide;
+    if (!turned || picking === null) return;
+    showSidePanel("add");
+    if (document.activeElement && document.activeElement !== document.body) return;
+    stopFocusMenu.current?.();
+    stopFocusMenu.current = focusWhenDrawn(() => document.getElementById("menu-block-find"), browserFrames());
+  }, [sideBySide, picking, showSidePanel]);
 
   /** "Add here" at a place: the card chosen goes there, or the place waits for a card (in the side menu, or the gallery opened here). */
   function addHere(at: number) {

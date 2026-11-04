@@ -5,6 +5,8 @@ import {addOption,addProduct,claimHandle,ensureStatsId,setProductFile,setStripeA
 import {readProduct} from "@/lib/catalog";
 import {createCheckout} from "@/lib/store-checkout";
 import {selectedDigitalOptionFromOriginal} from "@/lib/digital-option-confirmation";
+import {admitOrders} from "@/lib/order-admission";
+import {prepareDigitalOptionPreintent,readDigitalOptionPreintent} from "@/lib/digital-option-preintent";
 import {confirmationBodyDigest} from "@/lib/order-confirmation-outbox";
 import {digitalOptionBodyMatches,captureDigitalOptionRequestSnapshot} from "@/lib/digital-option-body";
 import {store as redis} from "./redis-stub";
@@ -45,6 +47,19 @@ test("both explicit paid-file choices match the actual original checkout body wi
    const snapshot=captureDigitalOptionRequestSnapshot({store,product,optionId:option.id,folder,body:prepared.toString(),nonce,consent,maximumBytes:60000});
    assert.ok(snapshot,"the original real wire, with explicit future-private markers, fits the closed snapshot");
    assert.equal(snapshot.selected.id,option.id);assert.equal(snapshot.selected.priceCents,option.priceCents);assert.equal(snapshot.permitsCheckout,false);assert.equal(snapshot.grantsAccess,false);
+   const admission=await admitOrders(store,1);assert.ok(admission.ok);
+   const request={store,product,optionId:option.id,folder,body:prepared.toString(),nonce,consent,maximumBytes:60000,admission};
+   assert.equal(await prepareDigitalOptionPreintent({...request,admission:JSON.parse(JSON.stringify(admission))}),null,"cloned admission is not authority");
+   const forgedProduct=structuredClone(product);forgedProduct.options.find(o=>o.id===option.id)!.file!.pathname=`stores/forged-folder/${option.id}/book.pdf`;
+   assert.equal(await prepareDigitalOptionPreintent({...request,product:forgedProduct,folder:"forged-folder"}),null,"caller file prefix cannot replace the actual admission folder");
+   const receipt=await prepareDigitalOptionPreintent(request);assert.ok(receipt,"actual private admission binds the selected original request");
+   const retained=readDigitalOptionPreintent(receipt);assert.ok(retained);assert.equal(retained.snapshot.selected.id,option.id);assert.equal(retained.snapshot.body,prepared.toString());
+   assert.equal(readDigitalOptionPreintent(JSON.parse(JSON.stringify(receipt))),null,"a reconstructed receipt cannot supply original file authority");
+   assert.deepEqual([receipt.admitted,receipt.permitsCheckout,receipt.grantsAccess],[false,false,false]);
+   const realNow=Date.now;
+   try{const attempt=prepareDigitalOptionPreintent(request);Date.now=()=>NaN;assert.equal(await attempt,null,"an unknown clock after asynchronous preparation cannot authorize a receipt");}
+   finally{Date.now=realNow;}
+
    assert.equal(JSON.stringify(product),before);
    for(const other of product.options.filter(o=>o.id!==option.id))assert.equal(digitalOptionBodyMatches(last.body,{options:[selected]},other.id,folder,{storeHandle:store.handle,productId:product.id,title:product.title,currency:store.currency,consent,summary:product.summary},60000),false);
   }

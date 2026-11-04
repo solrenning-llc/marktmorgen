@@ -228,7 +228,7 @@ const DEAL_TERMS = [
   "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promocional(?:es)?", "rebajas?", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad", "date prisa", "s[oó]lo hoy",
   "garant[ií]as?", "testimonios?", "cinco estrellas", "m[aá]s vendidos?",
   // French
-  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez-vous", "aujourd['’]hui seulement", "livraison gratuite",
+  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement", "livraison gratuite",
   "garanties?", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
   // German
   "\\p{L}*rabatt(?:e|en|s)?", "rabattcodes?", "\\p{L}*gutscheine?", "gutscheincodes?", "kostenloser versand", "aktionscodes?", "sonderangebote?", "letzte chance", "nur heute",
@@ -264,17 +264,25 @@ const LINK = /\b(?:https?:\/\/|www\.)\S+/i;
  * pressure word too, and it carries no link. A reply that fails is never
  * shown, whatever the model was told or tricked into.
  */
-export function heldToFacts(reply: string, facts: string): boolean {
+/** Text as one form with the characters that hide inside words removed (soft hyphen, zero-width space and joiners, word joiner, BOM), so no word slips past a rule. */
+export function readableText(text: string): string {
+  return text.normalize("NFC").replace(/[\u00AD\u200B-\u200D\u2060\uFEFF]/gu, "");
+}
+
+export function heldToFacts(raw: string, facts: string): boolean {
+  const reply = readableText(raw);
   if (!reply.trim() || LINK.test(reply)) return false;
   const factNumbers = new Set((facts.match(NUMBERS) ?? []).flatMap(numberForms));
   for (const n of reply.match(NUMBERS) ?? []) {
     if (!numberForms(n).some((form) => factNumbers.has(form))) return false;
   }
   // Both sides as one form, spaces single, so a word the store wrote is found however either was typed.
-  const plain = (text: string) => text.normalize("NFC").toLowerCase().replace(/[\s\-\u2010-\u2015]+/gu, " ");
+  const plain = (text: string) => readableText(text).toLowerCase().replace(/[\s\-\u2010-\u2015]+/gu, " ");
   const lowerFacts = plain(facts);
   for (const m of reply.matchAll(new RegExp(DEAL_WORDS.source, "giu"))) {
-    if (!lowerFacts.includes(plain(m[0]))) return false;
+    // The same word as the store wrote it, as a whole word: "discount" is not allowed by "discounted", nor "Rabatt" by "Frühlingsrabatt".
+    const word = plain(m[0]).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!new RegExp(`(?<![\\p{L}\\p{N}])${word}(?![\\p{L}\\p{N}])`, "u").test(lowerFacts)) return false;
   }
   return true;
 }

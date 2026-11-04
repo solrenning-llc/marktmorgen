@@ -38,4 +38,9 @@ is("plural deal words in a reply are refused", [heldToFacts("Many coupons are av
 is("but a word the store wrote is allowed", heldToFacts("Testimonials are on the page.", `${facts} Testimonials from our students.`), true);
 is("and an ordinary reply passes", heldToFacts("It has 12 lessons for $27.", facts), true);
 is("the reminder's sentence too", neutralLine("Grab the coupons before they go.", facts), "");
+part("Third review: the reply is read in one form, hidden marks removed, and the store's word as a whole word");
+is("a decomposed accent or a hidden mark inside the word is still the word", [heldToFacts("cupo\u0301n", "nada"), heldToFacts("dis\u200bcount", "nothing"), heldToFacts("Ra\u00ADbatt", "nichts")], [false, false, false]);
+is("a word the store wrote only inside a longer one does not allow it alone", [heldToFacts("A discount today.", "A discounted item."), heldToFacts("Rabatt heute.", "Frühlingsrabatt im Mai.")], [false, false]);
+is("but the same word as the store wrote it is allowed", heldToFacts("A discount for members.", "Members get a discount."), true);
+is("dépêchez vous with a space too", caught(["dépêchez vous"]), []);
 done();

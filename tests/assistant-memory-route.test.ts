@@ -3,13 +3,15 @@
  * assistant (app/api/store/assistant-memory/route.ts), through the real
  * route, session and store. Every note listed; added, changed, removed, all
  * forgotten at once; anyone's details refused with words that say what to
- * do; only for someone who may change the store's settings.
+ * do; only for someone who may change the store's settings. Two saves at
+ * once are both kept or one refused as busy (409); notes that cannot be read
+ * are said so (503), never listed as none, and never written over.
  */
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/store/assistant-memory/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { MAX_MEMORY_NOTE, NOTE_REFUSALS } from "@/lib/assistant-memory-rules";
-import { readMemory } from "@/lib/assistant-memory-store";
+import { MEMORY_STORE_REFUSALS, readMemory } from "@/lib/assistant-memory-store";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -60,6 +62,37 @@ async function main(): Promise<void> {
   const stranger = await post({ action: "add", kind: "preference", text: "Be brief." }, {});
   is("no session: refused", stranger.status >= 400 && stranger.status < 500, true);
   is("and nothing kept", (await readMemory(statsId)).length, 0);
+
+  part("Two saves at the same instant");
+  const both = await Promise.all([post({ action: "add", kind: "preference", text: "Write in a warm voice." }), post({ action: "add", kind: "instruction", text: "Never promise a date." })]);
+  is("each kept, or refused as busy", both.every((reply) => reply.status === 200 || (reply.status === 409 && reply.body.error === "busy")), true);
+  const saidKept = both.filter((reply) => reply.status === 200).length;
+  is("every save said kept is listed", [(await list()).notes?.length, saidKept], [saidKept, 2]);
+  const ids = (await list()).notes!.map((note) => note.id);
+  const removed = await Promise.all(ids.map((noteId) => post({ action: "remove", id: noteId })));
+  is("two removals at once: both gone", [removed.map((reply) => reply.status), (await list()).notes], [[200, 200], []]);
+
+  part("Busy: someone else is changing the notes");
+  const lock = `nl:amem:lock:${statsId}`;
+  await redis.pipeline([["SET", lock, "someone-else", "NX", "EX", 10]]);
+  const busy = await post({ action: "add", kind: "preference", text: "Be brief." });
+  is("refused with 409 and plain words", [busy.status, busy.body.error, busy.body.message], [409, "busy", "Someone else is changing these notes right now. Try again in a moment."]);
+  is("a removal too", (await post({ action: "remove", id: "abcdefghij" })).status, 409);
+  is("and nothing kept", (await readMemory(statsId)).length, 0);
+  await redis.pipeline([["DEL", lock]]);
+
+  part("Notes that cannot be read: said so, never written over");
+  const key = `nl:amem:${statsId}`;
+  await redis.pipeline([["SET", key, "{not json"]]);
+  const shown = await GET(new NextRequest("https://marktmorgen.com/api/store/assistant-memory", { headers: { cookie } }));
+  const shownBody = (await shown.json()) as Reply;
+  is("the studio is told they could not be read, not that there are none", [shown.status, shownBody.ok, shownBody.error, shownBody.notes, shownBody.message], [503, false, "unreadable", undefined, "Your assistant's notes could not be read just now. Try again in a moment."]);
+  const unreadable = await post({ action: "add", kind: "preference", text: "Be brief." });
+  is("a new note refused, saying nothing changed", [unreadable.status, unreadable.body.error, unreadable.body.message], [503, "unreadable", MEMORY_STORE_REFUSALS.unreadable]);
+  is("a change refused", (await post({ action: "edit", id: "abcdefghij", text: "Be brief." })).status, 503);
+  is("a removal refused", (await post({ action: "remove", id: "abcdefghij" })).status, 503);
+  is("the record as it was", (await redis.pipeline([["GET", key]]))[0], "{not json");
+  is("forgetting every note still works", [(await post({ action: "forget" })).status, (await list()).notes], [200, []]);
 
   done();
 }

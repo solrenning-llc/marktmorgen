@@ -16,7 +16,7 @@
  * a layout, or a comparison's tick or cross.
  * Browser-safe.
  */
-import { CELL_NO, CELL_YES, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";
+import { CELL_NO, CELL_YES, MAX_TRANSCRIPT, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";
 import type { LanguageCode } from "@/lib/store-language";
 
 /** A block's own words. */
@@ -132,7 +132,11 @@ export function keepEveryBlock(original: SalesPage, translated: SalesPage, to?: 
   // The blocks put back as they were, by version: counted only once the page is read, so a second version dropped
   // there for being the same as the first does not count its blocks (inbox C4-19 (a)).
   const restored = { main: new Set<string>(), variant: new Set<string>() };
-  const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1;
+  // A block reads when it is kept alone, and none of its videos' transcripts would be cut (MAX_TRANSCRIPT): a
+  // translation that makes one longer leaves the block as it was, counted, rather than cut short unsaid.
+  const transcripts = (block: PageBlock): string[] =>
+    block.kind === "row" ? block.columns.flat().flatMap((part) => ("transcript" in part && typeof part.transcript === "string" ? [part.transcript] : [])) : "transcript" in block && typeof block.transcript === "string" ? [block.transcript] : [];
+  const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1 && transcripts(block).every((words) => words.length <= MAX_TRANSCRIPT);
   const marked = (before: PageBlock): PageBlock => {
     const lang = markHolds(before) ? before.lang : from;
     return lang && lang !== to ? markLang(before, lang) : unmarked(before);

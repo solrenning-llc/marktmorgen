@@ -3324,6 +3324,19 @@ a.sp-product:focus-visible {
   width: min(100%, calc((100dvh - 6rem) * 16 / 9));
   margin-inline: auto;
 }
+/* Lines of at most about 80 characters (WCAG 1.4.8). */
+.sp-transcript p {
+  max-width: 70ch;
+}
+/* Its focus ring keeps 3:1 on the store's own colors (WCAG 1.4.11, 2.4.13), and white in the dark window, as Close. */
+.sp-transcript summary:focus-visible {
+  outline: 2px solid var(--st-accent-text, var(--focus));
+  outline-offset: 3px;
+}
+.vw-dialog .sp-transcript summary:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
 @media (prefers-reduced-motion: reduce) {
   .vw-dialog .pv-button {
     transition: none;

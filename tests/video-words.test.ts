@@ -11,8 +11,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { type BlockContext, BlockView } from "@/components/sales-blocks";
 import { VideoTranscript } from "@/components/video-transcript";
 import { coachChecks, type CoachInput } from "@/lib/page-coach";
-import { TRANSLATE_PART_CHARS, pageWords, withWords } from "@/lib/page-translate";
-import { MAX_TRANSCRIPT, type PageBlock, type RowElement, parsePage, saysInWords } from "@/lib/sales-page";
+import { TRANSLATE_PART_CHARS, keepEveryBlock, pageWords, withWords } from "@/lib/page-translate";
+import { buildBundle } from "@/lib/funnel-bundle";
+import { MAX_TRANSCRIPT, type PageBlock, type RowElement, pageProblem, parsePage, saysInWords } from "@/lib/sales-page";
 import { done, is, part } from "./check";
 
 const youtube = { provider: "youtube", id: "dQw4w9WgXcQ" };
@@ -36,6 +37,43 @@ part("What a video says is kept only as given");
   is("captions or a transcript, either says it in words", [saysInWords({ captioned: true }), saysInWords({ transcript: "Hi" }), saysInWords({ transcript: "  " }), saysInWords({})], [true, true, false, false]);
 }
 
+part("A transcript too long is told back or left as it was, never cut (review of the unit)");
+{
+  const long = "w".repeat(MAX_TRANSCRIPT + 1);
+  const sentVideo = { blocks: [videoBlock({ transcript: long })] };
+  is("a video block's: the save is refused with its reason", pageProblem(sentVideo, parsePage(sentVideo)), "transcript");
+  const sentRow = { blocks: [rowWith(rowVideo({ transcript: long }))] };
+  is("a row's video: the row is refused whole", pageProblem(sentRow, parsePage(sentRow)), "row");
+  const sentHero = { blocks: [{ id: "hero0001", kind: "hero", headline: "Hi", sub: "", media: "video", video: youtube, transcript: long }] };
+  is("the video at the top's too", pageProblem(sentHero, parsePage(sentHero)), "transcript");
+  // A transcript near the most, which a translation makes longer than it may be.
+  const near = read([videoBlock({ transcript: "Hello there. ".repeat(300).trim() }), rowWith(rowVideo({ transcript: "Step one. ".repeat(390).trim() }))]);
+  const grown = keepEveryBlock(near, withWords(near, pageWords(near).map((w) => `${w} ${w.slice(0, 1_500)}`)), "de");
+  const kept = grown.page.blocks[0] as { transcript?: string };
+  is("translated longer than the most: the block stays as it was, counted, never cut", [kept.transcript === (near.blocks[0] as { transcript?: string }).transcript, grown.untranslated], [true, 2]);
+}
+
+part("The video at the top has words too");
+{
+  const hero = (extra: Record<string, unknown>) => read([{ id: "hero0001", kind: "hero", headline: "Bake bread", sub: "", ...extra }]).blocks[0] as PageBlock & { transcript?: string; captioned?: boolean };
+  is("with a video, its words are kept", [hero({ media: "video", video: youtube, captioned: true, transcript: "Hi." }).captioned, hero({ media: "video", video: youtube, transcript: "Hi." }).transcript], [true, "Hi."]);
+  is("with a picture, there are none", ["transcript" in hero({ media: "picture", transcript: "Hi." }), "captioned" in hero({ media: "picture", captioned: true })], [false, false]);
+}
+
+part("A shared funnel leaves the sender's video words out with the video");
+{
+  const page = read([{ id: "hero0001", kind: "hero", headline: "Launch", sub: "", media: "video", video: youtube, transcript: "The sender speaks.", captioned: true }, videoBlock({ transcript: "The sender again.", captioned: true })]);
+  const source = {
+    name: "Launch",
+    steps: [{ kind: "page" as const, id: "page000001" }],
+    pages: new Map([["page000001", { meta: { id: "page000001", slug: "launch", title: "Launch", nav: true, target: "", from: 0 }, page }]]),
+    forms: new Map(),
+    products: new Map(),
+  };
+  const json = JSON.stringify(buildBundle(source as never, "share").bundle);
+  is("no transcript and no captions mark travel without their video", [json.includes("The sender"), json.includes("captioned")], [false, false]);
+}
+
 part("The page's checklist asks for words on every video");
 {
   const input = (blocks: PageBlock[], variant?: PageBlock[]): CoachInput => ({
@@ -53,7 +91,9 @@ part("The page's checklist asks for words on every video");
   const some = check([videoBlock({ transcript: "Hello." }), rowWith(rowVideo({ captioned: true }), windowed())]);
   is("one left: said as one", [some?.done, some?.label], [false, "Every video says what it shows in words (1 does not)"]);
   is("all with captions or a transcript: done", check([videoBlock({ captioned: true }), rowWith(windowed({ transcript: "Hi." }))])?.done, true);
-  is("the second version's videos count too", check([videoBlock({ captioned: true })], [videoBlock({ caption: "B" })])?.done, false);
+  is("the second version's videos count too, said as such", [check([videoBlock({ captioned: true })], [videoBlock({ caption: "B" })])?.done, check([videoBlock({ captioned: true })], [videoBlock({ caption: "B" })])?.label], [false, "Every video says what it shows in words (1 does not, in the second version)"]);
+  is("a video both versions show, without words, is one, not two", check([videoBlock()], [videoBlock({ caption: "B" })])?.label, "Every video says what it shows in words (1 does not, in each version)");
+  is("the video at the top counts", check([{ id: "hero0001", kind: "hero", headline: "Hi", sub: "", media: "video", video: youtube }])?.done, false);
   is("a video block with no video yet is not a video", check([{ ...videoBlock(), video: null }]), undefined);
 }
 

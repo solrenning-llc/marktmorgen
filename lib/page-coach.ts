@@ -238,15 +238,28 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
   }
   // Every video says what it shows in words (inbox C4-16 (g), C4-26 (3); WCAG 1.2.2, 1.2.8): a transcript beside it,
   // or the creator's word that it has captions of its own. Nobody can tell from here whether a video on another site
-  // has captions, so the creator says so. The video block, a row's video and a video in a window, both versions.
-  const videos = [...input.page.blocks, ...(input.page.variant?.blocks ?? [])].flatMap((block): VideoWords[] =>
-    block.kind === "video" ? (block.video ? [block] : []) : block.kind === "row" ? block.columns.flat().flatMap((part) => (part.kind === "video" || part.kind === "video-window" ? [part] : [])) : [],
-  );
+  // has captions, so the creator says so. The video at the top, the video block, a row's video and a video in a window;
+  // each version counted on its own, so a video both versions show is one.
+  const videosOf = (blocks: PageBlock[]): VideoWords[] =>
+    blocks.flatMap((block): VideoWords[] =>
+      block.kind === "hero"
+        ? block.media === "video" && block.video ? [block] : []
+        : block.kind === "video"
+          ? (block.video ? [block] : [])
+          : block.kind === "row"
+            ? block.columns.flat().flatMap((part) => (part.kind === "video" || part.kind === "video-window" ? [part] : []))
+            : [],
+    );
+  const videos = [...videosOf(input.page.blocks), ...videosOf(input.page.variant?.blocks ?? [])];
   if (videos.length > 0) {
-    const silent = videos.filter((video) => !saysInWords(video)).length;
+    const silentA = videosOf(input.page.blocks).filter((video) => !saysInWords(video)).length;
+    const silentB = videosOf(input.page.variant?.blocks ?? []).filter((video) => !saysInWords(video)).length;
+    const silent = Math.max(silentA, silentB);
     checks.push({
       id: "video_words",
-      label: silent ? `Every video says what it shows in words (${silent === 1 ? "1 does not" : `${silent} do not`})` : "Every video says what it shows in words",
+      label: silent
+        ? `Every video says what it shows in words (${silent === 1 ? "1 does not" : `${silent} do not`}${silentA && silentB ? ", in each version" : silentB ? ", in the second version" : ""})`
+        : "Every video says what it shows in words",
       why: "Some buyers cannot hear a video, and some cannot see it. Under each video, write what it says (a transcript), or tick that the video has captions of its own.",
       done: silent === 0,
       weight: 2,

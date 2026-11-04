@@ -59,6 +59,7 @@ import {
   MAX_SUBHEADLINE,
   MAX_TEXT,
   MAX_CAPTION,
+  MAX_TRANSCRIPT,
   MAX_COUNTDOWN_LABEL,
   MAX_COUNTDOWN_NOTE,
   MAX_PAGE_PICTURES,
@@ -160,6 +161,7 @@ export const MESSAGES: Record<string, string> = {
   quote_link: "Each thing said elsewhere needs the full https address of where it was said, so visitors can check it. Add it, or remove that one.",
   shape: "Something in the page could not be read. Reload the studio and try again.",
   row: `A row holds 1 to ${MAX_ROW_COLUMNS} columns and up to ${MAX_ROW_ELEMENTS} parts, each in plain words. Each picture needs words that describe it, or a mark that it is decoration, and each button with a link needs words and a full https address. Nothing was saved.`,
+  transcript: `A video's transcript can be up to ${MAX_TRANSCRIPT.toLocaleString("en-US")} characters, about five minutes of speech. Shorten it, or tick that the video has captions of its own instead. Nothing was saved.`,
   booking: `A page holds one booking block, with one of your calls chosen and a heading of up to ${MAX_HEADING} characters. Nothing was saved.`,
   same_version: "Version B shows just what version A does, or one of them has no blocks. Change something in version B, or end the test.",
   too_big: "The page is too long to save. Shorten some of the text.",
@@ -567,7 +569,12 @@ export function PageEditor({
   function setVideo(index: number, typed: string) {
     const video = readVideo(typed);
     setDrafts((all) =>
-      all.map((d, i) => (i === index && (d.block.kind === "hero" || d.block.kind === "video") ? { video: typed, block: { ...d.block, video } } : d)),
+      all.map((d, i) => {
+        if (i !== index || (d.block.kind !== "hero" && d.block.kind !== "video")) return d;
+        // Another video may not have the captions the last one had: the creator ticks it again for this one.
+        const same = Boolean(video && d.block.video && video.provider === d.block.video.provider && video.id === d.block.video.id);
+        return { video: typed, block: { ...d.block, video, ...(same ? {} : { captioned: undefined }) } };
+      }),
     );
   }
 
@@ -1301,6 +1308,9 @@ export function PageEditor({
                       ? "Not a video we can play. Paste a link from YouTube, Vimeo or Loom."
                       : "A link from YouTube, Vimeo or Loom. Nothing else can be played on the page."}
                 </p>
+                <div className="mt-3">
+                  <VideoWordsFields id={`${base}-w`} value={block} onChange={(next) => change(index, { transcript: next.transcript, captioned: next.captioned })} />
+                </div>
               </div>
             ) : null}
             {/*
@@ -3010,7 +3020,9 @@ function RowEditor({
                   const value = e.target.value;
                   const video = readVideo(value);
                   if (video) {
-                    const next = { ...element, video };
+                    // Another video may not have the captions the last one had: the creator ticks it again for this one.
+                    const same = video.provider === element.video.provider && video.id === element.video.id;
+                    const next = { ...element, video, ...(same ? {} : { captioned: undefined }) };
                     setTyped((map) => new Map(map).set(next, value));
                     replace(element, next);
                   } else setTyped((map) => new Map(map).set(element, value));

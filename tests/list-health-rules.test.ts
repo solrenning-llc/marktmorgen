@@ -70,7 +70,8 @@ function main(): void {
   is("bounce (hard and soft), spam complaint, delivered and the honest sentence", Object.keys(TERMS), ["bounce", "spamComplaint", "delivered", "spamUnknown"]);
   is("hard and soft both explained", /hard bounce/.test(TERMS.bounce) && /soft bounce/.test(TERMS.bounce), true);
   is("delivered is the server accepting it, not the inbox", /server accepted/.test(TERMS.delivered) && /does not tell us whether/.test(TERMS.delivered), true);
-  is("the honest sentence says no one can know, and names the signals", TERMS.spamUnknown, "No email service can know for sure whether an email went to spam, because Gmail, Outlook and other providers do not tell the sender; the signals shown here are spam complaints, bounces and clicks.");
+  is("the honest sentence says no one can know, and names the signals", TERMS.spamUnknown, "No email service can know for sure whether an email went to spam, because Gmail, Outlook and other providers do not tell the sender; the signals on this page are spam complaints, bounces for good and the visits and sales that links in your emails bring.");
+  is("no clicks named: the page counts visits its links bring, not clicks", /click/i.test(TERMS.spamUnknown), false);
   const words = [...Object.values(TERMS), roomLine({ bounces: 3, complaints: 2 }), roomLine({ bounces: 0, complaints: 2 })];
   is("inbox or went to spam only ever in a negative sentence", words.every((text) => !/inbox|went to spam|spam folder/i.test(text) || /\b(no|not|cannot)\b/i.test(text)), true);
   is("one sentence each", Object.values(TERMS).every((text) => text.split(/\.\s/).length === 1 && text.endsWith(".")), true);

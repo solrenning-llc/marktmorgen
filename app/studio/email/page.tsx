@@ -27,6 +27,7 @@ import { readFlowListStrict } from "@/lib/flow-list";
 import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
 import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
+import { ListHealthTable } from "@/components/list-health-table";
 import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
 import { EmailStudio } from "@/components/email-studio";
 import { emailEquivalence } from "@/lib/email-equivalence";
@@ -225,6 +226,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">{healthLine(health)}</p>
               <p className="mt-2 text-sm">{advice.text}</p>
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
+              {/* The same seven days as a table, how far each count is from a pause, and the words explained (570 [DR1], unit 2): no new reading. */}
+              <ListHealthTable health={health} />
             </section>
           ) : null}
           {(emailTemplate || query.sequenceTemplate) ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{emailTemplate ? "Library email opened as an unsaved draft. Replace every placeholder and review consent before saving or sending." : initialSequence ? "Library sequence opened as an unsaved paused draft. Review every step before saving; activation is a separate action." : "A new sequence could not be opened: its trigger may already be in use, your role may not allow it, or its records or products could not be confirmed. Existing sequences were preserved."}</p> : null}

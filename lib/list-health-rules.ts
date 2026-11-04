@@ -9,6 +9,10 @@
  * made again here: they are lib/mail-health-levels.ts (599 [KB20]), already
  * shown in the studio; roomLine is said beside its healthLine.
  *
+ * Unit 2 (components/list-health-table.tsx): the same seven days as a table,
+ * each count with its share, its level in words and how many more would
+ * pause it (healthRows), and the words below explained in place.
+ *
  * Next units of 570 [DR1]: the delivery report of each email to the list,
  * with each sender notice counted once where it is stored, and the 30-day
  * counts, which need storage beyond the 10 days (KEPT_SECONDS) the day counts
@@ -18,6 +22,7 @@
  * know that (TERMS.spamUnknown). There is no open count: no pixel is used.
  */
 import { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE } from "@/lib/mail-health-rules";
+import { healthLevels, shareWords, type HealthLevel, type HealthMeasure } from "@/lib/mail-health-levels";
 import type { Health } from "@/lib/mail-health";
 
 const isCount = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
@@ -90,5 +95,58 @@ export const TERMS = {
   delivered:
     "Delivered means the receiving email server accepted the email; it does not tell us whether the email was put in the inbox, the spam folder or another tab.",
   spamUnknown:
-    "No email service can know for sure whether an email went to spam, because Gmail, Outlook and other providers do not tell the sender; the signals shown here are spam complaints, bounces and clicks.",
+    "No email service can know for sure whether an email went to spam, because Gmail, Outlook and other providers do not tell the sender; the signals on this page are spam complaints, bounces for good and the visits and sales that links in your emails bring.",
 } as const;
+
+/**
+ * Said after TERMS.bounce in the table's terms: heardFromSender
+ * (lib/mail-health.ts) counts a bounce only when the sender says it is for
+ * good, and ignores a temporary one.
+ */
+export const SOFT_BOUNCE_NOTE = "Only bounces for good are counted here; a soft bounce is not.";
+
+/**
+ * KB20's four levels (lib/mail-health-levels.ts) in words, so a level is
+ * never told by colour alone (WCAG 1.4.1). Each one stands alone in its
+ * cell, read without the cells around it.
+ */
+const LEVEL_WORDS: Record<HealthLevel, string> = {
+  fine: "Under half of the level that pauses",
+  watch: "Half or more of the level that pauses",
+  near: "Four fifths or more of the level that pauses",
+  over: "At the level that pauses",
+};
+
+export function levelWords(level: HealthLevel): string {
+  return LEVEL_WORDS[level];
+}
+
+/** The room as its cell says it: a number, or that the line is reached. */
+export function roomWords(room: number): string {
+  return room === 0 ? "None: at the level" : n(room);
+}
+
+export type HealthRow = {
+  measure: HealthMeasure;
+  label: string;
+  count: number;
+  /** shareWords: rounded down, as KB20's healthLine says it. */
+  share: string;
+  level: HealthLevel;
+  room: number;
+};
+
+/**
+ * The table's two rows, bounces first as the pause looks at them first.
+ * Null when nothing was sent in these days or the counts cannot be read:
+ * then there is no share and no distance to show.
+ */
+export function healthRows(last7: Health | null | undefined): HealthRow[] | null {
+  const room = roomBeforePause(last7);
+  if (!readable(last7) || room.bounces === null || room.complaints === null) return null;
+  const levels = healthLevels(last7);
+  return [
+    { measure: "bounces", label: "Bounced for good", count: last7.bounced, share: shareWords(last7.bounced, last7.sent), level: levels.bounces, room: room.bounces },
+    { measure: "complaints", label: "Reported as spam", count: last7.complained, share: shareWords(last7.complained, last7.sent), level: levels.complaints, room: room.complaints },
+  ];
+}

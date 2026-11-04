@@ -1367,6 +1367,7 @@
     "components/licence-key-editor.tsx",
     "components/link-editor.tsx",
     "components/link-picture.tsx",
+    "components/list-health-table.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",
     "components/look-editor.tsx",

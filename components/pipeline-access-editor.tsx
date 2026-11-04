@@ -19,7 +19,9 @@ function currentOf(map: AccessMap | null | undefined, pipelineId: string): Pipel
  * never restricted, and the page says so. A teammate's choices are saved
  * together with their own Save button, never on each change of a choice
  * (moving through a choice with the arrow keys changes nothing until Save),
- * and what happened is said inside that teammate's group.
+ * and what happened is said inside that teammate's group. A Save sends the
+ * record as this page read it, so one from a page opened before another
+ * change is refused with a sentence to reload, never written over it.
  */
 export function PipelineAccessEditor({ members, pipelines, initial }: { members: Member[]; pipelines: { id: string; name: string }[]; initial: Record<string, AccessMap | null> }) {
   const [access, setAccess] = useState(initial);
@@ -41,10 +43,12 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
       return;
     }
     const choices = Object.fromEntries(pipelines.map((p) => [p.id, chosen(email, p.id)]));
+    // The record as this page has it: a change made since in another tab, or by someone else, is never written over.
+    const was = access[email] === undefined ? {} : access[email];
     setBusy(email);
     setSaid((all) => ({ ...all, [email]: { kind: "status", text: "Saving…" } }));
     try {
-      const response = await fetch("/api/store/pipeline-access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, choices }) });
+      const response = await fetch("/api/store/pipeline-access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, choices, was }) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; access?: AccessMap; message?: string; error?: string };
       if (answer.ok && answer.access) {
         const kept = answer.access;

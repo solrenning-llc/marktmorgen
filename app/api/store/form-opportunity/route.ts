@@ -23,7 +23,16 @@ export async function POST(request: NextRequest) {
   try {
     const stages = await readStages(store.statsId);
     const existing = await readFormOpportunity(store.statsId, body.responseRef, stages);
-    if (existing) return Response.json({ ok: true, state: "existing", deal: existing });
+    if (existing) {
+      // A deal already made from this response is shown only to someone who may see its pipeline (639 [GL7](7)).
+      if (guarded.role !== "owner" && guarded.role !== "admin") {
+        const pipeline = pipelineOfStage(await readPipelines(store.statsId), existing.stage);
+        if (pipeline === null || accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) === "none") {
+          return Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
+        }
+      }
+      return Response.json({ ok: true, state: "existing", deal: existing });
+    }
     const form = await readForm(store.statsId, body.form);
     if (!form) return refuse("unknown", 404);
     const { responses } = await readResponses(store.statsId, form.id, MAX_CONVERTIBLE_FORM_RESPONSES);

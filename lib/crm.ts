@@ -245,7 +245,7 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
  * `moves` says. A refusal writes nothing. Moves made here start no
  * workflow: a stage removed is not a deal entering a stage.
  */
-export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore): Promise<PipelineChange> {
+export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore, mayEdit: (pipelineId: string) => boolean = () => true): Promise<PipelineChange> {
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
   const counts = new Map<string, number>();
@@ -254,8 +254,13 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
   if (!result.ok) return result;
   const kept = new Set(allStages(result.pipelines).map((s) => s.id));
   const fallback = result.pipelines[0].stages.find((s) => s.kind === "open")!.id;
-  // A deal whose stage was already in no pipeline (written by an older board) is brought back to the first pipeline's first open stage.
-  const moved = deals.filter((d) => !kept.has(String(d.record.stage))).map((d) => ({ ...d, record: { ...d.record, stage: result.moves[String(d.record.stage)] ?? fallback } }));
+  // A deal whose stage was already in no pipeline (written by an older board) is brought back to the first
+  // pipeline's first open stage, only by someone who may change that pipeline (`mayEdit`, 639 [GL7](7));
+  // anyone else leaves it where it is.
+  const adopt = mayEdit(result.pipelines[0].id);
+  const moved = deals
+    .filter((d) => !kept.has(String(d.record.stage)) && (Object.hasOwn(result.moves, String(d.record.stage)) || adopt))
+    .map((d) => ({ ...d, record: { ...d.record, stage: Object.hasOwn(result.moves, String(d.record.stage)) ? result.moves[String(d.record.stage)] : fallback } }));
   await writePipelines(statsId, raw, result.pipelines, moved, room);
   return result;
 }
@@ -271,13 +276,17 @@ return 1`;
 /**
  * Saves the first pipeline's stages, as the board did before pipelines (the
  * studio's older "stages" request): a deal in a stage that is gone moves to
- * the first open one of them.
+ * the first open one of them. With `firstId` (the pipeline whose access was
+ * checked), the stages are written only while that pipeline is still the
+ * first one, in the same snapshot that is written over: otherwise
+ * CrmSchemaConflict and nothing is written.
  */
-export async function writeStages(statsId: string, stages: Stage[], room: DataStore): Promise<Stage[]> {
+export async function writeStages(statsId: string, stages: Stage[], room: DataStore, firstId?: string): Promise<Stage[]> {
   const first = stages.find(s => s.kind === "open");
   if (!first) throw new CrmSchemaReadUnavailable();
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
+  if (firstId !== undefined && current[0].id !== firstId) throw new CrmSchemaConflict();
   const next = parsePipelines([{ ...current[0], stages }, ...current.slice(1)]);
   if (!next) throw new CrmSchemaReadUnavailable();
   const kept = new Set(allStages(next).map(s => s.id));

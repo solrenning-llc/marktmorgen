@@ -55,10 +55,13 @@ export async function POST(request: NextRequest) {
       return ok ? Response.json({ ok: true }) : refuse("value");
     }
     if (body.action === "stages") {
-      if (!mayEdit(FIRST_PIPELINE_ID)) return noAccess();
+      // Whatever pipeline is first now is the one these stages replace: that one is checked, and the write
+      // refuses (crm_conflict) when another became first since this read.
+      const first = restricted ? ((await readPipelines(statsId))[0]?.id ?? FIRST_PIPELINE_ID) : undefined;
+      if (first !== undefined && !mayEdit(first)) return noAccess();
       const stages = parseStages(body.stages);
       if (!stages) return refuse("stages");
-      return Response.json({ ok: true, stages: await writeStages(statsId, stages, store) });
+      return Response.json({ ok: true, stages: await writeStages(statsId, stages, store, first) });
     }
     if (body.action === "pipeline" || body.action === "unpipeline") {
       const removing = body.action === "unpipeline";
@@ -81,7 +84,7 @@ export async function POST(request: NextRequest) {
         const sentStages = body.pipeline && typeof body.pipeline === "object" && Array.isArray((body.pipeline as { stages?: unknown }).stages) ? ((body.pipeline as { stages: { id?: unknown }[] }).stages.map((st) => st?.id).filter((v): v is string => typeof v === "string")) : [];
         if (targets.some((stage) => !sentStages.includes(stage) && !mayEdit(pipelineOfStage(pipelines, stage)))) return noAccess();
       }
-      const result = await savePipelineChange(statsId, removing ? { remove: id } : { pipeline: body.pipeline }, moves, pipelineLimit(store), store);
+      const result = await savePipelineChange(statsId, removing ? { remove: id } : { pipeline: body.pipeline }, moves, pipelineLimit(store), store, (pipelineId) => mayEdit(pipelineId));
       // Someone restricted gets back only the pipelines they may see, never the names and stages of the others.
       const shown = restricted ? visiblePipelines(result.ok ? result.pipelines : [], guarded.role, access).map((p) => ({ id: p.id, name: p.name, stages: p.stages })) : result.ok ? result.pipelines : [];
       return result.ok ? Response.json({ ok: true, pipelines: shown, moved: Object.keys(result.moves).length }) : refuse(result.error, result.error === "unknown" ? 404 : 400);
@@ -96,7 +99,13 @@ export async function POST(request: NextRequest) {
         const pipelines = await readPipelines(statsId);
         const target = typeof raw.stage === "string" ? raw.stage : (existing?.stage ?? "");
         // Both the pipeline it is in and the one it goes to must be theirs to change.
-        if ((existing && !mayEdit(pipelineOfStage(pipelines, existing.stage))) || !mayEdit(pipelineOfStage(pipelines, target))) return noAccess();
+        if (existing && !mayEdit(pipelineOfStage(pipelines, existing.stage))) return noAccess();
+        const into = pipelineOfStage(pipelines, target);
+        // A deal with no stage is refused for that. So is one whose stage no pipeline has, for someone who sees
+        // every pipeline; for someone who does not, it is refused as access, so it never tells which stages exist.
+        const seesAll = access !== null && !Object.values(access).includes("none");
+        if (into === null && (target === "" || seesAll)) return refuse(typeof raw.title === "string" && raw.title.trim() ? "stage" : "title");
+        if (!mayEdit(into)) return noAccess();
       }
       const follow = readFollowUp({ ...existing, ...raw });
       if (!follow.ok) return refuse(follow.error);

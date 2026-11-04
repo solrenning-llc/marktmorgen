@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   const set = await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "view" });
   is("the owner restricts a Support person", [set.status, set.body.access], [200, { sales0: "view" }]);
   is("kept", await readPipelineAccess(store.statsId, "sam@example.com"), { sales0: "view" });
-  is("written in the activity log", (await readLog(store.sid)).some((line) => line.what === "Set sam@example.com's access to the Sales pipeline: can only see"), true);
+  is("written in the activity log", (await readLog(store.sid)).some((line) => line.what === "Set sam@example.com's access to the Sales pipeline: can only see (was can change)"), true);
   const deal = await CRM(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", cookie: await cookie("sam@example.com") }, body: JSON.stringify({ action: "deal", deal: { title: "Seats", email: "", cents: 100, stage: "lead00", note: "" } }) }));
   is("and the deal routes hold to it", deal.status, 403);
   is("can change again, as before", [(await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "edit" })).body.access, await readPipelineAccess(store.statsId, "sam@example.com")], [{}, {}]);
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   part("Every pipeline at once, from the Save button");
   await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "edit" });
   const saveAll = await post(owner, { email: "sam@example.com", choices: { sales0: "view", wkshp1: "none" } });
-  is("one Save keeps every choice, and the log says them", [saveAll.status, saveAll.body.access, (await readLog(store.sid)).some((line) => line.what === "Set sam@example.com's pipeline access. Sales: can only see; Workshops: no access")], [200, { sales0: "view", wkshp1: "none" }, true]);
+  is("one Save keeps every choice, and the log says them", [saveAll.status, saveAll.body.access, (await readLog(store.sid)).some((line) => line.what === "Set sam@example.com's pipeline access. Sales: can only see (was can change); Workshops: no access (was can change)")], [200, { sales0: "view", wkshp1: "none" }, true]);
   is("a choice that is not one, or a pipeline that is gone, changes nothing", [(await post(owner, { email: "sam@example.com", choices: { sales0: "all" } })).body.error, (await post(owner, { email: "sam@example.com", choices: { gone00: "view" } })).status, await readPipelineAccess(store.statsId, "sam@example.com")], ["invalid", 404, { sales0: "view", wkshp1: "none" }]);
   await redis.pipeline([["HSET", `nl:crm:pacc:${store.statsId}`, "sam@example.com", JSON.stringify({ sales0: "view", wkshp1: "none", oldp01: "none" })]]);
   is("a restriction on a pipeline the store no longer has is dropped at the next save", (await post(owner, { email: "sam@example.com", choices: { sales0: "edit" } })).body.access, { wkshp1: "none" });
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   is("a record that cannot be read is said to show nothing, and what saving does", unread.includes("they see no pipeline. Choose what they may do with each one and save; the others stay at No access until you do.") && /<option value="none" selected="">/.test(unread), true);
   is("nobody to restrict, said why", renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [], pipelines: [], initial: {} })).includes("only Support people can"), true);
   const editorCode = readFileSync("components/pipeline-access-editor.tsx", "utf8");
-  is("a choice saves nothing by itself: each teammate has a Save that names them, and what happened is said in their own group", [/<select[^>]*disabled/.test(html), html.includes('role="status"'), html.includes(">Save<span class=\"sr-only\"> the access of sam@example.com</span>"), editorCode.includes("onChange={(event) => void choose"), editorCode.includes("body: JSON.stringify({ email, choices })")], [false, true, true, false, true]);
+  is("a choice saves nothing by itself: each teammate has a Save that names them, and what happened is said in their own group", [/<select[^>]*disabled/.test(html), html.includes('role="status"'), html.includes(">Save<span class=\"sr-only\"> the access of sam@example.com</span>"), editorCode.includes("onChange={(event) => void choose"), editorCode.includes("body: JSON.stringify({ email, choices, was })")], [false, true, true, false, true]);
   is("an error is tied to that teammate's choices, and the Save button is never disabled (it says why instead)", [editorCode.includes("aria-describedby={message?.kind === \"error\" ? errorId : undefined}"), editorCode.includes("aria-disabled={busy !== null || undefined}"), editorCode.includes("Another teammate's access is being saved. Press Save again in a moment.")], [true, true, true]);
 
   part("On the team page");

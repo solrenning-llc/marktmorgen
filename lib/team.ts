@@ -546,11 +546,12 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
         return null;
       }
       await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
+      // The old address's restrictions go only once the team names the new one, still under the lock, so
+      // someone who joins on the old address at once and is restricted never has that restriction deleted.
+      await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
       return team.members.find((m) => m.email === before)?.role ?? "support";
     });
     if (!role) continue;
-    // The old address's restrictions go only once the team names the new one.
-    await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
     await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
   }

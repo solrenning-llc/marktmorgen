@@ -27,6 +27,7 @@ import { BLOCK_GROUPS } from "@/components/block-picker";
 import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { SITE_KINDS } from "@/lib/site-page-rules";
 import { coachChecks } from "@/lib/page-coach";
+import { videoWindowMark } from "@/lib/buyer-words/blocks";
 import {
   BLOCK_KINDS,
   MAX_COLUMN_ELEMENTS,
@@ -193,6 +194,14 @@ is("a video is the lazy player, loading nothing before play", [video.includes("<
   const preview = draw(windowed.page.blocks[0], { ...ctx, preview: true });
   is("in the studio's preview the button is drawn and does nothing", [preview.includes("Watch the tour"), preview.includes("<button"), preview.includes("<dialog")], [true, false, false]);
   is("the mark is said in the page's language", draw(windowed.page.blocks[0], { ...ctx, lang: "pt" }).includes('<span class="sp-video-window-mark">(vídeo)</span>'), true);
+  // Words that already say video are not followed by "(video)", so a screen reader never hears it twice (inbox C4-16 (g)).
+  is(
+    "no second video when the words already say it, in any case or accent; a word that only starts the same keeps the mark",
+    [videoWindowMark("Watch the video", "en"), videoWindowMark("See 3 VIDEOS", "en"), videoWindowMark("Assista ao vídeo", "pt"), videoWindowMark("Watch the tour", "en"), videoWindowMark("Meet our videographer", "en")],
+    ["", "", "", "(video)", "(video)"],
+  );
+  const saysVideo = keep([row([[{ ...el.window, label: "Watch the video" }]])]);
+  is("drawn with the button's own words only", draw(saysVideo.page.blocks[0], ctx).includes(">Watch the video</button>"), true);
   is("the player waits for its own play button for a visitor who asked for less motion", [embedUrl(youtube as Video).includes("autoplay=1"), embedUrl(youtube as Video, { autoplay: false }).includes("autoplay=0"), embedUrl(youtube as Video, { autoplay: false }).includes("autoplay=1")], [true, true, false]);
   const source = readFileSync("components/video-window.tsx", "utf8");
   is(

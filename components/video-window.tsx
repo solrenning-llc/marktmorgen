@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { PROVIDER_NAMES, type Video, embedUrl } from "@/lib/sales-page";
-import { blockWords } from "@/lib/buyer-words/blocks";
+import { blockWords, videoWindowMark } from "@/lib/buyer-words/blocks";
 
 /**
  * A video behind a button, opened in a window over the page (added
@@ -22,6 +22,7 @@ import { blockWords } from "@/lib/buyer-words/blocks";
  */
 export function VideoWindow({ video, title, label, lang = "en" }: { video: Video; title: string; label: string; lang?: string }) {
   const words = blockWords(lang);
+  const mark = videoWindowMark(label, lang);
   const provider = PROVIDER_NAMES[video.provider];
   const dialog = useRef<HTMLDialogElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
@@ -50,7 +51,8 @@ export function VideoWindow({ video, title, label, lang = "en" }: { video: Video
           setOpen(true);
         }}
       >
-        {label} <span className="sp-video-window-mark">{words.videoWindowMark}</span>
+        {label}
+        {mark ? <> <span className="sp-video-window-mark">{mark}</span></> : null}
       </button>
       <dialog
         ref={dialog}

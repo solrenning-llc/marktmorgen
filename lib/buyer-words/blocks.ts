@@ -454,3 +454,16 @@ export const BLOCK_WORDS: Record<LanguageCode, BlockWords> = { en, es, fr, de, i
 export function blockWords(language: unknown): BlockWords {
   return BLOCK_WORDS[parseLanguage(language)];
 }
+
+/**
+ * The mark after a video window's button words, "(video)" in the store's
+ * language, or nothing when the creator's words already say video ("Watch
+ * the video"), so a screen reader never hears "Watch the video (video)"
+ * (inbox C4-16 (g)). Accents and case aside: "vídeo" is "video".
+ */
+export function videoWindowMark(label: string, language: unknown): string {
+  const mark = blockWords(language).videoWindowMark;
+  const plain = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const word = plain(mark.replace(/[()]/g, "").trim());
+  return word && new RegExp(`(^|[^\\p{L}])${word}s?($|[^\\p{L}])`, "u").test(plain(label)) ? "" : mark;
+}

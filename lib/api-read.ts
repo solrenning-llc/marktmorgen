@@ -17,7 +17,8 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
-import { listingsToRead, productIds, readListing, readListings } from "@/lib/catalog";
+import { productIds, readListing, readListings } from "@/lib/catalog";
+import { listingsToRead } from "@/lib/catalog-read-count";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { memberPage } from "@/lib/community";
 import { readCourse } from "@/lib/course";

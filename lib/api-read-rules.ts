@@ -227,7 +227,7 @@ export const API_PAGE_ROWS = 200;
 /** One product as the API sends it: its title in any script, its link and the rest. */
 export const PRODUCT_SENT_BYTES = 1_024;
 
-/** What one page of products does: each listing the store's own record does not hold, read (lib/catalog.ts, listingsToRead), and every product sent. */
+/** What one page of products does: each listing the store's own record does not hold, read (lib/catalog-read-count.ts, listingsToRead), and every product sent. */
 export function productsPageWork(listed: number, read: number): ReadWork {
   if (listed <= 0) return { ...NONE };
   return { commands: read, bytes: read * LISTING_BYTES, sent: listed * PRODUCT_SENT_BYTES, stripePages: 0, roundTrips: read ? 1 : 0 };

@@ -21,7 +21,8 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
  */
 import type { Store } from "@/lib/store";
 import { type StatsData, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
-import { listingsToRead, readListings } from "@/lib/catalog";
+import { readListings } from "@/lib/catalog";
+import { listingsToRead } from "@/lib/catalog-read-count";
 import { keptMembershipBytes, membershipNumbersPaid } from "@/lib/membership-numbers";
 import { broadcastSizes, listBroadcasts } from "@/lib/broadcasts";
 import { broadcastMoney, flowMoney, keptMailRevenueBytes, readMailRevenuePaid } from "@/lib/mail-revenue";

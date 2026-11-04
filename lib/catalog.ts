@@ -674,14 +674,6 @@ function wanted(store: Store, ids: Iterable<string> | undefined): string[] {
   return out;
 }
 
-/** How many listings readListings reads from the database for these ids: those the store's own record does not hold (a reading that pays for its size first counts them). */
-export function listingsToRead(store: Store, ids?: Iterable<string>): number {
-  const catalog = store.catalog;
-  if (catalog.inline || !catalog.id) return 0;
-  const head = new Set(catalog.head.map((listing) => listing.id));
-  return wanted(store, ids).filter((id) => !head.has(id)).length;
-}
-
 /**
  * Listings, in the order asked (every product in the creator's order when no
  * ids are given). Ids the store does not have are left out. Whatever the head
@@ -780,6 +772,12 @@ export async function readDelivery(
   if (product.id === id) return { product, option: null };
   const option = product.options.find((entry) => entry.id === id);
   return option ? { product, option } : null;
+}
+
+/** The file a delivery holds: the option's own when the id named an option, else the product's. */
+export function deliveredFile(found: { product: Listing; option: ProductOption | null } | null): ProductFile | null {
+  if (!found) return null;
+  return (found.option ? found.option.file : found.product.file) ?? null;
 }
 
 /**

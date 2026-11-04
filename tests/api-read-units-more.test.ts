@@ -16,7 +16,8 @@ import { makeKey } from "@/lib/api-keys";
 import {
   MEMBERSHIPS_COLD_WORK, NUMBERS_KEEP_WORK, addWork, apiReadUnits, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork,
 } from "@/lib/api-read-rules";
-import { listingsToRead, productIds } from "@/lib/catalog";
+import { productIds } from "@/lib/catalog";
+import { listingsToRead } from "@/lib/catalog-read-count";
 import { keptMembershipBytes } from "@/lib/membership-numbers";
 import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { members } from "@/lib/api-read";

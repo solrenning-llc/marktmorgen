@@ -118,3 +118,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+    from test_held_store_redis import main as held_store_checks
+    held_store_checks()

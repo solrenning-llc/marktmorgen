@@ -69,6 +69,7 @@ import { POST as rcourse } from "@/app/api/store/course/route";
 import { POST as rcrm } from "@/app/api/store/crm/route";
 import { POST as rfile_attach } from "@/app/api/store/file/attach/route";
 import { POST as rforms } from "@/app/api/store/forms/route";
+import { POST as rresend } from "@/app/api/store/resend/route";
 import { POST as rwaitlist } from "@/app/api/store/waitlist/route";
 import { POST as rimage } from "@/app/api/store/image/route";
 import { POST as rkeys } from "@/app/api/store/keys/route";
@@ -144,6 +145,7 @@ const ROUTES: Record<string, Handler> = {
   "site-page": rsite_page as Handler,
   "spend": rspend as Handler,
   "stream/captions": rstream_captions as Handler,
+  "resend": rresend as Handler,
   "waitlist": rwaitlist as Handler,
 };
 const route = async (path: string): Promise<Handler> => {
@@ -209,6 +211,8 @@ async function main(): Promise<void> {
   }
   is("taking an assignment off, with the work handed in, is refused", await answer(await course(json("/api/store/course", locked, { action: "task", id: pid, lessonId, task: null }))), LOCKED);
   is("taking a quiz off is refused", await answer(await course(json("/api/store/course", locked, { action: "quiz", id: pid, lessonId, quiz: null }))), LOCKED);
+  const resend = await route("resend");
+  is("sending a purchase email again, which carries the thank-you note, is refused", await answer(await resend(json("/api/store/resend", locked, { reference: "cs_test_" + "a".repeat(24) }))), LOCKED);
   is("withdrawing a student's certificate is refused", await answer(await course(json("/api/store/course", locked, { action: "withdraw", id: pid, certificate: "c".repeat(16) }))), LOCKED);
   is("deleting a lesson comment from the studio is refused", await answer(await course(json("/api/store/course", locked, { action: "cm-delete", id: pid, comment: "x" }))), LOCKED);
   kept.modules[0].lessons[0] = { ...kept.modules[0].lessons[0], video: { pathname: "stores/x/old.mp4", name: "old.mp4", bytes: 10, contentType: "video/mp4", addedAt: "" } };
@@ -395,12 +399,13 @@ async function main(): Promise<void> {
     "stores": ["need:delete", "not:leaving a team the person was invited to, which deletes nothing of the store"],
     "stream/captions": ["act:products:remove"],
     "team": ["need:team"],
+    "resend": ["act:orders:resend"],
     "waitlist": ["act:products:launch"],
     "webhooks": ["need:settings"],
   };
   // What deletes, and what sends or starts sending (an email, a batch, a queue that a job sends).
   const DELETES =
-    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\badvance[A-Z][A-Za-z]*\(/;
+    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(/;
   const walk = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const at = join(dir, name);

@@ -112,7 +112,9 @@ export async function readFields(statsId: string | null): Promise<CrmField[]> {
 /**
  * Saves the fields; the answers kept for a field that is gone go with it.
  * With `keepAll`, nothing is written when a field kept now would be gone
- * (CrmFieldsKept), read in the same step as the write.
+ * (CrmFieldsKept). The fields are read just before the write, not in the
+ * same step: a field another session adds in between is left off the list
+ * but its answers are never deleted, since only fields read as gone are.
  */
 export async function writeFields(statsId: string, fields: CrmField[], keepAll = false): Promise<CrmField[]> {
   let before: CrmField[];

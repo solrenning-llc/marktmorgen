@@ -232,7 +232,10 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     "delete", "delete-comment", "unsay" and "clear" (the chat room);
  *   - orders: "remove" (a task on a person), "unnote" (a note on a person),
  *     "undeal" (a deal), "fields-remove" (the store's own fields saved without
- *     one it had, which takes that field's answers off every person: crm);
+ *     one it had, which takes that field's answers off every person: crm),
+ *     "resend" (a buyer's purchase email sent again, which carries the
+ *     product's thank-you note: a note rewritten in that session would go to
+ *     every buyer listed);
  *     stats: "remove" (a note or a spend on the numbers);
  *     draft: "drop" (an outreach pitch), "segment-remove", "draft-remove";
  *     reviews: "photo" (a buyer's photo taken off a review).
@@ -247,7 +250,7 @@ export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
   community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],
-  orders: ["remove", "unnote", "undeal", "fields-remove"],
+  orders: ["remove", "unnote", "undeal", "fields-remove", "resend"],
   stats: ["remove"],
   draft: ["drop", "segment-remove", "draft-remove"],
   reviews: ["photo"],

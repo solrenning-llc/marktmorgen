@@ -1,4 +1,6 @@
 import { dealActionFilter } from "@/lib/crm-deal-filter";
+import { visiblePipelines } from "@/lib/pipeline-access-rules";
+import { readPipelineAccess } from "@/lib/pipeline-access";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -33,9 +35,21 @@ export default async function StudioDealsPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
-  const [loadedFields, inventory, team] = await Promise.all([readFields(store.statsId).catch(() => null), readOpportunityReview(store.statsId), readTeam(store.sid).catch(() => null)]);
+  const restricted = view.role !== "owner" && view.role !== "admin";
+  const [loadedFields, inventory, team, access] = await Promise.all([
+    readFields(store.statsId).catch(() => null),
+    readOpportunityReview(store.statsId),
+    readTeam(store.sid).catch(() => null),
+    // What this person may see of each pipeline (639 [GL7](7)); unreadable opens nothing (null).
+    restricted ? readPipelineAccess(store.statsId, view.email).catch(() => null) : Promise.resolve({}),
+  ]);
+  const seen = visiblePipelines(inventory.pipelines, view.role, access);
+  const seenStages = new Set(seen.flatMap((p) => p.stages.map((stage) => stage.id)));
+  const shown = { pipelines: seen.map((p) => ({ id: p.id, name: p.name, stages: p.stages })), deals: inventory.deals.filter((deal) => seenStages.has(deal.stage)), stages: inventory.stages.filter((stage) => seenStages.has(stage.id)) };
+  const viewOnly = seen.filter((p) => p.access === "view").map((p) => p.id);
+  const hidden = inventory.pipelines.length - seen.length;
   const fields = loadedFields ?? [];
-  const available = inventory.available && loadedFields !== null && team !== null;
+  const available = inventory.available && loadedFields !== null && team !== null && shown.pipelines.length > 0;
   const assignees = [store.email, ...(team?.members ?? []).filter(m => can(m.role, "orders")).map(m => m.email)];
   const today = new Date().toISOString().slice(0, 10);
 
@@ -60,7 +74,7 @@ export default async function StudioDealsPage({ searchParams }: Params) {
             .
           </p>
           <div className="mt-8">
-            {available ? <DealsBoard key={(store.sid || store.handle) + ":" + dealActionFilter(query.followup)} deals={inventory.deals} versions={inventory.versions} stages={inventory.stages} pipelines={inventory.pipelines} pipelineMax={pipelineLimit(store)} fields={fields} currency={store.currency} assignees={assignees} today={today} initialFilter={dealActionFilter(query.followup)} requestHref={can(view.role, "send") ? studioPath(store, "", "requests") : undefined} /> : <DealsUnavailable storeId={store.sid} buyersHref={studioPath(store, "", "people")} fields={fields} followup={dealActionFilter(query.followup)} />}
+            {restricted && access === null ? <p className="notice notice-warn">Your access to this store&apos;s pipelines could not be read just now, so none is shown. Reload the page in a moment, or ask the store&apos;s owner.</p> : inventory.available && access !== null && shown.pipelines.length === 0 ? <p className="notice notice-info">You have no pipelines to see in this store. Ask the store&apos;s owner if you should.</p> : available ? <DealsBoard key={(store.sid || store.handle) + ":" + dealActionFilter(query.followup)} deals={shown.deals} versions={Object.fromEntries(shown.deals.map(d => [d.id, inventory.versions[d.id] ?? ""]))} stages={shown.stages} pipelines={shown.pipelines} pipelineMax={Math.max(0, pipelineLimit(store) - hidden)} viewOnly={viewOnly} someHidden={restricted} fields={fields} currency={store.currency} assignees={assignees} today={today} initialFilter={dealActionFilter(query.followup)} requestHref={can(view.role, "send") ? studioPath(store, "", "requests") : undefined} /> : <DealsUnavailable storeId={store.sid} buyersHref={studioPath(store, "", "people")} fields={fields} followup={dealActionFilter(query.followup)} />}
           </div>
         </main>
       </StudioStorePin>

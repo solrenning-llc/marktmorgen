@@ -66,3 +66,21 @@ The whole-page render proves the newest forty digital purchases are shown, the o
 The 600 distinct historical listings are read before the forty-purchase truncation; the rendered purchases then trigger forty listing reads for keys and forty for reviewability. The command increase is 680 compared with the same waiting/call scenario. At the repository's recorded command input alone the sums are 0.002878 and 0.002718 dollars, not a verified current supplier invoice or the entire cost. HTML and record sizes are fixture observations and may vary with the clock, not byte ceilings.
 
 All six scenarios reach their original modeled-command comparison after passing functional and privacy assertions; all six reject the unchanged eighteen-command ceiling. No runtime fix, pricing adjustment, allowance increase, financial approval or PR is created. The next measurement must still cover bundles/bumps, invoice and refund lookups, imports, feeds, licence keys, malformed/oversized responses, other catalogue shapes, bytes and the actual entry budget assigned by CX-44. Nothing here declares the whole-page worst case complete or prices an unknown at zero.
+
+
+## Installment-invoice refund reads follow-up
+
+The fourth scenario keeps the same catalogue, calls, waiting block and paid additions. Its hundred historical checkout sessions are installment purchases (mode=subscription, metadata.kind=plan), each with its own valid first-invoice ID. The real purchaseRefunded reader finds no legacy payment_intent on each synthetic invoice, so it lists ten paid invoice payments and reads all ten expanded payment intents. Every charge is partially refunded (1 of 1000 minor units), not fully refunded, preserving access through the real refund rule. These are historical provider response fixtures, not checkout writes, real invoices or proof of a live account's API behavior.
+
+| Measured provider work | Each new/existing-room entry |
+| --- | ---: |
+| Base call, purchase and one-click-addition GETs | 16 |
+| First-invoice GETs | 100 |
+| Invoice-payment list GETs | 100 |
+| Expanded refund payment-intent GETs | 1000 |
+| Total Stripe GETs | 1216 |
+| Synthetic Stripe response bytes | 748394 |
+
+Redis counts remain 1439/1359 because this path adds provider reads rather than Redis commands. The actual render still shows the newest forty digital purchases and forty buyer calls, the full waiting block, and no unrelated buyer calls. All eight cases pass their functional/provider/privacy assertions and then reject only the unchanged eighteen-command ceiling. Metadata and rendering remain inside the measured entry; setup and the explicit warm request remain outside it.
+
+The payment-list limit of ten is the synthetic response in this case, not a locally enforced array cap; oversized provider replies are still a separate required case. This observation rules out treating the previous sixteen GETs as a whole-page provider ceiling. It does not establish a supplier price, function-duration allowance, complete worst-case bound or positive MR result. No product, tax, cost table, request window, price, visible allowance or flag is changed.

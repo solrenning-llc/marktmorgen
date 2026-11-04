@@ -18,7 +18,7 @@ import { readDraft as readRequestDraft } from "@/lib/payment-request-rules";
 import { COMMANDS, COMMAND } from "./traffic-cost";
 
 const OWNER = "buyer-page-cost@example.test", BUYER = "buyer@example.test", ACCOUNT = "acct_1TestLoom00001";
-async function world(pending = false, purchases = false) {
+async function world(pending = false, purchases = false, installments = false) {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_tax_journey_only";
   process.env.RESEND_API_KEY = "re_SYNTHETIC_ACCESS_ONLY";
@@ -64,23 +64,35 @@ async function world(pending = false, purchases = false) {
   const customers = Array.from({ length: 10 }, (_, i) => `cus_BuyerCost${String(i).padStart(8, "0")}`);
   const purchasedAt = Math.floor(Date.now()/1000) - 600;
   const bought = digitalIds.slice(0,100).map((product, i) => ({
-    object: "checkout.session", id: `cs_test_CostPurchase${String(i).padStart(12,"0")}`, mode: "payment", status: "complete", payment_status: "paid",
+    object: "checkout.session", id: `cs_test_CostPurchase${String(i).padStart(12,"0")}`, mode: installments ? "subscription" : "payment", status: "complete", payment_status: "paid",
+    invoice: installments ? `in_CostInvoice${String(i).padStart(12,"0")}` : null,
     created: purchasedAt + i, amount_total: 1000, currency: "usd", customer: customers[i%10], customer_details: { email: BUYER },
-    payment_intent: { id: `pi_CostPurchase${i}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
-    metadata: { store: store.handle, product },
+    payment_intent: installments ? null : { id: `pi_CostPurchase${i}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
+    metadata: { store: store.handle, product, ...(installments ? { kind: "plan" } : {}) },
   }));
   const upsells = digitalIds.slice(100).map((product, i) => ({
     object: "payment_intent", id: `pi_CostUpsell${String(i).padStart(12,"0")}`, status: "succeeded", amount: 1000, currency: "usd",
     created: purchasedAt + 100 + i, customer: customers[Math.floor(i/50)], latest_charge: { refunded: false, amount_refunded: 0 },
     metadata: { kind: "upsell", store: store.handle, product },
   }));
-  const provider = { calls: 0, callPages: 0, returned: 0, purchaseRows: 0, intentPages: 0, intentRows: 0, responseBytes: 0 };
+  const provider = { calls: 0, callPages: 0, returned: 0, purchaseRows: 0, intentPages: 0, intentRows: 0, invoiceGets: 0, invoicePaymentPages: 0, refundIntentGets: 0, responseBytes: 0 };
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input)); assert.equal(url.hostname, "api.stripe.com");
     assert.equal(init?.method, "GET"); assert.equal(new Headers(init.headers).get("Stripe-Account"), ACCOUNT);
     provider.calls++;
     let body: unknown;
-    if (url.pathname === "/v1/payment_intents") {
+    if (/^\/v1\/invoices\/in_CostInvoice[0-9]{12}$/.test(url.pathname)) {
+      assert.ok(installments); provider.invoiceGets++;
+      body = { object: "invoice", id: url.pathname.split("/").at(-1), payment_intent: null };
+    } else if (url.pathname === "/v1/invoice_payments") {
+      assert.ok(installments); assert.equal(url.searchParams.get("limit"), "10");
+      const invoice=url.searchParams.get("invoice"); assert.ok(invoice && /^in_CostInvoice[0-9]{12}$/.test(invoice));
+      const index=Number(invoice.slice(-12)); assert.ok(index>=0 && index<100); provider.invoicePaymentPages++;
+      body={ object: "list", has_more: false, data: Array.from({length:10}, (_,i)=>({ status: "paid", payment:{ type: "payment_intent", payment_intent: `pi_CostInvoicePayment${String(index*10+i).padStart(12,"0")}` } })) };
+    } else if (/^\/v1\/payment_intents\/pi_CostInvoicePayment[0-9]{12}$/.test(url.pathname)) {
+      assert.ok(installments); assert.deepEqual(url.searchParams.getAll("expand[]"), ["latest_charge"]); provider.refundIntentGets++;
+      body={ object: "payment_intent", id: url.pathname.split("/").at(-1), status: "succeeded", latest_charge: { object: "charge", amount: 1000, amount_refunded: 1, refunded: false } };
+    } else if (url.pathname === "/v1/payment_intents") {
       assert.ok(purchases, "empty purchase cases have no intent follow-up");
       assert.equal(url.searchParams.get("limit"), "50");
       const customer = url.searchParams.get("customer"); assert.ok(customer && customers.includes(customer));
@@ -105,15 +117,16 @@ async function world(pending = false, purchases = false) {
   const visit=async()=>{await generateMetadata(params);return renderToStaticMarkup(await OrdersPage(params));};
   return { provider,visit,sessions,requestIds,agreementIds,digitalTitles };
 }
-for(const scenario of ["calls", "waiting", "purchases"] as const) for(const warm of [false,true]) test(`real buyer page cost baseline (${scenario}): ${warm?"existing":"new"} rooms`,async()=>{
-  const pending=scenario!=="calls", purchases=scenario==="purchases";
-  const w=await world(pending,purchases); if(warm)await w.visit();
-  Object.assign(w.provider,{calls:0,callPages:0,returned:0,purchaseRows:0,intentPages:0,intentRows:0,responseBytes:0});
+for(const scenario of ["calls", "waiting", "purchases", "installments"] as const) for(const warm of [false,true]) test(`real buyer page cost baseline (${scenario}): ${warm?"existing":"new"} rooms`,async()=>{
+  const pending=scenario!=="calls", purchases=scenario==="purchases" || scenario==="installments", installments=scenario==="installments";
+  const w=await world(pending,purchases,installments); if(warm)await w.visit();
+  Object.assign(w.provider,{calls:0,callPages:0,returned:0,purchaseRows:0,intentPages:0,intentRows:0,invoiceGets:0,invoicePaymentPages:0,refundIntentGets:0,responseBytes:0});
   const actual=redis.pipeline.bind(redis),commands:(string|number)[][]=[];let requestBytes=0,responseBytes=0;
   redis.pipeline=async list=>{commands.push(...list);requestBytes+=Buffer.byteLength(JSON.stringify(list));const replies=await actual(list);responseBytes+=Buffer.byteLength(JSON.stringify(replies));return replies;};
   let html:string;
   try{html=await w.visit();}finally{redis.pipeline=actual;}
-  assert.equal(w.provider.callPages,5);assert.equal(w.provider.returned,500);assert.equal(w.provider.calls,purchases?16:6);
+  assert.equal(w.provider.callPages,5);assert.equal(w.provider.returned,500);assert.equal(w.provider.calls,installments?1216:purchases?16:6);
+  assert.equal(w.provider.invoiceGets,installments?100:0); assert.equal(w.provider.invoicePaymentPages,installments?100:0); assert.equal(w.provider.refundIntentGets,installments?1000:0);
   assert.equal(w.provider.purchaseRows,purchases?100:0); assert.equal(w.provider.intentPages,purchases?10:0); assert.equal(w.provider.intentRows,purchases?500:0);
   if(purchases) {
     assert.equal(w.digitalTitles.filter(title=>html.includes(title)).length,40,"all 600 paid records are considered before only the newest forty render");
@@ -136,7 +149,7 @@ for(const scenario of ["calls", "waiting", "purchases"] as const) for(const warm
   const catalogReads=commands.filter(c=>c[0]==="GET" && /^nl:catalog:[^:]+:l:/.test(String(c[1]))).length;
   if(purchases)assert.ok(catalogReads>=600,"six hundred distinct historical paid products actually reach the catalogue reader");
   const modeled=COMMANDS.laterPage+COMMANDS.laterCount;
-  const profile={source:"actual OrdersPage+generateMetadata+render",scenario:warm?"existing-rooms":"new-rooms",pending,purchases,catalogReads,waitingCommands,redisCommands:commands.length,moves,roomReads,roomWrites,
+  const profile={source:"actual OrdersPage+generateMetadata+render",scenario:warm?"existing-rooms":"new-rooms",pending,purchases,installments,catalogReads,waitingCommands,redisCommands:commands.length,moves,roomReads,roomWrites,
     logicalRedisRequestBytes:requestBytes,logicalRedisResponseBytes:responseBytes,htmlBytes:Buffer.byteLength(html),provider:w.provider,
     modeledCommands:modeled,redisCommandCostOnly:commands.length*COMMAND,financialApproval:false,completeWorstCase:false};
   console.log(JSON.stringify(profile));

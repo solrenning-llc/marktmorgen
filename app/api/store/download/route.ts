@@ -27,8 +27,10 @@ import { ordersWords } from "@/lib/buyer-words/orders";
  * to a page that says so and offers the way back (lib/membership-access.ts).
  *
  * A PDF on a product whose creator switched stamping on goes out with the
- * buyer's email on every page (lib/pdf-stamp.ts), which can take a few
- * seconds the first time for a big book: hence the longer time limit.
+ * buyer's email on every page (lib/pdf-stamp.ts), and an EPUB with the same
+ * line as an invisible mark inside the book (lib/epub-stamp.ts), which can
+ * take a few seconds the first time for a big book: hence the longer time
+ * limit.
  */
 export const maxDuration = 60;
 
@@ -52,7 +54,7 @@ const STATUSES = {
   refunded: 410,
 } as const;
 
-/** The file, stamped with its buyer's email when the product asks for it. */
+/** The file, stamped with its buyer's email when the product asks for it (a PDF or an EPUB). */
 async function deliver(
   store: Store,
   product: Listing,

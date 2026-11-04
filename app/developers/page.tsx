@@ -86,7 +86,7 @@ export default function DevelopersPage() {
           separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
           fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
           <code className="font-mono">unknown_field</code>, with its name. This works on every list above, on
-          Store and on Bookings.
+          Store, on Bookings and on Discount codes.
         </p>
         <p>
           {`Each key may make ${API_RATE} requests a minute. Past that, the answer is 429 with `}

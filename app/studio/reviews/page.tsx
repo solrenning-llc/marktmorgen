@@ -12,6 +12,10 @@ import { HIDDEN_RULE, OVERVIEW_READ_MAX, type StudioRow, averageText, reviewsSin
 import { OVERVIEW_MONTHS, byMonth, monthAverage, monthStart } from "@/lib/review-overview";
 import { ReviewAskEditor, ReviewRow, SeenAllButton, type StudioReview } from "@/components/review-studio";
 import { ReviewQr } from "@/components/review-qr";
+import { ReviewThemes } from "@/components/review-themes";
+import { ReviewAiSummaries } from "@/components/review-ai-summaries";
+import { readReviewSummary } from "@/lib/review-ai-summary";
+import { readVoice } from "@/lib/customer-voice";
 import { canRecover } from "@/lib/buyer-orders";
 import { storeBase } from "@/lib/purchase-email";
 import { AiOn } from "@/components/ai-assist";
@@ -85,6 +89,10 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   }));
   const pages = Math.max(1, Math.ceil(current.total / PAGE_SIZE));
   const reviewed = named.filter((p) => (numbers.get(p.id)?.visible ?? 0) + (numbers.get(p.id)?.hidden ?? 0) > 0);
+  // Each reviewed product's AI summary kept this week (636 [GL4](d)): read only, nothing made by opening the page.
+  const aiSummaries = await Promise.all(
+    reviewed.slice(0, 30).map(async (p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: await readReviewSummary(store.statsId, p.id).catch(() => null) })),
+  );
   const tab = (view: "new" | "all", label: string) => (
     <Link
       href={studioPath(store, view === "new" ? "" : "view=all", "reviews")}
@@ -273,6 +281,10 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 </>
               )}
             </section>
+
+            <ReviewThemes voice={await readVoice(store).catch(() => null)} studioHome={studioPath(store)} />
+
+            <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} />
 
             <div className="card p-5 sm:p-6">
               <h2 id="asking-for-reviews" tabIndex={-1} className="font-semibold text-ink">Asking for reviews</h2>

@@ -28,13 +28,14 @@ import { reviewable } from "@/lib/review-proof";
 import { takesReviews } from "@/lib/house-store";
 import { type PurchaseItems } from "@/lib/buyer-orders";
 import { BundleDelivery } from "@/components/bundle-delivery";
-import { speech } from "@/lib/buyer-words";
+import { speech, speechFor } from "@/lib/buyer-words";
 import { type OrdersWords, ordersWords } from "@/lib/buyer-words/orders";
 import { NewTab } from "@/components/new-tab";
 import { type Waiting, waitingFor } from "@/lib/buyer-waiting";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { agreementWords } from "@/lib/buyer-words/agreements";
 import { requestsOpen } from "@/lib/payment-requests";
+import { takePublicRequest } from "@/lib/traffic";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -173,7 +174,10 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token : "";
   const status = typeof query.status === "string" ? query.status : "";
-  const email = token ? await ordersGrant(store, token) : null;
+  // Each opening with a link takes one of the store's buyer requests before anything is read (lib/traffic.ts),
+  // so a link reloaded in a loop has a ceiling; without room, nothing is read and the page says to come back.
+  const admitted = token ? await takePublicRequest(store, "buyer") : true;
+  const email = token && admitted ? await ordersGrant(store, token) : null;
   const available = canRecover(store);
 
   let purchases: Purchase[] | null = null;
@@ -191,7 +195,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
     }
   }
   const NOTICES = words.notices;
-  const notice = token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
+  const notice = token && !admitted ? NOTICES.busy : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
   const on = (seconds: number) => said.date(seconds * 1000);
 
   // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
@@ -570,10 +574,11 @@ function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store
       <ul className="mt-4 space-y-4">
         {waiting.requests.map((request) => (
           <li key={request.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
-            <p className="font-semibold">{`${rw.pageTitle}: ${said.money(request.total)}`}</p>
+            {/* In the request's own currency, as its page and Stripe charge it: never the store's currency now. */}
+            <p className="font-semibold">{`${rw.pageTitle}: ${speechFor(store.language, request.currency).money(request.total)}`}</p>
             <p className="st-muted mt-1 text-sm">{request.dueDate ? rw.due(day(request.dueDate)) : rw.until(said.date(request.expiresAt))}</p>
             <Link href={`/@${store.handle}/pay/${request.id}`} className="btn st-btn btn-wrap mt-3 inline-flex min-h-11 items-center [overflow-wrap:anywhere]">
-              {words.openRequest(said.money(request.total), request.dueDate ? day(request.dueDate) : "")}
+              {words.openRequest(speechFor(store.language, request.currency).money(request.total), request.dueDate ? day(request.dueDate) : "")}
             </Link>
           </li>
         ))}

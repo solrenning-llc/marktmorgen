@@ -17,11 +17,13 @@ import { agreementsOfPerson, readVersion } from "@/lib/agreement-store";
 import { type PaymentRequest, statusOf as requestStatus } from "@/lib/payment-request-rules";
 import { requestsOfPerson } from "@/lib/payment-request-store";
 import type { Store } from "@/lib/store";
+import type { Currency } from "@/lib/money";
 
 /** Items listed of each kind; a store rarely has more open for one person. */
 export const WAITING_SHOWN = 10;
 
-export type WaitingRequest = { id: string; total: number; dueDate: string; expiresAt: number };
+/** An open payment request, with the currency it was made in: what its page and Stripe charge, whatever the store sells in now. */
+export type WaitingRequest = { id: string; total: number; currency: Currency; dueDate: string; expiresAt: number };
 export type WaitingAgreement = { id: string; kind: AgreementKind; title: string; expiresAt: number };
 /**
  * What waits, up to WAITING_SHOWN of each kind; how many there are in all
@@ -37,7 +39,7 @@ export function openRequestsFor(requests: readonly PaymentRequest[], email: stri
   return requests
     .filter((request) => same(request.email, email) && request.sent.length > 0 && requestStatus(request, now) === "open")
     .sort((a, b) => (a.dueDate || "9999-12-31").localeCompare(b.dueDate || "9999-12-31") || a.createdAt - b.createdAt)
-    .map((request) => ({ id: request.id, total: request.total, dueDate: request.dueDate, expiresAt: request.expiresAt }));
+    .map((request) => ({ id: request.id, total: request.total, currency: request.currency, dueDate: request.dueDate, expiresAt: request.expiresAt }));
 }
 
 /** The proposals and agreements emailed to this address still waiting for a signature, the first to stop taking one first, all of them. */
@@ -61,6 +63,8 @@ export async function waitingFor(store: Store, email: string, now = Date.now(), 
   const titled = await Promise.all(
     allAgreements.slice(0, WAITING_SHOWN).map(async (agreement) => {
       const latest = latestOf(agreement);
+      // The title is kept in the record's mark of the version: the version's whole text is read only for one kept before that.
+      if (latest?.title) return { id: agreement.id, kind: agreement.kind, title: latest.title, expiresAt: agreement.expiresAt };
       const version = latest ? await readVersion(agreement, latest.n).catch(() => null) : null;
       // An agreement whose text cannot be read is not listed (its page could not show it either), and the page says something could not be read.
       if (!version) unread = true;

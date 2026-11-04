@@ -51,6 +51,10 @@ const en = {
       title: "This link has expired",
       body: "A link to your purchases works for 24 hours. Ask for a new one below; it takes a few seconds.",
     },
+    busy: {
+      title: "This page is busy right now",
+      body: "Too many people opened this store's pages in the last few minutes. Nothing is lost: open your link again in a few minutes.",
+    },
   } as Record<string, { title: string; body: string }>,
 
   // ---- Asking for the link -------------------------------------------------------
@@ -294,6 +298,10 @@ const es: OrdersWords = {
       title: "Este enlace ha caducado",
       body: "Un enlace a tus compras funciona durante 24 horas. Pide uno nuevo abajo; tarda unos segundos.",
     },
+    busy: {
+      title: "Esta página está ocupada ahora mismo",
+      body: "Demasiadas personas abrieron las páginas de esta tienda en los últimos minutos. No se ha perdido nada: vuelve a abrir tu enlace dentro de unos minutos.",
+    },
   },
 
   getAgainTitle: "Vuelve a obtener lo que compraste",
@@ -509,6 +517,10 @@ const fr: OrdersWords = {
       title: "Ce lien a expiré",
       body: `Un lien vers vos achats est valable 24${S}heures. Demandez-en un nouveau ci-dessous${S}; cela ne prend que quelques secondes.`,
     },
+    busy: {
+      title: "Cette page est occupée pour le moment",
+      body: "Trop de personnes ont ouvert les pages de cette boutique ces dernières minutes. Rien n'est perdu : rouvrez votre lien dans quelques minutes.",
+    },
   },
 
   getAgainTitle: "Récupérez ce que vous avez acheté",
@@ -721,6 +733,10 @@ const de: OrdersWords = {
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Ein Link zu Ihren Käufen gilt 24 Stunden. Fordern Sie unten einen neuen an; das dauert nur ein paar Sekunden.",
+    },
+    busy: {
+      title: "Diese Seite ist gerade ausgelastet",
+      body: "In den letzten Minuten haben zu viele Leute die Seiten dieses Shops geöffnet. Es geht nichts verloren: Öffne deinen Link in ein paar Minuten noch einmal.",
     },
   },
 
@@ -940,6 +956,10 @@ const it: OrdersWords = {
       title: "Questo link è scaduto",
       body: "Un link ai tuoi acquisti funziona per 24 ore. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
     },
+    busy: {
+      title: "Questa pagina è occupata in questo momento",
+      body: "Troppe persone hanno aperto le pagine di questo negozio negli ultimi minuti. Non si è perso nulla: riapri il tuo link tra qualche minuto.",
+    },
   },
 
   getAgainTitle: "Recupera ciò che hai acquistato",
@@ -1154,6 +1174,10 @@ const nl: OrdersWords = {
       title: "Deze link is verlopen",
       body: "Een link naar je aankopen werkt 24 uur. Vraag hieronder een nieuwe aan; dat duurt maar een paar seconden.",
     },
+    busy: {
+      title: "Deze pagina is nu druk",
+      body: "De afgelopen minuten hebben te veel mensen de pagina's van deze winkel geopend. Er gaat niets verloren: open je link over een paar minuten opnieuw.",
+    },
   },
 
   getAgainTitle: "Haal je aankopen opnieuw op",
@@ -1366,6 +1390,10 @@ const pt: OrdersWords = {
     expired: {
       title: "Esta ligação expirou",
       body: "Uma ligação para as suas compras funciona durante 24 horas. Peça uma nova abaixo; demora apenas alguns segundos.",
+    },
+    busy: {
+      title: "Esta página está ocupada neste momento",
+      body: "Demasiadas pessoas abriram as páginas desta loja nos últimos minutos. Nada se perdeu: volte a abrir a sua ligação dentro de alguns minutos.",
     },
   },
 

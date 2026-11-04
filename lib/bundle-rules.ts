@@ -274,6 +274,20 @@ export function bundleFromMeta(meta: Record<string, string | undefined> | null |
   return out.slice(0, MAX_BUNDLE_ITEMS);
 }
 
+/** The most products a creator's extra for one affiliate's link adds to an order (lib/affiliate-extra-rules.ts). */
+export const MAX_AFFILIATE_EXTRAS = 3;
+
+/**
+ * The extras a checkout carries under `aff_extra`, as written; [] for none
+ * (630 [HN6](6)). Kept here, beside the other lists a checkout carries, so the
+ * readers of deliveredIds need nothing else.
+ */
+export function extraFromMeta(meta: Record<string, string | undefined> | null | undefined): string[] {
+  const raw = meta?.aff_extra;
+  if (typeof raw !== "string" || !raw) return [];
+  return [...new Set(raw.split(",").filter((id) => SAFE_ID.test(id)))].slice(0, MAX_AFFILIATE_EXTRAS);
+}
+
 /**
  * Every product a checkout hands over, by id: the product bought, the one
  * ticked at checkout, and every product of either when it is a bundle, each
@@ -297,6 +311,9 @@ export function deliveredIds(meta: Record<string, string | undefined> | null | u
     ...added.map((b) => b.id),
     ...bundleFromMeta(meta, "bundle"),
     ...added.flatMap((b) => bundleFromMeta(meta, `${b.key}_bundle`)),
+    // The creator's extra for buying through one affiliate's link (630 [HN6](6),
+    // lib/affiliate-extra-rules.ts), handed over and taken back with the order.
+    ...extraFromMeta(meta),
   ];
   const out: string[] = [];
   for (const id of ids) if (typeof id === "string" && id && !out.includes(id)) out.push(id);

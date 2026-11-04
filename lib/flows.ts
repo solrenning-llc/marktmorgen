@@ -754,7 +754,8 @@ async function actOnPeople(
     let held: Held | null = null;
     if (action.do === "rotate") {
       try {
-        held = await takeLock(`nl:flow-rotate:${statsId}`, ROTATE_LOCK_SECONDS, 3_000);
+        // One SET only: a busy lock is a wait like any other, priced as one (lib/flow-limits.ts), never a loop of tries.
+        held = await takeLock(`nl:flow-rotate:${statsId}`, ROTATE_LOCK_SECONDS, 0);
       } catch {
         return each(emails, "deferred", "Deals are being shared on your team right now; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
       }
@@ -869,7 +870,7 @@ async function actOnDeals(
       before = fresh.raw;
     }
     // A share decided on a lock that ran out could be decided twice: the rest wait for the next run.
-    if (held && !(await holdLock(held))) {
+    if (held && !(await holdLock(held).catch(() => false))) {
       out.push({ email, state: "deferred", note: "Deals are being shared on your team right now; tried again in a few minutes.", wait: "board" });
       continue;
     }

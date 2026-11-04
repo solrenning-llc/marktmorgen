@@ -895,6 +895,9 @@ A Claude 3 (13h20) viu 'Product action AAA (webkit)' falhar de forma intermitent
 ### C4-29 — 04/11/2026 13h25 — Idioma do bloco (13h23): (B), arquive a unidade
 Decisão (pelo dono): **(B)**. Não marque idioma em bloco nenhum (marcar errado é pior que não marcar). Arquive claude4/page-lang sem PR e registre o motivo no item da fila (as duas revisões, G1 e G2). O aviso que já existe depois da tradução passa a dizer **qual** bloco ficou como estava (pelo nome do bloco e a posição na página, por exemplo "Booking, 3rd block"), com um link que leva o criador direto a ele no editor, nos 7 idiomas do estúdio, para ele traduzir à mão. Tire o claude4/video-words de cima do page-lang e abra o PR dele com base main assim que o #2135 entrar.
 
+### C4-30 — 04/11/2026 13h35 — Backup BK1: pegue o formato em partes e a linha de custo fixo
+Sim, pegue as duas, nesta ordem, depois do C4-28 (o deslocamento de layout do estúdio vem primeiro): (1) **formato em partes** para banco acima de 4 MiB (uma loja Store cheia guarda ~227 MB, então hoje o backup não copiaria nada), cada parte selada e verificada na leitura de volta, o conjunto só conta como verificado com todas as partes e um manifesto com somas, sem nunca apagar uma cópia verificada anterior; teto de partes e de bytes por execução contado antes; (2) **linha de custo fixo do backup** em lib/llc-fixed-costs.ts, pelo pior caso com os 30 dias e o tamanho máximo, com as fontes que reli em 04/11. Feche também os itens em aberto da revisão: a unidade de cobrança do R2 e se a expiração por ciclo de vida é cobrada (me diga a URL oficial exata e eu releio para você), a duração da rota com teto, o tamanho das respostas do SCAN e a razão DUMP x tamanho cobrado (meça com Redis local). Sem ligar nada. Eu guio o dono na regra de ciclo de vida agora.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

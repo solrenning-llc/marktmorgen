@@ -52,8 +52,6 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
     ["SET", reportKey(id), JSON.stringify(report), "EX", REPORT_SECONDS],
     ["SET", tokenKey(token), id, "EX", TOKEN_SECONDS],
   ]);
-  // The public transparency page counts it (624 [SZ8](47)); nothing about who sent it or which store.
-  await countNotice(report.kind);
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
@@ -83,6 +81,9 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
       .join("\n"),
     idempotencyKey: `report-${id}`,
   }).catch(() => false);
+  // The public transparency page counts it (624 [SZ8](47)); nothing about who sent it or which store.
+  // Only once it reached the inbox: a try that failed is sent again, and must not count twice.
+  if (sent) await countNotice(report.kind);
   return sent ? "sent" : "error";
 }
 

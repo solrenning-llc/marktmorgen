@@ -142,7 +142,19 @@ export type CallSetup = {
    * and the creator, as before.
    */
   cancelHours?: number;
+  /**
+   * Several lengths, each with its own price (637 [GL5]; lib/call-lengths.ts
+   * has the rules): two to MAX_SETUP_LENGTHS, shortest first, the first
+   * being this setup's own `minutes` at the product's own price. Weekly
+   * hours with one person a time only. Absent for one length, which is
+   * every setup saved before it existed: then `minutes` and the product's
+   * price are the only length and price.
+   */
+  lengths?: { minutes: number; cents: number }[];
 };
+
+/** The most lengths one call may offer (lib/call-lengths.ts, MAX_CALL_LENGTHS, holds the same). */
+export const MAX_SETUP_LENGTHS = 3;
 
 /** The cancellation deadlines a creator may set, in hours before the start. */
 export const CANCEL_HOURS = [2, 12, 24, 48, 72] as const;
@@ -216,6 +228,7 @@ export type SetupProblem =
   | "place"
   | "deposit"
   | "cancel"
+  | "lengths"
   | "seats"
   | "sessions"
   | "session_time"
@@ -358,6 +371,8 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
   // A setup saved before group calls existed is a one-to-one call.
   const seats = Number(value.seats ?? 1);
   if (!Number.isInteger(seats) || seats < 1 || seats > MAX_SEATS) return "seats";
+  const lengths = readLengthsShape(value.lengths, { minutes, seats, weekly, deposit });
+  if (lengths === "lengths") return "lengths";
 
   return {
     kind: "weekly",
@@ -376,8 +391,44 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     ...(place.place ? { place: place.place } : {}),
     ...(deposit ? { deposit } : {}),
     ...(cancelHours ? { cancelHours } : {}),
+    ...(lengths ? { lengths } : {}),
   };
 }
+
+/**
+ * Several lengths' shape, as kept (lib/call-lengths.ts, readCallLengths,
+ * reads what the editor sends, with the store's currency and the product's
+ * package and team): absent, empty or one length is none; otherwise two to
+ * MAX_SETUP_LENGTHS lengths a call may have, shortest first, none twice,
+ * the first being the setup's own, each fitting in one stretch of the hours,
+ * each with a whole positive price above any deposit. One person a time
+ * only. Anything else refuses the setup, so nothing read from storage can
+ * charge a length the rules never let through.
+ */
+function readLengthsShape(
+  raw: unknown,
+  setup: { minutes: number; seats: number; weekly: Range[][]; deposit: number | null },
+): { minutes: number; cents: number }[] | null | "lengths" {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) return "lengths";
+  if (raw.length <= 1) return raw.length === 1 && !sameLength(raw[0], setup.minutes) ? "lengths" : null;
+  if (raw.length > MAX_SETUP_LENGTHS || setup.seats !== 1) return "lengths";
+  const lengths: { minutes: number; cents: number }[] = [];
+  for (const item of raw) {
+    const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    const { minutes, cents } = row;
+    if (typeof minutes !== "number" || !(CALL_LENGTHS as readonly number[]).includes(minutes)) return "lengths";
+    if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents <= 0) return "lengths";
+    if (lengths.length && minutes <= lengths[lengths.length - 1].minutes) return "lengths";
+    if (!setup.weekly.some((day) => day.some(([from, to]) => to - from >= minutes))) return "lengths";
+    if (setup.deposit !== null && setup.deposit >= cents) return "lengths";
+    lengths.push({ minutes, cents });
+  }
+  return lengths[0].minutes === setup.minutes ? lengths : "lengths";
+}
+
+const sameLength = (row: unknown, minutes: number) =>
+  Boolean(row && typeof row === "object" && (row as Record<string, unknown>).minutes === minutes);
 
 /**
  * A deposit's shape, before the price is known (lib/call-deposit.ts checks it

@@ -29,7 +29,7 @@ import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links"
 import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest, parseTest, partAt, splitFor } from "@/lib/mail-test";
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
-import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadingUnits, readNarrow } from "@/lib/segments";
+import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadingUnits, readNarrow, readsBuyers } from "@/lib/segments";
 import { sameNarrow } from "@/lib/segments-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
@@ -101,6 +101,12 @@ export type Broadcast = {
    * 2026 and on one with nothing held.
    */
   reserve?: number;
+  /**
+   * Readings of the store's buyers the scheduled job made for it, written
+   * down before each one: at most one covered by `reserve` and EXTRA_READS
+   * besides (C3-80 (d)). Absent before the first.
+   */
+  reads?: number;
 };
 
 /** Creation may have been partially written even when its acknowledgement is lost. */
@@ -116,6 +122,21 @@ export const MAX_SCHEDULE_DAYS = 365;
 /** How long a broadcast's record is kept after its last change, and who it went to after it was made. */
 const RECORD_DAYS = 400;
 const RECIPIENT_DAYS = 60;
+/**
+ * Readings of the buyers the scheduled job may make for one email beyond the
+ * one its hold covers (`reserve`; every reading of an email that holds
+ * nothing): a list that could not be made for another reason (the data room
+ * full) is read again at most this many times, then the email stops, failed,
+ * saying why (C3-80 (d); tests/plan-cost-registry.ts, scheduled-reads).
+ */
+export const EXTRA_READS = 3;
+
+/** The note of an email stopped because its readings of the buyers ran out: why it waited, without "tried again". */
+export function readsSpentNote(waiting: string): string {
+  const why = waiting.replace(/\s*(Make room, and it is tried again automatically|It will be checked again automatically|It is tried again automatically)\.$/, "").trim();
+  return `${why || "The list of who it goes to could not be made. Nothing was sent."} It was tried as many times as it can be, so it stopped. To send it, write it again.`;
+}
+
 /** The longest note a broadcast's record was given room for (createBroadcast). */
 export const NOTE_ROOM = 300;
 const QUEUE = "nl:mail:queue";
@@ -185,6 +206,7 @@ function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadc
   if (value.who !== undefined && !WHO.includes(value.who as Who) || value.notProductId !== undefined && !association(value.notProductId) || value.tagged !== undefined && typeof value.tagged !== "boolean" || value.test !== undefined && value.test !== null && b.test === null) throw new Error("Invalid campaign options");
   if (value.label !== undefined && value.label !== null && (typeof value.label !== "string" || readTags([value.label])[0] !== value.label)) throw new Error("Invalid campaign label");
   if (value.reserve !== undefined && !nonnegative(value.reserve)) throw new Error("Invalid campaign reserve");
+  if (value.reads !== undefined && !nonnegative(value.reads)) throw new Error("Invalid campaign reads");
   if (value.narrow !== undefined && value.narrow !== null) {
     if (typeof value.narrow !== "object" || Array.isArray(value.narrow)) throw new Error("Invalid campaign audience");
     const narrow = value.narrow as Record<string, unknown>;
@@ -461,7 +483,19 @@ export async function advanceBroadcast(
       // anything was held) is read too, as every scheduled reading is, without counting it in the studio's requests,
       // and logged, without who. Never a wait for the studio's requests (C3-80 (d)).
       let keep = given?.keep;
-      if (!given) {
+      if (!given && isNarrowed(b.narrow) && readsBuyers(store)) {
+        // At most one reading its hold covers and EXTRA_READS besides, each written down before it is read; past
+        // them, it stops, failed, with why it waited, never dropped without a word (C3-80 (d)).
+        const reads = b.reads ?? 0;
+        if (reads - (b.reserve !== undefined ? 1 : 0) >= EXTRA_READS) {
+          b = { ...b, status: "failed", note: readsSpentNote(b.note), finishedAt: now };
+          await save(b);
+          await redisPipeline([["SREM", QUEUE, id]]);
+          console.warn("A scheduled email stopped: its readings of the buyers ran out", { id, reads });
+          return b;
+        }
+        b = { ...b, reads: reads + 1 };
+        await save(b);
         const before = b;
         let held = before.reserve ?? 0;
         let over = 0;

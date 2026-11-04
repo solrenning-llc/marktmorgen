@@ -20,18 +20,19 @@ export type LiveBox<T> = {
   started: number;
   /** Readings that came back, as an answer or an error. */
   finished: number;
-  /** The highest sequence number whose result was applied; older ones that come later are ignored. */
-  applied: number;
+  /** The highest sequence number of a good answer applied, and of a failure: an answer older than the newest good one is dropped. */
+  goodSeq: number;
+  failSeq: number;
   /** The last good reading and when it was made; null until one comes. */
   last: LiveReading<T> | null;
-  /** The newest applied result was a failure. */
+  /** A failure is newer than the newest good answer. */
   failed: boolean;
   /** The last reading allowed (the 20th) has come back, however many earlier ones are still out. */
   lastBack: boolean;
 };
 
 export function newLiveBox<T>(): LiveBox<T> {
-  return { started: 0, finished: 0, applied: 0, last: null, failed: false, lastBack: false };
+  return { started: 0, finished: 0, goodSeq: 0, failSeq: 0, last: null, failed: false, lastBack: false };
 }
 
 /** Whether another reading will be started after the ones started so far. */
@@ -53,20 +54,21 @@ export function startReading<T>(box: LiveBox<T>, visible: boolean): { box: LiveB
   return { box: { ...box, started: box.started + 1 }, seq: box.started + 1 };
 }
 
-/** Event: a good answer to reading `seq`, made at `at` (ms). Dropped from the display when a newer reading already applied. */
+/** Event: a good answer to reading `seq`, made at `at` (ms). Dropped when a newer good answer already applied. */
 export function readingAnswered<T>(box: LiveBox<T>, seq: number, data: T, at: number): LiveBox<T> {
   const finished = box.finished + 1;
   const lastBack = box.lastBack || seq >= LIVE_ASKS;
-  if (seq < box.applied) return { ...box, finished, lastBack };
-  return { ...box, finished, lastBack, applied: seq, last: { data, at }, failed: false };
+  // Newer than the newest good answer is enough, even if a newer reading failed: its numbers are the freshest there are.
+  if (seq <= box.goodSeq) return { ...box, finished, lastBack };
+  return { ...box, finished, lastBack, goodSeq: seq, last: { data, at }, failed: box.failSeq > seq };
 }
 
 /** Event: reading `seq` failed. */
 export function readingFailed<T>(box: LiveBox<T>, seq: number): LiveBox<T> {
   const finished = box.finished + 1;
   const lastBack = box.lastBack || seq >= LIVE_ASKS;
-  if (seq < box.applied) return { ...box, finished, lastBack };
-  return { ...box, finished, lastBack, applied: seq, failed: true };
+  const failSeq = Math.max(box.failSeq, seq);
+  return { ...box, finished, lastBack, failSeq, failed: failSeq > box.goodSeq };
 }
 
 /** "3:41 PM your time": the viewer's own clock, said so, because the day below it is in UTC. */
@@ -74,12 +76,24 @@ export function formatReadTime(at: number, timeZone?: string): string {
   return `${new Date(at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone })} your time`;
 }
 
-/** The first line. Numbers that are not from a reading under way (it failed, or the box rests) are said with the time they were read. */
-export function headlineWords<T extends { visitors: number }>(box: LiveBox<T>, timeZone?: string): string {
+/** The numbers shown are older than one interval (a tab coming back from the background). */
+export const LIVE_EVERY_MS = 30_000;
+
+/**
+ * The one status sentence (a live region, WCAG 4.1.3): the count, and when the numbers are not from a reading under
+ * way (it failed, the box rests, or they are older than an interval) the time they were read and why.
+ */
+export function headlineWords<T extends { visitors: number }>(box: LiveBox<T>, timeZone?: string, now?: number): string {
   if (!box.last) return waitingWords(box);
   const v = box.last.data.visitors;
-  const base = v === 0 ? "Nobody has opened your store in the last 5 minutes" : `${v.toLocaleString("en-US")} ${v === 1 ? "person has" : "people have"} opened your store in the last 5 minutes`;
-  return box.failed || hasRested(box) ? `${base}, as of ${formatReadTime(box.last.at, timeZone)}` : base;
+  let text = v === 0 ? "Nobody has opened your store in the last 5 minutes" : `${v.toLocaleString("en-US")} ${v === 1 ? "person has" : "people have"} opened your store in the last 5 minutes`;
+  const rested = hasRested(box);
+  const old = now !== undefined && now - box.last.at > LIVE_EVERY_MS;
+  if (box.failed || rested || old) text += `, as of ${formatReadTime(box.last.at, timeZone)}`;
+  if (box.failed) text += rested ? "; the last try failed" : willReadAgain(box) ? "; the last try failed, and it is tried again in half a minute" : "; the last try failed, and one more is under way";
+  if (rested) text += "; paused, reload the page to read again";
+  if ((box.last.data as { today?: unknown }).today === null) text += "; today's numbers could not be read";
+  return text;
 }
 
 /** What the box is waiting to do next, in words that cannot promise a reading that will not be made. */

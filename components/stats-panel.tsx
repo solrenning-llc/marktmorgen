@@ -290,15 +290,18 @@ type LiveNow = { visitors: number; sources: { source: string; visitors: number }
  * stops after LIVE_ASKS of them (lib/live-box-rules.ts), ten minutes, until the page is opened again. What it says about a
  * next reading comes from the same count of readings made that decides whether there is one.
  */
-export function RightNow({ currency, initialBox, timeZone }: { currency: string; initialBox?: LiveBox<LiveNow>; timeZone?: string }) {
+export function RightNow({ currency, initialBox, timeZone, now }: { currency: string; initialBox?: LiveBox<LiveNow>; timeZone?: string; now?: number }) {
   // initialBox and timeZone are for tests that draw the box in a given state; the studio passes neither.
   const [box, setBox] = useState<LiveBox<LiveNow>>(() => initialBox ?? newLiveBox<LiveNow>());
   // The machine in lib/live-box-rules.ts holds the count, the last good reading and what to say; the ref lets each
   // event see the newest state without waiting for a render.
   const boxRef = useRef(box);
+  // The time of the last event, so what the box says about the age of its numbers is not read from the clock during a render.
+  const [clock, setClock] = useState(0);
   const apply = (next: LiveBox<LiveNow>) => {
     boxRef.current = next;
     setBox(next);
+    setClock(Date.now());
   };
   useEffect(() => {
     let stopped = false;
@@ -350,7 +353,7 @@ export function RightNow({ currency, initialBox, timeZone }: { currency: string;
       {/* Only this sentence is a live region: it is the one that changes, and it carries the time when the numbers are old. */}
       <p className="flex items-center gap-2 text-sm font-bold text-ink" aria-live="polite" aria-busy={live === null && !failed}>
         <span className={`inline-block h-2 w-2 rounded-full ${live?.visitors ? "bg-emerald-500" : "bg-line"}`} aria-hidden="true" />
-        {headlineWords(box, timeZone)}
+        {headlineWords(box, timeZone, now ?? clock)}
       </p>
       {live && live.visitors > 0 && live.sources.length > 0 ? (
         <ul className="mt-2 space-y-1 text-sm">

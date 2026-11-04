@@ -42,9 +42,17 @@ process.env.RESEND_API_KEY = "re_test_second_step_gate_only";
 const mails: { to: string; subject: string; text: string }[] = [];
 /** Addresses the email provider answers 503 for, as if it were down. */
 const mailDown = new Set<string>();
+/** Addresses whose next email waits until `open` is called, then is refused (503) or sent, as `fail` says (C3-113). */
+const mailHeld = new Map<string, { wait: Promise<void>; fail: boolean }>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   if (String(input).includes("resend")) {
     const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
+    const held = mailHeld.get(Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""));
+    if (held) {
+      mailHeld.delete(Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""));
+      await held.wait;
+      if (held.fail) return new Response("{}", { status: 503 });
+    }
     if (mailDown.has(Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""))) return new Response("{}", { status: 503 });
     mails.push({ to: Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""), subject: String(body.subject ?? ""), text: String(body.text ?? "") });
     return new Response(JSON.stringify({ id: "email_1" }), { status: 200 });
@@ -1089,6 +1097,30 @@ async function main(): Promise<void> {
   mailDown.delete(UNS);
   is("the provider is down: the request answers as such, and nothing waits to be removed", [unsAnswer.status, unsAnswer.error, await pendingRemoval(UNS)], [503, "unsent", null]);
   is("with the email going out, it is set", typeof (await passkeys(unsLink, { action: "remove", id: "cred-uns-1" })).removeOn, "number");
+
+  part("Two requests for the same removal while its first notice goes out: never a success on an unconfirmed notice (C3-113)");
+  /** Holds the account's next email until the second request has answered; then it fails or goes out. */
+  const interleaved = async (email: string, link: string, id: string, fail: boolean) => {
+    let open = () => {};
+    mailHeld.set(email, { wait: new Promise<void>((resolve) => { open = resolve; }), fail });
+    const first = passkeys(link, { action: "remove", id });
+    // The first request has written its record and waits on the provider.
+    for (let i = 0; i < 200 && mailHeld.has(email); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await passkeys(link, { action: "remove", id });
+    open();
+    return [await first, second] as const;
+  };
+  const DRR = "drr-owner@example.com";
+  await makePasskey(DRR, "cred-drr-1").keep();
+  await makePasskey(DRR, "cred-drr-2").keep();
+  const drrLink = await linkSession(DRR);
+  const [failedFirst, whileTelling] = await interleaved(DRR, drrLink, "cred-drr-1", true);
+  is("the provider fails the first: the second, asked meanwhile, answers busy, never success; the first unsent; nothing waits", [whileTelling.status, whileTelling.error, whileTelling.removeOn, failedFirst.error, await pendingRemoval(DRR)], [503, "busy", undefined, "unsent", null]);
+  const [sentFirst, whileSending] = await interleaved(DRR, drrLink, "cred-drr-1", false);
+  is("the provider delivers the first: the second, asked meanwhile, still answers busy; the first is set, told once", [whileSending.error, typeof sentFirst.removeOn, (await pendingRemoval(DRR))?.ids], ["busy", "number", ["cred-drr-1"]]);
+  const toldMails = mails.length;
+  const again = await passkeys(drrLink, { action: "remove", id: "cred-drr-1" });
+  is("asked again once the notice was delivered: answered set, keeping its moment, and not emailed again within the hour", [again.removeOn, mails.length], [sentFirst.removeOn, toldMails]);
 
   part("Moving passkeys whose last answer was lost keeps them at the new address (C3-110)");
   const LOF = "lof-from@example.com";

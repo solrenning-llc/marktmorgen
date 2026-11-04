@@ -303,11 +303,32 @@ const dropKey = (email: string) => `nl:pk:drop:${sha(`nimbus-passkey-drop:${norm
  */
 export type PendingRemoval = { ids: string[]; atOf: Record<string, number> };
 
-/** The record behind it, and when the account was last emailed about it (the same request asked again within the hour is not emailed again; a new passkey always is). */
-type DropRecord = PendingRemoval & { told: number };
+/**
+ * The record behind it, and when the account was last emailed about it (the same request asked again within the hour
+ * is not emailed again; a new passkey always is). `told` is only ever a notice that was DELIVERED (C3-113): while the
+ * first notice of a request is going out, the record says so in `telling`, with that request's own token, and any
+ * other request to remove a passkey of the account answers busy (try again) until it is delivered or taken back.
+ */
+type Telling = { token: string; since: number };
+type DropRecord = PendingRemoval & { told: number; telling?: Telling };
 
-function dropOf(atOf: Record<string, number>, told: number): DropRecord {
-  return { ids: Object.keys(atOf), atOf, told };
+function dropOf(atOf: Record<string, number>, told: number, telling?: Telling): DropRecord {
+  return telling ? { ids: Object.keys(atOf), atOf, told, telling } : { ids: Object.keys(atOf), atOf, told };
+}
+
+/**
+ * How long a notice being sent holds the account's other removal requests: longer than both emails can take (each
+ * provider call is bounded by its own timeout). Past it, the request that was sending is taken as gone (its process
+ * ended), and the next request sends the notice itself, never answering success on a notice nobody confirmed.
+ */
+const TELLING_MS = 5 * 60 * 1000;
+
+/** Thrown when another request's notice for this account is still going out: nothing was set; try again. */
+export class RemovalBusyError extends Error {
+  constructor() {
+    super("another notice is going out");
+    this.name = "RemovalBusyError";
+  }
 }
 
 /** How long a request asked again waits before it is emailed again. */
@@ -317,7 +338,7 @@ async function readDrop(email: string): Promise<DropRecord | null> {
   if (!isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", dropKey(email)]]);
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { atOf?: unknown; ids?: unknown; at?: unknown; told?: unknown }) : null;
+    const value = typeof raw === "string" ? (JSON.parse(raw) as { atOf?: unknown; ids?: unknown; at?: unknown; told?: unknown; telling?: unknown }) : null;
     if (!value) return null;
     const atOf: Record<string, number> = {};
     if (value.atOf && typeof value.atOf === "object" && !Array.isArray(value.atOf)) {
@@ -327,7 +348,9 @@ async function readDrop(email: string): Promise<DropRecord | null> {
       for (const id of value.ids) if (typeof id === "string") atOf[id] = value.at;
     }
     const ids = Object.keys(atOf).slice(0, MAX_PASSKEYS);
-    return ids.length ? dropOf(Object.fromEntries(ids.map((id) => [id, atOf[id]])), typeof value.told === "number" ? value.told : 0) : null;
+    const t = value.telling as { token?: unknown; since?: unknown } | undefined;
+    const telling = t && typeof t === "object" && typeof t.token === "string" && /^[0-9a-f]{32}$/.test(t.token) && typeof t.since === "number" && Number.isFinite(t.since) ? { token: t.token, since: t.since } : undefined;
+    return ids.length ? dropOf(Object.fromEntries(ids.map((id) => [id, atOf[id]])), typeof value.told === "number" ? value.told : 0, telling) : null;
   } catch {
     return null;
   }
@@ -341,12 +364,12 @@ async function readDrop(email: string): Promise<DropRecord | null> {
  */
 async function writeDrop(held: Held, email: string, record: DropRecord): Promise<void> {
   if (!record.ids.length) await fencedDel(held, [dropKey(email)]);
-  else await fencedSet(held, dropKey(email), JSON.stringify({ atOf: record.atOf, told: record.told }));
+  else await fencedSet(held, dropKey(email), JSON.stringify({ atOf: record.atOf, told: record.told, ...(record.telling ? { telling: record.telling } : {}) }));
 }
 
-/** The record without `gone`, the passkeys it no longer waits on. */
+/** The record without `gone`, the passkeys it no longer waits on (a notice going out stays marked). */
 function without(record: DropRecord, gone: (id: string) => boolean): DropRecord {
-  return dropOf(Object.fromEntries(Object.entries(record.atOf).filter(([id]) => !gone(id))), record.told);
+  return dropOf(Object.fromEntries(Object.entries(record.atOf).filter(([id]) => !gone(id))), record.told, record.telling);
 }
 
 /**
@@ -412,20 +435,25 @@ export async function scheduleRemoval(email: string, id: string, session: string
     const row = list.find((p) => p.id === id);
     if (!row) return null;
     const before = await readDrop(address);
+    // Another request's notice still going out: nothing is set or answered as set until it is delivered (C3-113).
+    if (before?.telling && now - before.telling.since < TELLING_MS) return "busy" as const;
     const atOf = { ...(before?.atOf ?? {}) };
     const isNew = atOf[id] === undefined;
     if (isNew) atOf[id] = now + REMOVAL_DAYS * 86_400_000;
-    const tellNow = isNew || !before || now - before.told >= RETELL_MS;
-    await writeDrop(held, address, dropOf(atOf, tellNow ? now : (before?.told ?? now)));
+    // A notice marked as going out long ago was never confirmed: this request sends it.
+    const tellNow = isNew || !before || now - before.told >= RETELL_MS || !!before.telling;
+    const token = randomBytes(16).toString("hex");
+    await writeDrop(held, address, dropOf(atOf, before?.told ?? 0, tellNow ? { token, since: now } : undefined));
     // Logged out under the same lock, the first time it is asked: nothing P opened stays open past this request
     // (asked again, the owner's own sessions are not logged out again).
     if (isNew) await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session);
     // Whether a second step is left that can still keep it: another passkey not set to go, or the app.
     const another = list.some((p) => atOf[p.id] === undefined);
     const waiting = list.filter((p) => atOf[p.id] !== undefined).map((p) => ({ name: p.name, at: atOf[p.id] }));
-    return { at: atOf[id], name: row.name, tellNow, another, waiting, isNew, told: before?.told ?? 0 };
+    return { at: atOf[id], name: row.name, tellNow, another, waiting, isNew, token };
   });
   await afterDue(address, gone);
+  if (asked === "busy") throw new RemovalBusyError();
   if (!asked) return null;
   if (asked.tellNow) {
     // Owner C3-96 and the reviews of 3467adf6d and 693f44f0b: when each goes, and what to do if it was not them, in plain words.
@@ -452,16 +480,28 @@ export async function scheduleRemoval(email: string, id: string, session: string
     const toAccount = await tell(address, subject, line, own);
     // Told to the confirmed recovery address too, as whoever asked may hold the sign-in inbox (MM-SA-19).
     const toRecovery = await tellRecovery(address, subject, line, own);
+    // Only the request whose notice this is changes the record after it, compared under the lock by its own token:
+    // another request that took over a notice left too long never has its record undone or marked by this one.
+    const settle = (next: (record: DropRecord) => DropRecord) =>
+      withPasskeys(address, async (held) => {
+        const record = await readDrop(address);
+        if (record?.telling?.token === asked.token) await writeDrop(held, address, next(record));
+      });
     if (!toAccount && !toRecovery) {
       // No email went out: a removal nobody was told about is never kept (security review C3-110). A new one is
       // taken back, an older one keeps its moment and is told again next time; the request answers as busy.
-      await withPasskeys(address, async (held) => {
-        const record = await readDrop(address);
-        if (!record) return;
-        await writeDrop(held, address, asked.isNew ? without(record, (x) => x === id) : dropOf(record.atOf, asked.told));
-      });
+      const undo = (record: DropRecord) => {
+        const kept = asked.isNew ? without(record, (x) => x === id) : record;
+        return dropOf(kept.atOf, kept.told);
+      };
+      // Tried twice (the lock may be held a moment by another change); were both to fail, the mark ages out and the
+      // next request for the account tells again, every passkey set to go listed in it.
+      await settle(undo).catch(() => settle(undo)).catch(() => {});
       throw new RemovalUnsentError();
     }
+    // Delivered: now it is told, and the account's other requests go on. Not marked (the lock or the write failed),
+    // the mark ages out and the next request tells again: more email, never a removal answered as set untold.
+    await settle((record) => dropOf(record.atOf, now)).catch(() => {});
   }
   return asked.at;
 }

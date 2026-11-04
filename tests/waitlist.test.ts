@@ -29,8 +29,9 @@ const batches: Sent[][] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
-    batches.push(JSON.parse(String(init?.body)) as Sent[]);
-    return new Response(JSON.stringify({ data: [] }));
+    const batch = JSON.parse(String(init?.body)) as Sent[];
+    batches.push(batch);
+    return Response.json({ data: batch.map((_, i) => ({ id: `synthetic_${i}` })) });
   }
   if (url.hostname === "api.resend.com") {
     single.push(JSON.parse(String(init?.body)) as Sent);

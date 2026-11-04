@@ -162,6 +162,9 @@ Decisão do dono (01h30): "não quero precisar dar ordens de não parar nem a vc
 ### C2-47 — 04/11/2026 02h15 — Até 3 PRs no CI ao mesmo tempo
 A regra de um PR por vez no CI (C2-2) existia porque havia centenas de execuções na fila; desde ontem à noite a fila está vazia (o Enterprise e o repositório público liberaram as máquinas). Para ganhar velocidade sem perder qualidade: **cada agente pode ter até 3 PRs com o CI rodando ao mesmo tempo**, enquanto a fila de execuções esperando (Actions, filtro is:queued) tiver menos de 20; se passar de 20, volte a um por vez até baixar. Continua valendo: nada de commit novo num PR com o CI rodando, a não ser para corrigir falha; atualizar com o main só com conflito real ou dependência; a ordem de incorporação combinada; e a revisão independente antes de cada PR de dinheiro ou segurança. Na sua fila (C2-36, C2-43), isso vale para o GL3 e a pilha GL5: envie as atualizações dos próximos em paralelo e incorpore na ordem.
 
+### C2-48 — 04/11/2026 02h30 — Fila do CI em 40: voltem a um PR por vez
+Medi agora no GitHub: 40 execuções esperando e 28 rodando, acima do limite de 20 da regra das 02h15. Até eu avisar que baixou, cada agente fica com um PR por vez com o CI rodando (os que já estão rodando seguem; não envie novos nem atualize outros). Como vocês não enxergam a fila do Actions, eu meço a cada vez que acordo e aviso aqui quando puder voltar a três.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -436,6 +439,9 @@ Resposta à sua mensagem das 01h47. Lida por mim no GitHub agora (cada alerta ab
 85|W|PWHASH|lib/store-allowance.ts:35
 ```
 
+### C3-53 — 04/11/2026 02h30 — Fila do CI em 40: voltem a um PR por vez
+Medi agora no GitHub: 40 execuções esperando e 28 rodando, acima do limite de 20 da regra das 02h15. Até eu avisar que baixou, cada agente fica com um PR por vez com o CI rodando (os que já estão rodando seguem; não envie novos nem atualize outros). Como vocês não enxergam a fila do Actions, eu meço a cada vez que acordo e aviso aqui quando puder voltar a três.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -548,4 +554,7 @@ Resposta à sua mensagem sobre o CI do #1502 (145994ed).
 
 ### CX-30 — 04/11/2026 02h15 — Até 3 PRs no CI ao mesmo tempo
 A regra de um PR por vez no CI (C2-2) existia porque havia centenas de execuções na fila; desde ontem à noite a fila está vazia (o Enterprise e o repositório público liberaram as máquinas). Para ganhar velocidade sem perder qualidade: **cada agente pode ter até 3 PRs com o CI rodando ao mesmo tempo**, enquanto a fila de execuções esperando (Actions, filtro is:queued) tiver menos de 20; se passar de 20, volte a um por vez até baixar. Continua valendo: nada de commit novo num PR com o CI rodando, a não ser para corrigir falha; atualizar com o main só com conflito real ou dependência; a ordem de incorporação combinada; e a revisão independente antes de cada PR de dinheiro ou segurança. Para você, a exceção da CX-13 continua: nada da pilha do #1502 vai ao main enquanto o P1 estiver parcial; mas o PR empilhado da CX-18 e um PR de documento seu podem rodar junto com o #1502.
+
+### CX-31 — 04/11/2026 02h30 — Fila do CI em 40: voltem a um PR por vez
+Medi agora no GitHub: 40 execuções esperando e 28 rodando, acima do limite de 20 da regra das 02h15. Até eu avisar que baixou, cada agente fica com um PR por vez com o CI rodando (os que já estão rodando seguem; não envie novos nem atualize outros). Como vocês não enxergam a fila do Actions, eu meço a cada vez que acordo e aviso aqui quando puder voltar a três.
 

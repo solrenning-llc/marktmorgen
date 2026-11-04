@@ -116,7 +116,7 @@ try{
   const response=await fetch(cfg.base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({syntheticCase:cfg.case,reset})});
   assert.equal(response.status,200);postAt=(await response.json()).at;posts++;
  }
- const state=await one(['HMGET',keys[0],'held','spent']);assert.deepEqual(state,['1','0']);
+ const state=await one(['HMGET',keys[0],'held','spent']);assert.deepEqual(state,[permission.status==='dispatch'?'1':'0','0']);
  if(cfg.case==='healthy'){assert.equal(posts,1);assert.ok(postAt<reset);}
  else if(cfg.case==='large_offset'){assert.equal(posts,0);}
  else if(cfg.unsafe){assert.equal(posts,1);assert.ok(postAt>=reset);}
@@ -432,7 +432,7 @@ def main():
         for before_expiry in (True, False):
             acc = account(); initialize(acc, cap=1)
             saved = call(acc, "partial-cancel", cap=1)
-            tail = "redis.call('PEXPIREAT',KEYS[2],expiry)\n redis.call('HINCRBY',KEYS[1],'held',-units)\n return {'released'}"
+            tail = "redis.call('PEXPIREAT',KEYS[2],expiry)\n if not closed then redis.call('HINCRBY',KEYS[1],'held',-units) end\n return {'released'}"
             assert script.count(tail) == 1
             replacement = "error('synthetic cancel interruption'); " + tail if before_expiry else tail.replace("redis.call('HINCRBY'", "error('synthetic cancel interruption'); redis.call('HINCRBY'", 1)
             try:
@@ -517,7 +517,7 @@ def main():
             acc = account(); initialize(acc)
             saved = call(acc, "partial-settlement")
             claim_call(acc, "partial-settlement", saved, "dispatch")
-            needle = "redis.call('HINCRBY',KEYS[1],'held',-units)\nreturn {'settled',outcome}" if before_release else "redis.call('PEXPIREAT',KEYS[2],expiry)\nif outcome=='accepted'"
+            needle = "if not closed then redis.call('HINCRBY',KEYS[1],'held',-units) end\nreturn {'settled',outcome}" if before_release else "redis.call('PEXPIREAT',KEYS[2],expiry)\nif outcome=='accepted'"
             assert script.count(needle) == 1
             interrupted = script.replace(needle, "error('synthetic settlement interruption'); " + needle, 1)
             try:

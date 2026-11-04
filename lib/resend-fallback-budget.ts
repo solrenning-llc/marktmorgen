@@ -153,8 +153,8 @@ if op=='initialize' or op=='reserve' then
  if start~=ledger[3] or reset~=ledger[4] then
   local priorStart,priorReset,finalUsed,finalAt=integer(ARGV[15]),integer(ARGV[16]),integer(ARGV[17]),integer(ARGV[18])
   if ARGV[20]~='period_closed' or not priorStart or not priorReset or not finalUsed or not finalAt or priorStart~=ledger[3] or priorReset~=ledger[4] or start~=priorReset or math.min(now,serverNow)<priorReset or finalAt<priorReset or finalAt>seenAt or finalUsed<ledger[6] or finalUsed<ledger[7] or finalUsed>ledger[10] then return no('unreviewed_reset') end
-  redis.call('HSET',KEYS[1],'start',ARGV[5],'reset',ARGV[6],'seenAt',ARGV[10],'seenUsed',ARGV[11],'spent','0','attempts','0','cap',ARGV[9])
-  ledger[3],ledger[4],ledger[5],ledger[6],ledger[7],ledger[9],ledger[10]=start,reset,seenAt,seenUsed,0,0,cap
+  redis.call('HSET',KEYS[1],'start',ARGV[5],'reset',ARGV[6],'seenAt',ARGV[10],'seenUsed',ARGV[11],'spent','0','held','0','attempts','0','cap',ARGV[9])
+  ledger[3],ledger[4],ledger[5],ledger[6],ledger[7],ledger[8],ledger[9],ledger[10]=start,reset,seenAt,seenUsed,0,0,0,cap
  else
   if seenAt<ledger[5] or seenUsed<ledger[6] then return no('usage_regressed') end
   cap=math.min(cap,ledger[10])
@@ -165,6 +165,7 @@ if op=='initialize' or op=='reserve' then
  if old==false then return no('claim_shape') end
  if old then
   if old[6]~=units or old[5]~=fingerprint then return no('claim_conflict') end
+  if old[7]~=start or old[8]~=reset then return no('closed_period') end
   if old[10]=='reserved' then return {'already_reserved',old[4],text(old[6]),text(old[7]),text(old[8]),text(old[9])} end
   if old[10]~='released' then return no(old[10]=='accepted' and 'completed' or 'already_dispatched') end
  end
@@ -181,14 +182,17 @@ local c=readClaim()
 if not c then return no('claim_shape') end
 local units,start,reset,untilAt=c[6],c[7],c[8],c[9]
 if c[4]~=token or c[5]~=fingerprint or units~=integer(ARGV[4]) or start~=integer(ARGV[5]) or reset~=integer(ARGV[6]) or untilAt~=integer(ARGV[8]) then return no('claim_conflict') end
+-- A reviewed closure already included all old activity and cleared its
+-- holds. Late cleanup must never debit a new period's unrelated hold.
+local closed=start<ledger[3] and reset<=ledger[3]
 if op=='cancel' then
  if c[10]=='released' then return {'already_released'} end
  if c[10]~='reserved' then return no('not_reserved') end
- if ledger[8]<units then return no('ledger_shape') end
+ if not closed and ledger[8]<units then return no('ledger_shape') end
  local expiry=serverNow + 3024000000
  redis.call('HSET',KEYS[2],'state','released','expiresAt',text(expiry))
  redis.call('PEXPIREAT',KEYS[2],expiry)
- redis.call('HINCRBY',KEYS[1],'held',-units)
+ if not closed then redis.call('HINCRBY',KEYS[1],'held',-units) end
  return {'released'}
 end
 if op=='dispatch' then
@@ -212,15 +216,16 @@ if outcome=='unknown' then
  return {'settled','unknown'}
 end
 if outcome~='accepted' and outcome~='confirmed_not_accepted' then return no('outcome') end
+if closed and outcome=='accepted' then return no('closed_period') end
 if outcome=='accepted' and (serverNow>=ledger[4] or serverNow<ledger[3] or serverNow<c[12]) then return no('unreviewed_acceptance_period') end
-if ledger[8]<units then return no('ledger_shape') end
+if not closed and ledger[8]<units then return no('ledger_shape') end
 -- Terminal provenance precedes financial effects. A partial failure can
 -- retain excess hold/spend, but the same dispatch can never release twice.
 local expiry=serverNow + 3024000000
 redis.call('HSET',KEYS[2],'state',outcome=='accepted' and 'accepted' or 'released','acceptedAt',outcome=='accepted' and text(serverNow) or '0','expiresAt',text(expiry))
 redis.call('PEXPIREAT',KEYS[2],expiry)
 if outcome=='accepted' then redis.call('HINCRBY',KEYS[1],'spent',units) end
-redis.call('HINCRBY',KEYS[1],'held',-units)
+if not closed then redis.call('HINCRBY',KEYS[1],'held',-units) end
 return {'settled',outcome}`;
 
 const denied = (reason: string): Stopped => ({ status: "denied", reason });
@@ -344,6 +349,16 @@ export async function markResendFallbackDispatched(value: ResendFallbackClaim, s
   const claim = claimData(value), now = Date.now();
   if (!claim || !integer(now) || now < claim.periodStartMs || now >= claim.validUntilMs || now >= claim.resetsAtMs) return denied("expired");
   const dispatchToken = randomBytes(16).toString("hex");
+  const ownedClaim = { ...claim, dispatchToken };
+  const stoppedWithoutPost = async (result: Stopped): Promise<Stopped> => {
+    // This invocation has not returned permission to POST. Its private
+    // dispatch token can reconcile a lost ACK without releasing a rival's
+    // in-flight dispatch; the reserved-only CAS covers an unapplied RPC.
+    let settled = await settleResendFallback(ownedClaim, "confirmed_not_accepted", sdk);
+    if (settled.status === "unknown") settled = await settleResendFallback(ownedClaim, "confirmed_not_accepted", sdk);
+    await cancelResendFallbackReserved(claim, sdk);
+    return result;
+  };
   // Start BEFORE the RPC: treating the complete RTT as elapsed consumes more
   // of Redis's remaining authorization, never less. Worker UTC may be stale
   // or frozen; it cannot supply the post-ACK lifetime of this permission.
@@ -353,12 +368,12 @@ export async function markResendFallbackDispatched(value: ResendFallbackClaim, s
   const serverNow = reply?.length === 6 ? asInteger(reply[5]) : null;
   if (reply?.[0] !== "dispatch" || reply[1] !== claim.token || reply[4] !== dispatchToken || asInteger(reply[2]) !== claim.recipients || deadline === null || serverNow === null
     || serverNow < claim.periodStartMs || deadline <= Math.max(now, serverNow)
-    || deadline > Math.min(now + RESEND_FALLBACK_DISPATCH_MS, serverNow + RESEND_FALLBACK_DISPATCH_MS, claim.validUntilMs, claim.resetsAtMs)) return stoppedReply(reply);
+    || deadline > Math.min(now + RESEND_FALLBACK_DISPATCH_MS, serverNow + RESEND_FALLBACK_DISPATCH_MS, claim.validUntilMs, claim.resetsAtMs)) return stoppedWithoutPost(stoppedReply(reply));
   const sendBeforeMonotonicMs = startedMonotonicMs + (deadline - serverNow);
   // No permission is returned if a delayed ACK already consumed it. A caller
   // must recheck BOTH this monotonic deadline and sendBeforeMs immediately
   // before POST, with no intervening await or callback.
-  if (!Number.isFinite(startedMonotonicMs) || startedMonotonicMs < 0 || !Number.isFinite(sendBeforeMonotonicMs) || performance.now() >= sendBeforeMonotonicMs) return unknown();
+  if (!Number.isFinite(startedMonotonicMs) || startedMonotonicMs < 0 || !Number.isFinite(sendBeforeMonotonicMs) || performance.now() >= sendBeforeMonotonicMs) return stoppedWithoutPost(unknown());
   return { status: "dispatch", claim: { ...claim, dispatchToken }, sendBeforeMs: deadline, sendBeforeMonotonicMs };
 }
 /** Local refusal before dispatch is not an HTTP outcome. This CAS cannot

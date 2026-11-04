@@ -40,6 +40,7 @@ import {
   beginAttempt, bookSlice, claimRefresh, forgetBookSnapshot, keptSlice, readBookVersion, releaseRefresh, snapshotState, undoAttempt, writeSnapshot,
 } from "@/lib/affiliate-book-snapshot";
 import { PERSON_DATA } from "@/lib/person-data";
+import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
 import { forgetLeadPerson, leadId } from "@/lib/affiliate-leads";
 import { affiliateLoadUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { paidStoreSitemap, sitemapSize, storeSitemap } from "@/lib/store-sitemap";
@@ -132,7 +133,7 @@ async function program(statsId: string, n: number, sales: number): Promise<void>
 const LEAD_EMAIL = "lena.buyer@example.com";
 
 const as = (id: string, status: Affiliate["status"] = "approved") => ({ id, status, share: null }) as Pick<Affiliate, "id" | "status" | "share">;
-const shownOf = (got: Awaited<ReturnType<typeof admitAffiliatePage>>) => (got.admitted && got.book && got.book !== "soon" ? got.book : null);
+const shownOf = (got: Awaited<ReturnType<typeof admitAffiliatePage>>) => (got.admitted && got.book && typeof got.book === "object" ? got.book : null);
 
 /** Writes a book as one refresh would: under its own lock, from the version it read. */
 async function writeHeld(shop: Parameters<typeof writeSnapshot>[0], book: Parameters<typeof writeSnapshot>[1], at: number) {
@@ -311,7 +312,7 @@ async function main(): Promise<void> {
     return seen;
   });
   const load = affiliateLoadUnits({ sliceBytes: 1, listings: 0, codes: null });
-  is("all five hundred admitted, each with its own figures", loads.value.every((b) => b !== "refused" && b !== null && b !== "soon"), true);
+  is("all five hundred admitted, each with its own figures", loads.value.every((b) => typeof b === "object" && b !== null), true);
   is("the book worked out once: one read of each of its seven hashes", count(loads.names, "HGETALL"), 7);
   is(`and Stripe asked for it once (${stripeCalls} calls: its invoices, refunds and disputes)`, stripeCalls <= 23, true);
   // The first load found no book kept: its own part, and the book in full, once.
@@ -323,7 +324,7 @@ async function main(): Promise<void> {
   for (const id of [idOf(0), idOf(1), idOf(7)]) {
     const own = await readBook(shop, id);
     const kept = await admitAffiliatePage(shop, as(id));
-    const shown = kept.admitted && kept.book && kept.book !== "soon" ? kept.book.book : null;
+    const shown = kept.admitted && kept.book && typeof kept.book === "object" ? kept.book.book : null;
     const kept2 = keptSlice(own);
     is(`affiliate ${id}: the same row, lines and payouts, as the page shows them`, shown && { rows: shown.rows, lines: shown.lines, payouts: shown.payouts }, { rows: kept2.rows, lines: kept2.lines, payouts: kept2.payouts });
     is("and the slice of the whole book is the same", bookSlice(whole, id).rows, own.rows);
@@ -334,7 +335,7 @@ async function main(): Promise<void> {
   const other = await claimRefresh(shop);
   is("another load holds the refresh", other !== null, true);
   const waiting = await watched(() => admitAffiliatePage(shop, as(idOf(3)), later));
-  is("this load reads the last book kept, and works nothing out", [waiting.value.admitted && waiting.value.book !== null && waiting.value.book !== "soon", count(waiting.names, "HGETALL")], [true, 0]);
+  is("this load reads the last book kept, and works nothing out", [waiting.value.admitted && waiting.value.book !== null && typeof waiting.value.book === "object", count(waiting.names, "HGETALL")], [true, 0]);
   is("and pays only its own part", waiting.taken, load);
   await releaseRefresh(other!);
   const refreshed = await watched(() => admitAffiliatePage(shop, as(idOf(3)), later));
@@ -350,16 +351,16 @@ async function main(): Promise<void> {
   part("Removed, and still owed");
   const stale = later + (BOOK_FRESH_SECONDS + 60) * 1000;
   const gone = await watched(() => admitAffiliatePage(shop, as("dddddddddddd", "removed"), stale));
-  const goneBook = gone.value.admitted && gone.value.book && gone.value.book !== "soon" ? gone.value.book.book : null;
+  const goneBook = gone.value.admitted && gone.value.book && typeof gone.value.book === "object" ? gone.value.book.book : null;
   is("a removed affiliate with a balance sees it: five sales at $6.00", [goneBook?.rows[0]?.affiliate.id, goneBook?.rows[0]?.owed, goneBook?.rows[0]?.sales], ["dddddddddddd", 3_000, 5]);
   is("the book out of date, they work it out once, as an approved affiliate would, paid the same", [count(gone.names, "HGETALL"), gone.taken], [7, load + full]);
   const again = await watched(() => admitAffiliatePage(shop, as("dddddddddddd", "removed"), stale));
-  is("a second load the same day reads the kept book and pays its own part", [again.value.admitted && again.value.book !== null && again.value.book !== "soon", count(again.names, "HGETALL"), again.taken], [true, 0, load]);
+  is("a second load the same day reads the kept book and pays its own part", [again.value.admitted && again.value.book !== null && typeof again.value.book === "object", count(again.names, "HGETALL"), again.taken], [true, 0, load]);
   const never = await watched(() => admitAffiliatePage(shop, as("eeeeeeeeeeee", "removed"), stale + (BOOK_FRESH_SECONDS + 60) * 1000));
   is("a removed affiliate who never sold: no book, the page as it was, and no refresh though the book is out of date", [never.value, count(never.names, "HGETALL"), count(never.names, "SET")], [{ admitted: true, book: null }, 0, 0]);
 
   const declined = await admitAffiliatePage(shop, as("dddddddddddd", "declined"), stale);
-  is("declined after being approved, and still owed: sees their own part, as one removed does", declined.admitted && declined.book && declined.book !== "soon" ? declined.book.book.rows[0]?.owed : null, 3_000);
+  is("declined after being approved, and still owed: sees their own part, as one removed does", declined.admitted && declined.book && typeof declined.book === "object" ? declined.book.book.rows[0]?.owed : null, 3_000);
 
   part("Only what the page shows is kept, and deleting the person deletes it");
   const raw = JSON.stringify(await redis.pipeline([["HGETALL", `nl:aff:${statsId}:book`]]));
@@ -387,7 +388,7 @@ async function main(): Promise<void> {
   answering(new Request("https://marktmorgen.com/@breadshop/affiliates", { headers: { "x-forwarded-for": "203.0.113.20" } }));
   try {
     const own = await watched(() => admitAffiliatePage(shop, as(idOf(2)), stale));
-    is("so the next load that day does not refresh it for everybody: it works out its own book", [own.value.admitted && own.value.book !== null && own.value.book !== "soon", count(own.names, "HGETALL"), count(own.names, "SET")], [true, 7, 0]);
+    is("so the next load that day does not refresh it for everybody: it works out its own book", [own.value.admitted && own.value.book !== null && typeof own.value.book === "object", count(own.names, "HGETALL"), count(own.names, "SET")], [true, 7, 0]);
     is("paid in full from its own connection's share of the day", [own.taken, own.names.includes("HINCRBY")], [load + full, true]);
     is("and the page promises no daily refresh for it: the figures are this load's own", shownOf(own.value)?.refresh, null);
     const goneOwn = await watched(() => admitAffiliatePage(shop, as("dddddddddddd", "removed"), stale));
@@ -598,7 +599,7 @@ async function main(): Promise<void> {
   answering(new Request("https://marktmorgen.com/@shareshop/affiliates", { headers: { "x-forwarded-for": "203.0.113.9" } }));
   try {
     const first = await watched(() => admitAffiliatePage(big, as(idOf(0))));
-    is("worked out all the same, for every affiliate", [first.value.admitted && first.value.book !== null && first.value.book !== "soon", count(first.names, "HGETALL")], [true, 7]);
+    is("worked out all the same, for every affiliate", [first.value.admitted && first.value.book !== null && typeof first.value.book === "object", count(first.names, "HGETALL")], [true, 7]);
     is("the same requests taken from the connection's own count would be refused", await takePublicRequest(big, "buyer", Date.now(), bigUnits), false);
   } finally {
     answering(null);
@@ -646,6 +647,30 @@ async function main(): Promise<void> {
   await undoAttempt(slow, refusedSlow!, 1);
   is("whose charge is refused takes its count back: nothing left of it", [(await snapshotState(slow, idOf(0)))?.tries, (await snapshotState(slow, idOf(0)))?.triedAt], [0, 0]);
   await releaseRefresh(refusedSlow!);
+
+  part("No room for the book: the page promises no time");
+  let roomy = await paidStore("room-owner@example.com", "roomshop", "acct_1TestRoomshop1");
+  await program(roomy.statsId!, 3, 12);
+  roomy = (await storeForEmail("room-owner@example.com"))!;
+  const T2 = Date.now();
+  // Room in the store's requests for the load itself, not for working the book out.
+  await takePublicRequest(roomy, "buyer", T2, requestLimitFor(roomy) - load);
+  const noRoom = await watched(() => admitAffiliatePage(roomy, as(idOf(0)), T2));
+  is("none kept and no room to work it out: told so, not told to look again in minutes", [noRoom.value, count(noRoom.names, "HGETALL")], [{ admitted: true, book: "noRoom" }, 0]);
+  is("and the refresh refused is not counted against the next", [(await snapshotState(roomy, idOf(0)))?.tries, (await snapshotState(roomy, idOf(0)))?.triedAt], [0, 0]);
+  // The window's counts let go, as a new window would: room again.
+  const [, counters] = (await redis.pipeline([["SCAN", "0", "MATCH", "nl:traffic:r:*", "COUNT", 1000]]))[0] as [string, string[]];
+  if (counters.length) await redis.pipeline([["DEL", ...counters]]);
+  const heldBusy = (await claimRefresh(roomy))!;
+  const busy = await admitAffiliatePage(roomy, as(idOf(0)), T2);
+  await releaseRefresh(heldBusy);
+  is("with room again, while another load works it out, the figures are being updated", busy.admitted && busy.book, "soon");
+  for (const [code, words] of Object.entries(AFFILIATES_WORDS)) {
+    is(`${code}: the words for no room promise no time, and the short refresh says only that it can`, [/\d/.test(words.figuresNoRoom), words.figuresNoRoom !== words.figuresSoon, words.figuresShort.includes("15")], [false, true, true]);
+  }
+  is("in English: \"can refresh again\", as \"at most once a day\" says", [AFFILIATES_WORDS.en.figuresShort, AFFILIATES_WORDS.en.figuresDaily], ["They can refresh again after 15 minutes.", "They refresh at most once a day."]);
+  const pageText = readFileSync("app/[handle]/affiliates/page.tsx", "utf8");
+  is("the page draws each in its own place", [pageText.includes('kept === "noRoom" ?'), pageText.includes("{a.figuresNoRoom}"), pageText.includes("{a.figuresSoon}")], [true, true, true]);
 
   part("The store's map");
   const MAP = "map-owner@example.com";

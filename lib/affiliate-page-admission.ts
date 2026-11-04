@@ -49,8 +49,14 @@ export type AffiliatePageAdmission =
   | { admitted: false }
   /** No book on this page: a visitor, an affiliate waiting or declined, or one removed with nothing kept. */
   | { admitted: true; book: null }
-  /** The affiliate's own part of the book and when it was worked out; "soon" while another load is working it out and none is kept. */
-  | { admitted: true; book: KeptBook | "soon" };
+  /**
+   * The affiliate's own part of the book and when it was worked out; "soon"
+   * while another load is working it out and none is kept; "noRoom" when
+   * none is kept and working it out was refused for want of room in the
+   * store's requests (or this connection's share of them), which may last
+   * days: the page promises no time then.
+   */
+  | { admitted: true; book: KeptBook | "soon" | "noRoom" };
 
 /**
  * When the figures are worked out again, said on the page only where it is
@@ -93,7 +99,7 @@ export async function affiliatePageCost(store: Store): Promise<number | null> {
  * affiliate's part of it; null when another load holds the lock, the book
  * was refreshed meanwhile, or the window has no room.
  */
-async function refreshFor(store: Store, id: string, now: number): Promise<KeptBook | null> {
+async function refreshFor(store: Store, id: string, now: number): Promise<KeptBook | "noRoom" | null> {
   const held = await claimRefresh(store);
   if (!held) return null;
   try {
@@ -107,7 +113,7 @@ async function refreshFor(store: Store, id: string, now: number): Promise<KeptBo
     if (tries === null) return null;
     if (!(await takePublicRequest(store, "buyer", now, units, { shared: true }))) {
       await undoAttempt(store, held, seconds);
-      return null;
+      return "noRoom";
     }
     const done = await refreshBook(store, seconds, held, tries);
     // Thrown away (its lock ran out, or a person was deleted while it read): nothing of it is shown.
@@ -123,22 +129,24 @@ async function refreshFor(store: Store, id: string, now: number): Promise<KeptBo
  * works out the affiliate's own book, paid in full from its own
  * connection's share of the day.
  */
-async function ownBook(store: Store, id: string, now: number): Promise<KeptBook | null> {
+async function ownBook(store: Store, id: string, now: number): Promise<KeptBook | "noRoom" | null> {
   const units = await affiliatePageCost(store);
-  if (units === null || !(await takePublicRequest(store, "buyer", now, units))) return null;
+  if (units === null) return null;
+  if (!(await takePublicRequest(store, "buyer", now, units))) return "noRoom";
   // Stripe asked no longer than a refresh is, so the page answers inside its maxDuration.
   return { book: await readBook(store, id, { deadline: Date.now() + BOOK_READ_SECONDS * 1000 }), at: Math.floor(now / 1000), refresh: null };
 }
 
 /** What a load that has paid its own part reads: the refresh when it is due, the kept part, or its own book when none could be kept. */
-async function bookFor(store: Store, id: string, state: SnapshotState, now: number): Promise<KeptBook | "soon"> {
+async function bookFor(store: Store, id: string, state: SnapshotState, now: number): Promise<KeptBook | "soon" | "noRoom"> {
   const seconds = Math.floor(now / 1000);
   const fresh = needsRefresh(state, seconds) ? await refreshFor(store, id, now) : null;
-  if (fresh) return fresh;
+  if (fresh && fresh !== "noRoom") return fresh;
   if (state.at && !state.kept && !needsRefresh(state, seconds)) return (await ownBook(store, id, now)) ?? "soon";
   // Another load is working it out, or the window has no room for it: the last one kept, when there is one.
   const kept = state.sliceBytes > 0 ? await readSlice(store, id) : null;
-  return kept ? { ...kept, refresh: state.freshFor === BOOK_SHORT_SECONDS ? "short" : "daily" } : "soon";
+  if (kept) return { ...kept, refresh: state.freshFor === BOOK_SHORT_SECONDS ? "short" : "daily" };
+  return fresh === "noRoom" ? "noRoom" : "soon";
 }
 
 export async function admitAffiliatePage(store: Store, affiliate: Pick<Affiliate, "id" | "status" | "share"> | null, now = Date.now()): Promise<AffiliatePageAdmission> {
@@ -149,12 +157,12 @@ export async function admitAffiliatePage(store: Store, affiliate: Pick<Affiliate
     if (state && state.sliceBytes > 0) {
       if (!(await takePublicRequest(store, "buyer", now, affiliateLoadUnits({ sliceBytes: state.sliceBytes, listings, codes: null })))) return REFUSED;
       const kept = await bookFor(store, affiliate.id, state, now);
-      if (kept !== "soon" && hasSomething(kept.book)) return { admitted: true, book: kept };
+      if (typeof kept === "object" && hasSomething(kept.book)) return { admitted: true, book: kept };
     } else if (state && state.at && !state.kept && !needsRefresh(state, Math.floor(now / 1000))) {
       // In date but not kept (too large): no part to tell whether they are owed, so their own book, as ownBook works it out for an approved affiliate.
       if (!(await takePublicRequest(store, "buyer", now, affiliateLoadUnits({ sliceBytes: 0, listings, codes: null })))) return REFUSED;
       const own = await ownBook(store, affiliate.id, now);
-      if (own && hasSomething(own.book)) return { admitted: true, book: own };
+      if (own && own !== "noRoom" && hasSomething(own.book)) return { admitted: true, book: own };
     }
   }
   if (!affiliate || affiliate.status !== "approved") {

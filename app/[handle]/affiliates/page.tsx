@@ -112,9 +112,10 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   const on = affiliatesOn(store);
   const open = canApply(store);
   const terms = store.affiliates;
-  const book = kept && kept !== "soon" ? kept.book : null;
-  const asOf = kept && kept !== "soon"
-    ? new Date(kept.at * 1000).toLocaleString(lang.locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })
+  const shown = typeof kept === "object" ? kept : null;
+  const book = shown ? shown.book : null;
+  const asOf = shown
+    ? new Date(shown.at * 1000).toLocaleString(lang.locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })
     : "";
   const row = book?.rows[0] ?? null;
   // The products a partner shares in, by name, so their own page can say what
@@ -360,7 +361,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     ))}
                   </dl>
                   <p className="st-muted mt-3 text-sm" data-figures-as-of="">
-                    {[a.figuresAsOf(asOf), kept && kept !== "soon" ? (kept.refresh === "daily" ? a.figuresDaily : kept.refresh === "short" ? a.figuresShort : "") : ""].filter(Boolean).join(" ")}
+                    {[a.figuresAsOf(asOf), shown?.refresh === "daily" ? a.figuresDaily : shown?.refresh === "short" ? a.figuresShort : ""].filter(Boolean).join(" ")}
                   </p>
                   <p className="st-muted mt-3 text-sm">
                     {a.paidSoFar(money(row.paid, book.currency), store.name)}
@@ -455,6 +456,10 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
               ) : kept === "soon" ? (
                 <p className="st-note mt-7 text-sm" role="status" data-figures-soon="">
                   {a.figuresSoon}
+                </p>
+              ) : kept === "noRoom" ? (
+                <p className="st-note mt-7 text-sm" role="status" data-figures-no-room="">
+                  {a.figuresNoRoom}
                 </p>
               ) : null}
 

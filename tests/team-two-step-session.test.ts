@@ -17,7 +17,7 @@ import { finishSetup, startSetup } from "@/lib/two-step";
 import { PASSKEY_COOKIE, RP_ID } from "@/lib/passkeys";
 import { SITE_URL } from "@/lib/site-url";
 import { SECOND_STEP_WORDS, putMember, secondStepWay, setRequireTwoStep, teamTwoStepBlocks } from "@/lib/team";
-import { resolveAccess } from "@/lib/studio-route";
+import { resolveAccess, studioAccess } from "@/lib/studio-route";
 import { claimHandle, ensureStoreId, storeForEmail } from "@/lib/store";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
@@ -124,12 +124,23 @@ async function main(): Promise<void> {
   is("with no second step written on it", await sessionSecondStep(byLink, PIA), null);
   is("the team holds it at the door", await blocks(PIA, byLink), true);
   is("and says to log in again with the passkey", await secondStepWay(PIA), "passkey");
+  const reason = async (email: string, session: string) => {
+    const r = await resolveAccess(email, { pinned: store.sid, session }, null);
+    return r.ok ? "open" : r.reason;
+  };
+  const route = async (session: string) => {
+    const r = await studioAccess(new NextRequest(`${ORIGIN}/api/store/x?store=${store.sid}`, { method: "POST", headers: { cookie: `nl_session=${session}` } }), "products");
+    return r.ok ? "open" : r.reason;
+  };
+  is("the studio refuses the store to it", await reason(PIA, byLink), "two_step");
+  is("and so does every studio route", await route(byLink), "two_step");
 
   part("The same member, logging in with the passkey");
   const byPasskey = await signInWithPasskey(pia, byLink);
   is("a session opens", [byPasskey.length, await emailForSession(byPasskey)], [64, PIA]);
   is("opened with the passkey", await sessionSecondStep(byPasskey, PIA), "passkey");
   is("the team lets it in", await blocks(PIA, byPasskey), false);
+  is("the studio opens the store to it", await reason(PIA, byPasskey), "open");
   is("the link's session was replaced: it is gone", await emailForSession(byLink), null);
 
   part("A member with an authenticator app: the link waits for the code");
@@ -145,6 +156,7 @@ async function main(): Promise<void> {
   const byCode = cookieOf(await codeRoute(form(`${ORIGIN}/api/auth/code`, { code: next }, `nl_2fa=${cookieOf(held, "nl_2fa")}`)), "nl_session");
   is("the app's code opens one, marked so", [byCode.length, await sessionSecondStep(byCode, ARI)], [64, "app"]);
   is("the team lets it in", await blocks(ARI, byCode), false);
+  is("the studio opens the store to it", await reason(ARI, byCode), "open");
   const held2 = await callback(form(`${ORIGIN}/api/auth/callback`, { token: await linkFor(ARI) }));
   const byRecovery = cookieOf(await codeRoute(form(`${ORIGIN}/api/auth/code`, { code: finished.codes[0] }, `nl_2fa=${cookieOf(held2, "nl_2fa")}`)), "nl_session");
   is("a recovery code opens one, marked so", [byRecovery.length, await sessionSecondStep(byRecovery, ARI)], [64, "recovery"]);

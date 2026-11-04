@@ -210,13 +210,14 @@ import { unusedSummary } from "@/lib/closing-refunds";
 import { holdCounts } from "@/lib/closing-holds";
 import { CLOSING_CHECKOUT_SECONDS, lastPlanMoment } from "@/lib/closing-plan-guard";
 import { type Permission, type Role, ROLE_NAMES, ROLE_SUMMARIES, can } from "@/lib/team-roles";
-import { MAX_TEAM, readTeam } from "@/lib/team";
+import { MAX_TEAM, SECOND_STEP_WORDS, readTeam, secondStepWay } from "@/lib/team";
 import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
 import { listPasskeys } from "@/lib/passkeys";
 import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PasskeyManager } from "@/components/passkey-manager";
+import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
@@ -786,6 +787,10 @@ export default async function StudioPage({
   const found = await studioView(cookieStore, typeof params.store === "string" ? params.store : undefined, null);
   if (!found.ok && found.reason === "signed_out") redirect("/signin");
   const view = found.ok ? found.view : null;
+  // A team that requires two-step sign-in held this session at its door
+  // (lib/team.ts teamTwoStepBlocks): what to do next, in place of starting a store.
+  const heldAt = !found.ok && found.reason === "two_step" && found.email ? found.store ?? null : null;
+  const secondStep = heldAt && !found.ok && found.email ? await secondStepWay(found.email).catch(() => "set_up" as const) : null;
   const email = view?.email ?? (found.ok ? "" : (found.email ?? ""));
   const role: Role = view?.role ?? "owner";
   /** Whether this person's role on this store has a permission (lib/team-roles.ts). */
@@ -3291,6 +3296,47 @@ export default async function StudioPage({
             </div>
             </div>
           </>
+        ) : secondStep ? (
+          <section aria-labelledby="second-step-title" className="card mt-8 p-6 sm:p-8">
+            <h2 id="second-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              {SECOND_STEP_WORDS[secondStep].title}
+            </h2>
+            {heldAt?.name ? (
+              <p className="mt-2 max-w-[80ch] text-ink-soft">
+                {"You help run "}
+                <strong className="text-ink [overflow-wrap:anywhere]">{heldAt.name}</strong>.
+              </p>
+            ) : null}
+            <p className="mt-2 max-w-[80ch] text-ink-soft">{SECOND_STEP_WORDS[secondStep].body}</p>
+            {secondStep === "passkey" ? (
+              <>
+                <PasskeySignIn />
+                <p className="mt-4 text-sm text-ink-soft">
+                  <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
+                    Go to the login page to use your passkey there
+                  </Link>
+                </p>
+              </>
+            ) : secondStep === "app" ? (
+              <Link href="/signin" className="btn btn-primary mt-6 inline-flex min-h-11 items-center">
+                {SECOND_STEP_WORDS.app.action}
+              </Link>
+            ) : (
+              <div className="mt-6 space-y-6">
+                <PasskeyManager
+                  initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
+                  fresh={freshLogin}
+                />
+                <RecoveryAddressManager shown={recoveryShown} />
+                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
+                <p className="text-sm text-ink-soft">
+                  <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
+                    Once it is set up, log in again with it
+                  </Link>
+                </p>
+              </div>
+            )}
+          </section>
         ) : (
           <div className="card mt-8 p-6 sm:p-8">
             <p className="text-lg font-semibold tracking-[-0.02em] text-ink">

@@ -203,7 +203,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:courses:lock@app/api/cron/courses/route.ts": lock("The courses job"),
   "nl:dc:lock@app/api/cron/discord/route.ts": lock("The Discord job"),
   "nl:imports:lock@app/api/cron/imports/route.ts": lock("The imports job"),
-  "nl:backup:ran:@lib/backup-run.ts": company("The mark that a day's backup run started (273 [BK1])", "One key a day holding \"1\", set only if absent and kept 2 days, so at most 3 at once for the company. Built and off: nothing calls the run."),
+  "nl:backup:ran:@lib/backup-run.ts": company("The count of a day's calls to the backup run, taken before any cost: at most a run and one new try after a failure (273 [BK1], inbox C4-49)", "One key a day holding a small count, made with its expiry only if absent and kept 2 days, so at most 3 at once for the company. Built and off: nothing calls the run."),
   "nl:backup:last-ok@lib/backup-run.ts": company("When the last backup copy was verified (273 [BK1])", "One key for the company: a time in ms, kept 8 days. Built and off: nothing calls the run."),
   "nl:backup:last-fail@lib/backup-run.ts": company("The last failed backup run and the step that failed (273 [BK1])", "One key for the company: a short JSON of a time and a reason name, kept 8 days. Built and off: nothing calls the run."),
   "nl:@lib/backup-export.ts": company("Not a key: the start of every key the backup export copies (273 [BK1])", "Read only: SCAN with MATCH nl:*, then DUMP and PEXPIRETIME of each key found, under a command budget, a row cap and a size cap, all set before any is sent; nothing is written. Built and off: nothing calls it. Each key family keeps its own bound."),

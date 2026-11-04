@@ -9,9 +9,13 @@
  *   back before the next one is copied; the manifest is written last and read
  *   back too. The set counts as verified only when the manifest read back
  *   names every part with the sums of what was stored.
- * - Nothing is ever deleted or replaced: a run that fails leaves the parts it
- *   wrote as unreferenced objects (no manifest names them) and every earlier
- *   verified set as it was. The bucket's lifecycle rule removes them all.
+ * - Nothing here is ever deleted or replaced: a run that fails leaves the parts
+ *   it wrote as unreferenced objects (no manifest names them) and every earlier
+ *   verified set as it was. The run deletes every object past the retention
+ *   before its next copy (lib/backup-run.ts); the bucket's lifecycle rule is a
+ *   safety net.
+ * - The walk reads at most BACKUP_SCAN_PAGES pages; a walk not done by then
+ *   is refused ("scan_pages") before anything is written.
  * - The walk's and the copy's commands are counted against the run's cap
  *   before the first DUMP; the parts and the bytes are counted as the copy
  *   goes, each row at the bytes it adds to its part's JSON: a database larger
@@ -40,6 +44,13 @@ const MANIFEST_ROOM = 65_536;
 export const MAX_PARTS = 10_000;
 /** Keys a SCAN is asked for at a time; a hint. */
 const SCAN_COUNT = 500;
+/**
+ * The most SCAN pages one walk reads (inbox C4-46). At 500 names a page asked for, 200 pages walk 100,000 names of the
+ * whole database, ten times the design's 10,000 keys of ours, so the cap leaves room for other products' keys in a
+ * shared database; it bounds what the walk may move (lib/backup-cost.ts). A walk whose cursor has not come back to "0"
+ * by then is refused as "scan_pages" before anything is written: a partial copy never passes as a whole one.
+ */
+export const BACKUP_SCAN_PAGES = 200;
 /** The longest key the backup format keeps (lib/backup-codec.ts), in bytes. */
 const KEY_MAX_BYTES = 1_024;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -69,7 +80,7 @@ export type BackupManifest = { version: 1; capturedAt: number; parts: PartEntry[
 
 export type PartsResult =
   | { ok: true; id: string; keys: number; bytes: number; parts: number; commands: number }
-  | { ok: false; reason: "limits" | "budget" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify"; commands: number; parts: number };
+  | { ok: false; reason: "limits" | "budget" | "scan_pages" | "too_many" | "too_big" | "too_many_parts" | "unreadable" | "error" | "verify"; commands: number; parts: number };
 
 const whole = (n: unknown, most = Number.MAX_SAFE_INTEGER) => typeof n === "number" && Number.isSafeInteger(n) && n > 0 && n <= most;
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -152,13 +163,16 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
   // written or read back ("verify").
   let writing = false;
   try {
-    // The walk: every name of ours, each SCAN counted before it is sent.
+    // The walk: every name of ours, each SCAN counted before it is sent, at most BACKUP_SCAN_PAGES pages.
     const keys = new Set<string>();
     let cursor = "0";
+    let pages = 0;
     do {
+      if (pages === BACKUP_SCAN_PAGES) return fail("scan_pages");
       if (commands + 1 > maxCommands) return fail("budget");
       const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", `${BACKUP_PREFIX}*`, "COUNT", SCAN_COUNT]]);
       commands += 1;
+      pages += 1;
       if (!Array.isArray(reply) || reply.length !== 2 || typeof reply[0] !== "string" || !Array.isArray(reply[1])) return fail("unreadable");
       for (const name of reply[1]) {
         if (typeof name !== "string" || name.includes("�")) return fail("unreadable");

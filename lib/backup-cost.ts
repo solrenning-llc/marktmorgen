@@ -4,38 +4,46 @@
  * repository records (lib/spend-cost-table.ts). It is a company cost: one run
  * copies the whole database under the review's caps, so it belongs with the
  * LLC fixed costs, 100% Marktmorgen (FX275; lib/llc-fixed-costs.ts, line
- * "backup"), never inside a plan. Inbox C4-38 and C4-44 (4 November 2026).
+ * "backup"), never inside a plan. Inbox C4-38, C4-44, C4-46 and C4-49 (4 November 2026).
  *
- * Every line is the most the caps allow, never an average:
- *   - 32 runs a month: one a UTC day, marked when it starts, so a run that
- *     starts before a midnight writes after it, and a 31-day billing period
- *     that does not start at 00:00 UTC touches 32 days (review of #2175);
- *   - R2 storage: the bucket keeps a set retentionDays, its lifecycle rule
- *     removes it "within 24 hours" of expiry, the day's set is being written
- *     and a run that wrote past its midnight is a day late, so retentionDays
- *     + 3 sets at the daily peak (validReview holds the same), each at its stored
- *     bound (runStoredBound); a GB-month is the average of the daily peaks,
- *     so the peak bounds it; the account's usage is rounded up to the next
- *     unit, so one more GB-month is added;
+ * The review is read once, as data (admitReview): a figure behind a getter, an
+ * inherited review or one that throws when read is not priced (null, unknown).
+ *
+ * Every line is the most the code allows, never an average:
+ *   - 64 runs a month: at most BACKUP_RUNS_PER_DAY (a run and one new try
+ *     after a failure) on each of 32 UTC days, since a run is counted on the
+ *     day it starts, so one that starts before a midnight writes after it, and
+ *     a 31-day billing period that does not start at 00:00 UTC touches 32 days;
+ *     each run at its full caps (a new try follows a run that may have failed
+ *     at its last step);
+ *   - R2 storage: the run deletes every copy past the retention before it
+ *     writes, so the bucket holds at most backupPeakSets(retentionDays) sets
+ *     at once (2 × (retention + 2), proved in lib/backup-run.ts; validReview
+ *     holds the same), each at its stored bound (runStoredBound); a GB-month is
+ *     the average of the daily peaks, so the peak bounds it; the account's
+ *     usage is rounded up to the next unit, so one more GB-month is added;
  *   - R2 operations: each object (every part and the manifest) is one Class A
- *     when written and one more when the lifecycle rule deletes it (whether
- *     that is billed is not said: taken as billed, never zero), one Class B
- *     when read back; the rounding adds one more million of each class;
- *   - Upstash: every command the run may send (maxCommands) and the two reads
- *     the daily report makes; the bytes it may move: every SCAN page at 500
- *     names of 1,024 bytes (as if every command were a page), every copied
- *     byte as read (maxRunBytes counts the base64 DUMPs it keeps), each key's
- *     name sent twice, and the marks and the report's reads; the marks kept;
+ *     when written and one more when deleted (the run's DeleteObject is free,
+ *     but the lifecycle rule, kept as a safety net, may come first, and whether
+ *     its deletion is billed is not said: taken as billed, never zero), one
+ *     Class B when read back; each run's listing pages (backupListPages) are
+ *     Class A; the rounding adds one more million of each class;
+ *   - Upstash: every command each run may send (maxCommands) and the two reads
+ *     a day the report makes; the bytes a run may move: every SCAN page it may
+ *     read (at most BACKUP_SCAN_PAGES, and no more than its commands allow) at
+ *     500 names of 1,024 bytes, every copied byte as read (maxRunBytes counts
+ *     the base64 DUMPs it keeps), each key's name sent twice, and the marks and
+ *     the report's reads; the marks kept;
  *   - Vercel: one call a run held for the route's maximum duration at 2 GB,
  *     its CPU the whole time;
  *   - and the provider allowance (PROVIDER_CHARGES_BPS) on all of it.
- * No supplier's free quota is credited (MR). What the caps cannot bound is in
+ * No supplier's free quota is credited (MR). What the code cannot bound is in
  * BACKUP_COST_UNKNOWNS: while any is open, the fixed-cost line's reviewed
  * ceiling stays unknown, never zero.
  */
-import { type BackupCostReview, validReview } from "@/lib/backup-run";
+import { BACKUP_RUN_COMMANDS, BACKUP_RUNS_PER_DAY, admitReview, backupListPages, backupPeakSets, type BackupCostReview } from "@/lib/backup-run";
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
-import { runStoredBound } from "@/lib/backup-parts";
+import { BACKUP_SCAN_PAGES, runStoredBound } from "@/lib/backup-parts";
 import {
   PROVIDER_CHARGES_BPS,
   R2_CLASS_A_MICRO_USD_PER_MILLION,
@@ -50,18 +58,18 @@ import {
   VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 
-/** Runs billed in the worst month: one a UTC day, and the one marked the day before that writes past midnight. */
-export const BACKUP_RUNS_PER_MONTH = 32;
+/** UTC days a billing month touches: 31 days that need not start at 00:00 UTC. */
+export const BACKUP_DAYS_PER_MONTH = 32;
+/** Runs billed in the worst month: BACKUP_RUNS_PER_DAY on each of those days. */
+export const BACKUP_RUNS_PER_MONTH = BACKUP_DAYS_PER_MONTH * BACKUP_RUNS_PER_DAY;
 /** The daily report's reads of the backup's outcome (backupStale, backupLastFailure). */
 export const BACKUP_REPORT_READS_PER_DAY = 2;
-/** Sets at the daily peak beyond the retention: the lifecycle rule's day of delay, the day being written (inbox C4-38) and a run that wrote past its midnight. */
-export const BACKUP_PEAK_EXTRA_SETS = 3;
 /** Names a SCAN page is taken to answer (its COUNT, a hint) and the longest name, in bytes. */
 export const BACKUP_SCAN_NAMES_PER_PAGE = 500;
 export const BACKUP_SCAN_NAME_BYTES = 1_024;
 /**
- * The backup's own small keys and their commands' bytes, at the most: the day marks of three days (each kept two days
- * from its run, so the day before yesterday's lives into today), the last good copy and the last failure.
+ * The backup's own small keys and their commands' bytes, at the most: the day counts of three days (each kept two days
+ * from its first call, so the day before yesterday's lives into today), the last good copy and the last failure.
  */
 const MARK_KEYS = 5;
 const MARK_BYTES = 1_024;
@@ -71,16 +79,16 @@ const ANSWER_FRAME_BYTES = 64;
 const GB = 1_000_000_000;
 
 /**
- * What the caps cannot bound, each an open item of docs/backup-cost-2026-11-04.md
- * (section 5): while any is here, the fixed-cost line is not reviewed.
+ * What the code cannot bound, each an open item of docs/backup-cost-2026-11-04.md
+ * (sections 5 and 5d): while any is here, the fixed-cost line is not reviewed.
  */
 export const BACKUP_COST_UNKNOWNS = [
   "vercel-route: no route runs the backup yet, so its maximum duration is the one assumed here, not a setting",
   "vercel-rates: the Vercel rates were read on 7 October 2026 and not since",
   "vercel-transfer: whether Vercel bills the function's bytes sent to R2 and Upstash",
   "upstash-overshoot: the last batch of DUMPs is read before the cap refuses it, and a key's size is not capped by the backup",
-  "scan-names: SCAN's COUNT is a hint, other products' key names in the shared database are not capped, and a name escaped in JSON can weigh more than its bytes",
-  "calls-per-day: nothing limits how often a day the run is called; each call refused at the day's mark sends one command and is one Vercel call",
+  "scan-names: SCAN's COUNT is a hint, so a page's names are taken at 500, other products' key names in the shared database are not capped, and a name escaped in JSON can weigh more than its bytes",
+  "refused-calls: nothing limits how many calls a day reach the run; each one refused at the day's count sends two commands and is one Vercel call",
   "report-reads: no schedule calls the report yet, so its two reads a day are assumed",
   "billing-units: whether Upstash and Vercel round usage up to a block, as R2 does",
   "restore-reads: reading a set back to restore (lib/backup-parts.ts, readBackupSet) is priced when a restore is decided",
@@ -98,22 +106,29 @@ export type BackupWorstMonth = {
  * The worst month of the backup under a review and the route's maximum
  * duration in seconds; null when the review is not one the run would accept.
  */
-export function backupWorstMonth(review: BackupCostReview, routeSeconds: number): BackupWorstMonth | null {
-  if (!validReview(review) || !Number.isSafeInteger(routeSeconds) || routeSeconds <= 0 || routeSeconds > 800) return null;
+export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): BackupWorstMonth | null {
+  // Priced only from the copy the run would use: read once, from data fields (lib/backup-run.ts, admitReview).
+  const review = admitReview(raw);
+  if (!review || !Number.isSafeInteger(routeSeconds) || routeSeconds <= 0 || routeSeconds > 800) return null;
   const parts = review.maxParts ?? 1;
   const runBytes = review.maxRunBytes ?? Math.min(review.maxBytes, BACKUP_MAX_BYTES);
   const objects = parts + 1;
   const runs = BACKUP_RUNS_PER_MONTH;
+  const days = BACKUP_DAYS_PER_MONTH;
   const up = (n: number) => Math.ceil(n);
+  const sets = backupPeakSets(review.retentionDays);
+  const setBytes = runStoredBound({ maxParts: parts, maxRunBytes: runBytes });
+  const listPages = backupListPages(review);
+  // The walk gets the commands the run does not keep for its own marks, one a page, and never more than the cap.
+  const scanPages = Math.min(review.maxCommands - BACKUP_RUN_COMMANDS, BACKUP_SCAN_PAGES);
 
-  const peakBytes = (review.retentionDays + BACKUP_PEAK_EXTRA_SETS) * runStoredBound({ maxParts: parts, maxRunBytes: runBytes });
-  const storage = up(((peakBytes / GB) + 1) * R2_STORAGE_MICRO_USD_PER_GB_MONTH);
-  const classA = up(((runs * 2 * objects) / 1_000_000 + 1) * R2_CLASS_A_MICRO_USD_PER_MILLION);
+  const storage = up((((sets * setBytes) / GB) + 1) * R2_STORAGE_MICRO_USD_PER_GB_MONTH);
+  const classA = up(((runs * (2 * objects + listPages)) / 1_000_000 + 1) * R2_CLASS_A_MICRO_USD_PER_MILLION);
   const classB = up(((runs * objects) / 1_000_000 + 1) * R2_CLASS_B_MICRO_USD_PER_MILLION);
-  const commands = runs * (review.maxCommands + BACKUP_REPORT_READS_PER_DAY);
+  const commands = runs * review.maxCommands + days * BACKUP_REPORT_READS_PER_DAY;
   const upstashCommands = up((commands / 1_000_000) * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS);
   const runTransfer =
-    review.maxCommands * BACKUP_SCAN_NAMES_PER_PAGE * BACKUP_SCAN_NAME_BYTES
+    scanPages * BACKUP_SCAN_NAMES_PER_PAGE * BACKUP_SCAN_NAME_BYTES
     + runBytes
     + review.maxRows * (2 * BACKUP_SCAN_NAME_BYTES + ANSWER_FRAME_BYTES)
     + (MARK_KEYS * MARK_BYTES);
@@ -123,11 +138,11 @@ export function backupWorstMonth(review: BackupCostReview, routeSeconds: number)
   const vercel = up(runs * (VERCEL_FUNCTION_GB * hours * VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR + hours * VERCEL_CPU_MICRO_USD_PER_HOUR + VERCEL_CALL_MICRO_USD_PER_MILLION / 1_000_000));
 
   const used: BackupCostLine[] = [
-    { id: "r2-storage", microUsd: storage, basis: `${review.retentionDays} + ${BACKUP_PEAK_EXTRA_SETS} sets of ${runStoredBound({ maxParts: parts, maxRunBytes: runBytes })} bytes at the daily peak, plus one GB-month of rounding` },
-    { id: "r2-class-a", microUsd: classA, basis: `${runs} runs × ${objects} objects × 2 (written, then deleted by the lifecycle rule), plus one million of rounding` },
+    { id: "r2-storage", microUsd: storage, basis: `${sets} sets (${BACKUP_RUNS_PER_DAY} × (${review.retentionDays} + 2)) of ${setBytes} bytes at the daily peak, plus one GB-month of rounding` },
+    { id: "r2-class-a", microUsd: classA, basis: `${runs} runs × (${objects} objects × 2 (written, then deleted) + ${listPages} listing page), plus one million of rounding` },
     { id: "r2-class-b", microUsd: classB, basis: `${runs} runs × ${objects} read-backs, plus one million of rounding` },
-    { id: "upstash-commands", microUsd: upstashCommands, basis: `${runs} × (${review.maxCommands} + ${BACKUP_REPORT_READS_PER_DAY}) commands` },
-    { id: "upstash-transfer", microUsd: upstashTransfer, basis: `${runs} runs × ${runTransfer} bytes: every command a SCAN page of ${BACKUP_SCAN_NAMES_PER_PAGE} names of ${BACKUP_SCAN_NAME_BYTES} bytes, ${runBytes} copied bytes, each key's name sent twice, the marks and the report's reads` },
+    { id: "upstash-commands", microUsd: upstashCommands, basis: `${runs} × ${review.maxCommands} commands + ${days} × ${BACKUP_REPORT_READS_PER_DAY} report reads` },
+    { id: "upstash-transfer", microUsd: upstashTransfer, basis: `${runs} runs × ${runTransfer} bytes: ${scanPages} SCAN pages of ${BACKUP_SCAN_NAMES_PER_PAGE} names of ${BACKUP_SCAN_NAME_BYTES} bytes, ${runBytes} copied bytes, each key's name sent twice, the marks and the report's reads` },
     { id: "upstash-storage", microUsd: marks, basis: `${MARK_KEYS} marks of at most ${MARK_BYTES} bytes kept` },
     { id: "vercel", microUsd: vercel, basis: `${runs} calls of ${routeSeconds} s at ${VERCEL_FUNCTION_GB} GB, CPU the whole time` },
   ];

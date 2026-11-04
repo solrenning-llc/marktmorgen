@@ -15,6 +15,7 @@
  *     send it to the recovery address again, and a right code opens everything;
  *   - moving the sign-in address carries the recovery address.
  */
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession } from "@/lib/auth";
@@ -118,6 +119,10 @@ async function main(): Promise<void> {
   await moveRecoveryAddress("new@example.com", "spare@example.org");
   is("moved onto the recovery address itself, there is none left", await recoveryAddress("spare@example.org"), "");
 
+  part("Codes drawn evenly");
+  // A random byte taken modulo a million favours the low codes (CodeQL js/biased-cryptographic-random).
+  const source = readFileSync("lib/recovery-address.ts", "utf8");
+  is("the six digits come from randomInt, never a byte modulo a million", [/randomInt\(1_000_000\)/.test(source), /%\s*1_000_000/.test(source)], [true, false]);
   done();
 }
 

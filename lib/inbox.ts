@@ -23,7 +23,7 @@
  */
 import { takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type AiResult, answerModel, askModel, counted } from "@/lib/ai";
 import { storeSender } from "@/lib/calls";
@@ -67,8 +67,8 @@ type Kept = Conversation & { token: string; b?: number; bm?: string };
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
 function newId(): string {
-  const bytes = randomBytes(12);
-  return [...bytes].map((b) => LETTERS[b % LETTERS.length]).join("");
+  // randomInt draws each letter evenly; a byte taken modulo 36 would favour the first letters.
+  return Array.from({ length: 12 }, () => LETTERS[randomInt(LETTERS.length)]).join("");
 }
 
 function parseKept(raw: unknown): Kept | null {

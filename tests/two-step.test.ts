@@ -16,6 +16,7 @@
  *   - nobody is locked out: with nothing left, it turns off a week after it is
  *     asked for, and a login with a code, or Cancel, calls that off.
  */
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { base32Decode, base32Encode, codeAt, stepOf, STEP_SECONDS } from "@/lib/totp";
@@ -185,6 +186,10 @@ async function main(): Promise<void> {
   const back = await callback(post("https://marktmorgen.com/api/auth/callback", { token: await linkFor(LOST) }));
   is("and the emailed link logs in on its own", [back.headers.get("location"), cookieOf(back, "nl_session").length], ["https://marktmorgen.com/studio", 64]);
 
+  part("Codes drawn evenly");
+  // A random byte taken modulo a million favours the low codes (CodeQL js/biased-cryptographic-random).
+  const source = readFileSync("lib/two-step.ts", "utf8");
+  is("the six digits come from randomInt, never a byte modulo a million", [/randomInt\(1_000_000\)/.test(source), /%\s*1_000_000/.test(source)], [true, false]);
   done();
 }
 

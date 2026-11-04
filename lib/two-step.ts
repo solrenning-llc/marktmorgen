@@ -61,7 +61,7 @@
  *   nl:2fa:locked:<hash>  a session opened without the second step: until when it is locked
  *   nl:2fa:lockedset:<hash> the account's locked sessions, to log them out on Cancel
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, endSession, normaliseEmail, openSession } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -299,7 +299,7 @@ export async function twoStepOn(email: string): Promise<boolean> {
 
 /** A six-digit code for confirming the recovery address, and its hash. */
 function confirmCode(): { code: string; hash: string } {
-  const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, "0");
+  const code = String(randomInt(1_000_000)).padStart(6, "0");
   return { code, hash: sha(`nimbus-2fa-backup:${code}`) };
 }
 

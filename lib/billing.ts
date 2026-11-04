@@ -1732,6 +1732,26 @@ async function observePlatformSubscriptions(store: Store, readSearch: boolean): 
   let searchError: unknown = search.error, ownError: unknown = own.error;
   const current = new Set(handles), all = new Set([...handles, ...ownership.released]);
   const ownEntries: SearchMember[] = [], searchEntries: SearchMember[] = [];
+  const identitySeen = new Map<string, { storeId?: string; customerId?: string; created?: number }>();
+  const identityConflicts = new Set<string>();
+  const noteIdentity = (row: Record<string, unknown>, metadata: Record<string, unknown>) => {
+    if (typeof row.id !== "string" || !SUBSCRIPTION_PATTERN.test(row.id)) return;
+    const rawCustomer = row.customer;
+    const customerField = rawCustomer && typeof rawCustomer === "object" ? Object.getOwnPropertyDescriptor(rawCustomer, "id") : undefined;
+    const customerId = typeof rawCustomer === "string" ? rawCustomer : customerField && Object.hasOwn(customerField, "value") ? customerField.value : undefined;
+    const next = {
+      storeId: platformStoreId(metadata.store_id) ? metadata.store_id : undefined,
+      customerId: typeof customerId === "string" && CUSTOMER_PATTERN.test(customerId) ? customerId : undefined,
+      created: typeof row.created === "number" && Number.isSafeInteger(row.created) ? row.created : undefined,
+    };
+    const previous = identitySeen.get(row.id);
+    if (previous && ((previous.storeId !== undefined && next.storeId !== undefined && previous.storeId !== next.storeId) ||
+        (previous.customerId !== undefined && next.customerId !== undefined && previous.customerId !== next.customerId) ||
+        (previous.created !== undefined && next.created !== undefined && previous.created !== next.created))) identityConflicts.add(row.id);
+    identitySeen.set(row.id, {
+      storeId: previous?.storeId ?? next.storeId, customerId: previous?.customerId ?? next.customerId, created: previous?.created ?? next.created,
+    });
+  };
   const evidence = ({ subscription, terminalOwn }: SearchMember) => canonicalFinancialSnapshot({
     id: subscription.id, status: subscription.status, created: subscription.created,
     metadata: subscription.metadata, customer: customerOf(subscription), terminalOwn,
@@ -1741,6 +1761,7 @@ async function observePlatformSubscriptions(store: Store, readSearch: boolean): 
     const unique = new Map<string, SearchMember>();
     for (const entry of entries) {
       const id = entry.subscription.id as string, previous = unique.get(id);
+      if (identityConflicts.has(id) && (entry.terminalOwn || ownedBy(observedStore, entry.subscription))) throw new Error("Subscription search overlap identity is unknown");
       if (previous) {
         const before = evidence(previous), after = evidence(entry);
         if (before === null || after === null || before !== after) throw new Error("Subscription search overlap is unknown");
@@ -1756,6 +1777,7 @@ async function observePlatformSubscriptions(store: Store, readSearch: boolean): 
     try {
       const row = searchDataRecord(value, "listed member");
       const metadata = searchDataRecord(row.metadata, "listed metadata");
+      noteIdentity(row, metadata);
       if (!(typeof metadata.store === "string" && all.has(metadata.store)) && metadata.store_id !== ownership.statsId) continue;
       const customer = searchDataRecord(row.customer, "listed customer");
       if (customer.id !== ownership.customerId) throw new Error("Subscription search listed customer is unknown");
@@ -1769,10 +1791,17 @@ async function observePlatformSubscriptions(store: Store, readSearch: boolean): 
   }
   for (const value of search.rows) {
     try {
-      const member = searchMember(value, current, ownership);
+      const row = searchDataRecord(value, "member");
+      noteIdentity(row, searchDataRecord(row.metadata, "member metadata"));
+      const member = searchMember(row, current, ownership);
       if (member) searchEntries.push(member);
     } catch (error) { searchError ??= error instanceof Error ? error : new Error("Subscription search observation is unknown"); }
   }
+  const completeCustomerRows = () => {
+    if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
+    if (ownRows.some(row => identityConflicts.has(row.id as string))) throw new Error("Subscription search overlap identity is unknown");
+    return ownRows;
+  };
   // No observation can activate the same grant twice, including a caller's
   // independent positive-customer fallback after a failed Search.
   const activations = new Map<string, Promise<StartedSubscription | null>>();
@@ -1802,16 +1831,13 @@ async function observePlatformSubscriptions(store: Store, readSearch: boolean): 
       return { live, customerId: last ?? null, lapsed };
     },
     customerLive: async () => {
-      if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
-      return liveFrom(ownRows);
+      return liveFrom(completeCustomerRows());
     },
     customerPlans: () => {
-      if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
-      return ownRows.map(row => ({ id: row.id as string, status: row.status as string, customerId: ownership.customerId! }));
+      return completeCustomerRows().map(row => ({ id: row.id as string, status: row.status as string, customerId: ownership.customerId! }));
     },
     customerSubscriptions: () => {
-      if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
-      return ownRows;
+      return completeCustomerRows();
     },
     closingPlans: () => {
       let complete = !searchError && !ownError;
@@ -1819,6 +1845,7 @@ async function observePlatformSubscriptions(store: Store, readSearch: boolean): 
       for (const entry of [...searchEntries, ...ownEntries]) {
         if (!entry.terminalOwn && !ownedBy(observedStore, entry.subscription)) continue;
         const id = entry.subscription.id as string, previous = candidates.get(id);
+        if (identityConflicts.has(id)) { ambiguous.add(id); complete = false; }
         if (previous) {
           const before = evidence(previous), after = evidence(entry);
           if (before === null || after === null || before !== after) { ambiguous.add(id); complete = false; }

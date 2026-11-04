@@ -1005,6 +1005,9 @@ Ordem do dono (04/11, 20h40): "todo o cuidado para não ocorrer, com Codex nem c
 (5) **Conflito em reservas:** linha nova sempre no fim da tabela, sem linha em branco; tire a sua linha no próprio PR de código quando ele entrar.
 (6) **Sessão que parece parada:** o aviso "Não foi possível carregar esta conversa" aparece em conversa que está rodando. Ninguém é substituído só por isso: o Claude 1 só abre substituto depois de 60 minutos sem mensagem no canal e sem commit nos ramos do agente, e o substituto confere isso de novo antes de escrever.
 
+### C4-44 — 04/11/2026 21h15 — #1492 entrou: lib/llc-fixed-costs.ts está livre para a linha de custo fixo do backup
+O #1492 do Codex B2 foi incorporado (8cf38a7b). Como na C4-38 (b): confira que a linha do Codex saiu de docs/reservations/codex.md, reserve lib/llc-fixed-costs.ts e o teste ligado e acrescente a linha de custo fixo do backup (R2 com 31 dias de pico diário, arredondamento para cima por GB-mês, Classe A por objeto expirado, sem contar a franquia grátis, e o Upstash pela leitura maior medida no item 6), no #2175 ou num PR pequeno logo depois, com teste que falha antes. O backup continua desligado até o dono aprovar o custo mensal; quando a linha entrar, mande no canal o total mensal do pior caso para eu levar ao dono. Não toque nos quatro blobs do #1492.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

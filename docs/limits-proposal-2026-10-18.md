@@ -14,20 +14,20 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 
 | Line | Store monthly ($69) | Store yearly ($690) | Studio monthly ($449) | Studio yearly ($4490) | Scale monthly ($999) | Scale yearly ($9990) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Net today | 55.89% | 55.39% | 59.70% | 59.26% | 60.15% | 59.70% |
-| AI drafts / answers a month | none today | none today | 40 / 250 → **18 / 110** | 40 / 250 → **4 / 25** | 80 / 400 | 80 / 400 → **37 / 180** |
+| Net today | 55.92% | 55.42% | 59.70% | 59.26% | 60.15% | 59.71% |
+| AI drafts / answers a month | none today | none today | 40 / 250 → **18 / 110** | 40 / 250 → **4 / 25** | 80 / 400 | 80 / 400 → **38 / 190** |
 | Video hours watched a month | 4 | 4 | 32 | 32 → **3** | 64 | 64 |
-| Storage | 5 GiB | 5 GiB | 40 GiB | 40 GiB → **25 GiB** | 80 GiB | 80 GiB |
+| Storage | 5 GiB | 5 GiB | 40 GiB | 40 GiB → **26 GiB** | 80 GiB | 80 GiB |
 | Orders a month | 200 | 200 | 450 | 450 | 1,500 | 1,500 |
 | Store emails a month | 75 | 75 | 300 | 300 | 800 | 800 |
 | Access emails a month | 150 | 150 | 400 | 400 | 1,000 | 1,000 |
 | List emails a month | none today | none today | 7,000 | 7,000 | 10,000 | 10,000 |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
 | Net with the cuts | not reachable | not reachable | **60.00%** | **60.00%** | **60.15%** | **60.00%** |
-| Every printed line at 10% / at zero | 57.65% / 57.84% | 57.33% / 57.54% | 62.08% / 62.34% | 61.93% / 62.23% | 62.48% / 62.74% | 62.34% / 62.64% |
-| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 88.78% of today | 75.16% of today | 100.00% of today | 90.06% of today |
+| Every printed line at 10% / at zero | 57.66% / 57.85% | 57.36% / 57.57% | 62.08% / 62.35% | 61.94% / 62.24% | 62.49% / 62.75% | 62.34% / 62.64% |
+| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 88.92% of today | 75.31% of today | 100.00% of today | 90.13% of today |
 
-Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 57.84%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 57.54%: its hidden lines and receiving alone take more than the floor leaves).
+Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 57.85%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 57.57%: its hidden lines and receiving alone take more than the floor leaves).
 
 ## How each line compares
 

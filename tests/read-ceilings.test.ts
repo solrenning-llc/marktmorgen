@@ -30,11 +30,11 @@ import {
 import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
-  CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
+  CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
   STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
-import { STORE_READINGS_PER_DAY, keptNumbers } from "@/lib/store-readings";
+import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, keptNumbers, takeStoreReading } from "@/lib/store-readings";
 import { claimHandle, createStore, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, storeForHandle, storeForId, type Store } from "@/lib/store";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -232,7 +232,20 @@ async function main(): Promise<void> {
   is("the feed is a cost line of its own, every making (its own and its credits) and answer of the month at its worst", feedMonth >= 32 * (CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY) * readShapeCost(CALENDAR_BUILD_SHAPE) + 31 * 24 * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE), true);
   const readings = COST_LINES.find((l) => l.id === "store-readings");
   const readingsMonth = readings ? readings.monthlyUsd("creator") : 0;
-  is("the store's readings are a line of their own, every reading of every day at the dearest kind", readingsMonth >= 32 * STORE_READINGS_PER_DAY * Math.max(...STORE_READING_SHAPES.map(readShapeCost)), true);
+  const heavyWorst = Math.max(readShapeCost(SALES_READ_SHAPE), readShapeCost(STORE_READING_SHAPES[3]));
+  const lightWorst = Math.max(readShapeCost(STATS_READ_SHAPE), readShapeCost(MEMBERS_READ_SHAPE));
+  is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && STORE_READING_SHAPES.length === 4, true);
+  is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy or light)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst), true);
+  {
+    // The day's heavy readings stop at their own figure; light ones go on to the day's whole figure.
+    const probe = { statsId: "h".repeat(32) };
+    const at = Date.parse("2031-02-03T10:00:00Z");
+    const heavy: boolean[] = [];
+    for (let i = 0; i < HEAVY_READINGS_PER_DAY + 1; i += 1) heavy.push(await takeStoreReading(probe, at, true));
+    const light: boolean[] = [];
+    for (let i = 0; i < STORE_READINGS_PER_DAY; i += 1) light.push(await takeStoreReading(probe, at));
+    is("heavy readings stop at HEAVY_READINGS_PER_DAY, and a refused one is not counted", [heavy.filter(Boolean).length, light.filter(Boolean).length], [HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY]);
+  }
   is("a store in its trial or past its plan keeps both, priced for it (M2)", nonPayingWorst() >= feedMonth + readingsMonth, true);
   console.log(`  calendar feed: a making $${readShapeCost(CALENDAR_BUILD_SHAPE).toFixed(6)}, an answer $${readShapeCost(CALENDAR_POLL_SHAPE).toFixed(6)}, the month $${feedMonth.toFixed(4)}`);
   console.log(`  store readings: a reading at most $${Math.max(...STORE_READING_SHAPES.map(readShapeCost)).toFixed(6)}, the month $${readingsMonth.toFixed(4)}`);

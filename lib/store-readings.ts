@@ -29,6 +29,14 @@ import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
 
 /** Readings a store may take in a UTC day, every page and kind together. */
 export const STORE_READINGS_PER_DAY = 8;
+/**
+ * Of them, the heavy ones: its sales (every PayPal sale and refund record read,
+ * lib/read-ceilings.ts SALES_READ_SHAPE) and a product update's search for its
+ * buyers (UPDATE_READ_SHAPE). The rest of the day's readings are light, so the
+ * day's worst stays inside the first-payment refund the owner funds
+ * (tests/plan-margin.test.ts, US$ 65; inbox C4-18).
+ */
+export const HEAVY_READINGS_PER_DAY = 3;
 /** How long a reading is shown as it is before it is read again. */
 export const READING_FRESH_SECONDS = 600;
 /** How long the last reading is kept to show when the day's readings are used. */
@@ -47,15 +55,22 @@ const dayKey = (statsId: string, day: string) => `nl:reading:day:${statsId}:${da
  * with its expiry, INCRBY, EXPIRE NX, and DECRBY when past the day's figure.
  * A count that cannot be made is a refusal.
  */
-export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date.now()): Promise<boolean> {
+export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date.now(), heavy = false): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
   const key = dayKey(store.statsId, new Date(now).toISOString().slice(0, 10));
+  const heavyKey = `${key}:heavy`;
   try {
-    const [, raw] = await redisPipeline([["SET", key, "0", "NX", "EX", 2 * 86_400], ["INCRBY", key, 1], ["EXPIRE", key, 2 * 86_400, "NX"]]);
+    const [, raw, , , rawHeavy] = await redisPipeline([
+      ["SET", key, "0", "NX", "EX", 2 * 86_400],
+      ["INCRBY", key, 1],
+      ["EXPIRE", key, 2 * 86_400, "NX"],
+      ...(heavy ? [["SET", heavyKey, "0", "NX", "EX", 2 * 86_400], ["INCRBY", heavyKey, 1]] : []),
+    ]);
     const n = Number(raw);
-    if (!Number.isSafeInteger(n) || n < 1) return false;
-    if (n <= STORE_READINGS_PER_DAY) return true;
-    await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
+    const h = heavy ? Number(rawHeavy) : 0;
+    if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(h) || (heavy && h < 1)) return false;
+    if (n <= STORE_READINGS_PER_DAY && h <= HEAVY_READINGS_PER_DAY) return true;
+    await redisPipeline([["DECRBY", key, 1], ...(heavy ? [["DECRBY", heavyKey, 1]] : [])]).catch(() => {});
     return false;
   } catch {
     return false;
@@ -84,7 +99,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     kept = null;
   }
   if (kept && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
-  if (!(await takeStoreReading(store, now))) return kept ? { ...kept, stale: true } : null;
+  if (!(await takeStoreReading(store, now, kind === "sales"))) return kept ? { ...kept, stale: true } : null;
   let value: T;
   try {
     value = await read();

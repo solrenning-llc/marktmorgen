@@ -153,7 +153,7 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   // the store's own readings of the day, taken before it starts
   // (lib/store-readings.ts; owner's rule MR and decision of 4 November 2026,
   // inbox C4-18). The studio's requests count only the press itself.
-  if (!(await takeStoreReading(store))) {
+  if (!(await takeStoreReading(store, Date.now(), true))) {
     return { ok: false, reason: "used", message: "Your store has read its sales from Stripe as many times as it can today. Try again tomorrow." };
   }
   let rows: Record<string, unknown>[];

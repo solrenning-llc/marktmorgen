@@ -10,6 +10,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { DealsBoard } from "@/components/deals-board";
 import { DEFAULT_STAGES, FIRST_PIPELINE_ID, type Deal, type Pipeline } from "@/lib/crm-rules";
+import { readdirSync } from "node:fs";
+import { can } from "@/lib/team-roles";
 import { done, is, part } from "./check";
 
 const coaching: Pipeline = { id: "coach0", name: "Coaching", stages: [{ id: "cnew00", name: "Intro call", kind: "open" }, { id: "cwon00", name: "Signed", kind: "won" }, { id: "clost0", name: "Passed", kind: "lost" }] };
@@ -40,5 +42,12 @@ is("never offers a pipeline beyond the store's limit", deals.includes("pipelineM
 is("says so when there is nothing they may see", deals.includes("You have no pipelines to see in this store."), true);
 const forms = readFileSync("app/studio/forms/page.tsx", "utf8");
 is("the forms page offers only stages they may change, and shows only deals they may see", forms.includes('seen.filter((p) => p.access === "edit")') && forms.includes("reviewData.deals.filter((deal) => !restricted || seenStages.has(deal.stage))"), true);
+
+part("Every other way to a deal (inbox C3-37 (b), (c))");
+// Only Editors and Support can be restricted; the owner and Admins never are.
+is("a role that can be restricted cannot save or switch on a workflow (which can move or give out deals): send stays the owner's and Admins'", [can("editor", "send"), can("support", "send")], [false, false]);
+is("nor export a person's data, deals included", [can("editor", "export"), can("support", "export")], [false, false]);
+const agentFiles = [...readdirSync("lib").filter((f) => /^(api-|mcp)/.test(f)).map((f) => `lib/${f}`)];
+is("no agent tool or API key reads or changes deals yet: if one does, it needs the same check", agentFiles.filter((f) => /\b(readDeals|writeDeal|dropDeal|readDeal|readOpportunityReview)\b/.test(readFileSync(f, "utf8"))), []);
 
 done();

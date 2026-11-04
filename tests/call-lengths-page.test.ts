@@ -105,6 +105,7 @@ async function main(): Promise<void> {
   is("in US English", [BOOKING_WORDS.en.lengthPick, BOOKING_WORDS.en.lengthOption(60, "$80.00"), BOOKING_WORDS.en.lengthChosen("60 minutes, $80.00")], ["How long would you like?", "60 minutes, $80.00", "Showing times for 60 minutes, $80.00."]);
 }
 
+is("each length is drawn in the store's own colors, so its focus ring and the chosen fill keep the store's contrast (2.4.13, 1.4.11)", readFileSync("app/[handle]/book/[product]/page.tsx", "utf8").includes('className={`btn ${l.minutes === chosen.minutes ? "st-btn" : "st-btn-ghost"} w-full justify-start`}'), true);
 void main().then(() => done(), (error) => {
   console.error(error);
   process.exit(1);

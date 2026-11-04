@@ -133,6 +133,15 @@ async function main(): Promise<void> {
     true,
   );
   emails.length = 0;
+  sale = { id: "cs_test_cancel00000000005", status: "complete", payment_status: "paid", metadata: { kind: "call", store: "bela", product: listing.id, start: String(at), end: String(at + 3_600_000), cancel_hours: "48" } };
+  const turnedOff = { ...listing, call: { ...listing.call, cancelHours: undefined } } as CallListing;
+  await confirmBooking({ store: shop, product: turnedOff, session: "cs_test_cancel00000000005", start: at, end: at + 3_600_000, buyerEmail: "ana@example.com", buyerTz: NY, amountCents: 8000, currency: "usd", origin: "https://marktmorgen.com" });
+  is(
+    "a deadline the creator turned off after the sale is still said: the promise is the sale's, never the product's as it is now",
+    [(emails.find((e) => e.to === "ana@example.com")?.text ?? "").includes("Cancel at least 48 hours before the start"), (emails.find((e) => e.to !== "ana@example.com")?.text ?? "").includes("They were told: cancel at least 48 hours before")],
+    [true, true],
+  );
+  emails.length = 0;
   await confirm("cs_test_cancel00000000003", { hours: 24, late: true });
   is("a time booked inside the deadline is told so after paying too", [(emails.find((e) => e.to === "ana@example.com")?.text ?? "").includes(tooLate), (emails.find((e) => e.to !== "ana@example.com")?.text ?? "").includes("within the 24-hour cancellation deadline")], [true, true]);
   emails.length = 0;

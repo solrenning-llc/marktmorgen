@@ -1426,11 +1426,12 @@ export async function confirmBooking(input: {
   // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
   // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
   // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.
-  // The deadline promised when paying is read the same way, only when the product has one now (none now, none said).
+  // The deadline promised when paying is read the same way whenever it was not handed, whatever the product says now:
+  // a deadline the creator turned off after the sale is still the promise the buyer paid under (lib/call-setup.ts, readCancelPromise).
   let due = input.due;
   let cancel = input.cancel;
   const needDue = due === undefined && whereOf(product.call).kind === "place";
-  const needCancel = cancel === undefined && Boolean(product.call.cancelHours);
+  const needCancel = cancel === undefined;
   if (needDue || needCancel) {
     try {
       const sale = await paidCall(store, session);

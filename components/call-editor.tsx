@@ -636,7 +636,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
           <>
             <p className="text-sm font-semibold text-ink">
               {setup.place
-                ? `In person · ${setup.minutes} minutes${setup.seats > 1 ? ` · up to ${setup.seats} people` : ""} · ${setup.tz}`
+                ? `In person · ${setup.seats <= 1 && setup.lengths?.length ? setup.lengths.map((l) => l.minutes).join(", ") : setup.minutes} minutes${setup.seats > 1 ? ` · up to ${setup.seats} people` : ""} · ${setup.tz}`
                 : setup.seats > 1
                   ? `Group call · ${setup.minutes} minutes · up to ${setup.seats} people · ${setup.tz}`
                   : `Paid call · ${setup.lengths?.length ? setup.lengths.map((l) => l.minutes).join(", ") : setup.minutes} minutes · ${setup.tz}`}
@@ -958,7 +958,10 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         </p>
       </div>
 
-      {Number(draft.seats) === 1 ? (
+      {Number(draft.seats) === 1 && product.callPackage && !draft.extra.length ? (
+        // A package's sessions are free once bought, so a call with a package has one length (lib/store.ts, lengths_package): said before saving, not after.
+        <p className="field-hint">{"This call has a package of sessions, so it has one length. To offer other lengths, choose “Stop offering it” in the package first."}</p>
+      ) : Number(draft.seats) === 1 ? (
         <OtherLengths draft={draft} setDraft={setDraft} currency={currency} id={product.id} wrong={wrongLength} clearWrong={() => setWrongLength(null)} errorId={`call-error-${product.id}`} />
       ) : draft.extra.length ? (
         // A group shares one time, so it has one length: said before saving, never dropped in silence.

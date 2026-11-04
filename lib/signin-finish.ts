@@ -12,7 +12,9 @@ import { HOLD_SECONDS, TWO_STEP_COOKIE, endRecoveryAccess, holdSignIn, resetIfDu
  *     waits for the app's code behind a cookie of this browser alone. A
  *     request to turn it off that has waited its days turns it off here.
  *   - Otherwise a session opens, and what the recovery address opened is
- *     closed, as the sign-in inbox itself has now been used.
+ *     closed, as the sign-in inbox itself has now been used. It opens without
+ *     a second step, even for an account that owns a passkey: a team that asks
+ *     for one holds it at the door (lib/team.ts teamTwoStepBlocks).
  *   - A session this browser already held is closed, not kept alongside.
  *   - A browser the account has never used is worth an email (noteSignIn).
  *

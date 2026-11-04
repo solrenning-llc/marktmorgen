@@ -16,6 +16,10 @@
  *   nl:auth:fresh:<hash>    -> that the session was opened in the last 15
  *                              minutes, for the few changes that ask for a
  *                              recent login (adding a passkey)
+ *   nl:auth:second:<hash>   -> the second step this session was opened with
+ *                              ("app", "recovery" or "passkey"), as long as
+ *                              the session; none for an emailed link, Google,
+ *                              a recovery address or a move (sessionSecondStep)
  *   nl:auth:sessions:<hash> -> the set of a creator's live sessions, so that
  *                              they can close every one of them at once
  *   nl:auth:move:<hash>     -> a move from one address to another, 15 minutes,
@@ -101,6 +105,35 @@ export async function isFreshSession(id: string | undefined): Promise<boolean> {
   if (!id || !isRedisConfigured() || !/^[0-9a-f]{64}$/.test(id)) return false;
   const [found] = await redisPipeline([["EXISTS", await freshKey(id)]]);
   return Number(found) === 1;
+}
+
+const secondKey = async (id: string) =>
+  `nl:auth:second:${(await sha256Hex(`nimbus-auth-second:${id}`)).slice(0, 40)}`;
+
+/**
+ * The second step a session was opened with: a code from the authenticator
+ * app, one of its recovery codes, or a passkey used to log in. An emailed
+ * link, Google, a recovery address, a move or a team invite proves only the
+ * inbox, so a session they open has none, even when the account owns a
+ * passkey or an app; so has every session opened before this was written down.
+ */
+export type SecondStep = "app" | "recovery" | "passkey";
+
+const SECOND_STEPS: readonly SecondStep[] = ["app", "recovery", "passkey"];
+
+/**
+ * What this session was opened with, for `email` only: a session that is
+ * gone, or that belongs to somebody else, has none. Read by what asks for the
+ * second step of a session rather than of an account (lib/team.ts).
+ */
+export async function sessionSecondStep(id: string | undefined, email: string): Promise<SecondStep | null> {
+  if (!id || !isRedisConfigured() || !/^[0-9a-f]{64}$/.test(id)) return null;
+  const [owner, second] = await redisPipeline([
+    ["GET", await sessionKey(id)],
+    ["GET", await secondKey(id)],
+  ]);
+  if (typeof owner !== "string" || !owner || owner !== normaliseEmail(email)) return null;
+  return SECOND_STEPS.find((step) => step === second) ?? null;
 }
 
 const sessionsKey = async (email: string) =>
@@ -222,14 +255,19 @@ export async function spendMoveLink(
   }
 }
 
-/** Opens a session for an address that has just proved it holds the inbox. */
-export async function openSession(email: string): Promise<string> {
+/**
+ * Opens a session for an address that has just proved it holds the inbox,
+ * and, when it was opened with one, the second step it was opened with
+ * (SecondStep), kept exactly as long as the session.
+ */
+export async function openSession(email: string, second?: SecondStep): Promise<string> {
   const id = randomToken();
   const opened = await sessionKey(id);
   const owned = await sessionsKey(normaliseEmail(email));
   await redisPipeline([
     ["SET", opened, normaliseEmail(email), "EX", SESSION_TTL_SECONDS],
     ["SET", await freshKey(id), "1", "EX", FRESH_LOGIN_SECONDS],
+    ...(second ? [["SET", await secondKey(id), second, "EX", SESSION_TTL_SECONDS]] : []),
     ["SADD", owned, opened],
     ["EXPIRE", owned, SESSION_TTL_SECONDS + 86_400],
   ]);
@@ -367,7 +405,7 @@ export async function endSession(id: string | undefined): Promise<void> {
   try {
     const key = await sessionKey(id);
     const [email] = await redisPipeline([["GET", key]]);
-    const commands: (string | number)[][] = [["DEL", key]];
+    const commands: (string | number)[][] = [["DEL", key], ["DEL", await secondKey(id)]];
     if (typeof email === "string" && email) {
       commands.push(["SREM", await sessionsKey(email), key]);
     }

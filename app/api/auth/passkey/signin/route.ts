@@ -55,7 +55,8 @@ export async function POST(request: NextRequest) {
       // is closed, and only the new one is kept.
       const previous = request.cookies.get(SESSION_COOKIE)?.value;
       if (previous) await endSession(previous);
-      const id = await openSession(email);
+      // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
+      const id = await openSession(email, "passkey");
       // A passkey is the second step: a pending request to turn two-step login off is called off (lib/two-step.ts).
       await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
       await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));

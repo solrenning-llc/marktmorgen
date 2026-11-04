@@ -46,9 +46,12 @@ export async function GET(request: NextRequest) {
   }
 
   // A creator: still signed in as the one who started, still allowed on that store.
-  const email = await emailForSession(request.cookies.get(SESSION_COOKIE)?.value ?? "");
+  const session = request.cookies.get(SESSION_COOKIE)?.value ?? "";
+  const email = await emailForSession(session);
   if (!email || email.toLowerCase() !== trip.by.toLowerCase()) return away(origin, "/signin?status=expired");
-  const allowed = await resolveAccess(email, { pinned: trip.sid }, "settings");
+  // The session goes with the store asked for: a team that asks for a second step reads how this session was opened (lib/team.ts teamTwoStepBlocks).
+  const wanted = { pinned: trip.sid, session };
+  const allowed = await resolveAccess(email, wanted, "settings");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { role } = allowed.access;
   const back = (query: string) => away(origin, studioPath(store, query, "discord"));

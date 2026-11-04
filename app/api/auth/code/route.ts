@@ -72,7 +72,8 @@ export async function POST(request: NextRequest) {
 
   const previous = request.cookies.get(SESSION_COOKIE)?.value;
   if (previous) await endSession(previous);
-  const sessionId = await openSession(answer.email);
+  // Opened with its second step: the app's code or a recovery code (lib/auth.ts SecondStep).
+  const sessionId = await openSession(answer.email, answer.how);
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   const response = away("/studio");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));

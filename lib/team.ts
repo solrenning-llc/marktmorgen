@@ -33,7 +33,7 @@
  */
 import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail, sessionSecondStep } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
@@ -166,16 +166,62 @@ async function saveTeam(sid: string, team: Team): Promise<void> {
 /**
  * Whether the team must use two-step sign-in, and, for one person, whether
  * they may open the studio under it: the owner always may (the requirement is
- * theirs to set); anybody else only with an authenticator app turned on or a
- * passkey (lib/two-step.ts, lib/passkeys.ts). Read only when it is on.
+ * theirs to set); anybody else only in a session that was opened with a
+ * second step (lib/auth.ts sessionSecondStep): the app's code, a recovery
+ * code, or a passkey used to log in. Owning a passkey or an app is not enough:
+ * an emailed link opens a session without either, so a member who has only a
+ * passkey and logs in by the link is asked for the second step here. A
+ * session read without its id, or opened before this was written down, has
+ * none: the answer is to ask for the step, never to let it through.
+ * Read only when the requirement is on.
  */
-export async function teamTwoStepBlocks(store: Store, email: string, role: Role): Promise<boolean> {
+export async function teamTwoStepBlocks(store: Store, email: string, role: Role, session?: string): Promise<boolean> {
   if (role === "owner" || !store.sid) return false;
   const team = await readTeam(store.sid);
   if (!team.requireTwoStep) return false;
-  const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
-  return !app && keys.length === 0;
+  return (await sessionSecondStep(session, email)) === null;
 }
+
+/**
+ * What a member held at the team's door does next (teamTwoStepBlocks):
+ * "passkey", log in again with the passkey they have; "app", log in again
+ * with the emailed link and the app's code; "set_up", add a passkey or turn
+ * on an app first. A passkey comes first when they have both, as it asks for
+ * nothing to be typed.
+ */
+export type SecondStepWay = "passkey" | "app" | "set_up";
+
+export async function secondStepWay(email: string): Promise<SecondStepWay> {
+  const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
+  return keys.length > 0 ? "passkey" : app ? "app" : "set_up";
+}
+
+/**
+ * The words for each way, in plain US English, for the page that holds a
+ * member at the door. Logging in again opens a new session in place of this
+ * one; nothing typed in another tab is lost, and a save refused there works
+ * when it is pressed again.
+ */
+export const SECOND_STEP_WORDS: Readonly<Record<SecondStepWay, { title: string; body: string; action: string; href: string }>> = {
+  passkey: {
+    title: "Log in again with your passkey",
+    body: "You logged in with an emailed link. This store's owner asks everyone on the team to log in with a second step, and your passkey is one. Log in again with it to open the store. Anything you typed in another tab stays there: press Save again once you are back.",
+    action: "Log in with your passkey",
+    href: "/signin",
+  },
+  app: {
+    title: "Log in again with your app's code",
+    body: "You logged in without your second step. This store's owner asks everyone on the team to use one. Log in again: after the emailed link, type the code from your authenticator app. Anything you typed in another tab stays there: press Save again once you are back.",
+    action: "Log in again",
+    href: "/signin",
+  },
+  set_up: {
+    title: "Set up a second step",
+    body: "This store's owner asks everyone on the team to log in with a second step. Add a passkey or turn on an authenticator app below, then log in again with it to open the store. Anything you typed in another tab stays there: press Save again once you are back.",
+    action: "Set up a second step",
+    href: "#two-step",
+  },
+};
 
 /** The owner turns the requirement on or off; written into the team's activity log. */
 export async function setRequireTwoStep(store: Store, on: boolean, by: string): Promise<boolean> {

@@ -282,6 +282,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:tasks:doors@lib/assignment.ts": company("Hand-in doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's (priced in buyer-actions), gone within two days."),
   "nl:auth:devices:@lib/auth.ts": company("Devices an account signed in on", "An account's, not a store's."),
   "nl:auth:fresh:@lib/auth.ts": company("A fresh sign-in", "An account's, minutes."),
+  "nl:auth:second:@lib/auth.ts": company("The second step a session was opened with", "An account's, as long as its session."),
   "nl:auth:link:@lib/auth.ts": company("A sign-in link", "An account's, minutes."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
   "nl:auth:session:@lib/auth.ts": company("A session", "An account's."),

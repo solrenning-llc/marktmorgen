@@ -75,7 +75,7 @@
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPayPalRefunds } from "@/lib/paypal-sales";
-import { saleHandles } from "@/lib/store";
+import { saleHandles, storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -649,7 +649,7 @@ export async function requestAffiliateLink(input: {
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   const email = normaliseEmail(raw);
   if (!canApply(store)) return "unavailable";
-  if (email === normaliseEmail(store.email)) return "owner";
+  if (canonicalEmail(email) === canonicalEmail(store.email)) return "owner";
   if (!(await within(applyIpKey(ip, store.handle), APPLY_IP_LIMIT))) return "limited";
   if (!(await within(applyAddressKey(email), APPLY_ADDRESS_LIMIT))) return "limited";
 
@@ -922,18 +922,47 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
     ["DEL", linkKey(token)],
   ]);
 
+  // Approved at once when the creator chose it (624 [SZ8](35)): through the same decision as by hand, so the
+  // approval email with their link goes as usual. Only a new application; someone declined or removed stays out,
+  // and so does the same inbox written another way (a dot or a "+" tag): an application whose address matches any
+  // other record, declined and removed included, waits for the creator instead.
+  // The store's own address (the owner's, as it is now) waits too: the owner is never their own affiliate.
+  // The choice is read again from the store as it is now, and the application again, so a creator who turned
+  // approval off, or declined or removed this person, in the meantime is not overruled.
+  const autoChosen = created && grant.k !== 1 && store.affiliates.autoApprove === true && affiliate.status === "pending";
+  const knownInbox = autoChosen && (await sameInboxAsAnother(store, affiliate.email, affiliate.id));
+  const ownersInbox = autoChosen && canonicalEmail(affiliate.email) === canonicalEmail(store.email);
+  let autoApproved = false;
+  if (autoChosen && !knownInbox && !ownersInbox) {
+    const now = store.sid ? await storeForId(store.sid) : null;
+    const still = now?.affiliates.autoApprove === true ? await readAffiliate(store, affiliate.id) : null;
+    if (still?.status === "pending") {
+      affiliate = (await decide(store, affiliate.id, "approve")) ?? affiliate;
+      autoApproved = affiliate.status === "approved";
+    }
+  }
+
   if (created && isSenderConfigured() && grant.k !== 1) {
+    const studioLink = `${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`;
     await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
       from: `Marktmorgen <${senderAddress()}>`,
       to: store.email,
-      subject: `New affiliate application: ${affiliate.email}`,
+      subject: autoApproved ? `New affiliate: ${affiliate.email}` : `New affiliate application: ${affiliate.email}`,
       text: [
-        `${affiliate.email} applied to be an affiliate of ${store.name}.`,
+        autoApproved
+          ? `${affiliate.email} joined as an affiliate of ${store.name}, approved at once because you chose to approve every application.`
+          : `${affiliate.email} applied to be an affiliate of ${store.name}.`,
+        ...(knownInbox
+          ? ["It was not approved at once: the address matches one already on your list (including people you declined or removed), written the same way or another way, so it waits for your decision."]
+          : []),
+        ...(ownersInbox ? ["It was not approved at once: it is this store's own address, so it waits for your decision."] : []),
         ...(affiliate.note ? [`Where they will share it: ${affiliate.note}`] : []),
         "",
-        `Approve or decline them in your studio: ${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`,
+        autoApproved ? `Remove them in your studio if you would rather not: ${studioLink}` : `Approve or decline them in your studio: ${studioLink}`,
         "",
-        "Nothing changes until you decide. Commissions are paid by you, directly, never by Marktmorgen.",
+        autoApproved
+          ? "Commissions are paid by you, directly, never by Marktmorgen."
+          : "Nothing changes until you decide. Commissions are paid by you, directly, never by Marktmorgen.",
       ].join("\n"),
     }).catch((error) => console.error("telling a creator about an application failed", error));
   }
@@ -945,11 +974,25 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
       "affiliate",
       grant.k === 1
         ? { title: "Your partner accepted", body: `Somebody you invited as a partner on ${store.name} opened their link.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" }
-        : { title: "New affiliate application", body: `Someone applied to promote ${store.name}. Approve or decline them in your studio.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
+        : autoApproved
+          ? { title: "New affiliate", body: `Someone joined as an affiliate of ${store.name}, approved at once as you chose.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" }
+          : { title: "New affiliate application", body: `Someone applied to promote ${store.name}. Approve or decline them in your studio.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
       { seed: affiliate.id },
     ).catch((error) => console.error("an application notification failed", error));
   }
   return { ok: true, session, affiliate, created };
+}
+
+/**
+ * Whether another record of this store than `self`, in any state (declined
+ * and removed included), reaches the same inbox as `address`, by its address
+ * or its payout address, written the same or another way (canonicalEmail).
+ */
+async function sameInboxAsAnother(store: Store, address: string, self: string | null): Promise<boolean> {
+  const mine = canonicalEmail(address);
+  return (await listAffiliates(store)).some(
+    (other) => other.id !== self && (canonicalEmail(other.email) === mine || canonicalEmail(payAddress(other)) === mine),
+  );
 }
 
 /** Whether buyers may join this store's programme on their own (lib/affiliate-setting.ts). */
@@ -995,16 +1038,19 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
   if (!buyersJoin(store)) return { ok: false, reason: "unavailable" };
   const email = await buyerOfOrder(store, sessionId);
   if (!email) return { ok: false, reason: "order" };
-  if (email === normaliseEmail(store.email)) return { ok: false, reason: "owner" };
+  if (canonicalEmail(email) === canonicalEmail(store.email)) return { ok: false, reason: "owner" };
   const statsId = store.statsId as string;
 
   let affiliate: Affiliate | null = null;
   let created = false;
   const [knownId] = await redisPipeline([["HGET", emailsKey(statsId), email]]);
   if (typeof knownId === "string") affiliate = await readAffiliate(store, knownId);
+  // The same inbox as another record, declined and removed included, written another way (a "+" tag, dots at
+  // Gmail): not let in by an order; an application waits for the creator instead (624 [SZ8](35)).
+  const knownInbox = await sameInboxAsAnother(store, email, affiliate?.id ?? null);
   if (affiliate) {
     if (affiliate.status === "declined" || affiliate.status === "removed") return { ok: false, reason: "declined" };
-    if (affiliate.status === "pending") {
+    if (affiliate.status === "pending" && !knownInbox) {
       affiliate = { ...affiliate, status: "approved", decidedAt: Date.now() };
       await writeAffiliate(store, affiliate);
     }
@@ -1021,7 +1067,9 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
     } else {
       const code = await claimCode(store, email, id);
       const now = Date.now();
-      affiliate = { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null };
+      affiliate = knownInbox
+        ? { id, email, code, status: "pending", appliedAt: now, decidedAt: 0, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null }
+        : { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null };
       await writeAffiliate(store, affiliate);
       created = true;
     }
@@ -1033,7 +1081,9 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
     await alertCreator(
       store,
       "affiliate",
-      { title: "A buyer became an affiliate", body: `Someone who bought from ${store.name} took their own link to share it.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
+      affiliate.status === "pending"
+        ? { title: "New affiliate application", body: `Someone who bought from ${store.name} asked for a link. Their address matches one already on your list, so it waits for you.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" }
+        : { title: "A buyer became an affiliate", body: `Someone who bought from ${store.name} took their own link to share it.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
       { seed: affiliate.id },
     ).catch((error) => console.error("a new-affiliate notification failed", error));
   }
@@ -1417,7 +1467,8 @@ export function canonicalEmail(raw: string): string {
   const at = email.lastIndexOf("@");
   if (at < 1) return email;
   let name = email.slice(0, at).split("+")[0];
-  let domain = email.slice(at + 1);
+  // "example.com." is the same domain as "example.com".
+  let domain = email.slice(at + 1).replace(/\.+$/, "");
   if (domain === "googlemail.com") domain = "gmail.com";
   if (domain === "gmail.com") name = name.replace(/\./g, "");
   return `${name}@${domain}`;
@@ -2150,11 +2201,15 @@ export function holdFlags(store: Pick<Store, "affiliates">, everyone: Affiliate[
   return out;
 }
 
-/** The other affiliates, approved or waiting, with this one's inbox or payout address, written any way. */
+/**
+ * The other records with this one's inbox or payout address, written any way:
+ * approved, waiting, and also declined or removed, so a payout address set to
+ * the inbox of someone the creator turned away is held too.
+ */
 function sharersOf(a: Affiliate, everyone: Affiliate[]): string[] {
   const mine = new Set([canonicalEmail(a.email), canonicalEmail(payAddress(a))]);
   return everyone
-    .filter((b) => b.id !== a.id && (b.status === "approved" || b.status === "pending"))
+    .filter((b) => b.id !== a.id)
     .filter((b) => mine.has(canonicalEmail(b.email)) || mine.has(canonicalEmail(payAddress(b))))
     .map((b) => b.id);
 }

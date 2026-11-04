@@ -29,8 +29,8 @@ import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links"
 import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest, parseTest, partAt, splitFor } from "@/lib/mail-test";
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
-import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, readNarrow } from "@/lib/segments";
-import { countLedger } from "@/lib/person-agenda-read";
+import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadingUnits, readNarrow } from "@/lib/segments";
+import { countUnits } from "@/lib/person-agenda-read";
 import { sameNarrow } from "@/lib/segments-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
@@ -91,6 +91,17 @@ export type Broadcast = {
    * email with one subject, which is every email made before this existed.
    */
   test: SubjectTest | null;
+  /**
+   * Studio requests held, when it was written down, for the one reading of
+   * the store's buyers its list needs when the scheduled job starts it (a
+   * narrowed email; lib/segments.ts, ledgerReadingUnits), not drawn yet: that
+   * reading draws from it and is never refused (C3-80 (d)). Studio requests
+   * are never given back (lib/store-allowance.ts gives back only a take it
+   * refused), so what is left after the reading, or when it is canceled, stays
+   * here as the record of it. Absent on every email made before 4 November
+   * 2026 and on one with nothing held.
+   */
+  reserve?: number;
 };
 
 /** Creation may have been partially written even when its acknowledgement is lost. */
@@ -174,6 +185,7 @@ function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadc
   // These fields were absent in older campaigns; explicit malformed values are not legacy defaults.
   if (value.who !== undefined && !WHO.includes(value.who as Who) || value.notProductId !== undefined && !association(value.notProductId) || value.tagged !== undefined && typeof value.tagged !== "boolean" || value.test !== undefined && value.test !== null && b.test === null) throw new Error("Invalid campaign options");
   if (value.label !== undefined && value.label !== null && (typeof value.label !== "string" || readTags([value.label])[0] !== value.label)) throw new Error("Invalid campaign label");
+  if (value.reserve !== undefined && !nonnegative(value.reserve)) throw new Error("Invalid campaign reserve");
   if (value.narrow !== undefined && value.narrow !== null) {
     if (typeof value.narrow !== "object" || Array.isArray(value.narrow)) throw new Error("Invalid campaign audience");
     const narrow = value.narrow as Record<string, unknown>;
@@ -241,8 +253,11 @@ export function linksToStore(body: string, store: Pick<Store, "handle" | "domain
 /**
  * Writes a broadcast down to go now or later. What it may contain is checked
  * here. `count` counts the reading of the store's buyers a narrowed email
- * needs before it is read (lib/segments.ts, buyerLedger); when it is not
- * counted, LedgerNotCounted is thrown and nothing is written.
+ * needs before it is read (lib/segments.ts, buyerLedger), and, for one the
+ * scheduled job starts, holds what its own reading then will cost at the most
+ * (ledgerReadingUnits; the broadcast's `reserve`), so the scheduled job never
+ * refuses it (C3-80 (d)); when either is not counted, LedgerNotCounted is
+ * thrown and nothing is written, and the studio says the refusal's sentence.
  */
 export async function createBroadcast(
   store: Store,
@@ -287,6 +302,16 @@ export async function createBroadcast(
   const test = asked === "none" ? null : asked;
   if (test && reach < MIN_TEST_REACH) return { ok: false, reason: "test_small" };
   if (test && !linksToStore(body, store)) return { ok: false, reason: "test_links" };
+  // A narrowed email the scheduled job starts reads the buyers again then: what that reading costs at the most is held
+  // now, counted before anything is written, and drawn by that reading (advanceBroadcast). One that starts in this
+  // request lists from the narrowing just read (the route's `keep`) and holds nothing. Held before the data room is
+  // taken, so a refusal takes nothing; studio requests are never given back, so a data room found full after this
+  // keeps them taken.
+  let reserve = 0;
+  if (narrow && count && sendAt > now + 60) {
+    reserve = await ledgerReadingUnits(store);
+    if (reserve > 0 && !(await count(reserve).catch(() => false))) throw new LedgerNotCounted();
+  }
   if (sendAt <= now + 60) {
     // The month as the plan counts it (lib/allowance-window.ts), the same window
     // reserve takes from and the studio shows; a window that cannot be told
@@ -317,6 +342,7 @@ export async function createBroadcast(
     listed: false,
     tagged: true,
     test,
+    ...(reserve > 0 ? { reserve } : {}),
   };
   // Its room in the store's data room first (DataRoomError when it does not
   // fit): its record, until it expires by itself (400 days after the last
@@ -350,8 +376,9 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
     if (!acquired) return false;
     // Read only after acquiring the same lock used by the sender.
     const b = await readBroadcast(id);
-    // Scheduled, or waiting before its list of who it goes to was made (its buyers' reading not counted, the plan
-    // without email, the data room full): nothing was sent, so it can still be called off.
+    // Scheduled, or waiting before its list of who it goes to was made (the plan without email, the data room full):
+    // nothing was sent, so it can still be called off. What it holds for its reading of the buyers (`reserve`) is
+    // not given back (studio requests have no giving back): it stays on the canceled record as the record of it.
     if (!b || b.id !== id || b.listId !== store.listId || (b.status !== "scheduled" && b.status !== "waiting") || b.sent !== 0 || b.listed !== false) return false;
     const cancelled = { ...b, status: "cancelled", finishedAt: Math.floor(Date.now() / 1000) };
     const saved = await redisPipeline([["SET", bcKey(id), JSON.stringify(cancelled), "EX", RECORD_DAYS * 86_400]]);
@@ -367,17 +394,6 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
   }
 }
 
-/**
- * Why a narrowed broadcast waits when reading the store's buyers could not be
- * counted: the refusal's own sentence (how many this needs, how many are left
- * and when they come back), and that it goes on by itself.
- */
-export function notCountedNote(said: string): string {
-  const after = " Nothing was sent. It is tried again automatically.";
-  // Within the 300 characters the record's room was taken for when it was written down (createBroadcast).
-  const words = said && said.length + after.length <= NOTE_ROOM ? said : "Your studio's requests could not be counted just now, so the list of who it goes to could not be made.";
-  return `${words}${after}`;
-}
 
 /** Only an explicit lock acknowledgement permits a reader to become a writer. */
 async function takeBroadcastLock(id: string): Promise<boolean> {
@@ -394,10 +410,10 @@ async function takeBroadcastLock(id: string): Promise<boolean> {
  * Its list of who it goes to reads the store's buyers when it is narrowed:
  * `given` is that narrowing, already read and counted when the broadcast was
  * written down in the same request (createBroadcast's `keep`), so it is
- * neither read nor counted twice. Otherwise the reading is counted in the
- * store's studio requests before it is read (lib/segments.ts, buyerLedger);
- * when it is not counted, nothing is read or sent, and the broadcast waits,
- * saying why, and is tried again by the scheduled job.
+ * neither read nor counted twice. Otherwise the reading draws from what was
+ * held for it when it was written down (`reserve`, createBroadcast) and is
+ * never refused for the studio's requests: an email accepted is never stopped
+ * here for them (C3-80 (d)).
  */
 export async function advanceBroadcast(
   id: string,
@@ -438,20 +454,39 @@ export async function advanceBroadcast(
         await save(b);
         return b;
       }
-      // Any other run (one that took the lock first, or a send due within the minute that this request left to the
-      // scheduled job) counts its own reading: within ten minutes that is the copy createBroadcast's reading kept,
-      // counted by its size (lib/segments.ts, buyerLedger), never Stripe's pages again. It can count more, never less.
+      // Any other run (the scheduled job, or one that took the lock first) reads the buyers drawing from what was held
+      // for that reading when the email was written down, never counting it again. Each draw is written down before
+      // that part is read, so a run cut short never draws the same requests twice. What is held and not drawn stays
+      // on the record: studio requests are never given back. What a reading needs beyond what is held (the kept
+      // buyers grew since, an earlier run drew it and then waited for another reason, or an email written down before
+      // anything was held) is counted in the studio's requests when they allow it, and read either way: what could
+      // not be counted is logged, without who. Never a wait for the studio's requests (C3-80 (d)).
       let keep = given?.keep;
       if (!given) {
-        const counting = countLedger(store);
+        const before = b;
+        let held = before.reserve ?? 0;
+        let over = 0;
+        const draw = async (units: number): Promise<boolean> => {
+          const drawn = Math.min(units, held);
+          if (drawn > 0) {
+            held -= drawn;
+            await save({ ...before, reserve: held });
+          }
+          const rest = units - drawn;
+          if (rest > 0 && !(await countUnits(store, rest).then((counted) => counted.ok, () => false))) over += rest;
+          return true;
+        };
         try {
-          keep = await keepFor(store, b.narrow, counting.count);
+          keep = await keepFor(store, b.narrow, draw);
         } catch (error) {
           if (!(error instanceof LedgerNotCounted)) throw error;
-          b = { ...b, status: "waiting", note: notCountedNote(counting.said.message) };
+          // Only when a draw could not be written down: nothing more was read.
+          b = { ...b, ...(b.reserve !== undefined ? { reserve: held } : {}), status: "waiting", note: "The list of who it goes to could not be prepared. Nothing was sent. It will be checked again automatically." };
           await save(b);
           return b;
         }
+        if (b.reserve !== undefined) b = { ...b, reserve: held };
+        if (over > 0) console.warn("A scheduled email's reading of the buyers needed more studio requests than it held and could count", { id, over });
       }
       const to = await audience(b.listId, b.productId ?? undefined, b.notProductId ?? undefined, whoOf(store, b.who), keep, b.label ?? undefined);
       let test = b.test;

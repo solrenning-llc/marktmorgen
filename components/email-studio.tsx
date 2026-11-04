@@ -1265,7 +1265,13 @@ function Compose(props: {
               </div>
             </dl>
             <SubjectTestReview preview={testPreview} />
-            <p id="mail-send-note" className="mt-2">Eligibility is checked again when sending starts.</p>
+            <p id="mail-send-note" className="mt-2">
+              Eligibility is checked again when sending starts.
+              {/* A narrowed email scheduled holds its later reading of the buyers now (lib/broadcasts.ts, createBroadcast; C3-80 (d)). */}
+              {later && (minSpent || channel || quietDays || buyerGroup || activeDays)
+                ? " Scheduling it sets aside, now, the studio requests needed to find these buyers when it goes out. If too few are left, it is not scheduled, and you see how many it needs. Canceling does not give them back."
+                : null}
+            </p>
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-3">

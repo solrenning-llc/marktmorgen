@@ -1,0 +1,10 @@
+# Reservations of Claude 1
+
+Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/11/2026 22h36). Add a row before the first commit of a unit, in the same pull request as the code; remove it in the pull request that merges the unit. Never reserve a shared or generated file (`docs/accessibility-inventory.json`, and `lib/agent-coverage.ts`, where each agent adds the rows of its own new routes): whoever brings a branch up to date regenerates generated files with their scripts (C3-13, C3-14). `scripts/reservation-check.mjs` reads every file in `docs/reservations/` and fails a pull request that changes a file another agent reserved here, or that changes another agent's reservations file. The lanes and branch prefixes stay in [docs/reservations.md](../reservations.md).
+
+## Reservations before code
+
+| Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
+| --- | --- | --- | --- | --- |
+| Claude 1 | CI capacity: the repository recognized by its permanent ID, so a later move to another owner keeps every owned-repository guard working | claude/repo-id-guard | `.github/workflows/accessibility-buyer-actions.yml`, `.github/workflows/accessibility-product-actions.yml`, `.github/workflows/accessibility-public-matrix.yml`, `.github/workflows/accessibility-real-readers.yml`, `.github/workflows/accessibility-signup-actions.yml`, `.github/workflows/accessibility-studio-matrix.yml`, `.github/workflows/product-checks.yml` (the three repository conditions only, released by Codex on the para-claude-1 channel, CX-13), `scripts/ci_full_tree_proof.py`, `scripts/test_ci_full_tree_proof.py`, `scripts/test_self_hosted_redis_migration.py`, `tests/e2e/ax2-public-run.mjs`, `tests/ax2-public-run.test.ts`, `tooling/screen-reader/owned-repository.mjs`, `tooling/screen-reader/owned-repository.test.mjs`, `tooling/screen-reader/reset-voiceover.mjs`, `tooling/screen-reader/setup-owned-reader.mjs`, `tooling/screen-reader/windows-foreground.mjs` | 02/11/2026 21h10 |
+| Claude 1 | Official EU texts for 619 [SZ3] and 625 [HN1] | claude/eu-official-texts | `docs/official-texts-eu-2026-11-02.md` | 02/11/2026 22h45 |

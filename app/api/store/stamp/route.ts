@@ -4,12 +4,14 @@ import { jsonAccess } from "@/lib/studio-route";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { stampProblems } from "@/lib/pdf-stamp";
 import { readListing } from "@/lib/catalog";
+import { isEpub } from "@/lib/product-file";
 
 /**
- * Stamping a product's PDFs with each buyer's email.
+ * Stamping a product's PDFs and EPUBs with each buyer's email.
  *
- * GET `?id=<product>`: which of its PDFs are handed over unstamped, and why —
- * too big to stamp, or a file the stamp could not be written into.
+ * GET `?id=<product>`: which of its PDFs and EPUBs are handed over unstamped,
+ * and why — too big to stamp, a file the stamp could not be written into, or
+ * an EPUB that is signed or encrypted (lib/pdf-stamp.ts, StampProblem).
  * POST `{ id, on }`: switches it on or off.
  */
 export async function GET(request: NextRequest) {
@@ -27,7 +29,7 @@ export async function GET(request: NextRequest) {
         ok: true,
         problems: files
           .filter((file) => problems.has(file.pathname))
-          .map((file) => ({ name: file.name, bytes: file.bytes, reason: problems.get(file.pathname) })),
+          .map((file) => ({ name: file.name, bytes: file.bytes, kind: isEpub(file) ? "epub" : "pdf", reason: problems.get(file.pathname) })),
       },
       { headers: { "Cache-Control": "private, no-store" } },
     );

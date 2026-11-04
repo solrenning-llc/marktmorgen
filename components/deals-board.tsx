@@ -15,6 +15,7 @@ import {
   type CrmField,
   type Deal,
   FIELD_TYPES,
+  hasChoices,
   type FieldType,
   MAX_CRM_FIELDS,
   MAX_DEAL_NOTE,
@@ -33,6 +34,7 @@ import {
   pipelineTotals,
   stageLabel,
   starterStages,
+  copyPipeline,
 } from "@/lib/crm-rules";
 
 const MESSAGES: Record<string, string> = {
@@ -245,6 +247,13 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               <button type="button" className="btn btn-ghost btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); setPipelineDraft({ id: newCrmId(), name: "", stages: starterStages(), isNew: true, moves: {}, removeTo: "" }); }}>
                 <Icon name="plus" size={16} />
                 New pipeline
+              </button>
+            ) : null}
+            {pipelines.length < pipelineMax ? (
+              /* 639 [GL7](8): the same stages under a new name, none of its deals; opened to read and save, nothing saved yet. */
+              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); const copy = copyPipeline(pipeline, pipelines); setPipelineDraft({ ...copy, isNew: true, moves: {}, removeTo: "" }); }}>
+                <Icon name="plus" size={16} />
+                {`Duplicate “${pipeline.name}”`}
               </button>
             ) : null}
           </div>
@@ -558,7 +567,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setFieldDraft(fieldDraft.filter((_, j) => j !== i))} aria-label={`Remove field ${i + 1}`}>
                     <Icon name="minus" size={16} />
                   </button>
-                  {field.type === "choice" ? (
+                  {hasChoices(field.type) ? (
                     <label className="block min-w-0 sm:col-span-3">
                       <span className="text-sm text-ink-soft">Choices, separated by commas</span>
                       <input
@@ -586,7 +595,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                 disabled={locked || writeUnconfirmed}
                 onClick={() =>
                   void run(
-                    { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: f.type === "choice" ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
+                    { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: hasChoices(f.type) ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
                     "Fields saved.",
                     () => setFieldDraft(null),
                   )

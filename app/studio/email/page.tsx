@@ -289,6 +289,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             segments={await listSegments(store.listId).catch(() => [])}
             preset={typeof query.who === "string" && (WHO as readonly string[]).includes(query.who) ? { who: query.who as Who } : undefined}
             courses={idsOfKind(store, "course")}
+            calls={idsOfKind(store, "call")}
             paidProducts={idsOfKind(store, "paid")}
             automation={{
               forms: (await readForms(store.statsId).catch(() => [])).filter((f) => f.fields.some((x) => x.type === "email")).map((f) => ({ id: f.id, name: f.name, outcomes: f.outcomes.map((o) => ({ id: o.id, title: o.title })) })),

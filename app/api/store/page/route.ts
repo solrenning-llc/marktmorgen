@@ -11,6 +11,7 @@ import { claimPictures, readPage, releasePictures, writePage } from "@/lib/sales
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
+import { takePictureDoor } from "@/lib/picture-door";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -94,6 +95,8 @@ export async function POST(request: NextRequest) {
         await releasePictures(store.statsId, id, fresh);
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
+      // Now on this page: no failed request elsewhere may delete it as a fresh upload (lib/picture-door.ts).
+      await takePictureDoor(fresh);
     }
 
     const marked = await setProductPage(guarded.ref, id, has);

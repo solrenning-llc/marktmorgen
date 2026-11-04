@@ -4,12 +4,25 @@
  * from 1 to 120 months; fixed on each certificate when it is issued; a
  * month later on a short month falls on its last day; a certificate past its
  * day says it expired and still says what it certified; LinkedIn's form gets
- * the expiration; the words exist in every buyer language.
+ * the expiration; the words exist in every buyer language; the studio's
+ * field saves through the route with the very body it sends (the action
+ * "cert-months" was once cut to "cert-month" and answered 400), and its
+ * label says the unit (WCAG 1.3.1, 3.3.2).
  */
 import { readFileSync } from "node:fs";
-import { editCourse, emptyCourse, parseCourse, readCertificateMonths } from "@/lib/course";
+import { editCourse, emptyCourse, parseCourse, readCertificateMonths, readCourse } from "@/lib/course";
 import { linkedInAddUrl, monthsAfter, standingOf } from "@/lib/certificate";
 import { coursesWords } from "@/lib/buyer-words/courses";
+import { NextRequest } from "next/server";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { POST as courseRoute } from "@/app/api/store/course/route";
+import { CertificateValidity } from "@/components/certificate-validity";
+import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
 part("The setting");
@@ -39,4 +52,48 @@ const page = readFileSync("app/[handle]/certificate/[id]/page.tsx", "utf8");
 is("the page says expired, in a status", page.includes('standingOf(certificate') && page.includes("w.expiredOn("), true);
 is("the PDF says until when", readFileSync("app/[handle]/certificate/[id]/pdf/route.ts", "utf8").includes("w.validUntil("), true);
 is("the issue fixes it from the course", readFileSync("lib/certificate.ts", "utf8").includes("certificate.validUntil = monthsAfter(certificate.issuedAt, input.course.certificateMonths)"), true);
-done();
+
+async function main(): Promise<void> {
+  part("Saved from the studio, through the route");
+  const field = readFileSync("components/certificate-validity.tsx", "utf8");
+  const sent = /action: "([^"]+)", months:/.exec(field)?.[1] ?? "";
+  is("the field sends cert-months", sent, "cert-months");
+  const owner = "validity@example.com";
+  await claimHandle(owner, "firstaidpro", "First Aid Pro", "");
+  await ensureStatsId(owner);
+  await ensureStoreId(owner);
+  await setStripeAccount(owner, "acct_1Validxxxxxxxx", true);
+  await setSubscription(owner, { customerId: "cus_valid", subscriptionId: "sub_valid", active: true, tier: "creator", period: paidPeriod() });
+  const session = await openSession(owner);
+  const post = async (body: Record<string, unknown>) => {
+    const response = await courseRoute(new NextRequest("https://marktmorgen.com/api/store/course", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
+    return { status: response.status, body: (await response.json()) as { ok?: boolean; error?: string } };
+  };
+  const made = await addProduct(owner, "First Aid Basics", "", "40");
+  const id = made.ok ? made.product.id : "";
+  is("a course is made", (await post({ action: "enable", id })).body.ok, true);
+  const courseId = (await readListing((await storeForEmail(owner))!, id))!.course!.id;
+  // The very body components/certificate-validity.tsx sends for "12".
+  const saved = await post({ id, action: sent, months: Number("12") });
+  is("12 months: answered and kept", [saved.status, saved.body.ok, (await readCourse(courseId))?.certificateMonths], [200, true, 12]);
+  const cleared = await post({ id, action: sent, months: null });
+  is("emptied: for good again", [cleared.status, cleared.body.ok, (await readCourse(courseId))?.certificateMonths], [200, true, undefined]);
+  const wrong = await post({ id, action: sent, months: 500 });
+  is("out of range: the error the field explains", [wrong.status, wrong.body.error], [400, "months"]);
+
+  const route = readFileSync("app/api/store/course/route.ts", "utf8");
+  const limit = Number(/const action = text\(body\.action, (\d+)\)/.exec(route)?.[1] ?? 0);
+  const actions = [...route.matchAll(/action === "([^"]+)"/g)].map((m) => m[1]);
+  is("every action the route answers fits the length it reads", actions.filter((a) => a.length > limit), []);
+  is("and there are actions to check", actions.includes("cert-months") && actions.length > 10, true);
+
+  part("The field says its unit");
+  const html = renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {} } as never }, createElement(CertificateValidity, { productId: "p1", months: null })));
+  const labelled = /<label[^>]*>([\s\S]*?)<\/label>/.exec(html)?.[1] ?? "";
+  const named = labelled.replace(/<span aria-hidden="true"[^>]*>[\s\S]*?<\/span>/g, "").replace(/<[^>]+>/g, " ");
+  is("the label read out names the unit, not only the hidden suffix", named.includes("Valid for, in months (optional)"), true);
+  is("the input sits inside that label", /<label[^>]*>[\s\S]*<input[\s\S]*<\/label>/.test(html), true);
+  done();
+}
+
+void main();

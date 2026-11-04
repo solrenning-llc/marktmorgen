@@ -38,9 +38,11 @@
  *     the customer too, a five-minute window, and the sweep's schedule
  *     (`nextSweepAt`, slower after the limit; an unsigned marker due at once);
  *   - the server's record of the last change winning over a tampered one;
- *   - a send with no confirmed result: its record, the resend with the
- *     same key, the window from the first send, `mayClearRequest` and
- *     `moveApplied`; the server's copy of the marker holding when the
+ *   - one send per change, never resent: its record, a presumed one when
+ *     it is missing, `mayClearRequest`, `moveApplied`, and a sweep that
+ *     never voids or refunds a change Stripe made after all
+ *     (`markerApplied`); markers written before the payment was kept, and
+ *     one that cannot be read; the server's copy of the marker holding when the
  *     metadata's is gone, and a stale sweep never clearing a newer marker;
  *     an unlinked invoice tied to the 402 only by its payment;
  *   - after the change, the excess above the ceiling to refund
@@ -124,14 +126,16 @@ import {
   sweepMarkerBody,
   sendRecordFor,
   sendResult,
-  mayResend,
+  presumedSendRecord,
+  markerApplied,
+  sweepSigTextV1,
   moveApplied,
   mayClearRequest,
   finalizeBody,
-  RESEND_MAX_SECONDS,
   nextSweepAt,
   refundBody,
-  refundIdempotencyKey,
+  refundFullKey,
+  refundExcessKey,
   SWEEP_SLOW_SECONDS,
   SWEEP_SKEW_SECONDS,
   RUN_END_CLEAR_SECONDS,
@@ -736,7 +740,9 @@ is("a price whose id is not read is refused", cannotMove(withItem(sub(), { price
 part("After a declined change (402): a marker first, every invoice it may have left cleared or refunded, swept again later");
 const SENT = on + 120;
 const NONE = { stopAdvance: [], finalize: [], void: [], refund: [], deleteItems: [], tell: [], tellPaid: [] };
-const RECORD = sendRecordFor(null, "sub_1", on, SENT);
+const RECORD = sendRecordFor(null, "sub_1", on, SENT)!;
+/** The first sweep that counts: once the five-minute window after the send has closed, plus fifteen minutes. */
+const AFTER = SENT + SWEEP_WINDOW_SECONDS + SWEEP_AGAIN_SECONDS;
 const IDS = { invoice: null, before: "in_1", pi: null };
 const mark = sweepMarkBody(pending, RECORD, sign, verify, IDS)!;
 const MARKER = { on, sentAt: SENT, from: SENT - SWEEP_SKEW_SECONDS, until: SENT + SWEEP_WINDOW_SECONDS, invoice: null, before: "in_1", pi: null };
@@ -803,7 +809,7 @@ is("one refunded in part is refunded again (the key keeps it to one)", invoicesT
 is("the last invoice before the send, paid for the period, is never refunded", invoicesToVoid([sentFrom({ id: "in_1", status: "paid", amount_paid: 1270 })], "sub_1", MARKER), NONE);
 is("stopping a draft sets auto_advance false", stopAdvanceBody().toString(), "auto_advance=false");
 is("a refund names the payment, in full or of an amount", [refundBody("pi_1").toString(), refundBody("pi_1", 500).get("amount")], ["payment_intent=pi_1&metadata%5Bbilling_day%5D=refund", "500"]);
-is("a refund's idempotency key names the invoice", refundIdempotencyKey("in_p"), "billing-day-refund:in_p");
+is("a full refund and an excess refund never share a key", [refundFullKey("in_p"), refundExcessKey("in_p")], ["billing-day-refund-full:in_p", "billing-day-refund-excess:in_p"]);
 is("one stamped more than ten minutes before the send is not this change's", invoicesToVoid([sentFrom({ id: "in_2", status: "open", created: SENT - 601 })], "sub_1", MARKER), NONE);
 is(
   "a quote the same customer paid 3 days after asking, linked to no subscription, is never refunded",
@@ -869,7 +875,17 @@ is("after that cleanup the request is gone but the marker stays", [pendingMove(c
 is("and the member is still refused, 30 days on", cannotMove(cleanedUp, SENT + 30 * DAY, ctx), "sweep");
 is("the change itself never touches the marker either", [...moveBody(base, on, sign)!.keys()].some((key) => key.includes(META_SWEEP)), false);
 is("no sweep is due on the run that got the 402", sweepDue(cleanedUp, SENT + 5, verify), false);
-is("a sweep is due 15 minutes later, whatever moveDue says", [sweepDue(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify), moveDue(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify)], [true, false]);
+is("not due before the window has closed and 15 minutes passed", sweepDue(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify), false);
+is(
+  "a sweep 15 minutes after a presumed send but before its window closed never clears",
+  (() => {
+    const presumed = presumedSendRecord("sub_1", on, on + MOVE_GRACE_SECONDS + 60);
+    const late = applied(withMarker(pending, sweepMarkBody(pending, presumed, sign, verify, IDS)!), clearRequestBody());
+    return sweepAction(late, on + SWEEP_AGAIN_SECONDS, verify, [], [], true).action;
+  })(),
+  "wait",
+);
+is("a sweep is due 15 minutes after the window, whatever moveDue says", [sweepDue(cleanedUp, AFTER, verify), moveDue(cleanedUp, AFTER, verify)], [true, false]);
 is("and still due 30 days later, never stuck", sweepDue(cleanedUp, SENT + 30 * DAY, verify), true);
 is("after a sweep, the next is 15 minutes on", nextSweepAt(cleanedUp, verify, SENT + DAY), SENT + DAY + SWEEP_AGAIN_SECONDS);
 is("after the limit, once a day", nextSweepAt(cleanedUp, verify, SENT + SWEEP_MAX_SECONDS), SENT + SWEEP_MAX_SECONDS + SWEEP_SLOW_SECONDS);
@@ -878,29 +894,29 @@ is("no marker: never due", [nextSweepAt(sub(), verify, null), sweepDue(sub(), SE
 const own = { id: "in_402", status: "void", created: SENT };
 const act = (s0: BillingDaySub, t: number, found: Record<string, unknown>[], toEnd = true, items: Record<string, unknown>[] = []) => sweepAction(s0, t, verify, found, items, toEnd);
 is("before then: wait, and still clear what was found", act(cleanedUp, SENT + 5, [sentFrom({ id: "in_2", status: "open" })]), { action: "wait", clear: { ...NONE, void: ["in_2"] }, rewrite: false });
-is("a later sweep that finds an invoice: again", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own, sentFrom({ id: "in_2", status: "open" })]).action, "again");
-is("a later sweep that finds a draft: again", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own, sentFrom({ id: "in_3", status: "draft" })]).action, "again");
-is("a later sweep that finds a paid one to refund: again", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [{ ...own, status: "paid", amount_paid: 847, payments: ["pi_p"] }]).action, "again");
-is("a later sweep not read to the end: again, never clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own], false).action, "again");
-is("a later sweep without the 402's own invoice re-read: again, never clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, []).action, "again");
-is("a later sweep, read to the end, its own invoice void, nothing else: clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own]), { action: "clear", clear: NONE, rewrite: false });
+is("a later sweep that finds an invoice: again", act(cleanedUp, AFTER, [own, sentFrom({ id: "in_2", status: "open" })]).action, "again");
+is("a later sweep that finds a draft: again", act(cleanedUp, AFTER, [own, sentFrom({ id: "in_3", status: "draft" })]).action, "again");
+is("a later sweep that finds a paid one to refund: again", act(cleanedUp, AFTER, [{ ...own, status: "paid", amount_paid: 847, payments: ["pi_p"] }]).action, "again");
+is("a later sweep not read to the end: again, never clear", act(cleanedUp, AFTER, [own], false).action, "again");
+is("a later sweep without the 402's own invoice re-read: again, never clear", act(cleanedUp, AFTER, []).action, "again");
+is("a later sweep, read to the end, its own invoice void, nothing else: clear", act(cleanedUp, AFTER, [own]), { action: "clear", clear: NONE, rewrite: false });
 is("still something after the limit: tell the creator, keep the refusal", act(cleanedUp, SENT + SWEEP_MAX_SECONDS, [own, sentFrom({ id: "in_2", status: "open" })]).action, "tell");
 is("nothing after the limit: clear", act(cleanedUp, SENT + SWEEP_MAX_SECONDS, [own]).action, "clear");
-is("a pending item of the subscription left by the 402: again, never clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own], true, [ITEM({})]), { action: "again", clear: { ...NONE, deleteItems: ["ii_1"] }, rewrite: false });
-is("a pending item whose subscription is not read, the 402's own invoice not known: tell", act(applied(marked, clearRequestBody()), SENT + SWEEP_AGAIN_SECONDS, [], true, [ITEM({ parent: null })]).action, "tell");
-is("the same item once the 402's own invoice is known: not this change's, clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own], true, [ITEM({ parent: null })]).action, "clear");
+is("a pending item of the subscription left by the 402: again, never clear", act(cleanedUp, AFTER, [own], true, [ITEM({})]), { action: "again", clear: { ...NONE, deleteItems: ["ii_1"] }, rewrite: false });
+is("a pending item whose subscription is not read, the 402's own invoice not known: tell", act(applied(marked, clearRequestBody()), AFTER, [], true, [ITEM({ parent: null })]).action, "tell");
+is("the same item once the 402's own invoice is known: not this change's, clear", act(cleanedUp, AFTER, [own], true, [ITEM({ parent: null })]).action, "clear");
 {
   const unknownOwn = applied(marked, clearRequestBody());
-  is("an unlinked invoice while the 402's own is unknown: tell", act(unknownOwn, SENT + SWEEP_AGAIN_SECONDS, [{ id: "in_u", status: "open", created: SENT, subscription: null }]).action, "tell");
+  is("an unlinked invoice while the 402's own is unknown: tell", act(unknownOwn, AFTER, [{ id: "in_u", status: "open", created: SENT, subscription: null }]).action, "tell");
 }
-is("the 402's own invoice deleted (re-read answered 404, passed as deleted): closed, clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [{ id: "in_402", status: "deleted" }]).action, "clear");
-is("no marker: nothing to do", act(sub(), SENT + SWEEP_AGAIN_SECONDS, []), { action: "wait", clear: NONE, rewrite: false });
+is("the 402's own invoice deleted (re-read answered 404, passed as deleted): closed, clear", act(cleanedUp, AFTER, [{ id: "in_402", status: "deleted" }]).action, "clear");
+is("no marker: nothing to do", act(sub(), AFTER, []), { action: "wait", clear: NONE, rewrite: false });
 const clearBody = clearSweepBody(cleanedUp, verify, OWN)!;
 const swept = applied(cleanedUp, clearBody);
 is("clearing the marker touches only the marker", [...clearBody.keys()], [`metadata[${META_SWEEP}]`, `metadata[${META_SWEEP_SIG}]`]);
 is("a sweep that read an older marker never clears a newer one", clearSweepBody(cleanedUp, verify, MARKER), null);
 is("nor one the server holds differently", clearSweepBody(cleanedUp, verify, OWN, { ...OWN, sentAt: SENT + 1 }), null);
-is("once cleared, the member may ask again", cannotMove(swept, SENT + SWEEP_AGAIN_SECONDS, ctx), null);
+is("once cleared, the member may ask again", cannotMove(swept, AFTER, ctx), null);
 {
   const edited = { ...cleanedUp, metadata: { ...cleanedUp.metadata, [META_SWEEP]: [on, SENT, NOW, SENT + 7200, "-", "-"].join(".") } };
   is("an edited marker is not read as a marker", sweepMarker(edited, verify), null);
@@ -920,34 +936,35 @@ is(
 is("an uncollectible invoice of the subscription refuses too", cannotMove(sub(), NOW, { verify, openInvoices: [{ id: "in_4", status: "uncollectible" }] }), "invoice");
 is("while the subscription's open invoices were not read, the member is refused", cannotMove(sub(), NOW, { verify, openInvoices: null }), "invoice");
 
-part("A send with no confirmed result: the record, the resend, the marker before any clear");
-is("the first send's record: the moment, its second and the key", RECORD, { on, sentAt: SENT, lastSentAt: SENT, key: moveIdempotencyKey("sub_1", on) });
-const RESENT = sendRecordFor(RECORD, "sub_1", on, SENT + 3 * 3600);
-is("a resend keeps the first second and the key, and moves the last send on", RESENT, { ...RECORD, lastSentAt: SENT + 3 * 3600 });
-is("a record for another moment starts again", sendRecordFor(RECORD, "sub_1", on + DAY, SENT + DAY).sentAt, SENT + DAY);
+part("One send per change: the record, no resend, the marker before any clear");
+is("the send's record: the moment, its second and the key", RECORD, { on, sentAt: SENT, lastSentAt: SENT, key: moveIdempotencyKey("sub_1", on) });
+is("a record for the same moment is there: never send again", sendRecordFor(RECORD, "sub_1", on, SENT + 3600), null);
+is("a record for another moment starts again", sendRecordFor(RECORD, "sub_1", on + DAY, SENT + DAY)?.sentAt, SENT + DAY);
 is(
   "a 200 is applied, a 402 declined; a 5xx, another 4xx or a timeout are unknown, never a 402",
   [sendResult({ status: 200 }), sendResult({ status: 402 }), sendResult({ status: 500 }), sendResult({ status: 400 }), sendResult(null), sendResult({})],
   ["applied", "declined", "unknown", "unknown", "unknown", "unknown"],
 );
-is("the same update may be sent again after its window (no mayRun), within Stripe's idempotency", [mayResend(RECORD, SENT + 3 * 3600), mayResend(RECORD, SENT + RESEND_MAX_SECONDS)], [true, false]);
-is(
-  "the marker's window starts at the first send and ends after the last",
-  [sweepMarker(withMarker(pending, sweepMarkBody(pending, RESENT, sign, verify, IDS)!), verify)?.from, sweepMarker(withMarker(pending, sweepMarkBody(pending, RESENT, sign, verify, IDS)!), verify)?.until],
-  [SENT - SWEEP_SKEW_SECONDS, SENT + 3 * 3600 + SWEEP_WINDOW_SECONDS],
-);
 {
-  // The first send timed out (Stripe made a 402 and an open invoice); the window passed.
   const lapsedAt = on + MOVE_GRACE_SECONDS + 60;
+  const presumed = presumedSendRecord("sub_1", on, lapsedAt);
+  is("with no record once the run could have started, a send is presumed over the whole run window", presumed, { on, sentAt: on, lastSentAt: on + MOVE_GRACE_SECONDS, key: moveIdempotencyKey("sub_1", on) });
+  is(
+    "its marker's window covers the run window, then five minutes",
+    [sweepMarker(withMarker(pending, sweepMarkBody(pending, presumed, sign, verify, IDS)!), verify)?.from, sweepMarker(withMarker(pending, sweepMarkBody(pending, presumed, sign, verify, IDS)!), verify)?.until],
+    [on - SWEEP_SKEW_SECONDS, on + MOVE_GRACE_SECONDS + SWEEP_WINDOW_SECONDS],
+  );
+  // The send timed out (Stripe made a 402 and an open invoice); the window passed.
   is("the run is now late", cannotRun(pending, lapsedAt, ctx), "late");
-  is("but the request may not be cleared while that send has no marker", mayClearRequest(pending, verify, RECORD), false);
-  is("once the marker is written, it may", mayClearRequest(marked, verify, RECORD), true);
-  is("or when the server holds the marker", mayClearRequest(pending, verify, RECORD, OWN), true);
-  is("a marker for another moment does not count", mayClearRequest(pending, verify, RECORD, { ...OWN, on: on + 1 }), false);
-  is("no send recorded: it may be cleared", mayClearRequest(pending, verify, null), true);
-  is("a record of another moment's send: it may be cleared", mayClearRequest(pending, verify, { ...RECORD, on: on - DAY }), true);
+  is("but the request may not be cleared while that send has no marker", mayClearRequest(pending, lapsedAt, verify, RECORD), false);
+  is("once the marker is written, it may", mayClearRequest(marked, lapsedAt, verify, RECORD), true);
+  is("or when the server holds the marker", mayClearRequest(pending, lapsedAt, verify, RECORD, OWN), true);
+  is("a marker for another moment does not count", mayClearRequest(pending, lapsedAt, verify, RECORD, { ...OWN, on: on + 1 }), false);
+  is("no record, the run could have started: not cleared (a send is presumed)", mayClearRequest(pending, lapsedAt, verify, null), false);
+  is("no record, before the run could start: it may be cleared (the member's own cancel)", mayClearRequest(pending, on, verify, null), true);
+  is("a record of another moment's send, the run come: not cleared", mayClearRequest(pending, lapsedAt, verify, { ...RECORD, on: on - DAY }), false);
   const applied200 = sub({ metadata: { ...meta, ...doneAt(base, on) } });
-  is("the change was made after all: it may be cleared", mayClearRequest(applied200, verify, RECORD), true);
+  is("the change was made after all: it may be cleared", mayClearRequest(applied200, lapsedAt, verify, RECORD), true);
 }
 is("moveApplied: the last change signed at that very moment", moveApplied(sub({ metadata: doneAt(base, on) }), on, verify), true);
 is("another moment is not this change", moveApplied(sub({ metadata: doneAt(base, on - DAY) }), on, verify), false);
@@ -957,14 +974,14 @@ part("The server's copy of the marker holds when the metadata's is gone");
 const bare = sub();
 is("no marker in the metadata, the server's holds: refused", cannotMove(bare, SENT + DAY, { ...ctx, serverMarker: OWN }), "sweep");
 is("and nothing runs", cannotRun(pending, on + 3600, { ...ctx, serverMarker: OWN }), "sweep");
-is("its sweep is scheduled from it", [nextSweepAt(bare, verify, null, OWN), sweepDue(bare, SENT + SWEEP_AGAIN_SECONDS, verify, null, OWN)], [SENT + SWEEP_AGAIN_SECONDS, true]);
+is("its sweep is scheduled from it", [nextSweepAt(bare, verify, null, OWN), sweepDue(bare, AFTER, verify, null, OWN)], [AFTER, true]);
 is(
   "a sweep with an open invoice: again, and the marker is written back",
-  sweepAction(bare, SENT + SWEEP_AGAIN_SECONDS, verify, [own, sentFrom({ id: "in_2", status: "open" })], [], true, { serverMarker: OWN }),
+  sweepAction(bare, AFTER, verify, [own, sentFrom({ id: "in_2", status: "open" })], [], true, { serverMarker: OWN }),
   { action: "again", clear: { ...NONE, void: ["in_2"] }, rewrite: true },
 );
-is("the metadata matching the server's: nothing to write back", sweepAction(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify, [own], [], true, { serverMarker: OWN }).rewrite, false);
-is("a replayed older marker in the metadata: written back", sweepAction(marked, SENT + SWEEP_AGAIN_SECONDS, verify, [own], [], true, { serverMarker: OWN }).rewrite, true);
+is("the metadata matching the server's: nothing to write back", sweepAction(cleanedUp, AFTER, verify, [own], [], true, { serverMarker: OWN }).rewrite, false);
+is("a replayed older marker in the metadata: written back", sweepAction(marked, AFTER, verify, [own], [], true, { serverMarker: OWN }).rewrite, true);
 is("written back, it reads as the server's", sweepMarker(applied(bare, sweepMarkerBody(bare, OWN, sign)!), verify), OWN);
 is("sweepMarkInvoiceBody builds on the server's copy too", sweepMarker(applied(bare, sweepMarkInvoiceBody(bare, { pi: "pi_402" }, sign, verify, OWN)!), verify), { ...OWN, pi: "pi_402" });
 
@@ -984,17 +1001,62 @@ is("finalizing a subscription's draft does not advance it", finalizeBody().toStr
 {
   const noOwn = applied(marked, clearRequestBody());
   const paidUnlinked = [unlinked({ status: "paid", amount_paid: 500 })];
-  is("an unlinked paid invoice while the payment is not known: told", sweepAction(noOwn, SENT + SWEEP_AGAIN_SECONDS, verify, paidUnlinked, [], true).action, "tell");
+  is("an unlinked paid invoice while the payment is not known: told", sweepAction(noOwn, AFTER, verify, paidUnlinked, [], true).action, "tell");
   is("still after the limit until the creator was told", sweepAction(noOwn, SENT + SWEEP_MAX_SECONDS, verify, paidUnlinked, [], true).action, "tell");
-  is("after the limit, once the creator was told, a paid one no longer holds the marker", sweepAction(noOwn, SENT + SWEEP_MAX_SECONDS, verify, paidUnlinked, [], true, { creatorTold: true }).action, "clear");
+  is("after the limit, the creator told but not the member: it still holds", sweepAction(noOwn, SENT + SWEEP_MAX_SECONDS, verify, paidUnlinked, [], true, { creatorTold: true }).action, "tell");
+  is("after the limit, once the creator and the member were told, a paid one no longer holds the marker", sweepAction(noOwn, SENT + SWEEP_MAX_SECONDS, verify, paidUnlinked, [], true, { creatorTold: true, memberTold: true }).action, "clear");
   is("an open one still does", sweepAction(noOwn, SENT + SWEEP_MAX_SECONDS, verify, [unlinked({ status: "open" })], [], true, { creatorTold: true }).action, "tell");
   is("an unlinked pending item once the 402's own invoice is known: left alone", invoicesToVoid([], "sub_1", OWN, [ITEM({ parent: null })]), NONE);
 }
+
+part("An unknown send that Stripe applied after all: the sweep never voids or refunds it");
+{
+  // Unknown result, marker written, then the change turns out made (its invoice paid, the anchor moved).
+  const madeLater = sub({ billing_cycle_anchor: SENT + 1, metadata: { ...marked.metadata!, ...doneAt(base, on) } });
+  const paidChange = [own, sentFrom({ id: "in_c", status: "paid", amount_paid: 847, payments: ["pi_c"] })];
+  is("markerApplied: the signed last change is this moment, the anchor inside the window", markerApplied(madeLater, MARKER, verify), true);
+  is("the sweep clears the marker and refunds nothing", sweepAction(madeLater, AFTER, verify, paidChange, [], true), { action: "clear", clear: NONE, rewrite: false });
+  is("even before the window closed", sweepAction(madeLater, SENT + 5, verify, paidChange, [], true).action, "clear");
+  const anchorElsewhere = { ...madeLater, billing_cycle_anchor: SENT - 3 * DAY };
+  is("an anchor outside the window: not this change, swept as declined", [markerApplied(anchorElsewhere, MARKER, verify), sweepAction(anchorElsewhere, AFTER, verify, paidChange, [], true).clear.refund], [false, ["in_c"]]);
+  is("another moment's last change: not applied", markerApplied(sub({ metadata: { ...marked.metadata!, ...doneAt(base, on - DAY) } }), MARKER, verify), false);
+  is("with no anchor read, the signed last change decides", markerApplied(sub({ metadata: { ...marked.metadata!, ...doneAt(base, on) } }), MARKER, verify), true);
+  is("once made, the request is gone, so no new marker can be written (the route checks moveApplied first)", sweepMarkBody(sub({ metadata: doneAt(base, on) }), RECORD, sign, verify, IDS), null);
+}
+
+part("A marker that cannot be read, and markers written before the payment was kept");
+{
+  const v1Text = sweepSigTextV1(base, MARKER)!;
+  is("the first markers' text: six parts, no payment", v1Text, `billing-day-sweep:v1|sub_1|cus_1|${on}|${SENT}|${SENT - 600}|${SENT + SWEEP_WINDOW_SECONDS}|-|in_1`);
+  const v1 = sub({ metadata: { [META_SWEEP]: [on, SENT, SENT - 600, SENT + SWEEP_WINDOW_SECONDS, "-", "in_1"].join("."), [META_SWEEP_SIG]: sign(v1Text) } });
+  is("a v1 marker is still read, with its payment unknown", sweepMarker(v1, verify), { ...MARKER, pi: null });
+  is("a v1 marker signed as v2 is not", sweepMarker(sub({ metadata: { ...v1.metadata!, [META_SWEEP_SIG]: sign(sweepSigText(base, MARKER)!) } }), verify), null);
+  const unsigned = { ...pending, metadata: { ...meta, [META_SWEEP]: "garbled", [META_SWEEP_SIG]: "00" } };
+  const ownOpen = sentFrom({ id: "in_s", status: "open", created: on + 3600 });
+  const otherUnlinked = { id: "in_x", status: "open", created: on + 3600, subscription: null };
+  is(
+    "an unsigned marker with no server copy: tell, and still clear this subscription's own open invoice over the request's window",
+    sweepAction(unsigned, on + DAY, verify, [ownOpen, otherUnlinked], [], true),
+    { action: "tell", clear: { ...NONE, void: ["in_s"] }, rewrite: false },
+  );
+  is("without the request, nothing to clear but still tell", sweepAction({ ...unsigned, metadata: { [META_SWEEP]: "garbled" } }, on + DAY, verify, [ownOpen], [], true), { action: "tell", clear: NONE, rewrite: false });
+}
+
+part("What the marker keeps is never overwritten");
+is("another 402 invoice over a kept one: refused", sweepMarkInvoiceBody(withOwn, { invoice: "in_other" }, sign, verify), null);
+is("the same invoice again: fine", sweepMarker(applied(withOwn, sweepMarkInvoiceBody(withOwn, { invoice: "in_402" }, sign, verify)!), verify), OWN);
+{
+  const withPi = applied(withOwn, sweepMarkInvoiceBody(withOwn, { pi: "pi_402" }, sign, verify)!);
+  is("a payment once kept", sweepMarker(withPi, verify)?.pi, "pi_402");
+  is("another payment over it: refused", sweepMarkInvoiceBody(withPi, { pi: "pi_other" }, sign, verify), null);
+}
+is("the words while a sweep holds", refusalWords("sweep")[1], "We are still checking the payment for your change.");
 
 part("After the change: anything above the ceiling is refunded");
 is("paid the ceiling: nothing to refund", overCeiling({ amount_paid: 1270 }, 1270), 0);
 is("paid less: nothing to refund", overCeiling({ amount_paid: 847 }, 1270), 0);
 is("a pending item slipped in, paid $5.00 more: $5.00 to refund", overCeiling({ amount_paid: 1770 }, 1270), 500);
+is("less what was refunded of it already", [overCeiling({ amount_paid: 1770 }, 1270, 200), overCeiling({ amount_paid: 1770 }, 1270, 500)], [300, 0]);
 is("amount paid not read: read the invoice again", [overCeiling({}, 1270), overCeiling(null, 1270), overCeiling({ amount_paid: 12.5 }, 1270)], [null, null, null]);
 
 part("The Stripe requests");

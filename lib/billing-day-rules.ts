@@ -152,7 +152,7 @@
  *     draft cannot be deleted); void each open or uncollectible one, and if
  *     voiding keeps failing, mark it uncollectible
  *     (`/invoices/{id}/mark_uncollectible`) and sweep again; refund each
- *     paid one in full (`refundBody`, `refundIdempotencyKey`); delete each
+ *     paid one in full (`refundBody`, `refundFullKey`); delete each
  *     pending invoice item of the subscription (`DELETE /invoiceitems/{id}`);
  *     tell the creator about each invoice or item whose subscription
  *     cannot be read (never voided or refunded blindly); never leave one
@@ -186,7 +186,16 @@
  *     that invoice and emails the member about it, and when; whether the
  *     402 error of the update carries a `payment_intent`; and which
  *     `billing_reason` the invoice of a checkout with `invoice_creation`
- *     has (lib/tax.ts). The ceiling
+ *     has (lib/tax.ts); an update that timed out and was applied after the
+ *     re-read, and the 409 of a key used concurrently; whether Stripe
+ *     answers a repeated 402 or 5xx on the same key, and whether a repeated
+ *     402 carries the `payment_intent`; a `proration_date` outside the
+ *     period; whether finalizing with `auto_advance=false` applies the
+ *     customer's balance, whether a void gives it back, and whether a void
+ *     cancels the intent so its 3D Secure link stops working; whether
+ *     `/invoice_payments` lists the intent of an open invoice whose payment
+ *     failed; and whether the `amount_paid` of the `latest_invoice`
+ *     includes the tax added on top. The ceiling
  *     keeps the member safe if the amounts differ; it does not show by how
  *     much.
  *
@@ -202,35 +211,38 @@
  *   4. Preview, check `mayRun` and update under `withLock` on
  *      `nl:tier:{subscription}:lock`, with a lock time longer than the
  *      Stripe calls, only from `on + RUN_SKEW_SECONDS`.
- *   5. Before every send, write the send record (`sendRecordFor`: the first
- *      send's second and the key) to Redis. Read the result with
- *      `sendResult`. A timeout, a network error, a 5xx or any other status
- *      is "unknown", never a 402: write the marker (item 6) from the first
- *      send's second, read the subscription again, and if `moveApplied`
- *      holds, it was a success (item 8); otherwise send the very same body
- *      with the same key again, without `mayRun` again, while `mayResend`
- *      allows, updating the record's last send. The request is cleared
- *      only when `mayClearRequest` allows, never by the lapsed-request
- *      cleanup while a send of it has no confirmed result and no marker.
- *   6. On a 402 or an "unknown" result: the sweep marker first
+ *   5. One send per change, never a resend. Before it, write the send
+ *      record (`sendRecordFor`: the moment, the send's second and the key)
+ *      to Redis; if that write fails, do not send. A record already there
+ *      for the same moment means a send happened: never send again
+ *      (`sendRecordFor` gives null). Read the result with `sendResult`. A
+ *      timeout, a network error, a 5xx or any other status is "unknown",
+ *      never a 402. On "unknown", read the subscription again: if the
+ *      change was made (`moveApplied`), it is a success (item 8);
+ *      otherwise it is treated as declined (item 6), with no new attempt:
+ *      the member asks again once the sweep has cleared. The request is
+ *      cleared only when `mayClearRequest` allows: never while a send of
+ *      it (or, with no record, any moment from `on + RUN_SKEW_SECONDS`)
+ *      has no confirmed result and no marker; a missing record is read as
+ *      a send that may have happened (`presumedSendRecord`).
+ *   6. On a 402 or an "unknown" result not applied: the sweep marker first
  *      (`sweepMarkBody`, from the send record, so the window starts at the
- *      first send), kept in Redis too; never clear the request until it is
- *      written; then the sweep (above). Before
- *      signing the invoice found through `/invoice_payments` into the
- *      marker, check it is this subscription's and was made from
- *      `sentAt - SWEEP_SKEW_SECONDS` on. A re-read by id that answers 404
- *      is passed to `sweepAction` as `{ id, status: "deleted" }`, read as
- *      closed. A paid invoice's `refunded` comes only from its charge's
- *      `amount_refunded`, never from the route's own record.
+ *      send), kept in Redis too; never clear the request until it is
+ *      written. If it cannot be written (`sweepMarkBody` null: the request
+ *      is gone or the record is not its own), check `moveApplied` again,
+ *      keep the request, tell the creator, and do not retry in a loop.
+ *      Then the sweep (above). Before
  *   7. Keep a Redis index of the subscriptions with a request or a sweep
  *      marker, by store, so the scheduler finds them; sweep again from it
  *      at `nextSweepAt` (`sweepDue`, `sweepAction`), keeping the last
  *      sweep's time there.
- *   8. On success (a 200, or `moveApplied` after an "unknown" result), check
- *      the expanded `latest_invoice` with `overCeiling` and refund any
- *      excess at once (`refundBody` with the amount,
- *      `refundIdempotencyKey`); never tell the member the day did not
- *      change.
+ *   8. On success (a 200, or `moveApplied` after an "unknown" result), clear
+ *      any marker written for it (server copy first, then the metadata),
+ *      check the expanded `latest_invoice` with `overCeiling` (less what was
+ *      refunded of it already) and refund any excess at once (`refundBody`
+ *      with the amount, `refundExcessKey`); never tell the member the day
+ *      did not change. A sweep of a marker whose change turns out made
+ *      voids and refunds nothing (`sweepAction` reads `moveApplied`).
  *   9. Keep on the server too (Redis) the last change made and each sweep
  *      marker, and pass them as `MoveContext.lastDone` and
  *      `MoveContext.serverMarker` (and `SweepOptions.serverMarker`): they
@@ -240,7 +252,16 @@
  *  9a. Every sweep, marker write (`sweepMarkBody`, `sweepMarkInvoiceBody`)
  *      and `clearSweepBody` runs under the same `withLock` as the change,
  *      reading the subscription again inside it; `clearSweepBody` clears
- *      only the marker the sweep read.
+ *      only the marker the sweep read, the server copy first, then the
+ *      metadata.
+ *  9b. A marker in the metadata that is not signed, with no server copy,
+ *      keeps the member refused; each sweep still clears the
+ *      subscription's own invoices over a window taken from the request,
+ *      when it is still there, and the creator is told. The way out for the
+ *      creator, in the notice: check in Stripe that no invoice of the
+ *      change is open or paid without a refund, then remove the
+ *      `billing_day_sweep` and `billing_day_sweep_sig` keys from the
+ *      subscription's metadata; the member may then ask again.
  *  10. Let the member cancel their own waiting request (`clearRequestBody`,
  *      under the same lock, only while it is not running).
  *  11. On "tell", tell the creator once (kept in Redis, not on every
@@ -385,6 +406,7 @@ export const MOVE_EXPAND = ["latest_invoice", "customer", "default_payment_metho
 /** The parts of a Stripe subscription these rules read. */
 export type BillingDaySub = {
   id?: unknown;
+  billing_cycle_anchor?: unknown;
   status?: unknown;
   billing_mode?: { type?: unknown } | null;
   cancel_at?: unknown;
@@ -641,11 +663,19 @@ const markerPresent = (sub: BillingDaySub) => Boolean(sub.metadata?.[META_SWEEP]
 export function sweepMarker(sub: BillingDaySub, verify: RequestVerifier): SweepMarker | null {
   const raw = sub.metadata?.[META_SWEEP];
   const id = "([A-Za-z0-9_]{1,255}|-)";
-  const found = typeof raw === "string" ? new RegExp(`^(\\d{1,12})\\.(\\d{1,12})\\.(\\d{1,12})\\.(\\d{1,12})\\.${id}\\.${id}\\.${id}$`).exec(raw) : null;
+  const found = typeof raw === "string" ? new RegExp(`^(\\d{1,12})\\.(\\d{1,12})\\.(\\d{1,12})\\.(\\d{1,12})\\.${id}\\.${id}(?:\\.${id})?$`).exec(raw) : null;
   if (!found) return null;
-  const part = (value: string) => (value === "-" ? null : value);
+  const part = (value: string | undefined) => (value === undefined || value === "-" ? null : value);
   const marker = { on: Number(found[1]), sentAt: Number(found[2]), from: Number(found[3]), until: Number(found[4]), invoice: part(found[5]), before: part(found[6]), pi: part(found[7]) };
-  return checks(verify, sweepSigText(sub, marker), sub.metadata?.[META_SWEEP_SIG]) ? marker : null;
+  // A marker written before the 402's payment was kept (six parts) is read with its own text.
+  const text = found[7] === undefined ? sweepSigTextV1(sub, marker) : sweepSigText(sub, marker);
+  return checks(verify, text, sub.metadata?.[META_SWEEP_SIG]) ? marker : null;
+}
+
+/** The text the first markers were signed with (six parts, no payment): `billing-day-sweep:v1|...|{invoice or -}|{before or -}`. */
+export function sweepSigTextV1(sub: BillingDaySub, marker: SweepMarker): string | null {
+  const v2 = sweepSigText(sub, { ...marker, pi: null });
+  return v2 === null ? null : v2.replace(/^billing-day-sweep:v2\|/, "billing-day-sweep:v1|").replace(/\|-$/, "");
 }
 
 const sameMarker = (a: SweepMarker | null, b: SweepMarker | null) => a !== null && b !== null && markerParts(a).join(".") === markerParts(b).join(".");
@@ -662,7 +692,8 @@ function holdingMarker(sub: BillingDaySub, verify: RequestVerifier, serverMarker
 
 /**
  * When the route's scheduler should sweep this subscription next, in
- * seconds: `SWEEP_AGAIN_SECONDS` after the first send, then after each
+ * seconds: `SWEEP_AGAIN_SECONDS` after the window closed (`until`, after
+ * the last send), then after each
  * sweep (`lastSweptAt`, kept by the route), every `SWEEP_AGAIN_SECONDS`
  * until `SWEEP_MAX_SECONDS`, then every `SWEEP_SLOW_SECONDS`. The server's
  * marker (`serverMarker`) counts when the metadata's is gone. A marker that
@@ -676,7 +707,8 @@ export function nextSweepAt(sub: BillingDaySub, verify: RequestVerifier, lastSwe
     if (!markerPresent(sub)) return null;
     return lastSweptAt === null ? 0 : lastSweptAt + SWEEP_SLOW_SECONDS;
   }
-  const first = marker.sentAt + SWEEP_AGAIN_SECONDS;
+  // The first counting sweep only once the window has closed (after the last send) and Stripe's lists caught up.
+  const first = Math.max(marker.sentAt, marker.until) + SWEEP_AGAIN_SECONDS;
   if (lastSweptAt === null || lastSweptAt < first) return first;
   return lastSweptAt + (lastSweptAt >= marker.sentAt + SWEEP_MAX_SECONDS ? SWEEP_SLOW_SECONDS : SWEEP_AGAIN_SECONDS);
 }
@@ -692,24 +724,31 @@ export function sweepDue(sub: BillingDaySub, nowSeconds: number, verify: Request
 }
 
 /**
- * The route's record of the change's sends, kept in Redis under the
- * subscription lock before every send: the moment, the first send's second
- * (the sweep window starts there), the last send's second, and the
- * idempotency key every send of it uses.
+ * The route's record of the change's one send, kept in Redis under the
+ * subscription lock before it: the moment, the send's second (the sweep
+ * window starts there), the last second it may have been sent at (the
+ * same, except for a presumed record), and its idempotency key.
  */
 export type SendRecord = { on: number; sentAt: number; lastSentAt: number; key: string };
 
-/** How long after the first send the same update may still be sent again (inside Stripe's 24-hour idempotency). */
-export const RESEND_MAX_SECONDS = 23 * 60 * 60;
+/**
+ * The send record to write before sending the update for `on`, or null
+ * when one for that moment is there already: a send happened, and the
+ * change is never sent again (an "unknown" result goes to the marker and
+ * the sweep, and the member asks again later).
+ */
+export function sendRecordFor(existing: SendRecord | null, subscription: string, on: number, nowSeconds: number): SendRecord | null {
+  if (existing && existing.on === on) return null;
+  return { on, sentAt: nowSeconds, lastSentAt: nowSeconds, key: moveIdempotencyKey(subscription, on) };
+}
 
 /**
- * The send record to write before sending the update for `on`: a new one
- * on the first send; on a resend of the same change, the same first second
- * and key, with the last send's second moved on.
+ * The record to use when none was found for a request whose moment has
+ * come: the send may have happened anywhere from `on` to now (no later
+ * than the run window's end), so the marker's window covers all of it.
  */
-export function sendRecordFor(existing: SendRecord | null, subscription: string, on: number, nowSeconds: number): SendRecord {
-  if (existing && existing.on === on) return { ...existing, lastSentAt: Math.max(existing.lastSentAt, nowSeconds) };
-  return { on, sentAt: nowSeconds, lastSentAt: nowSeconds, key: moveIdempotencyKey(subscription, on) };
+export function presumedSendRecord(subscription: string, on: number, nowSeconds: number): SendRecord {
+  return { on, sentAt: on, lastSentAt: Math.max(on, Math.min(nowSeconds, on + MOVE_GRACE_SECONDS)), key: moveIdempotencyKey(subscription, on) };
 }
 
 /**
@@ -725,15 +764,6 @@ export function sendResult(result: { status?: unknown } | null): "applied" | "de
 }
 
 /**
- * Whether the route may send the same update again after an "unknown"
- * result: the same body and key (`moveBody`, `SendRecord.key`), without
- * `mayRun` again, until `RESEND_MAX_SECONDS` after the first send.
- */
-export function mayResend(record: SendRecord, nowSeconds: number): boolean {
-  return nowSeconds < record.sentAt + RESEND_MAX_SECONDS;
-}
-
-/**
  * Whether the change for `on` was made: the last change kept, signed, is
  * that very moment. After an "unknown" send, the route reads the
  * subscription again; if this holds, the change was made: it treats it as
@@ -746,16 +776,47 @@ export function moveApplied(sub: BillingDaySub, on: number, verify: RequestVerif
 }
 
 /**
- * Whether the route may clear the request (`clearRequestBody`) now: no send
- * of its change was recorded, or the change was made (`moveApplied`), or a
- * marker for that very moment holds (metadata or server). After any send
- * without a confirmed success, the marker must be written first.
+ * Whether the route may clear the request (`clearRequestBody`) now: the
+ * change was made (`moveApplied`), or a marker for that very moment holds
+ * (metadata or server), or it was surely never sent: no record of a send
+ * for its moment, and that moment's run (`on + RUN_SKEW_SECONDS`) not yet
+ * come. With no record once the run could have started, the send is
+ * presumed (`presumedSendRecord`) and the marker is written first.
  */
-export function mayClearRequest(sub: BillingDaySub, verify: RequestVerifier, record: SendRecord | null, serverMarker?: SweepMarker | null): boolean {
+export function mayClearRequest(sub: BillingDaySub, nowSeconds: number, verify: RequestVerifier, record: SendRecord | null, serverMarker?: SweepMarker | null): boolean {
   const on = seconds(signedMeta(sub, verify)?.[META_ON]);
-  if (!on || !record || record.on !== on) return true;
-  if (moveApplied(sub, on, verify)) return true;
-  return holdingMarker(sub, verify, serverMarker)?.on === on;
+  if (!on) return true;
+  if (moveApplied(sub, on, verify) || holdingMarker(sub, verify, serverMarker)?.on === on) return true;
+  if (record && record.on === on) return false;
+  return nowSeconds < on + RUN_SKEW_SECONDS;
+}
+
+/**
+ * A window taken from the signed request, for a marker that cannot be read:
+ * from `SWEEP_SKEW_SECONDS` before its moment to the end of its run window
+ * and `SWEEP_WINDOW_SECONDS` more, short of the period's end, with no
+ * payment ("none": only this subscription's own invoices are touched).
+ * Null when the request is gone.
+ */
+function requestWindowMarker(sub: BillingDaySub, verify: RequestVerifier): SweepMarker | null {
+  const meta = signedMeta(sub, verify);
+  const on = seconds(meta?.[META_ON]);
+  const end = seconds(meta?.[META_END]);
+  if (!on || !end) return null;
+  return { on, sentAt: on, from: on - SWEEP_SKEW_SECONDS, until: Math.min(on + MOVE_GRACE_SECONDS + SWEEP_WINDOW_SECONDS, end - 1), invoice: null, before: null, pi: "none" };
+}
+
+/**
+ * Whether the change a marker is for was made after all (an "unknown" send
+ * that Stripe applied): `moveApplied` for its moment and, when the
+ * subscription's `billing_cycle_anchor` is read, the anchor inside the
+ * marker's window. Then nothing is voided or refunded; any excess is
+ * `overCeiling`'s.
+ */
+export function markerApplied(sub: BillingDaySub, marker: SweepMarker, verify: RequestVerifier): boolean {
+  if (!moveApplied(sub, marker.on, verify)) return false;
+  const anchor = sub.billing_cycle_anchor;
+  return typeof anchor !== "number" || (anchor >= marker.from && anchor <= marker.until);
 }
 
 /** When a signed change this membership is waiting for runs, in seconds; null when none waits. */
@@ -1204,7 +1265,7 @@ export type FoundItem = { id?: unknown; date?: unknown; subscription?: unknown; 
  *     uncollectible invoice can still be paid by its link; one that cannot
  *     be voided is marked uncollectible and swept again);
  *   - `refund`: paid ones with exactly one payment, not paid out of band,
- *     refunded in full (`refundBody`, `refundIdempotencyKey`): the member
+ *     refunded in full (`refundBody`, `refundFullKey`): the member
  *     paid it, by Stripe's link or a retry, for a change that never
  *     happened;
  *   - `deleteItems`: pending invoice items of the subscription, deleted so
@@ -1350,9 +1411,9 @@ export function finalizeBody(): URLSearchParams {
 }
 
 /**
- * A refund of a payment, in full or (after the change) of the `amount`
- * above the ceiling, sent with `refundIdempotencyKey` so a retry never
- * refunds twice.
+ * A refund of a payment, in full (`refundFullKey`) or, after the change, of
+ * the `amount` above the ceiling (`refundExcessKey`), so a retry never
+ * refunds twice and the two never share a key.
  */
 export function refundBody(paymentIntent: string, amount?: number): URLSearchParams {
   const body = new URLSearchParams({ payment_intent: paymentIntent, "metadata[billing_day]": "refund" });
@@ -1360,9 +1421,14 @@ export function refundBody(paymentIntent: string, amount?: number): URLSearchPar
   return body;
 }
 
-/** The idempotency key of a refund for one invoice. */
-export function refundIdempotencyKey(invoice: string): string {
-  return `billing-day-refund:${invoice}`;
+/** The idempotency key of the full refund of an invoice a declined change left paid. */
+export function refundFullKey(invoice: string): string {
+  return `billing-day-refund-full:${invoice}`;
+}
+
+/** The idempotency key of the refund of what a made change's invoice took above the ceiling. */
+export function refundExcessKey(invoice: string): string {
+  return `billing-day-refund-excess:${invoice}`;
 }
 
 /** The marker written to the metadata, signed; the route keeps the same marker in Redis. Null when it cannot be signed. */
@@ -1408,7 +1474,8 @@ export function sweepMarkBody(
  * The holding marker again, signed, with what the route learned since: the
  * 402's own invoice (checked first to be this subscription's and made from
  * `sentAt - SWEEP_SKEW_SECONDS` on) and its payment, so every later sweep
- * reads the invoice by id. Null without a holding marker.
+ * reads the invoice by id. Null without a holding marker, or when the
+ * marker already keeps another invoice or payment.
  */
 export function sweepMarkInvoiceBody(
   sub: BillingDaySub,
@@ -1418,11 +1485,15 @@ export function sweepMarkInvoiceBody(
   serverMarker?: SweepMarker | null,
 ): URLSearchParams | null {
   const marker = holdingMarker(sub, verify, serverMarker);
-  return marker ? sweepMarkerBody(sub, { ...marker, ...found }, sign) : null;
+  if (!marker) return null;
+  // What is kept is never overwritten with something else.
+  if (found.invoice !== undefined && marker.invoice !== null && marker.invoice !== found.invoice) return null;
+  if (found.pi !== undefined && marker.pi !== null && marker.pi !== found.pi) return null;
+  return sweepMarkerBody(sub, { ...marker, ...found }, sign);
 }
 
-/** Options of a sweep: the server's copy of the marker, and whether the creator was told already. */
-export type SweepOptions = { serverMarker?: SweepMarker | null; creatorTold?: boolean };
+/** Options of a sweep: the server's copy of the marker, and whether the creator and the member were told already. */
+export type SweepOptions = { serverMarker?: SweepMarker | null; creatorTold?: boolean; memberTold?: boolean };
 
 /**
  * What the route does with a sweep, and what to clear (always given, so
@@ -1431,7 +1502,9 @@ export type SweepOptions = { serverMarker?: SweepMarker | null; creatorTold?: bo
  * `nl:tier:{subscription}:lock`), reading the subscription again inside it.
  *   - "wait": the next sweep is not due yet (`nextSweepAt`); still clear
  *     what was found.
- *   - "clear": a sweep, at least `SWEEP_AGAIN_SECONDS` after the send, read
+ *   - "clear": the change turns out made (`markerApplied`: nothing to void
+ *     or refund); or a sweep, at least `SWEEP_AGAIN_SECONDS` after the
+ *     window closed, read
  *     to the end and with the 402's own invoice re-read by id (when the
  *     marker keeps one), found nothing left that holds; clear the marker
  *     (`clearSweepBody`, with the marker this sweep read) and its server
@@ -1441,8 +1514,10 @@ export type SweepOptions = { serverMarker?: SweepMarker | null; creatorTold?: bo
  *     later, keeping the refusal.
  *   - "tell": something to tell (`clear.tell`, or `clear.tellPaid` while
  *     it holds), still something after `SWEEP_MAX_SECONDS`, or a marker
- *     in the metadata that is not signed with no server copy; keep the
- *     refusal, keep clearing what is found, and tell the creator once.
+ *     in the metadata that is not signed with no server copy (then only this
+ *     subscription's own invoices over the request's window are cleared,
+ *     and the creator gets the way out, item 9b); keep the refusal, keep
+ *     clearing what is found, and tell the creator once.
  * `rewrite` is true when the server's marker holds but the metadata's is
  * gone, unsigned or different: the route writes it back
  * (`sweepMarkerBody`) and tells the creator.
@@ -1460,12 +1535,20 @@ export function sweepAction(
   const marker = holdingMarker(sub, verify, server);
   const rewrite = server !== null && !sameMarker(server, sweepMarker(sub, verify));
   const subscription = stripeId(sub.id);
-  if (!marker) return { action: markerPresent(sub) ? "tell" : "wait", clear: NOTHING_TO_CLEAR(), rewrite: false };
+  if (!marker) {
+    if (!markerPresent(sub)) return { action: "wait", clear: NOTHING_TO_CLEAR(), rewrite: false };
+    // Not signed and no server copy: still clear this subscription's own invoices over the request's window, and tell.
+    const fallback = requestWindowMarker(sub, verify);
+    return { action: "tell", clear: fallback && subscription ? invoicesToVoid(found, subscription, fallback, items) : NOTHING_TO_CLEAR(), rewrite: false };
+  }
   if (!subscription) return { action: "tell", clear: NOTHING_TO_CLEAR(), rewrite };
+  // The change was made after all: nothing to void or refund.
+  if (markerApplied(sub, marker, verify)) return { action: "clear", clear: NOTHING_TO_CLEAR(), rewrite };
   const clear = invoicesToVoid(found, subscription, marker, items);
-  if (nowSeconds < marker.sentAt + SWEEP_AGAIN_SECONDS) return { action: "wait", clear, rewrite };
+  if (nowSeconds < Math.max(marker.sentAt, marker.until) + SWEEP_AGAIN_SECONDS) return { action: "wait", clear, rewrite };
   const late = nowSeconds >= marker.sentAt + SWEEP_MAX_SECONDS;
-  const paidHolds = !(late && options.creatorTold === true);
+  // A paid unlinked invoice stops holding only once both the creator and the member were told.
+  const paidHolds = !(late && options.creatorTold === true && options.memberTold === true);
   const told = clear.tell.length > 0 || (paidHolds && clear.tellPaid.length > 0);
   const acting = clear.stopAdvance.length + clear.finalize.length + clear.void.length + clear.refund.length + clear.deleteItems.length > 0;
   // The 402's own invoice must have been read again (a 404 passed as "deleted" counts: it is closed).
@@ -1490,15 +1573,16 @@ export function clearSweepBody(sub: BillingDaySub, verify: RequestVerifier, read
 /**
  * What the invoice the change returned took above the ceiling kept with
  * the request, in the smallest unit of the currency (0 when nothing), for
- * the route to refund at once; null when its `amount_paid` cannot be read
+ * the route to refund at once, less what was refunded of it already
+ * (`refunded`, its charge's `amount_refunded`); null when its `amount_paid` cannot be read
  * (the route reads the invoice again). Something added outside the
  * subscription in the seconds between the fresh preview and the update can
  * land on that invoice.
  */
-export function overCeiling(invoice: { amount_paid?: unknown } | null, ceiling: number): number | null {
+export function overCeiling(invoice: { amount_paid?: unknown } | null, ceiling: number, refunded: number = 0): number | null {
   const paid = invoice?.amount_paid;
-  if (typeof paid !== "number" || !Number.isInteger(paid) || paid < 0 || !wholeAmount(ceiling)) return null;
-  return Math.max(0, paid - ceiling);
+  if (typeof paid !== "number" || !Number.isInteger(paid) || paid < 0 || !wholeAmount(ceiling) || !wholeAmount(refunded)) return null;
+  return Math.max(0, paid - refunded - ceiling);
 }
 
 /**
@@ -1614,7 +1698,7 @@ const REFUSAL_REASON: Record<RunOutcome, string> = {
   late: "The change could not run at its time.",
   none: "There was no change waiting.",
   invoice: "Another payment on your membership is still open.",
-  sweep: "We are still closing the payment that did not go through.",
+  sweep: "We are still checking the payment for your change.",
   stuck: "We are checking a payment on your account. The creator has been told.",
   changed: "Your membership's price or billing has changed.",
   balance: "Your account has a balance, or we could not read it.",

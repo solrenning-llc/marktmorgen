@@ -264,6 +264,10 @@ is("not on a store's own pages yet", SITE_KINDS.includes("booking"), false);
 is("but it has an icon, like every kind", KIND_ICONS.booking, "calendar");
 is("the editor names one already on a page", kindLabel("booking"), "Booking");
 is("and tells back, in words, why one was not saved", /^A page holds one booking block, with one of your calls chosen/.test(EDITOR_MESSAGES.booking ?? ""), true);
-is("a saved section never holds one (inbox C4-19 (b))", [NOT_IN_SECTIONS.includes("booking"), readSectionInput("Calls", [booking()]).ok], [true, false]);
+{
+  // Refused for its kind, not for a shape the page would drop (review of #2178).
+  const asked = readSectionInput("Calls", [booking()]);
+  is("a saved section never holds one (inbox C4-19 (b))", [NOT_IN_SECTIONS.includes("booking"), asked.ok, asked.ok ? "" : asked.error], [true, false, "kind"]);
+}
 
 done();

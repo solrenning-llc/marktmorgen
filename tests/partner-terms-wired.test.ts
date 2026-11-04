@@ -12,12 +12,12 @@ import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { affiliateCookieName, readAffiliate } from "@/lib/affiliates";
+import { affiliateCookieName, changeIdentity, partnerChangeFor, readAffiliate } from "@/lib/affiliates";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
 import { offerWords } from "@/lib/partner-invites";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { POST as answerRoute } from "@/app/api/store/affiliates/partner-answer/route";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -60,10 +60,17 @@ async function main(): Promise<void> {
   const token = randomBytes(32).toString("hex");
   const key = `nl:aff:session:${createHash("sha256").update(`nimbus-aff-session:${token}`).digest("hex").slice(0, 40)}`;
   await redis.pipeline([["SET", key, JSON.stringify({ s: statsId, a: p })]]);
-  const answer = async (value: string) => {
+  // What the partner's page shows (lib/affiliates.ts partnerChangeFor) and the identity its form sends with the answer.
+  const shown = async () => (await partnerChangeFor((await storeForEmail(owner))!, await readAffiliate((await storeForEmail(owner))!, p))).change;
+  const shownId = async () => {
+    const change = await shown();
+    return change ? changeIdentity(change) : "";
+  };
+  const answer = async (value: string, seen?: string) => {
     const form = new FormData();
     form.set("handle", "termswired");
     form.set("answer", value);
+    form.set("change", seen ?? (await shownId()));
     const response = await answerRoute(new NextRequest("https://marktmorgen.com/api/store/affiliates/partner-answer", { method: "POST", headers: { cookie: `${affiliateCookieName("termswired")}=${token}`, origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: form }));
     return response.headers.get("location") ?? `status ${response.status}`;
   };
@@ -94,6 +101,26 @@ async function main(): Promise<void> {
     "started:creator", "asked:creator", "asked:creator", "declined:partner", "asked:creator", "changed:partner",
   ]);
 
+  part("The answer applies to the change the partner read, never to one put in its place");
+  // A new hour, so the partner's answers are not slowed by the five an hour already used above.
+  advance(3601 * 1000);
+  is("the store asks for 30%", await post({ action: "share", id: p, percent: 30, products: [A], ends: future(60) }), { ok: true, state: "waiting" });
+  is("the partner's page shows 30%", (await shown())?.share?.percent, 30);
+  const read30 = await shownId();
+  is("the store switches its request to 5%", await post({ action: "share", id: p, percent: 5, products: [A], ends: future(60) }), { ok: true, state: "waiting" });
+  is("the partner's yes to the 30% they read is refused", await answer("yes", read30), "https://marktmorgen.com/@termswired/affiliates?status=partner-none#partner");
+  is("nothing changed: the share in force and the 5% request stay", [(await read(p)).share?.percent, (await read(p)).terms?.change?.share?.percent], [40, 5]);
+  is("a yes to the 5% now shown applies 5%", [await answer("yes"), (await read(p)).share?.percent], ["https://marktmorgen.com/@termswired/affiliates?status=partner-yes#partner", 5]);
+  is("the refusal says what happened and where the new request is", AFFILIATES_WORDS.en.partnerAnswered.none, "That request is no longer open. The store may have changed it or taken it back. Nothing changed, and any new request is shown on this page.");
+
+  part("A dated share in force is not removed by the store alone");
+  is("remove is refused, with the reason", (await post({ action: "remove", id: p })).error, "share_term_held");
+  is("decline is refused the same way", (await post({ action: "decline", id: p })).error, "share_term_held");
+  is("they stay approved with their share", [(await read(p)).status, (await read(p)).share?.percent], ["approved", 5]);
+  is("a share until revoked", await post({ action: "share", id: q, percent: 10, products: [A] }), { ok: true, state: "started" });
+  is("can be removed", [await post({ action: "remove", id: q }), (await read(q)).status, (await read(q)).share], [{ ok: true }, "removed", null]);
+  is("and the step is in its history", (await read(q)).terms?.history.at(-1)?.kind, "revoked");
+
   part("An invitation says how long it runs");
   // The program switched on, which an invitation needs (lib/affiliates.ts affiliatesOn).
   await setAffiliateSetting(owner, parseAffiliateSetting({ enabled: true, percent: 20, days: 30 }));
@@ -116,6 +143,8 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/affiliates/page.tsx", "utf8");
   is("the partner's page offers both answers in a form", page.includes('action="/api/store/affiliates/partner-answer"') && page.includes('name="answer" value="yes"') && page.includes('name="answer" value="no"'), true);
   is("and says the result in a status", page.includes('role="status"') && page.includes("a.partnerAnswered["), true);
+  is("the form sends which change it showed", page.includes('name="change" value={changeIdentity(askedChange)}'), true);
+  is("a refused removal says what to do instead, in the row's alert", studio.includes("their share runs to a set end date") && studio.includes("press End the partnership; it ends once they accept. Or wait until the end date, then remove them.") && studio.includes('role="alert"'), true);
   const en = AFFILIATES_WORDS.en;
   is("the words say the share stays until the answer", en.partnerAskedKeep("Dec 3, 2026"), "Until you answer, your share stays exactly as it is. If you have not answered by Dec 3, 2026, nothing changes.");
   is("an end asked for, in words", en.partnerAsked("Terms Wired", null, "", null), "Terms Wired asks to end your partner share.");

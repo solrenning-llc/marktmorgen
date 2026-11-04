@@ -56,6 +56,8 @@ const MESSAGES: Record<string, string> = {
   share_crowded: SHARE_PROBLEMS.crowded,
   share_committed: SHARE_PROBLEMS.committed,
   share_ends: `Pick an end date after today and within ${MAX_TERM_DAYS / 365} years, or leave it empty so the share runs until you or they end it.`,
+  share_term_held:
+    "This partner was not removed: their share runs to a set end date, and you agreed it would not end before then without their yes. To end it sooner, open their partner share and press End the partnership; it ends once they accept. Or wait until the end date, then remove them.",
   invite_email: "Type the email address to send the invitation to.",
   gone: "That offer is no longer there. The store may have withdrawn it.",
   owner: "That is your own address. A partner is somebody else.",

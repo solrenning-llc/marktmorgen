@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
   let handle = "";
   let answer = "";
+  let seen = "";
   try {
     const form = await (await limited(request, 2_000)).formData();
     const read = (name: string) => {
@@ -24,6 +25,8 @@ export async function POST(request: NextRequest) {
     };
     handle = normaliseHandle(read("handle"));
     answer = read("answer");
+    // Which change the partner read (lib/affiliates.ts changeIdentity): the answer applies to that one only.
+    seen = read("change").slice(0, 64);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -36,6 +39,6 @@ export async function POST(request: NextRequest) {
   if (!affiliate) return back("signedout");
   if (!(await withinStore("aff-partner", `${store.handle}|${affiliate.id}`, 5, 3600, store))) return back("payto-slow");
   const now = Math.floor(Date.now() / 1000);
-  const result = await answerShareChange(store, affiliate.id, answer === "yes", now, async (share) => (await sharePromiseProblem(store, affiliate.id, share, now)) === null);
+  const result = await answerShareChange(store, affiliate.id, answer === "yes", seen, now, async (share) => (await sharePromiseProblem(store, affiliate.id, share, now)) === null);
   return back(result.ok ? `partner-${result.state === "changed" ? "yes" : "no"}` : `partner-${result.reason}`);
 }

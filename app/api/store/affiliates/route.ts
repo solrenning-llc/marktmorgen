@@ -13,6 +13,7 @@ import {
   addPayout,
   MAX_BULK_DECISIONS,
   decide,
+  heldByTerm,
   decideMany,
   setRatesMany,
   undoMany,
@@ -166,7 +167,15 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, undone: await undoRates(store, before, rate) });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
-      const done = await decide(store, text(body.id, 20), action);
+      const id = text(body.id, 20);
+      const now = Math.floor(Date.now() / 1000);
+      // A partner whose dated share is still in force is not taken out by the store alone (lib/partner-terms-rules.ts):
+      // the studio says to ask for a change, which the partner must accept, or to wait for the end date.
+      if (action === "remove" || action === "decline") {
+        const affiliate = await readAffiliate(store, id);
+        if (affiliate && heldByTerm(affiliate, now)) return fail("share_term_held");
+      }
+      const done = await decide(store, id, action, now);
       return done ? Response.json({ ok: true }) : fail("unknown");
     }
     if (action === "payout") {

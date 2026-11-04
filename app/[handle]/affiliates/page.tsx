@@ -23,6 +23,7 @@ import {
   affiliatesOn,
   buyersJoin,
   canApply,
+  changeIdentity,
   linkEmail,
   partnerChangeFor,
   readBook,
@@ -316,6 +317,8 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                       {askedChange ? (
                         <form action="/api/store/affiliates/partner-answer" method="post" className="mt-3 space-y-2 text-sm">
                           <input type="hidden" name="handle" value={store.handle} />
+                          {/* The change this page shows: a yes or no applies to it only, never to one the store put in its place since. */}
+                          <input type="hidden" name="change" value={changeIdentity(askedChange)} />
                           <p className="font-semibold">
                             {a.partnerAsked(
                               store.name,

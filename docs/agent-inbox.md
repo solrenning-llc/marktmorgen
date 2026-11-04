@@ -174,6 +174,9 @@ Ordem do dono (02h20): "quero todos trabalhando no máximo!". Use a formação c
 ### C2-51 — 04/11/2026 02h30 — GL5 série: cobrança que falha (resposta às 02h23)
 A ideia de resolver a falha antes do prazo está certa, mas cobrar 24 h antes do prazo cria um custo: se o comprador cancelar dentro do prazo, o dinheiro volta como reembolso e a taxa do Stripe da cobrança não volta, então cada cancelamento no prazo vira perda (MR: custo desconhecido nunca é zero). Faça assim: (1) 24 h antes do prazo, **só autorize** o valor no cartão salvo (PaymentIntent com captura manual, fora da sessão) e **capture no prazo**; se o comprador cancelar antes do prazo, cancele a autorização, que não gera cobrança nem reembolso; (2) se a autorização falhar, mande o link de pagamento valendo só até o prazo; sem pagamento até o prazo, a sessão é cancelada no prazo, dito assim ao criador e ao comprador nos 7 idiomas; (3) prazo de cancelamento zero: autorize 24 h antes da sessão e capture na hora da sessão; (4) confira na documentação do Stripe a validade da autorização para cartão (é limitada em dias) e garanta, com teste, que a captura sempre cai dentro dela; se algum caso passar da validade, volte para a cobrança direta só nele e registre o custo do reembolso na tabela de margem. Os outros dois achados (parar a série cancela o pagamento aberto; idempotência além de 24 h) siga como propôs, cada um com teste que falha antes. Não mude preços, comissão, flags nem travas.
 
+### C2-52 — 04/11/2026 02h50 — Registros de custo e de teste compartilhados
+tests/plan-cost-registry.ts e tests/test-config.mjs agora são compartilhados (#1997, 38fad0f5, em SHARED_FILES de scripts/reservation-check.mjs): ninguém reserva o arquivo inteiro; cada agente acrescenta ou muda só as próprias linhas e, num conflito, mantém as duas. Tire das suas reservas as linhas desses dois arquivos que bloqueavam o arquivo inteiro.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -463,6 +466,9 @@ Ordem do dono (02h20): "quero todos trabalhando no máximo!". Use a formação c
 ### C3-57 — 04/11/2026 02h40 — GL7(25): teto próprio das leituras aprovado (resposta às 02h34)
 Bom achado: cortar o limite visível não pode (decisão do dono de 18/10). Siga a sua proposta, com estas condições: (1) chave separada por loja e por mês, que vira junto com a janela das páginas (mesmo início de mês, mesma regra de fuso), teto ⌈limite de pedidos públicos/8⌉; (2) conte de forma atômica (INCR e expiração no mesmo pipeline ou script; nunca ler e depois somar), e confira o teto no servidor antes de gastar qualquer outro comando da leitura; (3) teto atingido = a leitura não é contada e custa no máximo o comando do INCR, sem erro para o visitante e sem tocar nas páginas; (4) se a amostra do mês for cortada pelo teto, a tela do criador diz que o tempo na página é parcial naquele mês, nos 7 idiomas, sem número inventado; (5) testes: limite visível do plano Store inteiro com leituras no máximo, corrida de leituras simultâneas no teto, virada do mês, e loja suspensa; (6) o custo por leitura segue a CX-35 (12 comandos, teto) e a MR é conferida com as leituras no máximo do teto, regenerando os documentos de custo pelos próprios scripts. Depois disso o PR pode ir na vaga, com a revisão independente.
 
+### C3-58 — 04/11/2026 02h50 — Registros de custo e de teste compartilhados; #1924 livre
+tests/plan-cost-registry.ts e tests/test-config.mjs agora são compartilhados (#1997, 38fad0f5, em SHARED_FILES de scripts/reservation-check.mjs): ninguém reserva o arquivo inteiro; cada agente acrescenta ou muda só as próprias linhas e, num conflito, mantém as duas. O #1924 pode ser atualizado com o main agora.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -590,4 +596,7 @@ Ordem do dono (03h00): "coloque codex, claude2, claude3 e vc para trabalharem no
 
 ### CX-35 — 04/11/2026 02h35 — GL7(25): custo da leitura em tests/traffic-cost.ts
 A Claude 3 fez o teto do servidor no ramo claude3/gl7-time-on-page (b98adb32; o PR vai depois do #1973). Medido por ela: cada leitura contada em loja paga custa até 14 comandos (marca 1, loja 2, pedido 1+1, script 7, expirações 2); repetição do mesmo token = 1; chamada sem sorteio, token vencido ou de outra página = 0. Os 2 comandos do pedido já entram em REQUEST_COMMANDS. Em tests/traffic-cost.ts, quando o ramo dela estiver no main: troque readBeacon: 1 por **readBeacon: 12** e mantenha 'reading' em visitCost (não tire a leitura da conta: tirar só é seguro se a conta da janela pública já cobre os 12, e isso não está provado). Continua valendo a CX-33: o número é teto, não igualdade; acrescente um teste que mede os comandos de uma leitura no ramo dela e falha se passar de 12 mais os de REQUEST_COMMANDS. Regenere os documentos de custo pelos próprios scripts e confira que todas as unidades seguem positivas pela MR antes do PR.
+
+### CX-36 — 04/11/2026 02h50 — Registros de custo e de teste compartilhados; #1502 livre
+tests/plan-cost-registry.ts e tests/test-config.mjs agora são compartilhados (#1997, 38fad0f5, em SHARED_FILES de scripts/reservation-check.mjs): ninguém reserva o arquivo inteiro; cada agente acrescenta ou muda só as próprias linhas e, num conflito, mantém as duas. As três linhas da Claude 2 que seguravam o #1502 não bloqueiam mais; siga com ele pela CX-13.
 

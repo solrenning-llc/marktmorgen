@@ -1,4 +1,5 @@
 import { PAGE_TEST_WORDS } from "@/lib/headline-test-words";
+import { LOCKED_LIST } from "@/lib/locked-words";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { SHARED_QUESTIONS, helpAnswer } from "@/lib/help-content";
 import { funnelBeginnerQuestions } from "@/lib/funnel-faq";
@@ -2599,7 +2600,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         intro: "Said here so nobody relies on it for more than it does.",
         items: [
           "Two-step login is off until you turn it on. Without it, your account is as safe as your email inbox: protect that one.",
-          "Lose your phone, your recovery codes and every passkey, and a link to your recovery address gets you straight back in. Lose that inbox too, and you still get in at once, with the emailed link alone: you can sell, edit your products and pages and answer buyers, while payments, your plan, your team, exports, settings, sending to your list, deleting a person or a product and your sign-in address stay locked for 7 days, until two-step login turns off. That lock is what stops somebody who only has your sign-in inbox, and a login with a code or a passkey, or Cancel in your studio, logs them out.",
+          `Lose your phone, your recovery codes and every passkey, and a link to your recovery address gets you straight back in. Lose that inbox too, and you still get in at once, with the emailed link alone: you can sell, edit your products and pages and answer buyers, while ${LOCKED_LIST} stay locked for 7 days, until two-step login turns off. That lock is what stops somebody who only has your sign-in inbox, and a login with a code or a passkey, or Cancel in your studio, logs them out.`,
           "On a payment plan, a refund in full of the first payment closes access like any refund in full; a refund of a later payment is not detected, so take the buyer off the course, or remove their access, yourself. A refunded membership closes when its subscription is canceled in Stripe.",
           "A refund cannot take back a file already saved, or a product delivered as a link to somewhere else.",
           "The limits on checkouts, bookings and forms are counted in our database. If it cannot be reached, they let requests through rather than stop a buyer from paying.",

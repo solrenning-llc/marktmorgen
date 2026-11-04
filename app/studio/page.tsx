@@ -219,6 +219,7 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { PasskeyManager } from "@/components/passkey-manager";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
+import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
@@ -1193,7 +1194,7 @@ export default async function StudioPage({
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">{`Some things are locked until ${new Date(lockedTill).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}`}</p>
             <p className="mt-1 text-sm text-ink-soft">
-              You got in through your recovery address or without your second step, so payments, your plan, your team, exports, settings, sending to your list, deleting a person or a product, your sign-in address, passkeys and two-step login wait until then. Everything else is open: your products, pages, buyers, numbers and drafts. On that day nothing is locked any more, and you can move your sign-in address to an inbox you have. Logging in with your sign-in email, a passkey or your app&apos;s code before then opens everything at once.
+              {`You got in through your recovery address or without your second step, so ${LOCKED_LIST} wait until then. Everything else is open: your products, pages, buyers, numbers and drafts. On that day nothing is locked any more, and you can move your sign-in address to an inbox you have. Logging in with your sign-in email, a passkey or your app's code before then opens everything at once.`}
             </p>
           </div>
         ) : twoStep.reset > 0 ? (

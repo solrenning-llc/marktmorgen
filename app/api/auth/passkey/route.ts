@@ -44,15 +44,16 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
+  // A session let in without its second step cannot add a way in of its own, nor take one away from the owner
+  // (lib/two-step.ts): removing a passkey could lock the owner out, and it cannot be undone. Asked before
+  // the hourly count, so a locked session never spends the owner's own changes.
+  if ((body.action === "options" || body.action === "add" || body.action === "remove") && (await lockedUntil(session)) > 0) {
+    return Response.json({ ok: false, error: "locked" }, { status: 403 });
+  }
   if (!(await withinLimit("passkey-change", email, CHANGES_PER_HOUR, 60 * 60))) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
 
-  // A session let in without its second step cannot add a way in of its own, nor take one away from the owner
-  // (lib/two-step.ts): removing a passkey could lock the owner out, and it cannot be undone.
-  if ((body.action === "options" || body.action === "add" || body.action === "remove") && (await lockedUntil(session)) > 0) {
-    return Response.json({ ok: false, error: "locked" }, { status: 403 });
-  }
   if ((body.action === "options" || body.action === "add") && !(await isFreshSession(session))) {
     return Response.json({ ok: false, error: "reauth" }, { status: 403 });
   }

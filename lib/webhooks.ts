@@ -209,8 +209,8 @@ export const QUEUE_KEY = "nl:hooks:q";
 const anchorKey = (statsId: string) => `nl:hooks:anchor:${statsId}`;
 /** The event a store's Stripe reading is waiting on, and for how many runs: "<evt>|<runs>". */
 const waitKey = (statsId: string) => `nl:hooks:wait:${statsId}`;
-/** The passed-over events of a store on one UTC day, a sorted set by when each was first passed over; gone at the end of the next day. */
-const givenUpDayKey = (statsId: string, day: number) => `nl:hooks:wait:${statsId}:day:${day}`;
+/** The passed-over events said to one endpoint of a store on one UTC day, a sorted set by when each was first passed over; gone at the end of the next day. */
+const givenUpDayKey = (statsId: string, day: number, endpoint: string) => `nl:hooks:wait:${statsId}:day:${day}:${endpoint}`;
 const testsKey = (statsId: string) => `nl:rl:hooks:test:${statsId}`;
 const POSITION_KEY = "nl:hooks:pos";
 
@@ -515,7 +515,14 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
     commands.push(["LPUSH", logKey(statsId), id]);
   }
   commands.push(["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]);
-  await redisPipeline(commands);
+  try {
+    await redisPipeline(commands);
+  } catch (error) {
+    // The event is marked sent above; without its deliveries written it
+    // would never be: the mark goes, so the next time it is noticed it is.
+    await redisPipeline([["DEL", eventKey(eventId)]]).catch(() => undefined);
+    throw error;
+  }
   await soon(async () => {
     for (const id of ids) if (await claim(statsId, id)) await runClaimed(statsId, id);
   });
@@ -918,7 +925,9 @@ const num = (value: unknown) => (typeof value === "number" && Number.isFinite(va
  */
 export const STRIPE_LOOKUPS_PER_STORE = 10;
 export const DISPUTE_LOOKUPS_PER_STORE = 10;
-type Lookups = { left: number; disputes: number };
+type Budget = "left" | "disputes";
+/** The run's lookups left, and the Stripe event whose payment was last confirmed as the store's (for its line, if it is passed over). */
+type Lookups = { left: number; disputes: number; confirmed?: string };
 
 /**
  * The lookups below are read in one pinned API version (STRIPE_VERSION of
@@ -945,21 +954,25 @@ class StripeShapeError extends Error {}
  * Why an event could not be done with in this visit: "spent", the visit's
  * lookups ran out (not a failure, never a reason to give up); "refused",
  * Stripe will answer the same way again (STRIPE_REFUSED_RUNS); "passing",
- * a failure that may clear (STRIPE_WAIT_RUNS, STRIPE_WAIT_MAX_SECONDS).
+ * a failure of Stripe's that may clear, an error status or no answer
+ * (STRIPE_WAIT_RUNS, STRIPE_WAIT_MAX_SECONDS); "ours", our own code failed
+ * (a setting missing, an answer in a shape it did not expect, the store),
+ * waited on as long as a passing failure and said as ours.
  */
-type Waits = "spent" | "refused" | "passing";
+type Waits = "spent" | "refused" | "passing" | "ours";
 /** True once an event is done with, or why it waits. */
 type Outcome = true | Waits;
 
 /** How a failed Stripe call waits. */
 function waitsOn(error: unknown): Waits {
-  if (error instanceof StripeShapeError) return "refused";
-  if (error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 429 && error.status !== 409) return "refused";
-  return "passing";
+  if (error instanceof StripeError) return error.status >= 400 && error.status < 500 && error.status !== 429 && error.status !== 409 ? "refused" : "passing";
+  // No answer: the network failed or the call ran out of time (lib/fetch-timeout.ts gives up with this TypeError).
+  if (error instanceof TypeError && error.message === "fetch failed") return "passing";
+  return "ours";
 }
 
 /** Said once a run's budget is spent: the event waits for the next run, never silently. */
-function saySpent(store: Store, budget: keyof Lookups): void {
+function saySpent(store: Store, budget: Budget): void {
   console.error(budget === "disputes"
     ? "a store had more disputes in one run than are read; the rest wait for the next run"
     : "a store had more refunds and cancellations to look up in one run than are read; the rest wait for the next run", store.handle);
@@ -979,7 +992,7 @@ const isMissing = (error: unknown) => error instanceof StripeError && error.code
  * told now (Waits): the budget is used up, or a call failed in any other
  * way. The caller then leaves the event for the next run.
  */
-async function paymentMeta(store: Store, intent: string, lookups: Lookups, budget: keyof Lookups): Promise<Record<string, string> | Waits> {
+async function paymentMeta(store: Store, intent: string, lookups: Lookups, budget: Budget): Promise<Record<string, string> | Waits> {
   const account = store.stripeAccountId;
   if (!account) return {};
   const get = async (path: string) => {
@@ -1008,9 +1021,10 @@ async function paymentMeta(store: Store, intent: string, lookups: Lookups, budge
       return {};
     }
     // Anything else (a refusal, a limit, a timeout, an answer in a shape not
-    // known) is tried again next run, a bounded number of visits (waitsOn).
-    console.error("telling whose a payment is failed; it is read again next run", store.handle, intent, error);
-    return waitsOn(error);
+    // known, our own setting) is tried again next run, a bounded number of visits (waitsOn).
+    const waits = waitsOn(error);
+    console.error(waits === "ours" ? "OUR CODE FAILED telling whose a payment is (not a Stripe error); it is read again next run" : "telling whose a payment is failed at Stripe; it is read again next run", store.handle, intent, error);
+    return waits;
   }
 }
 
@@ -1118,31 +1132,21 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const id = str(object.id);
     if (!id) return true;
     const ended = event.type === "customer.subscription.deleted";
-    // A move to another price or quantity (an upgrade, a downgrade, another
-    // interval) is its own event, said once per change; the same update may
-    // also set an end, which goes on below as a cancellation.
-    if (!ended && "items" in previous) {
-      const from = planOf(previous.items);
-      const to = planOf(object.items);
-      if (from && to && (from.price !== to.price || from.quantity !== to.quantity)) {
-        await emitEvent(store, "membership.changed", `${id}|${num(event.created)}|${to.price}|${to.quantity}`, {
-          subscription: id,
-          product: await product(meta.product),
-          option: meta.option ?? null,
-          from,
-          to,
-          changed_at: iso(event.created),
-        }, created);
-      }
+    // The change and the cancellation it is, by one rule (subscriptionEmits),
+    // which a passed-over event's line reads too.
+    const says = subscriptionEmits(event);
+    if (says.changed) {
+      const { from, to } = says.changed;
+      await emitEvent(store, "membership.changed", says.changed.seed, {
+        subscription: id,
+        product: await product(meta.product),
+        option: meta.option ?? null,
+        from,
+        to,
+        changed_at: iso(event.created),
+      }, created);
     }
-    if (!ended) {
-      // Only the change that sets an end. A membership with a set number of
-      // payments is given its end when it is bought; that is not a cancellation.
-      const ending = object.cancel_at_period_end === true || num(object.cancel_at) > 0;
-      const wasEnding = previous.cancel_at_period_end === true || num(previous.cancel_at) > 0;
-      const changed = "cancel_at_period_end" in previous || "cancel_at" in previous;
-      if (!ending || wasEnding || !changed || meta.ends_after) return true;
-    }
+    if (!says.cancel) return true;
     const item = ((object.items as { data?: { current_period_end?: unknown }[] } | undefined)?.data ?? [])[0];
     const endsAt = num(object.cancel_at) || num(object.current_period_end) || num(item?.current_period_end);
     const details = (object.cancellation_details ?? {}) as { reason?: unknown };
@@ -1164,13 +1168,14 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         email = str((await onAccount("GET", store.stripeAccountId, `/customers/${encodeURIComponent(customer)}`)).email);
       } catch (error) {
         if (!isMissing(error)) {
-          console.error("reading a canceled member's address failed; it is read again next run", store.handle, error);
-          return waitsOn(error);
+          const waits = waitsOn(error);
+          console.error(waits === "ours" ? "OUR CODE FAILED reading a canceled member's address (not a Stripe error); it is read again next run" : "reading a canceled member's address failed at Stripe; it is read again next run", store.handle, error);
+          return waits;
         }
         email = null;
       }
     }
-    await emitEvent(store, "membership.canceled", `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}`, {
+    await emitEvent(store, "membership.canceled", says.cancel, {
       subscription: id,
       product: await product(meta.product),
       status: ended ? "ended" : "ending",
@@ -1197,6 +1202,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       meta = found;
     }
     if (!handles.has(meta.store ?? "")) return true;
+    lookups.confirmed = str(event.id) ?? undefined;
     const total = num(object.amount_refunded);
     const before = num(previous.amount_refunded);
     const billing = (object.billing_details ?? {}) as { email?: unknown; name?: unknown };
@@ -1229,6 +1235,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     if (typeof found === "string") return found;
     meta = found;
     if (!handles.has(meta.store ?? "")) return true;
+    lookups.confirmed = str(event.id) ?? undefined;
     const evidence = (object.evidence_details ?? {}) as { due_by?: unknown };
     await emitEvent(store, "dispute.opened", dispute, {
       dispute,
@@ -1245,6 +1252,38 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     }, created);
   }
   return true;
+}
+
+/**
+ * What one subscription event says, by the rules fromStripe sends by: the
+ * change of price or quantity it is (the seed of its membership.changed),
+ * if any, and whether it is a cancellation (with its membership.canceled seed).
+ */
+function subscriptionEmits(event: StripeEvent): { changed: { seed: string; from: NonNullable<ReturnType<typeof planOf>>; to: NonNullable<ReturnType<typeof planOf>> } | null; cancel: string | null } {
+  const object = event.data?.object ?? {};
+  const previous = event.data?.previous_attributes ?? {};
+  const meta = (object.metadata ?? {}) as Record<string, string>;
+  const id = str(object.id) ?? "";
+  const ended = event.type === "customer.subscription.deleted";
+  let changed = null;
+  // A move to another price or quantity (an upgrade, a downgrade, another
+  // interval) is its own event, said once per change; the same update may
+  // also set an end, which is a cancellation too.
+  if (!ended && "items" in previous) {
+    const from = planOf(previous.items);
+    const to = planOf(object.items);
+    if (from && to && (from.price !== to.price || from.quantity !== to.quantity)) changed = { seed: `${id}|${num(event.created)}|${to.price}|${to.quantity}`, from, to };
+  }
+  let cancels = ended;
+  if (!ended) {
+    // Only the change that sets an end. A membership with a set number of
+    // payments is given its end when it is bought; that is not a cancellation.
+    const ending = object.cancel_at_period_end === true || num(object.cancel_at) > 0;
+    const wasEnding = previous.cancel_at_period_end === true || num(previous.cancel_at) > 0;
+    const set = "cancel_at_period_end" in previous || "cancel_at" in previous;
+    cancels = ending && !wasEnding && set && !meta.ends_after;
+  }
+  return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null };
 }
 
 /** A subscription's first item as a membership's plan: its price, amount, interval and quantity; null when it has none. */
@@ -1278,24 +1317,41 @@ function stripeEventPage(value: unknown): StripeEvent[] {
 }
 
 /**
- * What a Stripe event that can wait would have been sent as (any of
- * `types`, by what each endpoint hears), the Stripe object it is about, in
- * the creator's words, and whether it is known to be the store's: one that
- * names the store in its own metadata is; a refund without it or a dispute
- * waits only because whose its payment is could not be told, so it may be a
- * charge made on the same Stripe account outside Marktmorgen.
+ * What a Stripe event that can wait would have been sent as: each event of
+ * ours it makes (`parts`, with the seed of its id, by fromStripe's own
+ * rules), the Stripe object it is about, in the creator's words, and whether
+ * it is known to be the store's: one that names the store in its own
+ * metadata is, and so is a refund or a dispute whose payment this visit
+ * confirmed (`confirmed`); otherwise a refund or a dispute waits only because
+ * whose its payment is could not be told, so it may be a charge made on the
+ * same Stripe account outside Marktmorgen.
  */
-function waitedAs(event: StripeEvent, handles: Set<string>): { types: WebhookEvent[]; about: string; known: boolean } {
+function waitedAs(event: StripeEvent, handles: Set<string>, confirmed: boolean): { parts: { type: WebhookEvent; seed: string }[]; about: string; known: boolean } {
   const object = event.data?.object ?? {};
-  const id = str(object.id) ?? "an unknown id";
-  const own = handles.has(str((object.metadata as Record<string, unknown> | undefined)?.store) ?? "");
-  if (event.type === "checkout.session.completed") return { types: ["sale.completed", "membership.started"], about: `checkout ${id}`, known: own };
-  if (event.type === "payment_intent.succeeded") return { types: ["sale.completed"], about: `payment ${id}`, known: own };
-  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") return { types: ["membership.canceled", "membership.changed"], about: `subscription ${id}`, known: own };
-  if (event.type === "charge.refunded") return { types: ["refund.issued"], about: `the refund of charge ${id}`, known: own };
-  if (event.type === "charge.dispute.created") return { types: ["dispute.opened"], about: `dispute ${id}`, known: false };
-  return { types: [], about: `Stripe event ${str(event.id) ?? id}`, known: false };
+  const meta = (object.metadata ?? {}) as Record<string, unknown>;
+  const id = str(object.id) ?? "";
+  const shown = id || "an unknown id";
+  const known = confirmed || handles.has(str(meta.store) ?? "");
+  if (event.type === "checkout.session.completed") {
+    const membership = object.mode === "subscription" && meta.kind !== "plan";
+    return { parts: [{ type: "sale.completed", seed: id }, ...(membership ? [{ type: "membership.started" as const, seed: str(object.subscription) ?? id }] : [])], about: `checkout ${shown}`, known };
+  }
+  if (event.type === "payment_intent.succeeded") return { parts: [{ type: "sale.completed", seed: id }], about: `payment ${shown}`, known };
+  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+    const says = subscriptionEmits(event);
+    return {
+      parts: [...(says.changed ? [{ type: "membership.changed" as const, seed: says.changed.seed }] : []), ...(says.cancel ? [{ type: "membership.canceled" as const, seed: says.cancel }] : [])],
+      about: `subscription ${shown}`,
+      known,
+    };
+  }
+  if (event.type === "charge.refunded") return { parts: [{ type: "refund.issued", seed: `${id}|${num(object.amount_refunded)}` }], about: `the refund of charge ${shown}`, known };
+  if (event.type === "charge.dispute.created") return { parts: [{ type: "dispute.opened", seed: id }], about: `dispute ${shown}`, known: confirmed };
+  return { parts: [], about: `Stripe event ${str(event.id) ?? shown}`, known: false };
 }
+
+/** The mark that a Stripe event was passed over and its lines written (eventKey), so it is never held or written again. */
+const givenUpMark = (statsId: string, stripeEvent: string) => eventKey(eventIdFor(statsId, "stripe.given_up", stripeEvent));
 
 /** A line of the delivery log no message is behind: the studio shows it "Not sent", with `words`. */
 function noticeLine(id: string, statsId: string, endpoint: string, eventId: string, type: WebhookEvent, words: string, now: number): Delivery {
@@ -1316,71 +1372,84 @@ async function pushMissing(statsId: string, ids: string[], known: string[] = [])
 /**
  * The line a passed-over Stripe event leaves in the store's delivery log,
  * which the studio shows ("Not sent", with the reason), for each endpoint
- * that hears what it would have been, so the creator can look it up in
- * Stripe. `cause` says whose the failure was: Stripe's (it kept refusing or
- * failing to answer) or ours (our own handling of the event failed).
+ * that hears something it would have been sent and was not (an event of
+ * ours it makes that was already sent, as a sale before its membership's
+ * start, is not said "Not sent"; an endpoint that got everything gets no
+ * line), so the creator can look it up in Stripe. `cause` says whose the
+ * failure was: Stripe's (it kept refusing or failing to answer) or ours.
  *
  * It takes none of the store's webhook deliveries: no message is made and
  * no endpoint is called, and a count that could be lost or refused would
  * either charge the creator again or hold the store's later events.
  *
- * The first GIVEN_UP_LINES_PER_DAY events of a UTC day get their own line;
- * every later one that day is counted in one summary line per endpoint,
- * rewritten with the day's count. Which is which is the event's place in the
- * day's sorted set (ZADD NX: a repeat keeps its first place), so a visit that
- * dies half way, or a store read again, never counts an event twice.
+ * The first GIVEN_UP_LINES_PER_DAY events of a UTC day for an endpoint get
+ * their own line there; every later one that day is counted in one summary
+ * line of that endpoint, rewritten with its count. Which is which is the
+ * event's place in the endpoint's sorted set of the day (ZADD NX: a repeat
+ * keeps its first place), so a visit that dies half way, or a store read
+ * again, never counts an event twice.
  *
  * Written once, and never lost: each line's id is made from the event and
  * the endpoint (the summary's from the day and the endpoint), so a repeat
  * finds it (SET NX) and puts it in the log only when it is not there yet;
- * an event's own line is followed by its mark (eventKey, as a sent event
- * leaves), and a visit that finds the mark writes nothing.
+ * the event's mark (givenUpMark) is set after every line is written, and a
+ * visit that finds it writes nothing (and watchStore passes the event over
+ * when it reads it again).
  */
-async function markGivenUp(store: Store, statsId: string, config: Config, event: StripeEvent, visits: number, cause: "stripe" | "ours", now: number): Promise<void> {
-  const as = waitedAs(event, saleHandles(store));
-  const listening = config.endpoints.flatMap((endpoint) => {
-    const type = as.types.find((t) => endpoint.events.includes(t));
-    return type ? [{ endpoint, type }] : [];
-  });
-  if (!listening.length) return;
-  const eventId = eventIdFor(statsId, "stripe.given_up", str(event.id) ?? "");
-  const [marked] = await redisPipeline([["GET", eventKey(eventId)]]);
+async function markGivenUp(store: Store, statsId: string, config: Config, event: StripeEvent, visits: number, cause: "stripe" | "ours", confirmed: boolean, now: number): Promise<void> {
+  const stripeEvent = str(event.id) ?? "";
+  const mark = givenUpMark(statsId, stripeEvent);
+  const as = waitedAs(event, saleHandles(store), confirmed);
+  const [marked, ...sent] = await redisPipeline([["GET", mark], ...as.parts.map((part) => ["GET", eventKey(eventIdFor(statsId, part.type, part.seed))])]);
   if (marked !== null && marked !== undefined) return;
+  const unsent = as.parts.filter((_, at) => sent[at] === null || sent[at] === undefined);
+  const listening = config.endpoints.flatMap((endpoint) => {
+    const part = unsent.find((p) => endpoint.events.includes(p.type));
+    return part ? [{ endpoint, type: part.type }] : [];
+  });
   const day = Math.floor(now / 86_400_000);
-  const dayKey = givenUpDayKey(statsId, day);
-  const [, card, fromTop] = await redisPipeline([
-    ["ZADD", dayKey, "NX", now, eventId],
-    ["ZCARD", dayKey],
-    ["ZREVRANK", dayKey, eventId],
-    // Gone at the end of the next UTC day: two days' sets at most.
-    ["EXPIREAT", dayKey, (day + 2) * 86400],
-  ]);
-  const place = Number(card) - 1 - Number(fromTop);
-  if (!Number.isSafeInteger(place) || place < 0) throw new Error("the day's passed-over events could not be counted");
+  const eventId = eventIdFor(statsId, "stripe.given_up", stripeEvent);
+  const placed = listening.length ? await redisPipeline(listening.flatMap(({ endpoint }) => {
+    const key = givenUpDayKey(statsId, day, endpoint.id);
+    // Gone at the end of the next UTC day: two days' sets an endpoint at most.
+    return [["ZADD", key, "NX", now, eventId], ["ZCARD", key], ["ZREVRANK", key, eventId], ["EXPIREAT", key, (day + 2) * 86400]];
+  })) : [];
+  const own: typeof listening = [];
+  const summed: { endpoint: Endpoint; type: WebhookEvent; more: number }[] = [];
+  listening.forEach((at, n) => {
+    const card = Number(placed[n * 4 + 1]);
+    const place = card - 1 - Number(placed[n * 4 + 2]);
+    if (!Number.isSafeInteger(place) || place < 0) throw new Error("the day's passed-over events could not be counted");
+    if (place < GIVEN_UP_LINES_PER_DAY) own.push(at);
+    else summed.push({ ...at, more: card - GIVEN_UP_LINES_PER_DAY });
+  });
 
-  if (place >= GIVEN_UP_LINES_PER_DAY) {
-    const more = Number(card) - GIVEN_UP_LINES_PER_DAY;
-    const words = `${more} more Stripe ${more === 1 ? "event was" : "events were"} skipped today because ${more === 1 ? "it" : "they"} could not be processed. Check your disputes and refunds in your Stripe dashboard.`;
-    const lines = listening.map(({ endpoint, type }) => noticeLine(
-      `dlv_${createHash("sha256").update(`${statsId}|${day}|${endpoint.id}|given-up-day`).digest("hex").slice(0, 24)}`,
-      statsId, endpoint.id, eventIdFor(statsId, "stripe.given_up_day", `${day}|${endpoint.id}`), type, words, now,
+  if (own.length) {
+    const start = cause === "ours" ? `We could not process this Stripe event about ${as.about}` : `Stripe kept refusing or failing to answer about ${as.about}`;
+    const words = `${start}, so it was skipped after ${visits} tries.${as.known ? "" : " It may not be from this store."} Look it up in your Stripe dashboard.`;
+    const lines = own.map(({ endpoint, type }) => noticeLine(
+      `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
+      statsId, endpoint.id, eventId, type, words, now,
     ));
-    // Rewritten with the day's count; in the log once.
-    await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "EX", DELIVERY_SECONDS]));
-    await pushMissing(statsId, lines.map((line) => line.id));
-    return;
+    const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));
+    // A new line goes in the log; one already there from a visit that died, only when that visit died before putting it there.
+    await pushMissing(statsId, lines.filter((_, at) => written[at] !== "OK").map((line) => line.id), lines.filter((_, at) => written[at] === "OK").map((line) => line.id));
   }
 
-  const start = cause === "ours" ? `We could not process this Stripe event about ${as.about}` : `Stripe kept refusing or failing to answer about ${as.about}`;
-  const words = `${start}, so it was skipped after ${visits} tries.${as.known ? "" : " It may not be from this store."} Look it up in your Stripe dashboard.`;
-  const lines = listening.map(({ endpoint, type }) => noticeLine(
-    `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
-    statsId, endpoint.id, eventId, type, words, now,
-  ));
-  const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));
-  // A new line goes in the log; one already there from a visit that died, only when that visit died before putting it there.
-  await pushMissing(statsId, lines.filter((_, at) => written[at] !== "OK").map((line) => line.id), lines.filter((_, at) => written[at] === "OK").map((line) => line.id));
-  await redisPipeline([["SET", eventKey(eventId), "1", "EX", EVENT_SECONDS]]);
+  if (summed.length) {
+    const date = new Date(day * 86_400_000).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+    const ids = summed.map(({ endpoint }) => `dlv_${createHash("sha256").update(`${statsId}|${day}|${endpoint.id}|given-up-day`).digest("hex").slice(0, 24)}`);
+    // The line keeps when it was first written and what it was first said as; only its count and its time move.
+    const before = (await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)]))).map(parseDelivery);
+    const lines = summed.map(({ endpoint, type, more }, at) => {
+      const words = `${more} more Stripe ${more === 1 ? "event" : "events"} could not be processed on ${date}. Look ${more === 1 ? "it" : "them"} up in your Stripe dashboard.`;
+      const kept = before[at];
+      return { ...noticeLine(ids[at], statsId, endpoint.id, eventIdFor(statsId, "stripe.given_up_day", `${day}|${endpoint.id}`), kept?.type && kept.type !== "test" ? kept.type : type, words, now), createdAt: kept?.createdAt ?? now };
+    });
+    await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "EX", DELIVERY_SECONDS]));
+    await pushMissing(statsId, ids);
+  }
+  await redisPipeline([["SET", mark, "1", "EX", EVENT_SECONDS]]);
 }
 
 /** One store: its Stripe events since the last one read, oldest first. */
@@ -1403,12 +1472,21 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
   let last = "";
   // The event this run stopped at, if any, with what its wait record becomes.
   let stuck: { event: string; runs: number; since: number } | null = null;
-  const send = async (rows: StripeEvent[]): Promise<boolean> => {
+  const send = async (rows: StripeEvent[], reread = false): Promise<boolean> => {
+    // A store read again from far back (its first run, or an anchor Stripe
+    // lost): events already passed over are passed over again at once, not
+    // held again; one pipeline a page, and only then.
+    const marks = reread ? await redisPipeline(rows.map((row) => ["GET", givenUpMark(statsId, str(row.id) ?? "")])) : [];
+    const passed = new Set(rows.filter((_, at) => marks[at] !== null && marks[at] !== undefined).map((row) => str(row.id) ?? ""));
     // Stripe lists newest first; they are sent in the order they happened.
     for (const event of [...rows].reverse()) {
       const id = str(event.id) ?? "";
+      if (passed.has(id)) {
+        last = id || last;
+        continue;
+      }
       let outcome: Outcome;
-      let cause: "stripe" | "ours" = "stripe";
+      lookups.confirmed = undefined;
       try {
         outcome = await fromStripe(store, event, lookups, heard);
       } catch (error) {
@@ -1417,9 +1495,10 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
         // said apart in the log, and counted like a failure that may clear,
         // so it too ends in a give-up instead of holding the store forever.
         console.error("OUR CODE FAILED on a Stripe event (not a Stripe error); it is read again next run", store.handle, id, event.type, error);
-        outcome = "passing";
-        cause = "ours";
+        outcome = "ours";
       }
+      // Whose the failure was, by this visit's: the one the line says.
+      const cause: "stripe" | "ours" = outcome === "ours" ? "ours" : "stripe";
       if (outcome === true) {
         handled += 1;
         last = id || last;
@@ -1440,7 +1519,7 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
       // said where the creator sees it as well as in the server's log. The
       // endpoints as they are now, so one added during this visit is told too.
       console.error(`WEBHOOK EVENT GIVEN UP: a Stripe event waited ${runs} visits since ${new Date(since * 1000).toISOString()} (${cause === "ours" ? "our code failed" : `a Stripe lookup kept failing, ${outcome}`}); it is passed over and not sent`, store.handle, id, event.type);
-      await markGivenUp(store, statsId, (await readConfig(statsId)) ?? config, event, runs, cause, now);
+      await markGivenUp(store, statsId, (await readConfig(statsId)) ?? config, event, runs, cause, lookups.confirmed === id, now);
       last = id || last;
     }
     return true;
@@ -1480,7 +1559,7 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
       if (page === FIRST_RUN_PAGES - 1) console.error("a store has more Stripe events than one first run reads; the oldest are left", store.handle);
     }
     if (!pages.length) return 0;
-    for (const rows of [...pages].reverse()) if (!(await send(rows))) break;
+    for (const rows of [...pages].reverse()) if (!(await send(rows, true))) break;
     if (last) await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS]]);
     await settle();
     return handled;
@@ -1571,14 +1650,16 @@ export async function watchStripe(deadline: number, now = Date.now()): Promise<{
  */
 export async function forgetStoreWebhooks(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const [rawLog] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
+  const [rawLog, rawConfig] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1], ["GET", cfgKey(statsId)]]);
   const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
+  const today = Math.floor(Date.now() / 86_400_000);
   await redisPipeline([
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
     ["DEL", waitKey(statsId)],
-    ...[0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, Math.floor(Date.now() / 86_400_000) - back)]),
+    // Each endpoint's sets of passed-over events, today's and the two days before (an endpoint removed since: gone within two days by itself).
+    ...(parseConfig(rawConfig)?.endpoints ?? []).flatMap((e) => [0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, today - back, e.id)])),
     ["DEL", logKey(statsId)],
     ...ids.flatMap((id) => [
       ["DEL", deliveryKey(id)],

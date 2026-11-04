@@ -25,7 +25,12 @@ import { type AllowanceKind, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, 
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
 
-export type Taken = { ok: true; left: number } | { ok: false; reason: "used" | "unknown" | "pool"; limit: number; message: string };
+/**
+ * What taking from a figure answered. A refusal for being used says, when
+ * the count was read, how many were `left` before this asked (from the
+ * figure's own count, never read again) and when they come back (`reset`).
+ */
+export type Taken = { ok: true; left: number } | { ok: false; reason: "used" | "unknown" | "pool"; limit: number; message: string; left?: number; reset?: string };
 
 const key = (kind: AllowanceKind, id: string, window: string) => `nl:allow:${kind}:${id}:${window}`;
 
@@ -88,7 +93,8 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
     if (counted <= limit) return { ok: true, left: limit - counted };
     // Over: what this asked for is given back, so a refused use costs the figure nothing.
     await redisPipeline([["DECRBY", k, n]]).catch(() => {});
-    return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")));
+    const reset = resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0);
+    return { ok: false, reason: "used", limit, message: usedWords(kind, limit, reset, standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")), left: Math.max(0, limit - (counted - n)), reset };
   } catch {
     return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   }

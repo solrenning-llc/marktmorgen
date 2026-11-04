@@ -41,8 +41,12 @@
  *     at once when its deadline has already passed (nothing left to cancel
  *     for free); and, only when the hold would not last until the deadline,
  *     charged at once with `refundFee` true: a buyer canceling in time is
- *     refunded, and the fee Stripe keeps on a refunded charge is a cost the
- *     margin table reads from that flag. No later session ever needs it.
+ *     refunded, and Stripe keeps its fee on a refunded charge. That is a
+ *     direct charge on the creator's own (Standard) Stripe account, whose
+ *     fees Stripe takes from the creator's balance, so the fee lost is the
+ *     creator's, never Marktmorgen's; nothing reads the flag yet (no margin
+ *     table or cost registry line does), and the booking unit tells the
+ *     creator before such a series is offered. No later session ever needs it.
  *   - A session moved within the rules is worked out again from its new
  *     start and from the moment it was moved, never planned in the past:
  *     moved inside its deadline by the buyer, it is charged at once and not
@@ -71,7 +75,8 @@
  *     amount is charged at once, off-session; if that fails too, the link
  *     works until the session starts, and unpaid it is canceled at its
  *     start. A charge that fails once the session has started never cancels
- *     a session that took place: what is owed stays on the pay link. Both
+ *     a session that took place: what is owed stays on the pay link for
+ *     OWED_PAY_DAYS after the start (owedPayBy), never for ever. Both
  *     sides are told each step (failedCharge, failedChargeWords).
  *   - A charge made at or after the deadline (a capture, a charge at once,
  *     a first session booked inside it, a session moved inside it) is kept:
@@ -86,8 +91,10 @@
  *     dealt with too: never charged and its open PaymentIntents closed (a
  *     hold released, a failed one canceled); or, when the buyer stopped it
  *     after its deadline, its hold captured, or charged at once when no hold
- *     is left to capture, or its failed late charge left owed on the pay
- *     link: a late cancellation is paid, as promised. One processing is
+ *     is left to capture: a late cancellation is paid, as promised. A
+ *     failed charge (C2-94) is the exception: the buyer canceling late is
+ *     treated as one who does nothing, the session canceled and nothing
+ *     charged, never left owed, as the words agreed to say. One processing is
  *     never counted paid: Stripe can neither refund nor cancel it, so it is
  *     left, reported, and decided again once it has settled. The pay link
  *     re-reads the session before it shows anything (payLink). A payment
@@ -103,6 +110,19 @@
  *     a hold is released, never refunded.
  *   - Not with a deposit, a discount code or a package: their figures are one
  *     booking's. Each session's price is the length chosen (lib/call-lengths.ts).
+ *   - Not in a store with tax on (C2-94, seriesBillingProblem "tax"): a
+ *     single call's tax is Stripe Tax's, worked out at its Checkout from the
+ *     buyer's address (lib/tax.ts, applyTax), and a PaymentIntent made off
+ *     the session has no Checkout to work it out or record it. Charging the
+ *     price alone would leave the tax promised on top uncollected; adding a
+ *     figure of our own would not be the tax Stripe works out, and an amount
+ *     other than the record's is a mismatch that charges nothing. So a
+ *     series is refused there until its tax is worked out by Stripe too.
+ *   - Each series is charged in the currency it was booked in, kept with
+ *     the series and each session's record (ChargeRecord.currency), never
+ *     the store's currency read later; the store's currency cannot change
+ *     while a series runs (app/api/store/currency/route.ts,
+ *     lib/call-series-open.ts).
  *   - The words a buyer agrees to before booking (seriesChargeWords) are
  *     worked out from the charges and refuse charges that are not the plan.
  *     Before they are shown, the booking unit checks against Stripe's and the
@@ -177,9 +197,27 @@
  *
  * The next unit's checklist (round-8 review, 4 November 2026):
  *   - Store per session its SeriesCharge, movedBy and the moment it was
- *     worked out, and pass 0 hours to failedCharge, payBy and the words for
- *     a session the creator moved inside its deadline (its cancelBy is its
- *     start).
+ *     worked out, and pass 0 hours to failedCharge, payBy and
+ *     failedChargeWords for a session the creator moved inside its deadline
+ *     (its cancelBy is its start). Only to those three: the change message
+ *     (seriesMoveMessage) always takes the deadline promised at booking,
+ *     and refuses 0 for the cases that name it.
+ *   - Store the series' currency at booking, write it on every record, and
+ *     build SeriesKey from the stored series, never from the store; mark the
+ *     series running (markSeriesOpen, lib/call-series-open.ts) in the same
+ *     step, and ended (markSeriesEnded) when it ends early.
+ *   - Before offering a series with a first session charged at once
+ *     (refundFee), tell the creator that a refund in time loses Stripe's fee
+ *     on their account.
+ *   - Write each session's ChargeRecord at booking (its cents and currency
+ *     as booked): toStop refuses a session without one. Pass toStop each
+ *     session's SeriesCharge.at (chargeAt) with its cancelBy.
+ *   - Tell the creator in the studio, in plain US English and with no date
+ *     promised, why a series is not offered while sales tax is on, e.g.:
+ *     "Series of calls are off while sales tax is on. Each later session is
+ *     charged without a checkout page, so Stripe cannot add the tax to it."
+ *     The tax route refuses to switch tax on while a series runs
+ *     (app/api/store/tax/route.ts).
  *   - Decide under the series' lock with `at` the moment a cancellation is
  *     accepted there, never a time the request carries; a charge counts as
  *     kept for a stop only when it was made before that moment.
@@ -228,7 +266,7 @@ export type SeriesCharge = {
   /** When it is captured: the deadline before the session, or its start for a session the creator moved inside its deadline. The same as `at` when `way` is "charge". */
   captureAt: number;
   way: "hold" | "charge";
-  /** Charged before the buyer's last moment to cancel for free: a refund in time loses Stripe's fee. The margin table reads it. */
+  /** Charged before the buyer's last moment to cancel for free: a refund in time loses Stripe's fee, on the creator's own account (a direct charge), so the creator's cost. Nothing outside this file reads it yet; the booking unit says it to the creator. */
   refundFee: boolean;
   /** Who moved the session to the start this charge was worked out from. */
   movedBy: MovedBy;
@@ -373,6 +411,8 @@ function holdTime(intent: Intent): number {
 export type ChargeRecord = {
   index: number;
   cents: number;
+  /** The currency the series was booked in (lowercase), written at booking with `cents`: every PaymentIntent is created, matched and refunded in it, never in the store's currency read later. */
+  currency: string;
   /** How many PaymentIntents were started for it, written under the lock before each is created; 0 when never. */
   attempt: number;
   /** When the latest attempt was started. */
@@ -409,7 +449,10 @@ export type ChargeRecord = {
 /**
  * The series as the PaymentIntents name it: its id, the platform's Connect
  * application they are created by (its ca_ id, as a PaymentIntent's
- * `application` reads, never an acct_ account id), and the store's currency.
+ * `application` reads, never an acct_ account id), and the currency the
+ * series was booked in, read from the stored series, never the store's
+ * currency now. A key whose currency is not its records' charges nothing
+ * (blockers, `config`).
  */
 export type SeriesKey = { id: string; application: string; currency: string };
 
@@ -467,7 +510,8 @@ export const MAX_LINK_TRIES = 3;
  * allowed_payment_method_types[] (payment_method_types[] on API versions
  * before it), metadata[mm_*], on a confirm-only parameter (CONFIRM_ONLY_KEYS)
  * without confirm=true, or without an explicit capture_method (manual or
- * automatic: never Stripe's default, automatic_async since API 2024-12).
+ * automatic: never Stripe's default, automatic_async since API 2024-12),
+ * or with an amount or currency other than the record's (as booked).
  * Read on docs.stripe.com/api/payment_intents/create (version
  * 2026-10-28.endive) and the save-and-reuse guide on 4 November 2026:
  * off_session takes true, "one_off" or "recurring", and these series send
@@ -481,6 +525,8 @@ export function startAttempt(record: ChargeRecord, now: number, body: Readonly<R
     if ((CONFIRM_ONLY_KEYS as readonly string[]).includes(key) && body.confirm !== "true") throw new Error(`startAttempt: ${key} can only be sent with confirm=true`);
   }
   if (body.capture_method !== "manual" && body.capture_method !== "automatic") throw new Error("startAttempt: capture_method must be sent, manual or automatic");
+  // Only the amount and currency booked: never the store's currency now, never a figure added on top (C2-94).
+  if (body.amount !== String(record.cents) || typeof body.currency !== "string" || body.currency.toLowerCase() !== record.currency.toLowerCase()) throw new Error("startAttempt: the amount and currency must be the session's as booked");
   return { ...record, attempt: record.attempt + 1, attemptAt: now, attemptBody: { ...body }, attemptKeyRefused: false, attemptFailed: false };
 }
 
@@ -613,13 +659,13 @@ const RANK: IntentStatus[] = ["succeeded", "requires_capture", "processing", "re
 /**
  * Whether a listed PaymentIntent is this session's: its prefixed metadata
  * names this series and session. One that does, but with another amount,
- * currency or application (null included; not checked only when Stripe's
+ * currency (the record's, as booked) or application (null included; not checked only when Stripe's
  * object does not carry it), is a mismatch: never ignored, never acted on,
  * reported, and it blocks any new charge for the session.
  */
 function matchOf(series: SeriesKey, record: ChargeRecord, f: FoundIntent): "mine" | "mismatch" | "other" {
   if (f.metadata.mm_series !== series.id || f.metadata.mm_session !== String(record.index)) return "other";
-  if (f.amount !== record.cents || f.currency.toLowerCase() !== series.currency.toLowerCase()) return "mismatch";
+  if (f.amount !== record.cents || f.currency.toLowerCase() !== record.currency.toLowerCase()) return "mismatch";
   return f.application !== undefined && f.application !== series.application ? "mismatch" : "mine";
 }
 
@@ -684,7 +730,8 @@ export function sessionIntents(series: SeriesKey, record: ChargeRecord, found: r
  * or application (`mismatch`); its only payment refunded in full outside
  * these rules, by the creator in their Stripe dashboard (`refunded`: the
  * buyer is never charged again without an explicit decision); or a
- * SeriesKey whose application is not a ca_ id (`config`). Each is reported
+ * SeriesKey whose application is not a ca_ id, or whose currency is not the
+ * record's as booked (`config`). Each is reported
  * to the creator. Blockers are read before anything else: while one stands,
  * nothing is reused, captured or created for the session; a late stop's
  * good hold is postponed (neither captured nor released), while toStop
@@ -699,6 +746,8 @@ export type Blocked = { why: "mismatch" | "refunded" | "config"; ids: string[] }
 
 function blockers(series: SeriesKey, record: ChargeRecord, all: readonly Live[]): Blocked | null {
   if (!series.application.startsWith("ca_")) return { why: "config", ids: [] };
+  // A key built from the store's currency now, not the series' as booked: nothing charged, reported (C2-94).
+  if (series.currency.toLowerCase() !== record.currency.toLowerCase()) return { why: "config", ids: [] };
   // A mismatch refunded in full or canceled can charge nothing more: it stops blocking.
   const mismatch = all.filter((i) => i.mismatch && i.status !== "canceled" && !(i.status === "succeeded" && i.full));
   if (mismatch.length) return { why: "mismatch", ids: mismatch.map((i) => i.id) };
@@ -865,7 +914,9 @@ export type AfterStop = "refund_in_full" | "release" | "capture" | "cancel" | "w
  * captured, as a late cancellation is paid. As Stripe allows: only a payment
  * that succeeded is refunded, and never one refunded in full already
  * (`refunded`); a hold is released (canceled), never refunded; one
- * processing is waited on.
+ * processing is waited on. For a session toStop put in `never` (stopped in
+ * time, or late after a failed charge), the caller passes `paid` false, so a
+ * pay link paid after the stop is refunded in full.
  */
 export function paidAfterStop(status: IntentStatus, paid = false, refunded = false): AfterStop {
   if (status === "canceled") return "none";
@@ -903,7 +954,6 @@ export type StopSteps = {
   refund: Refund[];
   capture: { id: string; key: string }[];
   charge: { index: number; attempt: number; key: string; capture: "manual" | "automatic"; body: Readonly<Record<string, string>> | null }[];
-  owed: string[];
   pending: { id: string; index: number }[];
   postpone: { id: string; index: number; until: number }[];
   unrefundable: { id: string; index: number; why: "disputed" | "refused" }[];
@@ -919,9 +969,13 @@ export type StopSteps = {
  * the same session, is dealt with too. Each call carries its key.
  * `cancelBy` is each session's own (SeriesCharge.cancelBy), required for
  * every session stopped (a session the creator moved inside its deadline
- * is free to cancel until its start); `cents` the price of a session with
- * no record. A session at its start has started: for one whose cancelBy is
- * its start, the last moment to cancel for free is just before it.
+ * is free to cancel until its start), and `chargeAt` each session's
+ * SeriesCharge.at (an attempt refused at or after it belongs to the plan
+ * now). Every session stopped needs its record, written at booking with the
+ * price and currency booked: none is made up here (C2-94), so a key in
+ * another currency is always caught (blockers). A session at its start has
+ * started: for one whose cancelBy is its start, the last moment to cancel
+ * for free is just before it.
  *   - `blocked`: a mismatch (blockers) is reported, never acted on, and
  *     no new charge is made for its session; nor for a late stop whose only
  *     payment was refunded in full outside these rules.
@@ -935,14 +989,18 @@ export type StopSteps = {
  *   - `pending`: those processing, which Stripe can neither refund nor
  *     cancel: never counted paid, reported, and decided again once they
  *     have settled.
- *   - `never`: each session that must never be charged.
+ *   - `never`: each session that must never be charged. A payment that
+ *     still succeeds for one of them later (a pay link paid after) is read
+ *     with paidAfterStop(status, false): refunded in full.
  *   - For sessions the buyer stopped after their cancelBy (a late
  *     cancellation is paid), when nothing was paid: a hold still good is
  *     captured (`capture`), or, beside one processing, left uncaptured while
  *     it stays good (`postpone`, decided again when either settles or by
- *     `until`); or nothing new while one is processing; or `owed`, a failed
- *     late charge left on its pay link; or, for a failed hold whose link
- *     ended at the deadline, nothing (the session goes unpaid); else
+ *     `until`); or nothing new while one is processing; or, for a failed
+ *     hold whose link ended at the deadline or a failed charge (C2-94: the
+ *     same as a buyer who does nothing, never owed), or an attempt Stripe
+ *     refused for this plan without making a PaymentIntent (attemptFailed),
+ *     nothing (the session goes unpaid, its PaymentIntents canceled); else
  *     `charge`, charged at once (no hold placed, or one canceled or
  *     expired): the latest attempt sent again, same key and body, while it
  *     is unknown, otherwise the next attempt.
@@ -951,16 +1009,20 @@ export type StopSteps = {
 export function toStop(
   canceled: readonly number[],
   records: readonly ChargeRecord[],
-  input: { series: SeriesKey; found: readonly FoundIntent[]; starts: readonly number[]; at: number; by: "creator" | "buyer"; deadlineHours: number; cents: number; cancelBy: readonly number[] },
+  input: { series: SeriesKey; found: readonly FoundIntent[]; starts: readonly number[]; at: number; by: "creator" | "buyer"; deadlineHours: number; cancelBy: readonly number[]; chargeAt: readonly number[] },
 ): StopSteps {
   const byIndex = new Map(records.map((r) => [r.index, r]));
-  const out: StopSteps = { never: [], close: [], refund: [], capture: [], charge: [], owed: [], pending: [], postpone: [], unrefundable: [], blocked: [] };
+  const out: StopSteps = { never: [], close: [], refund: [], capture: [], charge: [], pending: [], postpone: [], unrefundable: [], blocked: [] };
   for (const index of canceled) {
     const start = input.starts[index];
     if (!(start > input.at)) continue;
-    const record = byIndex.get(index) ?? { index, cents: input.cents, attempt: 0, attemptAt: null, attemptBody: null, attemptKeyRefused: false, attemptFailed: false, intent: null, refunded: false, kept: false, refused: [], tries: {} };
+    // Every session has its record from booking, with the price and currency booked: never one made up here from the key (C2-94), which would let a key in another currency charge.
+    const record = byIndex.get(index);
+    if (!record) throw new Error(`toStop: no record for session ${index}`);
     const cancelBy = input.cancelBy[index];
     if (!Number.isFinite(cancelBy)) throw new Error(`toStop: no cancelBy for session ${index}`);
+    const chargeAt = input.chargeAt[index];
+    if (!Number.isFinite(chargeAt)) throw new Error(`toStop: no chargeAt for session ${index}`);
     const all = allIntents(input.series, record, input.found);
     const blocked = blockers(input.series, record, all);
     if (blocked) out.blocked.push({ index, ...blocked });
@@ -983,7 +1045,6 @@ export function toStop(
     let keep: string | null = null;
     if (late && !paid.length) {
       const good = holds.find((h) => holdGoodUntil(holdTime(h), h.captureBefore) >= input.at);
-      const owes = open.find((i) => i.capture === "automatic");
       if (good && (processing.length || blocked)) {
         out.postpone.push({ id: good.id, index, until: holdGoodUntil(holdTime(good), good.captureBefore) });
         keep = good.id;
@@ -995,11 +1056,8 @@ export function toStop(
       } else if (live.some((i) => i.status === "succeeded" && i.full)) {
         // Its only payment was refunded in full outside these rules: never charged again without an explicit decision.
         out.blocked.push({ index, why: "refunded", ids: live.filter((i) => i.status === "succeeded" && i.full).map((i) => i.id) });
-      } else if (owes) {
-        out.owed.push(owes.id);
-        keep = owes.id;
-      } else if (open.length && !holds.length) {
-        // A failed hold: its link ended at the deadline, so the session goes unpaid.
+      } else if (open.some((i) => i.capture === "automatic") || (open.length && !holds.length) || (record.attemptFailed && record.attemptAt !== null && record.attemptAt >= chargeAt)) {
+        // A failed hold (its link ended at the deadline) or a failed charge (C2-94: as for a buyer who does nothing, canceled and not charged, never owed), including one Stripe refused for this plan without making a PaymentIntent (attemptFailed, read as chargeAttempt reads it): the session goes unpaid, its PaymentIntents closed.
         out.never.push(index);
       } else if (unknownAttempt(record, all, input.at)) {
         const body = record.attemptBody as Readonly<Record<string, string>>;
@@ -1015,18 +1073,28 @@ export function toStop(
   return out;
 }
 
+/** How long the link to pay a session that took place stays open after its start (failedCharge "owed"). */
+export const OWED_PAY_DAYS = 14;
+
+/** Until when the link to pay a session that took place works: OWED_PAY_DAYS after its start. Then it is closed and the creator decides. */
+export function owedPayBy(start: number): number {
+  return start + OWED_PAY_DAYS * 24 * HOUR;
+}
+
 /**
  * What the link to pay a failed hold or charge does, read again when it is
  * opened and when it is paid: nothing to pay without a PaymentIntent, or
  * once it is held or paid; refused once it is canceled; an owed charge (a
- * session that took place, or one the buyer stopped late) stays payable;
- * otherwise refused once the session is stopped, and from `payBy` on.
+ * session that took place) stays payable even once stopped, until
+ * owedPayBy(start), worked out here from the session's start, never for
+ * ever; otherwise refused once the session is stopped, and from `payBy` on
+ * (payBy of the step that failed).
  */
-export function payLink(input: { stopped: boolean; owed?: boolean; status: IntentStatus | null; now: number; payBy: number }): "pay" | "none" | "stopped" | "closed" | "late" | "done" {
+export function payLink(input: { stopped: boolean; owed?: boolean; status: IntentStatus | null; now: number; payBy: number; start: number }): "pay" | "none" | "stopped" | "closed" | "late" | "done" {
   if (input.status === null) return "none";
   if (input.status === "canceled") return "closed";
   if (input.status === "succeeded" || input.status === "requires_capture" || input.status === "processing") return "done";
-  if (input.owed) return "pay";
+  if (input.owed) return input.now < owedPayBy(input.start) ? "pay" : "late";
   if (input.stopped) return "stopped";
   if (input.now >= input.payBy) return "late";
   return "pay";
@@ -1037,12 +1105,14 @@ export function payLink(input: { stopped: boolean; owed?: boolean; status: Inten
  * the creator, at `at`: toStop's refunds for that session alone, from the
  * PaymentIntents just listed (`found`), never from the record alone.
  */
-export function sessionRefunded(record: ChargeRecord, found: readonly FoundIntent[], input: { series: SeriesKey; start: number; at: number; by: "creator" | "buyer"; deadlineHours: number; cancelBy: number }): Refund[] {
+export function sessionRefunded(record: ChargeRecord, found: readonly FoundIntent[], input: { series: SeriesKey; start: number; at: number; by: "creator" | "buyer"; deadlineHours: number; cancelBy: number; chargeAt: number }): Refund[] {
   const starts: number[] = [];
   starts[record.index] = input.start;
   const cancelBy: number[] = [];
   cancelBy[record.index] = input.cancelBy;
-  return toStop([record.index], [record], { series: input.series, found, starts, at: input.at, by: input.by, deadlineHours: input.deadlineHours, cents: record.cents, cancelBy }).refund;
+  const chargeAt: number[] = [];
+  chargeAt[record.index] = input.chargeAt;
+  return toStop([record.index], [record], { series: input.series, found, starts, at: input.at, by: input.by, deadlineHours: input.deadlineHours, cancelBy, chargeAt }).refund;
 }
 
 /** What a move comes to for the change message (lib/buyer-words/series-move.ts): read from the charge worked out for the new start and the session's record. */
@@ -1091,10 +1161,17 @@ export function moveCase(series: SeriesKey, record: ChargeRecord, found: readonl
   return at("planned");
 }
 
-export type BillingProblem = "deposit" | "code" | "package";
+export type BillingProblem = "deposit" | "code" | "package" | "tax";
 
-/** Whether a series may be charged this way, or why not. */
-export function seriesBillingProblem(input: { deposit: boolean; code: boolean; fromPackage: boolean }): BillingProblem | null {
+/**
+ * Whether a series may be charged this way, or why not. `tax` is the
+ * store's tax setting being on (store.tax.enabled, exclusive or inclusive):
+ * refused, and refused too when it is not said (only `false` passes), since
+ * no PaymentIntent of a series is charged with the tax Stripe works out at a
+ * single call's Checkout (see the header).
+ */
+export function seriesBillingProblem(input: { deposit: boolean; code: boolean; fromPackage: boolean; tax: boolean }): BillingProblem | null {
+  if (input.tax !== false) return "tax";
   if (input.deposit) return "deposit";
   if (input.code) return "code";
   if (input.fromPackage) return "package";
@@ -1107,12 +1184,15 @@ const same = (a: SeriesCharge, b: SeriesCharge) => a.index === b.index && a.cent
  * What the buyer agrees to before booking, in US English, worked out from
  * the charges themselves: `charges` from seriesCharges, `starts` each
  * session's start, `dates` each session's day and time as said, and `money`
- * the store's currency formatter. Throws when the deadline is not one of
+ * the series' currency formatter, `tax` the store's tax setting (only false
+ * is worked out). Throws when the tax is on or not said, the deadline is not one of
  * SERIES_DEADLINES, or when any charge is not the one sessionCharge plans
  * for that start, so the words never say other than what will be charged.
  */
-export function seriesChargeWords(input: { charges: readonly SeriesCharge[]; starts: readonly number[]; dates: readonly string[]; money: (cents: number) => string; store: string; bookedAt: number; deadlineHours?: number }): string {
+export function seriesChargeWords(input: { charges: readonly SeriesCharge[]; starts: readonly number[]; dates: readonly string[]; money: (cents: number) => string; store: string; bookedAt: number; tax: boolean; deadlineHours?: number }): string {
   const { charges, starts, dates, store } = input;
+  // "for $X in all" is the whole charge only without tax on top: never said for a store with tax on, nor when it is not said (seriesBillingProblem).
+  if (input.tax !== false) throw new Error("series words: a store with tax on is not offered a series");
   const deadline = readDeadline(input.deadlineHours);
   if (deadline === null) throw new Error("series words: the deadline is not one a series may have");
   if (!charges.length || charges.length !== dates.length || charges.length !== starts.length) throw new Error("series words: the charges, the starts and the dates do not agree");
@@ -1135,14 +1215,14 @@ export function seriesChargeWords(input: { charges: readonly SeriesCharge[]; sta
     "If your card cannot be reserved, we email you a link to pay.",
     deadline ? "Pay by the cancellation deadline, or that session is canceled and you are not charged." : "Pay before the session starts, or it is canceled and you are not charged.",
     ...(deadline
-      ? ["If the charge at the deadline fails, the link works until the session starts.", "If it is not paid by then, that session is canceled and you are not charged."]
-      : ["If the charge when it starts fails, we email you a link to pay it."]),
+      ? ["If the charge at the deadline fails, the link works until the session starts.", "If it is not paid by then, that session is canceled and you are not charged.", `If a charge fails once the session has started, we email you a link to pay it within ${OWED_PAY_DAYS} days.`]
+      : [`If the charge when it starts fails, we email you a link to pay it within ${OWED_PAY_DAYS} days.`]),
     deadline ? `Cancel a session at least ${deadline} hours before it starts and you pay nothing for it.` : "Cancel a session any time before it starts and you pay nothing for it.",
     "The reservation is released, and anything already charged is refunded.",
     ...(deadline
       ? [
           "If you cancel later or miss it, it is not refunded.",
-          "If you cancel later and its charge failed, you still owe it.",
+          "If you cancel later and its charge failed, that session is canceled and you are not charged.",
           "Once a session is charged at or after its deadline, it is not refunded, even if its time changes later.",
           `If you move a session to less than ${deadline} hours away, it is charged at once and not refunded.`,
           `If ${store} moves a session not charged yet closer than ${deadline} hours, your card is only reserved.`,
@@ -1160,12 +1240,17 @@ export function seriesChargeWords(input: { charges: readonly SeriesCharge[]; sta
  * could not be charged): when the link is sent (`pay_by_link`), when the
  * session is canceled unpaid (`cancel`: at the cancellation deadline after a
  * failed hold with a deadline, otherwise when it was due to start), and when
- * a session that took place stays owed (`owed`). `date` is the session's day
- * and time as said, `payBy` when the link stops working as said; the buyer
- * is not named.
+ * a session that took place stays owed (`owed`, its link open until
+ * owedPayBy). `start` is the session's start and `when` says a moment in
+ * the store's words; the session's day and time and the link's last moment
+ * (owedPayBy, or payBy of the step) are worked out here, never passed in.
+ * The buyer is not named.
  */
-export function failedChargeWords(input: { to: "buyer" | "creator"; what: "pay_by_link" | "cancel" | "owed"; step: "hold" | "charge"; date: string; payBy: string; deadlineHours: number }): string {
-  const { to, what, date, payBy: by } = input;
+export function failedChargeWords(input: { to: "buyer" | "creator"; what: "pay_by_link" | "cancel" | "owed"; step: "hold" | "charge"; start: number; when: (ms: number) => string; deadlineHours: number }): string {
+  const { to, what } = input;
+  const date = input.when(input.start);
+  // The link's last moment, worked out here: owedPayBy for a session that took place, payBy of the step that failed otherwise.
+  const by = input.when(what === "owed" ? owedPayBy(input.start) : payBy(input.start, input.deadlineHours, input.step));
   const verb = input.step === "hold" ? "reserved" : "charged";
   const at = input.step === "hold" && input.deadlineHours > 0 ? "at the cancellation deadline" : "when it was due to start";
   if (what === "pay_by_link") {
@@ -1175,8 +1260,8 @@ export function failedChargeWords(input: { to: "buyer" | "creator"; what: "pay_b
   }
   if (what === "owed") {
     return to === "buyer"
-      ? [`Your card could not be charged for your session on ${date}.`, "Please pay what you owe with the link below."].join(" ")
-      : [`The buyer's card could not be charged for the session on ${date}.`, "We emailed them a link to pay what they owe."].join(" ");
+      ? [`Your card could not be charged for your session on ${date}.`, `Please pay what you owe with the link below by ${by}.`, "After that, the link stops working."].join(" ")
+      : [`The buyer's card could not be charged for the session on ${date}.`, `We emailed them a link to pay what they owe by ${by}.`, "After that, the link stops working, and anything still owed is between you and the buyer."].join(" ");
   }
   return to === "buyer"
     ? [`Your session on ${date} was canceled ${at}, because it was not paid.`, "You were not charged for it."].join(" ")

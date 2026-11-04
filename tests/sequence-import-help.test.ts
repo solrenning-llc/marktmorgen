@@ -5,7 +5,7 @@
  * numbers, and claims nothing about how another service exports.
  */
 import { readFileSync } from "node:fs";
-import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE, sequenceTemplateCsv } from "@/lib/sequence-template";
 import { MAX_STEPS } from "@/lib/flow-limits";
 import { done, is } from "./check";
 
@@ -20,7 +20,10 @@ is("the numbers and columns from the code, never typed", [answer.includes("${SEQ
 const studio = readFileSync("components/email-studio.tsx", "utf8");
 const flows = readFileSync("lib/flows.ts", "utf8");
 is("what it says happens is what the code does: Studio only; a new sequence saved paused, switched on only from its card", [route.includes('if (monthlyAllowance(store) === 0) return fail("plan", 403);') && route.indexOf('if (monthlyAllowance(store) === 0) return fail("plan", 403);') < route.indexOf('if (action === "flow-import")'), answer.includes("It is saved paused: nothing is sent until you preview it and switch it on from its card."), studio.includes("active: draft.id ? draft.active : false"), /opts\.activate/.test(flows)], [true, true, true, true]);
-is("what is listed is what the reader lists, and only known tracking addresses are taken out", [answer.includes("Each picture, tracked link and merge field taken out, each preview text, which an email in a sequence does not have yet, and each email left out is listed by its line in the file"), answer.includes("links that go through a known click-tracking address"), readFileSync("lib/sequence-import.ts", "utf8").includes("TRACKER_HOSTS")], [true, true, true]);
+is("what is listed is what the reader lists, and only known tracking addresses are taken out", [answer.includes("Each one taken out is listed by its line in the file, above the emails, so you can check it. So is each email left out, and each preview text, which an email in a sequence does not have yet."), answer.includes("links through a known click-tracking address"), readFileSync("lib/sequence-import.ts", "utf8").includes("TRACKER_HOSTS")], [true, true, true]);
+is("Studio and Scale, as the route allows (a monthly email allowance), and no promise of no retyping: each email is copied into the file", [answer.includes("Yes, on Studio and Scale."), /retyp/i.test(answer)], [true, false]);
+is("every sentence is plain: under 21 words (3.1.5)", answer.replace(/^[\s\S]*?a: \[\s*[`"]/, "").replace(/[`"],?\s*(?:\n\s*[`"\]]|$)/g, " ").replace(/\$\{[^}]*\}/g, "X").split(/(?<=[.!?:;])\s+(?=[A-Z“])/).filter((t) => t.split(/\s+/).filter((w) => /[\p{L}\p{N}X]/u.test(w)).length > 20), []);
+is("the template's example leaves preview empty, as the answer says, since the reader takes it out", sequenceTemplateCsv().split("\n")[1].split(",")[3], '""');
 is("the box's own limit comes from the code too", readFileSync("components/sequence-import-box.tsx", "utf8").includes("KB and ${MAX_STEPS} emails."), true);
 is("no claim about how another service exports, no figure but ours", [/Mailchimp|Kit|ActiveCampaign|Beehiiv|MailerLite|export/i.test(answer), /\d/.test(answer.replace(/\$\{[^}]*\}/g, "").replace(/\*\|FNAME\|\*/, "").replace(/544 \[SQ9\]/, ""))], [false, false]);
 

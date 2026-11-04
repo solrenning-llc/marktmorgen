@@ -818,7 +818,7 @@ export async function shipmentMailOf(statsId: string, email: string, runtime: Sh
   const counts = ownArray(await pipeline([["TYPE", index], ["SCARD", index]]));
   if (!counts || counts.length !== 2 || !["none", "set"].includes(String(counts[0])) || !integer(counts[1]) || counts[1] > SHIPMENT_MAIL_MAX_INDEX_ITEMS) throw Error("Shipment copy index is unknown");
   if (counts[0] === "none" && counts[1] === 0) return [];
-  const reply = ownArray(await pipeline([["SMEMBERS", index]])), ids = reply?.length === 1 ? ownArray(reply[0]) : null;
+  const reply = ownArray(await pipeline([["SMEMBERS", index]])), ids = reply?.length === 1 ? ownArray(reply[0], SHIPMENT_MAIL_MAX_INDEX_ITEMS) : null;
   if (!ids || ids.length !== counts[1] || ids.some(id => typeof id !== "string" || !HASH.test(id)) || new Set(ids).size !== ids.length) throw Error("Shipment copy index is incomplete");
   const out: unknown[] = [];
   for (const id of ids) {

@@ -41,7 +41,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
     });
     // Asked more often than its own refresh: the app keeps what it had.
     if (answer.state === "paced") return later(429, 900);
-    if (answer.state === "none") return later(503, 3600);
+    if (!("ics" in answer)) return later(503, 3600);
     return new Response(answer.ics, {
       headers: {
         "Content-Type": "text/calendar; charset=utf-8",

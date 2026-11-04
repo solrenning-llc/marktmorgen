@@ -1410,6 +1410,7 @@
     "components/pdf-preview-toggle.tsx",
     "components/pdf-stamp-toggle.tsx",
     "components/pending-submit.tsx",
+    "components/person-company.tsx",
     "components/person-erase.tsx",
     "components/person-fields.tsx",
     "components/person-find.tsx",

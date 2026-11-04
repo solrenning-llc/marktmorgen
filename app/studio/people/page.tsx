@@ -9,6 +9,9 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
 import { PersonNotes } from "@/components/person-notes";
 import { PersonTasks } from "@/components/person-tasks";
+import { PersonCompany } from "@/components/person-company";
+import { readCompanies } from "@/lib/crm-companies";
+import type { Company } from "@/lib/crm-companies-rules";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
@@ -111,7 +114,9 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   const fields = profile ? await readFields(store.statsId) : [];
   const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
   // Tasks about this person (639 [GL7](6)), and who may be made responsible: the owner and teammates who can see orders.
-  const [tasks, team] = profile?.person ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null)]) : [null, null];
+  const [tasks, team, companies] = profile?.person
+    ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null), readCompanies(store.statsId).catch(() => null)])
+    : [null, null, null];
   const assignees = [store.email.toLowerCase(), ...(team?.members ?? []).filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())];
   // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
   const mayErase = can(view.role, "erase");
@@ -131,7 +136,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <p className="eyebrow">Buyers</p>
           {profile ? (
-            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} />
+            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} companies={companies} />
           ) : (
             <>
               {erased ? (
@@ -306,7 +311,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, companies }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[]; companies: Company[] | null }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -485,6 +490,15 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
           </Link>
         </p>
         {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} /> : null}
+      </section>
+
+      <section aria-labelledby="company-title" className="card mt-8 p-6 sm:p-8">
+        <h2 id="company-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Company</h2>
+        {profile.person && companies ? (
+          <PersonCompany key={profile.person} person={profile.person} initial={companies} />
+        ) : profile.person ? (
+          <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s company could not be read just now. Open this page again in a moment.</p>
+        ) : null}
       </section>
 
       <section aria-labelledby="tasks-title" className="card mt-8 p-6 sm:p-8">

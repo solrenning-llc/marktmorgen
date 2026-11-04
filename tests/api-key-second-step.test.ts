@@ -50,14 +50,17 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
-process.env.RESEND_API_KEY = "re_test_api_key_second_step_only";
+// One of the synthetic credentials the reviewed Resend fallback fixture knows (tests/resend-fixture-credentials.ts).
+process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
 const sent: { to: string; subject: string; text: string }[] = [];
 // The paused-keys emails; the creator's own notices (a webhook added) are not this test's.
 const mails = { get length() { return sent.filter((m) => m.subject.includes("API key")).length; }, list: () => sent.filter((m) => m.subject.includes("API key")) };
 let resendDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   if (String(input).includes("resend")) {
-    if (resendDown) return new Response("{}", { status: 500 });
+    // A refusal the sender is sure of (lib/resend-fallback-transport.ts: not accepted), so trying again may send;
+    // an uncertain one (a 500) holds the message rather than risk sending it twice.
+    if (resendDown) return new Response("{}", { status: 422 });
     const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
     sent.push({ to: Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""), subject: String(body.subject ?? ""), text: String(body.text ?? "") });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }), { status: 200 });

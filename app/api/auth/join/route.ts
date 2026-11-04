@@ -87,7 +87,13 @@ export async function POST(request: NextRequest) {
   const { store, member } = joined;
 
   await logTeam(store.sid, { who: member.email, role: member.role, what: `Joined the team as ${ROLE_NAMES[member.role]}` });
-  after(() => noticeCreator(store, { kind: "team-joined", who: member.email, role: ROLE_NAMES[member.role] }));
+  const tell = () => noticeCreator(store, { kind: "team-joined", who: member.email, role: ROLE_NAMES[member.role] });
+  // After the answer, inside the route's time; at once, unwaited, where there is no request to wait for (a test).
+  try {
+    after(tell);
+  } catch {
+    void tell().catch((error: unknown) => console.error("telling the owner about a new teammate failed", error));
+  }
 
   // Already logged in as this address: nothing about the session changes.
   if (signedInAs) {

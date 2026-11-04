@@ -71,7 +71,7 @@ import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
 import { MAX_TEAM, LOG_LINES } from "@/lib/team";
-import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
+import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, SKIPPED_LINES_PER_DAY, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
 import { MAX_DEVICES } from "@/lib/phone-alerts";
 import { MAX_FEEDS } from "@/lib/calendar-sync";
@@ -887,9 +887,15 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:anchor:@lib/webhooks.ts": { what: "The last Stripe event read", parts: [capped(KEY, "One a store.")] },
   "nl:hooks:cfg:@lib/webhooks.ts": { what: "The store's endpoints", parts: [capped(MAX_ENDPOINTS * 2 * KB, "MAX_ENDPOINTS endpoints.", src("lib/webhooks.ts", "MAX_ENDPOINTS"))] },
   "nl:hooks:d:@lib/webhooks.ts": { what: "One delivery and how it went, a week", parts: [
-    // Bounded where it is made (lib/webhooks.ts, emitEvent): a message past it is kept as a line that says so. The largest
-    // message the code makes, a sale of a full bundle with three full bundles ticked at checkout, is about 30 KB.
+    // Bounded where it is made (lib/webhooks.ts, emitEvent: every text cleaned and cut at MESSAGE_TEXT_MAX, a message past
+    // the bound kept as a line that says so). The largest message the code makes, a sale of a full bundle with three full
+    // bundles ticked at checkout, every text at its longest in quotation marks, is about 45 KB (tests/api-events-measured.test.ts).
+    // A message is kept only by a delivery the month counted: made with the month's deliveries used it is a line, and a
+    // try refused for them drops it (attempt).
     per("webhook", 7, DELIVERY_MAX_BYTES, "One delivery and how it went, a week, at the most a delivery is kept at (DELIVERY_MAX_BYTES)"),
+    // Messages not kept (too large, or the month's deliveries used): SKIPPED_LINES_PER_DAY lines a reason a day (counted in
+    // code, nl:hooks:wait:<id>:skip:<reason>:<day>) and one summary line an endpoint, each for every endpoint, a week.
+    capped(7 * 2 * (SKIPPED_LINES_PER_DAY + 1) * MAX_ENDPOINTS * 2 * KB, "Lines of messages not kept: SKIPPED_LINES_PER_DAY a reason a day and one summary, one an endpoint, a week.", src("lib/webhooks.ts", "SKIPPED_LINES_PER_DAY", "MAX_ENDPOINTS")),
     // A passed-over Stripe event leaves its line without taking a delivery: per endpoint, GIVEN_UP_LINES_PER_DAY events a day
     // (counted in code) get their own, every later one that day only rewrites the endpoint's summary line; at most MAX_ENDPOINTS
     // endpoints a store a day (counted in code, nl:hooks:wait:<id>:eps:<day>), each line kept a week.
@@ -903,7 +909,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),
   "nl:hooks:q@lib/webhooks.ts": company("Deliveries waiting for a try", "One sorted set, members gone within a week: each a webhook's."),
   "nl:hooks:stores@lib/webhooks.ts": company("Stores with any endpoint", "One set for every store."),
-  "nl:hooks:wait:@lib/webhooks.ts": { what: "The Stripe event the store's reading waits on, and for how many runs", parts: [capped(KEY, "One a store, for thirty days at most."), capped(2 * (MAX_ENDPOINTS * (288 / 3) * 128 + MAX_ENDPOINTS * 64 + 64), "The day's passed-over events said to each endpoint (a sorted set an endpoint, at most MAX_ENDPOINTS endpoints a store a day in a set of their own, and the day's count that numbers them, all gone at the end of the next UTC day: two days at most). Not counted in code: bounded by the five-minute cron's calls, 288 visits a day and at least STRIPE_REFUSED_RUNS failed visits before an event is passed over.", src("lib/webhooks.ts", "STRIPE_REFUSED_RUNS", "STRIPE_WAIT_RUNS"))] },
+  "nl:hooks:wait:@lib/webhooks.ts": { what: "The Stripe event the store's reading waits on, and for how many runs", parts: [capped(KEY, "One a store, for thirty days at most."), capped(2 * 2 * KEY, "The day's count of messages not kept, one a reason (too large, the month used), gone at the end of the next UTC day.", src("lib/webhooks.ts", "SKIPPED_LINES_PER_DAY")), capped(2 * (MAX_ENDPOINTS * (288 / 3) * 128 + MAX_ENDPOINTS * 64 + 64), "The day's passed-over events said to each endpoint (a sorted set an endpoint, at most MAX_ENDPOINTS endpoints a store a day in a set of their own, and the day's count that numbers them, all gone at the end of the next UTC day: two days at most). Not counted in code: bounded by the five-minute cron's calls, 288 visits a day and at least STRIPE_REFUSED_RUNS failed visits before an event is passed over.", src("lib/webhooks.ts", "STRIPE_REFUSED_RUNS", "STRIPE_WAIT_RUNS"))] },
   "nl:rl:hooks:test:@lib/webhooks.ts": short("Tests counted", "studio", 1, 128),
   "nl:wo:due@lib/welcome-offer-send.ts": company("Welcome offers due", "One sorted set for every store, each a sign-up's."),
   "nl:wo:n:@lib/welcome-offer-send.ts": short("Welcome offers counted", "day", 62, 128),

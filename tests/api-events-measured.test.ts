@@ -12,6 +12,7 @@
  * line says so. Synthetic stores, keys, Stripe answers and endpoints only;
  * the endpoint's name resolves to a private address, so nothing leaves.
  */
+import { readFileSync } from "node:fs";
 import { GET as eventsRead } from "@/app/api/v1/events/route";
 import { POST as mcp } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
@@ -21,7 +22,8 @@ import { broadcastSizes } from "@/lib/broadcasts";
 import { flowsBytes } from "@/lib/flows";
 import { keptMailRevenueBytes } from "@/lib/mail-revenue";
 import {
-  DELIVERY_MAX_BYTES, DELIVERY_UPDATE_ROOM_BYTES, LOG_SIZE, QUEUE_KEY, TOO_LARGE_WORDS, addEndpoint, emitEvent, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView,
+  DELIVERY_MAX_BYTES, DELIVERY_WRITE_MAX_BYTES, LOG_SIZE, MESSAGE_TEXT_MAX, QUEUE_KEY, SKIPPED_LINES_PER_DAY, TOO_LARGE_WORDS, addEndpoint, cleanText, deliverDue, emitEvent, recentMessages, resendDelivery,
+  setSendHooksForTests, watchStripe, webhooksView,
 } from "@/lib/webhooks";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
@@ -41,6 +43,15 @@ let commands: (string | number)[][] = [];
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: (string | number)[][]) => {
   commands.push(...batch);
+  const [only] = batch;
+  // The webhook queue's lease (lib/webhooks.ts, LEASE_SCRIPT), as Redis runs it and tests/webhooks-delivery.test.ts models it.
+  if (batch.length === 1 && only[0] === "EVAL" && String(only[1]).includes('redis.call("ZSCORE", KEYS[1], ARGV[1])')) {
+    const [, , , key, member, now, until] = only.map(String);
+    const [due] = await pipeline([["ZSCORE", key, member]]);
+    if (due === null || due === undefined || Number(due) > Number(now)) return [0];
+    await pipeline([["ZADD", key, Number(until), member]]);
+    return [1];
+  }
   return pipeline(batch);
 }) as typeof redis.pipeline;
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -125,7 +136,7 @@ async function main(): Promise<void> {
   const sample = (await recentMessages(await mine(), "sale.completed", 1))[0] as { data: { bundle_items: unknown[]; order_bumps: { bundle_items: unknown[] }[] } };
   is("the message names the bundle and every product ticked, each with its own bundle", [sample.data.bundle_items.length, sample.data.order_bumps.length, sample.data.order_bumps.map((b) => b.bundle_items.length)], [20, 3, [20, 20, 20]]);
   is("far past the 4 KB a delivery was priced at", largest > 7 * 4 * 1024, true);
-  is("inside the bound a delivery is made under, with the room its tries write later", largest <= DELIVERY_MAX_BYTES - DELIVERY_UPDATE_ROOM_BYTES, true);
+  is("inside the bound a delivery is made under, with the room its tries write later", largest <= DELIVERY_WRITE_MAX_BYTES, true);
   const family = FAMILIES["nl:hooks:d:@lib/webhooks.ts"];
   const priced = family.parts?.find((p) => "per" in p && p.per === "webhook");
   is("the store's data registry prices a delivery at the bound, at or above the largest the code makes", priced && "bytes" in priced ? [priced.bytes === DELIVERY_MAX_BYTES, priced.bytes >= largest] : null, [true, true]);
@@ -174,19 +185,68 @@ async function main(): Promise<void> {
   is("and what it did not need given back", await used(), allowanceFor(await mine(), "api") - (heldTen + 1 - due));
   await leave(1_000);
 
+  part("Every text cleaned where the message is made: the worst a text can escape is a quotation mark, four bytes kept");
+  is("control characters become a space, a text is cut at its most, a lone surrogate half becomes U+FFFD", [cleanText("a\u0001\u0000b\u007f"), cleanText("x".repeat(MESSAGE_TEXT_MAX + 9)).length, cleanText("\ud800x"), cleanText("\udc00"), cleanText("😀")], ["a b ", MESSAGE_TEXT_MAX, "\ufffdx", "\ufffd", "😀"]);
+  // Every free text of the largest sale at its longest, in the character that escapes worst once cleaned, and again in
+  // control characters (seven bytes kept each before cleaning): titles at MAX_TITLE_LENGTH, every text the order or Stripe
+  // carries (the order's title, its option, its tags, the buyer's name and address) far past MESSAGE_TEXT_MAX.
+  const worstSale = async (char: string, n: number) => {
+    const made: string[] = [];
+    for (let i = 0; i < 84; i += 1) {
+      const added = await addProduct(OWNER, `${char.repeat(78)}${String(i).padStart(2, "0")}`, "", "10");
+      if (!added.ok) throw new Error(`no synthetic product ${i}`);
+      made.push(added.product.id);
+    }
+    const [own, ...more] = made;
+    const long = char.repeat(500);
+    const metadata = {
+      store: HANDLE, product: own, title: long, option: long, utm_source: long, utm_medium: long, utm_campaign: long, utm_content: long, embed_site: `https://${"a".repeat(60)}.${"b".repeat(60)}.example.com`,
+      ...bundleMeta("bundle", more.slice(0, 20)), bump: more[20], bump2: more[21], bump3: more[22],
+      ...bundleMeta("bump_bundle", more.slice(23, 43)), ...bundleMeta("bump2_bundle", more.slice(43, 63)), ...bundleMeta("bump3_bundle", more.slice(63, 83)),
+    };
+    events = [{ id: `evt_Worst${n}`, type: "checkout.session.completed", created: 1_790_001_000 + n, data: { object: { id: `cs_Worst${n}`, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 99_00, currency: "usd", metadata, customer_details: { email: long, name: long } } } }];
+    await watchStripe(Date.now() + 60_000);
+    const [id] = await deliveryIds(statsId);
+    const [raw, size] = await redis.pipeline([["GET", `nl:hooks:d:${id}`], ["STRLEN", `nl:hooks:d:${id}`]]);
+    return { raw: String(raw), size: Number(size) };
+  };
+  const quotes = await worstSale('"', 1);
+  console.log(`  the largest sale with every text at its longest in quotation marks is kept at ${quotes.size.toLocaleString("en-US")} bytes, under ${DELIVERY_WRITE_MAX_BYTES.toLocaleString("en-US")}`);
+  is("kept with its message, at three quarters of the bound or less", [JSON.parse(quotes.raw).body.length > 0, quotes.size <= 0.75 * DELIVERY_WRITE_MAX_BYTES], [true, true]);
+  const controls = await worstSale("\u0001", 2);
+  is("in control characters: kept with its message, none of them escaped (was past 48 KB, every sale not sent)", [JSON.parse(controls.raw).body.length > 0, controls.raw.includes("\\\\u0001"), controls.size < quotes.size], [true, false, true]);
+
   part("A message past the bound is never kept or sent: its line says so, nothing queued, nothing counted");
   const webhooksBefore = await allowanceUsed(await mine(), "webhook");
-  const queued = await emitEvent(await mine(), "sale.completed", "synthetic-too-large", { note: "x".repeat(DELIVERY_MAX_BYTES) });
+  const many = (count: number) => ({ notes: Array.from({ length: count }, () => "x".repeat(MESSAGE_TEXT_MAX)) });
+  const queued = await emitEvent(await mine(), "sale.completed", "synthetic-too-large", many(300));
   const [lineId] = await deliveryIds(statsId);
   const [rawLine, score, lineSize] = await redis.pipeline([["GET", `nl:hooks:d:${lineId}`], ["ZSCORE", QUEUE_KEY, `${statsId}|${lineId}`], ["STRLEN", `nl:hooks:d:${lineId}`]]);
   const line = JSON.parse(String(rawLine)) as { body: string; state: string; lastError: string; givenUp?: boolean };
   is("nothing queued", [queued, score], [0, null]);
-  is("its line: no message, failed, with the reason", [line.body, line.state, line.lastError, line.givenUp], ["", "failed", TOO_LARGE_WORDS, true]);
+  is("its line: no message, failed, with the reason and the true figure", [line.body, line.state, line.lastError, line.givenUp, TOO_LARGE_WORDS.includes(`${DELIVERY_WRITE_MAX_BYTES / 1024} KB`)], ["", "failed", TOO_LARGE_WORDS, true, true]);
   is("kept small", Number(lineSize) < 2 * 1024, true);
   is("the studio's log shows it, without a way to send it again", [(await webhooksView(await mine())).log[0].lastError, (await resendDelivery(await mine(), lineId)).ok], [TOO_LARGE_WORDS, false]);
   is("no webhook delivery of the month taken", (await allowanceUsed(await mine(), "webhook")) - webhooksBefore, 0);
-  const fitting = await emitEvent(await mine(), "sale.completed", "synthetic-fits", { note: "x".repeat(DELIVERY_MAX_BYTES - DELIVERY_UPDATE_ROOM_BYTES - 2_000) });
+  const fitting = await emitEvent(await mine(), "sale.completed", "synthetic-fits", many(Math.floor((DELIVERY_WRITE_MAX_BYTES - 3_000) / (MESSAGE_TEXT_MAX + 6))));
   is("a message just inside the bound is queued as always", fitting, 1);
+  is("the studio's webhooks and the developers page say the bounds, from the code's figures", [
+    readFileSync("components/webhook-editor.tsx", "utf8").includes("Each text in a message is at most ${MESSAGE_TEXT_MAX} characters, with control characters turned into spaces, and a message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep."),
+    readFileSync("app/developers/page.tsx", "utf8").includes("a webhook message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, each text in it at most ${MESSAGE_TEXT_MAX} characters"),
+  ], [true, true]);
+  for (let i = 0; i < SKIPPED_LINES_PER_DAY + 2; i += 1) await emitEvent(await mine(), "sale.completed", `synthetic-too-large-${i}`, many(300));
+  const day = (await webhooksView(await mine())).log.filter((d) => d.lastError === TOO_LARGE_WORDS || / more messages? on .* were too large to send/.test(d.lastError));
+  is("a day's lines are bounded: SKIPPED_LINES_PER_DAY of their own, then one line that counts the rest", [day.filter((d) => d.lastError === TOO_LARGE_WORDS).length, day.filter((d) => d.lastError.startsWith("3 more messages on ")).length], [SKIPPED_LINES_PER_DAY, 1]);
+
+  part("A failed delivery kept before the bound, larger than it, is not sent again by hand");
+  const endpointId = JSON.parse(String((await redis.pipeline([["GET", `nl:hooks:cfg:${statsId}`]]))[0])).endpoints[0].id as string;
+  const oldId = `dlv_${"a".repeat(24)}`;
+  await redis.pipeline([
+    ["SET", `nl:hooks:d:${oldId}`, JSON.stringify({ id: oldId, statsId, endpoint: endpointId, eventId: "evt_OldLarge", type: "sale.completed", body: JSON.stringify({ note: "x".repeat(DELIVERY_MAX_BYTES) }), attempts: 7, state: "failed", next: 0, lastStatus: 500, lastError: "Answered 500.", lastAt: 1, createdAt: 1 }), "EX", 3_600],
+    ["LPUSH", `nl:hooks:log:${statsId}`, oldId],
+  ]);
+  const again = await resendDelivery(await mine(), oldId);
+  is("refused with the reason, nothing sent or counted", [again.ok, again.ok ? null : again.reason, (await allowanceUsed(await mine(), "webhook")) - webhooksBefore], [false, "too_large", 1]);
 
   part("The order's own title stands in only for its own product when a listing is gone");
   events = [sale(900, { product: "p_gone_main", bump: "p_gone_bump", bump2: "", bump3: "", ...bundleMeta("bundle", ["p_gone_b1"]), ...bundleMeta("bump_bundle", ["p_gone_b2"]), title: "The order's own title" })];
@@ -222,6 +282,26 @@ async function main(): Promise<void> {
   commands = [];
   const short = await tool(key, "get_emails");
   is("one short of it: refused, nothing read", [short.error?.code, /This read may take up to/.test(short.error?.message ?? ""), commands.some((c) => c[0] === "GET" && /^nl:(mail:|stats:.*:mailsales)/.test(String(c[1])))], [-32001, true, false]);
+
+  part("The month's webhook deliveries used: no message kept or sent, a line that says so, bounded by the day");
+  {
+    const store = await mine();
+    const waiting = await emitEvent(store, "sale.completed", "synthetic-before-used", { amount_cents: 100 });
+    const [waitingId] = await deliveryIds(statsId);
+    is("a message made while deliveries are left is kept, to be tried", [waiting, JSON.parse(String((await redis.pipeline([["GET", `nl:hooks:d:${waitingId}`]]))[0])).body.length > 0], [1, true]);
+    for (;;) if (!(await takeAllowance(store, "webhook")).ok) break;
+    const tried = await deliverDue(Date.now() + 10_000, Date.now() + 10 * 60_000);
+    const after = JSON.parse(String((await redis.pipeline([["GET", `nl:hooks:d:${waitingId}`]]))[0])) as { body: string; state: string; givenUp?: boolean; lastError: string };
+    is("tried once the month is used: not sent, and its message not kept past it", [tried.tried >= 1, after.state, after.body, after.givenUp, after.lastError.startsWith("Not sent. Your webhook deliveries for this month are used")], [true, "failed", "", true, true]);
+    for (let i = 0; i < SKIPPED_LINES_PER_DAY + 3; i += 1) is(`made with the month used ${i}: nothing queued`, await emitEvent(store, "sale.completed", `synthetic-used-${i}`, { amount_cents: 100 }), 0);
+    const log = (await webhooksView(store)).log;
+    // Every delivery tried once the month was used is not kept either (above); the lines of messages made since have no try.
+    const own = log.filter((d) => d.lastError.startsWith("Not sent. Your webhook deliveries for this month are used") && d.state === "failed" && d.attempts === 0);
+    const rest = log.filter((d) => /^3 more messages on .* were not sent because your store's webhook deliveries for this month are used/.test(d.lastError));
+    is("SKIPPED_LINES_PER_DAY lines of their own, then one line that counts the rest", [own.length, rest.length], [SKIPPED_LINES_PER_DAY, 1]);
+    const bodies = (await redis.pipeline(own.map((d) => ["GET", `nl:hooks:d:${d.id}`]))).map((raw) => (JSON.parse(String(raw)) as { body: string }).body);
+    is("no message kept behind any of them", bodies.every((b) => b === ""), true);
+  }
 
   done();
 }

@@ -156,6 +156,11 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
   }
 }
 
+/** The words a use of `kind` is refused with once the store's figure for it is used, as takeAllowance says them (lib/webhooks.ts, a message not kept). */
+export function allowanceUsedWords(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): string {
+  return usedWords(kind, allowanceFor(store, kind, now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
+}
+
 /** What has been taken of a kind in the store's window, for the studio; 0 when it cannot be read. */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
   const window = allowanceWindow(store, now);

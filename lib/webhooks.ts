@@ -74,13 +74,13 @@ import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
 import { type Store, storeForHandle, saleHandles } from "@/lib/store";
-import { takeAllowance } from "@/lib/store-allowance";
+import { allowanceUsedWords, allowancesUsedStrict, takeAllowance } from "@/lib/store-allowance";
 import { WEBHOOK_ADD_PAUSED_WORDS, WEBHOOK_PAUSED_COUNTED, WEBHOOK_PAUSED_NOT_SENT_WORDS, WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { readListing } from "@/lib/catalog";
 import { SITE_URL } from "@/lib/site-url";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
-import { MAX_ENDPOINTS, shortAddress } from "@/lib/webhook-limits";
+import { DELIVERY_MAX_BYTES, DELIVERY_UPDATE_ROOM_BYTES, DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX, shortAddress } from "@/lib/webhook-limits";
 
 export const WEBHOOK_EVENTS = [
   "sale.completed",
@@ -98,7 +98,7 @@ export const WEBHOOK_EVENTS = [
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 /** Endpoints one store may have, and how an address is shown (lib/webhook-limits.ts, which the studio and the feature page read too). */
-export { MAX_ENDPOINTS, shortAddress };
+export { DELIVERY_MAX_BYTES, DELIVERY_UPDATE_ROOM_BYTES, DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX, shortAddress };
 /** Deliveries a store's studio keeps. */
 export const LOG_SIZE = 50;
 /** Minutes to wait before each try after the first. */
@@ -158,25 +158,15 @@ const ANCHOR_SECONDS = 30 * 86400;
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
 
+/** What the studio's log says of a message past the bound: written down, not sent. */
+export const TOO_LARGE_WORDS = `Not sent: this message would take more than ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, the most a webhook message may take. Nothing was counted.`;
 /**
- * The most bytes one delivery is ever kept at (nl:hooks:d:<id>, a week): its
- * message, escaped once more inside the record, and how it went. The store's
- * data registry prices a delivery at this (tests/store-data-registry.ts) and
- * the recent events read up to LOG_SIZE of them (lib/api-read-rules.ts,
- * eventsWork). The largest message the code makes is a sale of a bundle of
- * MAX_BUNDLE_ITEMS with three products ticked at checkout, each a bundle of
- * as many, every title MAX_TITLE_LENGTH characters of a three-byte script:
- * about 30 KB kept (tests/api-events-measured.test.ts).
+ * Lines a store's log gets in a UTC day for messages not kept (too large, or
+ * the month's deliveries used), each reason on its own: past them, one line
+ * an endpoint for the day says how many more, rewritten with its count. So
+ * what these lines keep stays small whatever a store sells.
  */
-export const DELIVERY_MAX_BYTES = 48 * 1024;
-/**
- * Room left under DELIVERY_MAX_BYTES when a delivery is first written, for
- * what its tries write on it later: its state, its count of tries, the
- * endpoint's answer in a sentence, the resend that names it.
- */
-export const DELIVERY_UPDATE_ROOM_BYTES = 2 * 1024;
-/** What the studio's log says of a message larger than a delivery may be kept at: written down, not sent. */
-export const TOO_LARGE_WORDS = `Not sent: this message was larger than ${DELIVERY_MAX_BYTES / 1024} KB, the most a webhook message may be. Nothing was counted.`;
+export const SKIPPED_LINES_PER_DAY = 3;
 
 /**
  * An endpoint. `previous` is the secret it had before the creator replaced
@@ -242,6 +232,31 @@ const POSITION_KEY = "nl:hooks:pos";
 
 const ENDPOINT_ID_PATTERN = /^we_[0-9a-f]{16}$/;
 const DELIVERY_ID_PATTERN = /^dlv_[0-9a-f]{24}$/;
+
+/**
+ * A text as a message carries it: control characters (which JSON escapes in
+ * six bytes, seven kept) turned into a space, cut at MESSAGE_TEXT_MAX, and a
+ * lone half of a surrogate pair (escaped the same way) made U+FFFD. What is
+ * left escapes in at most two bytes a unit, four kept (a quotation mark or
+ * a backslash), which DELIVERY_MAX_BYTES is sized for.
+ */
+export function cleanText(text: string): string {
+  return text
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .slice(0, MESSAGE_TEXT_MAX)
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd");
+}
+
+/** Every text in a message's data cleaned (cleanText), keys too; numbers, booleans and nulls as they are. */
+export function cleanData(value: unknown): unknown {
+  if (typeof value === "string") return cleanText(value);
+  if (Array.isArray(value)) return value.map(cleanData);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [cleanText(k), cleanData(v)]));
+  return value;
+}
+
+/** Whether a delivery written as `text` would pass what it may be kept at when written. */
+const tooLargeToKeep = (text: string) => Buffer.byteLength(text) > DELIVERY_WRITE_MAX_BYTES;
 
 function isEvent(value: unknown): value is WebhookEvent {
   return typeof value === "string" && (WEBHOOK_EVENTS as readonly string[]).includes(value);
@@ -391,16 +406,19 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   const paused = store === "taken" || delivery.type === "test" ? null : integrationPauseWord(store, now / 1000);
   // One of the store's webhook deliveries for its month, before the endpoint is called.
   const taken = store === "taken" ? ({ ok: true } as const) : await takeAllowance(store, "webhook", 1, now);
+  // The month's deliveries used: not sent, and its message is not kept past it (a line, as emitEvent writes one), so
+  // a message is kept only by a delivery the month counted.
+  const unkept = !taken.ok && taken.reason === "used" && delivery.type !== "test" ? { body: "", givenUp: true as const } : {};
   // Paused: never retried, whatever the count answered; a month already used is said too.
   if (paused) {
     const counted = taken.ok ? ` ${WEBHOOK_PAUSED_COUNTED}` : taken.reason === "unknown" ? "" : ` ${taken.message}`;
-    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `${WEBHOOK_PAUSED_NOT_SENT_WORDS[paused]}${counted}`, notSentPaused: true };
+    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `${WEBHOOK_PAUSED_NOT_SENT_WORDS[paused]}${counted}`, notSentPaused: true, ...unkept };
   }
   if (!taken.ok) {
     const retryIn = delivery.type === "test" ? undefined : RETRY_MINUTES[delivery.attempts];
     // A count that could not be made is tried again on the schedule; a month whose deliveries are used is not.
     if (taken.reason === "unknown" && retryIn !== undefined) return { ...delivery, state: "retrying", next: now + retryIn * 60_000, lastAt: now, lastStatus: 0, lastError: taken.message };
-    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `Not sent. ${taken.message}` };
+    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `Not sent. ${taken.message}`, ...unkept };
   }
   const timestamp = Math.floor(now / 1000);
   let status = 0;
@@ -508,13 +526,14 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
   if (fresh === null) return 0;
 
-  const body = JSON.stringify({
+  // Every text cleaned and bounded where the message is made (cleanText), so what a delivery keeps is bounded.
+  const body = JSON.stringify(cleanData({
     id: eventId,
     type,
     created: Math.floor(now / 1000),
     store: { handle: store.handle, name: store.name, url: `${SITE_URL}/@${store.handle}` },
     data,
-  });
+  }));
   // Each delivery's id is made from the event and the endpoint, so writing
   // them again (after a reply that was lost) finds the same ones: SET NX
   // keeps what is there, the queue keeps its place (ZADD NX; a delivery
@@ -539,15 +558,25 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   }));
   const ids = deliveries.map((d) => d.id);
   const kept = deliveries.map((d) => JSON.stringify(d));
-  // Bounded where it is made: a message that would be kept past DELIVERY_MAX_BYTES, with the room its tries write
-  // later, is never kept or sent. Each endpoint's line says so instead, with no message behind it; nothing is
-  // queued, so no delivery of the month is taken. Every endpoint is sent the same message, so one too large is
-  // too large for all.
-  if (kept.some((text) => Buffer.byteLength(text) > DELIVERY_MAX_BYTES - DELIVERY_UPDATE_ROOM_BYTES)) {
-    console.error("WEBHOOK MESSAGE TOO LARGE: its lines say so, nothing is sent", statsId, type, eventId, Buffer.byteLength(body));
-    const lines = deliveries.map((d) => JSON.stringify(noticeLine(d.id, statsId, d.endpoint, eventId, type, TOO_LARGE_WORDS, now)));
-    const written = await redisPipeline(ids.map((id, at) => ["SET", deliveryKey(id), lines[at], "NX", "EX", DELIVERY_SECONDS]));
-    await pushMissing(statsId, ids.filter((_, at) => written[at] !== "OK"), ids.filter((_, at) => written[at] === "OK"));
+  // A message is kept only when it can be counted: when the month's webhook deliveries are used, nothing is kept
+  // or sent, and each endpoint's line says so (a count that cannot be read lets the try decide, as before). And it
+  // is bounded where it is made: a message that would be kept past DELIVERY_WRITE_MAX_BYTES is never kept or sent
+  // either. Every endpoint is sent the same message, so one too large is too large for all. Neither takes a
+  // delivery of the month, and the lines of each are bounded by the day (skippedLines).
+  // While the plan's costs are paused the try says so first (attempt), and takes the month's delivery then.
+  const month = integrationPauseWord(store, now / 1000) ? null : await allowancesUsedStrict(store, ["webhook"], now).catch(() => null);
+  const used = month?.[0] !== undefined && month[0].used >= month[0].figure;
+  const tooLarge = !used && kept.some(tooLargeToKeep);
+  if (used || tooLarge) {
+    if (tooLarge) console.error("WEBHOOK MESSAGE TOO LARGE: its lines say so, nothing is sent", statsId, type, eventId, Buffer.byteLength(body));
+    try {
+      await skippedLines(statsId, deliveries, used ? "used" : "large", used ? `Not sent. ${allowanceUsedWords(store, "webhook", now)}` : TOO_LARGE_WORDS, now);
+    } catch (error) {
+      // As below: without its lines written the event would leave no trace; the mark goes, so it is noticed again.
+      await redisPipeline([["DEL", eventKey(eventId)]]).catch((lost) =>
+        console.error("WEBHOOK EVENT LOST: its lines could not be written and its sent mark could not be taken back", statsId, type, eventId, lost));
+      throw error;
+    }
     return 0;
   }
   const writes = ids.map((id, at) => ["SET", deliveryKey(id), kept[at], "NX", "EX", DELIVERY_SECONDS]);
@@ -838,7 +867,7 @@ export async function removeEndpoint(store: Store, id: string): Promise<Webhooks
 export type ResendResult =
   | { ok: true; delivery: Delivery; view: WebhooksView }
   | { ok: false; reason: "missing" | "not_failed" | "not_heard" | "resent" | "limited" | "unavailable" }
-  | { ok: false; reason: "used" | "paused"; message: string };
+  | { ok: false; reason: "used" | "paused" | "too_large"; message: string };
 
 /**
  * Sends a failed delivery again, once, now, because the creator asked from
@@ -870,6 +899,10 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
     const [rawLast] = await redisPipeline([["GET", deliveryKey(before.resentAs)]]);
     const last = parseDelivery(rawLast);
     if (last && last.state !== "failed") return { ok: false, reason: "resent" };
+  }
+  // A message kept before the bound, larger than it, is not kept again by hand.
+  if (tooLargeToKeep(JSON.stringify({ ...before, attempts: 0, state: "queued", next: 0, lastStatus: 0, lastError: "", lastAt: 0, resentFrom: before.id, resentAs: undefined }))) {
+    return { ok: false, reason: "too_large", message: TOO_LARGE_WORDS };
   }
   const config = await readConfig(statsId);
   const endpoint = config?.endpoints.find((e) => e.id === before.endpoint);
@@ -1436,6 +1469,44 @@ function waitedAs(event: StripeEvent, handles: Set<string>, confirmed: boolean):
 
 /** The mark that a Stripe event was passed over and its lines written (eventKey), so it is never held or written again. */
 const givenUpMark = (statsId: string, stripeEvent: string) => eventKey(eventIdFor(statsId, "stripe.given_up", stripeEvent));
+
+/** The count of a store's messages not kept for one reason on one UTC day (skippedLines), under the family of the store's waits. */
+const skippedDayKey = (statsId: string, reason: "large" | "used", day: number) => `nl:hooks:wait:${statsId}:skip:${reason}:${day}`;
+
+/**
+ * The lines a message that is not kept leaves in the store's log, one an
+ * endpoint (`deliveries`, as they would have been): the first
+ * SKIPPED_LINES_PER_DAY messages of a UTC day for a reason get their own,
+ * with the reason's words; every later one that day is counted in one line
+ * an endpoint, rewritten with its count. `words` are the reason's, as the
+ * try would say them. No message is behind any of them,
+ * so none can be sent again, and none takes a delivery of the month.
+ */
+async function skippedLines(statsId: string, deliveries: Delivery[], reason: "large" | "used", words: string, now: number): Promise<void> {
+  const day = Math.floor(now / 86_400_000);
+  const key = skippedDayKey(statsId, reason, day);
+  const [count] = await redisPipeline([["INCR", key], ["EXPIREAT", key, (day + 2) * 86400]]);
+  const n = Number(count);
+  if (!Number.isSafeInteger(n) || n < 1) throw new Error("the day's messages not kept could not be counted");
+  if (n <= SKIPPED_LINES_PER_DAY) {
+    const lines = deliveries.map((d) => noticeLine(d.id, statsId, d.endpoint, d.eventId, d.type as WebhookEvent, words, now));
+    const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));
+    await pushMissing(statsId, lines.filter((_, at) => written[at] !== "OK").map((line) => line.id), lines.filter((_, at) => written[at] === "OK").map((line) => line.id));
+    return;
+  }
+  const more = n - SKIPPED_LINES_PER_DAY;
+  const date = new Date(day * 86_400_000).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+  const why = reason === "large" ? "were too large to send" : "were not sent because your store's webhook deliveries for this month are used";
+  const lines = deliveries.map((d) => ({
+    ...noticeLine(
+      `dlv_${createHash("sha256").update(`${statsId}|${day}|${d.endpoint}|skipped-${reason}`).digest("hex").slice(0, 24)}`,
+      statsId, d.endpoint, eventIdFor(statsId, `skipped.${reason}`, `${day}|${d.endpoint}`), d.type as WebhookEvent,
+      `${more} more ${more === 1 ? "message" : "messages"} on ${date} ${why}. Nothing was counted for ${more === 1 ? "it" : "them"}.`, now,
+    ),
+  }));
+  await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "EX", DELIVERY_SECONDS]));
+  await pushMissing(statsId, lines.map((line) => line.id));
+}
 
 /** A line of the delivery log no message is behind: the studio shows it "Not sent", with `words`. */
 function noticeLine(id: string, statsId: string, endpoint: string, eventId: string, type: WebhookEvent, words: string, now: number): Delivery {

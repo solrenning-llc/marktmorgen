@@ -446,7 +446,7 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/api-numbers.ts", "const settle = await hold(most);", '["GET", key]');
   before("lib/api-numbers.ts", "const refused = await charge(units, taken);", "await readNumbers(store, now)");
   assert.ok(!read("lib/mcp-tools.ts").includes("readTitles("), "the MCP tools never read every card, nor the listings' fall-back that reads every product");
-  assert.ok(read("docs/zapier-app.md").includes(`counts as ${1 + apiReadUnits(eventsWork({ deliveries: 0, bytes: 0, sent: 0 }))} to ${1 + apiReadUnits(eventsWork())} (\`1 + apiReadUnits(eventsWork())\` at the most)`), "the Zapier notes say what a sample of events counts as");
+  assert.ok(read("docs/zapier-app.md").includes(`counts as ${1 + apiReadUnits(eventsWork({ deliveries: 0, bytes: 0, sent: 0 }))} to ${1 + apiReadUnits(eventsWork())} (\`1 + apiReadUnits(eventsWork())\` at the most, for`), "the Zapier notes say what a sample of events counts as");
   before("lib/mail-revenue.ts", 'if (beforeStripe && !(await beforeStripe())) return "refused";', "readPaidSales(store, since, PAGES)");
   before("app/api/v1/stats/route.ts", "const read = await apiNumbers(store,", "summaryOf(read.data");
   before("app/api/v1/stats/route.ts", "const refused = await read.settle(", "apiOk(body)");

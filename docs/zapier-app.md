@@ -68,8 +68,9 @@ reads only the store, and more for a read that reads more than one request's
 worth (`lib/api-read-rules.ts`). The samples of events shown while a Zap is
 set up (`GET /api/v1/events`) read the newest deliveries, each measured first,
 set aside at its size before it is read and settled at what was read and sent,
-so each counts as 2 to 11 (`1 + apiReadUnits(eventsWork())` at the most). The
-webhook endpoints a Zap adds use the store's own webhook deliveries, already counted and bounded.
+so each counts as 2 to 12 (`1 + apiReadUnits(eventsWork())` at the most, for
+messages made since 4 November 2026, bounded by `DELIVERY_MAX_BYTES`; one kept
+from before counts at its size). The webhook endpoints a Zap adds use the store's own webhook deliveries, already counted and bounded.
 
 ## Before it is published (do not skip)
 

@@ -22,6 +22,7 @@ import {
   EDITOR_WIDTH_AT_1280,
   EDIT_COLUMN_MIN_PX,
   SIDE_COLUMN_PX,
+  SIDE_SCROLLBAR_PX,
   SIDE_GAP_PX,
   SIDE_PANELS,
   SIDE_PANEL_DEFAULT,
@@ -40,17 +41,17 @@ is("nothing, or anything else, is the default", [readSidePanel(null), readSidePa
 is("remembered under a key of its own", SIDE_PANEL_KEY, "mm:page-side-panel");
 
 part("The room left to the blocks");
-is("the shared column is a phone's width (24.5rem)", SIDE_COLUMN_PX, 392);
+is("the shared column is a phone's width and its scroll bar (25.5rem)", [SIDE_COLUMN_PX, SIDE_COLUMN_PX - SIDE_SCROLLBAR_PX >= 390], [408, true]);
 is("the gap between the two columns (gap-5)", SIDE_GAP_PX, 20);
-is("at 1280 pixels the blocks have 442 pixels, at least 420", [editColumnWidth(EDITOR_WIDTH_AT_1280), editColumnWidth(EDITOR_WIDTH_AT_1280) >= EDIT_COLUMN_MIN_PX], [442, true]);
+is("at 1280 pixels the blocks have 426 pixels, at least 420", [editColumnWidth(EDITOR_WIDTH_AT_1280), editColumnWidth(EDITOR_WIDTH_AT_1280) >= EDIT_COLUMN_MIN_PX], [426, true]);
 is("where the three columns left them 182", EDITOR_WIDTH_AT_1280 - 240 - 392 - 2 * 20, 182);
 is("never below nothing", editColumnWidth(100), 0);
 
 const editor = readFileSync("components/page-editor.tsx", "utf8");
 part("The editor: one column beside the blocks");
-is("two columns on a wide screen, the blocks and the shared one", editor.includes('<div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_24.5rem] items-start gap-5" : ""}>'), true);
+is("two columns on a wide screen, the blocks and the shared one", editor.includes('<div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_25.5rem] items-start gap-5" : ""}>'), true);
 is("no third column of its own for the menu", !editor.includes("_15rem_24.5rem"), true);
-is("the shared column's width is the one counted here", `${SIDE_COLUMN_PX / 16}rem`, "24.5rem");
+is("the shared column's width is the one counted here", `${SIDE_COLUMN_PX / 16}rem`, "25.5rem");
 is(
   "the switch at its top, then the menu or the page, never both",
   editor.includes('<SidePanelSwitch value={sidePanel} onChange={chooseSidePanel} controls="side-panel" />\n        {sidePanel === "add" ? (\n        <aside id="side-panel" aria-label="Blocks to add"') &&

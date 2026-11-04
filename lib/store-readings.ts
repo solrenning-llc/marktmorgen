@@ -2,8 +2,7 @@
  * A store's readings of its own numbers from its Stripe account and its
  * counts (C4-4; the owner's decision of 4 November 2026, inbox C4-18): its
  * days of visits (lib/stats.ts, readStats), its sales, renewals, refunds and
- * disputes (readSales), its memberships (lib/membership-numbers.ts), and a
- * product update's search for its buyers (lib/product-updates.ts).
+ * disputes (readSales) and its memberships (lib/membership-numbers.ts).
  *
  * The page that shows them still costs what the Terms say a studio page
  * costs, STUDIO_PAGE_UNITS of the studio's requests, and nothing more of that
@@ -22,7 +21,6 @@
  *   nl:reading:<kind>:<statsId>       { at, value }, a day
  *   nl:reading:day:<statsId>:<day>    the day's readings, two days
  *   nl:reading:day:<statsId>:<day>:heavy   of them, the heavy ones
- *   nl:reading:update:<statsId>:<day> a product update's searches, two days
  *
  * A reading kept is shown as it is, with the time it was read, never as an
  * incomplete one (inbox C4-33): the page says when it was read, offers to
@@ -30,7 +28,7 @@
  * when they come back, at 00:00 UTC.
  */
 import { nextUtcMidnight } from "@/lib/local-clock";
-import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, SALES_INPUTS_MAX_BYTES, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY } from "@/lib/store-reading-rules";
+import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, SALES_INPUTS_MAX_BYTES, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 import { type SalesInputs, type SalesStats, type Stats, type StatsData, readSales, readSalesInputs, readStats, readsSales, salesFromInputs, studioStats } from "@/lib/stats";
@@ -41,7 +39,7 @@ import { saleHandles } from "@/lib/store";
 import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
 
 // The day's figures live in lib/store-reading-rules.ts, which the help reads without the database.
-export { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, SALES_INPUTS_MAX_BYTES, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY };
+export { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, SALES_INPUTS_MAX_BYTES, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY };
 
 /** How long the last reading is kept to show when the day's readings are used. */
 export const READING_KEEP_SECONDS = 86_400;
@@ -53,7 +51,6 @@ export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members
 
 const copyKey = (kind: ReadingKind, statsId: string) => `nl:reading:${kind}:${statsId}`;
 const dayKey = (statsId: string, day: string) => `nl:reading:day:${statsId}:${day}`;
-const updateKey = (statsId: string, day: string) => `nl:reading:update:${statsId}:${day}`;
 const utcDay = (now: number) => new Date(now).toISOString().slice(0, 10);
 
 /** When the day's readings come back: the next 00:00 UTC, in milliseconds. */
@@ -89,30 +86,6 @@ export async function readingsLeft(store: Pick<Store, "statsId">, now = Date.now
     return { any: n < STORE_READINGS_PER_DAY, heavy: sales };
   } catch {
     return { any: false, heavy: false };
-  }
-}
-
-/**
- * One of a product update's searches of the day, from its own count (SET NX,
- * INCRBY, EXPIRE NX; DECRBY when past it). A count that cannot be made is a
- * refusal.
- */
-export async function takeUpdateSearch(store: Pick<Store, "statsId">, now = Date.now()): Promise<boolean> {
-  if (!store.statsId || !isRedisConfigured()) return false;
-  const key = updateKey(store.statsId, utcDay(now));
-  try {
-    const [, raw] = await redisPipeline([
-      ["SET", key, "0", "NX", "EX", 2 * 86_400],
-      ["INCRBY", key, 1],
-      ["EXPIRE", key, 2 * 86_400, "NX"],
-    ]);
-    const n = Number(raw);
-    if (!Number.isSafeInteger(n) || n < 1) return false;
-    if (n <= UPDATE_SEARCHES_PER_DAY) return true;
-    await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
-    return false;
-  } catch {
-    return false;
   }
 }
 

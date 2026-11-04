@@ -18,7 +18,8 @@
  *   - the totals page's reading of one store's numbers makes no more
  *     commands than TOTALS_STORE_SHAPE counts, and it takes its units first.
  *
- * (A product update's reading is held by tests/product-update-ceiling.test.ts.)
+ * (A product update's search for its buyers is counted in the studio's requests,
+ *  lib/product-updates.ts updateReadUnits, held by tests/ledger-counted-callers.test.ts.)
  */
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { readFileSync } from "node:fs";
@@ -34,7 +35,7 @@ import {
   CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, SINCE_READ_SHAPE, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
-import { HEAVY_READINGS_PER_DAY, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading, takeUpdateSearch } from "@/lib/store-readings";
+import { HEAVY_READINGS_PER_DAY, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading } from "@/lib/store-readings";
 import { GB, STORAGE_PER_GB, providerFeeUsd, worstCost } from "./plan-cost-model";
 import { PRICES_WITHOUT_COMMISSION } from "@/lib/plan";
 import { paidStorageBytes } from "@/lib/storage-rules";
@@ -267,10 +268,9 @@ async function main(): Promise<void> {
   const readings = COST_LINES.find((l) => l.id === "store-readings");
   const readingsMonth = readings ? readings.monthlyUsd("creator") : 0;
   const heavyWorst = readShapeCost(SALES_READ_SHAPE);
-  const updateWorst = readShapeCost(STORE_READING_SHAPES[3]);
   const lightWorst = Math.max(readShapeCost(STATS_READ_SHAPE), readShapeCost(MEMBERS_READ_SHAPE));
-  is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && lightWorst <= updateWorst && STORE_READING_SHAPES.length === 4, true);
-  is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light, brought up to date, product update searches)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst + SINCE_READINGS_PER_DAY * readShapeCost(SINCE_READ_SHAPE) + UPDATE_SEARCHES_PER_DAY * updateWorst), true);
+  is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && STORE_READING_SHAPES.length === 3, true);
+  is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light, brought up to date)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst + SINCE_READINGS_PER_DAY * readShapeCost(SINCE_READ_SHAPE)), true);
   {
     // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
     // payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) stays under it,
@@ -302,10 +302,8 @@ async function main(): Promise<void> {
     redis.run(["SET", `nl:reading:day:${fresh.statsId}:2031-02-04`, String(STORE_READINGS_PER_DAY), "EX", 86_400]);
     const lightRefused = await counted(() => takeStoreReading(fresh, day));
     const heavyRefused = await counted(() => takeStoreReading(fresh, day, true));
-    const updateTaken = await counted(() => takeUpdateSearch(fresh, day));
-    const updateRefused = await counted(() => takeUpdateSearch(fresh, day));
-    is("a reading's count, measured: light 3, heavy 5, a product update's search 3, as READING_COUNT_COMMANDS less its GET and SET", [lightTaken.commands, heavyTaken.commands, updateTaken.commands, lightTaken.value && heavyTaken.value && updateTaken.value], [READING_COUNT_COMMANDS.light - 2, READING_COUNT_COMMANDS.heavy - 2, READING_COUNT_COMMANDS.update, true]);
-    is("refused, with its DECRBY: light 4, heavy 7, a search 4, inside what KEPT_READINGS_SHAPE prices for a page that reads nothing", [lightRefused.commands, heavyRefused.commands, updateRefused.commands, lightRefused.value || heavyRefused.value || updateRefused.value, 3 + 2 * lightRefused.commands + heavyRefused.commands + 2 <= KEPT_READINGS_SHAPE.commands], [4, 7, 4, false, true]);
+    is("a reading's count, measured: light 3, heavy 5, as READING_COUNT_COMMANDS less its GET and SET", [lightTaken.commands, heavyTaken.commands, lightTaken.value && heavyTaken.value], [READING_COUNT_COMMANDS.light - 2, READING_COUNT_COMMANDS.heavy - 2, true]);
+    is("refused, with its DECRBY: light 4, heavy 7, inside what KEPT_READINGS_SHAPE prices for a page that reads nothing", [lightRefused.commands, heavyRefused.commands, lightRefused.value || heavyRefused.value, 3 + 2 * lightRefused.commands + heavyRefused.commands + 2 <= KEPT_READINGS_SHAPE.commands], [4, 7, false, true]);
     const left = await counted(() => readingsLeft(fresh, day));
     is("what is left of the day: three GET; the readings used, the sales still brought up to date after the day's whole one", [left.commands, left.value], [3, { any: false, heavy: true }]);
     redis.run(["SET", `nl:reading:day:${fresh.statsId}:2031-02-04:since`, String(SINCE_READINGS_PER_DAY), "EX", 86_400]);

@@ -219,6 +219,8 @@ try {
   await page.evaluate(() => { window.harness.next = { status: 400, body: { ok: false, error: "followup" } }; });
   await press("deal-save");
   await page.waitForFunction(() => document.getElementById("deal-field-nextAction")?.getAttribute("aria-invalid") === "true");
+  // Focus is read once it has moved (or after 5 s), never at the first frame that shows the error.
+  await page.waitForFunction(() => document.activeElement?.id === "deal-field-nextAction", null, { timeout: 5000 }).catch(() => {});
   is("a refusal about one field is said beside that field, which gets focus", [await active(), await attr("deal-field-nextAction", "aria-describedby"), await text("deal-field-nextAction-error"), await attr("deal-field-title", "aria-invalid")], ["deal-field-nextAction", "deal-field-nextAction-error", "Write a next action before setting its date. Keep it within 200 characters.", null]);
   await page.locator("#deal-field-nextAction").fill("Send the plan");
   await press("deal-save");

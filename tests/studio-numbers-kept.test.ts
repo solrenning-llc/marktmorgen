@@ -15,7 +15,8 @@
  *   - the rule's words for the help missing a figure.
  */
 import { readFileSync } from "node:fs";
-import { NotRead, ReadingFailed, ReadingsUsed, STORE_READINGS_PER_DAY, HEAVY_READINGS_PER_DAY, keptReading, readingsBackAt, readingsLeft } from "@/lib/store-readings";
+import { NotRead, ReadingFailed, ReadingsUsed, STORE_READINGS_PER_DAY, HEAVY_READINGS_PER_DAY, keptReading, keptSales as keptSalesOf, readingsBackAt, readingsLeft } from "@/lib/store-readings";
+import type { Store } from "@/lib/store";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ReadingLine } from "@/components/stats-panel";
@@ -86,6 +87,18 @@ async function main(): Promise<void> {
     is("with no copy to show, the failure is said as one that was counted", none, "failed, counted");
     const line = renderToStaticMarkup(createElement(ReadingLine, { reading: { at, canRefresh: true, refreshHref: "/studio?numbers=fresh", backAt: at, salesUsed: false, failed: true, left: 1 } }));
     is("the creator reads it: failed, counted, and what is left today", line.includes("The last reading failed and was counted; 1 reading left today."), true);
+    // Selling not configured on our side: Stripe is never called, so the reading is given back (the one NotRead today).
+    const saved = process.env.STRIPE_SECRET_KEY;
+    delete process.env.STRIPE_SECRET_KEY;
+    const unset = { statsId: "u".repeat(32), stripeAccountId: "acct_1NotConfigured", paypalSeller: null } as unknown as Store;
+    const beforeUnset = await readingsLeft(unset, at);
+    const unsetSales = await keptSalesOf(unset, at, true).then(() => "read", (e: unknown) => (e instanceof NotRead ? "not read" : String(e)));
+    const afterUnset = await readingsLeft(unset, at);
+    if (saved !== undefined) process.env.STRIPE_SECRET_KEY = saved;
+    is("selling not configured: nothing called, the reading given back", [unsetSales, afterUnset.heavyLeft === beforeUnset.heavyLeft, afterUnset.anyLeft], ["not read", true, STORE_READINGS_PER_DAY]);
+    const page = read("app/studio/page.tsx");
+    is("the studio's page passes the failure and what is left to the line", [page.includes("failed: salesRead?.failed === true || visitsKept?.failed === true"), page.includes("left: readsSales(current) ? left.heavyLeft : left.anyLeft")], [true, true]);
+    is("the totals never say to reload, which would spend another reading", read("app/studio/totals/page.tsx").includes("Reload the page in a moment"), false);
     const lineNone = renderToStaticMarkup(createElement(ReadingLine, { reading: { at, canRefresh: false, refreshHref: "/studio?numbers=fresh", backAt: at, salesUsed: false, failed: true, left: 0 } }));
     is("and with none left, 0 readings", lineNone.includes("The last reading failed and was counted; 0 readings left today."), true);
   }

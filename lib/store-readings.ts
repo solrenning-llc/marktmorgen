@@ -30,6 +30,7 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { keyFor } from "@/lib/stripe-account";
 import type { Store } from "@/lib/store";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
@@ -63,8 +64,8 @@ export class ReadingsUsed extends Error {
 }
 
 /**
- * Thrown by a reading that stopped before calling any supplier (its own check,
- * a lock held, a local refusal): nothing was spent, so its unit of the day is
+ * Thrown by a reading that stopped before calling any supplier (today: selling
+ * not configured, keptSales): nothing was spent, so its unit of the day is
  * given back (inbox C4-53).
  */
 export class NotRead extends Error {
@@ -219,7 +220,11 @@ export async function keptStats(store: Store, now = Date.now(), fresh = false): 
  * incomplete for being kept (inbox C4-33 (2)).
  */
 export async function keptSales(store: Store, now = Date.now(), fresh = false): Promise<Kept<SalesStats | null>> {
-  const kept = await keptReading(store, "sales", () => readSales(store, now), now, fresh);
+  const kept = await keptReading(store, "sales", async () => {
+    // Selling not configured on our side: nothing is called, so the reading's unit is given back (inbox C4-53).
+    if (store.stripeAccountId && !keyFor(store.stripeAccountId)) throw new NotRead("selling is not configured");
+    return readSales(store, now);
+  }, now, fresh);
   if (!kept) throw new ReadingsUsed();
   return kept;
 }

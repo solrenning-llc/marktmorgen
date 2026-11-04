@@ -43,11 +43,16 @@ async function main(): Promise<void> {
   redis.run(["SET", membersKey, JSON.stringify({ at: Date.now(), value: { leaving: { recent: [`${person} wrote: too expensive`] } } }), "EX", 86_400]);
   redis.run(["SET", feedKey, JSON.stringify({ at: Date.now(), ics: `BEGIN:VCALENDAR\r\nATTENDEE;CN=Rhea:mailto:${person}\r\nEND:VCALENDAR`, ref: "x", sid: store.statsId }), "EX", 86_400]);
 
+  // The day's own makings of the feed used, so the erasure's making given back is what lets the file be made again.
+  const buildsKey = `nl:cal:builds:${store.statsId}:${new Date().toISOString().slice(0, 10)}`;
+  redis.run(["SET", buildsKey, "2", "EX", 86_400]);
+
   part("The person's erasure, by the real door");
   const erased = await erasePerson(store, person, { kind: "person" });
   is("the erasure ends", erased.ok, true);
   is("nothing kept of the store's readings names them", String(redis.run(["GET", key]) ?? "").includes(person), false);
   is("nor the kept memberships reading, nor the calendar feed's file", [redis.run(["GET", membersKey]), redis.run(["GET", feedKey])], [null, null]);
+  is("and one of the day's makings given back, so the next check makes the file again", Number(redis.run(["GET", buildsKey])), 1);
   is("the calendar feed's copy is among what it forgot", erased.ok ? erased.parts.some((p) => p.module === "lib/calendar-sync.ts") : false, true);
   is("the readings are among what it forgot", erased.ok ? erased.parts.some((p) => p.module === "lib/store-readings.ts") : false, true);
   done();

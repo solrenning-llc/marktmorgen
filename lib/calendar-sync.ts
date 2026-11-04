@@ -724,12 +724,15 @@ export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "pac
  */
 /**
  * A person's erasure (lib/person-erasure.ts, a step of every door; review of
- * #2111): the feed's kept file goes, which names who booked. The next check
- * makes it again from the store's bookings, which Stripe keeps.
+ * #2111): the feed's kept file goes, which names who booked, and one of the
+ * day's own makings is given back, so the app's next check makes it again from
+ * the store's bookings (which Stripe keeps) even when the day's makings were
+ * used; the day's tries (calendarAttemptsKey) still bound what is read.
  */
-export async function forgetFeedCopyPerson(statsId: string | null): Promise<number> {
+export async function forgetFeedCopyPerson(statsId: string | null, now = Date.now()): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const [gone] = await redisPipeline([["DEL", outKey(statsId)]]);
+  if (Number(gone) > 0) await giveCounted(buildsKey(statsId, new Date(now).toISOString().slice(0, 10)), 2 * 86_400);
   return Number(gone) || 0;
 }
 
@@ -787,7 +790,9 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   const ownKey = buildsKey(owner.statsId, day);
   const attemptsKey = calendarAttemptsKey(owner.statsId, day);
   const tries = CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY;
-  // No making left by the counts just read: the copy, with no count taken (an answer's priced shape has none).
+  // No making left by the counts just read: the copy, with no count taken (an answer's priced shape has none). Only
+  // at the moment the day's last try is taken can an answer read room and lose the take (its SET NX, INCRBY, EXPIRE
+  // NX and DECRBY): once a day, a few commands, inside the making's own shape (CALENDAR_BUILD_SHAPE counts 4 for it).
   const roomFor = (used: unknown, ceiling: number) => (Number(used) || 0) < ceiling;
   if (!roomFor(attemptsRaw, tries) || !((changedSince && roomFor(creditsUsedRaw, credits)) || roomFor(ownRaw, CALENDAR_BUILDS_PER_DAY))) {
     return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
@@ -826,7 +831,8 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   }
   // Kept only while the store's settings are still there: a deletion that ran while this was being made
   // (forgetStoreCalendar) is not undone by a copy written after it, with its buyers' names; and what was made is
-  // not answered either (inbox C4-48, medium 1). When the step cannot be run, nothing is answered: the app asks again.
+  // not answered either (inbox C4-48, medium 1). When the step cannot be run, the old copy is answered if there is
+  // one, otherwise nothing: the app asks again.
   const [written] = await redisPipeline([["EVAL", KEEP_COPY, 2, cfgKey(owner.statsId), outKey(owner.statsId), file, CALENDAR_COPY_SECONDS]]).catch(() => [null]);
   if (Number(written) === 0) return { state: "gone" };
   if (Number(written) !== 1) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };

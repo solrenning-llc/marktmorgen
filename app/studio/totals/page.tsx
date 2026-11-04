@@ -102,7 +102,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
               ) : null}
               {!totals.salesWhole ? (
                 <p className="notice notice-info mt-4" role="status">
-                  Some sales could not be read in full just now, so the sales and money below may be lower than they are. Reload the page in a moment.
+                  Some sales could not be read on the last try, so the sales and money below may be lower than they are. Each try is one of the store's readings of the day, counted even when it fails; your studio's home says how many are left.
                 </p>
               ) : null}
               <section aria-labelledby="sums-title" className="card mt-6 overflow-x-auto p-6 sm:p-8">

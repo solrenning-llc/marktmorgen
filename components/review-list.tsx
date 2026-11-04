@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { afterPurchaseLine } from "@/lib/buyer-words/reviews";
 import { Stars } from "@/components/review-stars";
 import { type Review, type Summary, average, showsRating } from "@/lib/review-summary";
 import { speechFor } from "@/lib/buyer-words";
@@ -89,6 +90,11 @@ export function ReviewItem({
       <p className="st-muted mt-1 text-xs">
         {date(review.createdAt)}
         {review.editedAt ? w.edited(date(review.editedAt)) : ""}
+        {/* How long after paying it was first written (606 [WP5]), when the order's time was kept. */}
+        {review.paidAt ? (() => {
+          const after = afterPurchaseLine(lang, review.paidAt, Math.floor(review.createdAt / 1000));
+          return after ? ` · ${after}` : "";
+        })() : ""}
       </p>
       {review.text ? <p className="mt-3 whitespace-pre-line leading-relaxed [overflow-wrap:anywhere]">{review.text}</p> : null}
       {/* The buyer's photo (lib/review-photo.ts), small here and whole when opened. */}

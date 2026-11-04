@@ -22,7 +22,7 @@
  * A group is a name over the choices the composer already has: who, one
  * product, one left out, and the three above. Choosing it fills them in.
  */
-import { importedBuyers } from "@/lib/imported-purchases";
+import { importedBuyers, importedWhoKey } from "@/lib/imported-purchases";
 import { IMPORTED_CHANNEL } from "@/lib/channel-names";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -79,19 +79,33 @@ export class LedgerNotCounted extends Error {
 /**
  * Studio requests one reading of the buyers from Stripe costs at the most,
  * when its ten-minute copy ran out (tests/plan-cost-registry.ts,
- * BUYER_LEDGER): for a caller that counts them (`count`, below).
+ * BUYER_LEDGER), besides what it reads and writes by size (below): for a
+ * caller that counts them (`count`, below).
  */
 export const BUYER_LEDGER_UNITS = 8;
+/** Bytes of the ledger's copy, or of the imported buyers, that one studio request covers when read (tests/plan-cost-registry.ts, LEDGER_MB). */
+export const LEDGER_BYTES_PER_UNIT = 1_000_000;
+/** The most one imported buyer weighs: its address and when it came, read, then written in the copy as a row. */
+export const IMPORTED_BUYER_BYTES = 2 * (254 + 64);
+
+/** Studio requests reading (or writing) `bytes` of the buyers costs, by size. */
+export const ledgerUnits = (bytes: number) => Math.ceil(Math.max(0, bytes) / LEDGER_BYTES_PER_UNIT);
 
 /**
- * `count`, when given, is asked just before Stripe is read (never when the
- * ten-minute copy answers) and answers whether what that costs was counted;
- * when it was not, nothing is read and LedgerNotCounted is thrown.
+ * `count`, when given, is asked before anything big is read, with the studio
+ * requests it costs, and answers whether they were counted; when they were
+ * not, nothing more is read and LedgerNotCounted is thrown. The ten-minute
+ * copy is counted by its size (measured first, STRLEN), and a reading from
+ * Stripe as BUYER_LEDGER_UNITS and the imported buyers by how many there are
+ * (HLEN), both before they are read.
  */
-export async function buyerLedger(store: Store, count?: () => Promise<boolean>): Promise<Ledger> {
+export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>): Promise<Ledger> {
   if (!readsSales(store) && !store.pastBuyers) return { buyers: new Map(), partial: false };
+  const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
   if (store.statsId && isRedisConfigured()) {
-    const [cached] = await redisPipeline([["GET", ledgerKey(store.statsId)]]);
+    const [size] = await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]);
+    if (Number(size) > 0 && !(await counted(ledgerUnits(Number(size))))) throw new LedgerNotCounted();
+    const [cached] = Number(size) > 0 ? await redisPipeline([["GET", ledgerKey(store.statsId)]]) : [null];
     if (typeof cached === "string" && cached) {
       try {
         const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; v?: number };
@@ -103,7 +117,9 @@ export async function buyerLedger(store: Store, count?: () => Promise<boolean>):
       }
     }
   }
-  if (count && !(await count().catch(() => false))) throw new LedgerNotCounted();
+  // Stripe's pages, and the imported buyers read and written in the copy, by how many there are: before any is read.
+  const [imported] = store.statsId && isRedisConfigured() ? await redisPipeline([["HLEN", importedWhoKey(store.statsId)]]) : [0];
+  if (!(await counted(BUYER_LEDGER_UNITS + ledgerUnits(Number(imported || 0) * IMPORTED_BUYER_BYTES)))) throw new LedgerNotCounted();
   // Checkouts and offers after paying; and, on a Stripe account, the renewals
   // of memberships and payment plans, and what refunds and disputes took back
   // (270 [GR1], unit 2): a member who pays every month is not quiet since they

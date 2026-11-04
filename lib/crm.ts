@@ -513,6 +513,13 @@ export async function readPersonTasks(statsId: string | null, person: string): P
   return tasksOf(raw);
 }
 
+/** How many people have tasks kept (one HLEN), so a page with none reads and counts nothing more (639 [GL7](6)). */
+export async function tasksKept(statsId: string | null): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["HLEN", tasksKey(statsId)]]);
+  return Number(n) || 0;
+}
+
 /** Everyone's tasks, by person: what the agenda groups (lib/person-tasks.ts, tasksDue). At most MAX_STORE_TASKS. */
 export async function readAllTasks(statsId: string | null): Promise<DueTask[]> {
   if (!statsId || !isRedisConfigured()) return [];

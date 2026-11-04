@@ -28,6 +28,10 @@ export type CustomerBaseAssessment = {
 };
 const stopped = (status: CustomerBaseAssessment['status']): CustomerBaseAssessment => ({status,minimumCustomers:null,reviewedBaseSufficient:false});
 const cents = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+const FIXED_REVIEW_KEYS = [
+  'monthlyFixedCostsCeilingCents', 'monthlyFixedTaxesCeilingCents', 'reviewedPayingCustomers',
+  'allFixedCostsBounded', 'allFixedTaxesReviewed', 'fixedCostsEvidence', 'fixedTaxEvidence',
+] as const;
 /** Financial evidence is own data, never inherited defaults or executable reads. */
 function ownReviewData(record: unknown, key: string): unknown {
   if (!record || typeof record !== 'object') return undefined;
@@ -47,14 +51,24 @@ export function assessMinimumCustomerBase(units: CustomerBaseUnit[], fixed: Cust
     const length = ownReviewData(units, 'length');
     if (!cents(length) || length === 0 || Reflect.ownKeys(units).length !== length + 1) return stopped('unknown');
     if (!fixed || typeof fixed !== 'object' || Array.isArray(fixed)) return stopped('unknown');
+    if (![Object.prototype, null].includes(Object.getPrototypeOf(fixed))
+      || Reflect.ownKeys(fixed).length !== FIXED_REVIEW_KEYS.length) return stopped('unknown');
+    // Capture the complete fixed review. Projecting only expected fields could
+    // silently discard an additional cost or lose hidden data when serialized.
+    const data: Record<string, unknown> = Object.create(null);
+    for (const key of FIXED_REVIEW_KEYS) {
+      const field = Object.getOwnPropertyDescriptor(fixed, key);
+      if (!field || !field.enumerable || !Object.hasOwn(field, 'value')) return stopped('unknown');
+      data[key] = field.value;
+    }
     // Read every fixed-cost field once before validation and exact arithmetic.
-    const fixedCosts = ownReviewData(fixed, 'monthlyFixedCostsCeilingCents');
-    const fixedTaxes = ownReviewData(fixed, 'monthlyFixedTaxesCeilingCents');
-    const payingCustomers = ownReviewData(fixed, 'reviewedPayingCustomers');
-    const costsBounded = ownReviewData(fixed, 'allFixedCostsBounded');
-    const taxesReviewed = ownReviewData(fixed, 'allFixedTaxesReviewed');
-    const costsEvidence = ownReviewData(fixed, 'fixedCostsEvidence');
-    const taxEvidence = ownReviewData(fixed, 'fixedTaxEvidence');
+    const fixedCosts = data.monthlyFixedCostsCeilingCents;
+    const fixedTaxes = data.monthlyFixedTaxesCeilingCents;
+    const payingCustomers = data.reviewedPayingCustomers;
+    const costsBounded = data.allFixedCostsBounded;
+    const taxesReviewed = data.allFixedTaxesReviewed;
+    const costsEvidence = data.fixedCostsEvidence;
+    const taxEvidence = data.fixedTaxEvidence;
     if (fixedCosts == null || fixedTaxes == null || payingCustomers == null) return stopped('unknown');
     if (!cents(fixedCosts) || !cents(fixedTaxes) || !cents(payingCustomers)) return stopped('invalid');
     if (costsBounded !== true || taxesReviewed !== true || typeof costsEvidence !== 'string' || !costsEvidence.trim() || typeof taxEvidence !== 'string' || !taxEvidence.trim()) return stopped('unknown');

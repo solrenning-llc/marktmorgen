@@ -762,7 +762,7 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
       return (
         <section className="sp-section">
           <Heading text={block.heading || call.title} />
-          {block.heading ? <p className="mt-3 text-lg font-semibold leading-snug">{call.title}</p> : null}
+          {block.heading ? <h3 className="mt-3 text-lg font-semibold leading-snug">{call.title}</h3> : null}
           <p className="st-muted mt-2 text-sm font-semibold">{call.line}</p>
           <div className="mt-5">
             {call.href === null ? (

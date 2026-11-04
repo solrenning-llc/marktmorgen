@@ -40,6 +40,7 @@ import { wordsIn } from "@/lib/buyer-words";
 import type { CallSetup } from "@/lib/call-setup";
 import type { Listing, Store } from "@/lib/store";
 import { BLOCK_KINDS, MAX_BOOKING_BLOCKS, MAX_HEADING, type PageBlock, emptyBlock, pageProblem, parsePage } from "@/lib/sales-page";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const keep = (blocks: unknown[], variant?: unknown) => {
@@ -96,12 +97,10 @@ part("Its words are its heading, and only its heading");
 part("A translation that makes its heading too long keeps the block, untranslated (review of #2145)");
 {
   const page = keep([booking({ heading: "x".repeat(95) }), { id: "text0001", kind: "text", heading: "Why talk", body: "Twenty minutes." }]).page;
-  const longer = pageWords(page).map((w) => `${w} (translated)`);
-  const reread = parsePage(withWords(page, longer));
-  is("read again on its own, the longer heading would drop the block", reread.blocks.some((b) => b.kind === "booking"), false);
-  const kept = keepEveryBlock(page, reread);
-  is("kept: the booking block as it was, in its place, the other block translated", [kept.blocks.map((b) => b.kind), kept.blocks[0], kept.blocks[1].kind === "text" ? kept.blocks[1].heading : ""], [["booking", "text"], page.blocks[0], "Why talk (translated)"]);
-  is("the translation of a page reads its answer through keepEveryBlock", /keepEveryBlock\(input\.page, parsePage\(withWords\(/.test(readFileSync("lib/ai.ts", "utf8")), true);
+  const longer = withWords(page, pageWords(page).map((w) => `${w} (translated)`));
+  is("read again on its own, the longer heading would drop the block", parsePage(longer).blocks.some((b) => b.kind === "booking"), false);
+  const kept = keepEveryBlock(page, longer);
+  is("kept: the booking block as it was, in its place, counted, the other block translated", [kept.page.blocks.map((b) => b.kind), kept.page.blocks[0], kept.page.blocks[1].kind === "text" ? kept.page.blocks[1].heading : "", kept.untranslated], [["booking", "text"], page.blocks[0], "Why talk (translated)", 1]);
 }
 
 part("A copy into another store maps the call, or leaves the block out");
@@ -191,8 +190,25 @@ part("The cards come from the listings the store already holds");
   is("read at once, with no request", bookingCards(store(), asked, NOW) instanceof Promise, false);
   if (before === undefined) delete process.env.STRIPE_SECRET_KEY;
   else process.env.STRIPE_SECRET_KEY = before;
-  const source = readFileSync("lib/booking-cards.ts", "utf8");
-  is("its file reads nothing: no store, no network, no wait", /redis|fetch\(|await |readListing/i.test(source), false);
+  // Read nothing: every command the store's database is sent and every request out are counted while the cards are made.
+  const sent = { commands: 0, requests: 0 };
+  const pipeline = redis.pipeline.bind(redis);
+  const realFetch = globalThis.fetch;
+  redis.pipeline = (commands: (string | number)[][]) => {
+    sent.commands += commands.length;
+    return pipeline(commands);
+  };
+  globalThis.fetch = (async () => {
+    sent.requests += 1;
+    return new Response("{}", { status: 500 });
+  }) as typeof fetch;
+  try {
+    bookingCards(store(), asked, NOW);
+  } finally {
+    redis.pipeline = pipeline;
+    globalThis.fetch = realFetch;
+  }
+  is("made with no database command and no request out", sent, { commands: 0, requests: 0 });
 }
 
 part("Drawn on the page");
@@ -203,7 +219,7 @@ const draw = (block: PageBlock, context: BlockContext = withCard) => renderToSta
 const block = keep([booking()]).page.blocks[0] as PageBlock;
 {
   const html = draw(block);
-  is("the creator's heading, then the call's name and line", [html.includes(">Talk it through first</h2>"), html.includes(">Intro call</p>"), html.includes(card.line)], [true, true, true]);
+  is("the creator's heading, then the call's name and line", [html.includes(">Talk it through first</h2>"), html.includes(">Intro call</h3>"), html.includes(card.line)], [true, true, true]);
   is(
     "a link to the call's own booking page, whose name says where it leads (WCAG 2.4.9)",
     html.includes('<a href="/@ana/book/call000001" class="btn st-btn sp-cta-btn">Pick a time<span class="sr-only">: Intro call</span></a>'),

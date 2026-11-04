@@ -16,7 +16,7 @@
  * a layout, or a comparison's tick or cross.
  * Browser-safe.
  */
-import { CELL_NO, CELL_YES, type PageBlock, type RowElement, type SalesPage } from "@/lib/sales-page";
+import { CELL_NO, CELL_YES, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";
 
 /** A block's own words. */
 const TEXT = ["headline", "sub", "heading", "body", "label", "note", "caption", "yesLabel", "noLabel", "columnA", "columnB"] as const;
@@ -108,22 +108,32 @@ export function withWords(page: SalesPage, words: string[]): SalesPage {
 }
 
 /**
- * The translated page, read again, with every block the original had. A
- * block kept whole or not at all (a booking, a row of columns) is refused
- * when a translation makes one of its words longer than it may be, where
- * other blocks only shorten the word: such a block comes back as it was,
- * untranslated, rather than vanishing from the page without a word.
+ * The translated page, with every block the original had, read once at the
+ * end (inbox C4-17). `translated` is withWords' answer, not yet read again:
+ * each of its blocks is read alone, and a block kept whole or not at all (a
+ * booking, a row of columns) that a longer word would refuse comes back as
+ * it was, untranslated, and is counted, so the creator can be told. Only
+ * then is the page read: a second version that the translation made the same
+ * as the first is dropped there, as it always was, rather than coming back
+ * whole in the old language beside a translated first one.
  */
-export function keepEveryBlock(original: SalesPage, translated: SalesPage): SalesPage {
-  const back = (from: PageBlock[], to: PageBlock[]): PageBlock[] => {
-    const byId = new Map(to.map((block) => [block.id, block]));
-    return from.map((block) => byId.get(block.id) ?? block);
-  };
-  const variant =
-    original.variant && translated.variant
-      ? { ...translated.variant, blocks: back(original.variant.blocks, translated.variant.blocks) }
-      : original.variant;
-  return { ...translated, blocks: back(original.blocks, translated.blocks), variant };
+export function keepEveryBlock(original: SalesPage, translated: SalesPage): { page: SalesPage; untranslated: number } {
+  let untranslated = 0;
+  const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1;
+  const fit = (from: PageBlock[], to: PageBlock[]): PageBlock[] =>
+    to.map((block, at) => {
+      if (reads(block)) return block;
+      const before = from[at];
+      if (before && before.id === block.id && reads(before)) {
+        untranslated += 1;
+        return before;
+      }
+      return block;
+    });
+  const variant = translated.variant
+    ? { ...translated.variant, blocks: fit(original.variant?.blocks ?? [], translated.variant.blocks) }
+    : translated.variant;
+  return { page: parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks), variant }), untranslated };
 }
 
 /** The words split into parts of at most TRANSLATE_PART_CHARS characters (a longer single one is a part of its own). */

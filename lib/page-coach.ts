@@ -83,7 +83,8 @@ const filled = (block: PageBlock): boolean => {
     case "form":
       return Boolean(block.form);
     case "booking":
-      return Boolean(block.product);
+      // Not offered and not drawn yet (552 [BB1] unit 1): a block nobody sees counts for nothing.
+      return false;
     case "quotes":
       return block.items.length > 0;
     case "row":

@@ -68,15 +68,17 @@ export async function POST(request: NextRequest) {
       if (previous && previous !== id) await endSession(previous);
       // A passkey is the second step: a pending request to turn two-step login off is called off, and what
       // the recovery address opened is closed (lib/two-step.ts). Not by a passkey that is itself set to be
-      // removed (owner C3-88): whoever holds it may not be its owner, so it calls off nothing that asked
-      // for its removal, the recovery path and the way in without the second step included.
+      // removed (owner C3-88): whoever holds it may not be its owner, so it calls off nothing at all, not its
+      // own removal, not another passkey's (two passkeys set to be removed never keep each other), not the
+      // app's reset, not what the recovery address opened; and the session it opens has no second step
+      // (lib/second-step-gate.ts liveSecondStep).
       const doomed = waiting?.ids.includes(signed.id) === true;
       if (!doomed) {
         await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
         await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
+        // And the passkeys set to be removed stay (lib/passkeys.ts cancelRemoval).
+        await cancelRemoval(email, { by: "passkey" }).catch((error) => console.error("calling off a passkey removal failed", error));
       }
-      // And the other passkeys set to be removed stay; this one does not keep itself (lib/passkeys.ts cancelRemoval, owner C3-88).
-      await cancelRemoval(email, { except: signed.id }).catch((error) => console.error("calling off a passkey removal failed", error));
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));
       response.headers.append("Set-Cookie", `${PASSKEY_COOKIE}=; Path=/api/auth/passkey; Max-Age=0; HttpOnly; SameSite=Strict${secure}`);

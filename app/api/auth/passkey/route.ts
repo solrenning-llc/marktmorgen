@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
-import { SESSION_COOKIE, emailForSession, isFreshSession, sessionSecondStep } from "@/lib/auth";
+import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
-import { mayAddSecondStep } from "@/lib/second-step-gate";
+import { liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { lockedUntil } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
@@ -97,6 +97,8 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "keep") {
       const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
+      // Keeping one needs a session with a valid second step, never the passkey's own (owner C3-95, lib/second-step-gate.ts).
+      if (!mayKeepPasskey(await liveSecondStep(email, session))) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
       return (await cancelRemoval(email, { only: id })) ? Response.json({ ok: true }) : Response.json({ ok: false, error: "unknown" }, { status: 404 });
     }
     if (body.action === "options") {
@@ -113,7 +115,8 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "remove") {
       const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
-      if ((await sessionSecondStep(session, email)) === null) {
+      // At once only from a session with a valid second step (not one opened with a passkey that is itself set to be removed).
+      if ((await liveSecondStep(email, session)) === null) {
         const at = await scheduleRemoval(email, id, session);
         if (at === null) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         return Response.json({ ok: true, removeOn: at });

@@ -12,14 +12,14 @@
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
-import { PASSKEY_COOKIE, REMOVAL_DAYS, listPasskeys, pendingRemoval, scheduleRemoval } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, pendingRemoval, scheduleRemoval } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
 import { RESET_DAYS, finishSetup, lockedUntil, resetIfDue, startSetup, twoStepStatus } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
-import { hasSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
+import { hasSecondStep, liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { secondStepWay } from "@/lib/team";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { POST as passkeyRoute } from "@/app/api/auth/passkey/route";
@@ -155,6 +155,45 @@ async function main(): Promise<void> {
   await scheduleRemoval(ADA, "cred-ada-1", "f".repeat(64), Date.now() - (REMOVAL_DAYS * 86_400_000) - 60_000);
   is("the way offered is to set one up, and the passkey is gone", [await secondStepWay(ADA), (await listPasskeys(ADA)).length], ["set_up", 0]);
 
+  part("A session opened with a passkey set to be removed has no second step");
+  const BO = "bo-doomed@example.com";
+  const boP = makePasskey(BO, "cred-bo-p");
+  const boQ = makePasskey(BO, "cred-bo-q");
+  await boP.keep();
+  await boQ.keep();
+  await turnOnApp(BO, "bo-backup@example.org");
+  const boOld = await openSession(BO);
+  is("P is asked to go", typeof (await passkeys(boOld, { action: "remove", id: "cred-bo-p" })).removeOn, "number");
+  const byP = await signInWithPasskey(boP);
+  is("P still logs in within its days", byP.length, 64);
+  is("but its session has no second step", [await sessionSecondStep(byP, BO), await liveSecondStep(BO, byP)], ["passkey", null]);
+  is("(b) it adds no passkey", (await passkeys(byP, { action: "options" })).error, "second_step");
+  is("(b) it turns on no app either", (await twoStep(byP)).error, "second_step");
+  const qFromP = await passkeys(byP, { action: "remove", id: "cred-bo-q" });
+  is("(c) removing Q from it only waits, Q is not removed at once", [typeof qFromP.removeOn, (await listPasskeys(BO)).length], ["number", 2]);
+  is("(a) it cannot keep P", (await passkeys(byP, { action: "keep", id: "cred-bo-p" })).error, "second_step");
+  const boCancel = await twoStepRoute(asJson(`${ORIGIN}/api/auth/two-step`, { action: "cancel" }, `nl_session=${byP}`));
+  is("nor press Cancel under Two-step login", [boCancel.status, ((await boCancel.json()) as { error?: string }).error], [403, "second_step"]);
+  is("both still wait", (await pendingRemoval(BO))?.ids.sort(), ["cred-bo-p", "cred-bo-q"]);
+
+  part("Two passkeys set to be removed never keep each other");
+  mails.length = 0;
+  const byQ = await signInWithPasskey(boQ);
+  is("Q logs in, with no second step", [byQ.length, await liveSecondStep(BO, byQ)], [64, null]);
+  is("and calls nothing off: P and Q both still wait", (await pendingRemoval(BO))?.ids.sort(), ["cred-bo-p", "cred-bo-q"]);
+  is("nor says another passkey kept them", mails.some((m) => m.to === BO && m.subject === "Your passkeys stay on your Marktmorgen account"), false);
+
+  part("Once the days are over: nothing is called off, and the old session does nothing");
+  const dropBo = `nl:pk:drop:${hex(`nimbus-passkey-drop:${BO}`).slice(0, 40)}`;
+  const [rawBo] = await redis.pipeline([["GET", dropBo]]);
+  await redis.pipeline([["SET", dropBo, JSON.stringify({ ...JSON.parse(String(rawBo)), at: Date.now() - 1_000 })]]);
+  is("a removal whose days are over cannot be called off", [await cancelRemoval(BO, { by: "code" }), (await listPasskeys(BO)).length], [false, 0]);
+  is("the session P opened before is logged out with it", await emailForSession(byP), null);
+  is("and used by the API it removes nothing and adds nothing", [(await passkeys(byP, { action: "remove", id: "cred-bo-q" })).error, (await passkeys(byP, { action: "options" })).error], ["signed_out", "signed_out"]);
+
+  part("Keep it: the owner's rule (C3-95)");
+  is("no second step, no Keep it; another passkey or the app's code may", [mayKeepPasskey(null), mayKeepPasskey("passkey"), mayKeepPasskey("app")], [false, true, true]);
+
   part("The app's code calls a removal off too");
   const ZOE = "zoe-code@example.com";
   const zoe = makePasskey(ZOE, "cred-zoe-1");
@@ -244,11 +283,15 @@ async function main(): Promise<void> {
   is("the owner's login with the sign-in inbox logs it out", await emailForSession(viaRecovery), null);
   is("and calls its removal off", [await pendingRemoval(SAM), (await listPasskeys(SAM)).length], [null, 1]);
   is("saying so, beside the notice that what the recovery address opened was closed", [mails.some((m) => m.to === SAM && m.subject === "Your passkeys stay on your Marktmorgen account"), mails.some((m) => m.to === SAM && m.subject === "What your recovery address opened was closed")], [true, true]);
+  const sam2 = makePasskey(SAM, "cred-sam-2");
+  await sam2.keep();
+  const samKey = await signInWithPasskey(sam2);
   const samLink = await linkSession(SAM);
   await passkeys(samLink, { action: "remove", id: "cred-sam-1" });
   await linkSession(SAM);
   is("a removal asked by a session that stays open is not called off by another login", (await pendingRemoval(SAM)) !== null, true);
-  is("“Keep it” calls it off", [(await passkeys(samLink, { action: "keep", id: "cred-sam-1" })).ok, await pendingRemoval(SAM)], [true, null]);
+  is("“Keep it” from a session without a second step is refused (owner C3-95)", await passkeys(samLink, { action: "keep", id: "cred-sam-1" }), { status: 403, ok: false, error: "second_step" });
+  is("from a session opened with another passkey, “Keep it” calls it off", [(await passkeys(samKey, { action: "keep", id: "cred-sam-1" })).ok, await pendingRemoval(SAM)], [true, null]);
 
   part("Asking again within the hour is not emailed again");
   const TIA = "tia-again@example.com";
@@ -261,7 +304,7 @@ async function main(): Promise<void> {
   is("once in the first hour", told(), 1);
   await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), t0 + 61 * 60_000);
   is("again an hour later", told(), 2);
-  is("the email says the moment with its time zone spelled out, and how to stop it", [...mails].reverse().find((m) => m.to === TIA)?.text.includes("Coordinated Universal Time (UTC)") && [...mails].reverse().find((m) => m.to === TIA)?.text.includes("“Keep it”"), true);
+  is("the email says the moment with its time zone spelled out, and how to stop it", [...mails].reverse().find((m) => m.to === TIA)?.text.includes("Coordinated Universal Time (UTC)") && [...mails].reverse().find((m) => m.to === TIA)?.text.includes("Logging in with this passkey itself does not."), true);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";
@@ -297,8 +340,9 @@ async function main(): Promise<void> {
   await wes.keep();
   const wesLink = await linkSession(WES);
   await passkeys(wesLink, { action: "remove", id: "cred-wes-1" });
+  const wesApp = await openSession(WES, "app");
   const blocking = await takeLock(lockOf(WES), 30, 1_000);
-  is("keeping it while the lock is held elsewhere", await passkeys(wesLink, { action: "keep", id: "cred-wes-1" }), { status: 503, ok: false, error: "busy" });
+  is("keeping it while the lock is held elsewhere", await passkeys(wesApp, { action: "keep", id: "cred-wes-1" }), { status: 503, ok: false, error: "busy" });
   const optionsBusy = await passkeySignIn(asJson(`${ORIGIN}/api/auth/passkey/signin`, { action: "options" }, ""));
   const nonceBusy = cookieOf(optionsBusy, PASSKEY_COOKIE);
   const { options: askedBusy } = (await optionsBusy.json()) as { options: { challenge: string } };

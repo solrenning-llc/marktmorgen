@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
   const previous = request.cookies.get(SESSION_COOKIE)?.value;
   if (previous && previous !== sessionId) await endSession(previous);
   // The passkeys set to be removed from a session without the step stay (lib/passkeys.ts scheduleRemoval).
-  await cancelRemoval(answer.email).catch((error) => console.error("calling off a passkey removal failed", error));
+  await cancelRemoval(answer.email, { by: "code" }).catch((error) => console.error("calling off a passkey removal failed", error));
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   const response = away("/studio");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));

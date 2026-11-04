@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
-import { SESSION_COOKIE, dropSecondStep, emailForSession, isFreshSession } from "@/lib/auth";
+import { SESSION_COOKIE, dropSecondStep, emailForSession, isFreshSession, sessionMark } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { canSeal } from "@/lib/secret-box";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
-import { mayAddSecondStep } from "@/lib/second-step-gate";
+import { liveSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
 import { cancelRemoval } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
 
@@ -26,11 +26,14 @@ const CHANGES_PER_HOUR = 30;
  *   { action: "off", code }        turns it off, with a right code
  *   { action: "codes", code }      ten new recovery codes, with a right code
  *   { action: "cancel" }           calls off a request to turn it off without a
- *                                  code, and any passkey removal that waits;
- *                                  any logged-in browser not locked may, because
- *                                  keeping things as they are takes nothing away
- *                                  (a session let in without the step is refused
- *                                  above, as it is the one the request is about)
+ *                                  code; any logged-in browser not locked may,
+ *                                  because keeping things as they are takes
+ *                                  nothing away (a session let in without the
+ *                                  step is refused above, as it is the one the
+ *                                  request is about), except one opened with a
+ *                                  passkey that is set to be removed or gone.
+ *                                  Passkey removals that wait are called off too,
+ *                                  only from a session with a valid second step
  *
  * It belongs to the person, not to a store, like their passkeys.
  */
@@ -72,9 +75,13 @@ export async function POST(request: NextRequest) {
       return typeof done === "string" ? refuse(done) : Response.json({ ok: true, codes: done.codes }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "cancel") {
+      // A session opened with a passkey that is set to be removed, or gone, calls off nothing
+      // (lib/second-step-gate.ts liveSecondStep): whoever holds that passkey may not be the owner.
+      const step = await liveSecondStep(email, session);
+      if (step === null && (await sessionMark(session, email))?.startsWith("passkey")) return refuse("second_step", 403);
       await cancelReset(email, "studio");
-      // And passkeys set to be removed from a session without the step stay (lib/passkeys.ts scheduleRemoval).
-      await cancelRemoval(email);
+      // Passkeys set to be removed stay only for a session with a valid second step, as "Keep it" (owner C3-95).
+      if (step !== null) await cancelRemoval(email, { by: "studio" });
       return Response.json({ ok: true });
     }
     if (body.action === "off") {

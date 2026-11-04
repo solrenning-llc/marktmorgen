@@ -33,7 +33,8 @@
  */
 import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail, sessionSecondStep } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
@@ -167,7 +168,7 @@ async function saveTeam(sid: string, team: Team): Promise<void> {
  * Whether the team must use two-step sign-in, and, for one person, whether
  * they may open the studio under it: the owner always may (the requirement is
  * theirs to set); anybody else only in a session that was opened with a
- * second step (lib/auth.ts sessionSecondStep): the app's code, a recovery
+ * second step (lib/second-step-gate.ts liveSecondStep): the app's code, a recovery
  * code, or a passkey used to log in. Owning a passkey or an app is not enough:
  * an emailed link opens a session without either, so a member who has only a
  * passkey and logs in by the link is asked for the second step here. A
@@ -179,7 +180,7 @@ export async function teamTwoStepBlocks(store: Store, email: string, role: Role,
   if (role === "owner" || !store.sid) return false;
   const team = await readTeam(store.sid);
   if (!team.requireTwoStep) return false;
-  return (await sessionSecondStep(session, email)) === null;
+  return (await liveSecondStep(email, session)) === null;
 }
 
 /**

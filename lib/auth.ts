@@ -133,13 +133,23 @@ const SECOND_STEPS: readonly SecondStep[] = ["app", "recovery", "passkey"];
  * second step of a session rather than of an account (lib/team.ts).
  */
 export async function sessionSecondStep(id: string | undefined, email: string): Promise<SecondStep | null> {
+  const mark = await sessionMark(id, email);
+  return SECOND_STEPS.find((step) => step === stepOf(mark)) ?? null;
+}
+
+/**
+ * The mark itself ("app", "recovery" or "passkey:<id>"), for what has to know
+ * which passkey opened the session (lib/second-step-gate.ts liveSecondStep,
+ * which every check of a session's second step goes through).
+ */
+export async function sessionMark(id: string | undefined, email: string): Promise<string | null> {
   if (!id || !isRedisConfigured() || !/^[0-9a-f]{64}$/.test(id)) return null;
-  const [owner, second] = await redisPipeline([
+  const [owner, mark] = await redisPipeline([
     ["GET", await sessionKey(id)],
     ["GET", await secondKey(id)],
   ]);
   if (typeof owner !== "string" || !owner || owner !== normaliseEmail(email)) return null;
-  return SECOND_STEPS.find((step) => step === stepOf(second)) ?? null;
+  return typeof mark === "string" && mark ? mark : null;
 }
 
 /** The step a mark names: "passkey:<id>" is a passkey. */

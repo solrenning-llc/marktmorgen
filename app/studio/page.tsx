@@ -213,7 +213,7 @@ import { type Permission, type Role, ROLE_NAMES, ROLE_SUMMARIES, can } from "@/l
 import { MAX_TEAM, SECOND_STEP_WORDS, readTeam, secondStepWay } from "@/lib/team";
 import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
 import { REMOVAL_DAYS, listPasskeys, pendingRemoval } from "@/lib/passkeys";
-import { mayAddSecondStep } from "@/lib/second-step-gate";
+import { liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
@@ -1111,6 +1111,7 @@ export default async function StudioPage({
   const removing = email ? await pendingRemoval(email).catch(() => null) : null;
   const passkeyRemovals: Record<string, number> = removing ? Object.fromEntries(removing.ids.map((id) => [id, removing.at])) : {};
   const needsStep = email ? !(await mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : false;
+  const canKeep = email ? mayKeepPasskey(await liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : false;
   const [passkeys, team, freshLogin, lockedTill, twoStep, recoveryShown] = await Promise.all([
     email ? listPasskeys(email).catch(() => []) : Promise.resolve([]),
     store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
@@ -3247,6 +3248,7 @@ export default async function StudioPage({
                 initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                 fresh={freshLogin}
                 needsStep={needsStep}
+                canKeep={canKeep}
                 removals={passkeyRemovals}
                 removalDays={REMOVAL_DAYS}
               />
@@ -3336,6 +3338,7 @@ export default async function StudioPage({
                   initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                   fresh={freshLogin}
                   needsStep={needsStep}
+                  canKeep={canKeep}
                   removals={passkeyRemovals}
                   removalDays={REMOVAL_DAYS}
                 />

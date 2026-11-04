@@ -290,6 +290,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:second:@lib/auth.ts": company("The second step a session was opened with", "An account's, as long as its session."),
   "nl:auth:link:@lib/auth.ts": company("A sign-in link", "An account's, minutes."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
+  "nl:auth:moving:@lib/auth.ts": company("An address in the middle of a move", "An account's, minutes."),
   "nl:auth:session:@lib/auth.ts": company("A session", "An account's."),
   "nl:auth:sessions:@lib/auth.ts": company("An account's sessions", "An account's."),
   "nl:rl:address:@lib/auth.ts": company("Sign-in links per address", "An account's, an hour."),

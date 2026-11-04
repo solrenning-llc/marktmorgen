@@ -5,7 +5,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
-import { liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
+import { liveSecondStep, mayAddNow, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { lockedUntil, twoStepOn } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
@@ -110,7 +110,8 @@ export async function POST(request: NextRequest) {
       const response = body.response as RegistrationResponseJSON | undefined;
       if (!response || typeof response !== "object") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       const name = typeof body.name === "string" ? body.name : "";
-      const result = await addPasskey(email, session, response, name);
+      // Asked again under the account's lock, just before the write (lib/second-step-gate.ts mayAddNow).
+      const result = await addPasskey(email, session, response, name, () => mayAddNow(email, session));
       if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: ANSWERS[result.reason] ?? 400 });
       const list = await listPasskeys(email);
       return Response.json({ ok: true, passkeys: list.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced })) });

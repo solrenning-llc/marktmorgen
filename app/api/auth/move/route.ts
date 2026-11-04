@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
-import { moveTwoStep } from "@/lib/two-step";
+import { discardTwoStep, moveTwoStep } from "@/lib/two-step";
 import { moveRecoveryAddress } from "@/lib/recovery-address";
 import { originFrom } from "@/lib/request-origin";
 import {
   endAllSessions,
+  endMoving,
+  markMoving,
   moveDevices,
   openSession,
   sessionCookie,
@@ -11,7 +13,7 @@ import {
 } from "@/lib/auth";
 import { moveAccount, storeForEmail } from "@/lib/store";
 import { moveMemberships } from "@/lib/team";
-import { movePasskeys, pendingRemoval } from "@/lib/passkeys";
+import { discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
 import { movePhoneDevices } from "@/lib/phone-alerts";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
@@ -58,14 +60,39 @@ export async function POST(request: NextRequest) {
   if (await holdsSecondStep(moved.to).catch(() => true)) return away("/signin?status=move-has-login");
 
   const { from, to } = moved;
-  // The ways in move first, and each refuses an address with its own (lib/passkeys.ts movePasskeys,
-  // lib/two-step.ts moveTwoStep): when one refuses, or the store cannot move, whatever already moved goes
-  // back and nothing else moves, so a move never ends split between two addresses.
+  // Both addresses are marked as moving for the whole move (lib/auth.ts markMoving): the ways in leave
+  // `from` before the store does, and in that gap `from` counts as having a second step, so a session opened
+  // only by the emailed link adds no passkey and no app to it (lib/second-step-gate.ts; review of 8b4ddf6ee).
+  // A second move of either address waits until this one is over.
+  if (!(await markMoving(from, to).catch(() => false))) return away("/signin?status=move-error");
+  try {
+    return await finishMove(from, to, away);
+  } finally {
+    await endMoving(from, to).catch((error) => console.error("unmarking a move failed", error));
+  }
+}
+
+/**
+ * The move itself, with both addresses marked. The ways in move first, and
+ * each refuses an address with its own (lib/passkeys.ts movePasskeys,
+ * lib/two-step.ts moveTwoStep); when one refuses, or the store cannot move,
+ * the account's own ways in go back, whatever `from` gained in the meantime is
+ * forgotten and its sessions are logged out, and nothing else moves: a move
+ * never ends split between two addresses.
+ */
+async function finishMove(from: string, to: string, away: (path: string) => Response): Promise<Response> {
   let keysMoved = false;
   let appMoved = false;
   const undo = async () => {
-    if (appMoved) await moveTwoStep(to, from).catch((error) => console.error("moving two-step login back failed", error));
-    if (keysMoved) await movePasskeys(to, from).catch((error) => console.error("moving passkeys back failed", error));
+    if (keysMoved) {
+      await discardPasskeys(from).catch((error) => console.error("forgetting passkeys added midway failed", error));
+      await movePasskeys(to, from).catch((error) => console.error("moving passkeys back failed", error));
+    }
+    if (appMoved) {
+      await discardTwoStep(from).catch((error) => console.error("forgetting two-step login added midway failed", error));
+      await moveTwoStep(to, from).catch((error) => console.error("moving two-step login back failed", error));
+    }
+    await endAllSessions(from).catch((error) => console.error("logging out after an undone move failed", error));
   };
   try {
     await movePasskeys(from, to);
@@ -94,17 +121,20 @@ export async function POST(request: NextRequest) {
     ]).catch((error) => console.error("moving what belongs to the account failed", error));
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
-    await movePhoneDevices(moved.from, moved.to).catch((error) => console.error("moving phone devices failed", error));
-    await endAllSessions(moved.from);
+    await movePhoneDevices(from, to).catch((error) => console.error("moving phone devices failed", error));
+    await endAllSessions(from);
     // And whatever the new address had open before: nothing opened there earlier stays open into this account.
-    await endAllSessions(moved.to);
-    sessionId = await openSession(moved.to);
+    await endAllSessions(to);
+    sessionId = await openSession(to);
     // Passkeys set to be removed moved with the rest (lib/passkeys.ts movePasskeys); a removal whose days are over is applied at every login.
-    await pendingRemoval(moved.to).catch((error) => console.error("applying a passkey removal failed", error));
+    await pendingRemoval(to).catch((error) => console.error("applying a passkey removal failed", error));
   } catch (error) {
     console.error("address move failed", error);
-    // The store did not move, or did and something after it failed: put the ways in back only in the first case.
-    if (!(await storeForEmail(to).catch(() => null))) await undo();
+    // Undone only when the store is known to be still at `from`: a passing error reading it never undoes a
+    // move whose store already landed at `to`.
+    const [there, here] = await Promise.all([storeForEmail(to).catch(() => undefined), storeForEmail(from).catch(() => undefined)]);
+    if (there === null && here) await undo();
+    else if (there === undefined || here === undefined) console.error("a failed move left in an unknown state", { from, to });
     return away("/signin?status=move-error");
   }
 

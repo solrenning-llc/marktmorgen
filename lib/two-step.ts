@@ -516,7 +516,9 @@ export async function finishSetup(
   typed: string,
   backupCode: string,
   now = Date.now(),
-): Promise<{ codes: string[] } | "expired" | "wrong" | "backup-wrong" | "already"> {
+  /** Asked again under the record's lock, just before it is written (review of 8b4ddf6ee); it must take no lock. */
+  mayAdd: () => Promise<boolean> = async () => true,
+): Promise<{ codes: string[] } | "expired" | "wrong" | "backup-wrong" | "already" | "second_step"> {
   if (await twoStepOn(email)) return "already";
   const [raw] = await redisPipeline([["GET", setupKey(session)]]);
   let pending: { e?: unknown; s?: unknown; b?: unknown; c?: unknown } = {};
@@ -534,8 +536,11 @@ export async function finishSetup(
   if (step === null) return "wrong";
   const codes = newCodes();
   // Only where none is there yet, under the lock: turning it on twice at once makes one record, never two sets of codes.
-  const made = await withTwoStep(email, (held) => writeHeld(held, email, { s: pending.s as string, since: now, codes: codes.map((c) => codeHash(c)), last: step, reset: 0, backup: "" }, { absent: true }));
-  if (!made) return "already";
+  const made = await withTwoStep(email, async (held) => {
+    if (!(await mayAdd())) return "second_step" as const;
+    return (await writeHeld(held, email, { s: pending.s as string, since: now, codes: codes.map((c) => codeHash(c)), last: step, reset: 0, backup: "" }, { absent: true })) ? ("made" as const) : ("already" as const);
+  });
+  if (made !== "made") return made;
   // The account's recovery address from now on, for losing the email too (lib/recovery-address.ts).
   await keepRecoveryAddress(email, pending.b);
   await redisPipeline([["DEL", setupKey(session)]]);
@@ -735,6 +740,15 @@ export async function heldFor(token: string): Promise<string | null> {
 }
 
 /** Carries the second step to a new sign-in address (app/api/auth/move), sealed again for it. */
+/**
+ * Forgets an address's two-step record: only for a move that has to be
+ * undone, where whatever the address gained in the meantime must not stay
+ * (app/api/auth/move). True when there was one.
+ */
+export async function discardTwoStep(email: string): Promise<boolean> {
+  return withTwoStep(email, async (held) => (await read(email)) !== null && deleteHeld(held, [recordKey(email)]));
+}
+
 export async function moveTwoStep(from: string, to: string): Promise<void> {
   await withTwoStep(from, (heldFrom) =>
     withTwoStep(to, async (heldTo) => {
@@ -747,7 +761,11 @@ export async function moveTwoStep(from: string, to: string): Promise<void> {
       // opens (the root secret was rolled) still moves, so its recovery codes go
       // on letting the person in rather than the second step quietly ending.
       if (!(await writeHeld(heldTo, to, opened.ok ? { ...record, s: seal(opened.value, context(to)) } : record, { absent: true }))) throw new Error("moving two-step login lost its lock");
-      await deleteHeld(heldFrom, [recordKey(from)]);
+      if (!(await deleteHeld(heldFrom, [recordKey(from)]))) {
+        // Never on both addresses: the copy goes again, and the move is refused.
+        await deleteHeld(heldTo, [recordKey(to)]);
+        throw new Error("moving two-step login lost its lock");
+      }
     }),
   );
 }

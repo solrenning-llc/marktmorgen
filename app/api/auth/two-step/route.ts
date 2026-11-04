@@ -4,7 +4,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { canSeal } from "@/lib/secret-box";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
-import { liveSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
+import { liveSecondStep, mayAddNow, mayAddSecondStep } from "@/lib/second-step-gate";
 import { LockBusyError } from "@/lib/redis-lock";
 
 /** Changes one account may ask for in an hour: most of them email the account. */
@@ -70,8 +70,9 @@ export async function POST(request: NextRequest) {
           ? refuse(started, started === "already" ? 409 : started === "limited" ? 429 : started === "unsent" ? 503 : 400)
           : Response.json({ ok: true, ...started }, { headers: { "Cache-Control": "no-store" } });
       }
-      const done = await finishSetup(email, session, code, typeof body.backupCode === "string" ? body.backupCode.slice(0, 20) : "");
-      return typeof done === "string" ? refuse(done) : Response.json({ ok: true, codes: done.codes }, { headers: { "Cache-Control": "no-store" } });
+      // Asked again under the record's lock, just before it is written (lib/second-step-gate.ts mayAddNow).
+      const done = await finishSetup(email, session, code, typeof body.backupCode === "string" ? body.backupCode.slice(0, 20) : "", Date.now(), () => mayAddNow(email, session));
+      return typeof done === "string" ? refuse(done, done === "second_step" ? 403 : 400) : Response.json({ ok: true, codes: done.codes }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "cancel") {
       // A session opened with a passkey that is set to be removed, or gone, calls off nothing

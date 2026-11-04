@@ -221,7 +221,7 @@ export async function registrationOptions(email: string, session: string): Promi
   return options;
 }
 
-export type AddResult = { ok: true; passkey: Passkey } | { ok: false; reason: "expired" | "invalid" | "full" | "taken" };
+export type AddResult = { ok: true; passkey: Passkey } | { ok: false; reason: "expired" | "invalid" | "full" | "taken" | "second_step" };
 
 /** Checks the browser's answer and keeps the new passkey. */
 export async function addPasskey(
@@ -229,6 +229,8 @@ export async function addPasskey(
   session: string,
   response: RegistrationResponseJSON,
   rawName: string,
+  /** Asked again under the account's lock, so nothing between the route's check and the write lets a passkey in (review of 8b4ddf6ee); it must take no lock. */
+  mayAdd: () => Promise<boolean> = async () => true,
 ): Promise<AddResult> {
   const address = normaliseEmail(email);
   const challenge = await spend(regKey(session));
@@ -250,6 +252,7 @@ export async function addPasskey(
 
   const { credential, credentialBackedUp } = verified.registrationInfo;
   const kept = await withPasskeys(address, async (held): Promise<AddResult> => {
+    if (!(await mayAdd())) return { ok: false, reason: "second_step" };
     const list = await listPasskeys(address);
     if (list.length >= MAX_PASSKEYS) return { ok: false, reason: "full" };
     const [claimed] = await redisPipeline([["SET", credKey(credential.id), address, "NX"]]);
@@ -377,9 +380,9 @@ async function sessionPasskey(email: string, session: string | undefined): Promi
  */
 export async function scheduleRemoval(email: string, id: string, session: string, appOn = false, now = Date.now()): Promise<number | null> {
   const address = normaliseEmail(email);
-  let gone: Passkey[] = [];
+  let gone: Due = NONE;
   const asked = await withPasskeys(address, async (held) => {
-    gone = (await removeDue(held, address, now)) ?? [];
+    gone = (await removeDue(held, address, now)) ?? NONE;
     const list = await listPasskeys(address);
     const row = list.find((p) => p.id === id);
     if (!row) return null;
@@ -432,7 +435,10 @@ export async function scheduleRemoval(email: string, id: string, session: string
  * run out; answers them (empty when none were due), or null when nothing
  * waits or the moment has not come.
  */
-async function removeDue(held: Held, address: string, now: number): Promise<Passkey[] | null> {
+type Due = { gone: Passkey[]; ids: string[] };
+const NONE: Due = { gone: [], ids: [] };
+
+async function removeDue(held: Held, address: string, now: number): Promise<Due | null> {
   const record = await readDrop(address);
   const due = (id: string) => (record?.atOf[id] ?? Infinity) <= now;
   if (!record || !record.ids.some(due)) return null;
@@ -441,14 +447,19 @@ async function removeDue(held: Held, address: string, now: number): Promise<Pass
   await saveList(held, address, list.filter((p) => !due(p.id)));
   await fencedDel(held, removed.map((p) => credKey(p.id)));
   await writeDrop(held, address, without(record, due));
-  return removed;
+  // The sessions are logged out by the record's ids, not the list's: a passkey already off the list
+  // (a lock lost between the two writes) still has its sessions closed (review of 8b4ddf6ee).
+  return { gone: removed, ids: record.ids.filter(due) };
 }
 
 /** What follows a removal that waited its days, once the lock is let go: its sessions logged out, the account told. */
-async function afterDue(address: string, gone: Passkey[]): Promise<void> {
+async function afterDue(address: string, due: Due): Promise<void> {
+  if (due.ids.length) {
+    const marks = due.ids.map((id) => `passkey:${id}`);
+    await dropSecondStep(address, (mark) => marks.includes(mark));
+  }
+  const gone = due.gone;
   if (!gone.length) return;
-  const ids = gone.map((p) => `passkey:${p.id}`);
-  await dropSecondStep(address, (mark) => ids.includes(mark));
   await tell(address, "Passkeys were removed from your Marktmorgen account", `${gone.map((p) => `“${headerText(p.name, 60)}”`).join(", ")} ${gone.length === 1 ? "was" : "were"} removed from your Marktmorgen account (${address}) after the wait. ${gone.length === 1 ? "It cannot" : "They cannot"} log in anymore. You can add a new passkey in your studio.`);
 }
 
@@ -482,9 +493,9 @@ export async function pendingRemoval(email: string, now = Date.now()): Promise<P
  */
 export async function cancelRemoval(email: string, id: string, session: string | undefined, now = Date.now()): Promise<"kept" | "unknown" | "second_step"> {
   const address = normaliseEmail(email);
-  let gone: Passkey[] = [];
+  let gone: Due = NONE;
   const answer = await withPasskeys(address, async (held): Promise<"kept" | "unknown" | "second_step"> => {
-    gone = (await removeDue(held, address, now)) ?? [];
+    gone = (await removeDue(held, address, now)) ?? NONE;
     const record = await readDrop(address);
     const own = await sessionPasskey(address, session);
     if (own && (record?.ids.includes(own) || !(await listPasskeys(address)).some((p) => p.id === own))) return "second_step";
@@ -506,9 +517,9 @@ export async function cancelRemoval(email: string, id: string, session: string |
  */
 export async function removePasskey(email: string, id: string, keep?: string, now = Date.now()): Promise<"removed" | "unknown" | "second_step"> {
   const address = normaliseEmail(email);
-  let due: Passkey[] = [];
+  let due: Due = NONE;
   const answer = await withPasskeys(address, async (held): Promise<Passkey | "unknown" | "second_step"> => {
-    due = (await removeDue(held, address, now)) ?? [];
+    due = (await removeDue(held, address, now)) ?? NONE;
     const list = await listPasskeys(address);
     const record = await readDrop(address);
     const own = await sessionPasskey(address, keep);
@@ -558,10 +569,10 @@ export async function signInWith(nonce: string, response: AuthenticationResponse
   // All under the account's lock, removals whose wait ran out first: a
   // passkey due to go never logs in, and one removed meanwhile (in the
   // studio, or by its wait) is never written back.
-  let gone: Passkey[] = [];
+  let gone: Due = NONE;
   let doomed = false;
   const signed = await withPasskeys(owner, async (held) => {
-    gone = (await removeDue(held, owner, Date.now())) ?? [];
+    gone = (await removeDue(held, owner, Date.now())) ?? NONE;
     // Read under the same lock: whether this passkey is set to be removed (it then calls nothing off at login).
     doomed = (await readDrop(owner))?.ids.includes(response.id) === true;
     const list = await listPasskeys(owner);
@@ -609,6 +620,28 @@ export async function unlessSetToGo(email: string, id: string, work: () => Promi
   });
 }
 
+/** What waits to be removed, read without the lock and without applying anything: for checks made under another lock. */
+export async function pendingNow(email: string): Promise<PendingRemoval | null> {
+  const record = await readDrop(normaliseEmail(email));
+  return record ? { ids: record.ids, atOf: record.atOf } : null;
+}
+
+/**
+ * Forgets every passkey of an address, and what waited to be removed: only
+ * for a move that has to be undone, where whatever the address gained in the
+ * meantime must not stay (app/api/auth/move). True when there was any.
+ */
+export async function discardPasskeys(email: string): Promise<boolean> {
+  const address = normaliseEmail(email);
+  return withPasskeys(address, async (held) => {
+    const list = await listPasskeys(address);
+    const record = await readDrop(address);
+    if (!list.length && !record) return false;
+    await fencedDel(held, [listKey(address), dropKey(address), ...list.map((p) => credKey(p.id))]);
+    return true;
+  });
+}
+
 /**
  * Whether an address holds passkeys of its own, or a removal record: an
  * account is never moved onto one (app/api/auth/move, security review of
@@ -628,19 +661,32 @@ export async function holdsPasskeys(email: string): Promise<boolean> {
 export async function movePasskeys(from: string, to: string, now = Date.now()): Promise<void> {
   const source = normaliseEmail(from);
   const address = normaliseEmail(to);
-  let due: Passkey[] = [];
+  let due: Due = NONE;
   await withPasskeys(source, (heldFrom) =>
     withPasskeys(address, async (heldTo) => {
       if (await holdsPasskeys(address)) throw new Error("the new address holds passkeys of its own");
-      due = (await removeDue(heldFrom, source, now)) ?? [];
+      due = (await removeDue(heldFrom, source, now)) ?? NONE;
       const list = await listPasskeys(source);
       const pending = await readDrop(source);
-      if (list.length) {
-        await fencedSet(heldTo, listKey(address), JSON.stringify(list));
-        for (const p of list) await fencedSet(heldTo, credKey(p.id), address);
+      const copied: string[] = [];
+      try {
+        if (list.length) {
+          await fencedSet(heldTo, listKey(address), JSON.stringify(list));
+          for (const p of list) {
+            await fencedSet(heldTo, credKey(p.id), address);
+            copied.push(p.id);
+          }
+        }
+        if (pending) await writeDrop(heldTo, address, pending);
+        await fencedDel(heldFrom, [listKey(source), dropKey(source)]);
+      } catch (error) {
+        // A lock lost midway: what was copied goes back, so the passkeys are never on both addresses or neither.
+        await redisPipeline([
+          ...copied.map((id) => ["SET", credKey(id), source]),
+          ["DEL", listKey(address), dropKey(address)],
+        ]).catch((undo) => console.error("putting passkeys back failed", undo));
+        throw error;
       }
-      if (pending) await writeDrop(heldTo, address, pending);
-      await fencedDel(heldFrom, [listKey(source), dropKey(source)]);
     }),
   );
   await afterDue(source, due);

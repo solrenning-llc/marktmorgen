@@ -137,6 +137,40 @@ export async function sessionSecondStep(id: string | undefined, email: string): 
   return SECOND_STEPS.find((step) => step === stepOf(mark)) ?? null;
 }
 
+const movingKey = async (email: string) =>
+  `nl:auth:moving:${(await sha256Hex(`nimbus-auth-moving:${normaliseEmail(email)}`)).slice(0, 40)}`;
+
+/** How long an address stays marked as moving: far longer than a move takes; a move that died midway lets go by itself. */
+export const MOVING_SECONDS = 5 * 60;
+
+/**
+ * Marks both addresses of a move while it runs (app/api/auth/move): its
+ * passkeys and app have left one and not yet settled, so an address that is
+ * moving counts as having a second step, and nobody adds a passkey or an app
+ * to it until the move is over (lib/second-step-gate.ts, security review of
+ * 8b4ddf6ee). False when either is already moving.
+ */
+export async function markMoving(from: string, to: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const [a, b] = await redisPipeline([
+    ["SET", await movingKey(from), "1", "NX", "EX", MOVING_SECONDS],
+    ["SET", await movingKey(to), "1", "NX", "EX", MOVING_SECONDS],
+  ]);
+  if (a === "OK" && b === "OK") return true;
+  await redisPipeline([...(a === "OK" ? [["DEL", await movingKey(from)]] : []), ...(b === "OK" ? [["DEL", await movingKey(to)]] : [])]);
+  return false;
+}
+
+export async function endMoving(from: string, to: string): Promise<void> {
+  await redisPipeline([["DEL", await movingKey(from), await movingKey(to)]]);
+}
+
+export async function isMoving(email: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const [found] = await redisPipeline([["EXISTS", await movingKey(email)]]);
+  return Number(found) === 1;
+}
+
 /**
  * The mark itself ("app", "recovery" or "passkey:<id>"), for what has to know
  * which passkey opened the session (lib/second-step-gate.ts liveSecondStep,

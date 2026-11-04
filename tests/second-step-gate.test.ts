@@ -15,11 +15,11 @@ import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
 import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingRemoval, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
-import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, replaceCodes, resetIfDue, startSetup, turnOff, twoStepStatus } from "@/lib/two-step";
+import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, moveTwoStep, replaceCodes, resetIfDue, startSetup, turnOff, twoStepStatus } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
-import { hasSecondStep, liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
+import { hasSecondStep, liveSecondStep, mayAddNow, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { secondStepWay } from "@/lib/team";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { POST as passkeyRoute } from "@/app/api/auth/passkey/route";
@@ -30,7 +30,7 @@ import { POST as addressRoute } from "@/app/api/store/address/route";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { claimHandle, storeForEmail } from "@/lib/store";
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
-import { sendMoveLink } from "@/lib/auth";
+import { endMoving, markMoving, sendMoveLink } from "@/lib/auth";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -582,7 +582,7 @@ async function main(): Promise<void> {
   const movAnswer = (await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: movToken }))).headers.get("location");
   redis.pipeline = movePipe;
   is("refused", movAnswer, `${ORIGIN}/signin?status=move-has-login`);
-  is("the store, the passkey and the session stay with the old address", [Boolean(await storeForEmail(MOV)), Boolean(await storeForEmail(DEST)), (await listPasskeys(MOV)).map((p) => p.id), await emailForSession(movKey)], [true, false, ["cred-mov-1"], MOV]);
+  is("the store and the passkey stay with the old address, and its sessions are logged out", [Boolean(await storeForEmail(MOV)), Boolean(await storeForEmail(DEST)), (await listPasskeys(MOV)).map((p) => p.id), await emailForSession(movKey)], [true, false, ["cred-mov-1"], null]);
 
   part("Asking to move does not tell which addresses have passkeys");
   const PROBE = "probe-target@example.com";
@@ -607,6 +607,143 @@ async function main(): Promise<void> {
   const strict = await removePasskey(FEN, "cred-fen-p", fenSession).catch(() => "refused");
   redis.pipeline = strictPipe;
   is("nothing is written: both passkeys stay", [strict, (await listPasskeys(FEN)).map((p) => p.id).sort()], ["refused", ["cred-fen-p", "cred-fen-q"]]);
+
+  part("No gap while a move runs (review of 8b4ddf6ee)");
+  const WVIC = "wvic-from@example.com";
+  const WDEST = "wvic-dest@example.com";
+  await claimHandle(WVIC, "wvic-from", "Wvic", "");
+  await makePasskey(WVIC, "cred-wvic").keep();
+  const wOwner = await openSession(WVIC, "passkey", "cred-wvic");
+  const wAttacker = await linkSession(WVIC);
+  mails.length = 0;
+  await sendMoveLink(WVIC, WDEST, ORIGIN, wOwner);
+  const wToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === WDEST)?.text ?? "")?.[1] ?? "";
+  const wPipe = redis.pipeline.bind(redis);
+  let wInside: unknown = null;
+  let wFired = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const c = commands[0];
+    // The store's own lock, taken by the move of the store itself: the ways in have already left.
+    if (!wFired && c && c[0] === "SET" && c.includes("NX") && c.includes(15)) {
+      wFired = true;
+      redis.pipeline = wPipe;
+      const opts = await passkeyRoute(asJson(`${ORIGIN}/api/auth/passkey`, { action: "options" }, `nl_session=${wAttacker}`));
+      wInside = [await hasSecondStep(WVIC), await mayAddSecondStep(WVIC, wAttacker), await mayAddNow(WVIC, wAttacker), opts.status];
+      // Stands in for anything that slipped in all the same.
+      await makePasskey(WVIC, "cred-evil").keep();
+      throw new Error("store lock busy (made up)");
+    }
+    return wPipe(commands);
+  }) as typeof redis.pipeline;
+  const wAnswer = (await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: wToken }))).headers.get("location");
+  redis.pipeline = wPipe;
+  is("in the gap the old address counts as having a second step: no add, options refused", wInside, [true, false, false, 403]);
+  is("the move fails", wAnswer, `${ORIGIN}/signin?status=move-error`);
+  is("undone: the store and only the owner's passkey are back, nothing left at the new address", [Boolean(await storeForEmail(WVIC)), (await listPasskeys(WVIC)).map((p) => p.id), (await listPasskeys(WDEST)).length], [true, ["cred-wvic"], 0]);
+  is("and every session of the old address is logged out", [await emailForSession(wAttacker), await emailForSession(wOwner)], [null, null]);
+  is("the move's marks are gone", [await mayAddSecondStep(WDEST, await openSession(WDEST))], [true]);
+
+  part("Adding is asked again under the lock, just before the write");
+  const NOV = "nov-add@example.com";
+  const novLink = await linkSession(NOV);
+  const novOptions = await passkeys(novLink, { action: "options" }) as { ok: boolean; options?: { challenge: string } };
+  is("an account with no second step gets the options", novOptions.ok, true);
+  await markMoving(NOV, "nov-elsewhere@example.com");
+  const novKey = makePasskey(NOV, "cred-nov-new");
+  const novAdd = await passkeys(novLink, { action: "add", response: novKey.register(novOptions.options!.challenge), name: "New" });
+  await endMoving(NOV, "nov-elsewhere@example.com");
+  is("between the options and the add, the account started to move: nothing is added", [novAdd.error, (await listPasskeys(NOV)).length], ["second_step", 0]);
+  const novOptions2 = await passkeys(novLink, { action: "options" }) as { ok: boolean; options?: { challenge: string } };
+  is("with nothing in the way, the same answer adds it", (await passkeys(novLink, { action: "add", response: makePasskey(NOV, "cred-nov-2").register(novOptions2.options?.challenge ?? ""), name: "New" })).ok, true);
+  const SET = "set-app@example.com";
+  const started = await startSetup(SET, "e".repeat(64), "set-backup@example.org");
+  if (typeof started === "string") throw new Error(started);
+  const setSent = /Your code: (\d{6})/.exec([...mails].reverse().find((m) => m.to === "set-backup@example.org")?.text ?? "")?.[1] ?? "";
+  const setStep = codeAt(base32Decode(started.secret)!, Math.floor(Date.now() / 1000 / STEP_SECONDS));
+  is("turning the app on asks again under its lock", [await finishSetup(SET, "e".repeat(64), setStep, setSent, Date.now(), async () => false), (await twoStepStatus(SET)).on], ["second_step", false]);
+
+  part("A failed step after the store moved never undoes the move");
+  const TMV = "tmv-from@example.com";
+  const TDST = "tmv-dest@example.com";
+  await claimHandle(TMV, "tmv-from", "Tmv", "");
+  await makePasskey(TMV, "cred-tmv").keep();
+  const tOwner = await openSession(TMV, "passkey", "cred-tmv");
+  mails.length = 0;
+  await sendMoveLink(TMV, TDST, ORIGIN, tOwner);
+  const tToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === TDST)?.text ?? "")?.[1] ?? "";
+  const tOwnerKey = `nl:store:owner:${hex(`nimbus-store:${TDST}`).slice(0, 40)}`;
+  const tPipe = redis.pipeline.bind(redis);
+  let tBroke = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // Opening the new session fails after the store moved, and the first read of where it landed fails too.
+    if (tBroke === 0 && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:auth:session:"))) { tBroke = 1; throw new Error("down for a moment"); }
+    if (tBroke === 1 && commands.some((c) => c[0] === "GET" && c[1] === tOwnerKey)) { tBroke = 2; throw new Error("down for a moment"); }
+    return tPipe(commands);
+  }) as typeof redis.pipeline;
+  const tAnswer = (await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: tToken }))).headers.get("location");
+  redis.pipeline = tPipe;
+  is("it says the move did not finish", tAnswer, `${ORIGIN}/signin?status=move-error`);
+  is("but the store and the passkey stay together at the new address: nothing is split", [Boolean(await storeForEmail(TDST)), (await listPasskeys(TDST)).map((p) => p.id), (await listPasskeys(TMV)).length], [true, ["cred-tmv"], 0]);
+
+  part("Locks lost midway leave nothing on two addresses");
+  const LMA = "lma-from@example.com";
+  const LMB = "lma-dest@example.com";
+  await makePasskey(LMA, "cred-lma-1").keep();
+  await makePasskey(LMA, "cred-lma-2").keep();
+  const lmaLockB = `nl:pk:lock:${hex(`nimbus-passkey-lock:${LMB}`).slice(0, 40)}`;
+  const credOf = (id: string) => `nl:pk:cred:${hex(`nimbus-passkey-id:${id}`).slice(0, 40)}`;
+  const lPipe = redis.pipeline.bind(redis);
+  let lSeen = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && c.includes(credOf("cred-lma-1"))) && ++lSeen === 1) {
+      const out = await lPipe(commands);
+      await lPipe([["DEL", lmaLockB]]);
+      return out;
+    }
+    return lPipe(commands);
+  }) as typeof redis.pipeline;
+  const lMoved = await movePasskeys(LMA, LMB).then(() => "moved", () => "refused");
+  redis.pipeline = lPipe;
+  is("the lock of the new address runs out midway: refused", lMoved, "refused");
+  is("everything is back where it was", [(await listPasskeys(LMA)).length, (await listPasskeys(LMB)).length, (await redis.pipeline([["GET", credOf("cred-lma-1")]]))[0]], [2, 0, LMA]);
+  const TSA = "tsa-from@example.com";
+  const TSB = "tsa-dest@example.com";
+  await turnOnApp(TSA, "tsa-backup@example.org");
+  const tsaRecord = `nl:2fa:${hex(`nimbus-2fa:${TSA}`).slice(0, 40)}`;
+  const tsaLock = `nl:2fa:lock:${hex(`nimbus-2fa-lock:${TSA}`).slice(0, 40)}`;
+  const sPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-del:") && c.includes(tsaRecord))) await sPipe([["DEL", tsaLock]]);
+    return sPipe(commands);
+  }) as typeof redis.pipeline;
+  const sMoved = await moveTwoStep(TSA, TSB).then(() => "moved", () => "refused");
+  redis.pipeline = sPipe;
+  is("two-step login whose old record could not be taken away: refused, and the copy is gone", [sMoved, (await twoStepStatus(TSA)).on, (await twoStepStatus(TSB)).on], ["refused", true, false]);
+
+  part("A passkey already off the list still has its sessions closed when its day comes");
+  const OFF = "off-list@example.com";
+  const offKey = makePasskey(OFF, "cred-off");
+  await offKey.keep();
+  const offSession = await signInWithPasskey(offKey);
+  await redis.pipeline([
+    ["SET", `nl:pk:drop:${hex(`nimbus-passkey-drop:${OFF}`).slice(0, 40)}`, JSON.stringify({ atOf: { "cred-off": Date.now() - 1_000 }, told: 0 })],
+    ["DEL", `nl:pk:${hex(`nimbus-passkeys:${OFF}`).slice(0, 40)}`],
+  ]);
+  await pendingRemoval(OFF);
+  is("its session is logged out", await emailForSession(offSession), null);
+
+  part("Asking to move to many addresses is limited per account");
+  const ASK = "ask-many@example.com";
+  await claimHandle(ASK, "ask-many", "Ask", "");
+  const askKey = makePasskey(ASK, "cred-ask");
+  await askKey.keep();
+  const askSession = await signInWithPasskey(askKey);
+  const answers: string[] = [];
+  for (let i = 0; i < 6; i += 1) {
+    const r = await addressRoute(form(`${ORIGIN}/api/store/address`, { email: `target-${i}@example.com` }, `nl_session=${askSession}`));
+    answers.push((r.headers.get("location") ?? "").split("address=")[1]);
+  }
+  is("five an hour, then limited", answers, ["sent", "sent", "sent", "sent", "sent", "limited"]);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";

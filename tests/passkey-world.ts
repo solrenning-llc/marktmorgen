@@ -33,6 +33,27 @@ export function makePasskey(email: string, id: string) {
         ["SET", `nl:pk:cred:${hex(`nimbus-passkey-id:${id}`).slice(0, 40)}`, email],
       ]);
     },
+    /** What a browser answers when it makes this passkey, to the add options' challenge: attestation "none". */
+    register(challenge: string) {
+      const credId = Buffer.from(id);
+      const idLen = Buffer.alloc(2);
+      idLen.writeUInt16BE(credId.length);
+      const authData = Buffer.concat([sha(RP_ID), Buffer.from([0x45]), Buffer.alloc(4), Buffer.alloc(16), idLen, credId, cose]);
+      const bstr = authData.length < 256 ? Buffer.from([0x58, authData.length]) : Buffer.from([0x59, authData.length >> 8, authData.length & 0xff]);
+      const attestation = Buffer.concat([
+        Buffer.from([0xa3, 0x63]), Buffer.from("fmt"), Buffer.from([0x64]), Buffer.from("none"),
+        Buffer.from([0x67]), Buffer.from("attStmt"), Buffer.from([0xa0]),
+        Buffer.from([0x68]), Buffer.from("authData"), bstr, authData,
+      ]);
+      const clientData = Buffer.from(JSON.stringify({ type: "webauthn.create", challenge, origin: SITE_URL, crossOrigin: false }));
+      return {
+        id: credId.toString("base64url"),
+        rawId: credId.toString("base64url"),
+        type: "public-key",
+        clientExtensionResults: {},
+        response: { clientDataJSON: clientData.toString("base64url"), attestationObject: attestation.toString("base64url"), transports: ["internal"] },
+      };
+    },
     /** What a browser answers to the sign-in options, signed by this key. */
     answer(challenge: string) {
       counter += 1;

@@ -11,8 +11,8 @@
  * account (lib/passkeys.ts scheduleRemoval), or asks to turn the app off
  * without a code, which waits as long (lib/two-step.ts enterLocked).
  */
-import { type SecondStep, sessionMark } from "@/lib/auth";
-import { holdsPasskeys, listPasskeys, pendingRemoval } from "@/lib/passkeys";
+import { type SecondStep, isMoving, sessionMark } from "@/lib/auth";
+import { holdsPasskeys, listPasskeys, pendingNow, pendingRemoval } from "@/lib/passkeys";
 import { twoStepOn } from "@/lib/two-step";
 
 /**
@@ -48,17 +48,39 @@ export function mayKeepPasskey(step: SecondStep | null): boolean {
   return step !== null;
 }
 
-/** Whether the account has a passkey or an authenticator app turned on, after any removal that has waited its days. */
+/**
+ * Whether the account has a passkey or an authenticator app turned on, after
+ * any removal that has waited its days. An address in the middle of a move
+ * counts as having one (lib/auth.ts markMoving): its ways in have left and
+ * not settled, and nothing may be added in that gap.
+ */
 export async function hasSecondStep(email: string, now = Date.now()): Promise<boolean> {
+  if (await isMoving(email)) return true;
   await pendingRemoval(email, now);
   const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
   return app || keys.length > 0;
 }
 
-/** Whether this session may add a passkey or turn on an app for this account. */
+/** Whether this session may add a passkey or turn on an app for this account. Never while the address is moving. */
 export async function mayAddSecondStep(email: string, session: string | undefined, now = Date.now()): Promise<boolean> {
+  if (await isMoving(email)) return false;
   if ((await liveSecondStep(email, session, now)) !== null) return true;
   return !(await hasSecondStep(email, now));
+}
+
+/**
+ * The same question, asked again under the passkeys' or the two-step lock
+ * just before the write (lib/passkeys.ts addPasskey, lib/two-step.ts
+ * finishSetup): it takes no lock and applies nothing, reading what is there
+ * now, and a removal not yet applied counts as still waiting.
+ */
+export async function mayAddNow(email: string, session: string | undefined): Promise<boolean> {
+  if (await isMoving(email)) return false;
+  const [mark, app, keys, waiting] = await Promise.all([sessionMark(session, email), twoStepOn(email), listPasskeys(email), pendingNow(email)]);
+  const id = mark?.startsWith("passkey:") ? mark.slice("passkey:".length) : "";
+  const valid = mark === "app" || mark === "recovery" ? app : id !== "" && keys.some((p) => p.id === id) && !waiting?.ids.includes(id);
+  if (valid) return true;
+  return !(app || keys.length > 0 || waiting !== null);
 }
 
 /**
@@ -68,6 +90,6 @@ export async function mayAddSecondStep(email: string, session: string | undefine
  * da5191515): its ways in would join the account's.
  */
 export async function holdsSecondStep(email: string): Promise<boolean> {
-  const [app, keys] = await Promise.all([twoStepOn(email), holdsPasskeys(email)]);
-  return app || keys;
+  const [app, keys, moving] = await Promise.all([twoStepOn(email), holdsPasskeys(email), isMoving(email)]);
+  return app || keys || moving;
 }

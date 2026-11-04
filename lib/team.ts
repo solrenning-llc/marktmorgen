@@ -434,12 +434,12 @@ export async function setMemberRole(store: Store, email: string, rawRole: unknow
       await undoPause(store, paused).catch((undo: unknown) => console.error("undoing the API keys paused for a role change failed", undo));
       throw error;
     }
-    return { ok: true as const, before: member.role, role, unrecorded: paused.filter((p) => p.unrecorded).map((p) => p.name) };
+    return { ok: true as const, before: member.role, role, unrecorded: paused.filter((p) => p.kind === "unrecorded").map((p) => p.name), unmatched: paused.filter((p) => p.kind === "unmatched").map((p) => p.name) };
   }).then(async (result) => {
     // Keys nobody is recorded as making, paused as they may be this teammate's, may be the owner's own: told.
     if (!result.ok) return result;
-    const { unrecorded, ...done } = result;
-    if (unrecorded.length) await tellOwnerOfRole(store, address, unrecorded).catch((error: unknown) => console.error("telling the owner which API keys a role change paused failed", error));
+    const { unrecorded, unmatched, ...done } = result;
+    if (unrecorded.length || unmatched.length) await tellOwnerOfRole(store, address, unrecorded, unmatched).catch((error: unknown) => console.error("telling the owner which API keys a role change paused failed", error));
     return done;
   });
 }

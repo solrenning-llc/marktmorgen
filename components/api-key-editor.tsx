@@ -23,6 +23,8 @@ const MESSAGES: Record<string, string> = {
   not_yours: "Only whoever made this key can turn it back on. You can revoke it instead.",
   two_step_required: "This store's owner asks everyone on the team to log in with a second step. Log in again with your passkey, or with the emailed link and your app's code, then try again.",
   not_paused: "That key is already on. Reload the page.",
+  whose: "Choose whose key it is: yours, or a person on the team.",
+  role_disallows: "That person's role does not allow such a key. Change their role first, choose someone else, or revoke the key.",
   owner_only: "Only the store's owner can revoke a key made by someone no longer on the team.",
 };
 
@@ -52,6 +54,8 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
   const [revoking, setRevoking] = useState<string | null>(null);
   // Turning a paused key back on asks once too, saying what it means (turnOnNote): it is not paused again by the rule.
   const [turning, setTurning] = useState<string | null>(null);
+  // For a key that could not be linked to anyone: whose the owner says it is, "owner" or a teammate's address.
+  const [whose, setWhose] = useState("");
 
   async function send(payload: Record<string, unknown>, which: string) {
     setBusy(which);
@@ -97,8 +101,8 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
   }
 
   // A key the team's two-step rule paused (owner C3-100), turned back on by whoever made it.
-  async function turnOn(id: string) {
-    const data = await send({ action: "turn_on", id }, `on:${id}`);
+  async function turnOn(id: string, as = "") {
+    const data = await send({ action: "turn_on", id, ...(as ? { as } : {}) }, `on:${id}`);
     setTurning(null);
     if (data) toast("Key turned back on. Anything using it works again.");
   }
@@ -182,9 +186,29 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
                 {turning === key.id ? (
                   <span className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="max-w-xl text-ink">
-                      <span className="font-semibold">Turn it back on?</span> {turnOnNote(key)}
+                      <span className="font-semibold">Turn it back on?</span> {turnOnNote(key, whose)}
                     </span>
-                    <button type="button" onClick={() => turnOn(key.id)} disabled={busy !== null} aria-busy={busy === `on:${key.id}`} className="btn btn-primary btn-sm">
+                    {key.why === "unmatched" ? (
+                      <label className="flex flex-wrap items-center gap-2" htmlFor={`whose-${key.id}`}>
+                        <span className="font-semibold text-ink">Whose key is it?</span>
+                        <select id={`whose-${key.id}`} value={whose} onChange={(e) => setWhose(e.target.value)} className="field min-h-11 w-auto">
+                          <option value="">Choose a person</option>
+                          <option value="owner">Mine</option>
+                          {key.whoseChoices.map((email) => (
+                            <option key={email} value={email}>
+                              {email}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => turnOn(key.id, key.why === "unmatched" ? whose : "")}
+                      disabled={busy !== null || (key.why === "unmatched" && !whose)}
+                      aria-busy={busy === `on:${key.id}`}
+                      className="btn btn-primary btn-sm"
+                    >
                       {busy === `on:${key.id}` ? "Turning on…" : "Yes, turn it on"}
                     </button>
                     <button type="button" onClick={() => setTurning(null)} className="btn btn-ghost btn-sm">Keep it paused</button>
@@ -200,7 +224,10 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
                 ) : (
                   <span className="flex flex-wrap items-center gap-2">
                     {key.mayTurnOn ? (
-                      <button type="button" onClick={() => setTurning(key.id)} disabled={busy !== null} className="btn btn-primary btn-sm">
+                      <button type="button" onClick={() => {
+                          setTurning(key.id);
+                          setWhose("");
+                        }} disabled={busy !== null} className="btn btn-primary btn-sm">
                         Turn back on
                       </button>
                     ) : null}

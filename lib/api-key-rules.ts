@@ -62,6 +62,8 @@ export type ShownKey = ApiKey & {
   mayRevoke: boolean;
   /** Why it is paused (lib/api-keys.ts PauseWhy), or null. */
   why: "rule" | "left" | "unmatched" | "role" | "unrecorded" | null;
+  /** For a key whose maker could not be matched to the team, whom the owner may say it belongs to: teammates whose role allows it (the owner is always a choice). */
+  whoseChoices: string[];
 };
 
 /**
@@ -70,11 +72,14 @@ export type ShownKey = ApiKey & {
  * two-step rule pauses it again; one paused for its maker's role works as it
  * did, whatever that role is now.
  */
-export function turnOnNote(key: Pick<ShownKey, "why">): string {
+export function turnOnNote(key: Pick<ShownKey, "why">, whose = ""): string {
+  if (key.why === "unmatched") {
+    const who = whose && whose !== "owner" ? `${whose}'s` : "yours";
+    return `It becomes ${who}: it works again at once and the team's two-step rule will not pause it again, but it stops ${whose && whose !== "owner" ? "if their role no longer allows such a key or they leave the team" : "only if you revoke it"}. It could not be linked to anyone, most likely because the server's secret changed, so choose only the person you know made it.`;
+  }
+  if (key.why === "role") return "It works again at once, and the team's two-step rule will not pause it again. It stops again if its maker's role no longer allows such a key, or when they leave the team.";
   const base = "It works again at once, and the team's two-step rule will not pause it again.";
-  if (key.why === "role") return "It works again at once, whatever their role and the team's two-step rule, until the person who made it leaves the team. Their role does not allow such a key, so turn it on only if you want it to keep working for them.";
   if (key.why === "unrecorded") return `${base} Nobody is recorded as its maker, so turn it on only if you know it is yours or one you trust.`;
-  if (key.why === "unmatched") return "It works again at once, whatever the team's two-step rule, until the person who made it leaves the team. Its maker could not be matched to anyone on the team, so turn it on only if you know whose it is.";
   return base;
 }
 
@@ -101,7 +106,7 @@ export function pausedWords(key: Pick<ShownKey, "why" | "mayTurnOn">): string {
   const until = key.mayTurnOn ? "until you turn it back on" : "until the store's owner turns it back on";
   if (key.why === "left") return `Whoever made it is no longer on the team. ${stopped}. It can only be revoked, by the store's owner.`;
   if (key.why === "role") return `The role of whoever made it no longer allows such a key. ${stopped}, ${until}.`;
-  if (key.why === "unmatched") return `The person who made it could not be matched to anyone on the team. ${stopped}, ${until}.`;
+  if (key.why === "unmatched") return `It could not be linked to anyone on the team, most likely because the server's secret changed. ${stopped}, ${until}. Before turning it on, check whose it is: its name and when it was last used help.`;
   if (key.why === "unrecorded") return `Someone on the team left or lost access to keys, and nobody is recorded as this key's maker, so it may have been theirs. ${stopped}, ${until}.`;
   return `The team now logs in with a second step, and this key was made without one. ${stopped}, ${key.mayTurnOn ? "until you turn it back on" : "until whoever made it turns it back on"}.`;
 }

@@ -36,7 +36,7 @@ import { POST as postHook } from "@/app/api/v1/hooks/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { HOLD_SWAP, RECORD_SWAP, keyRecords, makeKey, makerPrint, resolveKey, revokeKey, rewriteMakers, swapHolds } from "@/lib/api-keys";
 import { afterMake, applyPause, leftTeam, makerFor, planPause, pausePreview, pausesUnderRule, shownKeys, tellPaused, undoPause } from "@/lib/api-key-pause";
-import { MAKER_FORMER, MAKER_UNRECORDED, turnOnNote } from "@/lib/api-key-rules";
+import { MAKER_FORMER, MAKER_UNRECORDED, pausedWords, turnOnNote } from "@/lib/api-key-rules";
 import { TAKE_COMMANDS } from "./plan-cost-registry";
 import { KEY_PAUSED_WORDS, apiStore } from "@/lib/api-guard";
 import { moveMemberships, putMember, readTeam, removeMember, setMemberRole } from "@/lib/team";
@@ -550,6 +550,9 @@ async function main(): Promise<void> {
   const eveKey = await make(await openSession(EVE), "Eve's sync", third, true);
   await setMemberRole(third, EVE, "editor");
   is("paused for the role", [await hold3(eveKey.body.made?.id ?? ""), (await asApi(eveKey.body.key ?? "")).error], ["role", "key_paused"]);
+  // A1 (fifth review): turning it on cannot override the role it answers to; once the role allows it again, the owner can.
+  is("while her role does not allow it, the owner cannot turn it on", (await keys(owner3Passkey, { action: "turn_on", id: eveKey.body.made?.id ?? "" }, third)).body.error, "role_disallows");
+  await setMemberRole(third, EVE, "admin");
   is("the owner turns it back on", (await keys(owner3Passkey, { action: "turn_on", id: eveKey.body.made?.id ?? "" }, third)).body.ok, true);
   is("and it works", await asApi(eveKey.body.key ?? ""), { status: 200, error: "" });
   await revokeKey(third.sid, eveKey.body.made?.id ?? "");
@@ -598,9 +601,13 @@ async function main(): Promise<void> {
   is("the ghost's key is held as unmatched", await hold4(ghost.made.id), "unmatched");
   const ghostShown = (await shownKeys(fourth, OWNER4, "owner")).find((k) => k.name === "Ghost's sync")!;
   is("the owner may turn it back on", ghostShown.mayTurnOn, true);
-  is("turned on, it is adopted and works, though its maker still matches nobody", [(await keys(owner4Passkey, { action: "turn_on", id: ghost.made.id }, fourth)).body.ok, await hold4(ghost.made.id), (await asApi(ghost.key)).status], [true, "adopted", 200]);
-  await removeMember(fourth, HAL, { repeat: true });
-  is("and a later exit leaves it adopted", await hold4(ghost.made.id), "adopted");
+  // A1 (fifth review): turning on an unmatched key means saying whose it is; it then answers to that person.
+  is("turning it on without saying whose it is is refused", (await keys(owner4Passkey, { action: "turn_on", id: ghost.made.id }, fourth)).body.error, "whose");
+  is("the owner may give it to Gia, an Admin", ghostShown.whoseChoices.includes(GIA), true);
+  is("given to Gia, it is hers and works", [(await keys(owner4Passkey, { action: "turn_on", id: ghost.made.id, as: GIA }, fourth)).body.ok, await hold4(ghost.made.id), (await keyRecords(fourth.sid)).find((k) => k.id === ghost.made.id)?.maker?.by === makerPrint(fourth.sid, GIA), (await asApi(ghost.key)).status], [true, "vouched", true, 200]);
+  await removeMember(fourth, GIA);
+  is("and when Gia leaves, it goes with her, for good", [await hold4(ghost.made.id), (await asApi(ghost.key)).error], ["left", "key_paused"]);
+  await putMember(fourth, GIA, "admin");
   is("Fin's is untouched", [await hold4(finKey.body.made?.id ?? ""), (await asApi(finKey.body.key ?? "")).status], [null, 200]);
 
   part("M6: the owner is told which keys a teammate leaving paused, and each refusal says why");
@@ -679,10 +686,11 @@ async function main(): Promise<void> {
   await revokeKey(fourth.sid, noMaker.made.id);
 
   part("L7: turning a key back on says it will not be paused by the rule again, before it is done");
-  is("the note for a key paused for its maker's role", turnOnNote({ why: "role" }), "It works again at once, whatever their role and the team's two-step rule, until the person who made it leaves the team. Their role does not allow such a key, so turn it on only if you want it to keep working for them.");
+  is("the note for a key paused for its maker's role", turnOnNote({ why: "role" }), "It works again at once, and the team's two-step rule will not pause it again. It stops again if its maker's role no longer allows such a key, or when they leave the team.");
+  is("and for one given to a teammate, it says it becomes theirs and when it stops", turnOnNote({ why: "unmatched" }, GIA).startsWith(`It becomes ${GIA}'s: it works again at once and the team's two-step rule will not pause it again, but it stops if their role no longer allows such a key or they leave the team.`), true);
   is("and for one nobody is recorded as making", turnOnNote({ why: "unrecorded" }).includes("will not pause it again"), true);
   const editorSource = readFileSync("components/api-key-editor.tsx", "utf8");
-  is("the panel asks with it before turning on", editorSource.includes("{turnOnNote(key)}") && editorSource.includes("Yes, turn it on") && editorSource.includes("onClick={() => setTurning(key.id)}"), true);
+  is("the panel asks with it before turning on", editorSource.includes("{turnOnNote(key, whose)}") && editorSource.includes("Yes, turn it on") && editorSource.includes("setTurning(key.id);"), true);
 
   await newDay();
   part("M4: a move whose team cannot be saved puts the keys back on the old address");
@@ -814,6 +822,50 @@ async function main(): Promise<void> {
   hook = null;
   is("at most 20 commands and the take", counted <= 20 + TAKE_COMMANDS, true);
   await revokeKey(fourth.sid, door.body.made?.id ?? "");
+
+
+  // ------------------------------------------------------------------ the fifth review
+  // Room: a store keeps five keys at most.
+  for (const k of await keyRecords(fourth.sid)) await revokeKey(fourth.sid, k.id);
+  await newDay();
+  part("A1 (2): on a role change, a turned-on key whose maker matches nobody is held again, and the owner told");
+  const strayKey = await makeKey(fourth.sid, "Stray sync", Date.now(), false, "none", makerFor(fourth.sid, "admin", "stray@example.com", false));
+  if (!strayKey.ok) throw new Error("key not made");
+  await swapHolds(fourth.sid, [strayKey.made.id], "vouched", [null]);
+  const beforeStray = sent.length;
+  await setMemberRole(fourth, IVY, "support");
+  is("held as unmatched again", [await hold4(strayKey.made.id), (await asApi(strayKey.key)).error], ["unmatched", "key_paused"]);
+  is("and the owner is told, with the likely cause", sent.slice(beforeStray).some((m) => m.to === OWNER4 && m.text.includes("- Stray sync") && m.text.includes("server's secret changed")), true);
+  await setMemberRole(fourth, IVY, "admin");
+
+  part("A2: the refusal and the panel name the likely cause and how to check");
+  is("the API says the secret most likely changed, and to check whose it is", [lastMessage, /server's secret changed/.test(lastMessage), /check whose key it is/.test(lastMessage)], [KEY_PAUSED_WORDS.unmatched, true, true]);
+  is("so does the panel", /server's secret changed/.test(pausedWords({ why: "unmatched", mayTurnOn: true })) && /check whose it is/.test(pausedWords({ why: "unmatched", mayTurnOn: true })), true);
+  await revokeKey(fourth.sid, strayKey.made.id);
+
+  await newDay();
+  part("N5 note: when the first sweep of a removal cannot finish, it is undone and the person stays");
+  // Gia was made an Editor earlier (L5): an Admin again, to hand out a key.
+  await setMemberRole(fourth, GIA, "admin");
+  const giaStay = await make(await openSession(GIA), "Gia's stay", fourth);
+  let swaps = 0;
+  hook = async (commands) => {
+    const swap = commands.find((c) => c[0] === "EVAL" && c[1] === RECORD_SWAP);
+    if (!swap) return;
+    if ((swaps += 1) > 4) {
+      hook = null;
+      return;
+    }
+    const id = String(swap[4]);
+    const raw = JSON.parse(String((await realPipeline([["HGET", `nl:api:keys:${fourth.sid}`, id]]))[0])) as Record<string, unknown>;
+    await realPipeline([["HSET", `nl:api:keys:${fourth.sid}`, id, JSON.stringify({ ...raw, name: `${String(raw.name)}.` })]]);
+  };
+  const failedRemoval = await removeMember(fourth, GIA).then(() => "removed", () => "refused");
+  hook = null;
+  const giaRecord = (await keyRecords(fourth.sid)).find((k) => k.id === giaStay.body.made?.id)!;
+  is("refused, and Gia stays on the team", [failedRemoval, (await readTeam(fourth.sid)).members.some((m) => m.email === GIA)], ["refused", true]);
+  is("her key's hold and maker are back, and it works", [giaRecord.hold, giaRecord.maker?.left, giaRecord.maker?.by === makerPrint(fourth.sid, GIA), (await asApi(giaStay.body.key ?? "")).status], [null, undefined, true, 200]);
+  await revokeKey(fourth.sid, giaStay.body.made?.id ?? "");
 
   part("The developers page names the answer");
   const docs = readFileSync("app/developers/page.tsx", "utf8");

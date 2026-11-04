@@ -87,14 +87,15 @@ export type KeyMaker = { owner: boolean; by: string; step: boolean; left?: true 
  * role no longer allows it, until the owner turns it back on; "unmatched",
  * refused, its maker's fingerprint matches nobody on the team (a secret
  * changed, or a change half done), until the owner turns it back on;
- * "vouched", turned back on with a second step; "adopted", turned back on by
- * the owner, who keeps it working whoever made it and whatever their role,
- * until its maker leaves; none, as made.
+ * "vouched", turned back on (by its maker with a second step, or by the owner,
+ * who for an unmatched key first says whose it is); none, as made. A vouched
+ * key still answers to the team as it is: its maker's role, and its maker
+ * being on the team (pauseWhy).
  */
-export type Hold = "paused" | "told" | "left" | "role" | "unmatched" | "vouched" | "adopted";
-const HOLDS: readonly string[] = ["paused", "told", "left", "role", "unmatched", "vouched", "adopted"];
+export type Hold = "paused" | "told" | "left" | "role" | "unmatched" | "vouched";
+const HOLDS: readonly string[] = ["paused", "told", "left", "role", "unmatched", "vouched"];
 /** Whether a hold refuses the key. */
-export const isPaused = (hold: Hold | null): boolean => hold !== null && hold !== "vouched" && hold !== "adopted";
+export const isPaused = (hold: Hold | null): boolean => hold !== null && hold !== "vouched";
 
 /** A key's record with who made it and its hold, never the key or its fingerprint. */
 export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: Hold | null };
@@ -251,7 +252,7 @@ export async function swapHolds(sid: string, ids: string[], to: Hold | null, fro
 }
 
 /** Every hold but the one for good: what any change may start from. */
-export const NOT_LEFT: (Hold | null)[] = [null, "paused", "told", "role", "unmatched", "vouched", "adopted"];
+export const NOT_LEFT: (Hold | null)[] = [null, "paused", "told", "role", "unmatched", "vouched"];
 
 /** The compare-and-set swapHolds runs, modelled by lib/redis-memory.ts. */
 export const HOLD_SWAP = `-- marktmorgen:api-hold-swap:v1
@@ -298,7 +299,7 @@ export async function keyStates(sid: string, ids: string[]): Promise<Map<string,
  * their sign-in address). "Last used" is kept apart from the record, so a
  * request using the key at that instant cannot write the old maker back.
  */
-export async function rewriteMakers(sid: string, change: (maker: KeyMaker) => KeyMaker | null): Promise<string[]> {
+export async function rewriteMakers(sid: string, change: (maker: KeyMaker, id: string) => KeyMaker | null): Promise<string[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
   const done: string[] = [];
   // Each record is written only over exactly the text read (RECORD_SWAP), so a key revoked meanwhile is never
@@ -311,7 +312,7 @@ export async function rewriteMakers(sid: string, change: (maker: KeyMaker) => Ke
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const s = parseStored(flat[i + 1]);
       if (!s?.maker || done.includes(s.id)) continue;
-      const next = change(s.maker);
+      const next = change(s.maker, s.id);
       if (!next) continue;
       swaps.push(s.id, String(flat[i + 1]), JSON.stringify({ ...s, maker: next }));
     }
@@ -353,11 +354,11 @@ export type PauseWhy = "rule" | "left" | "unmatched" | "role" | "unrecorded";
  * studio accepts count). A teammate's key whose fingerprint matches nobody on
  * the team is refused as unmatched, and one whose maker's role does not allow
  * it (any key without "export", one that writes without "import") as role,
- * whatever wrote, or failed to write, its hold; unless the owner adopted it.
+ * whatever wrote, or failed to write, its hold, and whether or not it was
+ * turned back on before.
  */
 export function pauseWhy(sid: string, maker: KeyMaker | null, hold: Hold | null, members: Pick<Member, "email" | "role">[], write: boolean): PauseWhy | null {
   if (hold === "left" || maker?.left) return "left";
-  if (hold === "adopted") return null;
   if (maker && !maker.owner) {
     const member = members.find((m) => makerPrints(sid, m.email).includes(maker.by));
     if (!member) return "unmatched";

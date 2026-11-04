@@ -33,14 +33,14 @@ export async function POST(request: NextRequest) {
     const done = await withTeamLocked(store.sid, async () => {
       const [team, pipelines] = await Promise.all([readTeam(store.sid), readPipelines(statsId)]);
       const member = team.members.find((m) => m.email === email);
-      if (!member) return { refused: Response.json({ ok: false, error: "unknown", message: "That person is no longer on your team. Reload the page." }, { status: 404 }) };
-      if (member.role === "admin") return { refused: Response.json({ ok: false, error: "admin", message: "An Admin sees and changes every pipeline. Change their role to restrict them." }, { status: 400 }) };
-      if (!can(member.role, "orders")) return { refused: Response.json({ ok: false, error: "no_deals", message: "This person's role does not open Deals, so there is nothing to restrict." }, { status: 400 }) };
+      if (!member) return { ok: false as const, refused: Response.json({ ok: false, error: "unknown", message: "That person is no longer on your team. Reload the page." }, { status: 404 }) };
+      if (member.role === "admin") return { ok: false as const, refused: Response.json({ ok: false, error: "admin", message: "An Admin sees and changes every pipeline. Change their role to restrict them." }, { status: 400 }) };
+      if (!can(member.role, "orders")) return { ok: false as const, refused: Response.json({ ok: false, error: "no_deals", message: "This person's role does not open Deals, so there is nothing to restrict." }, { status: 400 }) };
       const pipeline = pipelines.find((p) => p.id === pipelineId);
-      if (!pipeline) return { refused: Response.json({ ok: false, error: "unknown", message: "That pipeline is no longer there. Reload the page." }, { status: 404 }) };
-      return { pipeline, saved: await setPipelineAccess(statsId, email, pipelines.map((p) => p.id), pipeline.id, access, store) };
+      if (!pipeline) return { ok: false as const, refused: Response.json({ ok: false, error: "unknown", message: "That pipeline is no longer there. Reload the page." }, { status: 404 }) };
+      return { ok: true as const, pipeline, saved: await setPipelineAccess(statsId, email, pipelines.map((p) => p.id), pipeline.id, access, store) };
     });
-    if ("refused" in done) return done.refused;
+    if (!done.ok) return done.refused;
     const { pipeline, saved } = done;
     await logTeam(store.sid, { who: guarded.email, role: guarded.role, what: `Set ${email}'s access to the ${pipeline.name} pipeline: ${access === "edit" ? "can change" : access === "view" ? "can only see" : "no access"}` }).catch(() => {});
     return Response.json({ ok: true, email, access: saved }, { headers: { "Cache-Control": "private, no-store" } });

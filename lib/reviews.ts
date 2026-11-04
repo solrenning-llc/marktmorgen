@@ -257,13 +257,16 @@ export async function readReview(statsId: string, productId: string, id: string)
  */
 async function locked<T>(statsId: string, productId: string, work: () => Promise<T>): Promise<T | "busy"> {
   const key = lockKey(statsId, productId);
+  // A value of this call's own: a lock that ran out and was taken by another call is never let go of by this one.
+  const mine = randomBytes(12).toString("hex");
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const [got] = await redisPipeline([["SET", key, "1", "NX", "EX", 10]]);
+    const [got] = await redisPipeline([["SET", key, mine, "NX", "EX", 10]]);
     if (got !== null) {
       try {
         return await work();
       } finally {
-        await redisPipeline([["DEL", key]]).catch(() => {});
+        const [held] = await redisPipeline([["GET", key]]).catch(() => [null]);
+        if (held === mine) await redisPipeline([["DEL", key]]).catch(() => {});
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 60 + attempt * 40));
@@ -393,7 +396,7 @@ export async function deleteReview(statsId: string, productId: string, id: strin
     const [raw] = await redisPipeline([["HGET", productKey(statsId, productId), id]]);
     const gone = parseReview(raw);
     if (!gone) return "missing" as const;
-    await redisPipeline([
+    const [removed] = await redisPipeline([
       ["HDEL", productKey(statsId, productId), id],
       ["ZREM", visibleKey(statsId, productId), id],
       ["ZREM", allKey(statsId), `${productId}|${id}`],
@@ -401,8 +404,9 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it.
       ...summaryGone(statsId, productId),
     ]);
-    // Its room given back only once it is gone: a deletion that failed keeps the review and its room.
-    await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
+    // Its room given back only once it is gone, and only by the deletion that removed it: a deletion that failed
+    // keeps the review and its room, and a second one racing it gives nothing back twice.
+    if (Number(removed) === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
     await recount(statsId, productId);
     return "deleted" as const;
   });
@@ -427,11 +431,12 @@ async function creatorChange(
     // `room` is null for what only flips a mark or swaps a photo's path, which never refuses.
     const grown = reviewBytes(after) - reviewBytes(before);
     if (room && grown > 0) await needData(room, [{ slot: REVIEWS_SLOT(productId), bytes: grown }]);
-    else if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
     // A review hidden or refunded leaves the product's AI summary of its reviews (lib/review-ai-summary.ts) behind:
     // it goes in the same request as the change, so a failure fails the change too.
     const gone = (after.hidden && !before.hidden) || (after.refunded && !before.refunded);
     await write(statsId, after, gone ? summaryGone(statsId, productId) : []);
+    // What a shorter answer frees is given back only once it is written.
+    if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
     await recount(statsId, productId);
     return after;
   });
@@ -497,11 +502,13 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
     // Only while the review still rests on that payment: a buyer who wrote it
     // again from a later order that was kept is a buyer who kept one.
     let hit = false;
-    await creatorChange(statsId, productId, id, (review) => {
+    const done = await creatorChange(statsId, productId, id, (review) => {
       if (review.pi !== pi || review.refunded) return review;
       hit = true;
       return { ...review, refunded: true };
     }, null);
+    // A review busy just now is not marked: thrown, so the refund is not taken as seen and the sweep tries again.
+    if (done === "busy") throw new Error("a review is busy; the refund is marked on the next try");
     if (hit) changed += 1;
   }
   return changed;
@@ -509,7 +516,8 @@ export async function markRefunded(statsId: string, pi: string): Promise<number>
 
 /** Marks a review refunded found some other way (an edit that found the order refunded). */
 export async function markOneRefunded(statsId: string, productId: string, id: string): Promise<void> {
-  await creatorChange(statsId, productId, id, (review) => ({ ...review, refunded: true }), null);
+  const done = await creatorChange(statsId, productId, id, (review) => ({ ...review, refunded: true }), null);
+  if (done === "busy") throw new Error("a review is busy; its refund is marked on the next try");
 }
 
 /** Takes reviews out of the creator's queue: those named, or all of them. */

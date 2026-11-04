@@ -11,7 +11,8 @@ import { aiMonthKey } from "@/lib/ai";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { SUMMARY_REFRESH_SECONDS, summaryInputs } from "@/lib/review-ai-summary-rules";
 import { KEEP_REVIEW_SUMMARY, makeReviewSummary, readReviewSummary, summaryPrompt } from "@/lib/review-ai-summary";
-import { deleteReview, forgetReviewsPerson, markOneRefunded, readReview, saveReview, setHidden, visibleReviews } from "@/lib/reviews";
+import { deleteReview, forgetReviewsPerson, markOneRefunded, markRefunded, readReview, saveReview, setHidden, setReply, visibleReviews } from "@/lib/reviews";
+import { dataUsed } from "@/lib/store-data";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -188,14 +189,18 @@ async function main(): Promise<void> {
   part("Second review of 4 November 2026: a summary's deletion that fails fails the change with it");
   const kilnKey = `nl:rsum:${statsId}:${kiln}`;
   const keptRaw = String((await redis.pipeline([["GET", kilnKey]]))[0]);
-  is("the summary kept holds only its themes and counts: no review's id, words or writer", Object.keys(JSON.parse(keptRaw) as object).sort(), ["at", "read", "themes"]);
+  is("the summary kept holds only its themes and counts: no review's id, words or writer", Object.keys(JSON.parse(keptRaw) as object).sort(), ["at", "read", "themes", "v"]);
+  const { v: _version, ...unversioned } = JSON.parse(keptRaw) as Record<string, unknown>;
+  await redis.pipeline([["SET", `nl:rsum:${statsId}:${glaze}`, JSON.stringify(unversioned), "EX", 8 * 86_400]]);
+  is("a summary kept before version 2 (never taken away when a review left) is never read", [_version, await readReviewSummary(statsId, glaze)], [2, null]);
   // The same summary put back before each change, so each is tested against one (no AI job for it).
   const putBack = () => redis.pipeline([["SET", kilnKey, keptRaw, "EX", 8 * 86_400]]);
   const realPipeline = redis.pipeline.bind(redis);
-  const failing = async (change: () => Promise<unknown>): Promise<boolean> => {
-    // Redis fails for any request that takes the summary away.
+  const takesSummary = (c: (string | number)[]) => String(c[1] ?? "").startsWith("nl:rsum:ver:");
+  const failing = async (change: () => Promise<unknown>, fails: (c: (string | number)[]) => boolean = takesSummary): Promise<boolean> => {
+    // Redis fails for any request that takes the summary away (or that `fails` names).
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      if (commands.some((c) => String(c[1] ?? "").startsWith("nl:rsum:ver:"))) throw new Error("redis down for this test");
+      if (commands.some(fails)) throw new Error("redis down for this test");
       return realPipeline(commands);
     }) as typeof redis.pipeline;
     try {
@@ -241,6 +246,55 @@ async function main(): Promise<void> {
     memory.includes("if (locked !== mine) return 0;"),
     KEEP_REVIEW_SUMMARY.startsWith("-- marktmorgen:review-summary-keep:v1\n"),
   ], [true, true, true, true, true, true]);
+
+  part("Fifth review of 4 November 2026: the room, the lock and a busy refund");
+  const slip = await addProduct(OWNER, "Slip Recipes", "", "15");
+  if (!slip.ok) throw new Error("no product");
+  const slipId = slip.product.id;
+  for (const [i, text] of ["Good recipes", "Good and clear recipes"].entries()) {
+    await saveReview(statsId, { productId: slipId, email: `slip${i}@example.com`, reference: `cs_test_slp${i}0000000000`, pi: `pi_slp${i}`, rating: 5, text, name: `Slip ${i}` }, ROOM);
+  }
+  const slipped = await visibleReviews(statsId, slipId, 0, 10);
+  // By their words, not their order: both may be written in the same millisecond.
+  const slipA = slipped.find((r) => r.text === "Good recipes")!;
+  const slipB = slipped.find((r) => r.text === "Good and clear recipes")!;
+  const used = async () => (await dataUsed(ROOM))?.used;
+  const roomBefore = await used();
+  is("a deletion whose request fails gives no room back", [await failing(() => deleteReview(statsId, slipId, slipA.id, ROOM)), await used()], [true, roomBefore]);
+  await setReply(statsId, slipId, slipA.id, "Thank you for the long and kind words about the recipes", ROOM);
+  const withReply = await used();
+  is("a shorter answer whose write fails gives no room back", [await failing(() => setReply(statsId, slipId, slipA.id, "Thanks", ROOM), (c) => c[0] === "HSET" && String(c[1]).startsWith("nl:rev:")), await used()], [true, withReply]);
+  await setReply(statsId, slipId, slipA.id, "Thanks", ROOM);
+  is("written, it gives back what it freed", (await used())! < withReply!, true);
+
+  // Another deletion removed the review between this one's read and its write: this one gives nothing back.
+  const lockOf = `nl:rev:lock:${statsId}:${slipId}`;
+  const beforeRace = await used();
+  const realPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HDEL" && String(c[1]).startsWith("nl:rev:") && c[2] === slipB.id)) {
+      redis.pipeline = realPipe;
+      await realPipe([["HDEL", `nl:rev:${statsId}:${slipId}`, slipB.id]]);
+      // And its lock ran out and another call took it.
+      await realPipe([["SET", lockOf, "another-call", "EX", 10]]);
+    }
+    return realPipe(commands);
+  }) as typeof redis.pipeline;
+  is("a deletion whose review was already removed gives no room back twice", [await deleteReview(statsId, slipId, slipB.id, ROOM), await used()], ["deleted", beforeRace]);
+  redis.pipeline = realPipe;
+  is("and leaves the lock another call took to it", (await redis.pipeline([["GET", lockOf]]))[0], "another-call");
+  await redis.pipeline([["DEL", lockOf]]);
+  is("the reviews' lock is held under a value of its own, not a shared one", readFileSync("lib/reviews.ts", "utf8").includes('["SET", key, mine, "NX", "EX", 10]'), true);
+
+  // A refund that finds its review busy is not taken as seen: thrown, so the sweep tries it again.
+  await redis.pipeline([["SET", lockOf, "held-by-a-test", "EX", 10]]);
+  const busyOne = await markOneRefunded(statsId, slipId, slipA.id).then(() => "marked", () => "thrown");
+  const busyAll = await markRefunded(statsId, "pi_slp0").then(() => "marked", () => "thrown");
+  await redis.pipeline([["DEL", lockOf]]);
+  is("a refund of a busy review throws, one or by payment", [busyOne, busyAll, (await readReview(statsId, slipId, slipA.id))?.refunded], ["thrown", "thrown", false]);
+  is("once free, it is marked", [await markRefunded(statsId, "pi_slp0"), (await readReview(statsId, slipId, slipA.id))?.refunded], [1, true]);
+  const productRoute = readFileSync("app/api/store/product/route.ts", "utf8");
+  is("a removed product's reviews are tried again, never dropped silently", [productRoute.includes("dropReviews(removed.store.statsId, id).catch("), productRoute.includes("await dropReviewsAgain(removed.store.statsId, id)")], [false, true]);
 
   const fifth = await addProduct(OWNER, "Wheel Basics", "", "45");
   if (!fifth.ok) throw new Error("no product");

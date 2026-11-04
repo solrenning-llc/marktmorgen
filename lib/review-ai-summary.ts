@@ -28,6 +28,11 @@ import { visibleReviews } from "@/lib/reviews";
 import type { Store } from "@/lib/store";
 
 export type ReviewSummary = { at: number; read: number; themes: SummaryTheme[] };
+/**
+ * The version a summary is kept under: 2 since a review's change takes the summary away in the same request
+ * (lib/reviews.ts). One kept before (no "v", never taken away when a review left) is never read.
+ */
+const SUMMARY_VERSION = 2;
 export type ReviewSummaryResult = { ok: true; summary: ReviewSummary; fresh: boolean; left: number | null } | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "empty" | "week"; reviews?: number; /** "week": when the next one may be made, in seconds. */ next?: number };
 
 const KEEP_SECONDS = 8 * 86_400;
@@ -69,7 +74,7 @@ export function parseReviewSummary(raw: unknown): ReviewSummary | null {
     const themes = (Array.isArray(value.themes) ? value.themes : [])
       .filter((t): t is SummaryTheme => !!t && typeof t === "object" && typeof (t as SummaryTheme).title === "string" && (t as SummaryTheme).title.length <= MAX_THEME_TITLE && Number.isSafeInteger((t as SummaryTheme).reviews) && (t as SummaryTheme).reviews >= 2 && (t as SummaryTheme).reviews <= read)
       .slice(0, MAX_SUMMARY_THEMES);
-    return at && read ? { at, read, themes } : null;
+    return value.v === SUMMARY_VERSION && at && read ? { at, read, themes } : null;
   } catch {
     return null;
   }
@@ -142,7 +147,7 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
     const still = await visibleReviews(statsId, productId, 0, MAX_SUMMARY_REVIEWS * 2);
     if (!inputsStillShown(inputs, still, productId)) return { ok: false, reason: "failed" };
     // Kept only while no review went or changed since the mark was read and the lock is still this call's, in the same step as the SET.
-    const stored = JSON.stringify(done.value);
+    const stored = JSON.stringify({ v: SUMMARY_VERSION, ...done.value });
     const [keptNow] = await redisPipeline([[
       "EVAL", KEEP_REVIEW_SUMMARY, 4, markKey(statsId, productId), summaryKey(statsId, productId), lastKey(statsId, productId), lockKey(statsId),
       typeof mark === "string" && mark ? mark : NO_MARK, stored, KEEP_SECONDS, done.value.at, mine,

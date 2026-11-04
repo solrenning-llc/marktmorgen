@@ -65,11 +65,11 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
       if (answer.ok && answer.summary) {
         const summary = answer.summary;
         const left = typeof answer.left === "number" ? `Made. ${answer.left} AI ${answer.left === 1 ? "job" : "jobs"} left this month.` : "This week's summary.";
-        // The status is written and focused while the button is still there, then the summary replaces the button
-        // and takes the focus: it never falls to the page in between.
-        flushSync(() => setSaid((all) => ({ ...all, [product.id]: left })));
-        statusRefs.current[product.id]?.focus();
-        flushSync(() => setShown((all) => all.map((p) => (p.id === product.id ? { ...p, summary } : p))));
+        // The summary replaces the button and takes the focus in the same task, so it never rests on the page.
+        flushSync(() => {
+          setSaid((all) => ({ ...all, [product.id]: left }));
+          setShown((all) => all.map((p) => (p.id === product.id ? { ...p, summary } : p)));
+        });
         summaryRefs.current[product.id]?.focus();
         say(`The summary of ${product.title}'s reviews is ready. ${left}`);
       } else {
@@ -83,7 +83,8 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
         } else {
           buttonRefs.current[product.id]?.focus();
         }
-        say(`No summary of ${product.title}'s reviews was made. ${why}`);
+        // The week's reason is read from the status that has the focus; the live region says only that none was made.
+        say(week !== null ? `No summary of ${product.title}'s reviews was made.` : `No summary of ${product.title}'s reviews was made. ${why}`);
       }
     } catch {
       const why = "That did not work. Check your connection and try again.";
@@ -116,7 +117,7 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
               <li key={product.id} className="text-sm">
                 <h3 className="font-semibold text-ink [overflow-wrap:anywhere]">{product.title}</h3>
                 {product.summary ? (
-                  <p className="mt-1 text-ink" tabIndex={-1} ref={(node) => { summaryRefs.current[product.id] = node; }}>
+                  <p className="mt-1 text-ink rounded-md focus:outline-3 focus:outline-offset-3 focus:outline-(--focus)" tabIndex={-1} ref={(node) => { summaryRefs.current[product.id] = node; }}>
                     <span className="font-semibold">AI-sorted summary: </span>
                     {line || "No theme was repeated by two reviews or more."}
                     <span className="block text-sm text-ink-soft">{`Made ${day(product.summary.at)} (UTC) from ${product.summary.read} ${product.summary.read === 1 ? "review" : "reviews"}.`}</span>
@@ -137,7 +138,7 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
                     {product.reviews < MIN_SUMMARY_REVIEWS ? `A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews; this one has ${product.reviews}.` : `${product.summary ? "" : "The last summary was taken away because a review it counted was changed or removed. "}A new one can be made from ${day(nextAt)} (UTC).`}
                   </p>
                 )}
-                <p className="mt-1 text-sm text-ink" tabIndex={-1} ref={(node) => { statusRefs.current[product.id] = node; }}>
+                <p className="mt-1 text-sm text-ink rounded-md focus:outline-3 focus:outline-offset-3 focus:outline-(--focus)" tabIndex={-1} ref={(node) => { statusRefs.current[product.id] = node; }}>
                   {said[product.id] ?? ""}
                 </p>
               </li>

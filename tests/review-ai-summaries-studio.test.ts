@@ -42,7 +42,7 @@ is("while it is made, that is said", screenText.includes("Making the summary of 
 
 part("Review of 4 November 2026: the same sentence said again, the week kept after a delete");
 const says = source.match(/setAnnounce\(([^)]*)\)/g) ?? [];
-is("the live region is emptied first and the sentence put back on the next tick, so the same words twice are read twice", [says, /setAnnounce\(""\);\s*announceTimer\.current = window\.setTimeout\(/.test(source), (source.match(/\bsay\(`/g) ?? []).length], [['setAnnounce("")', "setAnnounce(text)"], true, 3]);
+is("the live region is emptied first and the sentence put back on the next tick, so the same words twice are read twice", [says, /setAnnounce\(""\);\s*announceTimer\.current = window\.setTimeout\(/.test(source), (source.match(/\bsay\(/g) ?? []).length - 1], [['setAnnounce("")', "setAnnounce(text)"], true, 3]);
 const removed = draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: null, lastAt: NOW - 86_400 }]);
 is("a summary taken away by a review change: no button before the week is over, and why", [removed.includes("Make the summary"), removed.includes("The last summary was taken away because a review it counted was changed or removed. A new one can be made from")], [false, true]);
 is("a week after the last one, the button", draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: null, lastAt: NOW - SUMMARY_REFRESH_SECONDS }]).includes(">Make the summary<"), true);
@@ -51,15 +51,15 @@ is("a week's refusal said with its date", source.includes('answer.error === "wee
 part("Second review of 4 November 2026: what a refusal allows, focus before the button goes");
 is("a failed or empty try says the next may be made now, as the code allows", [source.includes("try again another day"), source.includes("Try again later"), (source.match(/You can try again now; each try is one more AI job\./g) ?? []).length], [false, false, 2]);
 const success = source.slice(source.indexOf("if (answer.ok && answer.summary) {"), source.indexOf("} else {"));
-is("after a summary, focus moves to the status before the button is taken away", success.indexOf("statusRefs.current[product.id]?.focus();") > -1 && success.indexOf("statusRefs.current[product.id]?.focus();") < success.indexOf("setShown("), true);
+is("after a summary, focus moves to the summary in the same task as the button goes", success.indexOf("summaryRefs.current[product.id]?.focus();") > success.indexOf("setShown("), true);
 const refused = source.slice(source.indexOf("} else {"), source.indexOf("} catch {"));
 is("after a week's refusal too, never by a timer once the button is gone", refused.indexOf("statusRefs.current[product.id]?.focus();") > -1 && refused.indexOf("statusRefs.current[product.id]?.focus();") < refused.indexOf("setShown(") && !/setTimeout\(\(\) => statusRefs/.test(source), true);
 
-part("Fourth review of 4 November 2026: the reason written before focus, said in full, the summary focused");
-is("the status written first (flushSync), then focused, then the button replaced", /flushSync\(\(\) => setSaid[\s\S]*?statusRefs\.current\[product\.id\]\?\.focus\(\);\s*flushSync\(\(\) => setShown/.test(success), true);
-is("on a summary, focus moves to the summary itself", success.includes("summaryRefs.current[product.id]?.focus();") && source.includes("ref={(node) => { summaryRefs.current[product.id] = node; }}"), true);
-is("the live region says the full reason, the week's date and the AI job included", [refused.includes("say(`No summary of ${product.title}'s reviews was made. ${why}`);"), success.includes("say(`The summary of ${product.title}'s reviews is ready. ${left}`);")], [true, true]);
-is("the summary can take focus without being a tab stop", html.includes('<p class="mt-1 text-ink" tabindex="-1">'), true);
+part("Fourth and fifth reviews of 4 November 2026: the reason, the summary focused, a visible ring");
+is("on a summary, the status and the summary written together, then the summary focused, never the status first", [/flushSync\(\(\) => \{\s*setSaid[\s\S]*?setShown[\s\S]*?\}\);\s*summaryRefs\.current\[product\.id\]\?\.focus\(\);/.test(success), success.includes("statusRefs.current[product.id]?.focus()"), source.includes("ref={(node) => { summaryRefs.current[product.id] = node; }}")], [true, false, true]);
+is("a week's reason written, then focused, then the button taken away", /flushSync\(\(\) => setSaid[\s\S]*?statusRefs\.current\[product\.id\]\?\.focus\(\);\s*flushSync\(\(\) => setShown/.test(refused), true);
+is("the live region: the full reason where focus stays on the button, the short sentence where the focused status says it", refused.includes("say(week !== null ? `No summary of ${product.title}'s reviews was made.` : `No summary of ${product.title}'s reviews was made. ${why}`);") && success.includes("say(`The summary of ${product.title}'s reviews is ready. ${left}`);"), true);
+is("the summary and the status take focus without being tab stops, with a 3 px ring like the button's", [(html.match(/tabindex="-1"/g) ?? []).length, (html.match(/focus:outline-3 focus:outline-offset-3 focus:outline-\(--focus\)/g) ?? []).length], [2, 2]);
 
 part("The page");
 const page = readFileSync("app/studio/reviews/page.tsx", "utf8");

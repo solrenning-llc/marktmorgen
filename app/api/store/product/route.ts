@@ -302,7 +302,8 @@ export async function POST(request: NextRequest) {
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).
-        const reviewPhotos = await dropReviews(removed.store.statsId, id).catch(() => [] as string[]);
+        // Tried again when Redis fails, so the reviews and their AI summary go at once; said in the log if they cannot.
+        const reviewPhotos = await dropReviewsAgain(removed.store.statsId, id);
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (course) await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
         for (const file of had) {
@@ -385,5 +386,20 @@ export async function POST(request: NextRequest) {
     }
     console.error("changing a product failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+  }
+}
+
+/** The reviews of a removed product, their photos and their AI summary, deleted, tried up to three times. */
+async function dropReviewsAgain(statsId: string | null, productId: string): Promise<string[]> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await dropReviews(statsId, productId);
+    } catch (error) {
+      if (attempt >= 3) {
+        console.error("could not drop a removed product's reviews", error);
+        return [];
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
   }
 }

@@ -48,6 +48,18 @@ export function releaseHeld(held: RowHeld, column: number): number[] {
   return held.map((count, i) => (i === column ? Math.max(0, count - 1) : count));
 }
 
+/**
+ * A picture that finished sending, added to the row as it is now: checked
+ * against it, with the picture's own held place given back (`places` is the
+ * held places without it, releaseHeld). Pure, so the page editor can apply it
+ * as an update of its current state, whatever changed while it was sent.
+ */
+export function arrivePicture(now: RowColumns, column: number, element: RowElement, places: readonly number[]): RowEdit {
+  const refused = addRefusal(now, column, places);
+  if (refused) return { ok: false, why: refused };
+  return addElement(now, column, element, places);
+}
+
 /** A change made, with where the element it concerns now is (null when it is gone), or refused with why. */
 export type RowEdit = { ok: true; columns: RowElement[][]; at: RowPlace | null } | { ok: false; why: RowRefusal };
 

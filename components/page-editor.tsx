@@ -132,6 +132,7 @@ import {
   type RowPlace,
   addElement,
   addRefusal,
+  arrivePicture,
   blankElement,
   moveElement,
   removeElement,
@@ -496,6 +497,11 @@ export function PageEditor({
   const [overPlace, setOverPlace] = useState<number | null>(null);
   const [said, setSaid] = useState("");
   const focusNew = useRef<string | null>(null);
+  // Places held in a row for a picture still being sent there, by the row's id (lib/row-edit-rules.ts, RowHeld):
+  // kept here, not in the row's editor, so closing and reopening the row while it is sent never frees them.
+  const rowHeld = useRef(new Map<string, number[]>());
+  // Drawn again whenever a held place changes, so a row reopened while its picture is sent shows it ending.
+  const [, heldChanged] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -1140,18 +1146,18 @@ export function PageEditor({
     const lit = placeLit(at);
     return (
       <div className="flex min-h-12 items-center gap-2 py-0.5" data-drop-at={at} onDragOver={dragOverPlace} onDragLeave={dragLeavePlace} onDrop={dropOnPlace}>
-        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand" : "bg-transparent"}`} />
+        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
         <button
           type="button"
           data-place={at}
           onClick={() => addHere(at)}
-          className={`inline-flex min-h-11 items-center gap-1 rounded-full bg-white px-3 text-xs font-semibold ring-1 transition hover:text-violet-deep hover:ring-violet-brand/50 focus-visible:ring-2 focus-visible:ring-violet-brand motion-reduce:transition-none ${lit ? "text-violet-deep ring-2 ring-violet-brand" : "text-ink-soft ring-line"}`}
+          className={`inline-flex min-h-11 items-center gap-1 rounded-full bg-white px-3 text-xs font-semibold ring-1 transition hover:text-violet-deep hover:ring-violet-brand/50 focus-visible:ring-2 focus-visible:ring-violet-brand motion-reduce:transition-none ${lit ? "text-violet-deep ring-2 ring-violet-brand forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "text-ink-soft ring-line"}`}
           aria-label={`Add here: ${armed ? `${kindLabel(armed)}, ` : "a block "}${placeWords(at, drafts.length)}`}
         >
           <Icon name="plus" size={13} />
           Add here
         </button>
-        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand" : "bg-transparent"}`} />
+        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
       </div>
     );
   };
@@ -1735,6 +1741,20 @@ export function PageEditor({
             block={block}
             // By the block's id, not its place: a picture still being sent when the block moves lands in the right one.
             onColumns={(columns) => setDrafts((all) => all.map((d) => (d.block.id === block.id && d.block.kind === "row" ? { ...d, block: { ...d.block, columns } } : d)))}
+            // A picture that arrives is added to the row as it is then, in either version, never over the columns this
+            // editor drew when it was sent: it may have been closed and reopened, or another picture landed first.
+            onColumnsNow={(update) => {
+              const change = (list: Draft[]) =>
+                list.map((d) => {
+                  if (d.block.id !== block.id || d.block.kind !== "row") return d;
+                  const next = update(d.block.columns);
+                  return next ? { ...d, block: { ...d.block, columns: next as RowElement[][] } } : d;
+                });
+              setDrafts(change);
+              setOther((all) => (all ? change(all) : all));
+            }}
+            held={rowHeld}
+            onHeld={() => heldChanged((n) => n + 1)}
             pictureRoom={MAX_PAGE_PICTURES - shown - onlyInOther}
             productId={product.id}
             pageId={site?.id}
@@ -2011,7 +2031,7 @@ export function PageEditor({
         // On a wide screen the page is drawn beside the blocks as they are edited, in one column it shares with
         // the side menu of blocks to add, switched at its top (375 [TB1]; two columns of their own left the
         // blocks 182 pixels at 1280, lib/side-panel.ts); on a narrow screen the gallery opens where a place is pressed.
-        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_24.5rem] items-start gap-5" : ""}>
+        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_25.5rem] items-start gap-5" : ""}>
         <div className="min-w-0">
           {drafts.length === 0 ? (
             <div className="mt-6 rounded-2xl bg-paper p-5 ring-1 ring-line sm:p-6">
@@ -2274,7 +2294,8 @@ export function PageEditor({
                       title={locked ? undefined : "Drag to move this block"}
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", block.id);
+                        // A type of its own, so a block dragged over a text field never writes its id into it.
+                        event.dataTransfer.setData("application/x-mm-block", block.id);
                         const row = event.currentTarget.closest("li");
                         if (row) event.dataTransfer.setDragImage(row, 24, 24);
                         setDragged(index);
@@ -2408,7 +2429,7 @@ export function PageEditor({
               <BlockPicker icons={KIND_ICONS} allowed={addable} where={placeWords(drafts.length, drafts.length)} onPick={(kind) => add(kind, drafts.length, true)} onClose={cancelPicking} />
             ) : (
               <div data-drop-at={drafts.length} onDragOver={dragOverPlace} onDragLeave={dragLeavePlace} onDrop={dropOnPlace}>
-                <span aria-hidden="true" className={`mb-2 block h-1 rounded-full ${placeLit(drafts.length) ? "bg-violet-brand" : "bg-transparent"}`} />
+                <span aria-hidden="true" className={`mb-2 block h-1 rounded-full ${placeLit(drafts.length) ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
                 <button
                   type="button"
                   data-place={drafts.length}
@@ -2564,7 +2585,8 @@ export function PageEditor({
             document.getElementById(`row-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
           }}
         >
-          <div className="mb-2">
+          {/* Room above and beside it, so its focus ring is never cut by the panel's own scrolling edge (WCAG 2.4.13). */}
+          <div className="mb-2 px-1 pt-2">
             <ScreenSwitch value={screen} onChange={setScreen} />
           </div>
           <p className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-ink-soft">
@@ -2686,6 +2708,9 @@ function RowEditor({
   base,
   block,
   onColumns,
+  onColumnsNow,
+  held: heldByRow,
+  onHeld,
   pictureRoom,
   productId,
   pageId,
@@ -2696,6 +2721,12 @@ function RowEditor({
   base: string;
   block: RowBlock;
   onColumns: (columns: RowElement[][]) => void;
+  /** Changes the row as it is now in the page editor's state; the update returns null to leave it as it is. */
+  onColumnsNow: (update: (now: RowColumns) => RowColumns | null) => void;
+  /** The places held for pictures still being sent, by row id, kept by the page editor. */
+  held: React.MutableRefObject<Map<string, number[]>>;
+  /** Told when a held place changes, so the page editor draws the row again. */
+  onHeld: () => void;
   /** How many more pictures the page may show. */
   pictureRoom: number;
   productId: string;
@@ -2706,18 +2737,29 @@ function RowEditor({
 }) {
   const columns = block.columns;
   const total = rowElementCount(columns);
-  const [said, setSaid] = useState("");
+  // What was just done, for a screen reader: the same words said twice are said again, a space apart, so the
+  // live region always speaks (inbox C4-31).
+  const [said, setSaidNow] = useState("");
+  const again = useRef(false);
+  const setSaid = (text: string) => {
+    again.current = !again.current;
+    setSaidNow(text ? `${text}${again.current ? "\u00a0" : ""}` : "");
+  };
   const [countNote, setCountNote] = useState<string | null>(null);
   const [addKind, setAddKind] = useState<RowElementKind[]>(["heading", "heading", "heading"]);
   const [addVideo, setAddVideo] = useState(["", "", ""]);
   // Places held in each column for a picture still being sent there (lib/row-edit-rules.ts, RowHeld): drawn from
   // `sending`, read from `held` by a picture that arrives after other changes. Nothing else can take such a place,
   // so the file sent always gets its part; there is no way here to delete a file sent and not used.
-  const [sending, setSending] = useState([0, 0, 0]);
-  const held = useRef([0, 0, 0]);
+  // Read from the page editor on every drawing, never copied into this editor's own state: a send that began before
+  // the row was closed and reopened ends in the editor drawn now (inbox C4-31).
+  const heldNow = () => heldByRow.current.get(block.id) ?? [0, 0, 0];
+  const sending = heldNow();
   const hold = (column: number, count: number) => {
-    held.current = held.current.map((n, i) => (i === column ? count : n));
-    setSending(held.current);
+    const next = heldNow().map((n, i) => (i === column ? count : n));
+    if (next.every((n) => n === 0)) heldByRow.current.delete(block.id);
+    else heldByRow.current.set(block.id, next);
+    onHeld();
   };
   // Why a picture that arrived could not be added, said beside that column's Add control.
   const [uploadNote, setUploadNote] = useState<(string | null)[]>([null, null, null]);
@@ -3015,7 +3057,7 @@ function RowEditor({
     const video = kind === "video" ? readVideo(typedVideo) : null;
     const reason = why
       ? ROW_EDIT_WHY[why]
-      : kind === "image" && pictureRoom <= 0
+      : kind === "image" && pictureRoom - sending.reduce((n, count) => n + count, 0) <= 0
         ? `This page already shows ${MAX_PAGE_PICTURES} pictures, the most a page shows. Remove one first.`
         : kind === "video" && !video
           ? "Paste the video's address first: a link from YouTube, Vimeo or Loom."
@@ -3083,12 +3125,22 @@ function RowEditor({
             onSending={(count) => hold(column, count)}
             onChange={(items) => {
               if (!items[0]) return;
-              // Checked again now that it has arrived, against the row as it is, its own held place given back to it.
+              // Checked again now that it has arrived, against the row as it is in the page editor's state, with its own
+              // held place given back to it: never over the columns drawn when it was sent (inbox C4-31).
               const element: RowElement = { kind: "image", picture: items[0], decorative: false };
-              const places = releaseHeld(held.current, column);
-              const refused = addRefusal(latest.current, column, places);
-              if (refused) noteFor(column, `The picture you sent was not added: ${ROW_EDIT_WHY[refused]}`);
-              else add(column, element, latest.current, places);
+              const places = releaseHeld(heldNow(), column);
+              // Told once, after the update, and only what happened: an update may be run twice by React.
+              let told = false;
+              onColumnsNow((now) => {
+                const edit = arrivePicture(now, column, element, places);
+                queueMicrotask(() => {
+                  if (told) return;
+                  told = true;
+                  noteFor(column, edit.ok ? null : `The picture you sent was not added: ${ROW_EDIT_WHY[edit.why]}`);
+                  setSaid(edit.ok ? `Added picture to column ${column + 1}.` : `The picture you sent was not added to column ${column + 1}.`);
+                });
+                return edit.ok ? edit.columns : null;
+              });
             }}
           />
         ) : null}

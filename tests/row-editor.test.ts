@@ -45,6 +45,7 @@ import {
   type RowColumns,
   addElement,
   addRefusal,
+  arrivePicture,
   blankElement,
   moveElement,
   removeElement,
@@ -210,8 +211,24 @@ part("A slot held while a picture is being sent");
   is("the picture that arrives takes its own held slot", addElement(seven, 0, h("Picture"), releaseHeld(held, 0)).ok, true);
   is("releasing a slot leaves the others", [releaseHeld([1, 2, 0], 1), releaseHeld([0, 0], 0), held], [[1, 1, 0], [0, 0], [1, 0]]);
   is("with nothing held, every rule is as before", [addRefusal(seven, 0), addRefusal(seven, 0, [])], [null, null]);
-  const editor = readFileSync("components/page-editor.tsx", "utf8");
-  is("the editor holds the slot while sending and says a refusal beside the Add control", [editor.includes("onSending="), editor.includes("releaseHeld(held.current"), /uploadNote\[column\]/.test(editor)], [true, true, true]);
+}
+
+part("A picture that arrives is added to the row as it is then, never over what changed while it was sent (inbox C4-31)");
+{
+  const picture = (n: number): RowElement => ({ kind: "image", picture: { path: `images/${"a".repeat(24)}/${String(n).padStart(32, "0")}.webp`, width: 800, height: 600, alt: "", caption: "" }, decorative: false });
+  // Sent to column 1; meanwhile the row was closed and reopened, its heading rewritten and a paragraph added to column 2.
+  const sent: RowElement[][] = [[h("Old title")], [h("B1")]];
+  const held = [1, 0];
+  const now: RowElement[][] = [[h("New title")], [h("B1"), h("A paragraph")]];
+  const arrived = arrivePicture(now, 0, picture(1), releaseHeld(held, 0));
+  is("added to the row as it is now: the new heading and the new paragraph stay", arrived.ok ? arrived.columns : null, [[h("New title"), picture(1)], [h("B1"), h("A paragraph")]]);
+  // Two pictures that arrive one right after the other: each is applied to the state the other left.
+  const both = [1, 1];
+  const first = arrivePicture(sent, 0, picture(1), releaseHeld(both, 0));
+  const second = first.ok ? arrivePicture(first.columns, 1, picture(2), releaseHeld(releaseHeld(both, 0), 1)) : first;
+  is("two pictures arriving together: both kept", second.ok ? second.columns : null, [[h("Old title"), picture(1)], [h("B1"), picture(2)]]);
+  const full7: RowElement[][] = [full(MAX_COLUMN_ELEMENTS, "A"), []];
+  is("one that no longer fits, the row having filled meanwhile, is refused with its reason, nothing changed", arrivePicture(full7, 0, picture(3), [0, 0]), { ok: false, why: "column_full" });
 }
 
 part("Offered on a product's page only");
@@ -240,6 +257,15 @@ part("The editor uses the rules, with buttons");
   }
   is("the Add button stays a 44 pixel target", rowEditor.includes('"inline-flex min-h-11 items-center gap-1.5 rounded-full'), true);
   is("after a change the keyboard goes to the new field once it is drawn, at a later frame if need be, never left on Add", rowEditor.includes("stopFocus.current = focusWhenDrawn(() => document.getElementById(id), browserFrames());") && !rowEditor.includes("document.getElementById(focusTo.current)?.focus();"), true);
+  // Inbox C4-31: a picture that arrives after the row was closed and reopened, or after other changes.
+  is("an arriving picture goes into the row as it is in the page editor's state, through the rules", rowEditor.includes("onColumnsNow((now) => {") && rowEditor.includes("arrivePicture(now, column, element, places)") && !rowEditor.includes("addRefusal(latest.current"), true);
+  is("in either version of a page under test, by the block's id", editor.includes("setDrafts(change);\n              setOther((all) => (all ? change(all) : all));") && editor.includes("if (d.block.id !== block.id || d.block.kind !== \"row\") return d;"), true);
+  is("the held places are kept by the page editor, by row, so closing the row never frees them", editor.includes("const rowHeld = useRef(new Map<string, number[]>());") && editor.includes("held={rowHeld}") && !/useRef\(\[0, 0, 0\]\)/.test(rowEditor), true);
+  is("read on every drawing, so a reopened row sees its send end", rowEditor.includes("const sending = heldNow();") && !rowEditor.includes("useState(heldNow)") && editor.includes("onHeld={() => heldChanged((n) => n + 1)}"), true);
+  is("what happened is said once, and only what happened", rowEditor.includes("if (told) return;") && rowEditor.indexOf("setSaid(edit.ok ? `Added picture") > rowEditor.indexOf("queueMicrotask(() => {"), true);
+  is("the same words said twice are said again", rowEditor.includes('setSaidNow(text ? `${text}${again.current ? "\\u00a0" : ""}` : "");'), true);
+  is("pictures being sent count against the page's picture room", rowEditor.includes("pictureRoom - sending.reduce((n, count) => n + count, 0) <= 0"), true);
+  is("a dragged block carries a type of its own, never text a field would take", [editor.includes('setData("application/x-mm-block", block.id)'), editor.includes('setData("text/plain", block.id)'), readFileSync("components/block-picker.tsx", "utf8").includes('setData("application/x-mm-block", about.label)')], [true, false, true]);
   is("a copied row leaves its pictures out", editor.includes('if (block.kind === "row") block.columns = block.columns.map((column) => column.filter((element) => element.kind !== "image"));'), true);
 }
 

@@ -71,6 +71,10 @@ const SESSION_ID_PATTERN = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 /** The name printed at the top of Stripe's page (Stripe API 2025-09-30.clover and later). */
 const DISPLAY_NAME = "branding_settings[display_name]";
 
+// Keep newly created memberships/plans on the classic semantics used by our
+// renewal changes, independently of the platform account default. CX-47.
+const SUBSCRIPTION_CHECKOUT_VERSION = "2025-09-30.clover";
+
 export function isSellingConfigured(): boolean {
   return platformKey() !== null;
 }
@@ -364,6 +368,8 @@ export async function createCheckout(
     success_url: `${origin}/@${store.handle}/thanks?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/@${store.handle}`,
   });
+
+  if (recurring) body.set("subscription_data[billing_mode][type]", "classic");
 
   // Which option was bought decides which file is handed over later, so it
   // travels with the charge rather than being worked out again afterward.
@@ -736,7 +742,7 @@ export async function createCheckout(
     // Set just before the request, because Stripe counts its minimum from then.
     if (extras.held) body.set("expires_at", String(checkoutClosesAt()));
     else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
-    return onAccount("POST", store.stripeAccountId as string, "/checkout/sessions", body);
+    return onAccount("POST", store.stripeAccountId as string, "/checkout/sessions", body, recurring ? SUBSCRIPTION_CHECKOUT_VERSION : undefined);
   };
 
   // Each of the two things Stripe may refuse is put right once, whichever it

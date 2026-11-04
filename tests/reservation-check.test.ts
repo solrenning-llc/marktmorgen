@@ -92,6 +92,11 @@ test("the privacy policy never blocks: each agent adds only its own unit's sente
   assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: ["app/privacy/page.tsx"], agentFiles: reserved }).found.length, 0);
 });
 
+test("the cost and test registries never block: each agent adds its own rows (inbox CX-29)", () => {
+  const reserved = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", "| Claude 2 | x | claude2/x | `tests/plan-cost-registry.ts`, `tests/test-config.mjs` | 04/11/2026 |\n") }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "codex/mail", changed: ["tests/plan-cost-registry.ts", "tests/test-config.mjs"], agentFiles: reserved }).found.length, 0);
+});
+
 test("the old table is still read while it exists", () => {
   assert.deepEqual(conflicts({ text: sample, branch: "claude3/y", changed: ["lib/call-deposit.ts"], agentFiles: files }).found.map((r: { agent: string }) => r.agent), ["claude 2"]);
 });

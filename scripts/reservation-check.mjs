@@ -17,7 +17,8 @@ import { execFileSync } from "node:child_process";
  * They are never reserved.
  */
 // app/privacy/page.tsx (inbox C3-37): each agent adds or changes only its own unit's sentences, never rewrites another's, and keeps both in a conflict.
-export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "app/privacy/page.tsx"]);
+// tests/plan-cost-registry.ts and tests/test-config.mjs (inbox CX-29): registries where each unit adds its own rows; each agent adds or changes only its own rows and keeps both in a conflict.
+export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "app/privacy/page.tsx", "tests/plan-cost-registry.ts", "tests/test-config.mjs"]);
 
 /** The folder of each agent's own reservations file. */
 export const RESERVATIONS_DIR = "docs/reservations/";

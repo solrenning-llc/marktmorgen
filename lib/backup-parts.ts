@@ -12,9 +12,10 @@
  * - Nothing is ever deleted or replaced: a run that fails leaves the parts it
  *   wrote as unreferenced objects (no manifest names them) and every earlier
  *   verified set as it was. The bucket's lifecycle rule removes them all.
- * - Before any command is sent, the walk and the copy are counted against the
- *   run's caps (commands, parts, bytes): a database larger than the run may
- *   copy is refused, never half-copied as if whole.
+ * - The walk's and the copy's commands are counted against the run's cap
+ *   before the first DUMP; the parts and the bytes are counted as the copy
+ *   goes, each row at the bytes it adds to its part's JSON: a database larger
+ *   than the run may copy is refused, never written as a whole set.
  *
  * Server-only. Built and off: nothing schedules it (lib/backup-run.ts).
  */
@@ -39,8 +40,8 @@ const MANIFEST_ROOM = 65_536;
 export const MAX_PARTS = 10_000;
 /** Keys a SCAN is asked for at a time; a hint. */
 const SCAN_COUNT = 500;
-/** What one row adds to the sealed JSON besides its key and its value. */
-const ROW_OVERHEAD = 64;
+/** The longest key the backup format keeps (lib/backup-codec.ts), in bytes. */
+const KEY_MAX_BYTES = 1_024;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const MANIFEST_MAGIC = Buffer.from("MMBM1");
 const MANIFEST_AAD = Buffer.from("marktmorgen/backup-manifest/v1");
@@ -161,6 +162,8 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
       if (!Array.isArray(reply) || reply.length !== 2 || typeof reply[0] !== "string" || !Array.isArray(reply[1])) return fail("unreadable");
       for (const name of reply[1]) {
         if (typeof name !== "string" || name.includes("�")) return fail("unreadable");
+        // A key the format cannot keep: refused before anything is copied, never found out by a failed seal.
+        if (Buffer.byteLength(name, "utf8") > KEY_MAX_BYTES) return fail("too_big");
         if (name.startsWith(BACKUP_PREFIX)) keys.add(name);
         if (keys.size > maxRows) return fail("too_many");
       }
@@ -196,13 +199,15 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
         const ends = Number(replies[2 * i + 1]);
         // Gone between the walk and its copy, or ended by the time of the copy: left out, never copied empty.
         if (dump === null || ends === -2 || (ends !== -1 && ends <= now)) continue;
-        if (typeof dump !== "string" || !dump || !BASE64.test(dump) || !Number.isSafeInteger(ends) || ends < -1) return fail("unreadable");
-        const size = names[i].length + dump.length + ROW_OVERHEAD;
+        if (typeof dump !== "string" || !dump || !BASE64.test(dump) || Buffer.from(dump, "base64").toString("base64") !== dump || !Number.isSafeInteger(ends) || ends < -1) return fail("unreadable");
+        const row: BackupRow = { key: names[i], dump, expiresAt: ends === -1 ? null : ends };
+        // The bytes it adds to its part's JSON, escapes and UTF-8 included, and its comma.
+        const size = Buffer.byteLength(JSON.stringify(row), "utf8") + 1;
         // One key larger than a part holds cannot be split: refused whole.
         if (size > partBytes - 1_024) return fail("too_big");
         if (runBytes + size > maxRunBytes) return fail("too_big");
         if (filled + size > partBytes - 1_024 || rows.length + 1 > PART_MAX_ROWS) await close();
-        rows.push({ key: names[i], dump, expiresAt: ends === -1 ? null : ends });
+        rows.push(row);
         filled += size;
         runBytes += size;
       }
@@ -229,19 +234,30 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
 }
 
 /**
- * A verified set read back for a restore: the manifest, then every part, each
- * checked against the manifest's sum before it is opened. Throws on the first
- * part missing or different.
+ * A verified set read back for a restore, one part at a time: the manifest
+ * first, its parts' bytes added up and refused past `maxBytes` before any
+ * part is read; then each part checked against the manifest's size and sum
+ * before it is opened and handed to `onPart`, and let go before the next.
+ * Throws on the first part missing or different, after the parts before it
+ * were handed on: a restore that must write all or nothing reads the set
+ * twice, first checking every key of every part, then writing.
  */
-export async function readBackupSet(manifestId: string, key: Uint8Array, store: BackupObjectStore): Promise<{ manifest: BackupManifest; snapshots: BackupSnapshot[] }> {
+export async function readBackupSet(
+  manifestId: string,
+  key: Uint8Array,
+  store: BackupObjectStore,
+  maxBytes: number,
+  onPart: (snapshot: BackupSnapshot, index: number) => Promise<void>,
+): Promise<BackupManifest> {
   const manifest = openManifest(await store.read(manifestId, manifestBound(MAX_PARTS)), key);
-  const snapshots: BackupSnapshot[] = [];
-  for (const part of manifest.parts) {
+  const total = manifest.parts.reduce((n, part) => n + part.bytes, 0);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || total > maxBytes) throw new Error("Backup set exceeds the bytes a restore may read");
+  for (const [index, part] of manifest.parts.entries()) {
     const read = await store.read(part.id, PART_MAX_BYTES + PART_SEAL_ROOM);
     if (read.byteLength !== part.bytes || sha256(read) !== part.sha256) throw new Error("Backup part differs from its manifest");
     const snapshot = openBackup(read, key);
     if (snapshot.capturedAt !== manifest.capturedAt || snapshot.rows.length !== part.rows) throw new Error("Backup part does not match its manifest");
-    snapshots.push(snapshot);
+    await onPart(snapshot, index);
   }
-  return { manifest, snapshots };
+  return manifest;
 }

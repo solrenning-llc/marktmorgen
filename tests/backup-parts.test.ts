@@ -7,8 +7,12 @@
  *   - a part larger than its bound, or more parts or bytes than the run's caps
  *     written as if whole;
  *   - a part changed or missing after the copy read back as good;
- *   - a manifest that opens with another key, or a part opened against another
- *     set's manifest;
+ *   - a manifest that opens with another key, or a part whose sum is not the
+ *     one its manifest names;
+ *   - a row measured short (non-ASCII or quoted keys and values) so a part
+ *     passes its bound, or a key the format cannot keep found out only by a
+ *     failed seal;
+ *   - a set read whole into memory, or past the bytes a restore may read;
  *   - the database failing while it is read said as anything but "error"; a
  *     failed write said as anything but "verify", or an earlier part deleted;
  *   - anything thrown instead of a result.
@@ -50,8 +54,14 @@ async function main(): Promise<void> {
   if (!made.ok) throw new Error("no set");
   is("its objects: the parts and the manifest", objects.size, made.parts + 1);
   is("no part over its bound", [...objects.values()].every((bytes) => bytes.byteLength <= limits.partBytes + PART_SEAL_ROOM), true);
-  const back = await readBackupSet(made.id, key, store);
-  const rows = back.snapshots.flatMap((s) => s.rows);
+  const seen: number[] = [];
+  const rows: { key: string; expiresAt: number | null }[] = [];
+  const manifest = await readBackupSet(made.id, key, store, 10_000_000, async (snapshot, index) => {
+    seen.push(index);
+    rows.push(...snapshot.rows);
+  });
+  const back = { manifest };
+  is("read one part at a time, in the manifest's order", seen, manifest.parts.map((_, i) => i));
   is("read back: every key, once, in order, with its ending", [rows.length, new Set(rows.map((r) => r.key)).size, rows.map((r) => r.key).join() === [...rows.map((r) => r.key)].sort().join(), rows.find((r) => r.key === "nl:bk:test:ttl")?.expiresAt], [21, 21, true, T0 + 3_600_000]);
   is("the manifest names every part with its sums", [back.manifest.parts.length, back.manifest.rows, back.manifest.capturedAt], [made.parts, 21, T0]);
 
@@ -60,14 +70,18 @@ async function main(): Promise<void> {
   const firstPart = back.manifest.parts[0].id;
   const kept = objects.get(firstPart)!;
   objects.set(firstPart, new Uint8Array([...kept.slice(0, -1), kept[kept.length - 1] ^ 1]));
-  is("a part changed after the copy: refused", await readBackupSet(made.id, key, store).then(() => "read", () => "refused"), "refused");
+  const none = async () => {};
+  is("a part changed after the copy: refused", await readBackupSet(made.id, key, store, 10_000_000, none).then(() => "read", () => "refused"), "refused");
   objects.delete(firstPart);
-  is("a part missing: refused", await readBackupSet(made.id, key, store).then(() => "read", () => "refused"), "refused");
+  is("a part missing: refused", await readBackupSet(made.id, key, store, 10_000_000, none).then(() => "read", () => "refused"), "refused");
   objects.set(firstPart, kept);
   const forged = sealManifest({ ...back.manifest, parts: back.manifest.parts.map((p, i) => (i === 0 ? { ...p, sha256: back.manifest.parts[1].sha256 } : p)) }, key);
   objects.set("forged", forged);
-  is("a part whose sum is not the one its manifest names: refused", await readBackupSet("forged", key, store).then(() => "read", () => "refused"), "refused");
+  is("a part whose sum is not the one its manifest names: refused", await readBackupSet("forged", key, store, 10_000_000, none).then(() => "read", () => "refused"), "refused");
   objects.delete("forged");
+  let handed = 0;
+  const small = await readBackupSet(made.id, key, store, 1_000, async () => { handed += 1; }).then(() => "read", () => "refused");
+  is("a set larger than a restore may read: refused before any part is read", [small, handed], ["refused", 0]);
 
   part("The run's caps hold before anything is written as whole");
   const before = objects.size;
@@ -79,7 +93,29 @@ async function main(): Promise<void> {
   redis.run(["SET", "nl:bk:test:big", "z".repeat(5_000)]);
   const big = await copyInParts(limits, key, store);
   redis.run(["DEL", "nl:bk:test:big"]);
-  is("a key larger than a part: the run refused, never a set without it", [big.ok, big.ok === false && big.reason], [false, "too_big"]);
+  is("a value larger than a part: the run refused, never a set without it", [big.ok, big.ok === false && big.reason], [false, "too_big"]);
+  redis.run(["SET", `nl:bk:test:${"é".repeat(600)}`, "x"]);
+  const longKey = await copyInParts(limits, key, store);
+  redis.run(["DEL", `nl:bk:test:${"é".repeat(600)}`]);
+  is("a key longer than the format keeps (1,024 bytes, UTF-8): too_big at the walk, nothing copied", [longKey.ok === false && longKey.reason, longKey.ok === false && longKey.parts], ["too_big", 0]);
+
+  part("Rows are measured in the bytes they add to their part's JSON");
+  {
+    const scratch = new Map<string, Uint8Array>();
+    const plain: BackupObjectStore = { putNew: async (id, bytes) => void scratch.set(id, new Uint8Array(bytes)), read: async (id) => scratch.get(id) ?? Promise.reject(new Error("missing")) };
+    const kept = [...objects.keys()];
+    redis.clear();
+    redis.now = () => T0;
+    // Keys of euro signs (three bytes each) and quotes (two in JSON): far more bytes than characters.
+    for (let i = 0; i < 30; i += 1) redis.run(["SET", `nl:bk:${"€".repeat(200)}${'"'.repeat(100)}${String(i).padStart(2, "0")}`, "v".repeat(300)]);
+    const wide = await copyInParts({ ...limits, maxRows: 100, maxParts: 40 }, key, plain);
+    is("copied in parts", [wide.ok, wide.ok && wide.keys, wide.ok ? "" : wide.reason], [true, 30, ""]);
+    let largest = 0;
+    if (wide.ok) await readBackupSet(wide.id, key, plain, 10_000_000, async (snapshot) => { largest = Math.max(largest, Buffer.byteLength(JSON.stringify(snapshot), "utf8")); });
+    // A part's rows fill at most its bound less its 1,024 bytes of room; its envelope adds under 64.
+    is(`no part's JSON past what it counts (${largest} <= ${limits.partBytes - 1_024 + 64})`, largest > 0 && largest <= limits.partBytes - 1_024 + 64, true);
+    is("the objects of the first sets are still there", kept.every((id) => objects.has(id)), true);
+  }
 
   part("Failures say which side");
   const real = redis.pipeline.bind(redis);

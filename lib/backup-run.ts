@@ -1,9 +1,9 @@
 /**
- * 273 [BK1]: one daily backup run. Export every key of ours under the caps of
- * a reviewed cost ceiling (lib/backup-export.ts), seal it (lib/backup-codec.ts),
- * write it once to the backup's own bucket and read it back the same
- * (lib/backup-roundtrip.ts, lib/backup-store.ts), then keep the time of the
- * last good copy and the last failure's reason for the report.
+ * 273 [BK1]: one daily backup run. Copy every key of ours under the caps of
+ * a reviewed cost ceiling as a set of sealed parts and a sealed manifest
+ * (lib/backup-parts.ts, inbox C4-30), each written once to the backup's own
+ * bucket and read back the same (lib/backup-store.ts), then keep the time of
+ * the last good copy and the last failure's reason for the report.
  *
  * Off three ways, each checked before a single command is sent:
  *   - no reviewed cost ceiling: BACKUP_COST_REVIEW is null until the owner's
@@ -13,8 +13,9 @@
  *     pass. Unknown cost is never zero.
  *   - no backup bucket settings (backupStoreConfig()).
  *   - no 32-byte BACKUP_ENCRYPTION_KEY.
- * At most one run a day (UTC), so at most one stored object a day, failed
- * read-backs included. Nothing schedules it: vercel.json is untouched (owner
+ * At most one run a day (UTC), so at most one set a day (its parts and its
+ * manifest, at most the review's maxParts parts), failed read-backs included:
+ * a failed run's parts stay unreferenced. Nothing schedules it: vercel.json is untouched (owner
  * prerequisite 6 of docs/backup.md), and no route calls it.
  */
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
@@ -153,6 +154,7 @@ async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uin
   return { ok: false, reason: `export_${done.reason}` };
 }
 
+/** True when no copy has been verified in the last 48 hours (none kept counts as none). */
 export async function backupStale(now: number = Date.now()): Promise<boolean> {
   const [last] = await redisPipeline([["GET", LAST_OK]]);
   const at = Number(last);

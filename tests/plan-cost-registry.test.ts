@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
@@ -26,6 +26,7 @@ import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/l
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
+import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
 import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
@@ -198,6 +199,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
   assert.ok(PICTURE_REQUEST_UNITS * laterPageCost() >= PICTURE_READ, `${PICTURE_REQUEST_UNITS} x ${laterPageCost()} < ${PICTURE_READ}`);
+  // A certificate's PDF is CERTIFICATE_PDF_UNITS public requests, all taken before it is drawn: more than its CPU, its time and its bytes cost.
+  assert.ok(CERTIFICATE_PDF_UNITS * laterPageCost() >= CERTIFICATE_PDF_READ, `${CERTIFICATE_PDF_UNITS} x ${laterPageCost()} < ${CERTIFICATE_PDF_READ}`);
+  console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);

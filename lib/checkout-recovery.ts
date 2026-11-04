@@ -65,6 +65,8 @@ import { membershipLine, speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
 import { isTimeZone, readableTime, zoneName } from "@/lib/call-setup";
+import { chargeNow } from "@/lib/call-deposit";
+import { bookingWords } from "@/lib/buyer-words/booking";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
 import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
@@ -441,7 +443,10 @@ async function deliver(
     const locale = LANGUAGES[parseLanguage(store.language)].locale;
     const when = `${readableTime(about.start, tz, locale)} (${zoneName(about.start, tz, locale)})`;
     subject = g.callSubject(product.title);
-    text = [g.callLead(product.title, when, name), "", g.callHere, bookLink(store, product.id), "", g.recoverPrice(money(product.priceCents)), "", ...foot].join("\n");
+    // A deposit on an in-person booking (lib/call-deposit.ts): said as the booking page and Stripe's page say it, at today's price.
+    const due = chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
+    const deposit = due.rest > 0 ? [bookingWords(store.language).depositRest(money(due.rest), store.name)] : [];
+    text = [g.callLead(product.title, when, name), "", g.callHere, bookLink(store, product.id), "", g.recoverPrice(money(product.priceCents)), ...deposit, "", ...foot].join("\n");
   } else {
   const product = about.product;
   // The price as the store page says it: the floor of a price the buyer

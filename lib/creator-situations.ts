@@ -1,3 +1,4 @@
+import { audienceBeginnerQuestions } from "@/lib/audience-faq";
 import type { Block, TopicPage } from "@/lib/site-pages";
 
 export const CREATOR_PHOTOS = {
@@ -97,5 +98,7 @@ export const NEW_CREATOR_PAGES:TopicPage[]=situations.map((situation):TopicPage=
   {kind:"ladder",title:"A path you can prepare",intro:"Each step uses an existing product or studio tool. The order is an example, not a required package or a prediction of purchases.",items:situation.ladder},
   {kind:"features",title:"Tools for this kind of work",items:situation.features},
   {kind:"limits",title:"Read the boundaries before choosing",items:situation.limits},
+  // 534 [FQ1], unit 40: what someone starting out asks, answered by the code (lib/audience-faq.ts).
+  {kind:"faq",title:"Questions about starting",items:audienceBeginnerQuestions()},
  ],
 }));

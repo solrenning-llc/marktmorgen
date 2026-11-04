@@ -1,4 +1,6 @@
 import { serviceAllowanceWords } from "@/lib/store-allowance";
+import { placeLine } from "@/lib/call-place";
+import { planAboveSold } from "@/lib/larger-plan";
 import { SalesLevers } from "@/components/sales-levers";
 import { costsPaused } from "@/lib/plan-standing";
 import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pause";
@@ -59,7 +61,7 @@ import { DetailsForm } from "@/components/details-form";
 import { SocialsEditor } from "@/components/socials-editor";
 import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
-import { type PaidCall, catchUpBookings, paidCalls } from "@/lib/calls";
+import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
 import { productsInStats, reachProducts, readAllTimeSales, readSales, readStats, studioStats } from "@/lib/stats";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
@@ -94,6 +96,7 @@ import { keepHandle, webhooksView } from "@/lib/webhooks";
 import { PixelEditor } from "@/components/pixel-editor";
 import { ExitOfferEditor } from "@/components/exit-offer-editor";
 import { StoreLayoutEditor } from "@/components/store-layout-editor";
+import { VisitUsEditor } from "@/components/visit-us-editor";
 import { CollectionsEditor } from "@/components/collections-editor";
 import { BuyButtonEditor } from "@/components/buy-button-editor";
 import { CheckoutScriptEditor } from "@/components/checkout-script-editor";
@@ -139,6 +142,8 @@ import { ProductEditor } from "@/components/product-editor";
 import { PaymentsPanel } from "@/components/payments-panel";
 import { chargeableCurrencies, readWaysToPay } from "@/lib/payment-methods";
 import { formatMoney } from "@/lib/money";
+import { TodayPanel } from "@/components/today-panel";
+import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
 import { ContactBoxEditor } from "@/components/contact-box-editor";
@@ -757,6 +762,11 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/** Now, in milliseconds, for the "Today" counts. */
+function todayNow(): number {
+  return Date.now();
+}
+
 /** The first and last days the numbers' chart can show, in UTC: the 90 days up to today. */
 function chartDays(): [string, string] {
   const now = Date.now();
@@ -868,6 +878,8 @@ export default async function StudioPage({
   const breakDay = (seconds: number) =>
     new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   const tier = current?.tier ?? "creator";
+  // Whether a larger plan can be had now (lib/larger-plan.ts): none above Scale, none while Pro is not sold, nothing while no plan is on sale.
+  const largerOnSale = PLANS_ON_SALE && planAboveSold(tier);
   // The store's own domain: shown where this deployment can add one, and its
   // records read from Vercel only while it is not yet live.
   const domainsOn = isDomainsConfigured();
@@ -971,10 +983,11 @@ export default async function StudioPage({
   // Booked calls are read from the creator's Stripe account, the ledger, and
   // only asked for when the store sells calls at all.
   const callProducts = store ? await readKind(store, "call") : [];
-  const paidList =
+  const paidRead =
     current && current.stripeAccountId && callProducts.length > 0 && may("orders")
-      ? await paidCalls(current).catch(() => null)
+      ? await paidCallsRead(current).catch(() => null)
       : null;
+  const paidList = paidRead ? paidRead.paid : null;
   const calls = paidList && store ? upcoming(paidList, callProducts) : null;
   // The room of each booked time: the one made for it, or the creator's own link.
   const callRooms =
@@ -1058,6 +1071,18 @@ export default async function StudioPage({
   // The biggest buyers carry their addresses, so only whoever may read orders
   // with the buyer's address sees them (lib/team-roles.ts, "orders").
   const numbers = counted && may("orders") ? { ...counted, topBuyers: salesRead?.value?.buyers?.top ?? [] } : counted;
+  // "Today" (484 [IT1], complement item 1, unit 2a): from readings this page already made, each counted only
+  // where its place on this page is shown, so every line leads somewhere; the rest is not on this screen yet.
+  const today = current ? todayNow() : 0;
+  const todayCounts: TodayCounts = {
+    ...(current && numbers && salesRead ? salesCounts(salesRead, (cents) => formatMoney(cents, current.currency), today) : {}),
+    ...(current && callProducts.length > 0 && may("orders") ? (current.stripeAccountId ? bookingCounts(paidRead, today) : { bookingsToday: 0, bookingsTomorrow: 0 }) : {}),
+  };
+  const todayHrefs: Partial<Record<TodayId, string>> = {
+    ...(todayCounts.salesToday !== undefined ? { sales: "#numbers" } : {}),
+    ...(todayCounts.bookingsToday !== undefined ? { calls: "#calls-title" } : {}),
+  };
+  const todayScreen = current ? todayView(todayCounts, may) : null;
   // The list of products: all of a short one, a page of a long one, found by
   // name when the creator searched (lib/catalog.ts reads only that page in full).
   const shelf = store ? await studioShelf(store, params) : null;
@@ -1241,6 +1266,7 @@ export default async function StudioPage({
               <StoreSetupAi currency={store.currency} left={ai.left} hasFaq={store.faq.length > 0} storeName={store.name} />
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.hint})), "store")} /> : null}
+            {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.left} /> : null}
@@ -1616,7 +1642,7 @@ export default async function StudioPage({
 
             {callProducts.length > 0 && may("orders") ? (
               <section className="card mt-8 p-6 sm:p-8" aria-labelledby="calls-title">
-                <h2 id="calls-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                <h2 id="calls-title" className="scroll-mt-32 text-lg font-semibold tracking-[-0.02em] text-ink">
                   Upcoming calls
                 </h2>
                 {!current?.stripeAccountId ? (
@@ -1681,6 +1707,10 @@ export default async function StudioPage({
                                 >
                                   Start in Zoom
                                 <NewTab /></a>
+                              ) : null}
+                              {/* In person (lib/call-place.ts): where, as text, and no link. */}
+                              {product?.call?.place ? (
+                                <span className="break-words text-sm text-ink-soft">{`In person, at: ${placeLine(product.call.place)}`}</span>
                               ) : null}
                               {room ? (
                                 <a href={room} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 -my-2.5 items-center text-sm font-semibold text-violet-deep underline underline-offset-4">
@@ -1849,6 +1879,7 @@ export default async function StudioPage({
                     <>
                       <ExitOfferEditor current={store.exitOffer} free={free} />
                       {may("page") ? <StoreLayoutEditor sections={store.sections} announcement={store.announcement} products={published} /> : null}
+                      {may("page") ? <VisitUsEditor visitUs={store.visitUs} /> : null}
                       {may("page") ? <CollectionsEditor collections={store.collections ?? []} products={published} handle={store.handle} /> : null}
                       {may("page") ? (
                         <BuyButtonEditor
@@ -2559,8 +2590,8 @@ export default async function StudioPage({
                     <p className="mt-4 notice notice-warn">
                       <strong>{visited >= visitLimit ? "Your store\u2019s pages, and your buyers\u2019 pages, are resting." : "Your store\u2019s public pages are resting."}</strong>
                       {visited >= visitLimit
-                        ? ` It has used all ${countWords(visitLimit)} counted visits this month, so courses, the community and podcasts rest too, with a page that tells your buyers their access is kept. Everything opens again ${standing === "paid" ? "with your next billing month, or on a larger plan" : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`
-                        : ` It has reached ${countWords(publicVisitLimit(visitLimit))} of its ${countWords(visitLimit)} counted visits this month. Your buyers\u2019 courses, community and podcasts stay open for the last ${countWords(visitLimit - publicVisitLimit(visitLimit))}. Public pages open again ${standing === "paid" ? "with your next billing month, or on a larger plan" : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`}
+                        ? ` It has used all ${countWords(visitLimit)} counted visits ${standing === "trial" ? "for the trial" : "this month"}, so courses, the community and podcasts rest too, with a page that tells your buyers their access is kept. Everything opens again ${standing === "paid" ? `with your next billing month${largerOnSale ? ", or on a larger plan" : ""}` : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`
+                        : ` It has reached ${countWords(publicVisitLimit(visitLimit))} of its ${countWords(visitLimit)} counted visits ${standing === "trial" ? "for the trial" : "this month"}. Your buyers\u2019 courses, community and podcasts stay open for the last ${countWords(visitLimit - publicVisitLimit(visitLimit))}. Public pages open again ${standing === "paid" ? `with your next billing month${largerOnSale ? ", or on a larger plan" : ""}` : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`}
                     </p>
                   ) : null}
                   <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
@@ -2595,7 +2626,7 @@ export default async function StudioPage({
                   {standing === "paid" && store && ordered >= orderRoom ? (
                     <p className="mt-4 notice notice-warn">
                       <strong>New orders are paused for the month.</strong>
-                      {` Your store has had the ${countWords(orderRoom)} orders your plan covers. A buyer who presses buy is told the store is not taking new orders right now, and nothing is charged; anybody already paying finishes. Orders open again with your next billing month, or on a larger plan.`}
+                      {` Your store has had the ${countWords(orderRoom)} orders your plan covers. A buyer who presses buy is told the store is not taking new orders right now, and nothing is charged; anybody already paying finishes. Orders open again with your next billing month${largerOnSale ? ", or on a larger plan" : ""}.`}
                     </p>
                   ) : null}
                   {standing === "trial" && ordered >= TRIAL_ORDERS ? (
@@ -2625,7 +2656,7 @@ export default async function StudioPage({
                       ))}
                     </dl>
                     <p className="mt-3 text-sm text-ink-soft">
-                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, and a contact added or a product given through the API as ${API_WRITE_UNITS} API requests. Past a figure, that use waits for the next month or a larger plan, with a plain message; nothing is billed. Changing or canceling your plan, deleting your store and downloading your sales always work.`}
+                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, and a contact added or a product given through the API as ${API_WRITE_UNITS} API requests. Past a figure, that use waits until the figure opens again${standing === "paid" && largerOnSale ? ", or for a larger plan" : ""}, with a plain message that says when; nothing is billed. ${PLANS_ON_SALE ? "Changing or canceling your plan" : "Canceling your plan"}, deleting your store and downloading your sales always work.`}
                     </p>
                   </div>
                 ) : null}
@@ -2635,11 +2666,11 @@ export default async function StudioPage({
                     <p className="mt-2 text-sm text-ink-soft">{`${dataWords(data.used)} of ${dataWords(data.room)} used, ${dataWords(data.orders)} of it kept for your orders.`}</p>
                     {data.used >= data.room * 0.9 ? (
                       <p className="mt-3 notice notice-warn">
-                        {data.used >= data.room ? dataFullWords(data.used, data.room) : "Your data room is nearly full. Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan, before it is."}
+                        {data.used >= data.room ? dataFullWords(data.used, data.room, standing === "paid" && largerOnSale) : `Your data room is nearly full. Delete something you no longer need, such as old posts, drafts, pages or contacts${standing === "paid" && largerOnSale ? ", or move to a larger plan" : ""}, before it is.`}
                       </p>
                     ) : null}
                     <p className="mt-3 text-sm text-ink-soft">
-                      {"It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps. When it is full, what you or your buyers would add is refused until you delete something or move to a larger plan; deleting is never refused, and an order already paid for is never refused."}
+                      {`It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps. When it is full, what you or your buyers would add is refused until you delete something${standing === "paid" && largerOnSale ? " or move to a larger plan" : ""}; deleting is never refused, and an order already paid for is never refused.`}
                     </p>
                   </div>
                 ) : null}

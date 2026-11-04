@@ -1,5 +1,6 @@
 import { type SourceHooks, readSourcePage, sourceReadingOn } from "@/lib/source-page";
 import { allowanceWindow, windowId } from "@/lib/allowance-window";
+import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { reserveFundedExposure } from '@/lib/exposure-budget';
 import { consumeAiCallBudget, hasAiCallBudget, withAiCallBudget } from '@/lib/ai-call-budget';
@@ -21,7 +22,8 @@ import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { aiBudgetScopeFor, isAiBudgetConfigured, reserveAiSpend } from "@/lib/ai-spend";
 import { currentAiSpendPolicy } from "@/lib/ai-spend-policy";
-import { costStandingOf } from "@/lib/plan-standing";
+import { costPauseCode, costStandingOf, standingOf } from "@/lib/plan-standing";
+import { hasPro } from "@/lib/plan";
 import { timed } from "@/lib/fetch-timeout";
 import { boundedAiRequest, isSupportedAiModel } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
@@ -95,6 +97,23 @@ export const aiMonthKey = monthKey;
  * includes a monthly allowance. Store, the free trial and stores without a
  * paid plan have none (lib/ai-rules.ts), so no button is shown to them.
  */
+/**
+ * Why the writing help is off for a store, said as it is: "trial" (a trial leaves out paid AI writing), a renewal
+ * unpaid or a plan payment disputed (costPauseCode), "plan" (not a Studio or Scale plan that is paid), or "setup"
+ * (a paid-up Studio or Scale store where it is not switched on: not configured, or not funded for its plan).
+ * Null when it is on.
+ */
+export type AiOff = "trial" | "renewal_unpaid" | "plan_disputed" | "plan" | "setup";
+export function aiOffReason(store: Store, now = Date.now()): AiOff | null {
+  if (aiAvailableFor(store, now)) return null;
+  const seconds = now / 1000;
+  if (standingOf(store, seconds) === "trial") return "trial";
+  const paused = costPauseCode(store, seconds);
+  if (paused) return paused;
+  if (!hasPro(store.tier) || standingOf(store, seconds) !== "paid") return "plan";
+  return "setup";
+}
+
 export function aiAvailableFor(store: Store | null | undefined, now = Date.now()): boolean {
   if (!store || !isAiConfigured() || aiAllowance(store, now) <= 0) return false;
   // Only a paying plan has a spending allocation (lib/ai-spend-policy.ts).
@@ -1360,6 +1379,8 @@ export type PageReview = {
   headlines: { headline: string; sub: string }[];
   fit: { yes: string[]; no: string[] } | null;
   questions: { q: string; a: string }[];
+  /** The page read by the three kinds of buyer (lib/page-coach.ts, BUYER_LENSES), in their order; empty when none came back usable. */
+  buyers: { lens: BuyerLens; objection: string; add: string }[];
 };
 
 export async function reviewPage(
@@ -1384,6 +1405,8 @@ export async function reviewPage(
         `"headlines": 3 items, each {"headline": at most 90 characters, "sub": at most 200 characters}.`,
         `"fit": {"yes": 2 to 5 points, "no": 1 to 3 points, each at most 110 characters} or null.`,
         `"questions": 0 to 5 items, each {"q": at most 120 characters, "a": at most 400 characters or ""}.`,
+        `"buyers": 3 items, one for each reader below, in this order, each {"lens": its id, "objection": at most 160 characters, the main doubt that reader is left with, "add": at most 160 characters, what the page could show to answer it, only from the facts given}. Write these for the creator, in American English. Never predict a conversion rate, a lift, a percent or a number of sales.`,
+        BUYER_LENSES.map((lens) => `- "${lens.id}": a reader who ${lens.ask}.`).join("\n"),
       ].join("\n"),
     ].join("\n\n");
     const prompt = [
@@ -1418,6 +1441,13 @@ export async function reviewPage(
         .map((q) => ({ q: line(pair(q).q, 200), a: block(pair(q).a, 1_500) }))
         .filter((q) => q.q)
         .slice(0, 5),
+      // The three readers, each at most once, in the code's order; a lens the code did not name, or an objection that predicts a result, is dropped.
+      buyers: BUYER_LENSES.flatMap((lens) => {
+        const found = list(json.buyers).map(pair).find((b) => b.lens === lens.id);
+        const objection = found ? line(found.objection, 200) : "";
+        const add = found ? line(found.add, 200) : "";
+        return objection && add && !PREDICTS.test(`${objection} ${add}`) ? [{ lens: lens.id, objection, add }] : [];
+      }),
     };
     return review.verdict && (review.fixes.length || review.headlines.length) ? review : null;
   });

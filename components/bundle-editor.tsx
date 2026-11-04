@@ -1,5 +1,6 @@
 "use client";
 
+import { PRODUCT_OUTLINE_LEFT } from "@/lib/product-outline";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -23,6 +24,7 @@ export type PickerProduct = {
 };
 
 const MESSAGES: Record<string, string> = {
+  outline_left: PRODUCT_OUTLINE_LEFT,
   ...STUDIO_MESSAGES,
   count: `A bundle holds ${MIN_BUNDLE_ITEMS} to ${MAX_BUNDLE_ITEMS} different products.`,
   self: "A bundle cannot hold itself.",

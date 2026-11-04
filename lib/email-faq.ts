@@ -28,7 +28,7 @@ export function emailBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL
       a: `Email is part of the ${PLAN_TITLES.pro} and ${PLAN_TITLES.scale} plans; in your studio, the ${PLAN_TITLES.pro} plan is labeled “${w.studioPlan}”. While one of them is paid up, open “${w.tool}” in your studio. First, the owner or an ${ROLE_NAMES.admin} checks “${w.from}” (your store's name to start with), fills in “${w.postal}” and presses “${w.save}”. Then write it under “${w.compose}” and pick who gets it under “${w.to}”. The owner or an ${ROLE_NAMES.admin} presses “${w.send}”, which stays off while that group counts no one; an ${ROLE_NAMES.editor} presses “${w.draft}” for them. The studio then shows “${w.check}”, and nothing goes to your list until you press “${w.yes} …”. To send it later, choose “${w.later}” under “${w.when}”: the buttons say “${w.schedule}” and “${w.yesLater} …”.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try emailing my list before paying?",
       a: onSale
         ? `${tryBeforePaying(`Email to your list, on ${plans},`, "", true, trialDays)} On a trial of the ${PLAN_TITLES.creator} plan, email is not included.`
         : `Not yet. Email to your list needs the ${plans} plan, and paid plans are not on sale yet. To see a store working, open the live demo store from the link at the end of this page: a made-up store, marked as a demo.`,

@@ -34,6 +34,8 @@ import type { MayComeOff } from "@/lib/platform-share";
 
 /** Pinned, so the shape we send is the shape this version expects. */
 const API_VERSION = "2025-09-30.clover";
+/** The version codes are read at, for a reader outside this file (lib/deposit-code.ts). */
+export const CODES_API_VERSION = API_VERSION;
 
 /**
  * What a code may look like.

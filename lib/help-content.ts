@@ -1,3 +1,4 @@
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { PAGE_TEST_WORDS } from "@/lib/headline-test-words";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { ASSIST_REMINDER_WORDS } from "@/lib/buyer-words/assistant-reminder";
@@ -45,6 +46,16 @@ import { ERASE_STUDIO_UNITS } from "@/lib/erasure-rules";
 import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib/agreement-rules";
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
+
+/**
+ * The help center's questions a feature page asks too, word for word, so
+ * renaming one here renames it there (lib/feature-pages.ts, helpAnswer).
+ */
+export const SHARED_QUESTIONS = {
+  address: "Can I change my store address later?",
+  domain: "Can I use my own domain?",
+  refunds: "Who handles refunds and disputes?",
+} as const;
 
 /** An anchor for one answer, from its question. */
 export function answerId(q: string): string {
@@ -145,7 +156,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Yes, from “Move from ClickFunnels” under “Moving from another platform” in your studio, in four steps: the Products, Contacts and Orders files ClickFunnels lets you export, and your funnel's pages, each saved from your own browser as “Webpage, HTML Only”. ClickFunnels' column names are matched for you. Each file and each funnel is checked first in a dry run that saves nothing and lists what every row and page will become, then imported; running the same import again makes nothing twice.",
           "Contacts ClickFunnels marks Subscribed can be emailed here once you confirm they agreed; everyone else comes in as a contact you cannot email, and those marked Unsubscribed or Undeliverable stay unsubscribed here. Paid orders give past buyers what they bought; refunded, failed, canceled and pending ones are left out. Each saved page's headings, text, buttons, YouTube, Vimeo and Loom videos and form become one of your store's own pages, kept from visitors until you let it out, and the pages a funnel, switched off. A page you say was an order form becomes your product's own checkout, its order bumps boxes at that checkout, and pages you say were upsells or downsells offers after paying.",
           "What it does not do: we never sign in to ClickFunnels or fetch your pages, and pictures, design, scripts, tracking, countdown timers, workflows, courses and memberships are not brought over. Every page lists what was left out and why.",
-          `How much a month: ${importAllowanceWords()} Moving funnels: ${IMPORT_ALLOWANCES.creator.pageReads}, ${IMPORT_ALLOWANCES.pro.pageReads} and ${IMPORT_ALLOWANCES.scale.pageReads} saved pages read, ${IMPORT_ALLOWANCES.creator.funnelChecks}, ${IMPORT_ALLOWANCES.pro.funnelChecks} and ${IMPORT_ALLOWANCES.scale.funnelChecks} funnel checks, and ${IMPORT_ALLOWANCES.creator.funnelSaves}, ${IMPORT_ALLOWANCES.pro.funnelSaves} and ${IMPORT_ALLOWANCES.scale.funnelSaves} funnels made, on Store, Studio and Scale. Dry runs: ${IMPORT_ALLOWANCES.creator.checks}, ${IMPORT_ALLOWANCES.pro.checks} and ${IMPORT_ALLOWANCES.scale.checks} batches of contacts or products, and ${IMPORT_ALLOWANCES.creator.buyerChecks}, ${IMPORT_ALLOWANCES.pro.buyerChecks} and ${IMPORT_ALLOWANCES.scale.buyerChecks} of past buyers (each batch is up to 1,000 rows). Each figure starts again with your billing month (for a store with no plan, on the 1st, UTC); past one, that step waits for the next month or a larger plan.`,
+          `How much a month: ${importAllowanceWords()} Moving funnels: ${IMPORT_ALLOWANCES.creator.pageReads}, ${IMPORT_ALLOWANCES.pro.pageReads} and ${IMPORT_ALLOWANCES.scale.pageReads} saved pages read, ${IMPORT_ALLOWANCES.creator.funnelChecks}, ${IMPORT_ALLOWANCES.pro.funnelChecks} and ${IMPORT_ALLOWANCES.scale.funnelChecks} funnel checks, and ${IMPORT_ALLOWANCES.creator.funnelSaves}, ${IMPORT_ALLOWANCES.pro.funnelSaves} and ${IMPORT_ALLOWANCES.scale.funnelSaves} funnels made, on Store, Studio and Scale. Dry runs: ${IMPORT_ALLOWANCES.creator.checks}, ${IMPORT_ALLOWANCES.pro.checks} and ${IMPORT_ALLOWANCES.scale.checks} batches of contacts or products, and ${IMPORT_ALLOWANCES.creator.buyerChecks}, ${IMPORT_ALLOWANCES.pro.buyerChecks} and ${IMPORT_ALLOWANCES.scale.buyerChecks} of past buyers (each batch is up to 1,000 rows). Each figure starts again with your billing month (for a store with no plan, on the 1st, UTC); past one, that step waits until the figure opens again${PLANS_ON_SALE ? ", or, for a store that pays for its plan with a larger one on sale, until it moves to that one" : ""}.`,
         ],
       },
       {
@@ -300,7 +311,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Who handles refunds and disputes?",
+        q: SHARED_QUESTIONS.refunds,
         a: [
           "You do, in your own Stripe dashboard, with the same tools any business has. Because the charge was made on your account, a refund is a refund you issue, not a request you file with us.",
         ],
@@ -364,7 +375,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "What if I sell a very large number of things?",
         a: [
           `Your plan covers ${countWords(ORDERS_INCLUDED.creator)} orders a month on ${PLAN_TITLES.creator}, ${countWords(ORDERS_INCLUDED.pro)} on ${PLAN_TITLES.pro}, and ${countWords(ORDERS_INCLUDED.scale)} on ${PLAN_TITLES.scale}. An order is a purchase confirmed (a bundle or a cart of several products is one), an offer taken after paying, a PayPal order, a place in a purchase made for several people, or a free copy sent.${feeWords().ordersShared}`,
-          "Orders are never billed. When a paid store reaches its plan's figure, new orders pause until its next billing month or until it moves to a larger plan: a buyer who presses buy is told plainly that the store is not taking new orders right now, and nothing is charged. Anybody already paying finishes and gets everything they bought, because a checkout opened in the last day counts toward the figure until it is paid or closes. A PayPal order counts like a card order. We email you the first time a month reaches the figure, and your studio shows the count as it grows.",
+          "Orders are never billed. When a paid store reaches its plan's figure, new orders pause until its next billing month (or, where a larger plan is on sale, until it moves to one): a buyer who presses buy is told plainly that the store is not taking new orders right now, and nothing is charged. Anybody already paying finishes and gets everything they bought, because a checkout opened in the last day counts toward the figure until it is paid or closes. A PayPal order counts like a card order. We email you the first time a month reaches the figure, and your studio shows the count as it grows.",
           "Selling video works the same way at any volume. A video sold as a file is sent to each buyer at no cost to you however many buy it. A video inside a course counts by the hour watched, as the question on lesson video says.",
           `In the free trial, new orders (paid ones and free copies together) pause once the store has had ${countWords(TRIAL_ORDERS)} in the trial, until the plan is paid. A package of calls is one order, and a call booked counts as ${countWords(CALL_ORDER_UNITS)}, for the emails and reminders it sends.`,
         ],
@@ -381,9 +392,9 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           `On ${PLAN_TITLES.creator}: ${allowanceListWords("creator")}. On ${PLAN_TITLES.pro}: ${allowanceListWords("pro")}. On ${PLAN_TITLES.scale}: ${allowanceListWords("scale")}.`,
           `A studio request is any page of your studio you open (each counts as ${STUDIO_PAGE_UNITS}), any save, and the studio's own refreshing. An API request is one made with one of your keys; a contact added or a product given counts as ${API_WRITE_UNITS}. Store emails are what your store's own tools send outside your monthly emails and your orders: inbox notices and replies, a purchase sent again, reminders, offers and notices to members. Access emails hand buyers what they already have, such as the link to their purchases or a place in a purchase made for several people. Buyer actions are what your buyers do inside what they bought, other than opening its pages: a community post, comment, like, message, RSVP or picture, a lesson comment, a hand-in, a lesson marked done, a certificate. What you do there yourself counts as studio requests, and deleting what one wrote is not counted. A webhook delivery is each try to send one of your webhooks, retries and tests included, and each one not sent because your plan's renewal payment did not go through or a payment for it is disputed.`,
-          "When your buyer actions are used, your buyers can still open everything they have; what they would write waits for your next billing month, and they are told your store is resting for now. A webhook past the figure is not sent and shows in your studio as not sent, with the reason. A place in a purchase for several people taken after its first day is one of that month's orders, so when the month's orders are used, the person is told so and their place stays open for them.",
-          "When one is used, that use is refused with a plain message until your next billing month, or at once on a larger plan. Nothing is ever billed past a figure. Changing your plan, canceling it, deleting your store and downloading your sales always work.",
-          `Free trials and stores without a paid plan share a limited number of places each calendar month (${countWords(FREE_POOL_BASE_STORES)}, and one more for every ${countWords(PAID_STORES_PER_FREE_STORE)} paying stores). If they are taken, such a store is told so, and what it asked for waits until the next month or until its plan is paid.`,
+          "When your buyer actions are used, your buyers can still open everything they have; what they would write waits until that figure opens again, and they are told your store is resting for now. A webhook past the figure is not sent and shows in your studio as not sent, with the reason. A place in a purchase for several people taken after its first day is one of that month's orders, so when the month's orders are used, the person is told so and their place stays open for them.",
+          "When one is used, that use is refused with a plain message that says when it opens again: with your next billing month, or on the 1st (UTC) for a store without a paid plan. In a trial a figure lasts the whole trial; after it, some figures, such as API requests and webhooks, need a paid plan. A figure a store does not have stays closed. Nothing is ever billed past a figure. Canceling your plan, deleting your store and downloading your sales always work.",
+          `Free trials and stores without a paid plan share a limited number of places each calendar month (${countWords(FREE_POOL_BASE_STORES)}, and one more for every ${countWords(PAID_STORES_PER_FREE_STORE)} paying stores). If they are taken, such a store is told so, and what it asked for waits until the next month${PLANS_ON_SALE ? " or until its plan is paid" : ""}.`,
         ],
       },
       {
@@ -392,7 +403,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           `Paid storage is up to ${storageWords(PAID_STORAGE_BYTES.creator)} on ${PLAN_TITLES.creator}, ${storageWords(PAID_STORAGE_BYTES.pro)} on ${PLAN_TITLES.pro} and ${storageWords(PAID_STORAGE_BYTES.scale)} on ${PLAN_TITLES.scale}, for files and lesson videos combined. A free trial has up to ${storageWords(TRIAL_STORAGE_BYTES)}, capped by the chosen plan: ${storageWords(storageBrakeFor("trial", "creator"))} on ${PLAN_TITLES.creator}, ${storageWords(storageBrakeFor("trial", "pro"))} on ${PLAN_TITLES.pro} and ${storageWords(storageBrakeFor("trial", "scale"))} on ${PLAN_TITLES.scale}. A store with no plan, before one starts, holds ${storageWords(SETUP_STORAGE_BYTES)}.`,
           `Files your students hand in have room of their own: ${storageWords(TASK_ROOM_BYTES.creator)} on ${PLAN_TITLES.creator}, ${storageWords(TASK_ROOM_BYTES.pro)} on ${PLAN_TITLES.pro} and ${storageWords(TASK_ROOM_BYTES.scale)} on ${PLAN_TITLES.scale}. Your community keeps up to ${COMMUNITY_PICTURES.creator.toLocaleString("en-US")}, ${COMMUNITY_PICTURES.pro.toLocaleString("en-US")} or ${COMMUNITY_PICTURES.scale.toLocaleString("en-US")} pictures in its posts; deleting a post with a picture makes room for another.`,
           "Past its figure a store is asked to delete something before adding more. While a plan runs, nothing already there stops working and nothing already sold is touched.",
-          `Your store's words and records have a data room of their own: ${dataRoomListWords(PLAN_TITLES)}, and ${dataWords(NON_PAYING_DATA_ROOM_BYTES.trial)} in a free trial. It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps: the buyer's access, their contact, their marks. Each order is counted at what it really writes, so a buyer who has bought from you before adds next to nothing, and a booked call's line in your diary is let go ${PAST_CALL_DAYS} days after the call. Your studio shows how full it is. When it is full, what you or your buyers would add is refused with a plain message until you delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan; deleting is never refused. An order already paid for is never refused: room for every checkout still open is held before it opens, so when the room is close to full, new checkouts pause like they do at your monthly orders, and nobody is stopped while paying.`,
+          `Your store's words and records have a data room of their own: ${dataRoomListWords(PLAN_TITLES)}, and ${dataWords(NON_PAYING_DATA_ROOM_BYTES.trial)} in a free trial. It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps: the buyer's access, their contact, their marks. Each order is counted at what it really writes, so a buyer who has bought from you before adds next to nothing, and a booked call's line in your diary is let go ${PAST_CALL_DAYS} days after the call. Your studio shows how full it is. When it is full, what you or your buyers would add is refused with a plain message until you delete something you no longer need, such as old posts, drafts, pages or contacts${PLANS_ON_SALE ? ", or, if your store pays for its plan and a larger one is on sale, move to that one" : ""}; deleting is never refused. An order already paid for is never refused: room for every checkout still open is held before it opens, so when the room is close to full, new checkouts pause like they do at your monthly orders, and nobody is stopped while paying.`,
         ],
       },
       {
@@ -693,7 +704,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Write an email in its box, or switch to Design and lay it out in blocks: headings, text, lists, buttons that lead to an https address, lines across and pictures, with the email shown beside it as it will be sent, buttons in your store's color. Four templates start you off: a newsletter, something new, a welcome and one product. A template only lays out blocks, with what to write in ⟦brackets⟧, and an email still holding one cannot go out. Both ways write the same email, so you can switch between them at any time.",
           "An email can carry up to six pictures, each added under its box where the cursor is, with what it shows for readers who cannot see it. Each is made smaller on your device, kept as a JPEG on this site so every mail app shows it, and stays for as long as your store does, so an email opened years later still has it.",
           "A sequence can also split its people in two, A and B: an email set to the first half goes only to them, one set to the second half only to the others, and each person stays in the same half at every step, so you can try two versions of a sequence on one list. A step can also tell your own server, through your webhooks, who reached it, once for each person.",
-          `A sequence is also a workflow. Any step can branch, IF/ELSE: those its condition holds for do it and go on to a later step you choose, the others go to another later step or leave. A step can only wait, which with a condition makes a pure branch, or make a teammate responsible for the person's open deal. A workflow can end once someone buys, gets one product or carries a label, and it can start when someone opens a course for the first time, or when someone on your list leaves a checkout unpaid after checking the box on the checkout page to hear from you (that box is Stripe's, shown to stores with a US Stripe account; such a workflow must end once they buy). New workflows are saved paused: preview the path someone would take, then switch it on. Every run keeps its history for up to 400 days, each step attempted, then confirmed, failed or uncertain; an uncertain step is never repeated by itself, and the run waits for you to choose. When someone asks to be deleted, one press in a run's history erases them from every workflow: their runs, history and steps still waiting. Removing a workflow or deleting the store erases its runs too. ${workflowLimitWords()} Every email a workflow sends counts in your monthly emails.`,
+          `A sequence is also a workflow. Any step can branch, IF/ELSE: those its condition holds for do it and go on to a later step you choose, the others go to another later step or leave. A step can only wait, which with a condition makes a pure branch, or make a teammate responsible for the person's open deal, or set its next action and the day it is due. A workflow can end once someone buys, gets one product or carries a label, and it can start when someone opens a course for the first time, or when someone on your list leaves a checkout unpaid after checking the box on the checkout page to hear from you (that box is Stripe's, shown to stores with a US Stripe account; such a workflow must end once they buy). New workflows are saved paused: preview the path someone would take, then switch it on. Every run keeps its history for up to 400 days, each step attempted, then confirmed, failed or uncertain; an uncertain step is never repeated by itself, and the run waits for you to choose. When someone asks to be deleted, one press in a run's history erases them from every workflow: their runs, history and steps still waiting. Removing a workflow or deleting the store erases its runs too. ${workflowLimitWords()} Every email a workflow sends counts in your monthly emails.`,
           "A sequence can also follow your courses. It can start when someone who agreed to hear from you finishes a course, every lesson done, which is the moment to offer the next one; and any of its emails can go only to those who have, or have not, opened or finished a course. Wait three days after the purchase, send only to those who have not opened it, and the reminder reaches exactly the people who need it.",
           "You can also choose who gets an email by what your store knows about them: everyone who has spent at least an amount with you, everyone who first found you through one channel, like Instagram or a podcast, or everyone who has bought before but not in the last 30, 60, 90, 180 or 365 days. These are worked out from your own Stripe account when the email goes out, so they match buyers only, and nothing extra is recorded about anyone. Save any choice as a group with a name, up to 20, and pick it again for the next email.",
           "Someone on your team with the Editor role can write drafts, up to 20 per store; you or an Admin read them and send them. And, if you switch it on, one email asks each buyer for a review, 3 to 30 days after buying, counted in the same monthly emails.",
@@ -785,7 +796,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Can I put the buyer's email on a PDF?",
         a: [
-          "Yes. Switch on stamping for a product, and every page of the PDF a buyer downloads carries one line along the bottom with their email, the date and their order. It discourages sharing; it does not stop it, and it is not copy protection. PDFs up to 50 MB are stamped; a bigger one, or one locked with a password, is handed over as uploaded and your studio tells you. Say on the product that the buyer's email is printed on it.",
+          "Yes. Switch on stamping for a product, and every page of the PDF a buyer downloads carries one line along the bottom with their email, the date and their order. It discourages sharing; it does not stop it, and it is not copy protection. PDFs up to 50 MB are stamped; a bigger one, or one locked with a password, is handed over as uploaded and your studio tells you. An EPUB gets the same line hidden inside the book's files, where reading apps do not show it; one with a digital signature or encryption (DRM) is handed over as uploaded. Say on the product that the buyer's email is in the file.",
         ],
       },
       {
@@ -886,6 +897,8 @@ export const HELP_SECTIONS: HelpSection[] = [
           "A deal is somebody you are talking to about a sale that does not happen at your checkout, such as a coaching package or a project, with what it is worth in your store's currency. It sits on a stage you name, each open, won or lost, and each stage is added up. Only people on your team who see your orders see any of it, and nothing in it emails anybody by itself.",
           "Deals sit in pipelines: one for coaching and one for brand partnerships, say, each with its own stages in the order you choose. You rename, reorder, add and remove stages; removing a stage that still holds deals asks you where they go, and removing a pipeline moves its deals to a stage of another, so no deal is deleted that way. A deal moves to any stage of any pipeline. Each pipeline shows what its open, won and lost deals add up to, from the values you recorded: nothing is weighted or forecast. " + pipelineLimitWords(),
           "A workflow can start when a deal enters a stage you choose: when your team makes a deal in that stage, or moves one there. It starts only for the person the deal names by email, only if they are on your list and agreed to hear from you, and once per person, like every workflow. A deal made from a form response, moved by a workflow step, or moved because you removed its stage starts nothing. Each stage starts one workflow at most, which can start others with a step. On a plan with workflows, a deal entering a stage takes one more studio request, for that check.",
+          "A workflow can also start when someone signs one of your proposals or agreements: only for the person who signed, by the address you sent it to, only if they are on your list and agreed to hear from you, and once per person. Signing never adds anybody to your list. One workflow starts on signing; it can start others with a step.",
+          "The same is true of a payment request: a workflow can start when someone pays one, only for the person you sent it to, only if they are on your list and agreed to hear from you, and once per person. Paying never adds anybody to your list. One workflow starts on a paid request.",
         ],
       },
       {
@@ -896,7 +909,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Can I use my own domain?",
+        q: SHARED_QUESTIONS.domain,
         a: [
           ...(isDomainsConfigured()
             ? [
@@ -906,7 +919,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Can I change my store address later?",
+        q: SHARED_QUESTIONS.address,
         a: [
           "Yes, whenever you want, from your studio. Nobody has to be asked and there is nothing to wait for.",
           "Your store does not move: same page, same name, same description, same products. Only the address changes.",
@@ -1034,3 +1047,14 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
 ];
 
+/**
+ * A help-center answer as one paragraph, for a feature page that asks the very
+ * same question (534 [FQ1] unit 44), so a question has one answer wherever it
+ * is asked (tests/distinct-questions.test.ts). Throws when the question is not
+ * in the help center, so a renamed one cannot slip by.
+ */
+export function helpAnswer(q: string): string {
+  const item = HELP_SECTIONS.flatMap((section) => section.items).find((x) => x.q === q);
+  if (!item) throw new Error(`No help answer for "${q}"`);
+  return item.a.join(" ");
+}

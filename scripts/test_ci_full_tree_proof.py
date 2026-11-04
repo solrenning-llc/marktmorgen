@@ -4,7 +4,7 @@ import os
 import re
 from pathlib import Path
 from unittest.mock import patch
-from ci_full_tree_proof import WORKFLOWS, REPO, prove_full_tree, can_reuse_main
+from ci_full_tree_proof import WORKFLOWS, REPO, REPO_ID, ORIGINAL_REPO, current_repo, prove_full_tree, can_reuse_main
 from test_ci_all_checks import jobs_of
 A, T, M = "a"*40, "b"*40, "c"*40
 
@@ -14,7 +14,7 @@ def fixture():
     for index, (workflow, names) in enumerate(WORKFLOWS.items(), 1):
         runs.append({"id":index, "path":".github/workflows/"+workflow+".yml", "event":"pull_request",
                      "head_sha":A, "status":"completed", "conclusion":"success",
-                     "repository":{"full_name":REPO}, "head_repository":{"full_name":REPO},
+                     "repository":{"id":REPO_ID,"full_name":REPO}, "head_repository":{"id":REPO_ID,"full_name":REPO},
                      "display_title":"PV8 source "+M})
         jobs = [{"name":n,"status":"completed","conclusion":"success","started_at":"2026-10-25T00:00:00Z",
                  "completed_at":"2026-10-25T00:01:00Z"} for n in names | {"Documentation scope ("+workflow+")"}]
@@ -23,6 +23,16 @@ def fixture():
     return replies
 
 class FullTreeProofTests(unittest.TestCase):
+    def test_current_name_only_with_the_permanent_id(self):
+        self.assertEqual(current_repo({}), ORIGINAL_REPO)
+        self.assertEqual(current_repo({"GITHUB_REPOSITORY":"new-owner/marktmorgen","GITHUB_REPOSITORY_ID":str(REPO_ID)}), "new-owner/marktmorgen")
+        for env in [{"GITHUB_REPOSITORY":"new-owner/marktmorgen"},
+                    {"GITHUB_REPOSITORY":"new-owner/marktmorgen","GITHUB_REPOSITORY_ID":str(REPO_ID+1)},
+                    {"GITHUB_REPOSITORY":"new-owner/other","GITHUB_REPOSITORY_ID":str(REPO_ID)},
+                    {"GITHUB_REPOSITORY":"a/b/marktmorgen","GITHUB_REPOSITORY_ID":str(REPO_ID)},
+                    {"GITHUB_REPOSITORY":"../marktmorgen","GITHUB_REPOSITORY_ID":str(REPO_ID)}]:
+            self.assertEqual(current_repo(env), ORIGINAL_REPO)
+
     def test_exact_complete_tree_passes(self):
         self.assertTrue(prove_full_tree(A,T,fixture().__getitem__))
 
@@ -44,8 +54,10 @@ class FullTreeProofTests(unittest.TestCase):
 
     def test_wrong_source_event_repository_or_head_refuses(self):
         for field,value in [("event","push"),("head_sha","e"*40),("display_title","owner supplied title"),
-                            ("conclusion","failure"),("repository",{"full_name":"other/repo"}),
-                            ("head_repository",{"full_name":"fork/repo"})]:
+                            ("conclusion","failure"),("repository",{"id":1,"full_name":"other/repo"}),
+                            ("head_repository",{"id":2,"full_name":"fork/repo"}),
+                            ("repository",{"full_name":REPO}),
+                            ("head_repository",{"id":REPO_ID+1,"full_name":REPO})]:
             data=fixture(); data[next(k for k in data if k.startswith("actions/runs?"))]["workflow_runs"][0][field]=value
             self.assertFalse(prove_full_tree(A,T,data.__getitem__))
 

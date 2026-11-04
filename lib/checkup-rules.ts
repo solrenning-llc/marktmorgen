@@ -229,13 +229,15 @@ function stopsWords(kind: AllowanceKind, reset: string, plansOnSale = true): str
  * Fine otherwise, with the most used one; not checked when they could not be
  * read. A figure of zero (not on this plan) is left out. `paying` says
  * whether the store pays for a plan, so the way out is a larger plan or a
- * plan at all; `plansOnSale` (lib/opening.ts) whether either can be had now.
+ * plan at all; `plansOnSale` (lib/opening.ts) whether either can be had now;
+ * `larger` whether a plan above the store's own is sold (lib/larger-plan.ts):
+ * a paying store with none above it is offered no plan at all.
  */
-export function limitsCheck(readings: { kind: AllowanceKind; used: number; figure: number }[] | null, reset: string, paying: boolean, plansOnSale = true): Check {
+export function limitsCheck(readings: { kind: AllowanceKind; used: number; figure: number }[] | null, reset: string, paying: boolean, plansOnSale = true, larger = false): Check {
   const title = "Your plan's limits";
   if (!readings) return { id: "limits", title, state: "not-checked", found: "We could not read how much of your plan's figures is used just now. Try again in a few minutes." };
   // While no plan is on sale this fix is said, not linked (lib/checkup.ts, forBilling).
-  const fix: CheckFix = { kind: "studio", href: "/studio#billing", label: paying ? "See a larger plan" : "Start a plan" };
+  const fix: CheckFix | null = paying && !larger ? null : { kind: "studio", href: "/studio#billing", label: paying ? "See a larger plan" : "Start a plan" };
   const counted = readings.filter((r) => r.figure > 0);
   const share = (r: { used: number; figure: number }) => r.used / r.figure;
   const out = (r: { kind: AllowanceKind; used: number; figure: number }) => r.figure - r.used < (LARGEST_TAKE[r.kind] ?? 1);
@@ -250,7 +252,7 @@ export function limitsCheck(readings: { kind: AllowanceKind; used: number; figur
       state: "problem",
       found: `${first.used >= first.figure ? `${words.what} in this period are used: ${n(first.figure)} ${words.many}.` : `${words.what} in this period are almost used: ${n(first.used)} of ${n(first.figure)} ${words.many}, less than the next use takes.`}${more.length ? ` ${more.length === 1 ? "One more figure is" : `${more.length} more figures are`} used up too.` : ""}`,
       ifLeft: stopsWords(first.kind, reset, plansOnSale),
-      fix,
+      ...(fix ? { fix } : {}),
     };
   }
   const access = counted.find((r) => r.kind === "transactional");
@@ -261,7 +263,7 @@ export function limitsCheck(readings: { kind: AllowanceKind; used: number; figur
       state: "problem",
       found: "Confirmation emails to new addresses (sign-ups, a waitlist, the affiliate form) are paused: they have used their share of your buyers' access emails.",
       ifLeft: `Nobody new can confirm an address until it opens again. Links your buyers ask for still go out. ${reset}`,
-      fix,
+      ...(fix ? { fix } : {}),
     };
   }
   const top = [...counted].sort((a, b) => share(b) - share(a))[0];

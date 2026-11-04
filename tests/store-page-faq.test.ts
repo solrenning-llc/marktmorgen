@@ -33,11 +33,11 @@ is("the live demo is linked at the end of every feature page, and is marked as m
 part("The answers");
 const now = storeBeginnerQuestions(false);
 const later = storeBeginnerQuestions(true, TRIAL_DAYS);
-is("four questions", now.map((x) => x.q), ["What is a store page here?", "How do I start one?", "Can I try it before paying?", "Do store pages work?"]);
-is("start: the buttons and labels on the way, in order", (() => { const a = answer(now, "How do I start one?"); const at = [START_WORDS.start, START_WORDS.email, START_WORDS.confirm, START_WORDS.address, START_WORDS.name, START_WORDS.line, START_WORDS.create].map((w) => a.indexOf(`“${w}”`)); return at.every((x, k) => x >= 0 && (k === 0 || x > at[k - 1])); })(), true);
-is("try before paying: the one shared answer, in a store page's words", [answer(now, "Can I try it before paying?"), answer(later, "Can I try it before paying?")], [tryBeforePaying("A store page", "your page", false), tryBeforePaying("A store page", "your page", true, TRIAL_DAYS)]);
-is("the demo is pointed to once, by the shared answer, not again by the next one", [answer(now, "Can I try it before paying?").includes("open the live demo store"), answer(now, "Do store pages work?").includes("open the live demo store")], [true, false]);
-is("\"store\" not said twice in a row in the trial answer", answer(now, "Can I try it before paying?").includes("set up your page in your own store's studio"), true);
+is("four questions", now.map((x) => x.q), ["What is a store page here?", "How do I start my store page?", "Can I try a store page before paying?", "Do store pages work?"]);
+is("start: the buttons and labels on the way, in order", (() => { const a = answer(now, "How do I start my store page?"); const at = [START_WORDS.start, START_WORDS.email, START_WORDS.confirm, START_WORDS.address, START_WORDS.name, START_WORDS.line, START_WORDS.create].map((w) => a.indexOf(`“${w}”`)); return at.every((x, k) => x >= 0 && (k === 0 || x > at[k - 1])); })(), true);
+is("try before paying: the one shared answer, in a store page's words", [answer(now, "Can I try a store page before paying?"), answer(later, "Can I try a store page before paying?")], [tryBeforePaying("A store page", "your page", false), tryBeforePaying("A store page", "your page", true, TRIAL_DAYS)]);
+is("the demo is pointed to once, by the shared answer, not again by the next one", [answer(now, "Can I try a store page before paying?").includes("open the live demo store"), answer(now, "Do store pages work?").includes("open the live demo store")], [true, false]);
+is("\"store\" not said twice in a row in the trial answer", answer(now, "Can I try a store page before paying?").includes("set up your page in your own store's studio"), true);
 is("one space between sentences, never two", /\s{2}/.test(now.map((x) => x.a).join(" ")), false);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("no number of stores, visits or sales, no percent, no result promised", /\b\d{2,}\s+(stores|visits|buyers|creators|sales)|%|guarantee|proven|results?\b/i.test(all), false);

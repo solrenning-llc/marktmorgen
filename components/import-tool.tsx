@@ -149,9 +149,10 @@ const MESSAGES: Record<string, string> = {
   state: "This import is no longer taking rows. Start it again.",
   unknown: "That import is no longer here. Start it again.",
   slow: "That was a lot in a short time. Wait a while and try again.",
-  rows_month: "Your plan's imported rows for this month are used. The rest of the file can come in when the month turns, or on a larger plan.",
-  starts_month: "Your plan's imports for this month are started. More can start when the month turns, or on a larger plan.",
-  checks_month: "Your plan's dry runs for this month are used. You can still import the file; dry runs open again when the month turns.",
+  rows_month: "Your store has brought in all the rows its figure allows for now. The rest of the file can come in when that figure opens again.",
+  starts_month: "Your store has started all the imports it can for now. More can start when that figure opens again.",
+  // A ClickFunnels file is imported only after a finished check (dryFresh), so it waits; any other file can go in.
+  checks_month: "Your store has used all its dry runs for now. Any other file can still be imported; a ClickFunnels file waits until a check can finish again.",
   signed_out: "Your session ended. Log in again.",
   role: "Only the store's owner and Admins can import.",
   unavailable: "Imports are not switched on yet.",
@@ -794,7 +795,7 @@ export function ImportTool({
                       <span className="block text-ink-soft">
                         {canEmail
                           ? `One email per buyer, from your store's name, with how to open what they have. Nothing else is sent. On Studio and Scale they count in your monthly emails; on Store, up to ${IMPORT_ALLOWANCES.creator.movedEmails} a month.`
-                          : "Needs your store's plan to be active."}
+                          : "Needs your store's plan to be active and paid up, and our email sending switched on."}
                       </span>
                     </span>
                   </label>

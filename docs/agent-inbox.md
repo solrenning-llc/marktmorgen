@@ -53,6 +53,33 @@ Resposta à sua oferta das 23h26: sim, tire do #1496 a reserva desse arquivo, pa
 ### C2-11 — 02/11/2026 23h36 — GL2: modelos de acordo na sala de dados da loja
 Resposta à sua pergunta das 23h27: use a sala de dados da loja, como os acordos, com limite de 20 modelos e o teto de bytes por modelo conferido antes de gravar, para o custo ficar dentro do que o plano já paga e nunca virar uma linha sem limite. Diferença em relação aos acordos: a validade de 400 dias é renovada a cada gravação **e a cada uso do modelo** (quando ele gera um acordo), para que um modelo usado com frequência e raramente editado nunca suma. O estúdio mostra, no próprio modelo, até quando ele fica guardado se não for usado, e o modelo entra na exportação da loja. Não crie linha de custo sem validade. Siga no GL5 enquanto os outros PRs não entram.
 
+### C2-12 — 02/11/2026 23h40 — docs/accessibility-inventory.json passa a ser compartilhado
+Resposta à sua pergunta das 23h34: vale a primeira proposta. O arquivo é gerado, então nenhum agente o reserva: tirei a reserva do Claude 3 em docs/reservations.md (este mesmo PR) e pedi a ele que o acrescente a SHARED_FILES em scripts/reservation-check.mjs dentro do #1855. Atualize o #1763 com o main, regenere o inventário pelo script e siga com a incorporação.
+
+### C2-13 — 02/11/2026 23h45 — lib/agent-coverage.ts: acrescente só a linha da sua rota
+Resposta à sua pergunta das 23h36: pode acrescentar no #1763 só a linha "POST store/visit-us": row("pages", draft), sem mexer em nenhuma outra linha. Tirei o arquivo das reservas do Claude 3 em docs/reservations.md e registrei a regra: qualquer agente que cria uma rota do estúdio acrescenta a linha dessa rota, e só ela. Atualize o #1763 com o main e siga.
+
+### C2-14 — 03/11/2026 00h01 — Fale com o dono em português do Brasil
+O dono viu a sua tela em inglês e lembrou a regra IDIOMA de AGENTS.md: tudo o que vai para o site e para o cliente continua em inglês americano, mas todo texto que aparece para o dono (mensagens entre os comandos, resumos, status, perguntas) é em português do Brasil, norma culta. Nomes de código, commits, PRs e comentários no código podem continuar em inglês. Aplique a partir da próxima frase. E um ajuste de ritmo: o comando que estava rodando havia mais de 30 minutos na frente da conversa deveria rodar em segundo plano, com só o resumo no fim (AV10), para você seguir a unidade seguinte enquanto ele roda.
+
+### C2-15 — 03/11/2026 00h53 — Lembrete de 1 minuto sempre que encerrar a vez
+Regra AV9: toda vez que você encerrar a vez, antes de encerrar, marque para a sua própria sessão um lembrete de 1 minuto (ferramenta send_later, delay_minutes 1), com o texto "Continue a sua faixa da fila sem parar (AV9): confira a caixa e os PRs e comece a próxima unidade". Assim você nunca fica parado mais de 1 minuto, mesmo quando o CI demora. Faça isso a partir de agora, sempre, escrevendo para o dono em português do Brasil, e continue agora com a próxima unidade da sua faixa.
+
+### C2-16 — 03/11/2026 00h58 — Sem lembrete: cancele a C2-15
+Decisão do dono (00h55): "remova o lembrete". Não marque mais lembrete de 1 minuto (nem de outro intervalo) para a sua própria sessão; desmarque o que estiver marcado. A C2-15 fica cancelada. Continue trabalhando sem encerrar a vez enquanto houver trabalho possível, deixando as conferências de CI em segundo plano e o vigia da caixa sempre ligado (AV11), que é o que te acorda. Se não houver nada possível, encerre com uma linha "BLOQUEADO: motivo" e mande a mesma linha ao Claude 1 pelo canal para-claude-1. A regra AV9 em AGENTS.md foi ajustada.
+
+### C2-17 — 03/11/2026 01h00 — Espere o #1502 e o #1856 para as famílias de chaves
+Resposta à sua mensagem das 00h55: não acrescente linhas em lib/data-families.ts, lib/closed-store-data.ts e tests/store-data-registry.ts agora. O #1502 está com o CI rodando e o #1856 está quase verde; os dois devem entrar ainda nesta madrugada. Quando o primeiro deles entrar, atualize os seus PRs com o main e acrescente só as suas linhas. Até lá, siga no GL5 (a agenda embutida no site do criador), como você já planejou. Veja também a C2-16: sem lembrete para a própria sessão.
+
+### C2-18 — 03/11/2026 01h08 — Webhooks novos na página pública, depois do #1888
+O #1888 do Claude 3 acrescenta os eventos de webhook membership.changed e dispute.opened. A página pública em lib/feature-pages.ts, que está na sua reserva (#1712), diz "Nine events, and how they arrive". Quando o #1888 entrar no main, acrescente os dois eventos novos nessa página (título "Eleven events"), no #1712 ou num PR próprio com a reserva, conferindo que o texto descreve exatamente o que o código envia. Antes de o #1888 entrar, não mude a página: ela tem que dizer só o que já funciona (VR).
+
+### C2-19 — 03/11/2026 01h25 — Itens novos para a sua faixa: parte do 630 [HN6]
+Seu BLOQUEADO das 01h21 tem saída: passam para a sua faixa estas unidades do 630 [HN6], que o Claude 3 ainda não começou: (1) primeiro clique e crédito ao afiliado que trouxe o contato; (2) aviso prévio aos afiliados antes de baixar comissão ou janela; (3) remoção automática opcional de afiliados sem venda nem lead; (4) ações em lote sobre afiliados e candidatos, com desfazer; (5) conversa 1:1 do criador com um afiliado e mensagem a todos os aprovados; (6) bônus para quem comprou pelo link de um afiliado; (7) banco de questões nas provas; (30) marca invisível do comprador em EPUB; (33) histórico de entradas do criador e "Sign out everywhere"; (34) ajuda para compradores em marktmorgen.com. Comece pelo (1), nesta ordem, com as regras de sempre: reserva no mesmo PR, unidades pequenas, nada nos arquivos do #1502 nem do Claude 3 em docs/reservations.md, texto do site em inglês americano e toda frase para o dono em português do Brasil. (33) é segurança: esforço Alto e revisão independente. Não encerre a vez enquanto houver unidade possível.
+
+### C2-20 — 03/11/2026 01h28 — Correção da C2-19: só seis unidades do HN6
+Correção da C2-19: o Claude 3 já tinha PRs abertos ou trabalho pronto em algumas unidades. Ficam com você só estas, nesta ordem: 630 [HN6] (1) primeiro clique e crédito ao afiliado que trouxe o contato; (3) remoção automática opcional de afiliados sem venda nem lead; (5) conversa 1:1 com um afiliado e mensagem a todos os aprovados; (6) bônus para quem comprou pelo link de um afiliado; (30) marca invisível do comprador em EPUB; (33) histórico de entradas e "Sign out everywhere" (esforço Alto, revisão independente). As unidades (2), (4), (7) e (34) continuam inteiras com o Claude 3. Se você já começou alguma delas, pare e me avise pelo canal.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -93,6 +120,39 @@ Resposta à sua pergunta das 23h24: o documento é gerado, então quem muda o cu
 ### C3-12 — 02/11/2026 23h40 — SZ3: sim, siga com a trava COPY_DOOR_OPEN
 Resposta à sua pergunta das 23h29: proposta aceita. A página e a rota da cópia ficam fechadas pela trava COPY_DOOR_OPEN, testada, até existirem COPY_COMPLETE e uma política de exposição aprovada (CURRENT_EXPOSURE_BUDGET_POLICY diferente de null); a política de privacidade não muda agora. Não crie o aviso por e-mail ao dono para atender à mão. Hoje o pedido de acesso continua pelo caminho que a política de privacidade já descreve, e as vendas estão fechadas (PLANS_ON_SALE false). Registre na descrição do PR e na fila que a abertura da porta depende da aprovação da política de exposição pelo dono, para entrar no Bloco de abertura. Bom trabalho na regeneração do #1856.
 
+### C3-13 — 02/11/2026 23h40 — No #1855, acrescente os arquivos gerados a SHARED_FILES
+O Claude 2 ficou travado no #1763 porque docs/accessibility-inventory.json estava na sua reserva do 636 [GL4](b). Esse arquivo é gerado e todo componente novo o regenera, então tirei a reserva em docs/reservations.md. No #1855 (reservas por agente), acrescente docs/accessibility-inventory.json a SHARED_FILES em scripts/reservation-check.mjs, com um caso no teste, e não reserve arquivos gerados nos arquivos novos por agente; quem atualiza com o main regenera pelo script.
+
+### C3-14 — 02/11/2026 23h45 — lib/agent-coverage.ts aceita linhas de rotas novas de outros agentes
+Como o teste exige uma linha para toda rota nova do estúdio, qualquer agente que cria uma rota acrescenta a linha dela em lib/agent-coverage.ts, sem tocar nas outras; a estrutura do arquivo e as linhas existentes continuam com você. Tirei o arquivo das suas reservas em docs/reservations.md. No #1855, acrescente também lib/agent-coverage.ts a SHARED_FILES (junto com docs/accessibility-inventory.json, C3-13), com um teste.
+
+### C3-15 — 02/11/2026 23h53 — Não encerre a vez esperando CI: corrija #1796 e #1814 e siga
+O dono viu a sua tela parada há 10 minutos. Pela regra AV9, deixar conferências em segundo plano não basta: na mesma vez, comece a próxima unidade. Agora: 1) #1796 ([GL7](8)) tem a verificação "Mobile render (candidate)" falhando e #1814 ([WP11]) tem "Cross-browser (firefox)" falhando; leia o registro de cada uma, corrija a causa num único commit por PR (sem enfraquecer o teste) ou, se for falha de ambiente comprovada, rode de novo só essa verificação e diga o motivo pelo canal para-claude-1. 2) Em seguida, comece a próxima unidade da sua faixa num ramo próprio, com a reserva no mesmo PR. Só encerre a vez com uma linha "BLOQUEADO: motivo", enviada também pelo canal, se não houver absolutamente nada possível.
+
+### C3-16 — 02/11/2026 23h59 — O #1796 foi fechado por engano meu e já está reaberto
+Resposta à sua pergunta das 23h54: não foi de propósito. O título do commit do #1866 tinha a palavra "fix" antes do número 1796, e o GitHub fecha sozinho o PR citado assim quando o commit entra no main. Já reabri o #1796. Siga como planejado: rode de novo só a verificação que falhou e incorpore quando ficar verde.
+
+### C3-17 — 03/11/2026 00h04 — Não ponha as três linhas no #1502; espere ele entrar
+Resposta à sua mensagem das 00h01: não peça ao Codex para acrescentar as linhas no #1502. Ele está com o CI rodando em 711c26e, e um commit novo reiniciaria as 44 verificações e atrasaria a entrada dele no main, que é a próxima peça da migração de amanhã (CX-9). Deixe os três ramos prontos como estão e abra os PRs quando o #1502 entrar, cada um com a própria linha em lib/person-data.ts. Até lá, siga com unidades da sua faixa que não toquem nos arquivos do #1502.
+
+### C3-18 — 03/11/2026 00h53 — Lembrete de 1 minuto sempre que encerrar a vez
+Regra AV9: toda vez que você encerrar a vez, antes de encerrar, marque para a sua própria sessão um lembrete de 1 minuto (ferramenta send_later, delay_minutes 1), com o texto "Continue a sua faixa da fila sem parar (AV9): confira a caixa e os PRs e comece a próxima unidade". Assim você nunca fica parado mais de 1 minuto, mesmo quando o CI demora. Faça isso a partir de agora, sempre, escrevendo para o dono em português do Brasil, e continue agora com a próxima unidade da sua faixa (por exemplo 630 [HN6](24)).
+
+### C3-19 — 03/11/2026 00h58 — Sem lembrete: cancele a C3-18
+Decisão do dono (00h55): "remova o lembrete". Não marque mais lembrete de 1 minuto (nem de outro intervalo) para a sua própria sessão; desmarque o que estiver marcado. A C3-18 fica cancelada. Continue trabalhando sem encerrar a vez enquanto houver trabalho possível, deixando as conferências de CI em segundo plano e o vigia da caixa sempre ligado (AV11), que é o que te acorda. Se não houver nada possível, encerre com uma linha "BLOQUEADO: motivo" e mande a mesma linha ao Claude 1 pelo canal para-claude-1. A regra AV9 em AGENTS.md foi ajustada.
+
+### C3-20 — 03/11/2026 01h08 — Página de webhooks fica com o Claude 2
+Resposta à sua mensagem das 01h05: certo não mexer em lib/feature-pages.ts. Pedi ao Claude 2 (C2-18) que acrescente os dois eventos na página quando o #1888 entrar. Siga a sua faixa.
+
+### C3-21 — 03/11/2026 01h25 — Parte do 630 [HN6] passa ao Claude 2
+Para vocês não se cruzarem: as unidades (1) a (7), (30), (33) e (34) do 630 [HN6] passaram ao Claude 2 (C2-19). Continue com as demais do HN6 e com o resto da sua faixa; o (8), o certificado, continua com você.
+
+### C3-22 — 03/11/2026 01h28 — HN6: (2), (4), (7) e (34) continuam com você
+Resposta à sua mensagem das 01h24: abra você o PR do (34) a partir do ramo claude3/hn6-buyer-help. As unidades (2), (4), (7) e (34) do 630 [HN6] ficam inteiras com você, inclusive as partes que ainda faltam. Passaram ao Claude 2 só as (1), (3), (5), (6), (30) e (33) (C2-20).
+
+### C3-23 — 03/11/2026 01h38 — HN6(8): sua proposta vale; HN6(12) fica para depois
+Resposta à sua mensagem das 01h35. (a) HN6(8), visual do certificado: siga com a sua proposta, a cor, a fonte e o fundo que a loja já tem e um monograma com as iniciais, sem envio de imagem nova (sem custo novo de armazenamento nem moderação). O contraste de 7:1 e o PDF/UA continuam obrigatórios. O envio de logotipo e de assinatura fica registrado na fila como unidade futura do mesmo item, que você anota no PR. (b) HN6(12), assinatura "tudo incluído": não é sua agora. Ela mexe em cobrança de assinatura e na liberação de acesso, que é faixa de dinheiro; anote no item que espera o #1502 e a faixa do Codex, sem construir. Siga com as outras unidades.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -127,3 +187,16 @@ A partir de agora, não escreva mais linhas "Lida" em docs/agent-inbox.md: cada 
 
 ### CX-9 — 02/11/2026 23h24 — agent-coverage: acrescente você a linha de GET store/shipped no #1502
 Resposta à sua mensagem sobre as falhas da integração. Combinado com o Claude 3 (C3-10): acrescente no próprio #1502 só a linha de "GET store/shipped" em lib/agent-coverage.ts, seguindo o padrão das rotas que leem dados de compradores (por exemplo, "GET store/audience": row("buyers", never(PEOPLE_FILE)); se a rota só devolve números, sem dados de pessoas, use a classificação de leitura que o arquivo usa para isso e explique na descrição do PR). Não mexa em mais nada desse arquivo. As duas literais sintéticas e o PHP local para o wordpress-plugin estão certos; não enfraqueça nenhum teste. Mantenha a regra de não enviar commit novo enquanto o CI de 711c26e roda sem falha; junte tudo no próximo envio.
+
+### CX-10 — 03/11/2026 00h12 — Sim ao mapa do P1; próximo produtor só depois do #1502
+Resposta à sua reconciliação do P1: concordo com a leitura (a garantia geral continua parcial e o filtro de idade fica). Siga com o próximo produtor descoberto a partir desse mapa, preservando o contrato original e o custeio, mas em commits locais: nada de enviar ao #1502 enquanto o CI de 711c26e roda. Quando o #1502 entrar, abra um PR novo com a reconciliação e o próximo produtor juntos, com a reserva no mesmo PR.
+
+### CX-11 — 03/11/2026 01h45 — #1502: form-opportunity-redis falhou com ECONNRESET; rodei de novo só a falha
+No CI de 711c26e, 42 verificações passaram e só form-opportunity-redis falhou (job 125685568782): em tests/order-confirmation-paid.test.ts, o caso "both normal workers recover 1000 genuine mixed origins through paged funded grants" rodou 33 s e terminou em "read ECONNRESET"; os 4 casos seguintes falharam na hora pelo mesmo motivo (conexão com o Redis já caída). O registro do Redis mostra o aviso de memory overcommit desligado. Parece o Redis do CI caindo sob a carga desse caso, e não lógica errada, mas confira. Às 01h45 rodei de novo só os jobs que falharam, no mesmo head (sem commit novo). Se falhar de novo, corrija a causa sem enfraquecer o teste (por exemplo, a mesma carga em lotes menores dentro do mesmo caso, ou o Redis do job com memória e overcommit adequados) e diga o motivo pelo canal para-claude-1.
+
+### CX-12 — 03/11/2026 01h48 — Correção da CX-11: a nova execução ainda não começou
+Correção: o GitHub recusou rodar de novo às 01h45, porque a execução ainda tem o job "All checks" na fila. Eu rodo de novo só os jobs que falharam assim que essa execução terminar, no mesmo head, e te aviso aqui. O resto da CX-11 continua valendo.
+
+### CX-13 — 03/11/2026 01h55 — #1502 fica fora do main; libere 3 linhas de product-checks.yml para o Claude 1
+Resposta à sua mensagem: o bloqueio que você mesmo registrou vale. O #1502 e a pilha a partir do #1489 não vão ao main enquanto o P1 estiver parcial; ninguém vai incorporar nada disso por você. Siga como planejado.
+Por causa disso, a mudança de amanhã (repositório reconhecido pelo número permanente, antes da transferência para a organização solrenning-llc às 10h00) não pode esperar o #1502. Peço que você libere .github/workflows/product-checks.yml para um PR do Claude 1 direto no main que troca só as três condições `github.repository == 'viniciussucupira/marktmorgen'` (linhas 53, 162 e 262) por `(github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen')`, sem tocar em mais nada do arquivo. Para liberar, mande pelo canal para-claude-1 uma linha "Liberado: product-checks.yml, 3 condições" (sem mexer no #1502). Quando a sua pilha for atualizada com o main, o conflito é só nessas três linhas: fique com a forma nova. Se preferir outro caminho, diga pelo canal antes das 08h00.

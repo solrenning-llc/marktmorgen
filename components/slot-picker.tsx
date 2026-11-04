@@ -108,6 +108,7 @@ export function SlotPicker({
   pkg,
   host,
   minutes,
+  shownCents,
   words,
 }: {
   starts: number[];
@@ -124,6 +125,8 @@ export function SlotPicker({
   host?: { key: string; label: string } | null;
   /** On a call with several lengths: the one chosen, in minutes, sent so it is booked and charged (lib/call-lengths.ts). */
   minutes?: number;
+  /** Beside it, the price the page showed for it, in cents: only compared with the creator's record, never charged (price-changed). */
+  shownCents?: number;
   words: SlotWords;
 }) {
   const { locale } = words;
@@ -167,6 +170,7 @@ export function SlotPicker({
       <input type="hidden" name="tz" value={tz} />
       {pkg ? <input type="hidden" name="pkg" value={pkg} /> : null}
       {minutes && !move ? <input type="hidden" name="minutes" value={minutes} /> : null}
+      {minutes && !move && shownCents !== undefined ? <input type="hidden" name="shown" value={shownCents} /> : null}
       {host && !move ? (
         <>
           <input type="hidden" name="host" value={host.key} />

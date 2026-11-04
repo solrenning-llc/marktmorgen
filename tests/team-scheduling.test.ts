@@ -376,6 +376,22 @@ async function main(): Promise<void> {
   await callRefunded(first.store, { session: hw.session, product: rrCall.id, start: W2, email: "ana@example.com" });
   is("refunded in full, the event is deleted on that calendar", google.some((g) => g.method === "DELETE" && g.path.startsWith("/google/calendar/v3/calendars/team%40group.calendar.google.com/events/")), true);
 
+  part("A team booking moves at the length it was paid for, inside its host's hours");
+  // 637 [GL5]: a booking keeps its paid length when it moves (lib/call-lengths.ts, ownLength), so the host is checked at
+  // that length too, not at the call's length now. Sold at 60 minutes, the call changed to 30 since; the host works until 17:00.
+  const quay = await storeWithCalls("quay@example.com", "quay", "acct_1TestQuay00001", "pro", 1);
+  const [quayCall] = quay.products;
+  await writeTeam(quay.store, quayCall.id, { mode: "round_robin", hosts: [host("quay@example.com")], createdAt: "2026-10-06T00:00:00.000Z" });
+  const Q = weekdayAt(9, 600);
+  const hq = await hold(quay.store, quayCall, Q);
+  if (!hq.ok) throw new Error("no hold on the quay call");
+  await confirmBooking({ store: quay.store, product: quayCall, session: hq.session, start: Q, end: Q + HOUR, buyerEmail: "lee@example.com", buyerTz: NY, origin: "https://marktmorgen.com" });
+  const shorter: CallListing = { ...quayCall, call: { ...quayCall.call, minutes: 30 } };
+  const pastHours = await moveBooking({ store: quay.store, product: shorter, session: hq.session, booked: { start: Q, end: Q + HOUR, email: "lee@example.com", buyerTz: NY }, start: Q + 6.5 * HOUR, origin: "https://marktmorgen.com" });
+  is("a move whose paid hour would run past the host's 17:00 is refused, though the call's 30 minutes now would fit", pastHours.ok ? "moved" : pastHours.reason, "taken");
+  const fits = await moveBooking({ store: quay.store, product: shorter, session: hq.session, booked: { start: Q, end: Q + HOUR, email: "lee@example.com", buyerTz: NY }, start: Q + 5 * HOUR, origin: "https://marktmorgen.com" });
+  is("one that fits the whole hour moves, and the host is held for the whole hour", [fits.ok, ((await readClaims([hostId("quay@example.com")])).get(hostId("quay@example.com")) ?? []).find((c) => c.start === Q + 5 * HOUR)?.end], [true, Q + 6 * HOUR]);
+
   part("When her calendar cannot be read");
   freeBusy = () => new Response(JSON.stringify({ error: { message: "backend" } }), { status: 503 });
   offset += 20 * 60_000;

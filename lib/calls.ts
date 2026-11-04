@@ -740,7 +740,8 @@ export function callCheckoutBody(input: {
     "payment_intent_data[metadata][kind]": "call",
     "payment_intent_data[metadata][start]": String(start),
     success_url: `${origin}/@${store.handle}/thanks?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
+    // Back from Stripe's page, the length chosen is still chosen (3.3.7).
+    cancel_url: `${origin}/@${store.handle}/book/${product.id}${length && length.minutes !== product.call?.minutes ? `?length=${length.minutes}` : ""}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
   // The creator's cancellation deadline (lib/call-setup.ts, cancelHours): said before paying; never for a session from a package, which pays nothing here.
@@ -1160,8 +1161,11 @@ export async function moveBooking(input: {
       // The booking keeps its hosts, and their claim moves to the new time in one step.
       teamOwn = { hosts: own.hosts, claim: own.claim };
       try {
-        const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: false, except: { session, claim: own.claim } });
-        if (!(await moveTeamClaim({ store, product, ctx, hosts: own.hosts, claim: own.claim, start, end, now }))) return { ok: false, reason: "taken" };
+        // The hosts are checked at the length paid for (`at`), the length the booking is written at, never the call's
+        // length now: a paid hour never runs past a host's working hours or into their next event.
+        const paid: CallListing = { ...product, call: at };
+        const ctx = await teamContext(store, paid, team, [...busy, ...sessions, ...blocked], now, { refresh: false, except: { session, claim: own.claim } });
+        if (!(await moveTeamClaim({ store, product: paid, ctx, hosts: own.hosts, claim: own.claim, start, end, now }))) return { ok: false, reason: "taken" };
       } catch {
         return { ok: false, reason: "error" };
       }

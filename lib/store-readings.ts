@@ -200,10 +200,10 @@ export async function forgetStoreReadings(statsId: string | null | undefined): P
 }
 
 /**
- * A person's erasure: the store's kept sales reading goes; returns how many
- * copies went. Not yet one of lib/person-erasure.ts's steps: each step needs
- * its line in lib/person-data.ts, another agent's file today (inbox C4-33,
- * light d); until then the copy names a buyer at most READING_KEEP_SECONDS.
+ * A person's erasure (lib/person-erasure.ts, a step of every door; inbox
+ * C4-48): the store's kept sales reading goes, which may name them among the
+ * biggest buyers; returns how many copies went. The next reading is made
+ * again from the store's account and leaves them out.
  */
 export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;

@@ -109,6 +109,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/discord-access.ts": { how: "copied", what: "Your Discord account's link to the store, and its roles" },
   "lib/email-sync.ts": { how: "copied", what: "The record of sending you to the store's connected email platform" },
   "lib/segments.ts": { how: "marks", what: "A ten-minute copy of the store's buyers, made from its Stripe account" },
+  "lib/store-readings.ts": { how: "marks", what: "A day's copy of the store's sales numbers, which may name its biggest buyers, made from its Stripe account" },
   "lib/member-health.ts": { how: "marks", what: "A ten-minute copy of the store's members' scores, made from its Stripe account" },
   "lib/reviews.ts": { how: "copied", what: "Your reviews, and the store's replies to them" },
   "lib/buyer-library.ts": { how: "copied", what: "The note that you bought from or joined the store, for your library" },

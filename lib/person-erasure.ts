@@ -87,6 +87,7 @@ import { forgetInboxPerson } from "@/lib/inbox";
 import { forgetDiscordPerson } from "@/lib/discord-access";
 import { forgetSyncPerson } from "@/lib/email-sync";
 import { forgetLedgerCopy } from "@/lib/segments";
+import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
@@ -176,6 +177,8 @@ export const ERASERS: Eraser[] = [
     },
   },
   { module: "lib/segments.ts", run: (s) => forgetLedgerCopy(s.statsId) },
+  // The studio's kept reading of the sales names the biggest buyers by address (inbox C4-48): it goes, and is read again.
+  { module: "lib/store-readings.ts", run: (s) => forgetReadingsPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
   {
     module: "lib/reviews.ts",

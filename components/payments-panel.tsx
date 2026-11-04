@@ -113,6 +113,13 @@ export function PaymentsPanel({
         );
         return;
       }
+      if (data.error === "series") {
+        const n = data.running ?? 1;
+        setError(
+          `${n === 1 ? "A series of calls is" : `${n} series of calls are`} still running. ${n === 1 ? "It keeps" : "Each keeps"} charging in the currency it was booked in until its last session, whatever you choose here. So the currency can be changed once the last one is over or canceled. Nothing was changed.`,
+        );
+        return;
+      }
       if (data.error === "decimals") {
         setError(
           `${chosen === "jpy" || currency === "jpy" ? "The yen has no cents" : "These two currencies are written differently"}, so prices cannot keep their numbers: 49.99 has no meaning in yen, and 4999 yen would read as 4,999 of anything else. With prices in your store, change it before adding them, or give each product a price of 0 first.`,

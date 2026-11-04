@@ -6,6 +6,8 @@
 import { MAIL_SALE_MARGIN_SECONDS, type PriceFacts, mailPriceLabel } from "@/lib/mail-product-price";
 import { mailPriceFacts } from "@/lib/mail-product-sellable";
 import { parseProduct } from "@/lib/catalog";
+import { readSetup, type CallSetup } from "@/lib/call-setup";
+import { pricePill } from "@/components/store-product";
 import { DEFAULT_FAIR, fairOff } from "@/lib/fair-price";
 import { NO_SALE, type StoreSale } from "@/lib/store-sale";
 import { NO_TAX } from "@/lib/tax";
@@ -51,6 +53,17 @@ is("options: from the lowest one a buyer can pick", label(shop(), listing({ pric
 is("options on a membership: from the lowest, a month", label(shop(), listing({ ...monthly, priceCents: 1000, options })), "from $20 a month");
 is("a single option: its price", label(shop(), listing({ priceCents: 1000, options: [options[2]] })), "$20");
 is("pay what you want: the floor, or more", label(shop(), listing({ priceCents: 500, pwyw: { suggestedCents: 1500 } })), "$5 or more");
+
+part("A call with several lengths");
+const WEEK: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
+const hours = { kind: "weekly", minutes: 30, tz: "America/New_York", weekly: WEEK, noticeHours: 12, horizonDays: 30, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] };
+const coaching = (lengths: { minutes: number; cents: number }[] | undefined, extra: Record<string, unknown> = {}) =>
+  ({ ...listing({ priceCents: 4500 }), call: readSetup({ ...hours, ...(lengths ? { lengths } : {}), ...extra }) as CallSetup }) as Listing;
+const LENGTHS = [{ minutes: 30, cents: 4500 }, { minutes: 60, cents: 8000 }];
+is("from the lowest length's price, as the store's card says it", [label(shop(), coaching(LENGTHS)), pricePill(shop(), coaching(LENGTHS))], ["from $45", "from $45"]);
+is("with tax on top, said after it", label(shop(onTop), coaching(LENGTHS)), "from $45 + tax where it applies");
+is("one length, or lengths the booking page does not offer now (a price changed since): the call's own price", [label(shop(), coaching(undefined)), label(shop(), { ...coaching(LENGTHS), priceCents: 5000 })], ["$45", "$50"]);
+is("in the store's language", label(shop({ language: "de", currency: "eur" } as Partial<Store>), coaching(LENGTHS)), `ab ${speech({ language: "de", currency: "eur" }).money(4500)}`);
 
 part("Tax");
 is("tax on top: said after the price", [label(shop(onTop), listing({})), label(shop(onTop), listing({ priceCents: 500, pwyw: { suggestedCents: 1500 } })), label(shop(onTop), listing({ ...monthly, priceCents: 900 }))], ["$29 + tax where it applies", "$5 or more + tax where it applies", "$9 a month + tax where it applies"]);

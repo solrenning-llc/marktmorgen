@@ -119,6 +119,7 @@ import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
+import { VideoWordsFields } from "@/components/video-words-fields";
 import { NewTab } from "@/components/new-tab";
 import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
 import { SidePanelSwitch, useSidePanel } from "@/components/side-panel-switch";
@@ -1508,6 +1509,7 @@ export function PageEditor({
               <textarea id={`${base}-c`} className="field" rows={2} maxLength={MAX_CAPTION} value={block.caption} placeholder="What the visitor is about to see." onChange={(e) => change(index, { caption: e.target.value })} />,
               counter(block.caption, MAX_CAPTION),
             )}
+            <VideoWordsFields id={`${base}-w`} value={block} onChange={(next) => change(index, { transcript: next.transcript, captioned: next.captioned })} />
           </div>
         );
       }
@@ -3029,6 +3031,7 @@ function RowEditor({
                   : "Read out to people using a screen reader before the video plays. Left empty, the product's name is used."}
               </p>
             </div>
+            <VideoWordsFields id={`${id}-w`} value={element} onChange={(next) => replace(element, { ...element, transcript: next.transcript, captioned: next.captioned })} />
           </div>
         );
       }

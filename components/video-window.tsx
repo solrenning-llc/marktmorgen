@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { PROVIDER_NAMES, type Video, embedUrl } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
+import { VideoTranscript } from "@/components/video-transcript";
 
 /**
  * A video behind a button, opened in a window over the page (added
@@ -20,7 +21,7 @@ import { blockWords } from "@/lib/buyer-words/blocks";
  * less motion gets the player waiting on its own play button instead of
  * starting by itself.
  */
-export function VideoWindow({ video, title, label, lang = "en" }: { video: Video; title: string; label: string; lang?: string }) {
+export function VideoWindow({ video, title, label, transcript, lang = "en" }: { video: Video; title: string; label: string; transcript?: string; lang?: string }) {
   const words = blockWords(lang);
   const provider = PROVIDER_NAMES[video.provider];
   const dialog = useRef<HTMLDialogElement>(null);
@@ -88,6 +89,8 @@ export function VideoWindow({ video, title, label, lang = "en" }: { video: Video
                 referrerPolicy="strict-origin-when-cross-origin"
               />
             </div>
+            {/* What it says, in words, inside the window too (inbox C4-26 (3)); the window scrolls when it is opened. */}
+            <VideoTranscript text={transcript} lang={lang} />
           </div>
         ) : null}
       </dialog>

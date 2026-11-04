@@ -19,7 +19,7 @@
 import { CELL_NO, CELL_YES, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";
 
 /** A block's own words. */
-const TEXT = ["headline", "sub", "heading", "body", "label", "note", "caption", "yesLabel", "noLabel", "columnA", "columnB"] as const;
+const TEXT = ["headline", "sub", "heading", "body", "label", "note", "caption", "transcript", "yesLabel", "noLabel", "columnA", "columnB"] as const;
 /** Its lists: points, parts, steps, questions, pictures, rows. */
 const LISTS = ["items", "yes", "no", "rows"] as const;
 /** The words inside one entry of a list, or inside a block's one picture. */
@@ -83,10 +83,10 @@ function rowElementWords(element: RowElement, one: <T>(value: T) => T): RowEleme
       return { ...element, picture: { ...element.picture, alt, caption: one(element.picture.caption) } };
     }
     case "video":
-      return { ...element, title: one(element.title) };
+      return { ...element, title: one(element.title), ...(element.transcript ? { transcript: one(element.transcript) } : {}) };
     case "video-window":
-      // The button is read before the window it opens.
-      return { ...element, label: one(element.label), title: one(element.title) };
+      // The button is read before the window it opens, and the transcript inside it after its title.
+      return { ...element, label: one(element.label), title: one(element.title), ...(element.transcript ? { transcript: one(element.transcript) } : {}) };
   }
 }
 

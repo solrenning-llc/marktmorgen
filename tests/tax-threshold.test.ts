@@ -57,6 +57,53 @@ test("inherited fields and getters are not evidence and are never executed", () 
   assert.equal(reads,0);
   assert.equal(assessTaxThreshold(Object.create(value),NOW).status,"unknown");
 });
+test("threshold snapshots reject extra symbol evidence without evaluating it", () => {
+  let reads = 0;
+  for (const id of ["ca-specified-supplies", "no-remote-services"] as const) {
+    for (const enumerable of [true, false]) {
+      for (const accessor of [true, false]) {
+        const value = row(id, 0);
+        Object.defineProperty(value, Symbol("unreviewed amount"), {
+          enumerable,
+          ...(accessor ? { get() { reads++; return null; } } : { value: null }),
+        });
+        assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null });
+      }
+    }
+  }
+  assert.equal(reads, 0);
+});
+test("threshold snapshots reject custom prototypes even with every required own field", () => {
+  let reads = 0;
+  const prototype = Object.create(null);
+  Object.defineProperty(prototype, "unreviewedAmount", { get() { reads++; return null; } });
+  class Snapshot {
+    constructor() { Object.assign(this, row("ca-specified-supplies", 0)); }
+  }
+  for (const value of [Object.assign(Object.create(prototype), row("ca-specified-supplies", 0)), new Snapshot()]) {
+    assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null });
+  }
+  assert.equal(reads, 0);
+});
+test("uninspectable threshold evidence is unknown instead of below the threshold", () => {
+  const value = new Proxy(row("ca-specified-supplies", 0), {
+    getPrototypeOf() { throw new Error("evidence unavailable"); },
+  });
+  assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null });
+});
+test("exact plain and null-prototype snapshots keep their complete own amounts", () => {
+  for (const id of ["ca-specified-supplies", "no-remote-services"] as const) {
+    const value = row(id, TAX_THRESHOLD_RULES[id].thresholdMinor + 1);
+    for (const prototype of [Object.prototype, null]) {
+      const snapshot = Object.create(prototype, Object.fromEntries(
+        Object.entries(value).map(([key, amount]) => [key, { value: amount, enumerable: false }]),
+      ));
+      assert.deepEqual(assessTaxThreshold(snapshot, NOW), {
+        status: "treatment-required", projectedApplicableMinor: TAX_THRESHOLD_RULES[id].thresholdMinor + 1,
+      });
+    }
+  }
+});
 test("threshold arithmetic creates no actual registration, treatment record or permission to sell", () => {
   assert.equal(assessTaxThreshold(row("ca-specified-supplies",0),NOW).status,"below-threshold");
   assert.equal(DEEMED_SUPPLIER_RECORDS.length,0);

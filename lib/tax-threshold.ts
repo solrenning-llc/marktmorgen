@@ -57,8 +57,11 @@ export function assessTaxThreshold(value: unknown, now = Date.now()): TaxThresho
   if (!value || typeof value !== "object" || Array.isArray(value)) return stop("unknown");
   let data: Record<string, unknown>;
   try {
+    if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return stop("unknown");
+    // The snapshot must be exactly the reviewed own data, as for ledger evidence.
+    // String-only enumeration would silently ignore additional symbol fields.
+    if (Reflect.ownKeys(value).length !== KEYS.length) return stop("unknown");
     const descriptors = Object.getOwnPropertyDescriptors(value);
-    if (Object.keys(descriptors).length !== KEYS.length) return stop("unknown");
     data = Object.create(null);
     for (const key of KEYS) {
       if (!Object.hasOwn(descriptors, key)) return stop("unknown");

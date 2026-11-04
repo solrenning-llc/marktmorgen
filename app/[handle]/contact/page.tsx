@@ -6,20 +6,29 @@ import { lookStyle } from "@/lib/store-look";
 import { StoreTracking } from "@/components/store-tracking";
 import { speech } from "@/lib/buyer-words";
 import { contactWords } from "@/lib/buyer-words/contact";
+import { readCreatorCard } from "@/lib/creator-card";
+import { CreatorCardView } from "@/components/creator-card-view";
 
 type Params = {
   params: Promise<{ handle: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-export async function generateMetadata({ params }: Params): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
   const { handle } = await params;
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
-  return { title: `${contactWords(store?.language).pageTitle} — Marktmorgen`, robots: { index: false, follow: false } };
+  const query = await searchParams;
+  const card = store && !query.status ? await readCreatorCard(store.statsId).catch(() => null) : null;
+  const w = contactWords(store?.language);
+  return { title: `${card?.on ? `${card.name} · ${w.card.pageTitle}` : w.pageTitle} — Marktmorgen`, robots: { index: false, follow: false } };
 }
 
-/** What happened to a message sent from a store page's contact form (lib/store-contact.ts). */
+/**
+ * What happened to a message sent from a store page's contact form
+ * (lib/store-contact.ts); with no message, the creator's business card when
+ * they turned it on (lib/creator-card.ts, 639 [GL7](22)), or the store.
+ */
 export default async function ContactPage({ params, searchParams }: Params) {
   const { handle: raw } = await params;
   const decoded = decodeURIComponent(raw);
@@ -28,9 +37,20 @@ export default async function ContactPage({ params, searchParams }: Params) {
   if (!store) notFound();
   const query = await searchParams;
   const status = typeof query.status === "string" ? query.status : "";
-  if (!status) redirect(`/@${store.handle}`);
   const said = speech(store);
   const w = contactWords(store.language);
+  if (!status) {
+    const card = await readCreatorCard(store.statsId).catch(() => null);
+    if (!card?.on) redirect(`/@${store.handle}`);
+    return (
+      <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
+          <CreatorCardView card={card} handle={store.handle} storeName={store.name} words={w.card} />
+          <StoreTracking store={store} presence event={null} />
+        </main>
+      </div>
+    );
+  }
   const notice = status === "sent" ? { title: w.sentTitle, body: w.sentBody(store.name) } : (w.notices[status] ?? w.notices.error);
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -49,3 +69,4 @@ export default async function ContactPage({ params, searchParams }: Params) {
     </div>
   );
 }
+

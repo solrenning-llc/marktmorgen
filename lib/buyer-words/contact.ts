@@ -1,7 +1,9 @@
 /**
  * The words of the contact form on a store page (lib/store-contact.ts) and the
  * page after it. The creator may write the form's heading and line in their
- * own words; these are what shows when they did not. Browser-safe.
+ * own words; these are what shows when they did not. Also the words around
+ * the creator's business card on the same page (lib/creator-card.ts).
+ * Browser-safe.
  */
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 
@@ -15,6 +17,7 @@ const en = {
   message: "Your message",
   button: "Send the message",
   pageTitle: "Message",
+  card: { pageTitle: "Contact card", save: "Save contact", saveHint: "Adds this card to the contacts on your phone or computer.", email: "Email", phone: "Phone", website: "Website", store: (store: string) => `Visit ${store}` },
   sentTitle: "Your message is on its way",
   sentBody: (store: string) => `${store} has it, and answers you at the address you gave. Nothing else is sent to you.`,
   notices: {
@@ -36,6 +39,7 @@ const es: ContactWords = {
   message: "Tu mensaje",
   button: "Enviar el mensaje",
   pageTitle: "Mensaje",
+  card: { pageTitle: "Tarjeta de contacto", save: "Guardar contacto", saveHint: "Añade esta tarjeta a los contactos de tu teléfono o tu ordenador.", email: "Correo electrónico", phone: "Teléfono", website: "Sitio web", store: (store) => `Visitar ${store}` },
   sentTitle: "Tu mensaje va en camino",
   sentBody: (store) => `${store} lo tiene y te responderá en la dirección que diste. No se te envía nada más.`,
   notices: {
@@ -55,6 +59,7 @@ const fr: ContactWords = {
   message: "Votre message",
   button: "Envoyer le message",
   pageTitle: "Votre message",
+  card: { pageTitle: "Carte de contact", save: "Enregistrer le contact", saveHint: "Ajoute cette carte aux contacts de votre téléphone ou de votre ordinateur.", email: "E-mail", phone: "Téléphone", website: "Site web", store: (store) => `Visiter ${store}` },
   sentTitle: "Votre message est en route",
   sentBody: (store) => `${store} l'a reçu et vous répondra à l'adresse indiquée. Rien d'autre ne vous est envoyé.`,
   notices: {
@@ -74,6 +79,7 @@ const de: ContactWords = {
   message: "Deine Nachricht",
   button: "Nachricht senden",
   pageTitle: "Nachricht",
+  card: { pageTitle: "Kontaktkarte", save: "Kontakt speichern", saveHint: "Fügt diese Karte den Kontakten auf deinem Telefon oder Computer hinzu.", email: "E-Mail", phone: "Telefon", website: "Webseite", store: (store) => `${store} besuchen` },
   sentTitle: "Deine Nachricht ist unterwegs",
   sentBody: (store) => `${store} hat sie und antwortet dir an die angegebene Adresse. Sonst wird dir nichts geschickt.`,
   notices: {
@@ -93,6 +99,7 @@ const it: ContactWords = {
   message: "Il tuo messaggio",
   button: "Invia il messaggio",
   pageTitle: "Messaggio",
+  card: { pageTitle: "Biglietto da visita", save: "Salva il contatto", saveHint: "Aggiunge questo biglietto ai contatti del tuo telefono o computer.", email: "Indirizzo email", phone: "Telefono", website: "Sito web", store: (store) => `Visita ${store}` },
   sentTitle: "Il tuo messaggio è in viaggio",
   sentBody: (store) => `${store} l'ha ricevuto e ti risponderà all'indirizzo che hai dato. Non ti viene inviato nient'altro.`,
   notices: {
@@ -112,6 +119,7 @@ const nl: ContactWords = {
   message: "Je bericht",
   button: "Bericht versturen",
   pageTitle: "Bericht",
+  card: { pageTitle: "Contactkaart", save: "Contact opslaan", saveHint: "Voegt deze kaart toe aan de contacten op je telefoon of computer.", email: "E-mail", phone: "Telefoon", website: "Internetsite", store: (store) => `Bezoek ${store}` },
   sentTitle: "Je bericht is onderweg",
   sentBody: (store) => `${store} heeft het en antwoordt op het adres dat je gaf. Verder wordt je niets gestuurd.`,
   notices: {
@@ -132,6 +140,7 @@ const pt: ContactWords = {
   message: "A sua mensagem",
   button: "Enviar a mensagem",
   pageTitle: "Mensagem",
+  card: { pageTitle: "Cartão de contacto", save: "Guardar o contacto", saveHint: "Adiciona este cartão aos contactos do seu telemóvel ou computador.", email: "Endereço de email", phone: "Telefone", website: "Site", store: (store) => `Visitar ${store}` },
   sentTitle: "A sua mensagem está a caminho",
   sentBody: (store) => `${store} recebeu-a e responde-lhe no endereço que indicou. Não lhe é enviado mais nada.`,
   notices: {

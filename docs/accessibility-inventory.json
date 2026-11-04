@@ -1281,6 +1281,7 @@
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",
     "components/cover-maker.tsx",
+    "components/creator-card-view.tsx",
     "components/creator-research-form.tsx",
     "components/creator-showcase.tsx",
     "components/custom-range.tsx",

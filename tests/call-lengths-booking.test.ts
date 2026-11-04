@@ -16,7 +16,7 @@
  *   - the studio's save route refuses several lengths until the pages say
  *     each of them (the editor unit).
  */
-import { MAX_SETUP_LENGTHS, readSetup, type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import { MAX_SETUP_LENGTHS, parseSetup, readSetup, type CallSetup, zonedToUtc } from "@/lib/call-setup";
 import { MAX_CALL_LENGTHS, bookingLength, ownLength } from "@/lib/call-lengths";
 import { callCheckoutBody, holdAndCheckout, moveBooking, slotsForMove, type CallListing } from "@/lib/calls";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -83,6 +83,13 @@ async function main(): Promise<void> {
   ];
   is("out of order, not the setup's own first, twice, no price, a part of a cent, an unknown length, four, a group, too long for the hours, a deposit not below every price, one that is not the setup's own, not a list", refused.map((r) => readSetup(r)), refused.map(() => "lengths"));
   is("the setup and the rules allow the same number of lengths", MAX_SETUP_LENGTHS, MAX_CALL_LENGTHS);
+  const fromStorage = refused.map((r) => parseSetup(r));
+  is(
+    "read back from storage, lengths the rules no longer allow are dropped, never the call: it sells at its own length alone",
+    fromStorage.map((s) => (s ? [s.minutes, "lengths" in s] : null)),
+    refused.map(() => [30, false]),
+  );
+  is("a setup broken elsewhere is still refused from storage", parseSetup({ ...weekly, tz: "Not/AZone", lengths: LENGTHS }), null);
   is("a deposit below every price is kept", (readSetup({ ...weekly, place: "12 Harbor Street", deposit: 2000, lengths: LENGTHS }) as CallSetup).lengths, LENGTHS);
 
   part("The length of a new booking");

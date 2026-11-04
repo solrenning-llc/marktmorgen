@@ -26,12 +26,22 @@ export type PlanPaymentDisputeReview = Partial<Record<PlanPaymentDisputeKey, Pla
 export type ReviewedPlanPaymentDisputeCosts = Record<PlanPaymentDisputeKey, {
   principalCents: number; feesCents: number; lostPaymentWorstCaseCents: number;
 }>;
-function own(value: unknown, key: string): unknown {
+/** A complete review cannot omit unknown liabilities by selecting only known
+ * fields. Copy exact enumerable own data without inherited setters or getters. */
+function ownRecord(value: unknown, keys: readonly string[]): Record<string, unknown> | null {
   try {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    return descriptor && Object.hasOwn(descriptor, "value") ? descriptor.value : undefined;
-  } catch { return undefined; }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    if (Reflect.ownKeys(value).length !== keys.length) return null;
+    const record: Record<string, unknown> = Object.create(null);
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !Object.hasOwn(descriptor, "value") || !descriptor.enumerable) return null;
+      record[key] = descriptor.value;
+    }
+    return record;
+  } catch { return null; }
 }
 const cents = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0 &&
@@ -42,15 +52,18 @@ const cents = (value: unknown): value is number =>
  * The loss is the whole contract's principal plus fees, including for a yearly plan.
  */
 export function assessPlanPaymentDisputeCosts(value: unknown): ReviewedPlanPaymentDisputeCosts | null {
-  const result = {} as ReviewedPlanPaymentDisputeCosts;
+  const review = ownRecord(value, PLAN_PAYMENT_DISPUTE_KEYS);
+  if (!review) return null;
+  const result = Object.create(null) as ReviewedPlanPaymentDisputeCosts;
   for (const key of PLAN_PAYMENT_DISPUTE_KEYS) {
-    const row = own(value, key);
-    const principal = own(row, "maximumPaidPrincipalCents");
-    const fees = own(row, "maximumTotalFeesCents");
-    const evidence = own(row, "evidence");
+    const row = ownRecord(review[key], ["maximumPaidPrincipalCents", "maximumTotalFeesCents", "allContractPaymentsBounded", "liabilityTailReviewed", "evidence"]);
+    if (!row) return null;
+    const principal = row.maximumPaidPrincipalCents;
+    const fees = row.maximumTotalFeesCents;
+    const evidence = row.evidence;
     const [tier, cycle] = key.split("_") as [Tier, Cycle];
     if (!cents(principal) || principal < PUBLISHED_PLAN_PRICES[tier][cycle] || !cents(fees) ||
-        own(row, "allContractPaymentsBounded") !== true || own(row, "liabilityTailReviewed") !== true ||
+        row.allContractPaymentsBounded !== true || row.liabilityTailReviewed !== true ||
         typeof evidence !== "string" || !evidence.trim() || evidence.length > 1_000) return null;
     const loss = BigInt(principal) + BigInt(fees);
     if (loss > BigInt(PLAN_PAYMENT_DISPUTE_COST_RULES.maxInteger)) return null;

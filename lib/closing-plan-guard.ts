@@ -36,14 +36,14 @@
  *                             (hashed), expiring by itself after SHUT_DAYS
  */
 import { createHash } from "node:crypto";
-import { BillingError, type StartedSubscription, isBillingConfigured, listStoreSubscriptionRows, onPlatform, ownedBy, startedFromObservedSubscription } from "@/lib/billing";
+import { BillingError, type StartedSubscription, isBillingConfigured, listStoreSubscriptionRows, onPlatform, ownedBy, planOwnership, startedFromObservedSubscription } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { ownReleasedHandleTimes, platformStoreId } from "@/lib/platform-plan-identity";
+import { ownHandleOwnership, platformStoreId } from "@/lib/platform-plan-identity";
 import { formatMoney } from "@/lib/money";
 
 export const UNDO_KEY = "nl:closing:undo";
@@ -86,6 +86,8 @@ export type Undo = {
   name: string;
   /** When the closing day began (ms): payments since then are refunded. */
   since: number;
+  /** This queue entry was made only after immutable/interval ownership proof. */
+  v?: 1;
   /** When the store's last plan ended (ms): a plan started after it is refunded whatever minute it was paid. */
   ended?: number;
   /** When it was put in line (ms). */
@@ -133,7 +135,7 @@ export async function liveByCustomer(store: Store): Promise<StartedSubscription 
  * Marks every address a closing store sells under, from its closing day's
  * start, with the end of its last plan; renewed on each closing run.
  */
-export async function markShut(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles"> & { planEndedAt?: string; statsId?: string }, since: number, ended = Date.parse(store.planEndedAt ?? "")): Promise<void> {
+export async function markShut(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles"> & { planEndedAt?: string; statsId?: string | null }, since: number, ended = Date.parse(store.planEndedAt ?? "")): Promise<void> {
   if (!isRedisConfigured()) return;
   const handles = [...saleHandles(store)].filter(Boolean);
   if (!handles.length) return;
@@ -168,7 +170,7 @@ export async function closingSince(store: Store): Promise<ClosingTimes | null> {
   if (score === null || score === undefined || !Number.isFinite(Number(score))) return null;
   // The line's score is the end of the plan (lib/plan-closing.ts, closingDay).
   const ended = Number(score);
-  const marked = await shutOf(store.handle, store.statsId);
+  const marked = await shutOf(store.handle, store.statsId ?? undefined);
   return { since: marked?.since ?? ended, ended };
 }
 
@@ -182,18 +184,26 @@ export type Refused = "no" | "returned" | "returned-early" | "returning";
  * when everything is done, "returning" when a step is left for a later run.
  * The caller must never write it down as the store's plan unless "no".
  */
-export async function refusePlanIfClosing(input: { store: Store | null; handle: string; subscriptionId: string; customerId: string; storeId?: unknown; onStopped?: () => void }): Promise<Refused> {
+export async function refusePlanIfClosing(input: { store: Store | null; handle: string; subscriptionId: string; customerId: string; storeId?: unknown; subscription?: Record<string, unknown>; onStopped?: () => void }): Promise<Refused> {
   if (!SUBSCRIPTION_PATTERN.test(input.subscriptionId)) return "no";
   const identity = Object.getOwnPropertyDescriptor(input, "storeId");
   if (identity && (!Object.hasOwn(identity, "value") || !platformStoreId(identity.value))) return "returning";
   if (identity && input.store && identity.value !== input.store.statsId) return "no";
-  const times = input.store ? await closingSince(input.store) : await shutOf(input.handle, identity?.value);
+  // Snapshot the proof before waiting for the closing markers. Caller mutation
+  // cannot change the store whose ownership authorized this operation.
+  const observedStore = input.store ? capturePlanStore(input.store) : null;
+  const evidence = input.subscription;
+  const sameSubscription = evidence && Object.getOwnPropertyDescriptor(evidence, "id")?.value === input.subscriptionId;
+  const proved = sameSubscription && (observedStore ? ownedBy(observedStore, evidence) :
+    identity && ownedBy({ statsId: identity.value, stripeCustomerId: input.customerId, handle: input.handle, previousHandles: [], releasedHandles: [], email: "" }, evidence));
+  const times = observedStore ? await closingSince(observedStore) : await shutOf(input.handle, identity?.value);
   if (times === null) return "no";
+  if (!proved) return "returning";
   const entry: Undo = {
-    h: input.handle,
+    v: 1, h: input.handle,
     c: CUSTOMER_PATTERN.test(input.customerId) ? input.customerId : "",
-    to: input.store?.email ?? "",
-    name: input.store?.name ?? "",
+    to: observedStore?.email ?? "",
+    name: observedStore?.name ?? "",
     since: times.since,
     ...(times.ended ? { ended: times.ended } : {}),
     at: Date.now(),
@@ -226,7 +236,8 @@ export async function refuseSession(store: Store, sessionId: string | undefined)
   const subscriptionId = typeof session.subscription === "string" ? session.subscription : "";
   const customerId = typeof session.customer === "string" ? session.customer : "";
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) return "no";
-  return refusePlanIfClosing({ store, handle: meta.store, subscriptionId, customerId });
+  return refusePlanIfClosing({ store, handle: meta.store, subscriptionId, customerId, subscription: { ...session, id: subscriptionId },
+    ...(Object.hasOwn(meta, "store_id") ? {storeId: meta.store_id} : {}) });
 }
 
 async function expireSession(id: string): Promise<boolean> {
@@ -268,7 +279,9 @@ export async function expirePlanCheckouts(store: Store, customerIds: string[]): 
       for (const row of rows) {
         const meta = row.metadata as Record<string, string> | null | undefined;
         const id = typeof row.id === "string" ? row.id : "";
-        if (row.mode !== "subscription" || !SESSION.test(id) || typeof meta?.store !== "string" || !handles.has(meta.store) || !ownedBy(store, row)) continue;
+        if (row.mode !== "subscription" || !SESSION.test(id) || typeof meta?.store !== "string" || !handles.has(meta.store)) continue;
+        if (planOwnership(store, row) === "unknown") throw new Error("The closing checkout ownership is unknown");
+        if (!ownedBy(store, row)) continue;
         if (await expireSession(id)) expired += 1;
       }
       const last = rows[rows.length - 1]?.id;
@@ -281,9 +294,9 @@ export async function expirePlanCheckouts(store: Store, customerIds: string[]): 
 
 /** Account identity and release evidence cannot change while a provider page is awaited. */
 function capturePlanStore(store: Store): Store {
-  const dates = ownReleasedHandleTimes(store);
-  if (!dates) throw new Error("The closing store release evidence is unknown");
-  return { ...store, previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], releasedHandleAt: dates };
+  const history = ownHandleOwnership(store);
+  if (!history) throw new Error("The closing store release evidence is unknown");
+  return { ...store, previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], handleOwnership: history };
 }
 
 function readUndo(raw: unknown): Undo | null {
@@ -292,6 +305,7 @@ function readUndo(raw: unknown): Undo | null {
     const value = JSON.parse(raw) as Partial<Undo>;
     if (typeof value.since !== "number" || !Number.isFinite(value.since)) return null;
     return {
+      ...(value.v === 1 ? {v: 1 as const} : {}),
       h: typeof value.h === "string" ? value.h : "",
       c: typeof value.c === "string" ? value.c : "",
       to: typeof value.to === "string" ? value.to : "",
@@ -374,6 +388,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     if (raw !== null && raw !== undefined) console.error(`closing-plan-guard: an unreadable entry for ${id} is kept for a person to see`);
     return raw === null || raw === undefined;
   }
+  if (entry.v !== 1) return false;
   if (entry.done && !recheck) return true;
   const keep = async (why: string, error?: unknown) => {
     console.error(`closing-plan-guard: ${id} is not settled yet (${why}); tried again on the next run`, error ?? "");
@@ -436,7 +451,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
       await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify(entry)]]);
     }
     // Settled: only its dates are kept, for a retry or a recheck to find (no address, no customer, no name).
-    await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ h: "", c: "", to: "", name: "", since: entry.since, ...(entry.ended ? { ended: entry.ended } : {}), at: entry.at, n: entry.n, done: Date.now(), t: 1, ...(entry.e ? { e: 1 } : {}) })]]);
+    await redisPipeline([["HSET", UNDO_KEY, id, JSON.stringify({ v: 1, h: "", c: "", to: "", name: "", since: entry.since, ...(entry.ended ? { ended: entry.ended } : {}), at: entry.at, n: entry.n, done: Date.now(), t: 1, ...(entry.e ? { e: 1 } : {}) })]]);
     return true;
   } catch (error) {
     return keep("Stripe did not answer", error);

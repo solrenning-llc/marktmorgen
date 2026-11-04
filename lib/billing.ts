@@ -34,7 +34,7 @@ import {
 import { inTheCurrencyShown } from "@/lib/instant-pay";
 import { normaliseEmail } from "@/lib/auth";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
-import { beforeHandleRelease, ownReleasedHandleTimes, platformStoreId } from "@/lib/platform-plan-identity";
+import { ownHandleOwnership, legacyHandleOwnership, platformStoreId, type HandleOwnership, type PlanOwnership } from "@/lib/platform-plan-identity";
 import { PLATFORM_PLAN_MAX_PAGES, PLATFORM_PLAN_PAGE_SIZE } from "@/lib/platform-plan-rules";
 import {
   CUSTOMER_PATTERN,
@@ -653,6 +653,11 @@ export async function readSubscription(
   subscriptionId: string,
   fundingStore?:Store,
 ): Promise<SubscriptionState> {
+  if (fundingStore) {
+    const history = ownHandleOwnership(fundingStore);
+    if (!history) return {state:"unknown"};
+    fundingStore = {...fundingStore, previousHandles:[...fundingStore.previousHandles], releasedHandles:[...fundingStore.releasedHandles], handleOwnership:history};
+  }
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
   }
@@ -678,6 +683,7 @@ export async function readSubscription(
       !["active", "trialing", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused"].includes(subscription.status)) {
     return { state: "unknown" };
   }
+  if (fundingStore && !ownedBy(fundingStore, subscription)) return { state: "unknown" };
   const state=stateOf(subscription);
   if(state.state==='active'&&hasContractFunding(subscription)){
     if(!fundingStore||subscription.id!==subscriptionId)return{state:'unknown'};
@@ -1361,30 +1367,30 @@ export function customerOf(subscription: Record<string, unknown>): { id: string;
  * must also be paid by this store's own customer, or by the address this
  * store signs in with — the address the checkout was opened for.
  */
-export function ownedBy(store: Store, subscription: Record<string, unknown>): boolean {
+type PlanOwner = Pick<Store, "statsId" | "stripeCustomerId" | "handle" | "previousHandles" | "releasedHandles" | "email">;
+export function planOwnership(store: PlanOwner, subscription: Record<string, unknown>): PlanOwnership {
   try {
     const metadata = Object.getOwnPropertyDescriptor(subscription, "metadata");
-    if (!metadata || !Object.hasOwn(metadata, "value") || !metadata.value || typeof metadata.value !== "object" || Array.isArray(metadata.value)) return false;
+    if (!metadata || !Object.hasOwn(metadata, "value") || !metadata.value || typeof metadata.value !== "object" || Array.isArray(metadata.value)) return "unknown";
     const namedField = Object.getOwnPropertyDescriptor(metadata.value, "store");
     const identity = Object.getOwnPropertyDescriptor(metadata.value, "store_id");
-    if (!namedField || !Object.hasOwn(namedField, "value") || typeof namedField.value !== "string") return false;
-    if (identity && (!Object.hasOwn(identity, "value") || !platformStoreId(identity.value) || identity.value !== store.statsId)) return false;
-    const named = namedField.value;
-    const customer = customerOf(subscription);
+    if (!namedField || !Object.hasOwn(namedField, "value") || typeof namedField.value !== "string") return "unknown";
+    if (identity && (!Object.hasOwn(identity, "value") || !platformStoreId(identity.value))) return "unknown";
+    if (identity && identity.value !== store.statsId) return "foreign";
+    const named = namedField.value, customer = customerOf(subscription);
     const sameCustomer = Boolean(store.stripeCustomerId) && customer.id === store.stripeCustomerId;
     const current = new Set([store.handle, ...(store.previousHandles ?? [])]);
-    if (!current.has(named) && store.releasedHandles?.includes(named)) {
-      if (!sameCustomer) return false;
-      if (identity) return true;
-      const dates = Object.getOwnPropertyDescriptor(store, "releasedHandleAt");
-      const created = Object.getOwnPropertyDescriptor(subscription, "created");
-      return Boolean(dates && Object.hasOwn(dates, "value") && created && Object.hasOwn(created, "value") &&
-        beforeHandleRelease(dates.value, named, created.value));
-    }
-    if (!current.has(named) && !(identity && sameCustomer)) return false;
-    if (sameCustomer) return true;
-    return customer.email !== "" && normaliseEmail(customer.email) === normaliseEmail(store.email);
-  } catch { return false; }
+    const released = store.releasedHandles?.includes(named);
+    if (!current.has(named) && !released && !identity) return "foreign";
+    if (released && !current.has(named) && !sameCustomer) return "foreign";
+    if (!sameCustomer && !(current.has(named) && customer.email !== "" && normaliseEmail(customer.email) === normaliseEmail(store.email))) return "foreign";
+    if (identity) return "owned";
+    const history = ownHandleOwnership(store), created = Object.getOwnPropertyDescriptor(subscription, "created");
+    return history && created && Object.hasOwn(created, "value") ? legacyHandleOwnership(history, named, created.value) : "unknown";
+  } catch { return "unknown"; }
+}
+export function ownedBy(store: PlanOwner, subscription: Record<string, unknown>): boolean {
+  return planOwnership(store, subscription) === "owned";
 }
 
 /** What a subscription in good standing means for the store's snapshot. */
@@ -1432,6 +1438,7 @@ async function activateObservedSwitch(statsId:string,grantId:string,reviewId:str
  return activateSwitchContract({statsId,grantId,reviewId,subscriptionId,tier:state.tier,cycle:state.cycle,createdSeconds:subscription.created as number,trialing:state.trialing,periodStartSeconds:(state.trialing?subscription.trial_start:periodStart(subscription)) as number,periodEndSeconds:(state.trialing?subscription.trial_end:periodEnd(subscription,false)) as number});
 }
 export async function startedFromObservedSubscription(store:Store,subscription:Record<string,unknown>):Promise<StartedSubscription|null>{
+ if (!ownedBy(store, subscription)) return null;
  const metadata=Object.getOwnPropertyDescriptor(subscription,"metadata");
  if(metadata&&Object.hasOwn(metadata,"value")&&metadata.value&&typeof metadata.value==="object"){
   const identity=Object.getOwnPropertyDescriptor(metadata.value,"store_id");
@@ -1490,7 +1497,7 @@ function searchDataRecord(value: unknown, label: string): Record<string, unknown
   return copy;
 }
 
-type SearchOwnership = { customerId: string | null; released: Set<string>; current: Set<string>; statsId: string; releasedAt: Record<string, number> };
+type SearchOwnership = { customerId: string | null; released: Set<string>; current: Set<string>; statsId: string; email: string; history: HandleOwnership[] };
 type SearchMember = { subscription: Record<string, unknown>; terminalOwn: boolean };
 /** Only plain dense own data can prove a released handle, without rereading accessors. */
 function releasedSearchEvidence(value: unknown): Set<string> | null {
@@ -1525,10 +1532,13 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
   if (Object.hasOwn(metadata, "store_id")) {
     if (!platformStoreId(metadata.store_id)) throw new Error("Subscription search member store identity is unknown");
     if (metadata.store_id !== ownership.statsId) return null;
-  } else if (ownership.released.has(named) && !ownership.current.has(named)) {
-    if (customer.id !== ownership.customerId) return null;
-    if (!Object.hasOwn(ownership.releasedAt, named)) throw new Error("Subscription search released ownership is unknown");
-    if (!beforeHandleRelease(ownership.releasedAt, named, member.created)) return null;
+  } else if (handles.has(named)) {
+    // A shared customer and a released name do not identify a store. Missing
+    // acquisition evidence cannot become an empty, fully known observation.
+    if (ownership.released.has(named) && !ownership.current.has(named) && customer.id !== ownership.customerId) return null;
+    const legacy = legacyHandleOwnership(ownership.history, named, member.created);
+    if (legacy === "foreign") return null;
+    if (legacy === "unknown" && (customer.id === ownership.customerId || typeof customer.email === "string" && normaliseEmail(customer.email) === normaliseEmail(ownership.email))) throw new Error("Subscription legacy ownership is unknown");
   }
   // Stripe's DeletedCustomer has id/object/deleted, without an email.
   // A proved canceled prior owner is terminal history, including a name
@@ -1685,10 +1695,10 @@ export type StoreSubscriptionObservation = {
   find: () => Promise<{ live: StartedSubscription | null; customerId: string | null; lapsed: string[] }>;
   customerLive: () => Promise<StartedSubscription | null>;
   customerPlans: () => { id: string; status: string; customerId: string }[];
-  closingPlans: () => { complete: boolean; plans: { id: string; status: string; customerId: string }[] };
+  closingPlans: () => { complete: boolean; plans: { id: string; status: string; customerId: string; subscription: Record<string, unknown> }[] };
 };
-/** Both independent observations are read at most once. Closing reuses the
- * validated customer evidence even when Search is unknown; never a third GET. */
+/** Each observation page is requested at most once. Closing reuses the
+ * validated customer evidence even when Search is unknown, with no duplicate List. */
 type DetailedSubscriptionObservation = StoreSubscriptionObservation & { customerSubscriptions: () => Record<string, unknown>[] };
 async function observePlatformSubscriptions(store: Store, readSearch: boolean): Promise<DetailedSubscriptionObservation> {
   // Capture ownership before either awaited read. Released names never enter
@@ -1707,17 +1717,17 @@ async function observePlatformSubscriptions(store: Store, readSearch: boolean): 
     ? releasedSearchEvidence(releasedHandles) : null;
   if (released === null) throw new Error("Subscription search handle coverage is unknown");
   const stats = Object.getOwnPropertyDescriptor(store, "statsId");
-  const releasedAt = ownReleasedHandleTimes(store);
-  if (!stats || !Object.hasOwn(stats, "value") || !platformStoreId(stats.value) || releasedAt === null) throw new Error("Subscription search store identity is unknown");
+  const history = ownHandleOwnership(store);
+  if (!stats || !Object.hasOwn(stats, "value") || !platformStoreId(stats.value) || history === null) throw new Error("Subscription search store identity is unknown");
   const ownership: SearchOwnership = {
     customerId: customerContext && Object.hasOwn(customerContext, "value") &&
       typeof customerContext.value === "string" && CUSTOMER_PATTERN.test(customerContext.value) ? customerContext.value : null,
-    released, current: new Set(handles), statsId: stats.value, releasedAt,
+    released, current: new Set(handles), statsId: stats.value, email: store.email, history,
   };
   const observedStore = {
     handle: store.handle, previousHandles: [...store.previousHandles],
     releasedHandles: [...ownership.released], stripeCustomerId: ownership.customerId,
-    email: store.email, statsId: ownership.statsId, releasedHandleAt: ownership.releasedAt,
+    email: store.email, statsId: ownership.statsId, handleOwnership: ownership.history,
   } as Store;
   const query = new URLSearchParams({
     query: handles.map(handle => `metadata['store']:'${handle}'`).join(" OR "),
@@ -1852,7 +1862,7 @@ async function observePlatformSubscriptions(store: Store, readSearch: boolean): 
         } else candidates.set(id, entry);
       }
       return { complete, plans: [...candidates].filter(([id]) => !ambiguous.has(id)).map(([id, entry]) => ({
-        id, status: entry.subscription.status as string, customerId: customerOf(entry.subscription).id,
+        id, status: entry.subscription.status as string, customerId: customerOf(entry.subscription).id, subscription: entry.subscription,
       })) };
     },
   });

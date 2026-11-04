@@ -28,7 +28,7 @@ import {
   hasContractFunding,
   isBillingConfigured,
   listSubscriptions,
-  ownedBy,
+  ownedBy, planOwnership,
   readSubscription,
   startedFrom,
   startedFromObservedSubscription,
@@ -136,13 +136,14 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   const handle = meta?.store;
   if (!id || typeof handle !== "string" || !handle) return;
   const store = await storeForHandle(handle);
+  if (store && planOwnership(store, subscription) === "unknown") throw new Error("The listed subscription ownership is unknown");
   // A plan for a store already closing, or already removed, is never written
   // down: it is ended and its payment returned (queue item 307 [EC1],
   // lib/closing-plan-guard.ts). Only one that can still charge is looked at.
   if (subscription.status !== "canceled" && subscription.status !== "incomplete_expired" && (!store || (store.planEndedAt && ownedBy(store, subscription)))) {
     const customer = subscription.customer;
     const customerId = typeof customer === "string" ? customer : typeof (customer as { id?: unknown } | null)?.id === "string" ? String((customer as { id: string }).id) : "";
-    if ((await refusePlanIfClosing({ store, handle, subscriptionId: id, customerId,
+    if ((await refusePlanIfClosing({ store, handle, subscriptionId: id, customerId, subscription,
       ...(meta && Object.hasOwn(meta, "store_id") ? { storeId: meta.store_id } : {}),
     })) !== "no") return;
   }
@@ -150,6 +151,7 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
 
   // The one this store wrote down: Stripe's word stands.
   if (store.subscriptionId === id) {
+    if (!ownedBy(store, subscription)) throw new Error("The stored subscription ownership is unknown");
     const state=stateOf(subscription);
     if(state.state==='active'&&hasContractFunding(subscription)){
       const observed=await startedFromObservedSubscription(store,subscription);if(!observed)return;

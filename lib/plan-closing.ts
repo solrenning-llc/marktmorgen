@@ -762,7 +762,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   let live;
   try {
     if (store.subscriptionId) {
-      const own = await readSubscription(store.subscriptionId);
+      const own = await readSubscription(store.subscriptionId, store);
       if (own.state === "unknown") return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
       if (own.state === "active") {
         await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period });
@@ -826,7 +826,11 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     // No plan can be paid for it from here: its open plan checkouts are
     // expired, and its address is marked for after its records are gone.
     await markShut(store, next.day ?? day, endedAt);
-    await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []);
+    try { await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []); }
+    catch (error) {
+      console.error("checking a closing store checkout ownership failed", error);
+      return { key, state: "held", coverage: "unknown", note: "its open plan checkout ownership could not be proved" };
+    }
     try {
       const stopped = await stopRenewals(store, until);
       if (!stopped.done) return { key, state: "held", note: "the renewals it sold are not all stopped yet" };
@@ -893,17 +897,17 @@ async function refuseLatePlans(store: Store): Promise<boolean> {
   const observation = await observeStoreSubscriptions(store);
   const found = observation.closingPlans();
   let complete = found.complete;
-  const ids = new Map<string, string>();
+  const ids = new Map<string, { customerId: string; subscription: Record<string, unknown> }>();
   // Neither independent source may hide a positively owned late charge from
   // the other. Unknown coverage still prevents removal and never adopts rights.
   for (const row of found.plans) {
     if (row.status === "canceled" || row.status === "incomplete_expired") continue;
-    ids.set(row.id, row.customerId);
+    ids.set(row.id, {customerId: row.customerId, subscription: row.subscription});
   }
-  for (const [id, customerId] of ids) {
+  for (const [id, { customerId, subscription }] of ids) {
     try {
       let stopped = false;
-      const result = await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId, onStopped: () => { stopped = true; } });
+      const result = await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId, subscription, onStopped: () => { stopped = true; } });
       // A pending refund is self-contained in UNDO_KEY and retried after the
       // store is gone. Only a proved cancellation may hand it over: merely
       // returning "returning" can also mean an unreadable queue or live plan.

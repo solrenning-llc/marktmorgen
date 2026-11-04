@@ -24,7 +24,7 @@ test('a plan switch needs a fresh annual grant before payment confirmation is of
  assert.ok(created>=source.submitUntilSeconds-300,'provider creation follows its completed reservation');
  assert.equal(await activateCheckoutContract({statsId:'route-one',grantId:source.id,reviewId:source.reviewId,subscriptionId:'sub_Test000001',tier:'creator',cycle:'month',createdSeconds:created,trialing:false,periodStartSeconds:created,periodEndSeconds:created+30*86400},f.policy,f.context),true);
 setRouteStore({subscriptionId:'sub_Test000001',subscriptionActive:true});const response=await change(request('switch'));assert.equal(response.headers.get('Location'),'https://invoice.stripe.test/confirm');assert.equal(observations.switches[0]?.key,'creator_year');assert.equal(ledger.get('nl:contract-reserve:v1')?.get('pending:route-one'),observations.switches[0].id);});
-test('an existing active subscription is not intercepted as a new funded obligation',async()=>{start(false);setRouteStore({subscriptionActive:true,subscriptionId:'sub_Test000001'});assert.equal(result(await checkout(request('checkout'))),'already');assert.equal(observations.checkout.length,0);assert.equal(observations.find,0);});
+test('a verified active subscription is recovered before any new funded obligation',async()=>{start(false);setRouteStore({subscriptionActive:true,subscriptionId:'sub_Test000001'});observations.live={subscriptionId:'sub_Test000001',active:true};assert.equal(result(await checkout(request('checkout'))),'already');assert.equal(observations.checkout.length,0);assert.equal(observations.find,1);assert.equal(ledger.size,0);});
 
 test('an unmigrated subscription retains existing rights but cannot create an unbound switch obligation',async()=>{
  start();setRouteStore({subscriptionId:'sub_Test000001',subscriptionActive:true});
@@ -39,7 +39,7 @@ test('an unreadable subscription search cannot reserve cash or create a second c
   const before=JSON.stringify([...ledger].map(([key,value])=>[key,[...value]]));
   observations.findFail=true;
   for(let attempt=0;attempt<2;attempt++){
-   assert.equal(result(await checkout(request('checkout',cycle))),'error');
+   assert.equal(result(await checkout(request('checkout',cycle))),'unknown');
    assert.equal(observations.find,attempt+1,'one search per request, no automatic retry');
    assert.equal(observations.checkout.length,0,'no new provider checkout on unknown existing subscriptions');
    assert.equal(JSON.stringify([...ledger].map(([key,value])=>[key,[...value]])),before,'no cash reservation or pending obligation on unknown search');
@@ -52,12 +52,12 @@ test('an unreadable subscription search cannot reserve cash or create a second c
   assert.equal(observations.checkout[0].key,'creator_'+cycle);
  }
 });
-test('an already active plan remains accessible while subscription search is unavailable',async()=>{
+test('CX96 an active snapshot cannot claim already without verified ownership',async()=>{
  start(false);observations.findFail=true;
  setRouteStore({subscriptionActive:true,subscriptionId:'sub_Test000001'});
  const before=JSON.stringify([...ledger]);
- assert.equal(result(await checkout(request('checkout'))),'already');
- assert.equal(observations.find,0);
+ assert.equal(result(await checkout(request('checkout'))),'unknown');
+ assert.equal(observations.find,1);
  assert.equal(observations.checkout.length,0);
  assert.equal(JSON.stringify([...ledger]),before);
 });

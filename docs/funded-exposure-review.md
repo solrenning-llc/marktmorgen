@@ -8,21 +8,21 @@
 This is an explicit exception to the historical closing-day deletion statements
 below. Unknown billing coverage (`has_more`, malformed/failed evidence or an
 unreadable independent refund queue) never advances a store to `removed`.
-There is no deletion deadline for uncertainty and no new customer limit.
+There is no deletion deadline for uncertainty and no new customer limit. CX-96 also treats a legacy plan without recorded acquisition/release interval or immutable store binding as unknown: no adoption, cancellation or refund is authorized. Existing held-store aggregates retain that unresolved coverage for manual review.
 
 `lib/held-stores.ts` retains each unresolved obligation in the private shared
 `nl:held:stores` index. The daily closing job revisits oldest due entries. **CX-69,4 November2026:**
 only unknown platform billing coverage belongs in this index; known pauses,
 member/buyer batches, notices and refund progress continue through the ordinary
 walk. Previously misclassified entries may make local progress before any
-coverage read is needed. The two-read retry is independent of the retention
+coverage read is needed. The bounded paginated retry (CX-86: at most21 GETs, including the existing subscription detail read) is independent of the retention
 policy and is counted in its existing recovery work line. The current-month
 `post_cancellation` review governs retention only: its allocation supplies the
 global funded retention-case ceiling and consumes its existing ledger without
 initializing money, refunding slots or offsetting another scope. A null review
 leaves retention unknown, but cannot freeze recovery. At most50 rechecks may run company-wide
 per UTC day, and at most one per store/day, committed atomically before either
-of the two recovery reads. A lost acknowledgement consumes its claim and cannot
+of the recovery observations. A lost acknowledgement consumes its claim and cannot
 permit another attempt. Attempted entries rotate to the next UTC day; unattempted entries retain their older score so the same first50 cannot starve the rest. Once
 complete evidence proves there is no live billing, normal closing continues.
 A refund already independently queued after a confirmed stop does not retain
@@ -31,7 +31,7 @@ files; its refund worker remains responsible after deletion.
 `HELD_EXPOSURE` and `heldStoreMonthlyExposure` in `tests/plan-cost-registry.ts`
 count the full paid-tier file/task/community ceiling and the full data room
 plus **peak** outside-room keys and a4096-byte index allowance per held store,
-for31days. They add up to31 two-read timeout waits per store,128 bookkeeping
+for31days. They add up to31 recovery attempts per store, each at most21 timeout-bounded GETs,128 bookkeeping
 commands and MAX_STORE_BYTES+128KiB of database replies per retry. The global
 model uses at most1550 attempts/month, the reviewed simultaneous case cap,
 three overlapping daily hashes (50 hashed identities each, two-day TTL) and

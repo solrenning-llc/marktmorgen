@@ -6,7 +6,7 @@ import type {ContractGrant} from '@/lib/contract-funding';
 import type {Store} from '@/lib/store';
 import {PUBLISHED_PLAN_PRICES} from '@/lib/plan';
 process.env.STRIPE_SECRET_KEY='sk_test_not_a_real_deployment_key';
-const store={statsId:'metadata-one',handle:'harbor',email:'owner@example.test',stripeCustomerId:null,subscriptionId:null,extra:false} as Store;
+const store={handleOwnership:[{handle:'harbor',acquiredAt:1000,releasedAt:null},{handle:'old-harbor',acquiredAt:1000,releasedAt:null}],statsId:'metadata-one',handle:'harbor',email:'owner@example.test',stripeCustomerId:null,subscriptionId:null,extra:false} as Store;
 function grant(action:ContractGrant['action']='checkout'):ContractGrant{const now=Math.floor(Date.now()/1000);return{sourceSubscriptionId:action==='switch'?'sub_Test000001':null,action,id:'ctr_metadata',reviewId:'test_only',statsId:'metadata-one',key:'creator_year',reservedCents:93153,submitUntilSeconds:now+300,checkoutExpiresAtSeconds:now+3600,activationUntilSeconds:now+86400,liabilitiesThrough:'2099-01-01T00:00:00.000Z'};}
 function sourcePeriod(){const now=Math.floor(Date.now()/1000);return{current_period_start:now-86400,current_period_end:now+30*86400};}
 test('funded checkout carries its reserve reference, fixed price and bounded expiration to Stripe',async()=>{const old=globalThis.fetch;const g=grant();let body:URLSearchParams|null=null;globalThis.fetch=async(input,init)=>{const url=new URL(String(input));if(url.pathname==='/v1/checkout/sessions'){body=new URLSearchParams(String(init?.body));return Response.json({url:'https://checkout.stripe.test/session'});}return Response.json({error:{message:'TEST ONLY no catalog'}},{status:404});};try{assert.equal(await createBillingCheckout(store,'https://marktmorgen.test',{tier:'creator',cycle:'year'},null,g),'https://checkout.stripe.test/session');const sent=body as URLSearchParams|null;assert.ok(sent);assert.equal(sent.get('metadata[store_id]'),store.statsId);assert.equal(sent.get('subscription_data[metadata][store_id]'),store.statsId);assert.equal(sent.get('metadata[funding_grant]'),g.id);assert.equal(sent.get('subscription_data[metadata][funding_review]'),g.reviewId);assert.equal(sent.get('line_items[0][price_data][unit_amount]'),'69000');assert.equal(sent.get('expires_at'),String(g.checkoutExpiresAtSeconds));}finally{globalThis.fetch=old;}});
@@ -446,7 +446,7 @@ test('subscription search requires a complete bounded page before treating it as
 
 test('documented canceled DeletedCustomer preserves only proven foreign exclusion and own legacy terminal history',async()=>{
  const old=globalThis.fetch,now=Math.floor(Date.now()/1000);
- const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:['old-harbor'],releasedHandles:['released-harbor'],releasedHandleAt:{'released-harbor':now-50}} as Store;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:['old-harbor'],releasedHandles:['released-harbor'],releasedHandleAt:{'released-harbor':now-50},handleOwnership:[...store.handleOwnership!,{handle:'released-harbor',acquiredAt:1000,releasedAt:(now-50)*1000}]} as Store;
  const deleted=(handle:string,id='cus_Test000001')=>({id:'sub_Deleted001',created:now-100,status:'canceled',metadata:{store:handle},customer:{id,object:'customer',deleted:true}});
  let page:unknown={data:[],has_more:false},reads=0,writes=0;
  globalThis.fetch=async(input,init)=>{reads++;if(init?.method!=='GET')writes++;const list=new URL(String(input)).pathname==='/v1/subscriptions'; const body=page as {data:Record<string,unknown>[];has_more:boolean}; const data=body.data.filter(row=>{const meta=row.metadata as {store:string};const customer=row.customer as {id:string};return list?customer.id===owner.stripeCustomerId:meta.store!=='released-harbor';});return Response.json({...body,data});};
@@ -573,7 +573,7 @@ test('both recovery pages must be complete before a funded subscription is activ
  const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
  const handles=Array.from({length:11},(_,index)=>'harbor-'+index);
  const owner={...store,stripeCustomerId:'cus_Test000001',handle:handles[0],previousHandles:[],releasedHandles:handles.slice(1)} as Store;
- const subscription={id:'sub_Test000001',customer:{id:owner.stripeCustomerId,email:owner.email},created,status:'active',metadata:{store:owner.handle,funding_grant:'ctr_metadata',funding_review:'test_only'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
+ const subscription={id:'sub_Test000001',customer:{id:owner.stripeCustomerId,email:owner.email},created,status:'active',metadata:{store:owner.handle,store_id:owner.statsId,funding_grant:'ctr_metadata',funding_review:'test_only'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
  let reads=0,writes=0,complete=false;
  globalThis.fetch=async(_input,init)=>{reads++;if(init?.method!=='GET')writes++;return Response.json(reads%2===1?{data:[subscription],has_more:false}:{data:[],has_more:!complete});};
  try{

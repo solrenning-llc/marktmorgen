@@ -4,7 +4,7 @@ import type { Store } from "@/lib/store";
 import { done, is, part } from "./check";
 
 const origin = "https://marktmorgen.example.test";
-const fresh = { handle: "trial-policy", email: "owner@example.test", stripeCustomerId: null, subscriptionId: null, extra: false } as unknown as Store;
+const fresh = { statsId: "trial-policy-identity", handle: "trial-policy", email: "owner@example.test", stripeCustomerId: null, subscriptionId: null, extra: false } as unknown as Store;
 let choice: { tier: Tier; cycle: Cycle } = { tier: "creator", cycle: "month" };
 let catalog = false;
 let refusal: "customer" | "price" | null = null;

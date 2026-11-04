@@ -22,7 +22,7 @@ import { done, is, part } from "./check";
 import { claimHandle, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { FINAL_INDEX, inClosingDay } from "@/lib/closing-holds";
 import { prepareStore } from "@/lib/closed-store-data";
-import { UNDO_KEY, expirePlanCheckouts, markShut, planReturnedLetter, refusePlanIfClosing, refuseSession, retryPlanUndos } from "@/lib/closing-plan-guard";
+import { UNDO_KEY, expirePlanCheckouts, markShut, planReturnedLetter, refusePlanIfClosing as refuseObservedPlanIfClosing, refuseSession, retryPlanUndos } from "@/lib/closing-plan-guard";
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { closeOne, type Hands } from "@/lib/plan-closing";
 import { redisPipeline } from "@/lib/redis";
@@ -153,13 +153,21 @@ async function closingStore(handle: string, day: number, amount = 6_900) {
   await redisPipeline([["ZADD", FINAL_INDEX, day - 30 * DAY, storeRef((await storeForEmail(email))!)]]);
   await markShut((await storeForEmail(email))!, day);
   const id = `sub_${handle}late01`;
-  world.subs.set(id, { id, status: "active", customer, metadata: { store: handle, tier: "creator" }, created: S(day) - 3_600 });
+  world.subs.set(id, { id, status: "active", customer, metadata: { store: handle, store_id: (await storeForEmail(email))!.statsId!, tier: "creator" }, created: S(day) - 3_600 });
   const pi = `pi_${handle}late01`;
   world.invoices.push({ id: `in_${handle}late01`, subscription: id, status: "paid", amount_paid: amount, payment_intent: pi, created: S(day) - 3_600, paid_at: S(day) + 600 });
   world.charges.set(pi, { amount, disputed: false });
-  world.sessions.push({ id: `cs_test_${handle}late0001`, status: "complete", mode: "subscription", customer, subscription: id, metadata: { store: handle } });
+  world.sessions.push({ id: `cs_test_${handle}late0001`, status: "complete", mode: "subscription", customer, subscription: id, metadata: { store: handle, store_id: (await storeForEmail(email))!.statsId! } });
   return { email, id, pi, customer };
 }
+
+// Each caller passes the same provider row it has already observed. This is
+// identity evidence, not an additional provider request or an invented date.
+const refusePlanIfClosing = (input: Parameters<typeof refuseObservedPlanIfClosing>[0]) => {
+  const subscription = world.subs.get(input.subscriptionId);
+  return refuseObservedPlanIfClosing({ ...input, subscription,
+    ...(subscription?.metadata.store_id ? {storeId: subscription.metadata.store_id} : {}) });
+};
 
 const refundsOf = (pi: string) => world.refunds.filter((row) => row.payment_intent === pi);
 const undo = async (id: string) => {
@@ -210,7 +218,7 @@ async function main() {
 
   part("The store's own plan from before its closing day, still able to charge: ended, nothing refunded, no letter");
   const uma = await closingStore("uma", day);
-  world.subs.set("sub_umaold0001", { id: "sub_umaold0001", status: "past_due", customer: uma.customer, metadata: { store: "uma", tier: "creator" }, created: S(day) - 60 * 86_400 });
+  world.subs.set("sub_umaold0001", { id: "sub_umaold0001", status: "past_due", customer: uma.customer, metadata: { store: "uma", store_id: (await storeForEmail(uma.email))!.statsId!, tier: "creator" }, created: S(day) - 60 * 86_400 });
   world.invoices.push({ id: "in_umaold0001", subscription: "sub_umaold0001", status: "paid", amount_paid: 6_900, payment_intent: "pi_umaold0001", created: S(day) - 60 * 86_400, paid_at: S(day) - 60 * 86_400 });
   world.charges.set("pi_umaold0001", { amount: 6_900, disputed: false });
   const umaBefore = sent.filter((m) => m.to === uma.email).length;
@@ -219,7 +227,7 @@ async function main() {
 
   part("A plan paid by card three minutes before the day, found only once the day has begun: refunded, and the creator told");
   const dora = await closingStore("dora", day);
-  world.subs.set("sub_doralate02", { id: "sub_doralate02", status: "active", customer: dora.customer, metadata: { store: "dora", tier: "creator" }, created: S(day) - 180 });
+  world.subs.set("sub_doralate02", { id: "sub_doralate02", status: "active", customer: dora.customer, metadata: { store: "dora", store_id: (await storeForEmail(dora.email))!.statsId!, tier: "creator" }, created: S(day) - 180 });
   world.invoices.push({ id: "in_doralate02", subscription: "sub_doralate02", status: "paid", amount_paid: 6_900, payment_intent: "pi_doralate02", created: S(day) - 180, paid_at: S(day) - 180 });
   world.charges.set("pi_doralate02", { amount: 6_900, disputed: false });
   const doraBefore = sent.filter((m) => m.to === dora.email).length;
@@ -231,10 +239,10 @@ async function main() {
   is("a plan paid once the day had begun keeps its own words", [rosaLetter.includes("had already begun closing on Marktmorgen when this plan went through, so the plan could not be given"), rosaLetter.includes("too late to stop")], [true, false]);
 
   part("A store already deleted, its plan found by the daily sync: one started after its last plan ended is refunded, never taken for its old one");
-  const goneTwo = { handle: "gone-two", previousHandles: [], releasedHandles: [] };
+  const goneTwo = { statsId: "gone-two-identity", handle: "gone-two", previousHandles: [], releasedHandles: [] };
   await markShut(goneTwo, day, day - 30 * 86_400_000);
   world.customers.set("cus_gonetwo01", "gonetwo@example.com");
-  world.subs.set("sub_gonetwo001", { id: "sub_gonetwo001", status: "active", customer: "cus_gonetwo01", metadata: { store: "gone-two" }, created: S(day) - 10 * 86_400 });
+  world.subs.set("sub_gonetwo001", { id: "sub_gonetwo001", status: "active", customer: "cus_gonetwo01", metadata: { store: "gone-two", store_id: goneTwo.statsId }, created: S(day) - 10 * 86_400 });
   world.invoices.push({ id: "in_gonetwo001", subscription: "sub_gonetwo001", status: "paid", amount_paid: 6_900, payment_intent: "pi_gonetwo001", created: S(day) - 10 * 86_400, paid_at: S(day) - 10 * 86_400 });
   world.charges.set("pi_gonetwo001", { amount: 6_900, disputed: false });
   await refusePlanIfClosing({ store: null, handle: "gone-two", subscriptionId: "sub_gonetwo001", customerId: "cus_gonetwo01" });
@@ -307,10 +315,10 @@ async function main() {
   is("and its plan runs", world.subs.get("sub_owenplan01")?.status, "active");
 
   part("A store whose records are gone is still known by its marked address");
-  const gone = { handle: "gone-shop", previousHandles: [], releasedHandles: [] };
+  const gone = { statsId: "gone-shop-identity", handle: "gone-shop", previousHandles: [], releasedHandles: [] };
   await markShut(gone, day);
   world.customers.set("cus_gone0001", "gone@example.com");
-  world.subs.set("sub_gonelate01", { id: "sub_gonelate01", status: "active", customer: "cus_gone0001", metadata: { store: "gone-shop" }, created: S(day) });
+  world.subs.set("sub_gonelate01", { id: "sub_gonelate01", status: "active", customer: "cus_gone0001", metadata: { store: "gone-shop", store_id: gone.statsId }, created: S(day) });
   world.invoices.push({ id: "in_gonelate01", subscription: "sub_gonelate01", status: "paid", amount_paid: 6_900, payment_intent: "pi_gonelate01", created: S(day) + 60, paid_at: S(day) + 60 });
   world.charges.set("pi_gonelate01", { amount: 6_900, disputed: false });
   is("ended and returned, the creator told at the customer's address", [await refusePlanIfClosing({ store: null, handle: "gone-shop", subscriptionId: "sub_gonelate01", customerId: "cus_gone0001" }), refundsOf("pi_gonelate01").length, sent.filter((m) => m.to === "gone@example.com").length], ["returned", 1, 1]);
@@ -330,14 +338,14 @@ async function main() {
 
   part("When the day starts, the store's open plan checkouts are expired");
   world.sessions.push(
-    { id: "cs_test_rosaopen00001", status: "open", mode: "subscription", customer: rosa.customer, metadata: { store: "rosa" } },
+    { id: "cs_test_rosaopen00001", status: "open", mode: "subscription", customer: rosa.customer, metadata: { store: "rosa", store_id: (await storeForEmail(rosa.email))!.statsId! } },
     { id: "cs_test_rosaother0001", status: "open", mode: "subscription", customer: rosa.customer, metadata: { store: "rosa-two" } },
-    { id: "cs_test_rosaaddon0001", status: "open", mode: "payment", customer: rosa.customer, metadata: { store: "rosa" } },
+    { id: "cs_test_rosaaddon0001", status: "open", mode: "payment", customer: rosa.customer, metadata: { store: "rosa", store_id: (await storeForEmail(rosa.email))!.statsId! } },
   );
   const expired = await expirePlanCheckouts((await storeForEmail(rosa.email))!, [rosa.customer]);
   is("only its own open plan checkout is expired", [expired, world.expired], [1, ["cs_test_rosaopen00001"]]);
   is("another store's checkout is not this store's to refuse or expire", [await refuseSession((await storeForEmail(rosa.email))!, "cs_test_rosaother0001"), world.expired.length], ["no", 1]);
-  world.sessions.push({ id: "cs_test_rosaopen00002", status: "open", mode: "subscription", customer: rosa.customer, metadata: { store: "rosa" } });
+  world.sessions.push({ id: "cs_test_rosaopen00002", status: "open", mode: "subscription", customer: rosa.customer, metadata: { store: "rosa", store_id: (await storeForEmail(rosa.email))!.statsId! } });
   is("one of its own still open when met on the way back is expired there", [await refuseSession((await storeForEmail(rosa.email))!, "cs_test_rosaopen00002"), world.expired.at(-1)], ["no", "cs_test_rosaopen00002"]);
 
   part("A stopped late plan's queued refund outlives the closing store");

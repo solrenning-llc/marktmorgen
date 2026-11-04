@@ -32,7 +32,7 @@
  * it `email` for the first kind and works the same for the second.
  */
 import { type PlanDispute, parsePlanDispute, parsePlanDisputes, withPlanDispute } from "@/lib/plan-dispute-rules";
-import { ownReleasedHandleTimes, releasedHandleTimes } from "@/lib/platform-plan-identity";
+import { ownReleasedHandleTimes, releasedHandleTimes, ownHandleOwnership, acquireHandleOwnership, releaseHandleOwnership, type HandleOwnership } from "@/lib/platform-plan-identity";
 import { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
 export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
@@ -377,6 +377,7 @@ export type Store = {
   releasedHandles: string[];
   /** Explicit release instants in epoch seconds; absent for undated legacy history. */
   releasedHandleAt?: Record<string, number>;
+  handleOwnership?: HandleOwnership[];
   renamedAt: string;
   /**
    * The creator's own Stripe account, once they have connected it.
@@ -941,6 +942,7 @@ function parseStore(raw: unknown): Store | null {
       releasedHandles: Array.isArray(value.releasedHandles)
         ? value.releasedHandles.filter((h) => typeof h === "string")
         : [],
+      ...(Object.hasOwn(value, "handleOwnership") ? { handleOwnership: ownHandleOwnership(value) ?? [] } : {}),
       ...(Object.hasOwn(value, "releasedHandleAt") ? {
         releasedHandleAt: ownReleasedHandleTimes(value) ?? Object.create(null),
       } : {}),
@@ -1303,6 +1305,7 @@ async function freshStore(fields: {
     activationTracked: true,
     previousHandles: [],
     releasedHandles: [],
+    handleOwnership: [{ handle: fields.handle, acquiredAt: Date.parse(createdAt), releasedAt: null }],
     renamedAt: "",
     stripeAccountId: null,
     stripeChargesEnabled: false,
@@ -1920,6 +1923,7 @@ export async function renameHandle(
       next = await save({
         ...store,
         handle,
+        ...(claimed ? { handleOwnership: acquireHandleOwnership(store, handle, Date.now()) } : {}),
         previousHandles: [
           ...store.previousHandles.filter((old) => old !== handle),
           store.handle,
@@ -2280,6 +2284,7 @@ export async function releaseHandle(
       ...store,
       previousHandles: store.previousHandles.filter((old) => old !== handle),
       releasedHandles: [...store.releasedHandles.filter((old) => old !== handle), handle],
+      handleOwnership: releaseHandleOwnership(store, handle, releasedAtMs),
       releasedHandleAt: { ...(releasedHandleTimes(store.releasedHandleAt) ?? {}), [handle]: releasedAt },
     });
     return { ok: true, store: next };

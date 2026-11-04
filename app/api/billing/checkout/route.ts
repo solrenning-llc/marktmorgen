@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
   const { ref, store, origin, studio } = creator;
 
   if (!isBillingConfigured()) return away(origin, studio("billing=unavailable"));
-  if (store.subscriptionActive) return away(origin, studio("billing=already"));
+
   // Not open yet (lib/opening.ts): no card is taken, and Stripe is not asked.
   if (!PLANS_ON_SALE) return away(origin, studio("billing=not-open"));
   // Its closing day has begun (queue item 307 [EC1]): its members' memberships
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     lapsed = found.lapsed;
   } catch (error) {
     console.error("looking for this store's subscriptions failed", error);
-    return away(origin, studio("billing=error"));
+    return away(origin, studio("billing=unknown"));
   }
   // One whose card failed, or whose first payment never finished, is ended
   // first: otherwise a retry that goes through later would charge beside the

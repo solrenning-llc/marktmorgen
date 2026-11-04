@@ -12,6 +12,7 @@ const owner = "billing-flow@example.com";
 const id = "sub_BillingFlow01";
 const cursor = "sub_RetainedCursor01";
 const listCursorKey = "nl:billing:sync:after";
+let statsId = "";
 let list: unknown = { data: [], has_more: false };
 let detail: unknown = null;
 const calls: string[] = [];
@@ -31,10 +32,11 @@ async function setup() {
   await ensureStatsId(owner);
   await setSubscription(owner, { customerId: "cus_BillingFlow01", subscriptionId: id, active: true, tier: "creator", cycle: "month", period: paidPeriod() });
   const store = (await storeForEmail(owner))!;
+  statsId = store.statsId!;
   assert.ok(store.subscriptionActive && allowanceWindow(store), "fixture has a paid recorded period");
   return store;
 }
-const row = (status: unknown, rowId = id) => ({ id: rowId, status, metadata: { store: "billing-flow-shop" } });
+const row = (status: unknown, rowId = id) => ({ id: rowId, status, customer: "cus_BillingFlow01", metadata: { store: "billing-flow-shop", store_id: statsId } });
 
 async function main() {
   part("Whole-list refusal preserves real stored paid rights and continuation");

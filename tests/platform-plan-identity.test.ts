@@ -7,6 +7,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_synthetic_plan_identity_only";
 const second = Math.floor(Date.now() / 1000);
 const owner = () => ({
   statsId: "a".repeat(32), handle: "alpha", previousHandles: [],
+  handleOwnership: [{ handle: "xray", acquiredAt: (second - 200) * 1000, releasedAt: (second - 100) * 1000 }],
   releasedHandles: ["xray"], releasedHandleAt: { xray: second - 100 },
   stripeCustomerId: "cus_OneOwner001", email: "owner@example.test",
   subscriptionId: null, extra: false,
@@ -31,7 +32,7 @@ test("C86-1 a legacy released name proves ownership only before its recorded rel
   assert.equal(ownedBy(a, plan({ store: "xray" }, second)), false);
   assert.equal(ownedBy(a, plan({ store: "xray" }, second - 100)), false, "equal seconds do not prove before");
   assert.equal(ownedBy(a, plan({ store: "xray" }, second - 101)), true);
-  a.releasedHandleAt = {};
+  a.handleOwnership = [];
   assert.equal(ownedBy(a, plan({ store: "xray" }, second - 101)), false, "missing date is not invented");
 });
 
@@ -130,7 +131,49 @@ test("C86-1 the daily sync cannot apply store A's removed-name marker to store B
     throw new Error("Unexpected synthetic provider request: " + init?.method + " " + url.pathname);
   };
   try {
-    await syncSubscriptions();
+    await syncSubscriptions(Date.now() + 60_000);
     assert.deepEqual(stopped, [], "a released name marker is not another store's closing identity");
   } finally { globalThis.fetch = original; }
+});
+
+
+test("CX96 current-name legacy ownership needs an acquisition interval too", () => {
+  const a = owner();
+  assert.equal(ownedBy(a, plan({ store: "alpha" })), false);
+});
+
+test("CX96 the gap before acquiring a released name never proves ownership", () => {
+  const a = owner();
+  Object.assign(a, { handleOwnership: [{ handle: "xray", acquiredAt: (second - 200) * 1000, releasedAt: (second - 100) * 1000 }] });
+  assert.equal(ownedBy(a, plan({ store: "xray" }, second - 300)), false);
+  assert.equal(ownedBy(a, plan({ store: "xray" }, second - 150)), true);
+});
+
+
+test("CX96 an undated legacy plan refuses checkout recovery and keeps final closing coverage unknown", async () => {
+  const original = globalThis.fetch, a = owner();
+  a.handleOwnership = [];
+  const legacy = plan({store:"alpha"}); let writes = 0;
+  globalThis.fetch = async (_input, init) => {if(init?.method !== "GET") writes++; return Response.json({data:[legacy],has_more:false});};
+  try {
+    const observation = await observeStoreSubscriptions(a);
+    await assert.rejects(observation.find(), /ownership is unknown/);
+    await assert.rejects(observation.customerLive(), /ownership is unknown/);
+    assert.deepEqual(observation.closingPlans(), {complete:false,plans:[]});
+    assert.equal(writes,0);
+  } finally {globalThis.fetch = original;}
+});
+
+test("CX96 a closing marker and shared customer alone cannot cancel or refund a legacy plan", async () => {
+  const {store:redis} = await import("./redis-stub");
+  const {markShut,refusePlanIfClosing,UNDO_KEY,settleOne} = await import("@/lib/closing-plan-guard");
+  redis.clear(); const original=globalThis.fetch, a=owner(); let writes=0;
+  globalThis.fetch=async()=>{writes++;throw Error("No money operation is authorized");};
+  try {
+    await markShut(a,Date.now()-1000);
+    assert.equal(await refusePlanIfClosing({store:null,handle:"alpha",subscriptionId:"sub_StoreB00001",customerId:a.stripeCustomerId!,subscription:plan({store:"alpha"})}),"returning");
+    await redis.run(["HSET",UNDO_KEY,"sub_Unproved001",JSON.stringify({h:"alpha",c:a.stripeCustomerId,to:"",name:"",since:Date.now()-1000,at:Date.now(),n:0})]);
+    assert.equal(await settleOne("sub_Unproved001"),false);
+    assert.equal(writes,0);
+  } finally {globalThis.fetch=original;}
 });

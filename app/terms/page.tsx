@@ -889,14 +889,14 @@ export default function TermsPage() {
         </p>
         <p>
           <strong className="text-black">Download what you want to keep before that day.</strong>{" "}
-          The studio offers your whole store as one file: while your plan
+          The studio offers your store&rsquo;s main data as one file: while your plan
           runs, as often as your plan&rsquo;s studio use allows, and{" "}
           {ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`}{" "}
           after it ends, before the closing day, whatever the store&rsquo;s
           size. It holds your products and their pages, posts,
           courses with every lesson&rsquo;s text, forms and their answers,
           contacts and your orders as a spreadsheet. Files and videos
-          download from their own pages. Your students can download their
+          download from their own pages. Nothing else is in the file: files, videos, community posts, email sequences, broadcasts, reviews and CRM deals and tasks are not in it. Your students can download their
           course certificates until the closing day, and not after.
         </p>
         <p>

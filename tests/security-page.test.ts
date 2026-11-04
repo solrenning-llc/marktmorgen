@@ -63,12 +63,30 @@ const exportKeys = [...new Set([...exporter.matchAll(/[,{]\\?"(\w+)\\?":/g)].map
 const exportAt = words.indexOf('"title":"A copy of your store');
 const exportCopy = exportAt < 0 ? "" : words.slice(exportAt, words.indexOf("}", exportAt));
 const copyText = exportCopy.toLowerCase();
-const excluded = (/"notIncluded":"([^"]*)"/.exec(exporter)?.[1] ?? "").split(":")[0].toLowerCase();
+const excluded = (/"notIncluded":"([^"]*)"/.exec(exporter)?.[1] ?? "").toLowerCase();
 const promised = (/ (?:download )?a copy of (.*?) as one file/.exec(copyText)?.[1] ?? "");
 is("the export keys are products, courses, posts, forms, contactsCsv, ordersCsv", exportKeys.sort(), ["contactsCsv", "courses", "forms", "ordersCsv", "posts", "products"]);
-is("the copy names each exported part", ["products", "courses", "posts", "forms", "contacts", "orders"].map((word) => promised.includes(word)), [true, true, true, true, true, true]);
-is("the copy lists each exclusion of notIncluded and the CRM tasks (not in storeExport)", [["files", "videos", "community posts"].map((word) => excluded.includes(word) && /not in it/.test(copyText) && copyText.includes(word)), !/readPersonTasks|crm/.test(exporter) && copyText.includes("crm tasks")], [[true, true, true], true]);
-is("the copy does not promise everything or the whole store", [/everything|whole store|entire store/.test(copyText), says("can download everything your store keeps")], [false, false]);
+const hasWord = (text: string, word: string) => new RegExp(`(^|[^a-z])${word}([^a-z]|$)`, "i").test(text);
+const NAMED = ["products", "courses", "posts", "forms", "contacts", "orders"];
+const LEFT_OUT = ["files", "videos", "community posts", "email sequences", "broadcasts", "reviews", "CRM deals", "tasks"];
+const sentenceFor = (raw: string) => {
+  const text = raw.replace(/",\s*"\s*/g, " ").replace(/\s+/g, " ");
+  const at = Math.max(0, text.search(/main data/i));
+  const end = text.indexOf("are not", at);
+  return text.slice(at, end < 0 ? at + 700 : end + 12);
+};
+// Every place that promises the export, in the page items and across the site (review of #2114, items 1 to 4).
+const promiseSites: [string, string][] = [
+  ["security page item", copyText],
+  ["feature page 'as one file' item", (() => { const at = words.indexOf("Your store's main data as one file"); return at < 0 ? "" : words.slice(at, words.indexOf("}", at)); })()],
+  ...["app/studio/page.tsx", "lib/plan-closing.ts", "app/terms/page.tsx", "lib/help-content.ts", "lib/plan-refund-words.ts", "app/mission/page.tsx"].map((file): [string, string] => [file, read(file)]),
+];
+is("the copy names each exported part, as whole words", NAMED.map((word) => hasWord(promised.replace(/blog posts/, "posts"), word)), NAMED.map(() => true));
+is("the copy lists each exclusion of notIncluded and the CRM tasks (not in storeExport)", [["files", "videos", "community posts"].map((word) => excluded.includes(word) && hasWord(copyText, word)), !/readPersonTasks|crm/.test(exporter) && hasWord(copyText, "CRM deals and tasks")], [[true, true, true], true]);
+is("the copy says nothing else is in the file, and the file's own note says it too", [/nothing else is in the file/.test(copyText), /nothing else is in this file/i.test(exporter)], [true, true]);
+is("no site text promises everything or the whole store", promiseSites.map(([, text]) => /\b(everything|whole store|entire store)\b/i.test(sentenceFor(text)) || /download everything your store|your whole store, as one file|downloaded your whole store/i.test(text)), promiseSites.map(() => false));
+is("each place says what is left out, as whole words", promiseSites.filter(([name]) => name !== "app/mission/page.tsx" && name !== "feature page 'as one file' item").map(([, text]) => LEFT_OUT.every((word) => hasWord(sentenceFor(text), word))), [true, true, true, true, true, true].slice(0, promiseSites.length - 2));
+is("the studio button is not 'Download everything' for the store file", /name="what" value="store"[\s\S]{0,200}Download the file/.test(read("app/studio/page.tsx")), true);
 is("the export is offered from the studio", [/what === "store"/.test(read("app/api/store/export/route.ts")), /export function storeExport/.test(exporter)], [true, true]);
 is("a buyer deletes their own data by an emailed link", [says("Buyers can delete their own data"), words.includes('"href":"/privacy/delete"'), existsSync("app/privacy/delete/page.tsx"), existsSync("app/api/privacy/erase/route.ts")], [true, true, true, true]);
 is("a creator deletes one person", [says("can delete one person from your store"), /erasePerson\(/.test(read("app/api/store/person/route.ts"))], [true, true]);

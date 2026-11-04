@@ -31,8 +31,12 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
   const [shown, setShown] = useState(products);
   const [busy, setBusy] = useState<string | null>(null);
   const [said, setSaid] = useState<Record<string, string>>({});
-  // Where focus goes once a product's button is replaced by its result, so a keyboard user keeps their place.
+  // Where focus goes once a product's button is replaced by its result, so a keyboard user keeps their place;
+  // after a refusal the button stays, and focus goes back to it.
   const statusRefs = useRef<Record<string, HTMLParagraphElement | null>>({});
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // One short sentence for screen readers, said once; the full one stays beside the product.
+  const [announce, setAnnounce] = useState("");
 
   async function make(product: Product) {
     if (busy) return;
@@ -44,25 +48,31 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
       if (answer.ok && answer.summary) {
         setShown((all) => all.map((p) => (p.id === product.id ? { ...p, summary: answer.summary! } : p)));
         setSaid((all) => ({ ...all, [product.id]: typeof answer.left === "number" ? `Made. ${answer.left} AI ${answer.left === 1 ? "job" : "jobs"} left this month.` : "This week's summary." }));
+        setAnnounce(`The summary of ${product.title}'s reviews is ready.`);
+        window.setTimeout(() => statusRefs.current[product.id]?.focus(), 0);
       } else {
         setSaid((all) => ({ ...all, [product.id]: REFUSALS[answer.error ?? "failed"] ?? REFUSALS.failed }));
+        setAnnounce(`No summary of ${product.title}'s reviews was made.`);
+        window.setTimeout(() => buttonRefs.current[product.id]?.focus(), 0);
       }
     } catch {
       setSaid((all) => ({ ...all, [product.id]: "That did not work. Check your connection and try again." }));
+      setAnnounce(`No summary of ${product.title}'s reviews was made.`);
+      window.setTimeout(() => buttonRefs.current[product.id]?.focus(), 0);
     } finally {
       setBusy(null);
-      window.setTimeout(() => statusRefs.current[product.id]?.focus(), 0);
     }
   }
 
   return (
     <section aria-labelledby="ai-summaries-title" className="card p-5 sm:p-6">
       <h2 id="ai-summaries-title" className="font-semibold text-ink">
-        AI summary of each product&apos;s reviews
+        {`AI summary of each product's reviews (${shown.length} ${shown.length === 1 ? "product" : "products"})`}
       </h2>
-      <p className="mt-1 text-xs text-ink-soft">
-        AI sorts a product&apos;s reviews into the themes they repeat; the counts are your reviewers&apos;. Every rating counts the same. One AI job each, at most once a week. Only you and your team see it for now.
+      <p className="mt-1 text-sm text-ink-soft">
+        AI groups a product&apos;s reviews by the topics people repeat. The numbers are counted from your reviewers&apos; own words, and every rating counts the same. Each summary uses one of your monthly AI jobs (the AI work your plan includes), and you can make one per product each week. Only you and your team see it for now.
       </p>
+      <p className="sr-only" role="status">{announce}</p>
       {shown.length ? (
         <ul className="mt-3 space-y-4">
           {shown.map((product) => {
@@ -74,22 +84,27 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
                 <h3 className="font-semibold text-ink [overflow-wrap:anywhere]">{product.title}</h3>
                 {product.summary ? (
                   <p className="mt-1 text-ink">
-                    <span className="sr-only">Summary sorted by AI: </span>
+                    <span className="font-semibold">AI-sorted summary: </span>
                     {line || "No theme was repeated by two reviews or more."}
-                    <span className="block text-xs text-ink-soft">{`Made ${day(product.summary.at)} from ${product.summary.read} ${product.summary.read === 1 ? "review" : "reviews"}.`}</span>
+                    <span className="block text-sm text-ink-soft">{`Made ${day(product.summary.at)} (UTC) from ${product.summary.read} ${product.summary.read === 1 ? "review" : "reviews"}.`}</span>
                   </p>
                 ) : null}
                 {canMake ? (
-                  <button type="button" className="btn btn-secondary btn-sm mt-2" aria-disabled={busy !== null} aria-busy={busy === product.id} onClick={() => void make(product)}>
-                    {product.summary ? "Make this week's summary" : "Make the summary"}
-                    <span className="sr-only">{` of ${product.title}'s reviews`}</span>
-                  </button>
+                  <>
+                    <button type="button" ref={(node) => { buttonRefs.current[product.id] = node; }} className="btn btn-secondary btn-sm mt-2 min-h-11" aria-disabled={busy !== null} aria-busy={busy === product.id} aria-describedby={busy !== null && busy !== product.id ? `ai-wait-${product.id}` : undefined} onClick={() => void make(product)}>
+                      {product.summary ? "Make this week's summary" : "Make the summary"}
+                      <span className="sr-only">{` of ${product.title}'s reviews`}</span>
+                    </button>
+                    {busy !== null && busy !== product.id ? (
+                      <p id={`ai-wait-${product.id}`} className="mt-1 text-sm text-ink-soft">One summary is made at a time. This one can be made when the other is ready.</p>
+                    ) : null}
+                  </>
                 ) : (
-                  <p className="mt-1 text-xs text-ink-soft">
-                    {product.reviews < MIN_SUMMARY_REVIEWS ? `A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews; this one has ${product.reviews}.` : `A new one can be made from ${day(nextAt)}.`}
+                  <p className="mt-1 text-sm text-ink-soft">
+                    {product.reviews < MIN_SUMMARY_REVIEWS ? `A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews; this one has ${product.reviews}.` : `A new one can be made from ${day(nextAt)} (UTC).`}
                   </p>
                 )}
-                <p className="mt-1 text-xs text-ink" role="status" tabIndex={-1} ref={(node) => { statusRefs.current[product.id] = node; }}>
+                <p className="mt-1 text-sm text-ink" tabIndex={-1} ref={(node) => { statusRefs.current[product.id] = node; }}>
                   {said[product.id] ?? ""}
                 </p>
               </li>

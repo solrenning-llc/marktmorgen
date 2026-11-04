@@ -20,7 +20,11 @@ part("A summary made this week");
 const html = draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: kept }]);
 is("a named section, each product under its own heading", html.includes('aria-labelledby="ai-summaries-title"') && html.includes("<h3") && html.includes("Pottery Course</h3>"), true);
 is("the themes with how many of the reviews read say each", html.includes("Reviewers often mention: clear lessons (5 of 12); friendly teacher (3 of 12)."), true);
-is("said as sorted by AI, the counts the reviewers', every rating alike", html.includes("Summary sorted by AI: ") && html.includes("the counts are your reviewers&#x27;") && html.includes("Every rating counts the same"), true);
+is("said as sorted by AI, visibly, the numbers the reviewers', every rating alike", html.includes("AI-sorted summary: ") && html.includes("The numbers are counted from your reviewers&#x27; own words") && html.includes("every rating counts the same"), true);
+is("its job said in plain words, with how many products", html.includes("one of your monthly AI jobs (the AI work your plan includes)") && /AI summary of each product&#x27;s reviews \(\d+ products?\)/.test(html), true);
+const source = readFileSync("components/review-ai-summaries.tsx", "utf8");
+is("one short live sentence, the product's line not a live region, focus back to the button after a refusal", [source.includes('<p className="sr-only" role="status">{announce}</p>'), (source.match(/role="status"/g) ?? []).length, source.includes("buttonRefs.current[product.id]?.focus()")], [true, 1, true]);
+is("the other products' buttons say why they wait, dates say UTC", [source.includes("One summary is made at a time. This one can be made when the other is ready."), source.includes("(UTC) from")], [true, true]);
 is("when it was made and from how many", html.includes("from 12 reviews"), true);
 is("no new one before a week, and when one can be made", [html.includes("Make this week"), html.includes("A new one can be made from")], [false, true]);
 

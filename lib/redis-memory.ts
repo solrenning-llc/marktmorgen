@@ -357,14 +357,27 @@ export class MemoryRedis {
           this.data.set(target, args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-save:v1\n") && args[0] === "1" && args.length === 5) {
+        if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
-          if (held instanceof Map && !held.has(args[2]) && held.size >= Number(args[4])) return 0;
+          const there = held instanceof Map && held.has(args[2]);
+          if (!there && args[5] === "edit") return 2;
+          if (!there && held instanceof Map && held.size >= Number(args[4])) return 0;
           this.hash(target).set(args[2], args[3]);
           return 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-value-take:v1\n") && args[0] === "1" && args.length === 3) {
+          const target = args[1];
+          this.live(target);
+          const held = this.data.get(target);
+          if (held === undefined) return null;
+          if (!(held instanceof Map)) throw new Error("WRONGTYPE");
+          const value = held.get(args[2]);
+          if (value === undefined) return null;
+          held.delete(args[2]);
+          return value;
         }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {

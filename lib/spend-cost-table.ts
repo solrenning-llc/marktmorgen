@@ -186,14 +186,15 @@ export type ProtocolInfrastructureBounds = {
 export function protocolInfrastructureMicroUsd(
   input: ProtocolInfrastructureBounds | null,
 ): { baseMicroUsd: number; providerAllowanceMicroUsd: number; totalMicroUsd: number } | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  if (!input || typeof input !== 'object') return null;
   const keys = ['functionCalls', 'memoryGbMilliseconds', 'cpuMilliseconds',
     'redisCommands', 'transferBytes', 'retainedBytes', 'retentionMonths', 'storageCopies'] as const;
   const values: bigint[] = [];
   try {
     // Reject unpriced categories before projecting the known components. A
     // complete profile must survive a plain-data snapshot without omissions.
-    if (![Object.prototype, null].includes(Object.getPrototypeOf(input)) ||
+    if (Array.isArray(input) ||
+        ![Object.prototype, null].includes(Object.getPrototypeOf(input)) ||
         Reflect.ownKeys(input).length !== keys.length) return null;
     for (const key of keys) {
       const field = Object.getOwnPropertyDescriptor(input, key);

@@ -59,7 +59,9 @@ test("protocol evidence is plain own enumerable data while frozen and null-proto
  }
  const derived = Object.assign(Object.create({unreviewedSupplier: null}), zero);
  const unreadable = new Proxy({...zero}, {getPrototypeOf(){throw Error("unreadable profile");}});
- for (const input of [derived, unreadable]) assert.equal(protocolInfrastructureMicroUsd(input), null);
+ const revoked = Proxy.revocable({...zero}, {});
+ revoked.revoke();
+ for (const input of [derived, unreadable, revoked.proxy]) assert.equal(protocolInfrastructureMicroUsd(input), null);
  const bound = {...zero, redisCommands: 1_000_000, retainedBytes: 1_000_000, retentionMonths: 12};
  const expected = protocolInfrastructureMicroUsd(bound);
  assert.ok(expected && expected.totalMicroUsd > 0);

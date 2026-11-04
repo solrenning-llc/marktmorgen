@@ -960,7 +960,8 @@ export default function PrivacyPage() {
           creator turned the question on, which of five answers they tapped
           when asked what was stopping them from buying. On a sales page it also
           says how long the page was open in front of them, as one of six ranges
-          (from under 10 seconds to 10 minutes or more), and we add one to that
+          (from under 10 seconds to 10 minutes or more), measured until they first
+          switch to another tab or app or leave, and we add one to that
           range&apos;s count. No cookie is set and
           nothing about the visitor is sent or kept; the device remembers only
           that the question was asked, so it is not asked again.

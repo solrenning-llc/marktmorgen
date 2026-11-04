@@ -1,6 +1,7 @@
 /**
  * How long measured visitors stayed on a sales page (639 [GL7](25),
- * lib/page-depth-rules.ts): each range with its share, as counted, never an
+ * lib/page-depth-rules.ts), until they first switched away or left (the one
+ * beacon a visit sends, components/page-depth.tsx): each range with its share, as counted, never an
  * average made up from ranges. Shown once enough visitors were measured for
  * a share to mean something; nothing about who they were.
  */
@@ -15,7 +16,7 @@ export function PageTime({ ranges, least }: { ranges: { words: string; count: nu
         <p className="mt-2 text-sm text-ink-soft">{`Shown once ${least} visitors have been measured; ${measured} so far. One visitor in eight is measured, with no cookie and nothing about who they are.`}</p>
       ) : (
         <>
-          <p className="mt-1 text-xs text-ink-soft">{`From ${measured} measured visitors: one in eight, with no cookie and nothing about who they are. The time the page was open in front of them.`}</p>
+          <p className="mt-1 text-xs text-ink-soft">{`From ${measured} measured visitors: one in eight, with no cookie and nothing about who they are. The time the page was open in front of them, until they first switched to another tab or app or left. Someone who comes back after switching away is counted with the time before they switched, so the times can read shorter than the real ones, more often on phones.`}</p>
           <table className="mt-3 w-full text-left text-sm">
             <caption className="sr-only">How long measured visitors stayed on this page</caption>
             <thead>

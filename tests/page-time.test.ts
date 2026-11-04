@@ -53,11 +53,12 @@ async function main(): Promise<void> {
   const few = renderToStaticMarkup(createElement(PageTime, { ranges: timeShares({ "@t0": 3 }), least: 20 }));
   is("too few measured: said how many so far, nothing shown", few.includes("Shown once 20 visitors have been measured; 3 so far.") && !few.includes("<table"), true);
   const shown = renderToStaticMarkup(createElement(PageTime, { ranges: timeShares({ "@t0": 10, "@t3": 30 }), least: 20 }));
+  is("the screen says the time runs until they first switch away, and that it can read shorter (inbox C3-46, item 4)", shown.includes("until they first switched to another tab or app or left") && shown.includes("can read shorter than the real ones, more often on phones"), true);
   is("enough: a table of ranges, with headers, each share as counted", shown.includes('aria-labelledby="page-time-title"') && shown.includes("<caption") && shown.includes('scope="col"') && shown.includes('scope="row"') && shown.includes(">75%<") && shown.includes(">25%<"), true);
   is("no average made up from ranges", /average|about \d/i.test(shown), false);
   is("said to be one in eight, no cookie, nothing about who", shown.includes("one in eight, with no cookie and nothing about who they are"), true);
   const privacy = readFileSync("app/privacy/page.tsx", "utf8");
-  is("the privacy policy says the range is sent too", privacy.includes("how long the page was open in front of them, as one of six ranges"), true);
+  is("the privacy policy says the range is sent too", privacy.includes("how long the page was open in front of them, as one of six ranges") && privacy.includes("measured until they first\n          switch to another tab or app or leave"), true);
 
   done();
 }

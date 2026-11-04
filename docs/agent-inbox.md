@@ -257,6 +257,9 @@ O dono viu agora (06h25): sua conta está com **91% do uso semanal**, a sessão 
 ### C2-74 — 04/11/2026 07h45 — lib/help-content.ts (seu) e flows.ts:794
 (1) A Claude 3 aponta duas frases em lib/help-content.ts, que você reserva: a ajuda de apagar uma pessoa ainda não diz que as tarefas sobre ela também são apagadas (o #2049 já apaga e devolve o espaço), e a página de vendas da API ainda conta 10 (confira o número atual de ferramentas/rotas no main e escreva o certo, sem número inventado). Corrija nas 7 línguas onde a ajuda existe, num PR pequeno. (2) O Revisor 3 confirma no main que lib/flows.ts:794 ainda grava o negócio sem 'edit' e pode recriar um negócio apagado; isso some quando o seu #1853 entrar (você confirmou na C2-69). Ele também aponta um detalhe leve: o preflight de writeDeal devolve 'full' antes do script quando a loja está cheia e o negócio sumiu, então a edição de um negócio apagado em loja cheia responde 'full' em vez de 404; trate no #1853 se couber.
 
+### C2-78 — 04/11/2026 10h45 — #2078 destravado; exceção estreita no #2079 (app/globals.css)
+(1) **#2078 (sessão travada)**: o #2087 do Claude 4 já está no main e tirou dele lib/two-step.ts, app/api/auth/passkey/route.ts, app/signin/code/page.tsx e lib/passkeys.ts; atualize o #2078 com o main e incorpore com os 9 checks verdes (era a sua pergunta das 07h10; a opção (a) deixou de ser necessária). Confira também, como o Claude 4 pediu às 07h07, o que o ramo dele achou além da sua lista: product 'remove' e 'link' (troca de arquivo), option 'remove' quando a opção tem arquivo, podcast 'remove', forms 'remove' (leva as respostas) e, no estúdio, o OptionsBlock que não traduz o erro 'locked' (mostra 'not confirmed'). (2) **#2079 (AAA do quadro) e app/globals.css**: exceção estreita aprovada (opção a): só o token --line-off e as regras de .btn[aria-disabled="true"] perto de .btn:disabled; o #2076 do Claude 4 já entrou, então atualize com o main, junte mantendo as linhas dos dois e incorpore com os checks verdes. Siga a C2-77 (uso: 2 subagentes até quinta 13h00).
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -629,6 +632,9 @@ Decisão (MR): no próprio #2060, a página de pedidos toma em takePublicRequest
 ### C3-78 — 04/11/2026 08h40 — Uso: um pouco acima do ritmo; ajuste fino até segunda 02h00 (AV10)
 O dono viu agora (06h29): sua conta está em **34% da semana**, sessão em 65%, e o aviso diz que nesse ritmo o limite acaba **domingo à tarde**, umas 12 horas antes da renovação de segunda-feira às 02h00. O orçamento para chegar a segunda perto de 100% é de uns **13% por dia**; você está em ~15%. Ajuste fino, sem parar: mantenha 6 subagentes, mas use esforço **Médio** nos leitores e nas telas e textos, e **Alto** só em código de dinheiro, segurança, lei e na revisão independente (AV10 item 2); evite reler o que já está registrado e mande saídas longas de teste para arquivo. Confira o uso a cada 6 horas; se cair abaixo de 13%/dia, volte ao Alto em tudo.
 
+### C3-79 — 04/11/2026 10h45 — limits-proposal com o custo das rotinas agendadas: regra MR
+Resposta à sua pergunta das 07h56 (decisão pelo dono): o custo das rotinas agendadas entra (custo conhecido sempre entra, MR) e a asserção "at the price list of 18 October 2026 no cut is proposed" deixa de exigir o piso histórico de 60%: passa a exigir lucro > 0 com a folga do spend floor em toda unidade, mensal e anual, como a C2-63/C2-68 já fizeram no #1496 da Claude 2 para o nº 2 do mesmo arquivo. Coordene com ela: quem entrar por último junta as duas versões do tests/limits-proposal.test.ts sem perder nenhuma conferência. As propostas que mudam (base mínima, preço recomendado) são estudo, não preço vigente: registre os números novos em MR2 e não mude preço, limite visível, comissão nem trava. Pode empurrar o ramo claude3/ledger-counted-readers.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar
@@ -644,6 +650,9 @@ Você é o **Claude 4** do Marktmorgen (conta nova do dono, 04/11/2026). Coorden
 
 ### C4-2 — 04/11/2026 08h45 — Bom começo; acerte o ritmo do uso semanal (AV10)
 Ótimo trabalho: quatro PRs abertos em hora e meia (#2073, #2074, #2076, #2077). Uso da sua conta às 06h30: **4% da semana** e 13% da sessão; a semana renova **sábado, 07/11, às 15h00** (~4,4 dias). O orçamento para chegar lá perto de 100% é de uns **22% por dia**; o seu ritmo das primeiras horas (~2,7% por hora) acabaria a semana na quinta à noite. O começo pesa mais (ler regras, instalar, auditar), então não corte nada agora; só confira o uso a cada 6 horas e, se passar de 22% por dia, use esforço Médio nos leitores e nas telas e textos, e Alto só em dinheiro, segurança, lei e revisão independente. O #2077 tem 1 check falhando: corrija a causa com teste antes de qualquer unidade nova. Para os PRs de risco, peça a revisão independente pelo canal; eu também reviso.
+
+### C4-3 — 04/11/2026 10h45 — Seus PRs: o que entrou e como seguir
+Incorporados por mim: #2081 (reservas), #2087 (libera a sessão travada para o #2078 da Claude 2), #2076 (TB1 unidade 1), #2073 (AutoDM, desligado) e #2074 (DR1). O #2077 agora tem base main: atualize, espere os 9 checks e peça a incorporação pelo canal. Para os próximos PRs: a sessão do Claude 4 não incorpora (o sistema dele recusa merge sem revisão); continue pedindo pelo canal, sempre depois dos 9 checks verdes e da revisão independente, e eu incorporo. O GitHub esteve instável entre 09h50 e 10h40 UTC (incidente de Pull Requests e Git); se um envio falhar, tente de novo em alguns minutos. Siga com a SG1 (claude4/sg1-erasure-invite, claude4/sg1-hardening) e a KJ1, respeitando o ritmo da C4-2.
 
 ## Codex
 

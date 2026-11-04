@@ -69,7 +69,7 @@ const en = {
   nothingArrived: "Nothing arrived? You may have paid with a different address: the one you typed at checkout. Try that one below.",
 
   // ---- The list of purchases -------------------------------------------------------
-  bookedCalls: (count: number): string => (count === 1 ? "Your booked call" : "Your booked calls"),
+  bookedCalls: (count: number): string => (count === 1 ? "Your booking" : "Your bookings"),
   nothingToOpen: (store: string) =>
     `There is nothing to open here anymore. A purchase that was refunded in full is no longer listed. If something is missing, reply to the order confirmation you were emailed when you paid, and it reaches ${store}.`,
   everythingSold: (store: string) =>
@@ -303,7 +303,7 @@ const es: OrdersWords = {
     `Si esa dirección le compró algo a ${store}, el enlace va en camino. Llega de ${store} vía Marktmorgen, normalmente en menos de un minuto. Si no está, mira en la carpeta de spam.`,
   nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Prueba con esa abajo.",
 
-  bookedCalls: (count) => (count === 1 ? "Tu llamada reservada" : "Tus llamadas reservadas"),
+  bookedCalls: (count) => (count === 1 ? "Tu reserva" : "Tus reservas"),
   nothingToOpen: (store) =>
     `Aquí ya no hay nada que abrir. Una compra reembolsada por completo deja de aparecer. Si falta algo, responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
   everythingSold: (store) =>
@@ -513,7 +513,7 @@ const fr: OrdersWords = {
     `Si cette adresse a acheté quelque chose chez ${store}, le lien est en route. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute. S'il n'y est pas, regardez dans les spams.`,
   nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Essayez-la ci-dessous.`,
 
-  bookedCalls: (count) => (count < 2 ? "Votre appel réservé" : "Vos appels réservés"),
+  bookedCalls: (count) => (count < 2 ? "Votre réservation" : "Vos réservations"),
   nothingToOpen: (store) =>
     `Il n'y a plus rien à ouvrir ici. Un achat remboursé en totalité n'apparaît plus. S'il manque quelque chose, répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
   everythingSold: (store) =>
@@ -721,7 +721,7 @@ const de: OrdersWords = {
     `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link unterwegs. Er kommt von ${store} über Marktmorgen und trifft in der Regel innerhalb einer Minute ein. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
   nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Versuchen Sie es unten mit dieser.",
 
-  bookedCalls: (count) => (count === 1 ? "Ihr gebuchtes Gespräch" : "Ihre gebuchten Gespräche"),
+  bookedCalls: (count) => (count === 1 ? "Ihre Buchung" : "Ihre Buchungen"),
   nothingToOpen: (store) =>
     `Hier gibt es nichts mehr zu öffnen. Ein vollständig erstatteter Kauf wird nicht mehr aufgeführt. Wenn etwas fehlt, antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
   everythingSold: (store) =>
@@ -934,7 +934,7 @@ const it: OrdersWords = {
     `Se quell'indirizzo ha acquistato qualcosa da ${store}, il link è in arrivo. Arriva da ${store} tramite Marktmorgen, di solito entro un minuto. Se non lo trovi, guarda nella cartella spam.`,
   nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Prova con quello qui sotto.",
 
-  bookedCalls: (count) => (count === 1 ? "La tua chiamata prenotata" : "Le tue chiamate prenotate"),
+  bookedCalls: (count) => (count === 1 ? "La tua prenotazione" : "Le tue prenotazioni"),
   nothingToOpen: (store) =>
     `Qui non c'è più nulla da aprire. Un acquisto rimborsato per intero non compare più. Se manca qualcosa, rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
   everythingSold: (store) =>
@@ -1143,7 +1143,7 @@ const nl: OrdersWords = {
     `Als met dat adres iets is gekocht bij ${store}, is de link onderweg. Hij komt van ${store} via Marktmorgen en komt meestal binnen een minuut aan. Staat hij er niet, kijk dan in je spam.`,
   nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Probeer dat hieronder.",
 
-  bookedCalls: (count) => (count === 1 ? "Je geboekte gesprek" : "Je geboekte gesprekken"),
+  bookedCalls: (count) => (count === 1 ? "Je boeking" : "Je boekingen"),
   nothingToOpen: (store) =>
     `Hier valt niets meer te openen. Een aankoop die volledig is terugbetaald, staat er niet meer bij. Mist er iets, beantwoord dan de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
   everythingSold: (store) =>
@@ -1351,7 +1351,7 @@ const pt: OrdersWords = {
     `Se esse endereço comprou algo a ${store}, a ligação está a caminho. Chega de ${store} via Marktmorgen, normalmente em menos de um minuto. Se não estiver lá, veja na pasta de spam.`,
   nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Experimente esse abaixo.",
 
-  bookedCalls: (count) => (count === 1 ? "A sua chamada marcada" : "As suas chamadas marcadas"),
+  bookedCalls: (count) => (count === 1 ? "A sua marcação" : "As suas marcações"),
   nothingToOpen: (store) =>
     `Já não há nada para abrir aqui. Uma compra reembolsada na totalidade deixa de aparecer. Se faltar alguma coisa, responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
   everythingSold: (store) =>

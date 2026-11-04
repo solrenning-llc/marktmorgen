@@ -144,3 +144,15 @@ export async function forgetBondPerson(statsId: string | null, email: string): P
   const [gone] = await redisPipeline([["HDEL", bondKey(statsId), buyerHash(statsId, email)]]);
   return Number(gone) || 0;
 }
+
+/**
+ * The affiliate a person is tied to, for the copy of their data (619 [SZ3]):
+ * the record the erasure deletes, read whether or not the store's program
+ * still ties buyers (bondFor answers "" then; the record is still kept).
+ * Only reads.
+ */
+export async function bondRecordOf(statsId: string | null, email: string): Promise<string> {
+  if (!statsId || !isRedisConfigured()) return "";
+  const [raw] = await redisPipeline([["HGET", bondKey(statsId), buyerHash(statsId, email)]]);
+  return typeof raw === "string" ? raw : "";
+}

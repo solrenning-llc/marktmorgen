@@ -1,4 +1,7 @@
+import { Fragment } from "react";
 import { EmailField } from "@/components/email-field";
+import { placeLine } from "@/lib/call-place";
+import { bookingWords } from "@/lib/buyer-words/booking";
 import { isDiscordConfigured } from "@/lib/discord";
 import { discordFor } from "@/lib/discord-store";
 import { discordWords } from "@/lib/buyer-words/discord";
@@ -119,7 +122,10 @@ function BookedCallCard({ call, store, words }: { call: BookedCall; store: Store
       </p>
       <p className="st-muted text-sm">{words.callLength(zoneName(call.start, call.buyerTz, locale), minutes)}</p>
       <div className="mt-4 space-y-3">
-        {call.room ? (
+        {call.setup.place ? (
+          /* In person (lib/call-place.ts): where, as text, and no link. */
+          <p className="text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(call.setup.place))}</p>
+        ) : call.room ? (
           <a href={call.room} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn btn-block">
             {words.roomLabels[roomKind(call.room)]}
           <NewTab language={store.language} /></a>
@@ -441,11 +447,19 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                           {purchase.main ? (
                             <DeliveryButton handle={store.handle} token={token} purchase={purchase} delivery={purchase.main} item="main" words={words} language={store.language} />
                           ) : null}
-                          {purchase.added.map((added) =>
-                            added.delivery ? (
-                              <DeliveryButton key={added.key} handle={store.handle} token={token} purchase={purchase} delivery={added.delivery} item={added.key} words={words} language={store.language} />
-                            ) : null,
-                          )}
+                          {purchase.added.map((added) => (
+                            <Fragment key={added.key}>
+                              {/* A course anywhere in a cart opens on its own page, named, as the first one does (lib/order-courses.ts). */}
+                              {added.courseProduct ? (
+                                <Link href={`/@${store.handle}/course/${added.courseProduct}`} className="btn st-btn btn-block">
+                                  {words.openTitle(added.title)}
+                                </Link>
+                              ) : null}
+                              {added.delivery ? (
+                                <DeliveryButton handle={store.handle} token={token} purchase={purchase} delivery={added.delivery} item={added.key} words={words} language={store.language} />
+                              ) : null}
+                            </Fragment>
+                          ))}
                         </div>
                         {purchase.kind === "imported" && !purchase.giftFrom && !purchase.paidWith && !purchase.place && !purchase.preorder ? (
                           <p className="st-muted mt-3 text-xs leading-relaxed">{words.importedNote(store.name)}</p>

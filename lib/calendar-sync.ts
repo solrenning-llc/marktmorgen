@@ -33,6 +33,7 @@
  *   nl:cal:err:<feed>          the last failure, for the studio
  *   nl:cal:out:<statsId>       the subscription file, five minutes
  */
+import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -447,7 +448,9 @@ export function bookedCalendar(
     const key = `${slot.product}|${slot.start}`;
     // A booked time has the room its bookings were given; an empty session
     // that makes rooms gets one when somebody books it.
-    const room = rooms.has(key) ? rooms.get(key) ?? null : setup && !setup.video ? roomFor(setup, slot.start) : null;
+    // In person (lib/call-place.ts): the address, and no link, not even a room kept from when it was online.
+    const place = setup?.place ?? null;
+    const room = place ? null : rooms.has(key) ? rooms.get(key) ?? null : setup && !setup.video ? roomFor(setup, slot.start) : null;
     const video = isVideoRoom(room);
     const single = !group && slot.people.length === 1 ? slot.people[0] : null;
     const summary = single
@@ -457,7 +460,7 @@ export function bookedCalendar(
         : `${title} (no one booked yet)`;
     const description = [
       ...(slot.people.length ? [slot.people.length === 1 ? "Booked by:" : "Booked:", ...slot.people.map(who)] : ["Nobody has booked this yet."]),
-      ...(room ? ["", `Join: ${room}`] : []),
+      ...(place ? ["", `In person, at: ${placeLine(place)}`] : room ? ["", `Join: ${room}`] : []),
       ...(video ? [VIDEO_ROOM_NOTE] : []),
       ...(!room && setup?.video ? ["", "A private video room is made for it when the first person books."] : []),
       "",
@@ -472,7 +475,7 @@ export function bookedCalendar(
       `DTEND:${icsTime(slot.end)}`,
       `SUMMARY:${icsText(summary)}`,
       `DESCRIPTION:${icsText(description)}`,
-      ...(room ? [`LOCATION:${icsText(room)}`] : []),
+      ...(place ? placeIcsLines(place) : room ? [`LOCATION:${icsText(room)}`] : []),
       "STATUS:CONFIRMED",
       "TRANSP:OPAQUE",
       "END:VEVENT",

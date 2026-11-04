@@ -122,7 +122,15 @@ async function main(): Promise<void> {
   part("Codes drawn evenly");
   // A random byte taken modulo a million favours the low codes (CodeQL js/biased-cryptographic-random).
   const source = readFileSync("lib/recovery-address.ts", "utf8");
-  is("the six digits come from randomInt, never a byte modulo a million", [/randomInt\(1_000_000\)/.test(source), /%\s*1_000_000/.test(source)], [true, false]);
+  is("the six digits come from randomInt, never a random value modulo a number", [/randomInt\(1_000_000\)/.test(source), /%\s*(?:[\w.]+\.length\b|\d[\d_]*\b)/.test(source)], [true, false]);
+  const lines: string[] = [];
+  for (let i = 0; i < 4; i += 1) {
+    await startRecoveryAddress(`even${i}@example.com`, SESSION, `spare-even${i}@example.org`);
+    lines.push(/^Your code: .*$/m.exec(lastTo(`spare-even${i}@example.org`))?.[0] ?? "");
+  }
+  is("each code sent is exactly six digits, zeros kept in front", lines.every((line) => /^Your code: \d{6}$/.test(line)), true);
+  await startRecoveryAddress("even9@example.com", SESSION, "spare-even9@example.org");
+  is("and a code sent is the one taken", await confirmRecoveryAddress("even9@example.com", SESSION, codeTo("spare-even9@example.org")), { address: "spare-even9@example.org" });
   done();
 }
 

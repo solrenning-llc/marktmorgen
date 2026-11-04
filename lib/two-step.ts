@@ -132,8 +132,8 @@ async function write(email: string, record: TwoStep): Promise<void> {
 /** Ten recovery codes, "abcd-efgh", each from 31 letters and digits nobody misreads. */
 function newCodes(): string[] {
   return Array.from({ length: RECOVERY_CODES }, () => {
-    const bytes = randomBytes(8);
-    const text = Array.from(bytes, (b) => CODE_LETTERS[b % CODE_LETTERS.length]).join("");
+    // randomInt draws each letter evenly; a byte taken modulo 31 would favour the first eight.
+    const text = Array.from({ length: 8 }, () => CODE_LETTERS[randomInt(CODE_LETTERS.length)]).join("");
     return `${text.slice(0, 4)}-${text.slice(4)}`;
   });
 }

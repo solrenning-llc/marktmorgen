@@ -187,9 +187,13 @@ async function main(): Promise<void> {
   is("and the emailed link logs in on its own", [back.headers.get("location"), cookieOf(back, "nl_session").length], ["https://marktmorgen.com/studio", 64]);
 
   part("Codes drawn evenly");
-  // A random byte taken modulo a million favours the low codes (CodeQL js/biased-cryptographic-random).
+  // A random value taken modulo a million, or modulo the 31 letters, favours the low codes (CodeQL js/biased-cryptographic-random).
   const source = readFileSync("lib/two-step.ts", "utf8");
-  is("the six digits come from randomInt, never a byte modulo a million", [/randomInt\(1_000_000\)/.test(source), /%\s*1_000_000/.test(source)], [true, false]);
+  is("the six digits and the recovery letters come from randomInt, never a random value modulo a length or a number", [/randomInt\(1_000_000\)/.test(source), /randomInt\(CODE_LETTERS\.length\)/.test(source), /%\s*(?:[\w.]+\.length\b|\d[\d_]*\b)/.test(source)], [true, true, false]);
+  const RECOVERY = /^[abcdefghjkmnpqrstuvwxyz23456789]{4}-[abcdefghjkmnpqrstuvwxyz23456789]{4}$/;
+  is("ten recovery codes, each four and four of the 31 letters nobody misreads", [finished.codes.length, finished.codes.every((c) => RECOVERY.test(c)), set2.codes.every((c) => RECOVERY.test(c))], [10, true, true]);
+  const confirmLine = /^Your code: .*$/m.exec([...mails].reverse().find((m) => m.to === "backup@example.org")?.text ?? "")?.[0] ?? "";
+  is("the recovery address's code is exactly six digits", /^Your code: \d{6}$/.test(confirmLine), true);
   done();
 }
 

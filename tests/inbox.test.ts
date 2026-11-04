@@ -161,7 +161,9 @@ async function main(): Promise<void> {
   part("Ids drawn evenly");
   // A random byte taken modulo 36 favours the first letters (CodeQL js/biased-cryptographic-random).
   const source = readFileSync("lib/inbox.ts", "utf8");
-  is("each letter of an id comes from randomInt, never a byte modulo the alphabet", [/randomInt\(LETTERS\.length\)/.test(source), /%\s*LETTERS\.length/.test(source)], [true, false]);
+  is("each letter of an id comes from randomInt, never a random value modulo a length", [/randomInt\(LETTERS\.length\)/.test(source), /%\s*(?:[\w.]+\.length\b|\d[\d_]*\b)/.test(source)], [true, false]);
+  const ids = (await readInbox(store.statsId)).map((c) => c.id);
+  is("the conversations made here have ids of 12 lowercase letters and digits, all different", [ids.length > 5, ids.every((id) => /^[a-z0-9]{12}$/.test(id)), new Set(ids).size === ids.length], [true, true, true]);
   done();
 }
 

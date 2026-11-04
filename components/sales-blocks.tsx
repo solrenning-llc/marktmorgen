@@ -9,9 +9,10 @@ import { type Piece, aboutBlocks } from "@/lib/product-about";
 import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, bandsOf, quoteHost } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { PageFacts } from "@/lib/page-facts";
-import { MAX_LONG_ANSWER, MAX_SHORT_ANSWER, type FormDef, type FormField, branches } from "@/lib/forms";
+import { MAX_LONG_ANSWER, MAX_SHORT_ANSWER, type FormDef, type FormField, branches, formOpen, offersKeep, scheduleWhen } from "@/lib/forms";
 import { FormBranching } from "@/components/form-branching";
 import { formWords } from "@/lib/buyer-words/form";
+import { FormKeep } from "@/components/form-keep";
 import { NewTab } from "@/components/new-tab";
 
 /**
@@ -789,6 +790,18 @@ function FormQuestion({ field, form, ctx }: { field: FormField; form: FormDef; c
 /** A form, survey or quiz on one of the store's own pages (lib/forms.ts). */
 function FormView({ block, form, ctx }: { block: Extract<PageBlock, { kind: "form" }>; form: FormDef; ctx: BlockContext }) {
   const w = formWords(ctx.lang ?? DEFAULT_LANGUAGE);
+  // Before it opens or after it closes (639 [GL7](26)), the page says so instead of asking; the studio's preview always shows it.
+  const taking = ctx.now === undefined ? "open" : formOpen(form, ctx.now);
+  if (taking !== "open") {
+    return (
+      <section className="sp-section" id={`form-${form.id}`}>
+        <Heading text={block.heading} />
+        <p className="st-muted mt-4" role="status">
+          {taking === "not_yet" && form.opensAt ? w.notYet(scheduleWhen(form.opensAt, ctx.lang ?? DEFAULT_LANGUAGE)) : w.ended}
+        </p>
+      </section>
+    );
+  }
   const notice = ctx.formNotice?.form === form.id ? ctx.formNotice.status : "";
   const problem = notice && notice in w.errors ? w.errors[notice as keyof typeof w.errors] : "";
   const target = ctx.formTarget;
@@ -820,6 +833,8 @@ function FormView({ block, form, ctx }: { block: Extract<PageBlock, { kind: "for
         ))}
         {/* Only what the branching needs reaches the browser: a scored quiz's points and ranges stay on the server. */}
         {branches(form) && !ctx.preview ? <FormBranching form={{ id: form.id, fields: form.fields.map((f) => ({ ...f, options: f.options.map(({ id, label, outcome, next }) => ({ id, label, outcome, ...(next ? { next } : {}) })) })), outcomes: form.outcomes.map(({ id, title, body, product }) => ({ id, title, body, product })) }} /> : null}
+        {/* A long form can be finished later: its answers kept in the visitor's own browser, only if they ask (639 [GL7](26)). */}
+        {offersKeep(form) && !ctx.preview && target ? <FormKeep handle={target.handle} form={form.id} words={w} /> : null}
         {form.offerList && target?.listOpen ? (
           <label className="sp-form-option">
             <input type="checkbox" name="consent" value="yes" disabled={ctx.preview} />

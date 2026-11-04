@@ -138,3 +138,21 @@ export function tasksDue(entries: readonly DueTask[], today: string): { overdue:
     undated: open.filter((entry) => !entry.task.due),
   };
 }
+
+/**
+ * The calendar day it is at `nowMs` in `timeZone`, "YYYY-MM-DD": the day a
+ * task's date is compared with. In Fortaleza at 22:30 on 3 November it is
+ * still the 3rd, though in UTC it is the 4th. A zone the runtime does not
+ * know reads as UTC.
+ */
+export function dayIn(nowMs: number, timeZone: string): string {
+  let format: Intl.DateTimeFormat;
+  try {
+    format = new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" });
+  } catch {
+    format = new Intl.DateTimeFormat("en-CA", { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit" });
+  }
+  const parts = format.formatToParts(nowMs);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}

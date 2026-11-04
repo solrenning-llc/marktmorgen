@@ -9,13 +9,13 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PersonTasks } from "@/components/person-tasks";
-import { MAX_PERSON_TASKS, type PersonTask } from "@/lib/person-tasks";
+import { PersonTasks, browserDay } from "@/components/person-tasks";
+import { MAX_PERSON_TASKS, type PersonTask, dayIn } from "@/lib/person-tasks";
 import { done, is, part } from "./check";
 
 const PERSON = "a".repeat(32);
 const task = (n: number, over: Partial<PersonTask> = {}): PersonTask => ({ id: `task${String(n).padStart(6, "0")}`, text: `Task ${n}`, due: "", assignee: "", done: false, createdAt: 1, doneAt: 0, ...over });
-const draw = (tasks: PersonTask[]) => renderToStaticMarkup(createElement(PersonTasks, { person: PERSON, initial: tasks, assignees: ["owner@example.com", "sam@example.com"], today: "2026-11-03" }));
+const draw = (tasks: PersonTask[], today = "2026-11-03") => renderToStaticMarkup(createElement(PersonTasks, { person: PERSON, initial: tasks, assignees: ["owner@example.com", "sam@example.com"], today }));
 
 part("Each task");
 const html = draw([task(1, { text: "Send the workbook", due: "2026-11-01", assignee: "sam@example.com" }), task(2, { text: "Book the call", due: "2026-11-10" }), task(3, { text: "Say thanks", done: true })]);
@@ -48,5 +48,22 @@ const page = readFileSync("app/studio/people/page.tsx", "utf8");
 is("a named section with its heading", page.includes('aria-labelledby="tasks-title"') && page.includes('<h2 id="tasks-title"'), true);
 is("read with the person's page, and said when they cannot be read", page.includes("readPersonTasks(store.statsId, profile.person)") && page.includes("tasks could not be read just now"), true);
 is("the teammates offered are those who can see orders", page.includes('filter((m) => can(m.role, "orders"))'), true);
+
+part("The creator's own day, not the server's");
+// 01:30 UTC on 4 November is 22:30 on 3 November in Fortaleza (UTC-3).
+const LATE_EVENING = Date.parse("2026-11-04T01:30:00Z");
+is("the day in Fortaleza is still the 3rd", dayIn(LATE_EVENING, "America/Fortaleza"), "2026-11-03");
+is("in UTC it is already the 4th", dayIn(LATE_EVENING, "UTC"), "2026-11-04");
+is("a zone the runtime does not know reads as UTC", [dayIn(LATE_EVENING, "Not/A_Zone"), dayIn(LATE_EVENING, "")], ["2026-11-04", "2026-11-04"]);
+const zoneBefore = process.env.TZ;
+process.env.TZ = "America/Fortaleza";
+const there = browserDay(LATE_EVENING);
+if (zoneBefore === undefined) delete process.env.TZ;
+else process.env.TZ = zoneBefore;
+is("a browser in Fortaleza reads the 3rd", there, "2026-11-03");
+const evening = draw([task(1, { text: "Call back", due: "2026-11-03" }), task(2, { text: "Send the file", due: "2026-11-04" }), task(3, { text: "Pay the editor", due: "2026-11-02" })], there);
+is("a task due that day is due, not past", [evening.includes("Due Nov 3, 2026"), evening.includes("Was due Nov 3, 2026")], [true, false]);
+is("tomorrow's is still to come, yesterday's past", [evening.includes("Due Nov 4, 2026"), evening.includes("Was due Nov 2, 2026")], [true, true]);
+is("the browser's day takes over after the server's drawing, which it never mismatches", source.includes("useSyncExternalStore(noSubscription, () => browserDay(), () => serverDay)") && source.includes("const today = useCreatorDay(serverDay);"), true);
 
 done();

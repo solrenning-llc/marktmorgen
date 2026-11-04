@@ -195,13 +195,16 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   const NOTICES = words.notices;
   const notice = token && !admitted ? NOTICES.busy : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
 
+  // An unchecked older purchase may be the one that gives a role. Keep the
+  // entry available; the Discord callback still checks what this buyer holds
+  // before granting any role (lib/discord-access.ts).
   const opensDiscord = Boolean(
-    discordProducts &&
-      purchases?.some(
+    discordProducts?.size &&
+      (older.cursor || purchases?.some(
         (p) =>
           !p.ended &&
           [p.productId, ...p.added.map((a) => a.id), ...(p.items?.ids ?? [])].some((id) => discordProducts!.has(id)),
-      ),
+      )),
   );
   const dw = discordWords(store.language);
 

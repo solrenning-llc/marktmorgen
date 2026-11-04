@@ -7,8 +7,11 @@ import { guardStoreWrite } from "@/lib/store-request";
  * A label put on or taken off many contacts at once: 639 [GL7](3), unit 1.
  * POST `{ action: "review", label, change: "add" | "remove", text }` says what
  * it would do and writes nothing; `{ action: "apply", ... }` does it and
- * answers with the addresses it changed; an undo is `{ action: "apply",
- * label, change: <the opposite>, emails: <those addresses> }`. The same
+ * answers with the addresses it changed, how many it left and why, and on a
+ * removal the label each contact lost as it was written there (`removed`);
+ * an undo is `{ action: "apply", label, change: <the opposite>, emails:
+ * <those addresses>, restore: <removed> }`, which puts each contact's own
+ * label back where it stood. The same
  * permission as importing contacts ("send"). It starts no automation
  * (lib/bulk-labels.ts).
  */
@@ -22,11 +25,11 @@ export async function POST(request: NextRequest) {
   if (body.action !== "review" && body.action !== "apply") return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   const read = readBulk(body);
   if (!read.ok) return Response.json({ ok: false, error: read.error, message: BULK_REFUSALS[read.error] }, { status: 400 });
-  if (!store.listId) return Response.json({ ok: true, review: { changes: 0, already: 0, notOnList: read.ask.emails.length, full: 0, skipped: read.ask.skipped }, changed: [] }, { headers: NO_STORE });
+  if (!store.listId) return Response.json({ ok: true, review: { changes: 0, already: 0, notOnList: read.ask.emails.length, full: 0, skipped: read.ask.skipped }, changed: [], already: 0, full: 0, notOnList: read.ask.emails.length, removed: [] }, { headers: NO_STORE });
   try {
     if (body.action === "review") return Response.json({ ok: true, review: await reviewBulk(store.listId, read.ask) }, { headers: NO_STORE });
     const done = await applyBulk(store.listId, read.ask, store);
-    return Response.json({ ok: true, label: read.ask.label, change: read.ask.change, changed: done.changed, already: done.already }, { headers: NO_STORE });
+    return Response.json({ ok: true, label: read.ask.label, change: read.ask.change, changed: done.changed, already: done.already, full: done.full, notOnList: done.notOnList, removed: done.removed }, { headers: NO_STORE });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });
     console.error("changing labels in bulk failed", error);

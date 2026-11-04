@@ -2,23 +2,28 @@
 
 import { useState } from "react";
 import { toast } from "@/components/toast";
-import { MAX_BULK_ADDRESSES, type BulkChange, type BulkReview, opposite } from "@/lib/bulk-label-rules";
+import { MAX_BULK_ADDRESSES, type BulkChange, type BulkReview, type Removed, count, opposite, undoSummary } from "@/lib/bulk-label-rules";
 import { MAX_CONTACT_TAGS } from "@/lib/contact-rules";
 
-const count = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+type Done = { label: string; change: BulkChange; changed: string[]; removed: (Removed & { email: string })[] };
+const counted = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
 /**
  * A label on or off many contacts at once (639 [GL7](3), unit 1): the
  * addresses and the label, a review of what it will do before anything is
  * written, then the change, and an undo that takes back exactly what it
- * changed. It starts no automation, and says so before confirming.
+ * changed, each contact's own label put back as it was written there, and
+ * says how many did not go back and why. It starts no automation, and says
+ * so before confirming.
  */
 export function BulkLabels() {
   const [text, setText] = useState("");
   const [label, setLabel] = useState("");
   const [change, setChange] = useState<BulkChange>("add");
   const [review, setReview] = useState<BulkReview | null>(null);
-  const [done, setDone] = useState<{ label: string; change: BulkChange; changed: string[] } | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
+  // What an undo that could not take everything back says, kept on the screen (a toast would go away).
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -47,6 +52,7 @@ export function BulkLabels() {
   async function askReview(event: React.FormEvent) {
     event.preventDefault();
     setDone(null);
+    setNote("");
     const answer = await send({ action: "review", label, change, text });
     if (answer) setReview(answer.review as BulkReview);
   }
@@ -55,16 +61,21 @@ export function BulkLabels() {
     const answer = await send({ action: "apply", label, change, text });
     if (!answer) return;
     const changed = (answer.changed as string[]) ?? [];
-    setDone({ label: String(answer.label), change, changed });
+    setDone({ label: String(answer.label), change, changed, removed: Array.isArray(answer.removed) ? (answer.removed as Done["removed"]) : [] });
+    setNote("");
     setReview(null);
     toast(`${change === "add" ? "Label added to" : "Label taken off"} ${count(changed.length, "contact", "contacts")}.`);
   }
 
   async function undo() {
     if (!done) return;
-    const answer = await send({ action: "apply", label: done.label, change: opposite(done.change), emails: done.changed });
+    const undoing = opposite(done.change);
+    const answer = await send({ action: "apply", label: done.label, change: undoing, emails: done.changed, ...(done.change === "remove" ? { restore: done.removed } : {}) });
     if (!answer) return;
-    toast("Undone. Every contact is as it was.");
+    const changed = Array.isArray(answer.changed) ? answer.changed.length : 0;
+    const summary = undoSummary(done.changed.length, { changed, already: counted(answer.already), full: counted(answer.full), notOnList: counted(answer.notOnList) }, undoing);
+    if (summary.allBack) toast(summary.words);
+    else setNote(summary.words);
     setDone(null);
   }
 
@@ -134,6 +145,8 @@ export function BulkLabels() {
               </button>
             ) : null}
           </p>
+        ) : note ? (
+          <p className="text-sm text-ink">{note}</p>
         ) : null}
       </div>
     </div>

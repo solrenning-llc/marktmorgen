@@ -603,7 +603,8 @@ async function casWrite(key: string, writes: { email: string; value: string; was
 export async function changeLabels(
   listId: string,
   emails: string[],
-  change: (tags: string[]) => string[] | "same" | "skip",
+  /** Called with each contact's labels as read and its address. */
+  change: (tags: string[], email: string) => string[] | "same" | "skip",
   /** The store whose data room new labels take from (DataRoomError when they do not fit). */
   room: DataStore,
 ): Promise<{ changed: string[]; same: string[] }> {
@@ -619,7 +620,7 @@ export async function changeLabels(
       const raw = Array.isArray(rows) ? rows[i] : null;
       const contact = parseContact(raw);
       if (!contact || typeof raw !== "string") return;
-      const next = change(contact.tags);
+      const next = change(contact.tags, email);
       if (next === "same") same.push(email);
       else if (next !== "skip") {
         writes.push({ email, value: JSON.stringify({ ...contact, tags: next }), was: sha1(raw) });

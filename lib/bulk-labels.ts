@@ -17,15 +17,40 @@
  * contact the moment before, writes only if it is still as read, and takes
  * room in the store's data room first.
  */
-import { BULK_REFUSALS, type BulkChange, type BulkRefusal, type BulkReview, MAX_BULK_ADDRESSES, labelsAfter, opposite } from "@/lib/bulk-label-rules";
+import { BULK_REFUSALS, type BulkChange, type BulkRefusal, type BulkReview, MAX_BULK_ADDRESSES, type Removed, labelsAfter, opposite, removedFrom, same } from "@/lib/bulk-label-rules";
+import { MAX_CONTACT_TAGS } from "@/lib/contact-rules";
 import { changeLabels, leadsKey, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
 import type { DataStore } from "@/lib/store-data";
 
 export { BULK_REFUSALS, MAX_BULK_ADDRESSES, labelsAfter, opposite };
-export type { BulkChange, BulkRefusal, BulkReview };
+export type { BulkChange, BulkRefusal, BulkReview, Removed };
 
-export type BulkAsk = { label: string; change: BulkChange; emails: string[]; skipped: number };
+/** What one contact lost in a removal, by address: the route answers with these, and an undo sends them back. */
+export type RemovedFrom = Removed & { email: string };
+
+/** `back`, only on an undo of a removal: each contact's own label as it was written and where it stood. */
+export type BulkAsk = { label: string; change: BulkChange; emails: string[]; skipped: number; back?: Record<string, Removed> };
+
+/**
+ * What an undo of a removal says each contact had, kept only where it is one
+ * of the addresses sent and the same label as asked (in any case), so it can
+ * never put on a label other than the one named; a place outside a contact's
+ * list means the end.
+ */
+function readBack(raw: unknown, emails: readonly string[], label: string): Record<string, Removed> {
+  const back: Record<string, Removed> = {};
+  if (!Array.isArray(raw)) return back;
+  for (const entry of raw.slice(0, MAX_BULK_ADDRESSES)) {
+    if (!entry || typeof entry !== "object") continue;
+    const { email: typedEmail, label: typedLabel, at } = entry as Record<string, unknown>;
+    const [email] = readAddresses(typeof typedEmail === "string" ? typedEmail : "").emails;
+    const [kept] = readTags([typeof typedLabel === "string" ? typedLabel : ""]);
+    if (!email || !emails.includes(email) || !kept || !same(kept, label)) continue;
+    back[email] = { label: kept, at: Number.isInteger(at) && (at as number) >= 0 && (at as number) < MAX_CONTACT_TAGS ? (at as number) : MAX_CONTACT_TAGS };
+  }
+  return back;
+}
 
 /** What the creator sent, made safe, or what is wrong with it. Addresses from pasted text, or the exact list an undo sends back. */
 export function readBulk(raw: Record<string, unknown>): { ok: true; ask: BulkAsk } | { ok: false; error: BulkRefusal } {
@@ -39,7 +64,9 @@ export function readBulk(raw: Record<string, unknown>): { ok: true; ask: BulkAsk
     : readAddresses(typeof raw.text === "string" ? raw.text.slice(0, 400_000) : "");
   if (!read.emails.length) return { ok: false, error: "none" };
   if (read.emails.length > MAX_BULK_ADDRESSES) return { ok: false, error: "many" };
-  return { ok: true, ask: { label, change, emails: read.emails, skipped: read.skipped } };
+  const ask: BulkAsk = { label, change, emails: read.emails, skipped: read.skipped };
+  if (change === "add" && Array.isArray(raw.emails) && raw.restore !== undefined) ask.back = readBack(raw.restore, read.emails, label);
+  return { ok: true, ask };
 }
 
 /** What the change would do, read now, with nothing written. */
@@ -60,12 +87,43 @@ export async function reviewBulk(listId: string, ask: BulkAsk): Promise<BulkRevi
   return review;
 }
 
+export type BulkDone = {
+  /** The addresses it changed. */
+  changed: string[];
+  /** Contacts already as asked. */
+  already: number;
+  /** Contacts that hold the most labels a contact can (adding only). */
+  full: number;
+  /** Addresses not on the list (or no longer). */
+  notOnList: number;
+  /** On a removal: what each changed contact lost, exactly as written there, and where it stood. */
+  removed: RemovedFrom[];
+};
+
 /**
  * The change applied, each contact as it is at that moment. The answer lists
- * the addresses it changed: an undo sends exactly those back, with the
- * opposite change. It starts no automation.
+ * the addresses it changed, how many were left and why, and on a removal the
+ * label each contact lost as it was written there: an undo sends exactly
+ * those back, with the opposite change. It starts no automation.
  */
-export async function applyBulk(listId: string, ask: BulkAsk, room: DataStore): Promise<{ changed: string[]; already: number }> {
-  const { changed, same: already } = await changeLabels(listId, ask.emails, (tags) => labelsAfter(tags, ask.label, ask.change), room);
-  return { changed, already: already.length };
+export async function applyBulk(listId: string, ask: BulkAsk, room: DataStore): Promise<BulkDone> {
+  // The last reading of each contact decides why it was left: the rounds read again only those whose write lost a race.
+  const seen = new Map<string, "same" | "skip" | Removed | null>();
+  const { changed, same: already } = await changeLabels(
+    listId,
+    ask.emails,
+    (tags, email) => {
+      const next = labelsAfter(tags, ask.label, ask.change, ask.back?.[email]);
+      seen.set(email, typeof next === "string" ? next : ask.change === "remove" ? removedFrom(tags, ask.label) : null);
+      return next;
+    },
+    room,
+  );
+  const removed = changed.flatMap((email) => {
+    const was = seen.get(email);
+    return was && typeof was === "object" ? [{ email, ...was }] : [];
+  });
+  const full = ask.emails.filter((email) => seen.get(email) === "skip").length;
+  const notOnList = ask.emails.filter((email) => !seen.has(email)).length;
+  return { changed, already: already.length, full, notOnList, removed };
 }

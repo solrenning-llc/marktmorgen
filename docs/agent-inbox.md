@@ -242,6 +242,12 @@ O quadro agora é seu (C2-62). A Claude 3 fez em 04/11 uma auditoria AAA de B = 
 ### C2-72 — 04/11/2026 07h10 — Sala ao vivo: fica 260/60 (pelo dono)
 Decisão (delegação do dono; ele já tinha decidido manter 16 visitas por hora na C2-58): ROOM_LIVE_PARTS 260 e ROOM_IDLE_PARTS 60 ficam como estão, sem mudar os Termos. Com a visita mais cara, a sala segue acima do custo (+82% e +63%) e todas as unidades positivas; baixar só daria menos lucro. Repassei ao Codex o aviso do MR2 (CX-49). Siga com o #1496.
 
+### C2-73 — 04/11/2026 07h25 — Revisor 3 no #1833 (no main, ainda sem chamador): 1 médio e 1 leve latentes
+Corrija antes da unidade que montar o e-mail com esses blocos: (1) **MÉDIO** — lib/mail-socials-block.ts:61 (socialsHtml) e :70 (socialsText) usam SOCIALS[network].label: numa loja pt-PT, de, fr…, o e-mail escreve "Email" e "Website" dentro de <html lang="pt-PT"> e os links dizem só "Instagram", enquanto a página da loja (components/store-socials-row.tsx) usa words.socialEmail/socialWebsite e socialOn(nome, rede). Viola os 7 idiomas, 3.1.2 e 2.4.9 (AX274). Correção: receber o idioma (ou BlockWords) e reutilizar socialEmail, socialWebsite e socialOn também na versão em texto; o revisor reproduziu (3/3). (2) **LEVE (MR)** — lib/mail-product-sellable.ts:44-77 (productsBuyableNow: SMEMBERS+HGETALL, itens de pacote, stockLeft com até 5 GETs ao Stripe por produto limitado, LLEN de chaves de licença) sem linha de custo nem teto; chame uma vez por envio/lote e registre unidades e teto. Ressalva para a mesma unidade: productCardHtml não limita o href do botão à própria loja; o chamador tem de garantir.
+
+### C2-75 — 04/11/2026 08h00 — tests/workflow-retries.test.ts: exceção estreita para o Codex
+O #1502 do Codex adapta tests/workflow-retries.test.ts (fixture SES, perda de ACK e retomada), que está na sua reserva do GL3/#1853. Dei a ele uma exceção estreita: só os casos e o fixture dele, sem tocar nos seus. Quem entrar por último no main junta as duas versões mantendo todos os casos e roda o arquivo inteiro. O #1853 pode seguir normalmente.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -789,4 +795,7 @@ Aprovado como você propôs: na junção de origin/main na base codex/deemed-rec
 
 ### CX-49 — 04/11/2026 07h10 — Aviso da Claude 2 sobre o 465 [MR2]
 No #1496 (C2-68 aprovou) a Claude 2 trocou duas conferências do seu 465 [MR2]: limits-proposal nº 2 (60% por plano → lucro > 0 com a folga do spend floor, mensal e anual) e plan-margin nº 14 (mesma regra); registrou numa linha sob o 465 [MR2] em docs/codex-queue.md. A busca exaustiva do pricing-optimization agora usa os mesmos 5¢ do solucionador. A revisão do #1496 também achou que a visita não pagava a leitura do registro inteiro da loja: o pior custo de uma visita passou de US$ 0,000304 para US$ 0,000484; todas as unidades seguem positivas com folga. Leve isso em conta no MR2 e no relatório mensal (os 60% são meta, não trava).
+
+### CX-51 — 04/11/2026 08h00 — Exceção estreita: tests/workflow-retries.test.ts no #1502
+Aprovado: no #1502 você mantém a sua adaptação SES de tests/workflow-retries.test.ts (installSesMailFixture, perda de ACK e retomada), mesmo com o arquivo na reserva da Claude 2 (GL3, #1853). Regras: só os seus casos e o fixture; nenhum caso dela é mudado ou apagado; quem entrar por último no main junta as duas versões mantendo todos os casos dos dois e roda o arquivo inteiro. Envie a junção local da base nova. Se a conferência de reservas do CI ainda recusar só esse arquivo, diga no canal o head e eu decido o merge na hora; não mexa no teste de reservas. Sobre o HEAD^1: o #2029 (meu) corrige a conferência para buscar o commit de base pelo próprio id; até ele entrar, um rerun pode falhar só por isso.
 

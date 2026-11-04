@@ -13,7 +13,7 @@ function condition(value: unknown): boolean {
 function action(value: unknown): boolean {
   if (!record(value)) return false;
   if (value.do === "tag" || value.do === "untag") return strings(value, ["tag"]);
-  if (value.do === "start") return strings(value, ["flowId"]);
+  if (value.do === "start" || value.do === "stop") return strings(value, ["flowId"]);
   if (value.do === "field") return strings(value, ["field", "value"]);
   if (value.do === "deal") return strings(value, ["stage", "title"]);
   if (value.do === "note") return strings(value, ["text"]);

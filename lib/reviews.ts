@@ -366,7 +366,8 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     const grown = reviewBytes(review) - reviewBytes(before);
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
-    await write(statsId, review, before && before.text !== review.text ? summaryGone(statsId, review.productId, before.createdAt) : []);
+    // A review hidden or refunded was never counted by one (lib/review-ai-summary-rules.ts, summaryInputs): it takes none away.
+    await write(statsId, review, before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : []);
     await redisPipeline([
       ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
       ["SADD", REVIEW_STORES_KEY, statsId],
@@ -400,8 +401,9 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       ["ZREM", visibleKey(statsId, productId), id],
       ["ZREM", allKey(statsId), `${productId}|${id}`],
       ["ZREM", newKey(statsId), `${productId}|${id}`],
-      // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it.
-      ...summaryGone(statsId, productId, gone.createdAt),
+      // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it. One hidden or
+      // refunded was never counted, and takes none away.
+      ...(counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
     ]);
     // Its room given back only once its own HDEL answered that it removed the review: never twice for two
     // deletions racing. A request that failed may still have run the HDEL (an error on another command); the room
@@ -433,7 +435,8 @@ async function creatorChange(
     if (room && grown > 0) await needData(room, [{ slot: REVIEWS_SLOT(productId), bytes: grown }]);
     // A review hidden or refunded leaves the product's AI summary of its reviews (lib/review-ai-summary.ts) behind:
     // it goes in the same request as the change, so a failure fails the change too.
-    const gone = (after.hidden && !before.hidden) || (after.refunded && !before.refunded);
+    // One already hidden or refunded was never counted, so hiding or refunding it takes none away.
+    const gone = counted(before) && ((after.hidden && !before.hidden) || (after.refunded && !before.refunded));
     await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : []);
     // What a shorter answer frees is given back only once it is written.
     if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
@@ -450,8 +453,14 @@ async function creatorChange(
  * in one command: they are scored by the newest review the summary read (nl:rsum:<statsId>:<productId>:themes),
  * so only a review created at or before that (`createdAt`, ms; "all" when the product goes) removes them, and a
  * review written after the summary was made never takes it away. Its head (nl:rsum:) is never read without them.
+ * A review older than the oldest the summary read (past its MAX_SUMMARY_REVIEWS newest) still takes it away: the
+ * score holds one bound only, and both bounds in one step would need a script (lib/redis-memory.ts, its stand-in in
+ * the tests, is reserved by another agent); more taken away than counted, never less.
  * When the week's last summary was made (nl:rsum:last:) is never deleted here.
  */
+/** Whether an AI summary may have counted this review: only words a page shows, never a hidden or refunded review's. */
+const counted = (review: Review): boolean => !review.hidden && !review.refunded;
+
 const summaryGone = (statsId: string, productId: string, createdAt: number | "all"): (string | number)[][] => [
   ["SET", `nl:rsum:ver:${statsId}:${productId}`, randomBytes(12).toString("hex"), "EX", 8 * 86_400],
   createdAt === "all" || !Number.isSafeInteger(createdAt) || createdAt <= 0

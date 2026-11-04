@@ -443,6 +443,25 @@ async function main(): Promise<void> {
     is(`a review the summary counted, ${what}: the summary goes`, await readReviewSummary(statsId, toolsId), null);
   }
 
+  part("Second review of #2066: a hidden or refunded review was never counted");
+  const quiet = (await readReview(statsId, toolsId, (await counted("Sturdy tools again")).id))!;
+  await setHidden(statsId, toolsId, quiet.id, true, "private");
+  // A summary made after it was hidden, so it never read it.
+  await toolsBack();
+  const hiddenChanges: [string, () => Promise<unknown>][] = [
+    ["rewritten by its buyer", () => writeTool(5, "Sturdy tools, other words")],
+    ["refunded", () => markOneRefunded(statsId, toolsId, quiet.id)],
+    ["deleted by its buyer", () => deleteReview(statsId, toolsId, quiet.id, ROOM)],
+  ];
+  for (const [what, change] of hiddenChanges) {
+    await change();
+    is(`a review hidden before the summary, then ${what}: the summary stays`, (await readReviewSummary(statsId, toolsId))?.themes.length, 1);
+  }
+  const refundedOne = (await readReview(statsId, toolsId, (await visibleReviews(statsId, toolsId, 0, 20)).find((r) => r.refunded)!.id))!;
+  is("(a review refunded earlier, still shown, marked so)", refundedOne.refunded, true);
+  await deleteReview(statsId, toolsId, refundedOne.id, ROOM);
+  is("a review refunded before the summary, then deleted: the summary stays", (await readReviewSummary(statsId, toolsId))?.themes.length, 1);
+
   part("Review of #2066: the race with the keeping");
   const race = await addProduct(OWNER, "Clay Bats", "", "25");
   if (!race.ok) throw new Error("no product");
@@ -484,7 +503,7 @@ async function main(): Promise<void> {
   const left = (await redis.pipeline([["ZRANGEBYSCORE", batsRead, "-inf", "+inf"]]))[0] as string[];
   is("a new summary kept: the one it replaced and the one a failed clean-up left are taken out, its own alone in the set", [thirdBats.ok, fourthBats.ok && fourthBats.fresh, left.length, left.includes(ghost), (await readReviewSummary(statsId, raceId))?.at], [true, true, 1, false, Math.floor((day + 1_200_000 + 21 * 86_400_000) / 1000)]);
   const both = await readReviewSummaries(statsId, [toolsId, raceId, "../x"]);
-  is("the studio's read of several products, in one request", [both.size, both.get(raceId)?.summary?.read, both.get(toolsId)?.summary, (both.get(raceId)?.lastAt ?? 0) > 0], [2, 5, null, true]);
+  is("the studio's read of several products, in one request", [both.size, both.get(raceId)?.summary?.read, both.get(toolsId)?.summary?.read, (both.get(raceId)?.lastAt ?? 0) > 0], [2, 5, 6, true]);
   done();
 }
 

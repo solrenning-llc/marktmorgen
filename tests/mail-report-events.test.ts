@@ -103,6 +103,16 @@ async function main() {
     String(redis.run(["HGETALL", `nl:mail:health:${STORE}:${new Date().toISOString().slice(0, 10)}`])).includes("@"),
   ], [false, false]);
 
+  const originalNow = Date.now;
+  try {
+    const nextDay = originalNow() + 86_400_000;
+    Date.now = () => nextDay;
+    await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }));
+    is("a replay after midnight stays in the provider event's original UTC day", await mailReportDay(STORE, CAMPAIGN, nextDay), null);
+  } finally {
+    Date.now = originalNow;
+  }
+
   done();
 }
 

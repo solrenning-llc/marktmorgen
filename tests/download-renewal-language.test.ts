@@ -142,3 +142,57 @@ test("invalid or absent language hints fall back to English and a loaded store o
   const denied = await paidDownloadRenewalPost(request(action, fields), f.runtime);
   assert.equal(denied.status, 404); assert.equal(await denied.text(), copies.pt[3]);
 });
+
+import { enqueueSingleDigitalRenewal } from "@/lib/order-confirmation-outbox";
+import { seal } from "@/lib/secret-box";
+import { metadataHash } from "./single-digital-access-targeted-world";
+import { store as redis } from "./redis-stub";
+import { tokenKeys } from "./single-digital-access-renewal-world";
+
+const capacityCopies = {
+  en: "There is no capacity for another pending download link request. Your request has not been saved, and no email has been scheduled. Contact the store for help.",
+  es: "No hay capacidad para otra solicitud de enlace de descarga pendiente. Tu solicitud no se ha guardado y no se ha programado ningún email. Contacta con la tienda para obtener ayuda.",
+  fr: "La capacité disponible ne permet pas d’ajouter une demande de lien de téléchargement en attente. Votre demande n’a pas été enregistrée et aucun email n’a été programmé. Contactez la boutique pour obtenir de l’aide.",
+  de: "Für eine weitere ausstehende Download-Link-Anfrage ist keine Kapazität verfügbar. Deine Anfrage wurde nicht gespeichert und es wurde keine E-Mail eingeplant. Bitte wende dich an den Shop.",
+  it: "Non è disponibile capacità per un’altra richiesta di link per scaricare in attesa. La tua richiesta non è stata salvata e non è stata programmata alcuna email. Contatta il negozio per assistenza.",
+  nl: "Er is geen capaciteit voor nog een openstaande aanvraag voor een downloadlink. Je verzoek is niet opgeslagen en er is geen e-mail ingepland. Neem contact op met de winkel voor hulp.",
+  pt: "Não há capacidade para mais um pedido pendente de ligação para descarregar. O seu pedido não foi guardado e não foi programado nenhum email. Contacte a loja para obter ajuda.",
+} as const;
+
+for (const [language, expected] of Object.entries(capacityCopies)) {
+  test(`full renewal capacity tells the ${language} buyer that no request or email was saved`, async () => {
+    const f = await renewalFixture(); await setLanguage(f.store.email, language);
+    const capsules = Array.from({ length: 9 }, (_, i) => {
+      const sessionId = `cs_test_LanguageCapacity${i}00000001`, email = `capacity${i}@example.test`;
+      const metadata = { ...f.session.metadata, mm_order_intent: String(i+100).padStart(64, "0") };
+      f.sessions.set(sessionId, { ...structuredClone(f.session), id: sessionId, metadata, customer_details: { email } });
+      return seal(JSON.stringify({ ...f.capsule, sessionId, email, metadataHash: metadataHash(metadata) }), "single-digital-access|v1");
+    });
+    const ids = new Set<string>();
+    for (let i=0; i<8; i++) {
+      const queued = await enqueueSingleDigitalRenewal(f.store, capsules[i], String(i+1).padStart(64, "0"), f.runtime);
+      assert.ok(queued.ok, "eight independently verified paid buyers have their own pending slots"); ids.add(queued.id);
+    }
+    assert.equal(ids.size, 8);
+    const beforeRows = [...redis.keys()].filter(k => k.startsWith("nl:order-confirmation:row:")).length;
+    const beforePosts = f.calls.filter(c => c.method === "POST").length;
+    const fields = new URLSearchParams({ handle: f.store.handle, origin: capsules[8], request: "f".repeat(64) });
+    const response = await paidDownloadRenewalPost(request(f.url, fields), f.runtime);
+    assert.equal(response.status, 503); assert.equal(await response.text(), expected);
+    assert.equal([...redis.keys()].filter(k => k.startsWith("nl:order-confirmation:row:")).length, beforeRows);
+    assert.equal(f.calls.filter(c => c.method === "POST").length, beforePosts);
+    assert.equal(tokenKeys().length, 0);
+    const refused = await enqueueSingleDigitalRenewal(f.store, capsules[8], "e".repeat(64), f.runtime);
+    assert.deepEqual(refused, { ok: false, reason: "capacity" });
+    fields.set("origin", capsules[0]); fields.set("request", "d".repeat(64));
+    const duplicate = await paidDownloadRenewalPost(request(f.url, fields), f.runtime);
+    assert.equal(duplicate.status, 200, "the already saved request remains deduplicated when the store is full");
+  });
+}
+
+
+test("renewal form reader decodes each HTML entity exactly once", () => {
+  const fields = formFields('<input type="hidden" name="origin" value="&amp;quot;"><input type="hidden" name="request" value="&quot;&amp;">');
+  assert.equal(fields.get("origin"), "&quot;");
+  assert.equal(fields.get("request"), '\"&');
+});

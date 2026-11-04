@@ -18,10 +18,10 @@ export async function renewalFixture() {
   f.runtime.pipeline=async commands=>{
     const output:unknown[]=[];
     for(const c of commands){
-      if(c[0]==="EVAL" && c[1]===SHIPMENT_MAIL_SCRIPT && c[13]==="renewal-prepare"){
+      if(c[0]==="EVAL" && c[1]===SHIPMENT_MAIL_SCRIPT && c[3+Number(c[2])]==="renewal-prepare"){
         const raw=redis.run(["GET",String(c[3])]);
-        if(raw!==c[14])output.push(["changed"]);
-        else{redis.run(["SET",String(c[3]),String(c[15])]);output.push(["prepared",String(c[15])]);}
+        if(raw!==c[4+Number(c[2])])output.push(["changed"]);
+        else{redis.run(["SET",String(c[3]),String(c[5+Number(c[2])])]);output.push(["prepared",String(c[5+Number(c[2])])]);}
       }else output.push(...await base([c]));
     }
     return output;
@@ -35,7 +35,7 @@ export const request = (url:URL,body:URLSearchParams,origin=url.origin) => {
 };
 export function formFields(html:string):URLSearchParams{
   const form=new URLSearchParams();
-  for(const match of html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g))form.set(match[1],match[2].replace(/&amp;/g,"&").replace(/&quot;/g,'"'));
+  for(const match of html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g))form.set(match[1],match[2].replace(/&quot;/g,'"').replace(/&amp;/g,"&"));
   return form;
 }
 export function tokenKeys(){return [...redis.keys()].filter(k=>k.startsWith("nl:orders:link:"));}

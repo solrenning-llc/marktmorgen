@@ -3,7 +3,7 @@
  * real Redis in scripts/test_shipment_mail_outbox_redis.py.
  */
 import { store } from "./redis-stub";
-import { SHIPMENT_MAIL_SCRIPT, RENEWAL_PENDING_READ_SCRIPT, type ShipmentMailPolicy, type ShipmentMailPipeline } from "@/lib/shipment-mail-outbox";
+import { SHIPMENT_MAIL_SCRIPT, type ShipmentMailPolicy, type ShipmentMailPipeline } from "@/lib/shipment-mail-outbox";
 
 export const shipmentPolicy = (now = Date.now()): ShipmentMailPolicy => ({
   reviewId: "SYNTHETIC_SHIPMENT_ONLY", evidence: "SYNTHETIC; no live funding or account",
@@ -21,16 +21,13 @@ export function shipmentOutboxFixture() {
     const answers: unknown[] = [];
     for (const c of batch) {
       commands.push([...c]);
-      if(c[0]==="EVAL" && c[1]===RENEWAL_PENDING_READ_SCRIPT){
-        answers.push(Number(store.run(["SCARD",c[3]]))===1?store.run(["SMEMBERS",c[3]]):[]);continue;
-      }
       if (c[0] !== "EVAL" || c[1] !== SHIPMENT_MAIL_SCRIPT) {
         answers.push(...await base([c])); continue;
       }
-      const k = c.slice(3, 13).map(String);
-      const op = String(c[13]), expected = String(c[14]), supplied = String(c[15]);
-      const now = Number(c[16]), owner = String(c[19]);
-      const policy = JSON.parse(String(c[18])) as ShipmentMailPolicy | null;
+      const offset = 3+Number(c[2]), k = c.slice(3, offset).map(String);
+      const op = String(c[offset]), expected = String(c[offset+1]), supplied = String(c[offset+2]);
+      const now = Number(c[offset+3]), owner = String(c[offset+6]);
+      const policy = JSON.parse(String(c[offset+5])) as ShipmentMailPolicy | null;
       const raw = store.run(["GET", k[0]]) as string | null;
       const source = store.run(["GET", k[1]]) as string | null;
       let answer: unknown;
@@ -39,9 +36,14 @@ export function shipmentOutboxFixture() {
         else if (source) answer = ["legacy", source];
         else {
           const value = JSON.parse(supplied);
-          if(value.originKind==="single_digital_renewal" && Number(store.run(["SCARD",k[3]]))!==0){answers.push(["full"]);continue;}
+          if(value.originKind==="single_digital_renewal") {
+            const pending=store.run(["GET",k[10]]);
+            if(pending){answers.push(["duplicate",pending]);continue;}
+            if(Number(store.run(["SCARD",k[11]]))>=8){answers.push(["full"]);continue;}
+            store.run(["SET",k[10],value.id]);store.run(["SADD",k[11],value.id]);
+          }
           store.run(["SET", k[0], supplied]); store.run(["SET", k[1], value.sourceValue]);
-          store.run(["ZADD", k[2], now, value.id]);
+          if(value.originKind!=="course")store.run(["ZADD", k[2], now, value.id]);
           for (const index of [3, 4, 7]) store.run(["SADD", k[index], value.id]);
           answer = ["queued", supplied];
         }
@@ -50,6 +52,7 @@ export function shipmentOutboxFixture() {
       else {
         const value = JSON.parse(raw);
         if (op === "accepted" || op === "cancel") {
+          if(value.originKind==="single_digital_renewal"){store.run(["DEL",k[10]]);store.run(["SREM",k[11],value.id]);}
           store.run(["DEL", k[0]]); store.run(["ZREM", k[2], value.id]);
           for (const index of [3, 4, 7]) store.run(["SREM", k[index], value.id]);
           store.run(["EXPIRE", k[1], 400 * 86_400]);

@@ -15,6 +15,7 @@ type RenewalWords = {
   invalid: string;
   tooOften: string;
   unavailable: string;
+  capacity: string;
   notPaid: string;
 };
 
@@ -33,6 +34,7 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     invalid: "This download link could not be checked.",
     tooOften: "Please wait before requesting another link.",
     unavailable: "A new link cannot be requested right now. Please try again later.",
+    capacity: "There is no capacity for another pending download link request. Your request has not been saved, and no email has been scheduled. Contact the store for help.",
     notPaid: "This purchase is no longer paid or has been refunded, so its download is closed.",
   },
   es: {
@@ -49,6 +51,7 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     invalid: "No hemos podido comprobar este enlace de descarga.",
     tooOften: "Espera un poco antes de solicitar otro enlace.",
     unavailable: "Ahora no se puede solicitar un nuevo enlace. Inténtalo de nuevo más tarde.",
+    capacity: "No hay capacidad para otra solicitud de enlace de descarga pendiente. Tu solicitud no se ha guardado y no se ha programado ningún email. Contacta con la tienda para obtener ayuda.",
     notPaid: "Esta compra ya no está pagada o se ha reembolsado, por lo que la descarga está cerrada.",
   },
   fr: {
@@ -65,6 +68,7 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     invalid: "Ce lien de téléchargement n’a pas pu être vérifié.",
     tooOften: "Veuillez patienter avant de demander un autre lien.",
     unavailable: "Impossible de demander un nouveau lien pour le moment. Veuillez réessayer plus tard.",
+    capacity: "La capacité disponible ne permet pas d’ajouter une demande de lien de téléchargement en attente. Votre demande n’a pas été enregistrée et aucun email n’a été programmé. Contactez la boutique pour obtenir de l’aide.",
     notPaid: "Cet achat n’est plus payé ou a été remboursé, le téléchargement est donc fermé.",
   },
   de: {
@@ -81,6 +85,7 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     invalid: "Dieser Download-Link konnte nicht geprüft werden.",
     tooOften: "Bitte warte, bevor du einen weiteren Link anforderst.",
     unavailable: "Ein neuer Link kann gerade nicht angefordert werden. Bitte versuche es später erneut.",
+    capacity: "Für eine weitere ausstehende Download-Link-Anfrage ist keine Kapazität verfügbar. Deine Anfrage wurde nicht gespeichert und es wurde keine E-Mail eingeplant. Bitte wende dich an den Shop.",
     notPaid: "Dieser Kauf ist nicht mehr bezahlt oder wurde erstattet. Der Download ist deshalb geschlossen.",
   },
   it: {
@@ -97,6 +102,7 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     invalid: "Non è stato possibile verificare questo link per scaricare.",
     tooOften: "Attendi prima di richiedere un altro link.",
     unavailable: "Al momento non è possibile richiedere un nuovo link. Riprova più tardi.",
+    capacity: "Non è disponibile capacità per un’altra richiesta di link per scaricare in attesa. La tua richiesta non è stata salvata e non è stata programmata alcuna email. Contatta il negozio per assistenza.",
     notPaid: "Questo acquisto non risulta più pagato o è stato rimborsato, quindi il download è chiuso.",
   },
   nl: {
@@ -113,6 +119,7 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     invalid: "Deze downloadlink kon niet worden gecontroleerd.",
     tooOften: "Wacht even voordat je nog een link aanvraagt.",
     unavailable: "Je kunt nu geen nieuwe link aanvragen. Probeer het later opnieuw.",
+    capacity: "Er is geen capaciteit voor nog een openstaande aanvraag voor een downloadlink. Je verzoek is niet opgeslagen en er is geen e-mail ingepland. Neem contact op met de winkel voor hulp.",
     notPaid: "Deze aankoop is niet meer betaald of is terugbetaald. De download is daarom gesloten.",
   },
   pt: {
@@ -129,6 +136,7 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     invalid: "Não foi possível verificar esta ligação para descarregar.",
     tooOften: "Aguarde antes de pedir outra ligação.",
     unavailable: "Não é possível pedir uma nova ligação neste momento. Tente novamente mais tarde.",
+    capacity: "Não há capacidade para mais um pedido pendente de ligação para descarregar. O seu pedido não foi guardado e não foi programado nenhum email. Contacte a loja para obter ajuda.",
     notPaid: "Esta compra já não está paga ou foi reembolsada, por isso o ficheiro já não pode ser descarregado.",
   },
 };

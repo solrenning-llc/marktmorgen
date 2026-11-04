@@ -194,21 +194,14 @@ function keys(r: Pick<Row, "id" | "session" | "statsId" | "person">): string[] {
  * an expired dispatch lease, absent provider response or a lost ACK as absence.
  * Tests count EVAL itself plus every internal redis.call on real Redis.
  */
-/** Read at most one existing pending ID atomically. SCARD followed by a
- * separate SMEMBERS may race with physical admissions and transfer a whole
- * store index. This read-only script is billed at most3 commands, not1. */
-export const RENEWAL_PENDING_READ_SCRIPT = `-- marktmorgen:renewal-pending-singleton:v1
-if #KEYS~=1 or #ARGV~=0 then return redis.error_reply('renewal-pending: arguments') end
-if redis.call('SCARD',KEYS[1])~=1 then return {} end
-return redis.call('SMEMBERS',KEYS[1])`;
-
 export const SHIPMENT_MAIL_SCRIPT = `-- marktmorgen:shipment-mail-outbox:v1
 local op, expected, supplied = ARGV[1], ARGV[2], ARGV[3]
 local now, maxbytes = tonumber(ARGV[4]), tonumber(ARGV[5])
 if not now or now < 0 or not maxbytes or maxbytes > 131072 then return {'unknown'} end
-local types = {'string','string','zset','set','set','hash','hash','set','string','string'}
+if #KEYS~=10 and #KEYS~=12 then return {'unknown'} end
+local types = {'string','string','zset','set','set','hash','hash','set','string','string','string','set'}
 local seen = {}
-for i=1,10 do
+for i=1,#KEYS do
  if not KEYS[i] or seen[KEYS[i]] then return {'unknown'} end
  seen[KEYS[i]] = true
  local kind = redis.call('TYPE',KEYS[i]).ok
@@ -222,6 +215,17 @@ if raw ~= '' then
  local ok,v = pcall(cjson.decode,raw)
  if not ok or type(v) ~= 'table' or type(v.bytes) ~= 'number' or v.bytes < #raw then return {'unknown'} end
  r=v
+end
+-- Only renewals own these two additional keys. No mixed confirmation index
+-- is read to deduplicate or count renewal requests.
+local function renewalKeys(v)
+ if v.originKind~='single_digital_renewal' then return #KEYS==10 end
+ return #KEYS==12 and type(v.statsId)=='string' and type(v.capsuleDigest)=='string' and #v.capsuleDigest==64 and not string.find(v.capsuleDigest,'[^a-f0-9]') and
+  KEYS[11]=='nl:order-confirmation:renewal:capsule:'..v.statsId..':'..v.capsuleDigest and KEYS[12]=='nl:order-confirmation:renewal:store:'..v.statsId
+end
+if r then
+ if not renewalKeys(r) then return {'unknown'} end
+ if r.originKind=='single_digital_renewal' and (redis.call('GETRANGE',KEYS[11],0,64)~=r.id or redis.call('SISMEMBER',KEYS[12],r.id)~=1) then return {'unknown'} end
 end
 local function pool(key)
  local v=redis.call('HMGET',key,'items','bytes')
@@ -242,6 +246,9 @@ local function drop()
   redis.call('HINCRBY',KEYS[6],'items',-1); redis.call('HINCRBY',KEYS[6],'bytes',-r.bytes)
   redis.call('HINCRBY',KEYS[7],'items',-1); redis.call('HINCRBY',KEYS[7],'bytes',-r.bytes)
   if b[1]==1 and b[2]==r.bytes then redis.call('DEL',KEYS[7]) end
+ end
+ if r.originKind=='single_digital_renewal' then
+  redis.call('DEL',KEYS[11]); redis.call('SREM',KEYS[12],r.id)
  end
  redis.call('DEL',KEYS[1]); redis.call('ZREM',KEYS[3],r.id)
  redis.call('SREM',KEYS[4],r.id); redis.call('SREM',KEYS[5],r.id); redis.call('SREM',KEYS[8],r.id)
@@ -272,7 +279,15 @@ if op == 'enqueue' then
    if n.kind~='confirmation' or n.purpose~='single-digital-access-renewal' or n.phase~='renewal_queued' or n.state~='queued' or not covered['single-digital-access-renewal'] or not covered['single-digital-confirmation'] or type(p.singleDigitalAccessEvidence)~='string' or #p.singleDigitalAccessEvidence==0 or type(p.singleDigitalRenewalEvidence)~='string' or #p.singleDigitalRenewalEvidence==0 then return {'unknown'} end
   else return {'unknown'} end
  end
+ if not renewalKeys(n) then return {'unknown'} end
  if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then return {'unknown'} end
+ if n.originKind=='single_digital_renewal' then
+  local pending=redis.call('GETRANGE',KEYS[11],0,64)
+  if pending~='' then
+   if #pending~=64 or string.find(pending,'[^a-f0-9]') or redis.call('SISMEMBER',KEYS[12],pending)~=1 then return {'unknown'} end
+   return {'duplicate',pending}
+  elseif redis.call('EXISTS',KEYS[11])~=0 then return {'unknown'} end
+ end
  local a,b=pool(KEYS[6]),pool(KEYS[7])
  if a==false or b==false then return {'unknown'} end
  if not a then
@@ -280,12 +295,11 @@ if op == 'enqueue' then
   a={0,0}
  end
  if not b then if redis.call('SCARD',KEYS[4])~=0 then return {'unknown'} end; b={0,0} end
- -- Private renewal custody: at most one pending confirmation for this store.
- -- The shared pool retains one full same-store physical source envelope; a
- -- renewal can never take the last slot/bytes needed by an ordinary sale.
- -- Existing exact requests were returned above, before these admission checks.
+ -- Eight independent pending capsules at most, bounded by the same funded
+ -- pool. Keep one full physical source envelope in both item and byte limits.
+ -- A duplicate capsule returned above does not consume another slot.
  if n.originKind=='single_digital_renewal' then
-  if redis.call('SCARD',KEYS[4])~=0 or a[1]+1>=p.globalItems or b[1]+1>=p.storeItems or a[2]+2*n.bytes>p.globalBytes or b[2]+2*n.bytes>p.storeBytes then return {'full'} end
+  if redis.call('SCARD',KEYS[12])>=8 or a[1]+1>=p.globalItems or b[1]+1>=p.storeItems or a[2]+2*n.bytes>p.globalBytes or b[2]+2*n.bytes>p.storeBytes then return {'full'} end
  end
  if a[1]>=p.globalItems or b[1]>=p.storeItems or a[2]+n.bytes>p.globalBytes or b[2]+n.bytes>p.storeBytes then return {'full'} end
  redis.call('HSET',KEYS[6],'items',a[1]+1,'bytes',a[2]+n.bytes)
@@ -296,6 +310,9 @@ if op == 'enqueue' then
  -- in the existing ownership indices, without an unbounded polling member.
  if n.originKind~='course' then redis.call('ZADD',KEYS[3],now,n.id) end
  redis.call('SADD',KEYS[4],n.id); redis.call('SADD',KEYS[5],n.id); redis.call('SADD',KEYS[8],n.id)
+ if n.originKind=='single_digital_renewal' then
+  redis.call('SET',KEYS[11],n.id,'NX'); redis.call('SADD',KEYS[12],n.id)
+ end
  return {'queued',supplied}
 end
 if not r then return {'missing'} end

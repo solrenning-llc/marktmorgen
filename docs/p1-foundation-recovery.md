@@ -138,12 +138,39 @@ Two concrete omissions were reproduced before correction. Parent shipment copy r
 
 All four reported issues were reproduced before correction. Personal copies now omit the digital message body both for ordinary single_digital confirmations and renewals, including dispatching/unknown acceptance. The original protected URL is proved live by a200 paid-file response in the regression, while the copy contains no token/origin URL; original purchase fields, subject and state remain. The own copy-plan sentence explains the omission without claiming delivery was accepted.
 
-Renewal admission now has an atomic private custody bound: the store confirmation index must be empty for a new renewal, and one item plus its full physical-source byte envelope remains available in both shared pools. A duplicate capsule with a different client nonce returns the existing pending ID instead of charging another row; another capsule is refused while a confirmation remains pending. Completion releases the pending bound, so a new legitimate inbox renewal can still be requested with a new form rather than being blocked by a400day stable-source tombstone. No new key family, visible limit, commercial price or flag is introduced. Actual Redis tests run five concurrent nonces, prove one reserved item/bytes, refuse another authenticated capsule, and still open a physical checkout through the actual application and a disclosed synthetic provider. Single-item and insufficient-two-envelope byte caps deny renewal while physical checkout still works.
-
-Additional readonly review found a race in an initial SCARD-then-SMEMBERS fallback: physical admissions could enlarge the set between reads. A RED/GREEN growth-injection case now protects an atomic readonly Lua selection returning at most one ID; the caller still checks its hash and source ownership. The helper bills at most3 commands (EVAL+SCARD+SMEMBERS), and renewal admission adds1SCARD. This is explicit operational counting, not a real invoice, complete funding review or activation approval; real policies remain null.
+The first corrective head89ad2765 used an atomic store-wide singleton check. Independent review CX-43 rejected that guard: the mixed confirmation index includes other buyers, abandoned physical checkouts and reserve-only courses, so ordinary stores could never renew. That guard and its singleton-read fallback are superseded by the capsule pointer and renewal-only index below; the previous operational profile is not an approval of the replacement.
 
 All new buyer strings, including early403/415/400/404/503 guards, are in a seven-language buyer-words helper and private HTML uses the store language. The form action carries only a presentation language hint for guards before reading the body or looking up a store; the loaded store overrides it and it never participates in authorization. Three original form fields and the absent-policy-before-body guard remain. Known refunded/unpaid exact provider sessions return410 without offering an endless renewal form; unavailable or incomplete provider evidence remains503, never a false unpaid claim. POST uses the enqueue result and performs only one provider lookup.
 
 Directed RED/GREEN logs: review-cap-red (three failures), admission-cap-red (two actual-Lua failures), singleton-race-red (concurrent read growth), and download-renewal language/outcome red (including early guards). Final native renewal12/12 and admission2/2 pass; seven-language/error cases24/24 pass. The new native admission and renewal cases are included in the existing CI Redis step's test list, without a new job or runner. Types/lint/related directed tests/public-data scanner are checked before the single corrective send; complete suite/build/accessibility/security remain hosted per CX-37/38. No generalP1, account, legal retention or worst-month margin approval is implied.
 
 Usage: owner reports weekly quota renewed04/11 at03h35,100% remaining seen03h38; current live usage is not visible to Codex. High effort follows the renewed weekly budget; subsequent usage readings remain necessary instead of assuming it stays100%.
+
+
+## CX-43/CX-45: isolated capsule custody and exact fixture decoding (04 November 2026)
+
+Renewals now declare twelve Lua keys: the ten existing custody keys plus a statsId/capsule-digest STRING pointer and a dedicated per-store SET of pending renewal IDs. Direct bounded pointer lookup, membership proof, SET NX, pool reservation and both index writes occur in the same admission script. Different client nonces for the same pending capsule return its authenticated existing ID; another buyer is no longer refused because unrelated physical, digital or reserve-only course origins exist. The private renewal-only cap is eight, still bounded by the original funded global/store pools and the existing one-item/two-envelope physical headroom. All other producers retain the ten-key protocol.
+
+Accepted and explicit-erasure operations verify pointer ownership and index membership before atomically deleting both along with the protected payload and releasing its reserve. Pending, refused and unknown dispatch never expire or release their custody. A corrupt pointer/value/index refuses further permission and leaves erasure incomplete with its fence retained; it is not silently discarded or certified erased. A new legitimate request after terminal completion uses its fresh nonce while the old exactly-matching400day source tombstone remains. The reserve includes both additional key names and overhead; a synthetic native twelve-key case measured4112–4128bytes across ten present keys against149190reserved bytes (pointer280bytes, renewal index200bytes in the final sample). This is a component memory observation on Redis7.4.12, not a worst-case retention, replicas, pricing or financial review.
+
+Known capacity exhaustion returns its own truthful seven-language message: no new request was saved or email scheduled, and the buyer can contact the store. Unknown provider/protocol evidence remains unavailable and known unpaid/refunded purchases remain410. The CodeQL js/double-escaping fixture defect is corrected by unescaping ampersands last, with an explicit amp;quot regression; no alert is suppressed.
+
+RED/GREEN regressions cover two distinct paid buyers, a checkout still retained after48hours and a worker pass, an unknown dispatch retained after30days without replay, and a reserve-only course, each in the fixture and native Redis. Native concurrency reaches eight independent pending capsules, refuses the ninth renewal while preserving the ninth physical slot, and verifies exact pool items/bytes. Accepted/canceled cleanup, malformed/foreign pointers and real key memory are tested too. The new file is wired into the existing hosted native Redis step. Policies remain null, lifecycle never_activated, flags false, generalP1 partial and the entire stack outside main pending independent review and hosted gates. Full lifetime/read/processing/failure/copy/retention costs remain unknown/rejected; neither a new private bound nor descriptive registry entries establish funding.
+
+
+Native Redis7.4.12 command profiles use the exact application EVAL in MULTI with INFO commandstats snapshots immediately before/after it. The observer INFO is subtracted once; application commands, including EVAL itself and all internal redis.call commands, remain counted. MULTI/EXEC run outside the snapshots. Tests pin upper bounds by operation rather than treating an operational profile as a funded lifetime allowance.
+
+| Operation / state | Measured EVAL plus internal commands | Test ceiling |
+| --- | ---: | ---: |
+| Enqueue, both pools absent | 34 | 34 |
+| Duplicate capsule, existing pointer | 18 | 18 |
+| Enqueue, both pools present | 31 | 34 |
+| Enqueue, global pool zero / store pool absent | 32 | 34 |
+| Claim | 20 | 20 |
+| Prepare renewal draft | 19 | 19 |
+| Dispatch barrier | 20 | 20 |
+| Accepted, last store item | 33 | 33 |
+| Cancel, sibling still present | 31 | 32 |
+| Cancel, last store item | 32 | 32 |
+
+The native regression runs the original script, not a rewritten Lua approximation, and separately exercises corrupted metadata and concurrent admission. The exact current script SHA256 is d032e42b1f667b44aef8088d054aaf537d06969fbf43d6c70802f7cd7c37e7ca. Extra reads/provider checks/trigger costs outside this EVAL, indefinite pending work, replicas and erasure failures still require their complete review; none are priced as zero.

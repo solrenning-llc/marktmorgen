@@ -10,7 +10,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RightNow } from "@/components/stats-panel";
 import { readFileSync } from "node:fs";
-import { LIVE_ASKS, footnoteWords, hasRested, newLiveBox, readingAnswered, readingFailed, startReading, todayFailedWords, type LiveBox } from "@/lib/live-box-rules";
+import { LIVE_ASKS, LIVE_TIMEOUT_MS, footnoteWords, hasRested, newLiveBox, readingAnswered, readingFailed, startReading, todayFailedWords, type LiveBox } from "@/lib/live-box-rules";
 import { done, is, part } from "./check";
 
 part("Before its first answer, the box is already there, in the shape it keeps");
@@ -60,7 +60,7 @@ part("The box as a state machine: it rests only when the last reading has come b
   const stale = run(run(newLiveBox<{ n: number }>(), true, 7), false);
   const staleWords = footnoteWords(stale, UTC);
   is("the numbers are kept, from the last good reading", stale.last?.data.n, 7);
-  is("and said to be from its time, with the last try failed", [staleWords.includes("last good reading, at 3:41 PM"), staleWords.includes("last try to read them again failed"), staleWords.includes("updated every half minute")], [true, true, false]);
+  is("and said to be from its time, with the last try failed", [staleWords.includes("last good reading, at 3:41 PM your time"), staleWords.includes("last try to read them again failed"), staleWords.includes("updated every half minute")], [true, true, false]);
   is("a good reading after that clears it", footnoteWords(run(stale, true, 8), UTC).startsWith("Your store page"), true);
 
   // Two readings overlap (a tab coming back to view and the timer): the older answer arriving last is ignored.
@@ -72,8 +72,44 @@ part("The box as a state machine: it rests only when the last reading has come b
   const failedLate = readingFailed(readingAnswered(second.box, second.seq, { n: 2 }, at), first.seq);
   is("and an older failure does not mark the newer numbers failed", failedLate.failed, false);
   is("both still count as come back", failedLate.finished, 2);
+
+  // A reading that never comes back (reading 1 stays out, 2 to 20 are answered): the box still rests.
+  {
+    let b: Box = newLiveBox();
+    const one = startReading(b, true)!;
+    b = one.box;
+    for (let i = 2; i <= LIVE_ASKS; i++) {
+      const st = startReading(b, true)!;
+      b = readingAnswered(st.box, st.seq, { n: i }, at);
+    }
+    is("with reading 1 never back, after the 20th it rests and has no next reading", [b.started, b.finished, hasRested(b), startReading(b, true)], [LIVE_ASKS, LIVE_ASKS - 1, true, null]);
+    is("and never says it updates every half minute", footnoteWords(b, UTC).includes("every half minute"), false);
+  }
+  is("a reading is given up after ten seconds at most", LIVE_TIMEOUT_MS <= 10_000, true);
+
+  type Live = LiveBox<{ visitors: number; sources: { source: string; visitors: number }[]; today: null }>;
+  const reading = (visitors: number) => ({ visitors, sources: [], today: null });
+  const good = (visitors: number): Live => {
+    const st = startReading(newLiveBox<ReturnType<typeof reading>>(), true)!;
+    return readingAnswered(st.box, st.seq, reading(visitors), at);
+  };
+  const drawn = (b: Live) => renderToStaticMarkup(createElement(RightNow, { currency: "usd", initialBox: b, timeZone: UTC }));
+  const rested = (b: Live): Live => ({ ...b, started: LIVE_ASKS, finished: LIVE_ASKS });
+  part("The box as drawn, in the states the machine reaches");
+  {
+    const pending = drawn(startReading(newLiveBox<ReturnType<typeof reading>>(), true)!.box);
+    is("a reading out and nothing yet: checking, busy", [pending.includes("Checking who has opened"), pending.includes('aria-busy="true"')], [true, true]);
+    const fresh = drawn(good(3));
+    is("a fresh good reading: the count, no time, no as-of", [fresh.includes("3 people have opened your store in the last 5 minutes<"), fresh.includes("as of")], [true, false]);
+    const failedAfter = drawn(readingFailed(startReading(good(3), true)!.box, 2));
+    is("a failure after a good one: the count with its time, your time", [failedAfter.includes("last 5 minutes, as of 3:41 PM your time"), failedAfter.includes("last try to read them again failed")], [true, true]);
+    const old = drawn(rested(good(3)));
+    is("resting after a good reading: the count is said with its time", [old.includes("last 5 minutes, as of 3:41 PM your time"), old.includes("Paused after ten minutes")], [true, true]);
+    is("only the status sentence is a live region", (old.match(/aria-live/g) ?? []).length, 1);
+    is("and the time in it is not read twice by it", (old.match(/<p[^>]*aria-live[^>]*>.*?<\/p>/)?.[0].match(/3:41 PM/g) ?? []).length, 1);
+  }
   const source = readFileSync("components/stats-panel.tsx", "utf8");
-  is("the component draws everything from the machine", [source.includes("footnoteWords(box)"), source.includes("todayFailedWords(box)"), source.includes("waitingWords(box)")], [true, true, true]);
+  is("the component draws everything from the machine", [source.includes("footnoteWords(box"), source.includes("todayFailedWords(box)"), source.includes("headlineWords(box")], [true, true, true]);
 }
 
 done();

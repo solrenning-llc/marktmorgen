@@ -10,6 +10,8 @@
  * the numbers still on the screen are from the last good reading, at its time.
  */
 export const LIVE_ASKS = 20;
+/** A reading that has not come back by then is a failed one (an AbortController in the component), so none stays out for good. */
+export const LIVE_TIMEOUT_MS = 10_000;
 
 export type LiveReading<T> = { data: T; at: number };
 
@@ -24,10 +26,12 @@ export type LiveBox<T> = {
   last: LiveReading<T> | null;
   /** The newest applied result was a failure. */
   failed: boolean;
+  /** The last reading allowed (the 20th) has come back, however many earlier ones are still out. */
+  lastBack: boolean;
 };
 
 export function newLiveBox<T>(): LiveBox<T> {
-  return { started: 0, finished: 0, applied: 0, last: null, failed: false };
+  return { started: 0, finished: 0, applied: 0, last: null, failed: false, lastBack: false };
 }
 
 /** Whether another reading will be started after the ones started so far. */
@@ -35,9 +39,12 @@ export function willReadAgain<T>(box: LiveBox<T>): boolean {
   return box.started < LIVE_ASKS;
 }
 
-/** The last reading has come back: the box rests until the page is reloaded. */
+/**
+ * The last reading has come back: the box rests until the page is reloaded. A reading that never comes back cannot
+ * keep it from resting: the 20th coming back is enough, and every reading ends within LIVE_TIMEOUT_MS anyway.
+ */
 export function hasRested<T>(box: LiveBox<T>): boolean {
-  return !willReadAgain(box) && box.finished >= box.started;
+  return !willReadAgain(box) && (box.lastBack || box.finished >= box.started);
 }
 
 /** Event: a reading is due. Returns the next box and the reading's sequence number, or null when none is made (tab hidden, or no readings left). */
@@ -49,20 +56,30 @@ export function startReading<T>(box: LiveBox<T>, visible: boolean): { box: LiveB
 /** Event: a good answer to reading `seq`, made at `at` (ms). Dropped from the display when a newer reading already applied. */
 export function readingAnswered<T>(box: LiveBox<T>, seq: number, data: T, at: number): LiveBox<T> {
   const finished = box.finished + 1;
-  if (seq < box.applied) return { ...box, finished };
-  return { ...box, finished, applied: seq, last: { data, at }, failed: false };
+  const lastBack = box.lastBack || seq >= LIVE_ASKS;
+  if (seq < box.applied) return { ...box, finished, lastBack };
+  return { ...box, finished, lastBack, applied: seq, last: { data, at }, failed: false };
 }
 
 /** Event: reading `seq` failed. */
 export function readingFailed<T>(box: LiveBox<T>, seq: number): LiveBox<T> {
   const finished = box.finished + 1;
-  if (seq < box.applied) return { ...box, finished };
-  return { ...box, finished, applied: seq, failed: true };
+  const lastBack = box.lastBack || seq >= LIVE_ASKS;
+  if (seq < box.applied) return { ...box, finished, lastBack };
+  return { ...box, finished, lastBack, applied: seq, failed: true };
 }
 
-/** "3:41 PM", in the viewer's time unless a zone is given. */
+/** "3:41 PM your time": the viewer's own clock, said so, because the day below it is in UTC. */
 export function formatReadTime(at: number, timeZone?: string): string {
-  return new Date(at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+  return `${new Date(at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone })} your time`;
+}
+
+/** The first line. Numbers that are not from a reading under way (it failed, or the box rests) are said with the time they were read. */
+export function headlineWords<T extends { visitors: number }>(box: LiveBox<T>, timeZone?: string): string {
+  if (!box.last) return waitingWords(box);
+  const v = box.last.data.visitors;
+  const base = v === 0 ? "Nobody has opened your store in the last 5 minutes" : `${v.toLocaleString("en-US")} ${v === 1 ? "person has" : "people have"} opened your store in the last 5 minutes`;
+  return box.failed || hasRested(box) ? `${base}, as of ${formatReadTime(box.last.at, timeZone)}` : base;
 }
 
 /** What the box is waiting to do next, in words that cannot promise a reading that will not be made. */

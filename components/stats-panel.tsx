@@ -49,7 +49,7 @@ import type { AutoMark, MarkKind } from "@/lib/auto-marks";
 import { useStudioStore } from "@/components/studio-store-pin";
 import { WeeklyAiToggle } from "@/components/weekly-ai-toggle";
 import { AttributionTable } from "@/components/attribution-table";
-import { footnoteWords, formatReadTime, newLiveBox, readingAnswered, readingFailed, startReading, todayFailedWords, waitingWords, type LiveBox } from "@/lib/live-box-rules";
+import { footnoteWords, LIVE_TIMEOUT_MS, headlineWords, newLiveBox, readingAnswered, readingFailed, startReading, todayFailedWords, type LiveBox } from "@/lib/live-box-rules";
 
 /**
  * The store's funnel for the range: people, then the ones who started a
@@ -290,8 +290,9 @@ type LiveNow = { visitors: number; sources: { source: string; visitors: number }
  * stops after LIVE_ASKS of them (lib/live-box-rules.ts), ten minutes, until the page is opened again. What it says about a
  * next reading comes from the same count of readings made that decides whether there is one.
  */
-export function RightNow({ currency }: { currency: string }) {
-  const [box, setBox] = useState<LiveBox<LiveNow>>(() => newLiveBox<LiveNow>());
+export function RightNow({ currency, initialBox, timeZone }: { currency: string; initialBox?: LiveBox<LiveNow>; timeZone?: string }) {
+  // initialBox and timeZone are for tests that draw the box in a given state; the studio passes neither.
+  const [box, setBox] = useState<LiveBox<LiveNow>>(() => initialBox ?? newLiveBox<LiveNow>());
   // The machine in lib/live-box-rules.ts holds the count, the last good reading and what to say; the ref lets each
   // event see the newest state without waiting for a render.
   const boxRef = useRef(box);
@@ -305,8 +306,11 @@ export function RightNow({ currency }: { currency: string }) {
       const started = startReading(boxRef.current, document.visibilityState === "visible");
       if (!started) return;
       apply(started.box);
+      // A reading that does not come back is a failed one, so the box can never be left waiting for it.
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), LIVE_TIMEOUT_MS);
       try {
-        const response = await fetch("/api/store/live", { cache: "no-store" });
+        const response = await fetch("/api/store/live", { cache: "no-store", signal: controller.signal });
         const body = (await response.json().catch(() => ({}))) as { ok?: boolean } & Partial<LiveNow>;
         if (stopped) return;
         if (body.ok) apply(readingAnswered(boxRef.current, started.seq, { visitors: body.visitors ?? 0, sources: body.sources ?? [], today: body.today ?? null }, Date.now()));
@@ -314,6 +318,8 @@ export function RightNow({ currency }: { currency: string }) {
       } catch {
         // A missed reading is simply the next one's to make; until one comes, the box says so.
         if (!stopped) apply(readingFailed(boxRef.current, started.seq));
+      } finally {
+        window.clearTimeout(timeout);
       }
     };
     void ask();
@@ -340,16 +346,11 @@ export function RightNow({ currency }: { currency: string }) {
     </>
   );
   return (
-    <div className="mt-6 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line" aria-live="polite" aria-busy={live === null && !failed}>
-      <p className="flex items-center gap-2 text-sm font-bold text-ink">
+    <div className="mt-6 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line">
+      {/* Only this sentence is a live region: it is the one that changes, and it carries the time when the numbers are old. */}
+      <p className="flex items-center gap-2 text-sm font-bold text-ink" aria-live="polite" aria-busy={live === null && !failed}>
         <span className={`inline-block h-2 w-2 rounded-full ${live?.visitors ? "bg-emerald-500" : "bg-line"}`} aria-hidden="true" />
-        {live === null
-          ? waitingWords(box)
-          : (live.visitors === 0
-              ? "Nobody has opened your store in the last 5 minutes"
-              : `${count(live.visitors)} ${live.visitors === 1 ? "person has" : "people have"} opened your store in the last 5 minutes`) +
-            // A failed try after a good one: the numbers are the last good reading's, said with its time.
-            (failed && box.last ? `, as of ${formatReadTime(box.last.at)}` : "")}
+        {headlineWords(box, timeZone)}
       </p>
       {live && live.visitors > 0 && live.sources.length > 0 ? (
         <ul className="mt-2 space-y-1 text-sm">
@@ -363,7 +364,7 @@ export function RightNow({ currency }: { currency: string }) {
       ) : null}
       {/* One line either way, so the pause never adds one above the rest of the studio. */}
       <p className="mt-2 text-xs text-ink-soft">
-        {footnoteWords(box)}
+        {footnoteWords(box, timeZone)}
       </p>
       <div className="mt-4 border-t border-line pt-3">
         <p className="text-sm font-bold text-ink">Today so far</p>

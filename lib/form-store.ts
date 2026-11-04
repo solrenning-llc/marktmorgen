@@ -147,8 +147,8 @@ export async function responseCounts(statsId: string | null, ids: string[]): Pro
  * answers is this address (ARGV[1], lower case), on the Redis side so no
  * response travels. Answers how many went.
  */
-export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v1
-local removed = 0
+export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v2
+local out = {}
 for k = 1, #KEYS do
   local items = redis.call("LRANGE", KEYS[k], 0, -1)
   for _, raw in ipairs(items) do
@@ -159,16 +159,40 @@ for k = 1, #KEYS do
         if type(answer) == "string" and string.lower(string.match(answer, "^%s*(.-)%s*$")) == ARGV[1] then hit = true end
       end
     end
-    if hit then removed = removed + redis.call("LREM", KEYS[k], 0, raw) end
+    if hit then
+      local n = redis.call("LREM", KEYS[k], 0, raw)
+      if n > 0 then
+        table.insert(out, k)
+        table.insert(out, raw)
+        table.insert(out, n)
+      end
+    end
   end
 end
-return removed`;
+return out`;
 
-/** Deletes every response one person gave to any of the store's forms (lib/person-erasure.ts). */
-export async function forgetFormsPerson(statsId: string | null, email: string): Promise<number> {
+/**
+ * Deletes every response one person gave to any of the store's forms
+ * (lib/person-erasure.ts), and gives back to `room` exactly what each one
+ * took when it was kept (addResponse): the script answers each response it
+ * removed, by form, with how many times it was there.
+ */
+export async function forgetFormsPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const forms = await readForms(statsId);
   if (!forms.length) return 0;
-  const [removed] = await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]);
-  return Number(removed) || 0;
+  const [reply] = await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]);
+  const list = Array.isArray(reply) ? reply : [];
+  let removed = 0;
+  const freed = new Map<string, number>();
+  for (let i = 0; i + 2 < list.length; i += 3) {
+    const form = forms[Number(list[i]) - 1];
+    const raw = list[i + 1];
+    const n = Number(list[i + 2]);
+    if (!form || typeof raw !== "string" || !Number.isSafeInteger(n) || n < 1) continue;
+    removed += n;
+    freed.set(form.id, (freed.get(form.id) ?? 0) + dataBytes([raw], 1) * n);
+  }
+  if (room && freed.size) await giveData(room, [...freed].map(([id, bytes]) => ({ slot: ANSWERS_SLOT(id), bytes })));
+  return removed;
 }

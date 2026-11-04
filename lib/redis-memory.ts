@@ -434,27 +434,29 @@ export class MemoryRedis {
           }
           return n;
         }
-        if (key.startsWith("-- marktmorgen:form-forget:v1\n")) {
+        if (key.startsWith("-- marktmorgen:form-forget:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const address = args[1 + count];
-          let removed = 0;
-          for (const listKey of keys) {
+          const out: (string | number)[] = [];
+          keys.forEach((listKey, k) => {
             this.live(listKey);
-            if (!this.data.has(listKey)) continue;
+            if (!this.data.has(listKey)) return;
+            const counts = new Map<string, number>();
             const kept = this.list(listKey).filter((raw) => {
               try {
                 const value = JSON.parse(raw) as { answers?: Record<string, unknown> };
                 const hit = value && typeof value.answers === "object" && value.answers !== null && Object.values(value.answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === address);
-                if (hit) removed += 1;
+                if (hit) counts.set(raw, (counts.get(raw) ?? 0) + 1);
                 return !hit;
               } catch {
                 return true;
               }
             });
             this.data.set(listKey, kept);
-          }
-          return removed;
+            for (const [raw, n] of counts) out.push(k + 1, raw, n);
+          });
+          return out;
         }
         if (key.startsWith("-- marktmorgen:path-write:v1\n")) {
           const count=Number(args[0]);

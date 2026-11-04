@@ -120,7 +120,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
-  { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email) },
+  { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
   {
     module: "lib/learn.ts",
     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),

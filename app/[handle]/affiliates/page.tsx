@@ -109,6 +109,9 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   // answer (630 [HN6](39), lib/partner-terms-rules.ts); one left unanswered
   // lapses on its own, so only one still open is shown.
   const { nowSeconds, change: askedChange, titles: askedTitles } = await partnerChangeFor(store, affiliate);
+  // What became of the partner's answer, said even when no share is left to show (they agreed to end it).
+  const partnerNotice =
+    status === "partner-yes" ? "yes" : status === "partner-no" ? "no" : status === "partner-cap" ? "cap" : status === "partner-none" ? "none" : status === "partner-busy" ? "busy" : null;
   /** The last day a share earns on, in the store's language: the day before its end. */
   const lastDay = (until: number) => day(until - 24 * 60 * 60);
   // Codes of the store's own that this affiliate was given, which earn with no
@@ -303,8 +306,10 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     part somebody agreed to in an email and should be able to
                     check without asking.
                   */}
-                  {affiliate.share ? (
+                  {affiliate.share || partnerNotice ? (
                     <div id="partner" className="scroll-mt-24">
+                      {affiliate.share ? (
+                      <>
                       <p className="st-label mt-7">{a.partnerShareLabel}</p>
                       {shareRunning(affiliate.share, nowSeconds) ? (
                         <p className="st-muted mt-2 text-sm">
@@ -338,9 +343,11 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                           </div>
                         </form>
                       ) : null}
-                      {status === "partner-yes" || status === "partner-no" || status === "partner-cap" || status === "partner-none" ? (
-                        <p className={`st-note mt-3 text-sm${status === "partner-yes" || status === "partner-no" ? "" : " font-semibold"}`} role="status">
-                          {a.partnerAnswered[status === "partner-yes" ? "yes" : status === "partner-no" ? "no" : status === "partner-cap" ? "cap" : "none"]}
+                      </>
+                      ) : null}
+                      {partnerNotice ? (
+                        <p className={`st-note mt-3 text-sm${partnerNotice === "yes" || partnerNotice === "no" ? "" : " font-semibold"}`} role="status">
+                          {a.partnerAnswered[partnerNotice]}
                         </p>
                       ) : null}
                     </div>

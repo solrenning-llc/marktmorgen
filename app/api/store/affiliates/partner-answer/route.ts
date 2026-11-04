@@ -4,6 +4,7 @@ import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { affiliateCookieName, affiliateForSession, answerShareChange, sharePromiseProblem } from "@/lib/affiliates";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { LockBusyError } from "@/lib/redis-lock";
 
 /**
  * A signed-in partner answering a change to their share that the store asked
@@ -39,6 +40,13 @@ export async function POST(request: NextRequest) {
   if (!affiliate) return back("signedout");
   if (!(await withinStore("aff-partner", `${store.handle}|${affiliate.id}`, 5, 3600, store))) return back("payto-slow");
   const now = Math.floor(Date.now() / 1000);
-  const result = await answerShareChange(store, affiliate.id, answer === "yes", seen, now, async (share) => (await sharePromiseProblem(store, affiliate.id, share, now)) === null);
+  let result;
+  try {
+    result = await answerShareChange(store, affiliate.id, answer === "yes", seen, now, async (share) => (await sharePromiseProblem(store, affiliate.id, share, now)) === null);
+  } catch (error) {
+    // The store was changing this partner at the same moment and held it past our wait: nothing was applied.
+    if (error instanceof LockBusyError) return back("partner-busy");
+    throw error;
+  }
   return back(result.ok ? `partner-${result.state === "changed" ? "yes" : "no"}` : `partner-${result.reason}`);
 }

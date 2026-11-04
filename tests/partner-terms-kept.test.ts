@@ -6,7 +6,7 @@
  * withdraws a waiting change; every step is in the history. Synthetic store.
  */
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { answerShareChange, changeIdentity, decide, decideMany, proposePartnerShare, readAffiliate } from "@/lib/affiliates";
+import { answerShareChange, changeIdentity, decide, decideMany, decideWhy, proposePartnerShare, readAffiliate, undoMany } from "@/lib/affiliates";
 import { CHANGE_WAITS_SECONDS } from "@/lib/partner-terms-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -102,8 +102,68 @@ async function main(): Promise<void> {
   is("a share until revoked can be removed", [untilRevoked?.status, untilRevoked?.share], ["removed", null]);
   is("and the history says the store ended it", (await read(u)).terms?.history.map((s) => `${s.kind}:${s.by}`), ["started:creator", "revoked:creator"]);
   const after = await decide(await store(), x, "remove", T + 61 * DAY);
-  is("after the end date it can be removed", [after?.status, after?.share], ["removed", null]);
-  is("with the step in its history", (await read(x)).terms?.history.at(-1)?.kind, "revoked");
+  is("after the end date it can be removed, the share left as it ended", [after?.status, after?.share?.until], ["removed", T + 60 * DAY]);
+  is("with no step saying the store ended it: it ended on its date", (await read(x)).terms?.history.map((s) => s.kind), ["started"]);
+
+  part("Refused under the lock, with its own reason, whatever the status");
+  const w = "abababababab";
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ ...person(w), status: "pending", share: { percent: 10, products: [A], until: T + 30 * DAY } })]]);
+  is("somebody waiting who holds a dated share in force is not declined", await decideWhy(await store(), w, "decline", T + 1), { ok: false, reason: "term" });
+  is("the dated partner's removal says why", await decideWhy(await store(), d, "remove", T + 1), { ok: false, reason: "term" });
+  is("an unknown one says unknown", await decideWhy(await store(), "acacacacacac", "remove", T + 1), { ok: false, reason: "unknown" });
+
+  part("An undo never sends a partner back to waiting");
+  const v = "bcbcbcbcbcbc";
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, v, JSON.stringify({ ...person(v), status: "pending", decidedAt: 0 })]]);
+  const before = await decideMany(await store(), [v], "approve");
+  is("approved in bulk", (await read(v)).status, "approved");
+  await proposePartnerShare(await store(), v, { percent: 15, products: [A], until: T + 60 * DAY }, T + 3);
+  is("the undo leaves a partner given a dated share since as they are", [await undoMany(await store(), before, "approve"), (await read(v)).status], [0, "approved"]);
+  is("so they cannot then be declined around their term", await decideWhy(await store(), v, "decline", T + 4), { ok: false, reason: "term" });
+  const v2 = "cdcdcdcdcdcd";
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, v2, JSON.stringify({ ...person(v2), status: "pending", decidedAt: 0 })]]);
+  const before2 = await decideMany(await store(), [v2], "approve");
+  is("an approval with nothing given since is still undone", [await undoMany(await store(), before2, "approve"), (await read(v2)).status], [1, "pending"]);
+
+  part("Someone removed has nothing left to answer");
+  const z = "dededededede";
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, z, JSON.stringify(person(z))]]);
+  await proposePartnerShare(await store(), z, { percent: 20, products: [B], until: T + 60 * DAY }, T);
+  await proposePartnerShare(await store(), z, { percent: 25, products: [B], until: T + 60 * DAY }, T + 5);
+  const zSeen = await seen(z);
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, z, JSON.stringify({ ...(await read(z)), status: "removed" })]]);
+  is("a yes from a removed partner is refused", await answerShareChange(await store(), z, true, zSeen, T + 6, yes), { ok: false, reason: "none" });
+
+  part("Two changes to one partner at the same instant: neither is lost");
+  const c = "efefefefefef";
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, c, JSON.stringify(person(c))]]);
+  await proposePartnerShare(await store(), c, { percent: 10, products: [B], until: T + 60 * DAY }, T);
+  await proposePartnerShare(await store(), c, { percent: 30, products: [B], until: T + 60 * DAY }, T + 1);
+  const cSeen = await seen(c);
+  // The cap check takes a moment, as a real one reading the other partners does: the other change starts meanwhile.
+  const slowYes = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    return true;
+  };
+  const shop = await store();
+  const [answered, asked] = await Promise.all([
+    answerShareChange(shop, c, true, cSeen, T + 2, slowYes),
+    proposePartnerShare(shop, c, { percent: 50, products: [B], until: T + 60 * DAY }, T + 2),
+  ]);
+  const cNow = await read(c);
+  is("both done, one after the other", [answered.ok, asked.ok], [true, true]);
+  is("the new request is still waiting, not dropped by the yes", cNow.terms?.change?.share?.percent, 50);
+  is("and the yes took 30%", cNow.share?.percent, 30);
+  // A share until revoked, a raise waiting, and the store removing them while they say yes.
+  const e = "fafafafafafa";
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, e, JSON.stringify(person(e))]]);
+  await proposePartnerShare(await store(), e, { percent: 10, products: [B] }, T);
+  await proposePartnerShare(await store(), e, { percent: 40, products: [B] }, T + 1);
+  const eSeen = await seen(e);
+  await Promise.all([answerShareChange(shop, e, true, eSeen, T + 2, slowYes), decide(shop, e, "remove", T + 2)]);
+  const eEnd = await read(e);
+  is("a removal racing a yes is never undone by it: removed, with no share left", [eEnd.status, eEnd.share], ["removed", null]);
+  is("and the history ends with the store ending it", eEnd.terms?.history.at(-1)?.kind, "revoked");
   done();
 }
 

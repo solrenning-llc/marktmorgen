@@ -135,6 +135,7 @@ const en = {
     no: "Your share stays as it was. The store sees your answer in its studio.",
     cap: "This change no longer fits what the store already promises on that product, so it was not applied. Your share stays as it was.",
     none: "That request is no longer open. The store may have changed it or taken it back. Nothing changed, and any new request is shown on this page.",
+    busy: "Your answer was not saved, because the store was changing this at the same moment. Nothing changed. Read what this page shows now and answer again.",
   },
   yourRate: (store: string, percent: number) =>
     `${store} set your share at ${percent}% of what a buyer pays before tax, on every one-time purchase through your link, except any product they took out of the program.`,
@@ -446,6 +447,7 @@ const es: AffiliatesWords = {
     no: "Tu participación sigue como estaba. La tienda ve tu respuesta en su estudio.",
     cap: "Este cambio ya no cabe en lo que la tienda ya promete sobre ese producto, así que no se aplicó. Tu participación sigue como estaba.",
     none: "Esa solicitud ya no está abierta. Puede que la tienda la haya cambiado o retirado. No cambió nada, y cualquier solicitud nueva aparece en esta página.",
+    busy: "Tu respuesta no se guardó, porque la tienda estaba cambiando esto en ese mismo momento. No cambió nada. Lee lo que muestra esta página ahora y responde de nuevo.",
   },
   yourRate: (store, percent) =>
     `${store} fijó tu parte en el ${percent}${S}% de lo que paga un comprador antes de impuestos, en cada compra única hecha a través de tu enlace, excepto los productos que haya retirado del programa.`,
@@ -728,6 +730,7 @@ const fr: AffiliatesWords = {
     no: "Votre part reste telle qu'elle était. La boutique voit votre réponse dans son studio.",
     cap: "Cette modification ne tient plus dans ce que la boutique promet déjà sur ce produit, elle n'a donc pas été appliquée. Votre part reste telle qu'elle était.",
     none: "Cette demande n'est plus ouverte. La boutique l'a peut-être modifiée ou retirée. Rien n'a changé, et toute nouvelle demande s'affiche sur cette page.",
+    busy: "Votre réponse n'a pas été enregistrée, car la boutique modifiait cela au même moment. Rien n'a changé. Lisez ce que cette page affiche maintenant et répondez à nouveau.",
   },
   yourRate: (store, percent) =>
     `${store} a fixé votre part à ${percent}${S}% de ce qu'un acheteur paie hors taxes, sur chaque achat unique effectué via votre lien, sauf pour les produits retirés du programme.`,
@@ -1013,6 +1016,7 @@ const de: AffiliatesWords = {
     no: "Ihre Beteiligung bleibt, wie sie war. Der Shop sieht Ihre Antwort in seinem Studio.",
     cap: "Diese Änderung passt nicht mehr zu dem, was der Shop für dieses Produkt schon zugesagt hat, deshalb wurde sie nicht übernommen. Ihre Beteiligung bleibt, wie sie war.",
     none: "Diese Anfrage ist nicht mehr offen. Der Shop hat sie vielleicht geändert oder zurückgenommen. Es hat sich nichts geändert, und eine neue Anfrage erscheint auf dieser Seite.",
+    busy: "Ihre Antwort wurde nicht gespeichert, weil der Shop dies im selben Moment geändert hat. Es hat sich nichts geändert. Lesen Sie, was diese Seite jetzt zeigt, und antworten Sie erneut.",
   },
   yourRate: (store, percent) =>
     `${store} hat Ihren Anteil auf ${percent}${S}% dessen festgelegt, was ein Käufer vor Steuern zahlt, bei jedem Einmalkauf über Ihren Link, außer bei Produkten, die aus dem Programm genommen wurden.`,
@@ -1302,6 +1306,7 @@ const it: AffiliatesWords = {
     no: "La tua quota resta com'era. Il negozio vede la tua risposta nel suo studio.",
     cap: "Questa modifica non rientra più in quanto il negozio promette già su quel prodotto, quindi non è stata applicata. La tua quota resta com'era.",
     none: "Quella richiesta non è più aperta. Il negozio potrebbe averla modificata o ritirata. Non è cambiato nulla, e un'eventuale nuova richiesta compare in questa pagina.",
+    busy: "La tua risposta non è stata salvata, perché il negozio stava modificando questo nello stesso momento. Non è cambiato nulla. Leggi cosa mostra ora questa pagina e rispondi di nuovo.",
   },
   yourRate: (store, percent) =>
     `${store} ha fissato la tua quota al ${percent}${S}% di quanto un acquirente paga al netto delle tasse, su ogni acquisto singolo fatto tramite il tuo link, tranne i prodotti che ha escluso dal programma.`,
@@ -1587,6 +1592,7 @@ const nl: AffiliatesWords = {
     no: "Je aandeel blijft zoals het was. De winkel ziet je antwoord in zijn studio.",
     cap: "Deze wijziging past niet meer bij wat de winkel al toezegt op dat product, dus is ze niet toegepast. Je aandeel blijft zoals het was.",
     none: "Dat verzoek staat niet meer open. De winkel heeft het misschien gewijzigd of ingetrokken. Er is niets veranderd, en een nieuw verzoek zie je op deze pagina.",
+    busy: "Je antwoord is niet opgeslagen, omdat de winkel dit op hetzelfde moment wijzigde. Er is niets veranderd. Lees wat deze pagina nu toont en antwoord opnieuw.",
   },
   yourRate: (store, percent) =>
     `${store} heeft je aandeel vastgesteld op ${percent}${S}% van wat een koper vóór belasting betaalt, bij elke eenmalige aankoop via je link, behalve producten die uit het programma zijn gehaald.`,
@@ -1878,6 +1884,7 @@ const pt: AffiliatesWords = {
     no: "A sua participação fica como estava. A loja vê a sua resposta no seu estúdio.",
     cap: "Esta alteração já não cabe no que a loja já promete sobre esse produto, por isso não foi aplicada. A sua participação fica como estava.",
     none: "Esse pedido já não está aberto. A loja pode tê-lo alterado ou retirado. Nada mudou, e qualquer pedido novo aparece nesta página.",
+    busy: "A sua resposta não foi guardada, porque a loja estava a alterar isto no mesmo momento. Nada mudou. Leia o que esta página mostra agora e responda de novo.",
   },
   yourRate: (store, percent) =>
     `${store} fixou a sua parte em ${percent}${S}% do que um comprador paga antes de impostos, em cada compra única feita através da sua ligação, exceto os produtos que retirou do programa.`,

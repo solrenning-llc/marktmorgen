@@ -80,6 +80,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { withLock } from "@/lib/redis-lock";
 import { giveData, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -143,6 +144,18 @@ export function affiliateCookieName(handle: string): string {
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const peopleKey = (id: string) => `nl:aff:${id}:people`;
 const emailsKey = (id: string) => `nl:aff:${id}:emails`;
+/**
+ * One affiliate's record being changed: a decision, a share asked for or
+ * answered, an undo. Each reads the whole record and writes it back, so two at
+ * the same instant would quietly undo each other (a new request dropped, an
+ * accepted term overwritten); the lock makes the second wait its turn.
+ */
+const personLockKey = (statsId: string, id: string) => `nl:aff:person:lock:${statsId}:${id}`;
+const PERSON_LOCK_SECONDS = 10;
+const PERSON_LOCK_WAIT_MS = 5_000;
+function withPerson<T>(store: Store, id: string, work: () => Promise<T>): Promise<T> {
+  return withLock(personLockKey(store.statsId as string, id), PERSON_LOCK_SECONDS, PERSON_LOCK_WAIT_MS, work);
+}
 const codesKey = (id: string) => `nl:aff:${id}:codes`;
 const clicksKey = (id: string) => `nl:aff:${id}:clicks`;
 const paidClicksKey = (id: string) => `nl:aff:${id}:paid`;
@@ -405,6 +418,11 @@ export type ShareProposal = { ok: true; state: "started" | "same" | "applied" | 
  * as with setPartnerShare. `nowSeconds` is the time of the save.
  */
 export async function proposePartnerShare(store: Store, id: string, next: PartnerShare | null, nowSeconds: number): Promise<ShareProposal> {
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) return { ok: false, reason: "unknown" };
+  return withPerson(store, id, () => proposeLocked(store, id, next, nowSeconds));
+}
+
+async function proposeLocked(store: Store, id: string, next: PartnerShare | null, nowSeconds: number): Promise<ShareProposal> {
   const affiliate = await readAffiliate(store, id);
   if (!affiliate) return { ok: false, reason: "unknown" };
   const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
@@ -469,8 +487,21 @@ export async function answerShareChange(
   nowSeconds: number,
   allowed: (share: PartnerShare) => Promise<boolean>,
 ): Promise<ShareAnswer> {
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) return { ok: false, reason: "none" };
+  return withPerson(store, id, () => answerLocked(store, id, yes, seen, nowSeconds, allowed));
+}
+
+async function answerLocked(
+  store: Store,
+  id: string,
+  yes: boolean,
+  seen: string,
+  nowSeconds: number,
+  allowed: (share: PartnerShare) => Promise<boolean>,
+): Promise<ShareAnswer> {
   const affiliate = await readAffiliate(store, id);
-  if (!affiliate) return { ok: false, reason: "none" };
+  // Only a partner still in the program answers; someone removed has nothing left to agree to.
+  if (!affiliate || affiliate.status !== "approved") return { ok: false, reason: "none" };
   const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
   const change = terms.change;
   if (change === null || !changeOpen(change, nowSeconds)) {
@@ -1221,33 +1252,54 @@ export type Decision = "approve" | "decline" | "remove" | "restore";
  * the store asks for the change, which the partner must accept, or waits for
  * the end date. Only a share "until revoked", or one already over, can be.
  */
-export function heldByTerm(affiliate: Pick<Affiliate, "status" | "share">, nowSeconds: number): boolean {
-  return affiliate.status === "approved" && affiliate.share !== null && affiliate.share.until !== undefined && shareRunning(affiliate.share, nowSeconds);
+export function heldByTerm(affiliate: Pick<Affiliate, "share">, nowSeconds: number): boolean {
+  return affiliate.share !== null && affiliate.share.until !== undefined && shareRunning(affiliate.share, nowSeconds);
+}
+
+export type DecideResult = { ok: true; affiliate: Affiliate } | { ok: false; reason: "unknown" | "term" };
+
+/** Lets someone in, turns them down, or takes them out (decideWhy); null when it was not done. */
+export async function decide(store: Store, id: string, decision: Decision, nowSeconds = Math.floor(Date.now() / 1000)): Promise<Affiliate | null> {
+  const done = await decideWhy(store, id, decision, nowSeconds);
+  return done.ok ? done.affiliate : null;
 }
 
 /**
  * Lets someone in, turns them down, or takes them out. Their history stays.
- * Taking out a partner whose dated share is still in force is refused
- * (null, see heldByTerm); taking out any other partner ends their share and
- * writes that step in the partnership's history.
+ * Taking out anyone whose dated share is still in force is refused ("term",
+ * see heldByTerm), whatever their status; taking out a partner whose share
+ * runs until revoked ends it and writes that step in the history; a share
+ * already over by its date is left as it ended, with no step of the store
+ * ending it. A change still waiting is taken back, and that is written too.
  */
-export async function decide(store: Store, id: string, decision: Decision, nowSeconds = Math.floor(Date.now() / 1000)): Promise<Affiliate | null> {
-  const affiliate = await readAffiliate(store, id);
-  if (!affiliate) return null;
-  const takesOut = (decision === "remove" || decision === "decline") && affiliate.status === "approved";
-  if (takesOut && heldByTerm(affiliate, nowSeconds)) return null;
-  const status: AffiliateStatus =
-    decision === "approve" || decision === "restore" ? "approved" : decision === "decline" ? "declined" : "removed";
-  let next: Affiliate = { ...affiliate, status, decidedAt: Date.now() };
-  if (takesOut && affiliate.share !== null) {
-    // Ended by the store, as it may for a share until revoked or one already over: in the history, and no share
-    // left to earn again should they be let back in later.
-    const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
-    const withdrawn = terms.change ? withStep(terms.history, stepOf("withdrawn", "creator", terms.change.share, nowSeconds)) : terms.history;
-    next = withTerms({ ...next, share: null }, { change: null, history: withStep(withdrawn, stepOf("revoked", "creator", null, nowSeconds)) });
-  }
-  await writeAffiliate(store, next);
-  if (decision === "approve" && affiliate.status === "pending" && isSenderConfigured()) {
+export async function decideWhy(store: Store, id: string, decision: Decision, nowSeconds = Math.floor(Date.now() / 1000)): Promise<DecideResult> {
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) return { ok: false, reason: "unknown" };
+  const decided = await withPerson(store, id, async (): Promise<DecideResult & { was?: AffiliateStatus }> => {
+    const affiliate = await readAffiliate(store, id);
+    if (!affiliate) return { ok: false, reason: "unknown" };
+    const takesOut = decision === "remove" || decision === "decline";
+    if (takesOut && heldByTerm(affiliate, nowSeconds)) return { ok: false, reason: "term" };
+    const status: AffiliateStatus =
+      decision === "approve" || decision === "restore" ? "approved" : decision === "decline" ? "declined" : "removed";
+    let next: Affiliate = { ...affiliate, status, decidedAt: Date.now() };
+    if (takesOut && (affiliate.share !== null || affiliate.terms?.change)) {
+      const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
+      let history = terms.change ? withStep(terms.history, stepOf("withdrawn", "creator", terms.change.share, nowSeconds)) : terms.history;
+      let share = affiliate.share;
+      // Ended by the store, as it may for a share until revoked: in the history, and no share left to earn again
+      // should they be let back in later.
+      if (shareRunning(share, nowSeconds)) {
+        history = withStep(history, stepOf("revoked", "creator", null, nowSeconds));
+        share = null;
+      }
+      next = withTerms({ ...next, share }, { change: null, history });
+    }
+    await writeAffiliate(store, next);
+    return { ok: true, affiliate: next, was: affiliate.status };
+  });
+  if (!decided.ok) return { ok: false, reason: decided.reason };
+  const affiliate = decided.affiliate;
+  if (decision === "approve" && decided.was === "pending" && isSenderConfigured()) {
     const a = affiliatesWords(store.language);
     await sendEmail({ meter: { by: "store", store: store, kind: "email" },
       from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
@@ -1280,7 +1332,7 @@ export async function decide(store: Store, id: string, decision: Decision, nowSe
       ].join("\n"),
     }).catch((error) => console.error("telling an affiliate they were approved failed", error));
   }
-  return next;
+  return { ok: true, affiliate };
 }
 
 // ---- Several decisions at once, with undo (630 [HN6](4), unit 1) ----------
@@ -1320,10 +1372,16 @@ export async function undoMany(store: Store, before: Before[], decision: "approv
   let undone = 0;
   for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
     if (entry.status !== "pending") continue;
-    const affiliate = await readAffiliate(store, entry.id);
-    if (!affiliate || affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt) continue;
-    await writeAffiliate(store, { ...affiliate, status: entry.status, decidedAt: entry.decidedAt });
-    undone += 1;
+    const put = await withPerson(store, entry.id, async () => {
+      const affiliate = await readAffiliate(store, entry.id);
+      if (!affiliate || affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt) return false;
+      // Somebody given a share since the approval is a partner now: sending them back to waiting would end it
+      // with no step in its history, so the undo leaves them as they are.
+      if (affiliate.share !== null || affiliate.terms?.change) return false;
+      await writeAffiliate(store, { ...affiliate, status: entry.status, decidedAt: entry.decidedAt });
+      return true;
+    });
+    if (put) undone += 1;
   }
   return undone;
 }

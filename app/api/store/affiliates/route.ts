@@ -12,8 +12,7 @@ import {
   acceptPartnership,
   addPayout,
   MAX_BULK_DECISIONS,
-  decide,
-  heldByTerm,
+  decideWhy,
   decideMany,
   setRatesMany,
   undoMany,
@@ -30,6 +29,7 @@ import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes"
 import { leadProblem } from "@/lib/affiliate-lead-rules";
 import { planTerms, readNoticeDays } from "@/lib/affiliate-notice";
 import { MAX_LEAD_DECISIONS, decideLeads } from "@/lib/affiliate-leads";
+import { LockBusyError } from "@/lib/redis-lock";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -167,16 +167,11 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, undone: await undoRates(store, before, rate) });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
-      const id = text(body.id, 20);
-      const now = Math.floor(Date.now() / 1000);
       // A partner whose dated share is still in force is not taken out by the store alone (lib/partner-terms-rules.ts):
-      // the studio says to ask for a change, which the partner must accept, or to wait for the end date.
-      if (action === "remove" || action === "decline") {
-        const affiliate = await readAffiliate(store, id);
-        if (affiliate && heldByTerm(affiliate, now)) return fail("share_term_held");
-      }
-      const done = await decide(store, id, action, now);
-      return done ? Response.json({ ok: true }) : fail("unknown");
+      // decided under the partner's lock, so the studio says to ask for a change, which the partner must accept, or
+      // to wait for the end date, however close the two requests came.
+      const done = await decideWhy(store, text(body.id, 20), action);
+      return done.ok ? Response.json({ ok: true }) : fail(done.reason === "term" ? "share_term_held" : "unknown");
     }
     if (action === "payout") {
       // In the store's currency, which is what the payout is written down in.
@@ -256,6 +251,9 @@ export async function POST(request: NextRequest) {
       const id = text(body.id, 20);
       const affiliate = await readAffiliate(store, id);
       if (!affiliate) return fail("unknown");
+      // Only someone approved in the program holds a share, as only they are credited (notePartners): a share given to
+      // somebody waiting, declined or removed would read as running while nothing is paid.
+      if (affiliate.status !== "approved") return fail("share_not_approved");
       const now = Math.floor(Date.now() / 1000);
       if (body.share === null || body.percent === "" || body.percent === null) {
         const ended = await proposePartnerShare(store, id, null, now);
@@ -292,6 +290,8 @@ export async function POST(request: NextRequest) {
     return fail("unknown");
   } catch (error) {
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // Another change to the same affiliate held its lock past our wait (lib/affiliates.ts withPerson).
+    if (error instanceof LockBusyError) return fail("busy", 409);
     console.error("changing the affiliate programme failed", error);
     return fail("server_error", 500);
   }

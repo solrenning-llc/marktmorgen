@@ -121,6 +121,19 @@ async function main(): Promise<void> {
   is("can be removed", [await post({ action: "remove", id: q }), (await read(q)).status, (await read(q)).share], [{ ok: true }, "removed", null]);
   is("and the step is in its history", (await read(q)).terms?.history.at(-1)?.kind, "revoked");
 
+  part("A share only for someone approved");
+  const w = "cccccccccccc";
+  for (const status of ["pending", "declined", "removed"]) {
+    await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ id: w, email: `${w}@example.com`, code: `c${w}`, status, appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null })]]);
+    is(`refused for somebody ${status}`, (await post({ action: "share", id: w, percent: 10, products: [A], ends: future(30) })).error, "share_not_approved");
+    is(`and nothing is written for somebody ${status}`, [(await read(w)).share, (await read(w)).terms], [null, undefined]);
+  }
+
+  part("The partner hears what became of their answer even after the share ended");
+  await post({ action: "share", id: p, percent: null });
+  is("the store asks to end the dated share", (await read(p)).terms?.change?.share, null);
+  is("the partner's yes ends it", [await answer("yes"), (await read(p)).share], ["https://marktmorgen.com/@termswired/affiliates?status=partner-yes#partner", null]);
+
   part("An invitation says how long it runs");
   // The program switched on, which an invitation needs (lib/affiliates.ts affiliatesOn).
   await setAffiliateSetting(owner, parseAffiliateSetting({ enabled: true, percent: 20, days: 30 }));
@@ -144,6 +157,9 @@ async function main(): Promise<void> {
   is("the partner's page offers both answers in a form", page.includes('action="/api/store/affiliates/partner-answer"') && page.includes('name="answer" value="yes"') && page.includes('name="answer" value="no"'), true);
   is("and says the result in a status", page.includes('role="status"') && page.includes("a.partnerAnswered["), true);
   is("the form sends which change it showed", page.includes('name="change" value={changeIdentity(askedChange)}'), true);
+  is("the answer's notice is outside the share, so it shows when none is left", page.includes("{affiliate.share || partnerNotice ? (") && page.indexOf("{partnerNotice ? (") > page.indexOf("{affiliate.share ? (\n                      <>"), true);
+  is("a store change at the same moment is said, not hidden", page.includes('status === "partner-busy" ? "busy"') && Object.values(AFFILIATES_WORDS).every((words) => words.partnerAnswered.busy.length > 40), true);
+  is("the studio says a share is only for someone approved", studio.includes("Only someone approved in your program can have a partner share."), true);
   is("a refused removal says what to do instead, in the row's alert", studio.includes("their share runs to a set end date") && studio.includes("press End the partnership; it ends once they accept. Or wait until the end date, then remove them.") && studio.includes('role="alert"'), true);
   const en = AFFILIATES_WORDS.en;
   is("the words say the share stays until the answer", en.partnerAskedKeep("Dec 3, 2026"), "Until you answer, your share stays exactly as it is. If you have not answered by Dec 3, 2026, nothing changes.");

@@ -37,34 +37,49 @@ export type Published = { ok: true; letter: Letter } | { ok: false; reason: "not
 /**
  * Publishes one email the store sent: a copy of its subject and words as
  * they were sent, written once, at its own address. Publishing it again
- * writes the copy again and starts its days afresh, with the products given
- * this time: none is for everyone, some keep its words for their holders
- * (lib/letter-rules.ts, membersOnly).
+ * writes the copy again and starts its days afresh.
+ *
+ * `products`: the products whose holders alone may read its words
+ * (lib/letter-rules.ts, membersOnly). An array is the choice, and an empty one
+ * is for everyone. Left out (undefined or null), the email keeps what it had:
+ * publishing again never opens an email kept for members by itself. Anything
+ * else is refused, never read as "everyone".
  */
-export async function publishLetter(store: Store, broadcast: Broadcast, now = Date.now(), products: unknown = []): Promise<Published> {
+export async function publishLetter(store: Store, broadcast: Broadcast, now = Date.now(), products?: unknown): Promise<Published> {
   if (!isRedisConfigured() || !store.sid) return { ok: false, reason: "unavailable", message: "This can't be saved right now. Try again in a minute." };
   if (!store.listId || broadcast.listId !== store.listId || broadcast.status !== "sent") return { ok: false, reason: "not_sent", message: "Only an email this store has sent can be published." };
-  const ids = letterProducts(products);
-  const asked = Array.isArray(products) ? products.length : 0;
-  if (ids.length !== asked || asked > MAX_LETTER_PRODUCTS || ids.some((id) => !itemFor(store, id))) {
-    return { ok: false, reason: "products", message: `Check up to ${MAX_LETTER_PRODUCTS} of this store's products. Reload the page if one was just deleted.` };
-  }
-  const letter: Letter = {
-    id: letterIdFor(store.sid, broadcast.id),
-    sid: store.sid,
-    subject: broadcast.subject,
-    body: broadcast.body,
-    sentAt: broadcast.finishedAt ? broadcast.finishedAt * 1000 : broadcast.sendAt * 1000,
-    publishedAt: now,
-    ...(ids.length ? { products: ids } : {}),
-  };
+  const refuse: Published = { ok: false, reason: "products", message: `Check up to ${MAX_LETTER_PRODUCTS} of this store's products. Reload the page if one was just deleted.` };
+  const keep = products === undefined || products === null;
+  if (!keep && !Array.isArray(products)) return refuse;
+  const ids = keep ? [] : letterProducts(products);
+  if (!keep && (ids.length !== (products as unknown[]).length || ids.some((id) => !itemFor(store, id)))) return refuse;
+  const id = letterIdFor(store.sid, broadcast.id);
   try {
-    // Entries whose copy has gone by itself leave the count first.
-    const [, count, already] = await redisPipeline([
+    // Entries whose copy has gone by itself leave the count first; the copy
+    // already there is read only to keep its products.
+    const [, count, already, before] = await redisPipeline([
       ["ZREMRANGEBYSCORE", listKey(store.sid), "-inf", String(now - LETTER_KEEP_DAYS * DAY)],
       ["ZCARD", listKey(store.sid)],
-      ["ZSCORE", listKey(store.sid), letter.id],
+      ["ZSCORE", listKey(store.sid), id],
+      ...(keep ? [["GET", recordKey(id)]] : []),
     ]);
+    let kept: string[] = [];
+    if (keep && typeof before === "string") {
+      const named = (JSON.parse(before) as { products?: unknown }).products;
+      kept = letterProducts(named);
+      // A copy that named products none of which can be read stays shut: it is not published again for everyone.
+      if (named !== undefined && kept.length === 0) return refuse;
+    }
+    const chosen = keep ? kept : ids;
+    const letter: Letter = {
+      id,
+      sid: store.sid,
+      subject: broadcast.subject,
+      body: broadcast.body,
+      sentAt: broadcast.finishedAt ? broadcast.finishedAt * 1000 : broadcast.sendAt * 1000,
+      publishedAt: now,
+      ...(chosen.length ? { products: chosen } : {}),
+    };
     if (already === null && Number(count) >= MAX_PUBLISHED_LETTERS) return { ok: false, reason: "too_many", message: `Your store keeps ${MAX_PUBLISHED_LETTERS} published emails at most. Take one off first.` };
     const room = await takeData(store, [{ until: now + LETTER_KEEP_DAYS * DAY, bytes: letterRoomBytes(letter) }], now);
     if (!room.ok) return room.reason === "full" ? { ok: false, reason: "full", message: room.message } : { ok: false, reason: "unavailable", message: "This can't be saved right now. Try again in a minute." };

@@ -25,9 +25,11 @@
  * What it costs: the page and the form are each one of the store's public
  * requests (lib/buyer-actions.ts takeBuyerRead), the answer is one cached
  * read, and the link is one of the store's access emails, counted and
- * refused past its allowance by the email meter before it is sent.
+ * refused past its allowance by the email meter before it is sent. The form
+ * answers before any of that is done (requestLetterLink).
  */
 import { createHash, randomBytes } from "node:crypto";
+import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -80,10 +82,15 @@ export async function letterReader(store: Store, letter: Letter, cookies: Cookie
   return (await holdsLetter(store, letter, learner.email)) ? { state: "in", email: learner.email } : { state: "closed", email: learner.email };
 }
 
+/**
+ * Counts one more under `key` for LETTER_LINK_SECONDS from its first. The
+ * count and its end are set together, the end only when the key has none, so
+ * a key that ran out between two commands is never left without one.
+ */
 async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", LETTER_LINK_SECONDS, "NX"],
+  const [count] = await redisPipeline([
     ["INCR", key],
+    ["EXPIRE", key, LETTER_LINK_SECONDS, "NX"],
   ]);
   return Number(count) <= limit;
 }
@@ -102,9 +109,13 @@ export type LetterGrant = { e: string; k: string; h: string; l: string };
 
 /**
  * Emails a way to read the email, when the address holds one of its
- * products. "sent" either way: only whoever reads the inbox learns whether it
- * did, so the form cannot be used to find out who bought what, or to fill a
- * stranger's inbox.
+ * products. "sent" either way, and at once, right after the limits, for an
+ * address that holds one and one that does not: whether it holds one is
+ * asked, and its link made and emailed, only after the answer is sent
+ * (afterAnswer), so neither the answer's words nor its time tell them apart,
+ * and the form cannot be used to find out who bought what or to fill a
+ * stranger's inbox. What fails after the answer is said only in the
+ * server's log.
  */
 export async function requestLetterLink(input: { store: Store; letter: Letter; email: string; ip: string; origin: string }): Promise<LetterLinkRequest> {
   const { store, letter, ip, origin } = input;
@@ -113,8 +124,13 @@ export async function requestLetterLink(input: { store: Store; letter: Letter; e
   if (!membersOnly(letter) || !store.sid || !isRedisConfigured()) return "error";
   if (!(await within(`nl:letters:rl:ip:${sha(`${ip}|${store.handle}`).slice(0, 32)}`, IP_LIMIT))) return "limited";
   if (!(await within(`nl:letters:rl:addr:${addressKey(raw)}`, ADDRESS_LIMIT))) return "limited";
-  if (!(await holdsLetter(store, letter, raw))) return "sent";
+  afterAnswer(() => sendLetterLink(store, letter, raw, origin));
+  return "sent";
+}
 
+/** The link itself, for an address that holds one of the email's products; nothing for one that does not. */
+async function sendLetterLink(store: Store, letter: Letter, raw: string, origin: string): Promise<void> {
+  if (!(await holdsLetter(store, letter, raw))) return;
   const token = randomBytes(32).toString("hex");
   const grant: LetterGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle, l: letter.id };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LETTER_LINK_SECONDS]]);
@@ -127,16 +143,33 @@ export async function requestLetterLink(input: { store: Store; letter: Letter; e
     subject: w.linkSubject(letter.subject).slice(0, 200),
     text: w.linkBody(letter.subject, link, store.name),
   });
-  return sent ? "sent" : "error";
+  if (!sent) console.error("a link to read an email kept for members was not sent");
+}
+
+/**
+ * Runs a link's question, grant and email after the answer is sent, inside
+ * the route's own time; at once, unwaited, when there is no request to wait
+ * for.
+ */
+function afterAnswer(task: () => Promise<void>): void {
+  const run = () =>
+    task().catch((error) => {
+      console.error("sending a link to read an email failed", error);
+    });
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 /** Spends one open of an emailed link, and says who and which email it was for. */
 export async function openLetterLink(token: string): Promise<LetterGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw, , opens] = await redisPipeline([
+  const [raw, opens] = await redisPipeline([
     ["GET", linkKey(token)],
-    ["SET", opensKey(token), "0", "EX", LETTER_LINK_SECONDS, "NX"],
     ["INCR", opensKey(token)],
+    ["EXPIRE", opensKey(token), LETTER_LINK_SECONDS, "NX"],
   ]);
   if (typeof raw !== "string" || Number(opens) > MAX_LINK_OPENS) return null;
   try {

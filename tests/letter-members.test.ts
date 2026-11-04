@@ -20,11 +20,12 @@
  *     place: only the pages, the studio, its routes and the closing walk
  *     read the copies.
  */
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, removeProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import type { Broadcast } from "@/lib/broadcasts";
 import { MAX_LETTER_PRODUCTS, membersOnly, parseLetter } from "@/lib/letter-rules";
@@ -37,6 +38,7 @@ import { POST as publishRoute } from "@/app/api/store/letters/route";
 import { POST as linkRoute } from "@/app/api/store/letters/link/route";
 import { GET as openRoute } from "@/app/api/store/letters/open/route";
 import { cookieValues } from "./letter-members-world";
+import { afterTasks } from "./next-server-after-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -52,15 +54,20 @@ const SECRET = "Members-only recipe: brown the butter for exactly four minutes."
 
 const sessions: Record<string, Record<string, unknown>[]> = {};
 const mails: { to: string; text: string }[] = [];
+/** How often the creator's Stripe account was asked, and whether the email service is down. */
+let stripeAsked = 0;
+let mailDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
+    if (mailDown) return answer({ message: "down" }, 500);
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; text: string };
     mails.push({ to: [body.to].flat()[0], text: body.text });
     return answer({ id: `email_${mails.length}` });
   }
   const path = url.pathname.replace(/^\/v1/, "");
+  stripeAsked += 1;
   if (path === "/checkout/sessions") return answer({ object: "list", data: sessions[url.searchParams.get("customer_details[email]") ?? ""] ?? [], has_more: false });
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
@@ -154,6 +161,20 @@ async function main(): Promise<void> {
   is("read back the same", (await readLetter(store, letter.id))?.products, [club]);
   is("a stored copy naming products none readable stays closed, never opened to all", parseLetter({ ...letter, products: ["<bad>"] }), null);
 
+  part("A wrong kind of choice never publishes for everyone");
+  for (const [what, wrong] of [["a string", club], ["an object", { 0: club }], ["a number", 1]] as [string, unknown][]) {
+    const r = await publishLetter(store, kept, now, wrong);
+    is(`${what} is refused, and the email stays kept`, [r.ok, r.ok ? "" : r.reason, (await readLetter(store, letter.id))?.products], [false, "products", [club]]);
+  }
+  const again = await publishLetter(store, kept, now + 1);
+  is("published again with no products said: still kept for members", again.ok ? again.letter.products : null, [club]);
+  const againNull = await publishLetter(store, kept, now + 2, null);
+  is("or with null", againNull.ok ? againNull.letter.products : null, [club]);
+  const toAll = await publishLetter(store, kept, now + 3, []);
+  is("only an empty choice, on purpose, opens it to everyone", [toAll.ok, toAll.ok ? membersOnly(toAll.letter) : true], [true, false]);
+  const back = await publishLetter(store, kept, now + 4, [club]);
+  is("and checking the product again keeps it again", back.ok ? back.letter.products : null, [club]);
+
   part("Nothing chosen: everyone reads it, as before");
   const open = await publishLetter(store, broadcast(store, "b1", { subject: "Open notes", body: "Everyone may read this." }), now);
   if (!open.ok) throw new Error(open.message);
@@ -196,7 +217,7 @@ async function main(): Promise<void> {
   sessions["ana@example.com"] = [paid("cs_test_ana000000001", club)];
   forgetAnswers();
 
-  part("The emailed link");
+  part("The emailed link: the same answer, at once, whoever asks");
   const ask = async (email: string, ip = "203.0.113.7") => {
     const form = new FormData();
     form.set("handle", HANDLE);
@@ -205,17 +226,47 @@ async function main(): Promise<void> {
     const r = await linkRoute(new NextRequest("https://marktmorgen.com/api/store/letters/link", { method: "POST", body: form, headers: { "x-forwarded-for": ip } }));
     return { status: r.status, location: r.headers.get("location") ?? "" };
   };
+  const grants = () => redis.keys().filter((k) => k.startsWith("nl:letters:link:") && !k.endsWith(":opens")).length;
+  const runAfter = async () => {
+    for (const task of afterTasks.splice(0)) await (task as () => Promise<unknown>)();
+  };
+  afterTasks.length = 0;
+  /** One request, and what was done before its answer: Stripe asked, emails sent, links made, work left for after it. */
+  const atAnswer = async (email: string, ip: string) => {
+    forgetAnswers();
+    const [asked, sent, made] = [stripeAsked, mails.length, grants()];
+    const r = await ask(email, ip);
+    return [r.status, r.location.endsWith("?link=sent"), stripeAsked - asked, mails.length - sent, grants() - made, afterTasks.length];
+  };
   const before = mails.length;
-  const stranger = await ask("nobody@example.com");
-  is("an address that holds nothing: the same answer, and no email", [stranger.status, stranger.location.endsWith("?link=sent"), mails.length], [303, true, before]);
-  const holder = await ask("ana@example.com");
-  is("a holder: the same answer, and one email to it", [holder.status, holder.location.endsWith("?link=sent"), mails.length, mails.at(-1)?.to], [303, true, before + 1, "ana@example.com"]);
+  is("an address that holds nothing: \"sent\" at once, nothing asked or sent before the answer", await atAnswer("nobody@example.com", "203.0.113.7"), [303, true, 0, 0, 0, 1]);
+  await runAfter();
+  is("and after it, no email", mails.length, before);
+  is("a holder: the very same answer, the same nothing done before it", await atAnswer("ana@example.com", "203.0.113.7"), [303, true, 0, 0, 0, 1]);
+  await runAfter();
+  is("and after it, one email to it", [mails.length, mails.at(-1)?.to], [before + 1, "ana@example.com"]);
   is("the email holds a link to open, never the words", [/\/api\/store\/letters\/open\?token=[0-9a-f]{64}/.test(mails.at(-1)?.text ?? ""), (mails.at(-1)?.text ?? "").includes(SECRET)], [true, false]);
+  mailDown = true;
+  const downHolder = await atAnswer("ana@example.com", "203.0.113.10");
+  await runAfter();
+  const downStranger = await atAnswer("nobody@example.com", "203.0.113.10");
+  await runAfter();
+  is("with the email service down, the holder's answer and a stranger's are the same", [downHolder, downStranger], [[303, true, 0, 0, 0, 1], [303, true, 0, 0, 0, 1]]);
+  mailDown = false;
+  const ipKey = (ip: string) => `nl:letters:rl:ip:${createHash("sha256").update(`${ip}|${HANDLE}`).digest("hex").slice(0, 32)}`;
+  is("a count of links asked always has an end", redis.keys().filter((k) => k.startsWith("nl:letters:rl:")).every((k) => Number(redis.run(["TTL", k])) > 0), true);
+  redis.run(["SET", ipKey("203.0.113.11"), "1"]);
+  await ask("nobody@example.com", "203.0.113.11");
+  await runAfter();
+  is("one left with none, by a key that ran out between two commands, is given one", Number(redis.run(["TTL", ipKey("203.0.113.11")])) > 0, true);
+  is("and the count went on from it", redis.run(["GET", ipKey("203.0.113.11")]), "2");
   const token = /token=([0-9a-f]{64})/.exec(mails.at(-1)!.text)![1];
   const opened = await openRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${token}`));
   const set = opened.headers.get("set-cookie") ?? "";
   is("opening it lets this browser in and goes back to the email", [opened.status, (opened.headers.get("location") ?? "").endsWith(`/@${HANDLE}/letters/${letter.id}`), set.startsWith(`${cookieName}=`)], [303, true, true]);
   const minted = /=([0-9a-f]{64})/.exec(set)![1];
+  const opensKey = redis.keys().find((k) => k.startsWith("nl:letters:link:") && k.endsWith(":opens"))!;
+  is("the link's count of opens has an end", Number(redis.run(["TTL", opensKey])) > 0, true);
   is("with it, the words show", (await render(store, letter.id, { [cookieName]: minted })).includes(SECRET), true);
   const formFor = async (id: string) => {
     const form = new FormData();
@@ -258,10 +309,23 @@ async function main(): Promise<void> {
   );
   const viaRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id, products: [club] }) }));
   const routeBody = (await viaRoute.json()) as Record<string, unknown>;
+  const stringRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id, products: club }) }));
+  is("the route refuses products sent as a string, and the email stays kept", [stringRoute.status, (await readLetter(store, letter.id))?.products], [409, [club]]);
+  const bareRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id }) }));
+  is("and published again through it without products, it stays kept", [bareRoute.status, (await readLetter(store, letter.id))?.products], [200, [club]]);
   is("the studio's route takes the products", [viaRoute.status, routeBody.ok, (await readLetter(store, letter.id))?.products], [200, true, [club]]);
   const badRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id, products: ["nope_not_a_product"] }) }));
   is("and refuses one the store does not have", badRoute.status, 409);
   is("the store lists both", (await listLetters(store)).length, 2);
+
+  part("The creator is told when none of the products is left");
+  const lone = await publishLetter(store, broadcast(store, "c1", { subject: "Knife notes" }), now, [other.product.id]);
+  if (!lone.ok) throw new Error(lone.message);
+  await removeProduct(OWNER, other.product.id);
+  const afterRemoval = (await storeForEmail(OWNER))!;
+  const loneHtml = await render(afterRemoval, lone.letter.id, { [SESSION_COOKIE]: owner });
+  is("the creator reads it and is told nobody else can", [loneHtml.includes(SECRET), loneHtml.includes("None of the products you chose is on your store anymore")], [true, true]);
+  is("a visitor still sees no words", (await render(afterRemoval, lone.letter.id)).includes(SECRET), false);
   done();
 }
 

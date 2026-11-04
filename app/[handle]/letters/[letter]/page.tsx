@@ -84,14 +84,14 @@ export default async function LetterPage({ params, searchParams }: Params) {
           {kept ? (
             <section aria-labelledby="letter-for" className="mt-6">
               <h2 id="letter-for" className="text-sm font-semibold">{readable ? w.forHolders : w.lockedLead}</h2>
-              {reader.state === "owner" ? <p className="st-muted mt-1 text-sm">{w.ownerNote}</p> : null}
-              <ul className="mt-2 space-y-2">
+              {reader.state === "owner" ? <p className="st-muted mt-1 text-sm">{products.length ? w.ownerNote : w.noneLeft}</p> : null}
+              <ul className="mt-2 space-y-1">
                 {products.map((p) => (
                   <li key={p.id} className="[overflow-wrap:anywhere]">
                     {p.hidden ? (
-                      <span className="font-semibold">{p.title}</span>
+                      <span className="inline-flex min-h-11 items-center font-semibold">{p.title}</span>
                     ) : (
-                      <Link href={`/@${store.handle}/p/${productSegment(p)}`} className="font-semibold underline underline-offset-4">
+                      <Link href={`/@${store.handle}/p/${productSegment(p)}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
                         {p.title}
                       </Link>
                     )}

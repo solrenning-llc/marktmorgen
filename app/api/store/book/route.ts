@@ -49,6 +49,8 @@ export async function POST(request: NextRequest) {
   // On a team that lets buyers choose: the host's position and name as the page showed them (lib/team-scheduling-rules.ts).
   let hostKey = "";
   let hostLabel = "";
+  // On a call with several lengths: the one chosen, in minutes (lib/call-lengths.ts); its price is read from the creator's record, never from the form.
+  let minutes = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string) => {
@@ -64,6 +66,7 @@ export async function POST(request: NextRequest) {
     typed = read("code").slice(0, 60);
     hostKey = /^[0-5]$/.test(read("host")) ? read("host") : "";
     hostLabel = read("host_label").slice(0, 60);
+    minutes = read("minutes").slice(0, 4);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -135,6 +138,7 @@ export async function POST(request: NextRequest) {
     fromPackage: prepared && prepared.ok ? prepared.fromPackage : null,
     code,
     host: hostKey ? { key: hostKey, label: hostLabel } : null,
+    minutes,
     channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
   });
   if (!result.ok) return back(result.reason);

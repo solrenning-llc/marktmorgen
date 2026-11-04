@@ -450,7 +450,7 @@ export const HELD_EXPOSURE = {
   retryCommands: 128,
   retryReplyBytes: MAX_STORE_BYTES + 128 * 1024,
   indexBytesPerStore: 4096,
-  globalCounterBytes: 3 * (HELD_RECHECKS_PER_DAY * 256 + 1024) + 15 * 1024,
+  globalCounterBytes: 3 * (HELD_RECHECKS_PER_DAY * 256 + 1024) + 15 * 1024 + 1024,
   stripeEndpointTariffUsd: null,
   completeMonthlyCostUsd: null,
   reviewedGlobalCaseCeiling: null,
@@ -1109,7 +1109,7 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
-  HELD_RECHECKS_PER_DAY: "Company post_cancellation funded exposure, never a paid plan allowance: HELD_EXPOSURE in this registry and docs/funded-exposure-review.md count50 global daily rechecks, two actual bounded reads each, retained full stores/keys and aggregate counters. Actual case cap/rates remain unknown until reviewed; no zero subsidy.",
+  HELD_RECHECKS_PER_DAY: "Company recovery work plus separate post_cancellation retention exposure, never a paid plan allowance: HELD_EXPOSURE in this registry and docs/funded-exposure-review.md count50 global daily rechecks, two actual bounded reads each, retained full stores/keys and aggregate counters. Actual case cap/rates remain unknown until reviewed; no zero subsidy.",
   PAGE_INCLUDED_BYTES: "What one studio request's own price already moves through the database and on to the browser (lib/sent-bytes.ts; UNIT_COST.studio prices fifty kilobytes): a reading or a page's sending up to it counts nothing beyond the request that asked, and past it one studio request a megabyte (LEDGER_BYTES_PER_UNIT, STUDIO_UNIT_SENT_BYTES, held in tests/plan-cost-registry.test.ts). A threshold inside the studio line, not a figure of its own.",
   FREE_CALL_HOLDS_PER_DAY: "A pace on how often one email address may hold a free intro call's time in one store in a day (lib/free-call-rules.ts, 551 [FB1]): every hold is first taken from the plan's own monthly orders as FREE_CALL_ORDER_UNITS, before any email, so it adds no cost and only refuses.",
   BUYER_CAP_MONTHS: "Queue item 307 EC1: the cap on one closing's buyers (lib/closing-buyers-rules.ts, buyerNoticeCap), a post-cancellation funded exposure of docs/funded-exposure-review.md (closingBuyersCost above), the company's, not a plan's line.",

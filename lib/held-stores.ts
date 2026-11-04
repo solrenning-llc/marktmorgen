@@ -49,17 +49,14 @@ export async function fundHeldStore(ref: string, now: number, funding: HeldFundi
   if (!config || !allocation || allocation.slots === 0 || allocation.cents < heldStoreFundingFloorCents()) return false;
   return reserveFundedExposure(identity(ref), "post_cancellation", funding.policy, funding.context);
 }
-export async function claimHeldRecheck(ref: string, now: number, funding?: HeldFunding): Promise<boolean> {
-  const day = dayOf(now), budget = funding ?? currentFunding();
+/** CX-69: the known two-read retry line and daily work ceiling are independent
+ * of the retention review. An unknown retention budget cannot freeze recovery. */
+export async function claimHeldRecheck(ref: string, now: number): Promise<boolean> {
+  const day = dayOf(now);
   if (!refValid(ref) || day === null || !isRedisConfigured()) return false;
-  const before = exposureBudgetConfiguration(budget.policy, budget.context, new Date(now));
-  if (!before) return false;
-  // Reserve the whole reviewed monthly case, including retention, before work.
-  if (!(await fundHeldStore(ref, now, budget))) return false;
   try {
     const reply = await redisPipeline([["EVAL", CLAIM_HELD_RECHECK, 1, "nl:held:retry:" + day, identity(ref), HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS]]);
-    const after = exposureBudgetConfiguration(budget.policy, budget.context);
-    return ack(reply) && dayOf(Date.now()) === day && after !== null && after.binding === before.binding;
+    return ack(reply) && dayOf(Date.now()) === day;
   } catch { return false; }
 }
 export async function heldStoreKnown(ref: string): Promise<boolean> {

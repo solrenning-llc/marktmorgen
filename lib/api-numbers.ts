@@ -17,8 +17,8 @@
  *
  * Whose numbers: the key is the store's own `statsId`, from the store the API
  * key belongs to, never anything in the request. The copy is sealed with an
- * HMAC over that id, the variant, what it was read under (the store's id, its
- * Stripe account, currency and whether it reads sales) and its time, under a
+ * HMAC over that id, the variant, what it was read under (its Stripe account,
+ * currency and whether it reads sales) and its time, nothing of the API key, under a
  * key derived from the deployment's secret (lib/secret-box.ts): a copy written
  * by anything else, for another store, under another Stripe account, or older
  * than an hour is not used, and the numbers are read again. With no secret,
@@ -30,7 +30,7 @@
  * reading whose listings were not covered by the requests left is answered
  * without them and not kept.
  */
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { deriveKey } from "@/lib/secret-box";
 import type { Store } from "@/lib/store";
@@ -57,17 +57,21 @@ const SEAL_HEAD_BYTES = 64;
 
 export const keptNumbersKey = (statsId: string, variant: NumbersVariant) => `nl:stats:${statsId}:apinum:${variant}`;
 
-/** What the numbers were read under: a copy read under anything else is not used. */
+/**
+ * What the numbers were read under, and nothing secret: the store's numbers
+ * id, its Stripe account, currency and whether it reads sales. A copy read
+ * under anything else is not used. Only these fields go into the seal, never
+ * the store record as a whole nor anything that came with the request's key.
+ */
 function readUnder(store: Store): string {
-  return createHash("sha256")
-    .update(JSON.stringify([store.sid ?? "", store.statsId ?? "", store.stripeAccountId ?? "", store.currency, readsSales(store)]))
-    .digest("base64url");
+  return JSON.stringify([String(store.statsId ?? ""), String(store.stripeAccountId ?? ""), String(store.currency), readsSales(store)]);
 }
 
+/** The seal: an HMAC under a key derived from the deployment's own secret (lib/secret-box.ts), over the fields above, the variant, the time and the numbers. */
 function seal(store: Store, variant: NumbersVariant, at: number, json: string): string | null {
   const key = deriveKey("api-numbers-kept");
   if (!key || !store.statsId) return null;
-  return createHmac("sha256", key).update(`${store.statsId}|${variant}|${readUnder(store)}|${at}|`).update(json).digest("base64url");
+  return createHmac("sha256", key).update(`${variant}|${readUnder(store)}|${at}|`).update(json).digest("base64url");
 }
 
 /** The kept copy, when it is this store's, read under what it is now, and less than an hour old; else null. */

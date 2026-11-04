@@ -84,6 +84,10 @@ import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS } from "@/lib/store-blog";
+import { MAX_BUMPS } from "@/lib/product-extras";
+import { SEARCH_PAGE } from "@/lib/community-search";
+import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
+import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
@@ -290,6 +294,41 @@ export const PATH_BOARD_JOIN = request("heavy",70,30_000);
 export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
 
 export const PATH_READ = request("heavy", 26, LIFE_WRITE_MAX * 96 + 20_480) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+
+/**
+ * Review ceilings for three more public reads paid for since 4 November 2026
+ * (lib/page-read-rules.ts). What working through a body costs past what a
+ * request's shape holds, a heavy request's CPU and wait for each megabyte.
+ */
+const bodyWork = (bytes: number) => bytes * DB_BYTE + (bytes / 1e6) * (SHAPES.heavy.cpu * CPU_SECOND + SHAPES.heavy.seconds * MEMORY_SECOND);
+/** A product's listing, and the most one of a community's messages, posts, events or members takes in any script. */
+export const READ_LISTING_BYTES = 16_384;
+export const READ_ROOM_MESSAGE_BYTES = 3_200;
+export const READ_DM_MESSAGE_BYTES = 6_500;
+export const READ_POST_BYTES = 16_000;
+/** One product on a collection page past its drawing: its stock, its keys and the bundles holding it (four commands), and its listing, those its checkout boxes offer and a bundle's. */
+export function collectionRead(products: number): number {
+  return products * (4 * COMMAND + bodyWork((2 + MAX_BUMPS) * READ_LISTING_BYTES));
+}
+/**
+ * One search of a community past its page: the four indexes and their next
+ * page, a page of results and what is drawn beside it (a hundred commands at
+ * the most, with the posts, the products and the people of a page), the
+ * room's last MAX_CHAT_KEPT messages where it is on, and SEARCH_MESSAGES of
+ * each conversation read.
+ */
+export function searchRead(size: { room: boolean; conversations: number }): number {
+  const page = SEARCH_PAGE * (READ_POST_BYTES + READ_LISTING_BYTES + 2_048);
+  return request("heavy", 100, page) + bodyWork(page)
+    + (size.room ? COMMAND + bodyWork(MAX_CHAT_KEPT * READ_ROOM_MESSAGE_BYTES) : 0)
+    + size.conversations * (COMMAND + bodyWork(SEARCH_MESSAGES * READ_DM_MESSAGE_BYTES));
+}
+/** One check of who holds a product or an event: its cached answer read and written, and up to three calls to Stripe waited on at 2 GB. */
+export const ACCESS_CHECK_READ = 4 * COMMAND + 3 * (EXPORT_PAGE_SECONDS * MEMORY_SECOND + bodyWork(64_000));
+/** One step of the walk of a community's archive: its commands, the bytes it reads, and its round trip waited on. */
+export function walkRead(commands: number, bytes: number): number {
+  return commands * COMMAND + bodyWork(bytes) + 0.05 * MEMORY_SECOND;
+}
 
 /** One host's calendar read: its commands, and the wait for the calendar, held at 2 GB inside the page that asked. */
 export const TEAM_READING = 7 * COMMAND + 1 * MEMORY_SECOND + 0.05 * CPU_SECOND;
@@ -552,6 +591,13 @@ export const COST_LINES: CostLine[] = [
     },
     sources: [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
+      // A collection's products, a community search and its checks, and the one walk of its archive, paid before they read (4 November 2026);
+      // a license check pays before it reads the product.
+      { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
+      { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)"] },
+      { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
+      { file: "lib/community-walk.ts", names: ["walkUnits(", "indexCommands("] },
+      { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
       { file: "lib/traffic.ts", names: ["countRequest", "takePublicRequest", "requestsKey"] },
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).

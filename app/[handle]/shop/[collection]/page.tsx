@@ -18,7 +18,8 @@ import { canManage } from "@/lib/membership-manage";
 import { canUseDomain } from "@/lib/domains";
 import { summaries } from "@/lib/reviews";
 import { forVisitor } from "@/lib/visitor";
-import { isResting } from "@/lib/traffic";
+import { isResting, takePublicRequest } from "@/lib/traffic";
+import { collectionUnits } from "@/lib/page-read-rules";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
@@ -109,6 +110,9 @@ export default async function CollectionPage({ params }: Params) {
 
   const ids = shownProducts(collection, listedItems(store));
   if (ids.length === 0) redirect(`/@${store.handle}`);
+  // Its products, paid for before they are read (lib/page-read-rules.ts, 4 November 2026):
+  // past the window, the resting page, and nothing of them read.
+  if (!(await takePublicRequest(store, "public", undefined, collectionUnits(ids.length)))) return <StoreResting store={store} />;
   // At most one page of products (MAX_COLLECTION_PRODUCTS), and the ones their checkout boxes offer.
   const listed = (await readListings(store, ids)).filter((p) => !p.hidden);
   const products = ids.flatMap((id) => listed.find((p) => p.id === id) ?? []);

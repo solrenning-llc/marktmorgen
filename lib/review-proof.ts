@@ -36,7 +36,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
-import { keptUnlessLost, lostDisputesOrRetry, refundedInFull, rowGivesBack } from "@/lib/refunds";
+import { keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { ordersGrant } from "@/lib/buyer-orders";
 import { DOWNLOAD_WINDOW_SECONDS } from "@/lib/store-checkout";
 import { REVIEW_STORES_KEY, markRefunded } from "@/lib/reviews";
@@ -305,8 +305,10 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       // A dispute closed as lost marks its reviews as a
       // full refund does (lib/refunds.ts, queue 388 [TB14]): read once, with
       // the first page, from Stripe's closing events (kept thirty days).
-      const lost = page === 0 ? await lostDisputesOrRetry(store.stripeAccountId, since, deadline) : { rows: [], complete: true };
+      const lost = page === 0 ? await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("rev", statsId)) : { rows: [], complete: true, newest: 0 };
       if (!lost.complete) unsure = true;
+      // The latest closing of the whole sweep (lib/refunds.ts, lostDisputesSince): reached the end, the place moves past it.
+      else newest = Math.max(newest, lost.newest);
       // What gives back on the page, and which of it an earlier pass already took: one request for the page, and
       // nothing written again for one already taken (each pass reads the last days' refunds again).
       const full = [...lost.rows, ...refunds]

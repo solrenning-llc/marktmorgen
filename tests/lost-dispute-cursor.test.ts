@@ -8,6 +8,8 @@
  * the whole sweep, so the job's place moves past every page read.
  */
 import { LOST_DISPUTE_PAGES, lostCursorKey, lostDisputesSince } from "@/lib/refunds";
+import { markRefundedReviews } from "@/lib/review-proof";
+import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -27,6 +29,7 @@ let reads = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.pathname !== "/v1/events") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  if (url.searchParams.get("type") !== "charge.dispute.closed") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   reads += 1;
   const after = url.searchParams.get("starting_after");
   const from = after ? events.findIndex((e) => e.id === after) + 1 : 0;
@@ -57,6 +60,15 @@ async function main(): Promise<void> {
   is("every lost dispute read once, across the two runs", seen.size, TOTAL);
   is("the end hands back the newest closing of the whole sweep, so the job's place moves past every page", two.newest, NOW);
   is("and the place is let go", (await redis.pipeline([["GET", key]]))[0], null);
+
+  part("The review job keeps its place too (inbox C4-21)");
+  const statsId = "r".repeat(32);
+  const shop = { statsId, stripeAccountId: ACCOUNT, handle: "cursor-shop" } as unknown as Store;
+  const placeKey = `nl:rev:refunds:since:${statsId}`;
+  await markRefundedReviews(shop, Date.now() + 60_000);
+  is("its first run is not complete, so its place does not move yet", (await redis.pipeline([["GET", placeKey]]))[0], null);
+  await markRefundedReviews(shop, Date.now() + 60_000);
+  is("its next run reaches the end and moves its place past the newest closing", Number((await redis.pipeline([["GET", placeKey]]))[0]), NOW);
 
   part("A place of another window is never followed");
   await lostDisputesSince(ACCOUNT, since, Number.POSITIVE_INFINITY, LOST_DISPUTE_PAGES, key);

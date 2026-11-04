@@ -59,13 +59,17 @@ export async function POST(request: NextRequest) {
   if (!statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   const id = typeof body.id === "string" ? body.id.slice(0, 20) : "";
   const person = typeof body.person === "string" ? body.person : "";
-  const refuse = (error: CompanyRefusal) => Response.json({ ok: false, error, message: COMPANY_REFUSALS[error] }, { status: error === "unknown" ? 404 : 400 });
+  const refuse = (error: CompanyRefusal) => Response.json({ ok: false, error, message: COMPANY_REFUSALS[error] }, { status: error === "unknown" ? 404 : error === "busy" ? 409 : 400 });
   try {
     let result;
     if (body.action === "add" || body.action === "edit") {
       const input = readCompanyInput(body);
       if (!input.ok) return refuse(input.error);
-      result = await changeCompanies(statsId, store, (companies) => (body.action === "add" ? addCompany(companies, input.value, newCompanyId(), Date.now() / 1000) : editCompany(companies, id, input.value)));
+      // The new company's id is made here and sent back, so the screen links the person to this one, never to one
+      // another tab added at the same moment.
+      const madeId = newCompanyId();
+      result = await changeCompanies(statsId, store, (companies) => (body.action === "add" ? addCompany(companies, input.value, madeId, Date.now() / 1000) : editCompany(companies, id, input.value)));
+      if (result.ok && body.action === "add") return Response.json({ ok: true, companies: result.companies, added: madeId }, { headers: NO_STORE });
     } else if (body.action === "remove") {
       result = await changeCompanies(statsId, store, (companies) => dropCompany(companies, id));
     } else if (body.action === "link") {

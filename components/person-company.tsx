@@ -19,16 +19,16 @@ export function PersonCompany({ person, initial }: { person: string; initial: Co
   const [error, setError] = useState("");
   const [left, setLeft] = useState<Company | null>(null);
 
-  async function send(body: Record<string, unknown>, done: string): Promise<Company[] | null> {
+  async function send(body: Record<string, unknown>, done: string): Promise<{ companies: Company[]; added?: string } | null> {
     setBusy(true);
     setError("");
     try {
       const response = await fetch("/api/store/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; message?: string; error?: string };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; added?: string; message?: string; error?: string };
       if (answer.ok && answer.companies) {
         setCompanies(answer.companies);
         toast(done);
-        return answer.companies;
+        return { companies: answer.companies, added: answer.added };
       }
       setError(answer.message ?? (answer.error === "data_full" ? "Your store's data room is full. Delete something you no longer need first." : "That did not save. Try again in a moment."));
     } catch {
@@ -56,11 +56,11 @@ export function PersonCompany({ person, initial }: { person: string; initial: Co
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
+    // The id the server made for this company: never guessed from the list, which another tab may have changed.
     const made = await send({ action: "add", name }, "Company added.");
-    const added = made?.find((c) => !companies.some((old) => old.id === c.id));
-    if (added) {
+    if (made?.added && made.companies.some((c) => c.id === made.added)) {
       setName("");
-      await link(added.id);
+      await link(made.added);
     }
   }
 

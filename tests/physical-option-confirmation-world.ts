@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {createCheckout} from '@/lib/store-checkout';
 import {readConfirmationOrigin} from '@/lib/order-confirmation-outbox';
 import {physicalPaidFixture,originId} from './order-confirmation-paid-fixture';
-export async function optionCheckout(priceCents=6500,shippingCents=500){
+export async function optionCheckout(priceCents=6500,shippingCents=500,sku?:string){
  const f=await physicalPaidFixture();
- const selected={id:'large_print',label:'Large print',priceCents,file:null,link:null,details:['Original edition'],best:false};
+ const selected={id:'large_print',label:'Large print',priceCents,file:null,link:null,details:['Original edition'],best:false,...(sku===undefined?{}:{sku})};
  f.product.options=[{...selected,id:'standard',label:'Standard',priceCents:3500},selected];
  f.product.shipping={...f.product.shipping!,cents:shippingCents};
  f.runtime.policy={...f.runtime.policy!,coveredOrigins:['physical-option-confirmation']};
@@ -26,8 +26,8 @@ export async function optionCheckout(priceCents=6500,shippingCents=500){
  };
  return{...f,selected};
 }
-export async function purchased(priceCents=6500,shippingCents=500){
- const f=await optionCheckout(priceCents,shippingCents);
+export async function purchased(priceCents=6500,shippingCents=500,sku?:string){
+ const f=await optionCheckout(priceCents,shippingCents,sku);
  const checkout=await createCheckout(f.store,f.product,'https://example.test','large_print',{},f.runtime);
  const session=f.sessions.get(checkout.id)!;assert.ok(session);
  const amount=priceCents+shippingCents;

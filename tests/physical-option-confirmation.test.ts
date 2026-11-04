@@ -22,8 +22,8 @@ test('missing, ambiguous and unknown selected IDs never fall back to the first c
 test('noncanonical amounts cannot coerce themselves into a price',()=>{
  for(const priceCents of [-1,NaN,Infinity,Number.MAX_SAFE_INTEGER+1,'6500',null,{},6500.5])assert.equal(select({...option(),priceCents}),null);
 });
-test('file/link delivery, SKU-coupled and extra option properties stay outside this projection',()=>{
- for(const patch of [{file:{pathname:'a.pdf'}},{link:'https://example.test'},{sku:'physical-stock'},{extra:true}])assert.equal(select({...option(),...patch}),null);
+test('file/link delivery and extra option properties stay outside this projection',()=>{
+ for(const patch of [{file:{pathname:'a.pdf'}},{link:'https://example.test'},{extra:true}])assert.equal(select({...option(),...patch}),null);
  const missing={...option()} as Partial<ReturnType<typeof option>>;delete missing.best;assert.equal(select(missing),null);
 });
 test('identity, label and description bounds retain the existing option contract',()=>{
@@ -128,4 +128,15 @@ test('closing admissions does not remove express lifetime coverage from existing
  assert.equal(physicalOptionCovered(f.value(),p,later),false,'no new admission after the original deadline');
  assert.equal(physicalOptionCovered(f.value(),p,later,false),true,'same reviewed pending lifetime can continue');
  assert.equal(physicalOptionCovered(f.value(),{...p,coveredOrigins:undefined},later,false),false);
+});
+
+test('a canonical optional physical SKU is copied without reinterpretation or mutable catalog substitution',()=>{
+ for(const sku of ['PRINT-xl_01','Édition-大', 'x'.repeat(64),'']){
+  const o={...option(),sku},c=select(o);assert.ok(c);assert.equal(c.sku,sku);assert.notEqual(c,o);
+  o.sku='Replacement';assert.equal(c.sku,sku);
+ }
+ for(const sku of [undefined,null,0,{},'x'.repeat(65),' bad ','bad\nSKU','bad\u0085SKU'])
+  assert.equal(select({...option(),sku}),null);
+ let reads=0;const o=Object.defineProperty(option(),'sku',{get(){reads++;throw Error('no');}});
+ assert.equal(select(o),null);assert.equal(reads,0);
 });

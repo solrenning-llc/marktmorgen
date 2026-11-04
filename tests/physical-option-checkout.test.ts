@@ -109,12 +109,13 @@ test('an unknown option email outcome retains its permanent barrier across73h',a
 test('actual Lua and accounting settle paid option, paid shipping and zero total once after73h',{
  skip:process.env.MARKTMORGEN_REDIS_INTEGRATION!=='1'||!process.env.CONFIRMATION_ORIGIN_REDIS_PORT,
 },async()=>{
- for(const [priceCents,shippingCents] of [[6500,500],[0,500],[0,0]]){
+ for(const [priceCents,shippingCents,sku] of [[6500,500,undefined],[0,500,undefined],[0,0,undefined],[6500,500,'PRINT-xl_É01']] as const){
   const realTime=Date.now,originalTime=realTime()-73*3600000;
   let f:Awaited<ReturnType<typeof purchased>>;
-  try{Date.now=()=>originalTime;f=await purchased(priceCents,shippingCents);}finally{Date.now=realTime;}
+  try{Date.now=()=>originalTime;f=await purchased(priceCents,shippingCents,sku);}finally{Date.now=realTime;}
   f.advance(0);const source=await readConfirmationOrigin(f.id,f.runtime);assert.ok(source);
   assert.ok(realTime()-source.row.created>=73*3600000);
+  assert.deepEqual((source.payload.snapshot.product as {options:{sku?:string}[]}).options[0].sku,sku);
   const row=source.row,person=createHash('sha256').update('buyer@example.test').digest('hex');
   const keys=[confirmationOriginRowKey(f.id),`nl:order-confirmation:source:${f.id}`,'nl:order-confirmation:due',
    `nl:order-confirmation:store:${row.statsId}`,`nl:order-confirmation:person:${row.statsId}:${row.person}`,
@@ -151,4 +152,15 @@ test('actual Lua and accounting settle paid option, paid shipping and zero total
    assert.equal(f.calls.filter(c=>c.method==='POST').length,1);
   }finally{await confirmationLocalPipeline([['DEL',...made]]);}
  }
+});
+
+test('a physical SKU stays in the durable original snapshot before the sole payment POST',async()=>{
+ const f=await optionCheckout();Object.assign(f.selected,{sku:'PRINT-xl_É01'});
+ const checkout=await createCheckout(f.store,f.product,'https://example.test','large_print',{},f.runtime);
+ const found=await readConfirmationOrigin(originId(),f.runtime);assert.ok(found);
+ const product=found.payload.snapshot.product as {options:{sku?:string}[]};
+ assert.equal(product.options[0].sku,'PRINT-xl_É01');assert.equal(found.row.session,checkout.id);
+ Object.assign(f.selected,{sku:'Later inventory edit'});
+ assert.equal(product.options[0].sku,'PRINT-xl_É01');
+ assert.equal(f.calls.filter(c=>c.method==='POST').length,1);
 });

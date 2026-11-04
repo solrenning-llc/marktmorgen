@@ -6,3 +6,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Codex | CX-27 GL7(25): billable read-beacon commands and worst-case accounting only, no producer/flag changes; narrow traffic-cost exception over #1496 | codex/gl7-read-command-cost | `tests/traffic-cost.ts`, `tests/read-beacon-cost.test.ts`, `scripts/test_read_beacon_cost_redis.py`, `docs/gl7-read-command-cost.md` | 04/11/2026 |

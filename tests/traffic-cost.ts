@@ -66,7 +66,6 @@
  * tests/podcast.test.ts hold what each is counted as over what it costs.
  */
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
-import { READ_SAMPLE } from "@/lib/page-read-sample";
 
 export const CDN_PER_REQUEST = 2.0 / 1_000_000;
 export const COMMAND = 2.0 / 1_000_000;
@@ -127,6 +126,8 @@ export const COMMANDS = {
    * per visit. Until October 11, 2026 this went through the store's general
    * count at seven commands and was in none of these sums.
    */
+  // Wire EVAL only, retained for the existing route-shape test. Billing is
+  // READ_BEACON_BILLED_COMMANDS, including Lua calls and first-count expiry.
   readBeacon: 1,
   /**
    * Handing a member's page ten minutes' leave to ask the room, at the
@@ -146,6 +147,21 @@ export const COMMANDS = {
   feed: 9,
 };
 
+/** GL7(25), reviewed against claude3/gl7-time-on-page e04e5275 (4 Nov 2026).
+ * Two hashes, one count each. A near-cap hash may use HMGET; both counters
+ * may first become1 and require EXPIRE. Count both together even in restored
+ * zero-valued hashes, not just the usual warm positive-counter path.
+ * Upstash bills EVAL plus each redis.call, verified 4 Nov 2026:
+ * https://upstash.com/docs/redis/overall/billing
+ * https://upstash.com/pricing/redis ($0.20/100K, no paid-tier free commands).
+ * scripts/test_read_beacon_cost_redis.py measures the actual application Lua.
+ * This is one non-replicated primary; extra write replicas require costing.
+ */
+export const READ_BEACON_BILLED_COMMANDS = {
+  eval: 1, lengths: 2, membershipReads: 2, increments: 2, expiries: 2,
+} as const;
+const READ_BEACON_BILL = Object.values(READ_BEACON_BILLED_COMMANDS).reduce((a, b) => a + b, 0);
+
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */
 const PAGE_AND_COUNT = 2 * CALL + 0.1 * CPU_PER_SECOND + 1.3 * MEMORY_PER_SECOND;
 
@@ -155,7 +171,7 @@ const PAGE_AND_COUNT = 2 * CALL + 0.1 * CPU_PER_SECOND + 1.3 * MEMORY_PER_SECOND
  * an empty answer.
  */
 export function readBeaconCost(): number {
-  return CDN_PER_REQUEST + CALL + COMMANDS.readBeacon * COMMAND + 0.005 * CPU_PER_SECOND + 0.04 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
+  return CDN_PER_REQUEST + CALL + READ_BEACON_BILL * COMMAND + 0.005 * CPU_PER_SECOND + 0.04 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
 }
 
 /** What one visit costs at the most this is worked out for, in dollars. */
@@ -163,9 +179,10 @@ export function visitCost(): number {
   const later = PAGES_PER_VISIT - 1;
   const requests = 1 + STATIC_FILES + 1 + 1 + STORE_PAGE_SIZE + later * (1 + 1 + PICTURES_ON_A_LATER_PAGE);
   const commands = COMMANDS.frontPage + COMMANDS.frontCount + COMMANDS.firstOfDay + later * (COMMANDS.laterPage + COMMANDS.laterCount);
-  // Every page of the visit is taken to be measured for how it is read, at the
-  // share of visitors the pages send it for: the store's page and two sales pages.
-  const reading = (PAGES_PER_VISIT / READ_SAMPLE) * readBeaconCost();
+  // A browser-only random sample is an expectation, not a worst-month cap.
+  // Cost every one of the visit's pages as measured. Replayed notices remain
+  // an unbounded producer gap (docs/gl7-read-command-cost.md), not free work.
+  const reading = PAGES_PER_VISIT * readBeaconCost();
   return requests * CDN_PER_REQUEST + commands * COMMAND + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
 }
 

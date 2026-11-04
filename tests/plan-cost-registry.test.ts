@@ -359,7 +359,11 @@ test("an API reading that reads more than a page takes further requests that cov
   const calls = read("lib/calls.ts");
   assert.ok(calls.includes(`const MAX_PAGES = ${BOOKING_PAGES};`) && calls.includes("/checkout/sessions?limit=100"), "the bookings' pages");
   const paypal = read("lib/paypal-sales.ts");
-  assert.ok(paypal.includes(`"LIMIT", "0", "${BOOK_PAYPAL_REFUNDS + 1}"`) && paypal.includes(`Math.min(flat.length, ${BOOK_PAYPAL_REFUNDS * 2})`), "PayPal refunds read");
+  assert.ok(
+    (paypal.includes(`"LIMIT", "0", "${BOOK_PAYPAL_REFUNDS + 1}"`) && paypal.includes(`Math.min(flat.length, ${BOOK_PAYPAL_REFUNDS * 2})`))
+      || (paypal.includes(`PAYPAL_REFUNDS_READ = ${BOOK_PAYPAL_REFUNDS};`) && paypal.includes('"LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)') && paypal.includes("Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ)")),
+    "PayPal refunds read",
+  );
   const book = read("lib/affiliates.ts");
   assert.ok(book.includes(`.slice(0, ${BOOK_MOVES})`) && book.includes(`const INVOICE_PAGES = ${BOOK_INVOICES / 100};`) && book.includes('limit: "100"'), "the book's moves and invoices");
   assert.ok(BOOK_STRIPE_PAGES >= BOOK_INVOICES / 100);

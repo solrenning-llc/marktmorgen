@@ -531,7 +531,7 @@
    "etiqueta": "TB4",
    "estado": "feito",
    "prova_do_estado": "queue.md:11073 'Estado: em andamento pela Claude 2 (1/11/2026 ...)' descreve três unidades: 1 (servidor, rotação), 3 (reenvio manual) e 2 (tela e textos). As três foram incorporadas: #1557 (unidade 1, merge 8d6cbaed09bab41d1979880ff56a6135eb3b6879, 01/11/2026 03h18 Fortaleza), #1568 (unidade 3, merge 58562747d90c42bfaeac5da6df2ecde5d71053ca, 01/11/2026 09h42 Fortaleza) e #1572 (unidade 2, a última, merge 31113c2b227754e2e4279f84b39921c78ba45a0c, 01/11/2026 10h44 Fortaleza). Nenhuma outra unidade planejada na fila.",
-   "correcao_estado": "PR #1572, commit 31113c2b227754e2e4279f84b39921c78ba45a0c, 01/11/2026 10h44 Fortaleza",
+   "correcao_estado": "Concluído nas unidades originais: PRs #1557, #1568 e #1572 (último: commit 31113c2b227754e2e4279f84b39921c78ba45a0c, 01/11/2026 10h44 Fortaleza); complementos posteriores ao item ficam pendentes (C4-20261105-2015-C5-5)",
    "pedidos": [
     {
      "o_que": "Rotação do segredo sem interrupção: o novo mostrado uma vez, o anterior assina junto por 24 h (dois v1 no cabeçalho), entrega em trânsito sai com os dois, depois o anterior sai",
@@ -569,8 +569,8 @@
   {
    "n": 402,
    "etiqueta": "WX3",
-   "estado": "cancelado",
-   "prova_do_estado": "queue.md:11286 ainda diz 'Estado: na fila', mas queue.md:17210 [LQ7] 'Cancelado por decisão do dono em 28/10/2026 (LQ7); não executar: ... 402 [WX3]'; queue.md:17125 '| 402 | cancelado |'; queue.md:17322 [LQ13] 'Continuam cancelados ... 347 [FL2], 352 [DN4] e 402 [WX3] (estudos sem construção)'. As linhas MQ2 (queue.md:844, 1488) só mantêm a posição na cauda, como para os outros cancelados (127, 347, 352, 420).",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:11288 \"Estado: na fila\". O cancelamento de 28/10 (LQ7, tabela em 17127) foi desfeito: LQ13 reabriu os cancelados pelo LQ7 (queue.md:15218 e seguintes, \"Reaberto por decisão do dono em 28/10/2026, 23h26 (LQ13)\") e LQ17 (queue.md:17353) devolveu todo item tocado por LQ1–LQ15 ao estado anterior. A linha \"na fila\" está certa; nenhuma correção.",
    "correcao_estado": "",
    "pedidos": [],
    "complemento": ""

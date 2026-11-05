@@ -320,7 +320,8 @@ export async function recordLead(
   if (!store.listId || !isRedisConfigured()) return null;
   // A free product claimed through the emailed link: they came back on their own, so the CRM may keep fields about them
   // again (lib/crm.ts, personReturned; C3-125).
-  await personReturned(store.statsId, claim.e);
+  // When they asked for the copy, not when the link was used: an old link used again is not a return (Codex D, #2287).
+  await personReturned(store.statsId, claim.e, Date.parse(claim.at));
   try {
     // A free copy is an order: its contact is counted at what it really adds (lib/order-data.ts).
     const result = await upsertContact(store.listId, claim.e, {

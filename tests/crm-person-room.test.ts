@@ -114,7 +114,11 @@ async function main(): Promise<void> {
     is("the mark and the generation are kept that long", ttls, [ERASED_MARK_SECONDS, ERASED_MARK_SECONDS]);
 
     part("Someone who came back on their own (a paid order, a confirmed sign-up, a free product, a form): the server takes the mark away");
-    await personReturned(STATS, "cal@example.com");
+    await personReturned(STATS, "cal@example.com", Date.now() - 2 * 86_400_000);
+    is("an act from before the deletion, seen only now, leaves the mark (Codex D, #2287)", await marked(CAL), 1);
+    await personReturned(STATS, "cal@example.com", Number.NaN);
+    is("and so does an unknown time", await marked(CAL), 1);
+    await personReturned(STATS, "cal@example.com", Date.now() + 1);
     is("the mark is gone", await marked(CAL), 0);
     is("a page read before the deletion is still refused", await outcome(() => setValue(STATS, CAL, fields[0], "Stale", ROOM, read)), "gone");
     const since = await readGeneration(STATS, CAL);

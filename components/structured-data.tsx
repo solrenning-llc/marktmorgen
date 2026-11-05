@@ -11,6 +11,7 @@ import { PUBLISHED_PLAN_PRICES as PLAN_PRICES, PLAN_TITLES as PLAN_NAMES, TIERS,
 import { SITE_URL } from "@/lib/site-url";
 import type { BlogPost } from "@/lib/blog";
 import { feeWords } from "@/lib/fee-words";
+import { PLANS_ON_SALE, PREVIEW_LINE } from "@/lib/opening";
 
 /**
  * One block of structured data.
@@ -63,7 +64,9 @@ export function SiteData() {
 }
 
 /**
- * The product and its prices, and the questions answered on the cover.
+ * The product and the questions answered on the cover. Prices are offers
+ * only while paid plans can actually be started; otherwise the description
+ * repeats the same preview notice visitors read.
  *
  * The prices are read from the same constants the pricing section prints, so
  * the two can never drift apart: changing a plan's price changes both.
@@ -90,8 +93,10 @@ export function HomeData({ questions }: { questions: { q: string; a: string }[] 
             operatingSystem: "Web",
             url: SITE_URL,
             publisher: { "@id": `${SITE_URL}/#organization` },
-            description: `A store page for creators, with a ${TRIAL_DAYS}-day free trial. Sales are direct charges on the creator's own Stripe account. ${feeWords().takesOfCreator}`,
-            offers: TIERS.map(offer),
+            description: PLANS_ON_SALE
+              ? `A store page for creators, with a ${TRIAL_DAYS}-day free trial. Sales are direct charges on the creator's own Stripe account. ${feeWords().takesOfCreator}`
+              : PREVIEW_LINE,
+            ...(PLANS_ON_SALE ? { offers: TIERS.map(offer) } : {}),
           },
           {
             "@type": "FAQPage",

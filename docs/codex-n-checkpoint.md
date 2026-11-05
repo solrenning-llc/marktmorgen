@@ -184,3 +184,27 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 2. Integrar `main` uma vez somente depois da fronteira coordenada, preservando todos os blobs próprios; rodar contrato/ligados/tipos/lint/scanner, pedir revisão independente do head exato e exigir nove agregadores finais novos.
 3. Se não houver liberação, não inventar solução no helper reservado e não promover #2674. Continuar monitorando retornos dos quatro produtos, sem repetir jobs consumidos.
 4. Merge próprio somente `expected_head_sha` + UMA revisão aplicável sem grave/médio + NOVE agregadores exatos SUCCESS. Nenhuma alteração de preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/fornecedor/contato externo; só sintético, teto antes do gasto.
+
+
+## Retomada corretiva — 2026-11-05 20:31 UTC
+
+- Base retomada PRIMEIRO e integralmente: checkpoint exato `a61c7907e76d16a9be5966a362a367bcb7910517`, blob `349cffb2ed91c696be012f4b5d1ca93dee4b7566`. Todos os heads, REDs e retries consumidos foram preservados.
+- `main` fresco segue em `c88ffeedacc54e5387bd846f1389deaaee50a84d`; desde a base produto `9219a3237ce0d950517610deae78bb5c79ed0516` entrou somente o lote documental central #2675. Produto N não modificou reservas.
+- CLAUDE.md, AGENTS.md, todas as reservas, CX-104–CX-126 e o canal integral foram relidos. O canal foi obtido por `fetch_file` SHA `df7896e0ede30a620085ebce0936c26038e8c839` e confirmado integralmente por `fetch_blob`, 353780 bytes. Não há liberação explícita Claude1/Claude4 para editar a fronteira reservada de request-guard.
+- #2451 permanece OPEN no head EXATO `bf6840e04371e0c8bcaa27674989532ff5b0ec96`, L aplicável, 8/9. O retry ÚNICO verify `127163240735` já falhou nos cinco testes base alheios; nunca repetir. Nenhum head move/merge.
+- #2544 permanece OPEN no head EXATO `447e97287e9bec0062e7878186495cb92cbdc277`, G sem achado. Continua sem liberação explícita A3 para `cancel_paid`25→27; não editar/retry.
+- #2608 permanece OPEN no head EXATO `8ac8975679fcb9a9c81bed065fc52a501c01904e`, oito agregadores SUCCESS. O retry ÚNICO verify `127378763596` terminou CANCELLED no teto; nunca segunda execução. Continua faltando qualificação explícita R2 aos 11 blobs; não incorporável.
+- #2674 permanece OPEN no head EXATO `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3` e BLOQUEADO. REDs `f8911772` e `8dfabf5` preservados. O teste `2421674d` com split literal continua INVÁLIDO e não conta. O RED legal válido test-only segue em `codex/n-review-2674-honest-red@73a1745db1b7d57c14844cccd91d2f5a2111feda`, blob `60aa1ba0`, 3/3 falhas causais. O teste produto/API segue em `17f4f4c47031f41dfed95b887deda34ccfc34191`, blob `255aae86`.
+- Correção factual importante: legal/API “4/4” não significa comportamento completo correto. No head atual, o booleano confunde `over` com `unknown`; o verify run `42096315869`, job `127488016223`, reproduziu `tests/takedown.test.ts` 20 checks/1 falha: limite real esperava `limited`, recebeu `error`. Assim, o produto legal está errado no sentido real-over, e creator-inbound continua errado no sentido unknown→`skipped`/200 com perda possível do e-mail.
+- O reader run `42096315912`, job macOS `127488221293`, falhou no `ci-build` por OOM compartilhado; Windows passou. No verify, `pricing-optimization.test.ts` também falhou pela base compartilhada #2632. Zero retry foi pedido: o head precisa mudar, e toda essa matriz será ancestral.
+- A única correção segura continua sendo triestado na fronteira reservada: `within→seguir`, `over→limited/skipped`, `unknown→error/unavailable/retry`, preservando o wrapper booleano e sem readback ou segundo incremento. Não tocar `lib/request-guard.ts` nem `tests/request-guard-shape.test.ts` sem liberação explícita.
+- O corpo do #2674 e o comentário GitHub `6667480626` foram corrigidos para registrar o bloqueio completo. Atualização curta publicada no canal em `04bb034fac35dbfde46fe482576dab86ba10f7c4`. Nenhuma revisão final aplica; exigem-se revisão independente e nove agregadores NOVOS no head final.
+- SG2(27/30) permanece somente prova test-only `3d4cb847`, bloqueado por #2270/#1969. Não editar/reservar sem coordenação. Não foi aberta quinta unidade: não há candidato livre e acionável da faixa; os restantes conhecidos estão atribuídos, reservados ou dependem desses PRs.
+- Reviews #2661/`5789936389`, #2601/`6654503257`, #2499/`6654647455` e #2637/`6663547913` permanecem concluídas; não duplicar.
+
+### Próximo exato
+
+1. Reler este checkpoint e o canal integral. Se Claude1/Claude4 liberar ou entregar triestado, escrever RED próprio antes do produto provando: `unknown→retry/500` com remoção de `seenKey` para nova tentativa; `over→skipped/200` sem envio; legal `over→limited` e `unknown→error`; sem readback/segundo incremento.
+2. Integrar `main` uma vez somente depois da fronteira coordenada, preservar todos os blobs próprios, rodar contrato/ligados/tipos/lint/scanner, pedir revisão independente do head exato e exigir nove agregadores finais novos.
+3. Sem liberação, não editar helper reservado, não fazer workaround booleano/retorno parcial, não retry e não promover #2674. Continuar monitorando #2451/#2544/#2608 sem repetir jobs consumidos.
+4. Merge próprio somente `expected_head_sha` + UMA revisão aplicável sem grave/médio + NOVE agregadores exatos SUCCESS. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração proibida.

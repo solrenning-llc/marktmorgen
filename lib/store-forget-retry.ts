@@ -7,14 +7,25 @@
  * after the last try stays in line, marked, and is counted every month for
  * the owner's report (storeForgetMonth): numbers only, no store, no person.
  *
- *   nl:forget:q                 hash  "<statsId>|<sid>" → { tries, first, last, gaveUp? }
+ *   nl:forget:q                 hash  "<statsId>|<sid>" → { tries, first, last }: tried again daily
+ *   nl:forget:kept              hash  the same, given up: never read by the daily run
+ *
+ * A given-up entry leaves the line for nl:forget:kept, so the daily HGETALL
+ * holds only the stores of the last FORGET_TRIES days (review of #2556 at
+ * c6267d1ef). It is kept there for good, on purpose: it is what tells the
+ * owner that data is still kept. It is shown to the owner only once
+ * storeForgetMonth / storeForgetLine are wired into the monthly owner report
+ * (lib/company-margin-report.ts, queue item 465 [MR2], reserved by Codex E);
+ * until then it is counted here and logged by the closing job, and nothing
+ * takes it out.
  *   nl:forget:month:<YYYY-MM>   hash  queued, done, gaveUp counts for the month, 400 days
  *
  * Its cost is Redis commands only, no supplier: each try runs
- * forgetStoreWebhooks (two pipelines: 12 + 2 × LOG_SIZE commands, and 3 more
- * for each endpoint told in the last three days, MAX_ENDPOINTS live at once)
- * and revokeAllKeys (2 + MAX_KEYS), plus three for the line itself;
- * FORGET_TRY_COMMANDS with MAX_ENDPOINTS endpoints. At most FORGET_TRIES tries
+ * forgetStoreWebhooks (two pipelines: 13 + 2 × LOG_SIZE commands, and 3 more
+ * for each endpoint it names: the MAX_ENDPOINTS configured and up to
+ * MAX_ENDPOINTS told on each of the last three days, lib/webhooks.ts, so
+ * 4 × MAX_ENDPOINTS) and revokeAllKeys (2 + MAX_KEYS), plus at most four for
+ * the line itself: FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
  * a deleted store, at most FORGET_PER_RUN stores a day, and only for a delete
  * whose first try failed (held in tests/sg2-unknown-replies.test.ts).
  */
@@ -29,24 +40,25 @@ export const FORGET_TRIES = 8;
 /** Stores tried again in one run of the closing job. */
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
-export const FORGET_TRY_COMMANDS = 12 + 2 * LOG_SIZE + 3 * MAX_ENDPOINTS + 2 + MAX_KEYS + 3;
+export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 2 + MAX_KEYS + 4;
 /** How long a month's counts are kept: past the next yearly look at them. */
 const MONTH_SECONDS = 400 * 86_400;
 
 const QUEUE = "nl:forget:q";
+const KEPT = "nl:forget:kept";
 const monthKey = (month: string) => `nl:forget:month:${month}`;
 const monthOf = (now: number) => new Date(now).toISOString().slice(0, 7);
 const STATS_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const SID = /^[0-9a-f]{32}$/;
 
-type Entry = { tries: number; first: number; last: number; gaveUp?: true };
+type Entry = { tries: number; first: number; last: number };
 
 function parseEntry(raw: unknown): Entry | null {
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Partial<Entry>;
     if (!Number.isSafeInteger(v.tries) || (v.tries as number) < 1 || !Number.isSafeInteger(v.first) || !Number.isSafeInteger(v.last)) return null;
-    return { tries: v.tries as number, first: v.first as number, last: v.last as number, ...(v.gaveUp === true ? { gaveUp: true as const } : {}) };
+    return { tries: v.tries as number, first: v.first as number, last: v.last as number };
   } catch {
     return null;
   }
@@ -95,7 +107,6 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
   for (let i = 0; i < flat.length; i += 2) {
     const field = flat[i];
     const entry = parseEntry(flat[i + 1]);
-    if (entry?.gaveUp) continue;
     if (tried >= FORGET_PER_RUN || Date.now() > deadline) {
       out.left += 1;
       continue;
@@ -114,10 +125,13 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
       const tries = (entry?.tries ?? FORGET_TRIES - 1) + 1;
       const gaveUp = !known || tries >= FORGET_TRIES;
       console.error(gaveUp ? "forgetting a deleted store's webhooks and keys was given up" : "forgetting a deleted store's webhooks and keys failed again", error);
-      await redisPipeline([
-        ["HSET", QUEUE, field, JSON.stringify({ tries, first: entry?.first ?? now, last: now, ...(gaveUp ? { gaveUp: true } : {}) })],
-        ...(gaveUp ? [["HINCRBY", monthKey(monthOf(now)), "gaveUp", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]] : []),
-      ]);
+      const kept = JSON.stringify({ tries, first: entry?.first ?? now, last: now });
+      // Given up: out of the daily line, into the kept ones, counted for the month.
+      await redisPipeline(
+        gaveUp
+          ? [["HSET", KEPT, field, kept], ["HDEL", QUEUE, field], ["HINCRBY", monthKey(monthOf(now)), "gaveUp", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]
+          : [["HSET", QUEUE, field, kept]],
+      );
       if (gaveUp) out.gaveUp += 1;
       else out.failed += 1;
     }
@@ -130,10 +144,11 @@ export type StoreForgetMonth = { month: string; queued: number; done: number; ga
 
 export async function storeForgetMonth(month: string): Promise<StoreForgetMonth | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
-  const [counts, line] = await redisPipeline([["HGETALL", monthKey(month)], ["HVALS", QUEUE]]);
+  const [counts, waiting, given] = await redisPipeline([["HGETALL", monthKey(month)], ["HLEN", QUEUE], ["HLEN", KEPT]]);
   const flat = stringList(counts);
-  const values = stringList(line);
-  if (!flat || flat.length % 2 !== 0 || !values) return null;
+  const waitingNow = countOf(waiting);
+  const keptNow = countOf(given);
+  if (!flat || flat.length % 2 !== 0 || waitingNow === null || keptNow === null) return null;
   const read: Record<string, number> = { queued: 0, done: 0, gaveUp: 0 };
   for (let i = 0; i < flat.length; i += 2) {
     if (!Object.hasOwn(read, flat[i])) continue;
@@ -141,12 +156,7 @@ export async function storeForgetMonth(month: string): Promise<StoreForgetMonth 
     if (!Number.isSafeInteger(n)) return null;
     read[flat[i]] = n;
   }
-  // An entry in another shape is counted as kept: never as nothing there.
-  const keptNow = values.filter((value) => {
-    const entry = parseEntry(value);
-    return entry === null || entry.gaveUp === true;
-  }).length;
-  return { month, queued: read.queued, done: read.done, gaveUp: read.gaveUp, waitingNow: values.length - keptNow, keptNow };
+  return { month, queued: read.queued, done: read.done, gaveUp: read.gaveUp, waitingNow, keptNow };
 }
 
 /**

@@ -102,9 +102,23 @@ const keptLockedKey = (email: string) => `${lockedSetKey(email)}:kept`;
 /**
  * The accounts whose locked sessions are kept locked now, by accountTag, space-separated: only a session of one
  * of them with no lock of its own asks more. Kept as the mark of a name no address can be ("any account" has a
- * space), in the same family.
+ * space), in the same family. Each account once, at most KEPT_ANY_MAX of them (KEPT_ANY_MAX × 41 bytes, read by
+ * every lockedUntil); past that it is "*" (KEEP_ANY), the safe side: every session with no lock of its own then
+ * asks whether it is in its account's kept set (keptListed, three commands more), so none that was is set free,
+ * until the list lapses SESSION_TTL_SECONDS and a day after the last failed read.
  */
 const KEPT_ANY_KEY = keptLockedKey("any account");
+export const KEPT_ANY_MAX = 100;
+/** In one command: the account's tag added once (never twice), "*" past KEPT_ANY_MAX, and the expiry set. */
+export const KEEP_ANY = `-- marktmorgen:kept-any:v1
+local v = redis.call('GET', KEYS[1]) or ''
+if v ~= '*' and not string.find(' ' .. v .. ' ', ' ' .. ARGV[1] .. ' ', 1, true) then
+  local n = 0
+  for _ in string.gmatch(v, '%S+') do n = n + 1 end
+  if n >= tonumber(ARGV[2]) then v = '*' elseif v == '' then v = ARGV[1] else v = v .. ' ' .. ARGV[1] end
+end
+redis.call('SET', KEYS[1], v, 'EX', ARGV[3])
+return v == '*' and 0 or 1`;
 /** A one-way tag of an account: its locked set's own hash, never the address. */
 const accountTag = (email: string) => lockedSetKey(email).slice("nl:2fa:lockedset:".length);
 const rescueKey = (token: string) => `nl:2fa:rescue:${sha(`nimbus-2fa-rescue:${token}`).slice(0, 40)}`;
@@ -367,7 +381,8 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
     // 47161b86e). A session of an account whose locked sessions are kept locked (listed in KEPT_ANY_KEY,
     // or that list in another shape) asks whether it is still in its account's kept set (keptListed).
     if (!owner || anyKept === null) return 0;
-    if (typeof anyKept === "string" && !anyKept.split(" ").includes(accountTag(owner))) return 0;
+    // "*": more accounts than KEPT_ANY_MAX, so every such session asks (the safe side).
+    if (typeof anyKept === "string" && anyKept !== "*" && !anyKept.split(" ").includes(accountTag(owner))) return 0;
     return keptListed(session, owner, now);
   }
   // "<until>|<opened>"; a value written before 5 November 2026 is "<until>" alone, opened at an unknown time.
@@ -498,9 +513,8 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
     // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
     await redisPipeline([
       ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
-      // Listed by a one-way tag of the account, never its address; APPEND keeps two at once both.
-      ["APPEND", KEPT_ANY_KEY, ` ${accountTag(email)}`],
-      ["EXPIRE", KEPT_ANY_KEY, SESSION_TTL_SECONDS + 86_400],
+      // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
+      ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
       ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
     ]);
     return false;

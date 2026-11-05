@@ -550,6 +550,21 @@ export class MemoryRedis {
           this.hash(names).delete(who);
           return gone;
         }
+        if (key.startsWith("-- marktmorgen:kept-any:v1\n")) {
+          // lib/two-step.ts KEEP_ANY: KEYS[1] the list, ARGV[1] a tag, ARGV[2] the most tags, ARGV[3] seconds.
+          const [list, tag, most, seconds] = [args[1], args[2], Number(args[3]), Number(args[4])];
+          this.live(list);
+          const held = this.data.get(list);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          let value = held ?? "";
+          if (value !== "*" && !value.split(" ").includes(tag)) {
+            const n = value.split(" ").filter(Boolean).length;
+            value = n >= most ? "*" : value === "" ? tag : `${value} ${tag}`;
+          }
+          this.data.set(list, value);
+          this.until.set(list, this.now() + seconds * 1000);
+          return value === "*" ? 0 : 1;
+        }
         if (key.startsWith("-- marktmorgen:list-blank:v1\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
@@ -860,14 +875,6 @@ export class MemoryRedis {
       case "STRLEN": {
         const held = this.data.get(key);
         return typeof held === "string" ? Buffer.byteLength(held, "utf8") : 0;
-      }
-      case "APPEND": {
-        // APPEND key value: the value added at the end of the string (made when there is none); answers the new length.
-        const held = this.data.get(key);
-        if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
-        const next = (held ?? "") + args[0];
-        this.data.set(key, next);
-        return Buffer.byteLength(next, "utf8");
       }
       case "ZSCAN": {
         // ZSCAN key cursor [COUNT n]: everything at once, member and score, the cursor back at "0", as HSCAN does.

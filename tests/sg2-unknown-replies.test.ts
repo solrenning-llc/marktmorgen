@@ -534,7 +534,12 @@ async function main(): Promise<void> {
   const afterLast = await retryStoreForgets(Date.now() + 10_000, Date.now(), failing);
   const given = await storeForgetMonth(monthNow);
   const line = storeForgetLine(given);
-  is("the last try gives it up, it stays in line, marked, and is never tried again", [last, afterLast, tries, given?.gaveUp, given?.keptNow, given?.waitingNow], [{ done: 0, failed: 0, gaveUp: 1, left: 0 }, { done: 0, failed: 0, gaveUp: 0, left: 0 }, FORGET_TRIES - 1, 1, 1, 0]);
+  is(
+    "given up, it leaves the daily line for the kept ones, never read by the daily run",
+    [Number((await real([["HLEN", "nl:forget:q"]]))[0]), Number((await real([["HLEN", "nl:forget:kept"]]))[0])],
+    [0, 1],
+  );
+  is("the last try gives it up, it is kept, and is never tried again", [last, afterLast, tries, given?.gaveUp, given?.keptNow, given?.waitingNow], [{ done: 0, failed: 0, gaveUp: 1, left: 0 }, { done: 0, failed: 0, gaveUp: 0, left: 0 }, FORGET_TRIES - 1, 1, 1, 0]);
   is(
     "the owner's report says what is still kept, with numbers only: no store, no key, no person",
     [line.includes("1 com dados ainda guardados depois de todas as tentativas"), line.includes("que podem conter dados de compradores"), line.includes(GONE_STATS), line.includes(GONE_SID), /@|nl:/.test(line)],

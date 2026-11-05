@@ -31,9 +31,12 @@ export async function checkPdfStampAcknowledgment({browser,LOCAL,fixture,is}){
    await page.waitForLoadState("networkidle");
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const select=page.locator('[id="stamp-'+fixture.product+'"]');await select.waitFor({state:"visible"});
+   // The checkbox is visible in the server HTML before React can handle its
+   // change. Observe that exact handler instead of sleeping or retrying a click.
+   await page.waitForFunction(element=>Object.keys(element).some(key=>key.startsWith("__reactProps$")&&typeof element[key]?.onChange==="function"),await select.elementHandle());
    const box=select.locator("../..");
    for(const scenario of cases){
-    let release;const held=new Promise(resolve=>{release=resolve;});work={scenario,held};
+    let release=()=>{};const held=new Promise(resolve=>{release=()=>resolve(undefined);});work={scenario,held};
     const seen=page.waitForRequest(r=>r.method()==="POST"&&new URL(r.url()).pathname==="/api/store/stamp");seen.catch(()=>{});
     const name=scenario.name+"/"+width;
     try{

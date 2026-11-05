@@ -802,6 +802,20 @@ export default function PrivacyPage() {
           of the address and network address that asked for a link for one
           hour.
         </p>
+        <p id="members-letters">
+          <strong className="text-black">An email kept for members.</strong>{" "}
+          When a creator publishes an email on their store for the buyers of
+          some products only, we decide who may read it by looking up the
+          email address a person types on the creator&apos;s own Stripe
+          account, on that creator&apos;s list for something free, or among
+          the buyers the creator brought over from another platform, and we
+          email that address a link that works for one hour. The link and the
+          address it was sent to are kept for that hour. Using it sets the
+          same cookie for that store a course and a community use, for 90
+          days. The answer about whether an address may read it is kept for
+          up to five minutes, and, to limit abuse, one-way hashes of the
+          address and network address that asked for a link for one hour.
+        </p>
         <p id="live-events">
           <strong className="text-black">Live events in a community.</strong>{" "}
           When a member says they are coming to a creator&apos;s live event
@@ -824,7 +838,8 @@ export default function PrivacyPage() {
           in as their name in the room, where the others in it see it. A
           replay is a YouTube, Vimeo or Loom video that loads from that
           service only when a member presses play, and so does a video on a
-          creator&apos;s sales page, when a visitor presses play.
+          creator&apos;s sales page, when a visitor presses play or the button
+          that opens it in a window, where it then starts playing.
         </p>
         <p id="imports">
           <strong className="text-black">
@@ -1114,7 +1129,10 @@ export default function PrivacyPage() {
           creator also gets a private address of their own that lists their
           upcoming calls and sessions with the name and email address of each
           buyer, for the calendar app they subscribe with; replacing that
-          address turns the old one off.
+          address turns the old one off. We keep the last copy of that list
+          made for their calendar app for up to 40 days; once the store is
+          deleted or closed, that copy is never shown again, and it is erased
+          within those 40 days.
         </p>
         <p id="webhooks">
           <strong className="text-black">Webhooks a creator adds.</strong> A
@@ -2120,7 +2138,7 @@ export default function PrivacyPage() {
           <p>
             What is deleted: your place on the store&apos;s list and every link
             in its emails to you; what its team noted about you (its fields,
-            notes and deals); your form answers with their quiz results and
+            notes, deals and tasks); your form answers with their quiz results and
             scores, inbox conversations, reviews
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;

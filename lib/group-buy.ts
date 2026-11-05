@@ -518,13 +518,16 @@ export async function takePlace(input: {
   try {
     return await takeOpened(input, group, email, who);
   } finally {
-    // Read, compared and deleted in two steps (no script for it here): only
-    // an open that outlived its 30 seconds between the two could take off a
-    // newer one's, and every open still reads the address's state afresh.
-    const [held] = await redisPipeline([["GET", opening]]).catch(() => [undefined]);
-    if (held === mine) await redisPipeline([["DEL", opening]]).catch(() => undefined);
+    // Compared and deleted in one step (Codex C2's proof on #2654): an open that outlived its 30 seconds never
+    // takes off the hold of the open that came after it.
+    await redisPipeline([["EVAL", PLACE_RELEASE, 1, opening, mine]]).catch(() => undefined);
   }
 }
+
+/** Deletes a place's opening hold only while it is still this open's own (its random token). */
+const PLACE_RELEASE = `-- marktmorgen:group-place-release:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
 
 /** How long one open of a link holds it, at most. */
 const OPENING_SECONDS = 30;

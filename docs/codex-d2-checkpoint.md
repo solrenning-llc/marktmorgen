@@ -1,18 +1,30 @@
-# D2 latest continuation — November 5, 2026
+# Codex D2 — continuation checkpoint, November 5, 2026,22:54 UTC
 
-Fresh five own PR heads confirmed unchanged and OPEN, each8success plus cancelled/failed product. No sixth product, retry, head move or merge.2632 remains OPEN/f183; C3 explained that deleting V's row inside that PR cannot resolve the checker because it reads BASE reservations and enforces owner scope. C1/V must remove the released row on main through normal PR incorporation; D2 must not edit their branches or bypass the checker.
+Read this latest section first; it supersedes pending claim/return instructions in the historical checkpoint below. Five own PRs remain OPEN with identical heads:2425/a59658003c203080589961337979b3d67efce448;2445/9e82e9ea79e25f21f94342d4d8ae14c5226e841c;2596/b465b26050865b1d1728c3531f4d20ccb2e0c7fd;2633/e9b7e3dc07540aa97a6b72055917b8a3019f6701;2647/90a269a86bb92869e9616cc839331e2647e5f493. Fresh metadata and workflows confirmed each8success plus one cancelled/failed product. No eligible merge, sixth unit, retry, cancellation or product-head change.
 
-2692 latest35e670e3cf35a9997821bd5e47bb104afb9f6453 was rechecked: immutable2ff8feda/ce1670bf9/9; new RED5b262cb304da3c93930a0aa60fe851581721bdf7 author95/5, same test159cae2a final95/95. Fresh277/277 counts, scoped strict types/lint/scanner3801/0/diff pass. D2 review5793265992; durable reporta753ea193181623891bef33587f106b70f9336af, proofs/d2/review-2692-return-35e.md on codex/d-review-2692-refund-evidence. No overall clearance: R2's four studio-page outage MEDIUM still OPEN, waiting nominal permission/owner delivery. R2 independently reported the foreign-row compatibility issue resolved; D2 verified synthetic regression cases and did not certify Stripe documentation.
+## Completed nominal returns in this continuation
 
-New E2 focal request discovered:2605/b18bea42f0042401900c9a885103e318f80bda0e, RED4e77e73c07ee1accdc76d22b29459c4df4378fce, lexical duplicate-member detection. D2 is the previous reviewer and the fresh channel/reviews showed no competing return. The channel announcement hit409; wait2min, re-read FULL and claim only if still unclaimed. No proof/test code written yet; only metadata/source reads and isolated checkout preparation. Proposed NEW opt-in tests/d2-review-2605-json.proof.ts, no author product/CI/branch edits. This is a review, not a sixth product. Initial direct source read finds a bounded Set-per-object scanner with escaped-key decoding; no grade/clearance is inferred before tests.
+2692/35e670e3cf35a9997821bd5e47bb104afb9f6453: D2 review5793265992. Immutable2ff8feda/ce1670bf9/9; compatibility RED5b262cb304da3c93930a0aa60fe851581721bdf7 author95/5, unchanged159cae2a final95/95. Fresh277/277, scoped strict types/lint/scanner3801/0/diff pass. Durable reporta753ea193181623891bef33587f106b70f9336af, proofs/d2/review-2692-return-35e.md on codex/d-review-2692-refund-evidence. D2's original replay MEDIUM stays CLOSED. NO overall financial clearance: R2 studio-page outage MEDIUM remains OPEN, waiting nominal owner permission/implementation. R2 independently confirmed compatibility correction; D2 verified synthetic regression cases, not Stripe docs.
 
-The fiscal MEDIUM37a8d453 remains OPEN; no nominal assignment yet. Preserve all historical proofs, five heads and retry counters below.
+2605/b18bea42f0042401900c9a885103e318f80bda0e: completed requested E2 focal return, review5793305504 SEM ACHADO / PODE ENTRAR only after conflict/main coordination and nine NEW exact-head successful aggregators. Complete delta2paths from43a6723 read. Author test52118f7b is unchanged RED4e77e73c07ee1accdc76d22b29459c4df4378fce16/1 →final16/16. Independent opt-in proof20/11causal+9controls RED →20/20 final; real Unicode aliases, nested delimiters, distinct objects, escaped values, deep bounded input and existing size boundaries. Actual SSR2, report9, creator-profit-rules37, held13: total97counted checks including20+16; two registry assertion suites also pass. Strict scoped types/imports0, lint0, staged scanner3735/0, diff0. No browser/native/provider/globalTS/deploy claim.
+
+Durable E2 proof/report: codex/d-review-2605-json-return@e035eb746e49e151379aad6852b048f9275729a4; tests/d2-review-2605-json.proof.ts; proofs/d2/run-2605-json.mjs; proofs/d2/tsconfig-2605-json.json; proofs/d2/review-2605-json.md. Reproduce final/red with node proofs/d2/run-2605-json.mjs final|red d2-review-2605-json.proof.ts company-owner-report.test.ts. Author escaped literal encodes a literal backslash, so D2 did not count that specific vector as causal decoded-alias evidence; the independent proof supplies genuine escaped aliases. No author test/assertion changed.
+
+Initial channel claim409: waited two minutes and re-read FULL; successful claim40dba28a7f91b5c92134ad547e9186e17aaa399a before proof creation. No duplicate reviewer or sixth product.2704 was only triaged and belongs to R1's completed review; D2 did NOT claim/review it.
+
+## Next action and unchanged blockers
+
+2632 remains OPEN/f183d78fd326c404c5a75fd6a3b9328b9fe24c94. C3's19:45 explanation: checker reads BASE reservations and enforces owner scope; deleting V's released row inside2632 cannot unblock it. C1/V must remove the row on main via normal PR incorporation, then C3 integrates once and requires nine new checks. D2 never edits their branches/reservations or copies unmerged fixes.
+
+After2632 normal incorporation, integrate necessary main once into each own product while preserving reviewed product blobs, validate linked/types/lint/scanner/diff, require nine NEW exact-head successes, then merge own with expected_head_sha and applicable review. Preserve all retry counters: Canada/Swiss/Africa exhausted; Korea Mac retry PASSED/consumed; no deterministic pricing rerun. Fiscal malformed-present enabled MEDIUM37a8d453 remains OPEN and needs C1 nominal assignment; five own slots full, no product/gate edit. No new E2 test/return is pending from D2 onb18. Further product deltas need focal reassessment; main/reservation-only identical blobs preserve applicability.
+
+# Historical checkpoint and proof ledger
 
 # Codex D2 checkpoint — November 5, 2026, 22:37 UTC
 
 Read this checkpoint first, then the fresh Codex inbox, channel and GitHub state. Preserve heads, proofs and retry counters. Conversation/channel: PT-BR. Code, commits and PRs: English. Coordinator: Claude1. Lane: 474 TX4 / 473 TX3, with E2 cross-reviews.
 
-## Previous return — November 5, 2026, 22:37 UTC
+## Latest return — November 5, 2026, 22:37 UTC
 
 Applied the owner's Pro continuation order C1-1900, C1-1857 and C4-1859. The actual full channel instructions are C1-1809 (AV12, referenced as1808) and C1-1843 (default lane audit, referenced as1846). Existing hourly continuation was re-enabled exactly once; no duplicate automation or repeated model polling. Five own products remain at the exact heads below, each8/9; no retry, cancellation, product edit, head move or merge.
 

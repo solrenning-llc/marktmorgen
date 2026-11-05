@@ -84,12 +84,14 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 if ARGV[2] == '' then redis.call('DEL', KEYS[2]) else redis.call('SET', KEYS[2], ARGV[2]) end
 return 1`;
 /**
- * Forgets the notes and takes the lock away in the same step, so a change
- * still in flight finds its lock gone and writes nothing back (Codex G2 on
- * #1949): the number of records deleted, 0 or 1. Modelled by lib/redis-memory.ts.
+ * Forgets the notes and makes the lock the forgetting's own (ARGV[1], for
+ * ARGV[2] seconds) in the same step: a change still in flight finds its lock
+ * gone and writes nothing back (Codex G2 on #1949), and no new change can
+ * start until the forgetting has given back the room and let go (Codex J on
+ * #1951). The number of records deleted, 0 or 1. Modelled by lib/redis-memory.ts.
  */
-export const MEMORY_FORGET = `-- marktmorgen:amem-forget:v1
-redis.call('DEL', KEYS[1])
+export const MEMORY_FORGET = `-- marktmorgen:amem-forget:v2
+redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
 return redis.call('DEL', KEYS[2])`;
 
 /** A change of the notes whose answer was not Redis's own: it may or may not have been written. */
@@ -202,14 +204,15 @@ export async function dropNote(statsId: string, id: string, room: DataStore): Pr
  */
 export async function forgetMemory(statsId: string | null, room: DataStore): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const held = await takeLock(lockKey(statsId), LOCK_SECONDS, MEMORY_LOCK_WAIT_MS).catch(() => null);
+  const waited = await takeLock(lockKey(statsId), LOCK_SECONDS, MEMORY_LOCK_WAIT_MS).catch(() => null);
+  // Its own lock, or one it takes over in the same step as the deletion when another change held it too long.
+  const held: Held = waited ?? { key: lockKey(statsId), token: crypto.randomUUID(), ttlSeconds: LOCK_SECONDS };
   try {
-    // The notes and the lock go in one step: a change still in flight finds its lock gone and writes nothing back.
-    const reply: unknown = await redisPipeline([["EVAL", MEMORY_FORGET, 2, lockKey(statsId), memoryKey(statsId)]]);
+    const reply: unknown = await redisPipeline([["EVAL", MEMORY_FORGET, 2, held.key, memoryKey(statsId), held.token, LOCK_SECONDS]]);
     // Room is given back only once Redis says the record is gone; an answer that is not its own keeps it counted.
     if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== 0 && reply[0] !== 1)) throw new MemoryWriteUnconfirmed();
     await giveData(room, [{ slot: MEMORY_SLOT, bytes: 0, set: true }]);
   } finally {
-    if (held) await releaseLock(held);
+    await releaseLock(held);
   }
 }

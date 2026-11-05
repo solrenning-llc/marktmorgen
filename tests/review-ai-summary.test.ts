@@ -101,9 +101,13 @@ async function main(): Promise<void> {
   const third = await addProduct(OWNER, "Glaze Guide", "", "29");
   if (!third.ok) throw new Error("no product");
   const glaze = third.product.id;
+  const glazeAt = Date.now();
   for (const [i, text] of ["Clear steps", "Clear steps, nice photos", "Nice photos", "Clear and short", "Short and clear", "Nice photos again"].entries()) {
-    await saveReview(statsId, { productId: glaze, email: `glaze${i}@example.com`, reference: `cs_test_glz${i}0000000000`, pi: `pi_glz${i}`, rating: 5, text, name: `Glazer ${i}` }, ROOM);
+    // Force the adverse order that equal millisecond timestamps can produce:
+    // the review later rewritten is first, independently of the random ids.
+    await saveReview(statsId, { productId: glaze, email: `glaze${i}@example.com`, reference: `cs_test_glz${i}0000000000`, pi: `pi_glz${i}`, rating: 5, text, name: `Glazer ${i}` }, ROOM, glazeAt + (i === 1 ? 100 : i));
   }
+  is("the review later rewritten is first in the adverse fixture", (await visibleReviews(statsId, glaze, 0, 10))[0].text, "Clear steps, nice photos");
   store = (await storeForEmail(OWNER))!;
   // Days inside the store's paid month (tests/billing-period-fixture.ts: from ten days before today to twenty after).
   const day = Date.now() - 2 * 86_400_000;

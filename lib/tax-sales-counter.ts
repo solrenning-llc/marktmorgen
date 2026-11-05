@@ -98,6 +98,9 @@ export function countTaxSales(value: unknown): TaxSalesCount {
       || ledger.coverageThrough < ledger.periodEnd) return unknown();
     const entries = ledger.entries;
     if (!Array.isArray(entries) || Object.getPrototypeOf(entries) !== Array.prototype) return unknown();
+    // An inserted ancestor could supply a hook beyond the two checked
+    // intrinsics. Refuse that chain without traversing or reading its fields.
+    if (Object.getPrototypeOf(Array.prototype) !== Object.prototype) return unknown();
     if (Object.getOwnPropertyDescriptor(Array.prototype, "toJSON")
       || Object.getOwnPropertyDescriptor(Object.prototype, "toJSON")) return unknown();
     const length = Object.getOwnPropertyDescriptor(entries, "length")?.value;

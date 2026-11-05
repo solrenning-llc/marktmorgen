@@ -44,8 +44,8 @@
      "monthCents": 900,
      "roomMonth": -49,
      "roomYear": 288,
-     "netAtOnes": 328,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 327,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 1.91485421551,
@@ -58,8 +58,8 @@
      "monthCents": 1900,
      "roomMonth": 2,
      "roomYear": 799,
-     "netAtOnes": 965,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 964,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 1.31789305532,
@@ -72,8 +72,8 @@
      "monthCents": 2900,
      "roomMonth": 55,
      "roomYear": 1307,
-     "netAtOnes": 1603,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 1602,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 1.06673850333,
@@ -86,8 +86,8 @@
      "monthCents": 3900,
      "roomMonth": 105,
      "roomYear": 1817,
-     "netAtOnes": 2240,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 2239,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.919866211008,
@@ -100,8 +100,8 @@
      "monthCents": 4900,
      "roomMonth": 154,
      "roomYear": 2325,
-     "netAtOnes": 2876,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 2875,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.820651806648,
@@ -114,8 +114,8 @@
      "monthCents": 5900,
      "roomMonth": 207,
      "roomYear": 2835,
-     "netAtOnes": 3514,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 3513,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.747878355014,
@@ -128,8 +128,8 @@
      "monthCents": 6900,
      "roomMonth": 257,
      "roomYear": 3342,
-     "netAtOnes": 4150,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 4149,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": false,
      "demand": {
       "-0.5": 0.691564074808,
@@ -142,8 +142,8 @@
      "monthCents": 7900,
      "roomMonth": 308,
      "roomYear": 3852,
-     "netAtOnes": 4787,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 4786,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": true,
      "demand": {
       "-0.5": 0.646313792973,
@@ -157,7 +157,7 @@
      "roomMonth": 358,
      "roomYear": 4360,
      "netAtOnes": 5423,
-     "usageMonthAtOnes": 273,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": true,
      "demand": {
       "-0.5": 0.608922422689,
@@ -171,7 +171,7 @@
      "roomMonth": 410,
      "roomYear": 4869,
      "netAtOnes": 6061,
-     "usageMonthAtOnes": 273,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": true,
      "demand": {
       "-0.5": 0.57735026919,
@@ -184,8 +184,8 @@
      "monthCents": 10900,
      "roomMonth": 461,
      "roomYear": 5378,
-     "netAtOnes": 6698,
-     "usageMonthAtOnes": 273,
+     "netAtOnes": 6697,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": true,
      "demand": {
       "-0.5": 0.550229309995,
@@ -199,7 +199,7 @@
      "roomMonth": 511,
      "roomYear": 5889,
      "netAtOnes": 7334,
-     "usageMonthAtOnes": 273,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": true,
      "demand": {
       "-0.5": 0.526603194417,
@@ -213,7 +213,7 @@
      "roomMonth": 564,
      "roomYear": 6396,
      "netAtOnes": 7972,
-     "usageMonthAtOnes": 273,
+     "usageMonthAtOnes": 274,
      "exactKeepsAtOnes": true,
      "demand": {
       "-0.5": 0.505780538859,
@@ -231,7 +231,7 @@
     "storage": 25,
     "orders": 42,
     "store-email": 7,
-    "transactional-email": 13,
+    "transactional-email": 14,
     "list-email": 0,
     "visits": 89
    },
@@ -241,7 +241,7 @@
     "storage": 152,
     "orders": 505,
     "store-email": 82,
-    "transactional-email": 165,
+    "transactional-email": 166,
     "list-email": 0,
     "visits": 1076
    }
@@ -1507,7 +1507,7 @@
     }
    ],
    "baseMonth": 361,
-   "baseYear": 4174,
+   "baseYear": 4175,
    "coefMonth": {
     "ai": 335,
     "video": 46,
@@ -1519,12 +1519,12 @@
     "visits": 264
    },
    "coefYear": {
-    "ai": 4025,
-    "video": 554,
-    "storage": 1218,
-    "orders": 1136,
-    "store-email": 327,
-    "transactional-email": 442,
+    "ai": 4024,
+    "video": 553,
+    "storage": 1217,
+    "orders": 1135,
+    "store-email": 326,
+    "transactional-email": 441,
     "list-email": 7560,
     "visits": 3165
    }
@@ -4329,17 +4329,17 @@
      }
     }
    ],
-   "baseMonth": 824,
-   "baseYear": 9589,
+   "baseMonth": 825,
+   "baseYear": 9590,
    "coefMonth": {
-    "ai": 637,
-    "video": 93,
-    "storage": 411,
-    "orders": 316,
-    "store-email": 73,
+    "ai": 636,
+    "video": 92,
+    "storage": 410,
+    "orders": 315,
+    "store-email": 72,
     "transactional-email": 92,
     "list-email": 900,
-    "visits": 1056
+    "visits": 1055
    },
    "coefYear": {
     "ai": 7643,

@@ -236,7 +236,13 @@ export async function readErasureLink(token: string): Promise<{ email: string; s
   const [raw] = await redisPipeline([["GET", linkKey(token)]]);
   const grant = parseGrant(raw);
   if (!grant) return null;
-  const stores = (await Promise.all(grant.s.map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
+  const stores = await Promise.all(grant.s.map(async (sid) => {
+    const store = await storeForId(sid);
+    // A missing store record cannot prove that no personal data remains.
+    // Do not show only part of the scope the person is about to delete.
+    if (!store) throw new Error("Your data could not be checked. Try again.");
+    return store;
+  }));
   return { email: grant.e, stores };
 }
 
@@ -279,7 +285,12 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
       continue;
     }
     const store = await storeForId(sid).catch(() => null);
-    if (!store) continue;
+    if (!store) {
+      // Unknown is still to do: never discard the grant and claim completion
+      // while this store's data could not even be reached.
+      later.push(sid);
+      continue;
+    }
     const result = await erasePerson(store, grant.e, { kind: "person" }).catch(() => ({ ok: false as const, reason: "unavailable" as const }));
     if (!result.ok) {
       later.push(sid);

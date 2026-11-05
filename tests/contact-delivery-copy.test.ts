@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   const source = readFileSync("lib/store-contact.ts", "utf8");
   is("success starts with the sender's boolean answer", source.includes("const sent = await sendEmail("), true);
   is("filing in the store inbox is best effort after sender acceptance", source.includes("if (sent) await fileContact(") && source.includes("filing a contact message failed"), true);
-  is("the public result follows acceptance and has no delivery-status read", [source.includes('return sent ? "sent" : "error"'), /deliveryStatus|delivery_status|GET.*email/is.test(source)], [true, false]);
+  is("the public result follows acceptance and has no delivery-status read", [source.includes('return sent ? "sent" : "error"'), /deliveryStatus|delivery_status|GET[\s\S]*email/i.test(source)], [true, false]);
   done();
 }
 

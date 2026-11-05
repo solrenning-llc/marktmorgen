@@ -1,0 +1,71 @@
+import type { BlogPost } from "@/lib/blog";
+import { feeWords } from "@/lib/fee-words";
+import { PLANS_ON_SALE, PREVIEW_LINE } from "@/lib/opening";
+
+/** Decision work beyond the existing Skool fee article; no new product or pricing promise. */
+export const COMMUNITY_PLATFORM_GUIDE: BlogPost = {
+  slug: "skool-alternatives-community-platforms",
+  title: "Skool alternatives: choose by the work you need",
+  category: "Comparisons",
+  date: "2026-11-05",
+  readMinutes: 6,
+  excerpt: "Compare community, courses, live sessions and billing before moving. A practical checklist for Skool, Circle, Kajabi and Marktmorgen's current preview.",
+  kicker: "A decision before a migration",
+  from: "#265465",
+  to: "#403879",
+  body: [
+    { type: "p", text: "A search for Skool alternatives starts with a reason to change. Write that reason as a task: members cannot find the lesson they need, a live session needs a different format, or your work now includes products outside the community. A longer feature list does not establish that another platform will solve that task. Keep the working parts of your current setup in the comparison, too." },
+    { type: "note", text: PLANS_ON_SALE ? "Marktmorgen's published plan, payment and access requirements still apply. Check the current pricing and feature pages before choosing." : PREVIEW_LINE },
+    { type: "h2", text: "Start with the job your members need to finish" },
+    { type: "p", text: "Choose a few real tasks and use the same ones for every candidate. For example, can a member find a lesson from a phone, learn when the next session happens and understand what their subscription includes? These are checks to perform, not claims about a particular platform's accessibility or results. Include someone who is new to the material rather than relying only on the administrator's view." },
+    { type: "ul", items: [
+      "Community: decide whether conversations, courses or scheduled events should be the main entry point.",
+      "Delivery: list the files, lessons, recordings and access periods you actually intend to provide.",
+      "Operations: name the people who need access, the messages members agreed to receive and the records you must retain.",
+      "Billing: identify the subscription terms and payment account you need before comparing an advertised monthly equivalent with a monthly invoice.",
+    ] },
+    { type: "h2", text: "Keep Skool on the list when its existing workflow fits" },
+    { type: "p", text: "Skool's own live-call guide describes calls hosted inside Skool, in its app or in a browser, without a separate streaming platform. If that is already central to your community, treat it as a requirement to verify elsewhere. Moving a community just to collect more tools can add a new member journey without removing the original problem. The separate fee guide below covers the dated payment quotes; this article focuses on the work around the community." },
+    { type: "h2", text: "Inspect Circle for a community with courses and events" },
+    { type: "p", text: "Circle's pricing page lists community, courses and live events, along with a member directory and profiles. Those are reasons to inspect it when member interaction is your starting point. They do not establish that every plan has the same capacity or that every existing subscription qualifies for migration. Write down the plan, live-session limits and migration conditions that apply to your proposed setup. Test the member experience you need rather than treating a feature name as the finished task." },
+    { type: "h2", text: "Inspect Kajabi when publishing and email belong in the same workflow" },
+    { type: "p", text: "Kajabi's pricing page describes products, contacts, websites and communities; its email page describes broadcasts and automated follow-up sequences. That makes it a candidate to inspect when the task extends from teaching into communicating with an audience. Check the applicable product and contact limits and what the payment provider adds. An advertised email tool does not remove the need for permission to send marketing, and a plan name does not establish the exact invoice for your country and billing interval." },
+    { type: "h2", text: "Inspect Marktmorgen as a store with explicit boundaries" },
+    { type: "p", text: "Marktmorgen's public community, course and call pages describe the tools and their limits. Use them to check whether a store with several product types matches your work. A link to a meeting provider is a different arrangement from Skool's native call experience; inspect the connection and availability requirements on the call page. The demo lets you examine an example store. It is not evidence of audience demand or a replacement for checking your own requirements." },
+    { type: "p", text: feeWords().whoHolds },
+    { type: "p", text: PLANS_ON_SALE ? "Read the current plan and checkout requirements before starting paid selling. A feature comparison does not waive those requirements." : "Preparing a Marktmorgen store does not enable paid checkout while its plans remain closed. If you need to launch a paid community now, this preview is not an available substitute for a platform already taking paid subscriptions." },
+    { type: "h2", text: "Plan the move separately from the platform choice" },
+    { type: "p", text: "A comma-separated values (CSV) file is a table of records. A CSV file does not move payment cards or live billing agreements. Treat contact records, content, member access and recurring billing as separate parts of the move. A contact's presence in a file also does not establish permission to send marketing. Marktmorgen's supported-import guide explains what its existing imports accept and what still needs separate setup; it does not promise an automatic transfer of a Skool community." },
+    { type: "steps", items: [
+      { title: "Write a small acceptance checklist", text: "List the member tasks, content access and billing terms that must work. Record the current platform's working behavior so it stays part of the comparison." },
+      { title: "Inspect the exact offer", text: "Keep subscription, processing, optional services and applicable taxes separate. If an invoice or migration condition has not been confirmed, keep it unknown rather than treating it as free or included." },
+      { title: "Separate records from permissions", text: "Check which records you may export and reuse, the destination's accepted fields and how you will preserve opt-outs. Review the rows the importer refuses before relying on its result." },
+      { title: "Plan access and recurring billing", text: "Decide how members receive the new terms and access, and when existing renewals end. Follow the actual migration requirements instead of assuming that an imported address continues a paid subscription." },
+      { title: "Keep the decision tied to the task", text: "Compare the evidence from your checklist. A platform that meets a different creator's needs is not proof that your lessons, sessions, permissions and billing will work there." },
+    ] },
+    { type: "note", text: "Sources read November 5, 2026. Provider descriptions are dated observations, not a claim that plans, limits or migration eligibility are identical. No earnings, audience growth or ranking result is predicted here." },
+    { type: "links", items: [
+      { label: "Skool: how native live calls work", href: "https://help.skool.com/article/210-how-to-go-live-on-skool" },
+      { label: "Circle: current plans, features and conditions", href: "https://circle.so/pricing" },
+      { label: "Kajabi: current plans and payment conditions", href: "https://www.kajabi.com/pricing" },
+      { label: "Kajabi: broadcasts and email sequences", href: "https://www.kajabi.com/features/email-marketing" },
+    ] },
+    { type: "links", items: [
+      { label: "The dated Skool fee guide", href: "/blog/skool-fees-explained" },
+      { label: "Marktmorgen and Skool: the feature comparison", href: "/proof/skool" },
+      { label: "Marktmorgen and Circle: the feature comparison", href: "/proof/circle" },
+      { label: "Marktmorgen and Kajabi: the feature comparison", href: "/proof/kajabi" },
+      { label: "Community features and limits", href: "/platform/community" },
+      { label: "Course features and limits", href: "/platform/courses" },
+      { label: "Calls and meeting-provider requirements", href: "/platform/calls" },
+      { label: "What supported imports move and what needs separate setup", href: "/platform/switching-to-marktmorgen" },
+      { label: "Marktmorgen's published plans and limits", href: "/pricing" },
+      { label: "Inspect the existing demo store", href: "/demo" },
+    ] },
+  ],
+  faq: [
+    { q: "Is one Skool alternative right for every community?", a: "No. Choose by the member tasks, content, live-session format, permissions and billing you actually need. A feature list does not prove that your workflow will transfer." },
+    { q: "Does importing a contact continue their paid membership?", a: "No. A contact record is separate from content access and recurring billing. Follow the destination's specific membership-migration requirements and preserve the person's marketing permissions." },
+    { q: "Can I start paid selling on Marktmorgen today?", a: PLANS_ON_SALE ? "Paid selling still requires the applicable plan, account and checkout checks. See the current pricing and feature pages." : PREVIEW_LINE },
+  ],
+};

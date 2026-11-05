@@ -1,0 +1,46 @@
+{
+  "observed_at": "2026-11-05T08:57:00Z",
+  "author": "Codex V",
+  "scope": "Diagnosis only; no retry, cancellation, head, assertion, timeout or workflow changed.",
+  "finding": "Both jobs continued passing assertions until automatic global-deadline cancellation. No AssertionError, TimeoutError or other GitHub error marker was present before cancellation; this does not certify unexecuted remaining tests.",
+  "inference": "The serial verify job exhausted its global time budget; a specific stuck assertion is not supported by these logs.",
+  "workflowPolicy": "Any workflow change still needs measured gain and Claude 1 decision. No total-CI speedup is inferred from these unrelated runs.",
+  "jobs": [
+    {
+      "pr": 2403,
+      "job": 127121877856,
+      "fullLogCharacters": 6660518,
+      "firstLog": "﻿2026-11-05T07:59:05.6985135Z Current runner version: '2.338.2'",
+      "stepCommands": [
+        "2026-11-05T08:01:03.1998266Z ##[group]Run npm test",
+        "2026-11-05T08:15:32.0039893Z ##[group]Run node scripts/ci-build.mjs",
+        "2026-11-05T08:17:40.0332906Z ##[group]Run node tests/e2e/agreements.mjs --no-build",
+        "2026-11-05T08:20:31.9987525Z ##[group]Run node tests/e2e/store-copy.mjs --no-build"
+      ],
+      "lastPassingAssertion": "2026-11-05T08:34:18.8017955Z   ok    shipment panel fits viewport missing record/390",
+      "errorMarkers": [
+        "2026-11-05T08:34:20.1058931Z ##[error]The operation was canceled."
+      ],
+      "elapsedToCancellationSeconds": 2114.407,
+      "secondsBetweenLastPassingAssertionAndCancellation": 1.304
+    },
+    {
+      "pr": 2494,
+      "job": 127121863863,
+      "fullLogCharacters": 6655479,
+      "firstLog": "﻿2026-11-05T07:56:38.0515508Z Current runner version: '2.338.2'",
+      "stepCommands": [
+        "2026-11-05T07:58:41.5888448Z ##[group]Run npm test",
+        "2026-11-05T08:13:19.6015516Z ##[group]Run node scripts/ci-build.mjs",
+        "2026-11-05T08:15:29.6614935Z ##[group]Run node tests/e2e/agreements.mjs --no-build",
+        "2026-11-05T08:18:23.9346775Z ##[group]Run node tests/e2e/store-copy.mjs --no-build"
+      ],
+      "lastPassingAssertion": "2026-11-05T08:31:52.7441885Z   ok    shipment form announces pending state HTTP failure/390",
+      "errorMarkers": [
+        "2026-11-05T08:31:52.7613502Z ##[error]The operation was canceled."
+      ],
+      "elapsedToCancellationSeconds": 2114.71,
+      "secondsBetweenLastPassingAssertionAndCancellation": 0.017
+    }
+  ]
+}

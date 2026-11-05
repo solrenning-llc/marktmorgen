@@ -112,3 +112,18 @@ test("invalid clock and month fail closed; exact zero stays distinct from absent
   assert.deepEqual(render(input).sections[2].counts, { times: 0 });
   assert.equal(companyOwnerReport(JSON.stringify(input), "2026-1", NOW).month, null);
 });
+
+test("an ambient inherited source cannot execute or fabricate an absent observation", () => {
+  let calls = 0;
+  Object.defineProperty(Object.prototype, "sesPause", { configurable: true, get() {
+    calls += 1;
+    return { status: "ready", observedAtMs: NOW, holdUntilMs: null };
+  } });
+  try {
+    const report = companyOwnerReport("{}", MONTH, NOW);
+    assert.equal(report.sections[4].status, "unknown");
+    assert.equal(calls, 0);
+  } finally {
+    Reflect.deleteProperty(Object.prototype, "sesPause");
+  }
+});

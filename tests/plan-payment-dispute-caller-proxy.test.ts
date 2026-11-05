@@ -298,3 +298,24 @@ for (const stage of ["review-ownKeys", "context-identity", "late-canonical"] as 
     );
   });
 }
+
+for (const boundary of ["context", "review"] as const) {
+  test(`capture does not normalize an unsupported ${boundary} prototype`, () => {
+    const fixture = contractFixture();
+    assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
+    Object.setPrototypeOf(
+      boundary === "context" ? fixture.context : fixture.review,
+      { unreviewedLiability: null },
+    );
+    assert.equal(
+      canonicalFinancialSnapshot(fixture.context),
+      null,
+      "the original graph is unsupported at the canonical boundary",
+    );
+    assert.equal(
+      contractFundingConfiguration(fixture.policy, fixture.context, fixture.now),
+      null,
+      "capture must not normalize inherited unknown evidence into a plain record",
+    );
+  });
+}

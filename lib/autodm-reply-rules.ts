@@ -20,9 +20,11 @@
  *     only the test accounts or the mode does not;
  *   - the decision for one comment (decideReply), in a fixed order so the
  *     cheapest refusal comes first and the channel unit only has to carry it
- *     out: the rule off, the account's own comment, a live rule never tested,
- *     the person out of reach (test accounts only in test mode, nobody live
- *     while AUTODM_LIVE is false), no keyword, too soon for this person;
+ *     out: the rule off, no id for the account the post belongs to, the
+ *     account's own comment, a live rule never tested, the person out of
+ *     reach (test accounts only in test mode, nobody live while AUTODM_LIVE
+ *     is false, which the function holds itself whatever its caller says),
+ *     no keyword, too soon for this person;
  *   - the studio's test box (tryComment) and every problem as one plain US
  *     English sentence (ruleProblemWords).
  *
@@ -60,35 +62,61 @@ import {
 import { productSegment } from "@/lib/product-slug";
 
 /**
- * The longest reply text, in characters as a person counts them (an emoji is
- * one). Our own cap, so a reply reads on one phone screen; not Meta's limit.
+ * The longest reply text, in characters as a person sees them: a family
+ * emoji, a flag or an accent typed as a letter and a mark is one (grapheme
+ * clusters, Intl.Segmenter). Our own cap, so a reply reads on one phone
+ * screen; not Meta's limit.
  */
 export const REPLY_MAX_CHARS = 500;
+/**
+ * A second cap, in code points, behind the character count: one character
+ * can be stacked with any number of marks, which would make a short-looking
+ * reply endless. 8 a character leaves room for 500 family emoji (7 each).
+ */
+export const REPLY_MAX_CODE_POINTS = 4_000;
+
+/** Characters as a person sees them. */
+function graphemes(text: string): number {
+  let count = 0;
+  for (const _ of new Intl.Segmenter("en", { granularity: "grapheme" }).segment(text)) count += 1;
+  return count;
+}
 
 /** Why a reply's text was refused. */
 export type ReplyProblem = "empty" | "too_long" | "link" | "control";
 
 /**
- * Control characters (C0 and C1, tab included) and the invisible marks that
- * turn text around or isolate a run of it (U+200E, U+200F, U+202A to U+202E,
- * U+2066 to U+2069), which could make a reply read differently from what the
- * creator saw. A line break is the one control kept.
+ * Control characters (C0 and C1, tab included), the line and paragraph
+ * separators (U+2028, U+2029), the invisible marks that turn text around or
+ * isolate a run of it (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to
+ * U+2069), the invisible spaces and operators (U+200B, U+2060 to U+2064,
+ * U+FEFF) and the tag characters (U+E0000 to U+E007F), any of which could
+ * make a reply read differently from what the creator saw. Kept: a line
+ * break, the joiners real emoji and scripts are made of (U+200C, U+200D),
+ * the emoji style mark (U+FE0F), and tags inside a subdivision flag (the
+ * England flag is a black flag, tag letters and a cancel tag), removed
+ * before this is tested. A lone half of a surrogate pair is refused too.
  */
-const CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+const CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}\ud800-\udfff]/u;
+const SUBDIVISION_FLAG = /\u{1f3f4}[\u{e0030}-\u{e0039}\u{e0061}-\u{e007a}]{1,6}\u{e007f}/gu;
 
 /**
- * A link typed by hand: a scheme ("https://", "ftp://"), "www.", or a name
- * ending in one of the endings links in comments and bios use most (endings
- * that are also everyday words after a dot, like ".me" or ".to", are left
- * out, so "Thanks.Me too" is not refused). Not a
- * security boundary (the reply is the creator's own words to their own
- * followers); it keeps the reply's one link the product's, which is counted.
- * A dot inside a sentence ("Thanks.Enjoy", "9.99", "e.g.") is not a link.
+ * The common ways a link is typed by hand: a scheme ("https://", "ftp://"),
+ * "www.", any name with a path ("linktr.ee/chef", "t.co/abc"), or a name
+ * ending, in lowercase, in one of the endings links in comments and bios use
+ * most ("example.co", "example.de"). It is tested on the text with
+ * compatibility forms folded (so full-width "ｅｘａｍｐｌｅ．ｃｏｍ" reads as
+ * "example.com") and the joiners removed. A capitalized word after a dot
+ * ("Sold out.Store opens Monday") is a sentence, not an ending, and "9.99",
+ * "e.g." or "5p.m." are not links. Not a security boundary and not every
+ * link there is (the reply is the creator's own words to their own
+ * followers): it keeps the reply's one link the product's, which is counted.
  */
 const LINK = [
   /\b[a-z][a-z0-9+.-]*:\/\//i,
   /\bwww\./i,
-  /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|app|link|ly|gg|shop|store|xyz|info|biz|online|bio)\b/i,
+  /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,24}\/[^\s/]/i,
+  /\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?:com|net|org|io|co|ai|ee|me|to|tv|us|uk|ca|de|fr|es|it|nl|eu|br|app|link|ly|gg|shop|store|xyz|info|biz|online|bio|site|page)\b/,
 ];
 
 /**
@@ -100,9 +128,10 @@ export function readReplyText(input: unknown): { ok: true; text: string } | { ok
   if (typeof input !== "string") return { ok: false, problem: "empty" };
   const text = input.replace(/\r\n?/g, "\n").trim();
   if (!text) return { ok: false, problem: "empty" };
-  if (CONTROL.test(text)) return { ok: false, problem: "control" };
-  if (Array.from(text).length > REPLY_MAX_CHARS) return { ok: false, problem: "too_long" };
-  if (LINK.some((pattern) => pattern.test(text))) return { ok: false, problem: "link" };
+  if (CONTROL.test(text.replace(SUBDIVISION_FLAG, ""))) return { ok: false, problem: "control" };
+  if (Array.from(text).length > REPLY_MAX_CODE_POINTS || graphemes(text) > REPLY_MAX_CHARS) return { ok: false, problem: "too_long" };
+  const plain = text.normalize("NFKC").replace(/[\u200c\u200d]/g, "");
+  if (LINK.some((pattern) => pattern.test(plain))) return { ok: false, problem: "link" };
   return { ok: true, text };
 }
 
@@ -195,7 +224,7 @@ export function readAutoDmRule(input: unknown, products: readonly { id: string }
 }
 
 /** Why a comment gets no reply. */
-export type SkipReason = "off" | "own" | "untested" | "not_reached" | "no_match" | "too_soon";
+export type SkipReason = "off" | "no_account" | "own" | "untested" | "not_reached" | "no_match" | "too_soon";
 
 /** Send the rule's reply (and which keyword matched), or why not. */
 export type Decision = { send: true; keyword: string } | { send: false; why: SkipReason };
@@ -203,9 +232,12 @@ export type Decision = { send: true; keyword: string } | { send: false; why: Ski
 /**
  * Whether one comment gets the rule's reply. `lastSentAtSeconds` is when this
  * person last got this post's reply (null for never); `ownAccountId` is the
- * account the post belongs to; `live` is AUTODM_LIVE, passed in so the
- * decision can be checked both ways. In order: the rule off; the account's
- * own comment (never answered, even when it is listed as a test account);
+ * account the post belongs to, without which nothing is sent, since its own
+ * comment could not be told apart. `live` can only narrow: a live rule
+ * reaches people only when the caller passes true AND AUTODM_LIVE is true,
+ * so this function keeps its own lock. In order: the rule off; no account
+ * id; the account's own comment (never answered, even when it is listed as
+ * a test account);
  * a live rule whose test does not match it; the person out of reach; no
  * keyword in the comment; too soon for this person. The person is looked at
  * only after the rule and before the comment's words.
@@ -221,9 +253,10 @@ export function decideReply(input: {
 }): Decision {
   const { rule } = input;
   if (rule.mode === "off") return { send: false, why: "off" };
-  if (typeof input.personId === "string" && input.personId && input.personId === input.ownAccountId) return { send: false, why: "own" };
+  if (typeof input.ownAccountId !== "string" || !input.ownAccountId) return { send: false, why: "no_account" };
+  if (input.personId === input.ownAccountId) return { send: false, why: "own" };
   if (rule.mode === "live" && rule.tested !== ruleFingerprint(rule)) return { send: false, why: "untested" };
-  if (!input.personId || !mayReachPerson({ mode: rule.mode, live: input.live, personId: input.personId, testerIds: rule.testers })) {
+  if (!input.personId || !mayReachPerson({ mode: rule.mode, live: input.live === true && AUTODM_LIVE, personId: input.personId, testerIds: rule.testers })) {
     return { send: false, why: "not_reached" };
   }
   const keyword = matchingKeyword(input.comment, rule.keywords);
@@ -235,24 +268,42 @@ export function decideReply(input: {
 /**
  * The reply as it is sent: the creator's text and, apart, the product's page
  * under the store's base address (lib/purchase-email.ts, storeBase: its own
- * domain or its address here) with only the rule's id added. Null when the
- * base is not a plain https address (no query, fragment, trailing slash or
- * name before an "@" in its host)
- * or the product is not the rule's.
+ * domain or its address here) with only the rule's id added, the product's
+ * part of the path encoded so nothing in an id can reach the query. Null
+ * when the base is not a plain https address exactly as a browser would
+ * read it (no user or password, query, fragment, trailing slash, "." or ".."
+ * part, backslash or space), or the product is not the rule's.
  */
 export function replyMessage(rule: AutoDmRule, base: string, product: { id: string; title: string }): { text: string; link: string } | null {
   const tag = dmLinkTag(rule.id);
   if (!tag || product.id !== rule.product) return null;
-  if (typeof base !== "string" || !/^https:\/\/[^\s/?#@]+(?:\/[^\s/?#]+)*$/.test(base)) return null;
-  return { text: rule.reply, link: `${base}/p/${productSegment(product)}?${tag.name}=${tag.value}` };
+  if (!plainHttpsBase(base)) return null;
+  return { text: rule.reply, link: `${base}/p/${encodeURIComponent(productSegment(product))}?${tag.name}=${tag.value}` };
+}
+
+/** Whether `base` is an https address with nothing a browser would read differently from how it is written. */
+function plainHttpsBase(base: unknown): boolean {
+  if (typeof base !== "string" || base.endsWith("/") || /[\s?#\\]/.test(base)) return false;
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return false;
+  // A bare host reads back with "/" added; any other difference is a part the browser would read otherwise.
+  return url.href === base || (url.pathname === "/" && url.href === `${base}/`);
 }
 
 const quote = (keyword: string) => `"${keyword}"`;
 
 /**
  * The studio's test box: which keyword a typed comment matches, as the
- * creator typed it, and who would get the reply as the rule is now. Nothing
- * is sent and the repeat interval is not looked at.
+ * creator typed it, and who would get the reply as the rule is now, never
+ * more than decideReply would send to: nobody in test mode without test
+ * accounts, nobody for a live rule without its test, nobody live while
+ * AUTODM_LIVE is false whatever `live` says. Nothing is sent and the repeat
+ * interval is not looked at.
  */
 export function tryComment(rule: AutoDmRule, comment: string, live = AUTODM_LIVE): { matched: string | null; words: string } {
   const matched = matchingKeyword(comment, rule.keywords);
@@ -261,14 +312,23 @@ export function tryComment(rule: AutoDmRule, comment: string, live = AUTODM_LIVE
     rule.mode === "off"
       ? "This rule is off, so nobody gets the reply."
       : rule.mode === "test"
-        ? "In test mode, only your test accounts get the reply."
-        : live
-          ? "Everyone who comments it gets the reply."
-          : "AutoDM can't send replies yet, so nobody gets the reply.";
+        ? rule.testers.length
+          ? "In test mode, only your test accounts get the reply."
+          : "In test mode, only your test accounts get the reply, and you haven't listed any yet, so nobody gets it."
+        : rule.tested !== ruleFingerprint(rule)
+          ? "This rule hasn't had a test reply yet, so nobody gets the reply."
+          : live === true && AUTODM_LIVE
+            ? "Everyone whose comment matches gets the reply."
+            : "AutoDM can't send replies yet, so nobody gets the reply.";
   return { matched, words: `This comment matches ${quote(matched)}. ${who}` };
 }
 
-const nth = (index: number | undefined) => (typeof index === "number" && index >= 0 ? index + 1 : 0);
+/** A place counted from 1 for people, or 0 when it is missing or not a whole number from 0. */
+const nth = (index: number | undefined) => (Number.isSafeInteger(index) && (index as number) >= 0 ? (index as number) + 1 : 0);
+/** "Keyword 2", or "A keyword" when the place is not known. */
+const keywordAt = (n: number) => (n ? `Keyword ${n}` : "A keyword");
+/** "Test account 2", or "A test account" when the place is not known. */
+const testerAt = (n: number) => (n ? `Test account ${n}` : "A test account");
 
 /** A rule's problem as one plain US English sentence for the creator; places counted from 1. */
 export function ruleProblemWords(problem: RuleProblem): string {
@@ -305,13 +365,15 @@ export function ruleProblemWords(problem: RuleProblem): string {
         case "too_many":
           return `Use at most ${MAX_KEYWORDS_PER_POST} keywords on one post.`;
         case "too_long":
-          return `Keyword ${n} is too long. Use at most ${KEYWORD_MAX_CHARS} characters.`;
+          return `${keywordAt(n)} is too long. Use at most ${KEYWORD_MAX_CHARS} characters.`;
         case "too_many_words":
-          return `Keyword ${n} has too many words. Use at most ${KEYWORD_MAX_WORDS}.`;
+          return `${keywordAt(n)} has too many words. Use at most ${KEYWORD_MAX_WORDS}.`;
         case "no_letters":
-          return `Keyword ${n} needs at least one letter or number.`;
-        case "duplicate":
-          return `Keyword ${n} already matches keyword ${nth(problem.other)}. Remove one of them.`;
+          return `${keywordAt(n)} needs at least one letter or number.`;
+        case "duplicate": {
+          const other = nth(problem.other);
+          return `${keywordAt(n)} already matches ${other && other !== n ? `keyword ${other}` : "another keyword"}. Remove one of them.`;
+        }
       }
       break;
     }
@@ -323,9 +385,11 @@ export function ruleProblemWords(problem: RuleProblem): string {
         case "too_many":
           return `List at most ${MAX_TESTERS} test accounts.`;
         case "bad_id":
-          return `Test account ${n} is not an account ID. Use letters, numbers, "_", "." or "-".`;
-        case "duplicate":
-          return `Test account ${n} is the same as test account ${nth(problem.other)}. Remove one of them.`;
+          return `${testerAt(n)} is not an account ID. Use letters, numbers, "_", "." or "-".`;
+        case "duplicate": {
+          const other = nth(problem.other);
+          return `${testerAt(n)} is the same as ${other && other !== n ? `test account ${other}` : "another test account"}. Remove one of them.`;
+        }
       }
       break;
     }

@@ -2,25 +2,33 @@
  * AutoDM rule, reply and decision (480 [SB3], unit 2; lib/autodm-reply-rules.ts;
  * added 5 November 2026). Pure: nothing is read, sent or kept here. Checked:
  *
- *   - the reply's text: trimmed, 1 to REPLY_MAX_CHARS characters, no link
- *     typed by hand (the product's link is added by the code, with its count
- *     tag), no control characters, Windows line ends read as plain ones;
+ *   - the reply's text: trimmed, 1 to REPLY_MAX_CHARS characters as a person
+ *     sees them (a family emoji, a flag, an accent in two parts is one) under
+ *     a code point cap, no link typed in the common ways (full-width and
+ *     joined ones too; a capitalized word after a dot is a sentence), no
+ *     control, invisible or tag character (the joiners real emoji use and an
+ *     England flag kept), Windows line ends read as plain ones;
  *   - a post's whole rule: every part checked by unit 1's readers, the first
  *     problem named with its field (and its keyword or test account), the
  *     product one the store sells now, defaults for what was left out;
  *   - test before live: a rule saved live only when its test reply went out
  *     for exactly this rule, so any change to what people get asks for a new
  *     test;
- *   - the decision for one comment, in a fixed order: the rule off, the
- *     account's own comment, the person out of reach, no keyword, too soon;
- *     never a send while AUTODM_LIVE is false outside test mode;
+ *   - the decision for one comment, in a fixed order: the rule off, no
+ *     account id, the account's own comment, the person out of reach, no
+ *     keyword, too soon; never a send while AUTODM_LIVE is false outside test
+ *     mode, even when the caller passes live (the live path itself is unit
+ *     1's mayReachPerson);
  *   - the reply's link: the store's own product page with only the rule id
- *     added, never who clicked;
- *   - the studio's test box and every problem said in plain US English.
+ *     added, never who clicked; a base a browser would read otherwise is
+ *     refused and the product's part is encoded;
+ *   - the studio's test box, which never promises a reply decideReply would
+ *     refuse, and every problem said in plain US English, never "keyword 0".
  */
-import { AUTODM_LIVE, DEFAULT_MODE, DEFAULT_REPEAT, KEYWORD_MAX_CHARS, MAX_KEYWORDS_PER_POST, MAX_TESTERS } from "@/lib/autodm-rules";
+import { AUTODM_LIVE, DEFAULT_MODE, DEFAULT_REPEAT, KEYWORD_MAX_CHARS, MAX_KEYWORDS_PER_POST, MAX_TESTERS, mayReachPerson } from "@/lib/autodm-rules";
 import {
   REPLY_MAX_CHARS,
+  REPLY_MAX_CODE_POINTS,
   decideReply,
   noteTested,
   readAutoDmRule,
@@ -89,6 +97,18 @@ check("a reply at the cap passes, one character more is too long, counted in cha
   // An emoji is one character to a person, two code units to JavaScript.
   equal(readReplyText("😀".repeat(REPLY_MAX_CHARS)).ok, true);
 });
+check("characters are counted as a person sees them: a family emoji, a flag or an accent typed in two parts is one", () => {
+  const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}"; // 7 code points, 1 character
+  equal(readReplyText(family.repeat(100)).ok, true, "100 families");
+  equal(readReplyText("\u{1F1E7}\u{1F1F7}".repeat(260)).ok, true, "260 flags");
+  equal(readReplyText("e\u0301".repeat(300)).ok, true, "300 accents in two parts");
+  equal(readReplyText(family.repeat(REPLY_MAX_CHARS)).ok, true, "500 families");
+  equal(readReplyText(family.repeat(REPLY_MAX_CHARS + 1)), { ok: false, problem: "too_long" }, "501 families");
+});
+check("a character stacked with endless marks is too long, by a code point cap behind the character count", () => {
+  equal(readReplyText("a" + "\u0301".repeat(REPLY_MAX_CODE_POINTS)), { ok: false, problem: "too_long" });
+  equal(REPLY_MAX_CODE_POINTS >= REPLY_MAX_CHARS * 8, true, "room for 500 family emoji");
+});
 check("a link typed into the reply is refused: the product's link is added by the code", () => {
   for (const text of [
     "Get it at https://example.com/guide",
@@ -99,12 +119,23 @@ check("a link typed into the reply is refused: the product's link is added by th
     "see shop.example.store",
     "mylink.ly",
     "ftp://files.example.net",
+    "linktr.ee/chef",
+    "chef.studio/free",
+    "Go to Chef.Academy/start",
+    "t.co/abc",
+    "beacons.ai/chef",
+    "example.co/x",
+    "find me on example.de",
+    "see example.co",
+    "see example\u200D.com/guide",
+    "see ｅｘａｍｐｌｅ．ｃｏｍ",
+    "ＷＷＷ．example.org",
   ]) {
     equal(readReplyText(text), { ok: false, problem: "link" }, text);
   }
 });
 check("ordinary sentences with dots are not links", () => {
-  for (const text of ["Thanks.Enjoy it!", "e.g. the first lesson", "It's 9.99 today", "Hi, Mr. Smith", "See you at 5p.m."]) {
+  for (const text of ["Thanks.Enjoy it!", "e.g. the first lesson", "It's 9.99 today", "Hi, Mr. Smith", "See you at 5p.m.", "Sold out.Store opens Monday", "Thanks.Shop again soon", "Done.Co-op members first", "and/or both"]) {
     equal(readReplyText(text).ok, true, text);
   }
 });
@@ -119,6 +150,14 @@ check("control characters are refused; line breaks are kept, Windows line ends r
 check("invisible direction marks that could hide what the reply says are refused", () => {
   equal(readReplyText("Hi\u202Ethere"), { ok: false, problem: "control" });
   equal(readReplyText("Hi\u2066there"), { ok: false, problem: "control" });
+  for (const mark of ["\u061C", "\u200B", "\u2060", "\uFEFF", "\u2028", "\u2029", "\u{E0041}", "\u{E007F}", "\uD800", "\uDC00"]) {
+    equal(readReplyText(`Hi${mark}there`), { ok: false, problem: "control" }, `U+${mark.codePointAt(0)!.toString(16)}`);
+  }
+});
+check("the joiners and the emoji style mark that real emoji are made of are kept, and so is the England flag", () => {
+  equal(readReplyText("Team \u{1F468}\u200D\u{1F373} \u2764\uFE0F").ok, true, "cook and red heart");
+  equal(readReplyText("Go \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}!").ok, true, "England flag");
+  equal(readReplyText("\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645").ok, true, "a Persian word with its non-joiner");
 });
 
 // A post's whole rule.
@@ -255,11 +294,13 @@ check("the account's own comment on its own post never gets the reply, even when
 check("in test mode, anyone who is not a test account is out of reach", () => {
   equal(decide({ personId: "a_buyer" }), { send: false, why: "not_reached" });
 });
-check("live mode reaches nobody while AUTODM_LIVE is false", () => {
+check("live mode reaches nobody while AUTODM_LIVE is false, even when the caller says live", () => {
   equal(AUTODM_LIVE, false);
   const live = { ...noteTested(rule()), mode: "live" as const };
   equal(decide({ rule: live, personId: "a_buyer" }), { send: false, why: "not_reached" });
-  equal(decide({ rule: live, personId: "a_buyer", live: true }), { send: true, keyword: "guide" });
+  equal(decide({ rule: live, personId: "a_buyer", live: true }), { send: false, why: "not_reached" });
+  // The live path itself, once AutoDM is live, is unit 1's mayReachPerson, which decideReply asks.
+  equal(mayReachPerson({ mode: "live", live: true, personId: "a_buyer", testerIds: [] }), true);
 });
 check("a live rule never tested sends nothing even if live were on", () => {
   const untested = { ...rule(), mode: "live" as const };
@@ -277,6 +318,11 @@ check("the same person again inside the repeat interval: too soon; after it: sen
 check("a missing person id or own account id never sends", () => {
   equal(decide({ personId: "" }), { send: false, why: "not_reached" });
   equal(decide({ rule: rule({ testers: [] }) }), { send: false, why: "not_reached" });
+  // Without the account's own id, its own comment could not be told apart: nothing is sent.
+  equal(decide({ rule: rule({ testers: ["chef"] }), comment: "guide", personId: "chef", ownAccountId: "" }), { send: false, why: "no_account" });
+  equal(decide({ ownAccountId: "" }), { send: false, why: "no_account" });
+  equal(decide({ ownAccountId: undefined as unknown as string }), { send: false, why: "no_account" });
+  equal(decide({ ownAccountId: 7 as unknown as string }), { send: false, why: "no_account" });
 });
 
 // The reply's link.
@@ -296,7 +342,20 @@ check("no link when the base is not https, ends in a slash, carries a query, or 
   equal(replyMessage(rule(), "https://marktmorgen.com/@chef#x", PRODUCTS[0]), null);
   equal(replyMessage(rule(), "javascript:alert(1)", PRODUCTS[0]), null);
   equal(replyMessage(rule(), "https://marktmorgen.com@evil.example/@chef", PRODUCTS[0]), null);
+  equal(replyMessage(rule(), "https://marktmorgen.com/@chef/..", PRODUCTS[0]), null, "dot segments");
+  equal(replyMessage(rule(), "https://marktmorgen.com/@other/../@chef", PRODUCTS[0]), null, "dot segments inside");
+  equal(replyMessage(rule(), "https://evil.example\\marktmorgen.com", PRODUCTS[0]), null, "backslash");
+  equal(replyMessage(rule(), "https://user:pw@marktmorgen.com/@chef", PRODUCTS[0]), null, "user and password");
+  equal(replyMessage(rule(), "https://marktmorgen.com/@chef?", PRODUCTS[0]), null, "empty query");
+  equal(replyMessage(rule(), "https://marktmorgen.com/@chef#", PRODUCTS[0]), null, "empty fragment");
+  equal(replyMessage(rule(), "https://marktmorgen.com/@ch ef", PRODUCTS[0]), null, "space");
   equal(replyMessage(rule(), BASE, PRODUCTS[1]), null);
+});
+check("a product id with link characters is written into the path, never into the query", () => {
+  const odd = { id: "x?mm_dm=other99#", title: "" };
+  const r = readAutoDmRule(input({ product: odd.id }), [odd]);
+  if (!r.ok) throw new Error(JSON.stringify(r));
+  equal(replyMessage(r.rule, BASE, odd)?.link, "https://marktmorgen.com/@chef/p/x%3Fmm_dm%3Dother99%23?mm_dm=rule42abc");
 });
 check("the link never names the person, the post or the keyword", () => {
   const link = replyMessage(rule(), BASE, PRODUCTS[0])!.link;
@@ -309,6 +368,14 @@ check("the test box says which keyword matched and who would get the reply in ea
   equal(tryComment(rule({ mode: "off" }), "guide"), { matched: "guide", words: 'This comment matches "guide". This rule is off, so nobody gets the reply.' });
   const live = { ...noteTested(rule()), mode: "live" as const };
   equal(tryComment(live, "guide").words, AUTODM_LIVE ? 'This comment matches "guide". Everyone who comments it gets the reply.' : 'This comment matches "guide". AutoDM can\'t send replies yet, so nobody gets the reply.');
+});
+check("the test box never says someone gets a reply that decideReply would refuse", () => {
+  equal(tryComment(rule({ testers: [] }), "guide").words, 'This comment matches "guide". In test mode, only your test accounts get the reply, and you haven\'t listed any yet, so nobody gets it.');
+  const untested = { ...rule(), mode: "live" as const };
+  equal(tryComment(untested, "guide", true).words, 'This comment matches "guide". This rule hasn\'t had a test reply yet, so nobody gets the reply.');
+  equal(tryComment(untested, "guide").words, 'This comment matches "guide". This rule hasn\'t had a test reply yet, so nobody gets the reply.');
+  const tested = { ...noteTested(rule()), mode: "live" as const };
+  equal(tryComment(tested, "guide", true).words, 'This comment matches "guide". AutoDM can\'t send replies yet, so nobody gets the reply.', "the caller cannot open what AUTODM_LIVE keeps shut");
 });
 check("the test box says plainly when nothing matches", () => {
   equal(tryComment(rule(), "love this"), { matched: null, words: "This comment doesn't match any keyword, so no reply is sent." });
@@ -351,6 +418,19 @@ check("every problem has one plain US English sentence, numbered from 1 for peop
   equal(ruleProblemWords({ ok: false, field: "reply", problem: "too_long" }), `Use at most ${REPLY_MAX_CHARS} characters in the reply.`);
   equal(ruleProblemWords({ ok: false, field: "reply", problem: "link" }), "Take the link out of the reply. The product's link is added for you, so its clicks and sales are counted.");
   equal(ruleProblemWords({ ok: false, field: "mode", problem: "untested" }), "Send a test reply to one of your test accounts before you turn this rule on.");
+});
+check("a problem with a missing or broken place never says keyword 0 or test account NaN", () => {
+  for (const index of [undefined, NaN, -1, 1.5, Infinity] as unknown as number[]) {
+    for (const problem of ["too_long", "too_many_words", "no_letters", "duplicate"] as const) {
+      const words = ruleProblemWords({ ok: false, field: "keywords", problem, index, other: index });
+      holds(`keywords ${problem} at ${index}: ${words}`, !/\b0\b|NaN|undefined|Infinity|-1|1\.5/.test(words) && /^A keyword /.test(words));
+    }
+    for (const problem of ["bad_id", "duplicate"] as const) {
+      const words = ruleProblemWords({ ok: false, field: "testers", problem, index, other: index });
+      holds(`testers ${problem} at ${index}: ${words}`, !/\b0\b|NaN|undefined|Infinity|-1|1\.5/.test(words) && /^A test account /.test(words));
+    }
+  }
+  equal(ruleProblemWords({ ok: false, field: "keywords", problem: "duplicate", index: 1 }), "Keyword 2 already matches another keyword. Remove one of them.");
 });
 
 done();

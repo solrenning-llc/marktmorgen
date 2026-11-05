@@ -412,6 +412,31 @@ def main():
         assert db.command("HGET", course_keys[5], "items") == "0"
         print("PASS: course explicit coverage,32CAS rivals,immutable winner,unsupported stages closed,shared cap and original erasure/retention")
 
+        # A network-old ARGV clock cannot extend the paid admission window.
+        # Future and expired controls use real TIME, without sleeping or a provider.
+        for expired in [False, True]:
+            clock = db.command("TIME")
+            executed = int(clock[0]) * 1000 + int(clock[1]) // 1000
+            earlier = executed - 200
+            renewal, renewal_keys = fixture("renewal-cutoff-" + str(expired))
+            renewal.update(originKind="single_digital_renewal", purpose="single-digital-access-renewal",
+                           phase="renewal_queued", capsuleDigest="b" * 64, created=earlier,
+                           authorizedAt=earlier, next=earlier)
+            renewal_keys += ["nl:order-confirmation:renewal:capsule:SYNTHETIC:" + renewal["capsuleDigest"],
+                             "nl:order-confirmation:renewal:store:SYNTHETIC"]
+            renewal_keys[:10] = [k.replace(prefix, prefix + "renewal-cutoff:" + str(expired) + ":") for k in renewal_keys[:10]]
+            made.update(renewal_keys)
+            renewal_policy = dict(policy, admissionsUntil=executed - 100 if expired else executed + 3600000,
+                                  coveredOrigins=["single-digital-confirmation", "single-digital-access-renewal"],
+                                  singleDigitalAccessEvidence="SYNTHETIC ONLY", singleDigitalRenewalEvidence="SYNTHETIC ONLY")
+            answer = db.command("EVAL", shared, 12, *renewal_keys, "enqueue", "", json.dumps(renewal), earlier,
+                                131072, json.dumps(renewal_policy), "")
+            assert answer[0] == ("unknown" if expired else "queued"), "real execution TIME must enforce the cutoff before retention"
+            assert db.command("EXISTS", renewal_keys[0]) == (0 if expired else 1)
+            assert db.command("HGET", renewal_keys[5], "items") == (None if expired else "1")
+            db.command("DEL", *renewal_keys)
+        print("PASS: execution TIME rejects expired renewal admission before row/pool writes; future control retained")
+
         print(json.dumps({"observed_commands_including_eval_and_redis_call": profiles, "supplier_invoice": False}))
         # Exercise production TypeScript plus the exact shared/paid/accounting
         # Lua together, under the same explicitly disposable loopback opt-in.

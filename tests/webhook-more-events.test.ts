@@ -7,7 +7,8 @@
  */
 import { readFileSync } from "node:fs";
 import { WEBHOOK_EVENTS, addEndpoint, isWebhookEvent, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
-import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -25,7 +26,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/v1/events") return Response.json({ data: events, has_more: false });
   const intent = url.pathname.match(/^\/v1\/payment_intents\/(pi_\w+)$/)?.[1];
   if (intent && intents[intent]) return Response.json({ id: intent, metadata: intents[intent] });
-  return Response.json({ error: { message: "No such object" } }, { status: 404 });
+  // As Stripe answers an object it does not have: resource_missing (lib/webhooks.ts passes only that over).
+  return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such object" } }, { status: 404 });
 }) as typeof fetch;
 // The endpoint's name resolves to a private address: every try is refused before any socket opens.
 setSendHooksForTests({ fetch: { resolve: async () => [{ address: "127.0.0.1", family: 4 }] } });
@@ -41,6 +43,8 @@ async function setup(listen: string[]) {
   await claimHandle("more-events@example.com", HANDLE, "More Events", "");
   await ensureStatsId("more-events@example.com");
   await setStripeAccount("more-events@example.com", account);
+  // A paid plan, so its messages are kept: a store whose month has no webhook deliveries keeps none (lib/webhooks.ts, emitEvent).
+  await setSubscription("more-events@example.com", { customerId: "cus_MoreEvents01", subscriptionId: "sub_MoreEventsPlan01", active: true, tier: "scale", cycle: "month", period: paidPeriod() });
   const store = (await storeForEmail("more-events@example.com"))!;
   is("an endpoint listening for them is kept", (await addEndpoint(store, "https://hooks.example.net/in", listen)).ok, true);
   asked.length = 0;

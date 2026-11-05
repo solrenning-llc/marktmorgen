@@ -195,7 +195,7 @@ async function main(): Promise<void> {
   );
   is("never for a session from a package", book.includes("const due = fromPackage ? null : chargeNow("), true);
   const recovery = readFileSync("lib/checkout-recovery.ts", "utf8");
-  is("the reminder of an abandoned checkout says the rest, at today's price", recovery.includes("const deposit = due.rest > 0 ? [bookingWords(store.language).depositRest(money(due.rest), store.name)] : [];") && recovery.includes("g.recoverPrice(money(product.priceCents)), ...deposit,"), true);
+  is("the reminder of an abandoned checkout says the rest, at today's price", recovery.includes("const deposit = due.rest > 0 ? [bookingWords(store.language).depositRest(money(due.rest), store.name)] : [];") && recovery.includes("g.recoverPrice(price), ...deposit,") && recovery.includes(": lengths.length ? w.fromPrice(money(fromPrice(lengths) as number)) : money(product.priceCents);"), true);
 
   done();
 }

@@ -5,6 +5,7 @@ import { MorningLogo } from "@/components/morning-header";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { RESET_DAYS, TWO_STEP_COOKIE, heldFor, twoStepStatus } from "@/lib/two-step";
+import { LOCKED_LIST, LOCKED_LIST_START } from "@/lib/locked-words";
 
 export const metadata: Metadata = {
   title: "Your code — Marktmorgen",
@@ -97,8 +98,8 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
             </summary>
             <p className="mt-2">
               {reset
-                ? `You can get in now, as before. Payments, your plan, your team, exports, settings, sending to your list, your sign-in address, passkeys and two-step login stay locked until ${resetDay}, when two-step login turns off; everything else is open.`
-                : `Get in now. Everything you need to keep selling is open at once: your products, pages, buyers, numbers and drafts. What could take money, data or the account away — payments, your plan, your team, exports, settings, sending to your list, your sign-in address — stays locked for ${RESET_DAYS} days, and then two-step login turns off. That is what keeps someone who only got into your email from doing harm: we email you, and logging in with a code or a passkey in that time, or Cancel in your studio, logs them out.`}
+                ? `You can get in now, as before. ${LOCKED_LIST_START} stay locked until ${resetDay}, when two-step login turns off; everything else is open.`
+                : `Get in now. Everything you need to keep selling is open at once: your products, pages, buyers, numbers and drafts. What could take money, data or the account away — ${LOCKED_LIST} — stays locked for ${RESET_DAYS} days, and then two-step login turns off. That is what keeps someone who only got into your email from doing harm: we email you, and logging in with a code or a passkey in that time, or Cancel in your studio, logs them out.`}
             </p>
             <form method="post" action="/api/auth/code" className="mt-3">
               <input type="hidden" name="action" value="reset" />

@@ -1,8 +1,7 @@
-import { apiError, apiStore } from "@/lib/api-guard";
+import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
 import { apiOkFields, fieldsAsked } from "@/lib/api-fields";
 import { SALE_FIELDS, cursorOf, sales } from "@/lib/api-sales";
 import { canSell } from "@/lib/store-checkout";
-import { takeAllowance } from "@/lib/store-allowance";
 import { API_SALES_UNITS } from "@/lib/store-allowance-rules";
 import { StripeError } from "@/lib/stripe-account";
 
@@ -25,10 +24,12 @@ export async function GET(request: Request) {
   const unknown = fields.fields?.find((f) => !(SALE_FIELDS as readonly string[]).includes(f));
   if (unknown) return apiError(400, "unknown_field", `No item in this answer has a field named “${unknown}”.`);
   // A page of sales is API_SALES_UNITS of the month's API requests, the request itself one of them.
-  const taken = await takeAllowance(store, "api", API_SALES_UNITS - 1);
-  if (!taken.ok) return apiError(429, taken.reason === "used" ? "monthly_limit" : taken.reason === "pool" ? "no_place" : "unavailable", taken.message);
+  const refused = await takeMoreApi(store, API_SALES_UNITS - 1);
+  if (refused) return refused;
   try {
-    const page = await sales(store, cursor.cursor);
+    // The listings read for titles are taken before they are read (lib/api-sales.ts).
+    const page = await sales(store, cursor.cursor, (more, taken) => takeMoreApi(store, more, taken));
+    if (page instanceof Response) return page;
     if (!page) return unavailable();
     return apiOkFields(request, page);
   } catch (error) {

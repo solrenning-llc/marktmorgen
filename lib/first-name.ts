@@ -78,9 +78,9 @@ const LINKLIKE = /@|https?:|www\.|[<>{}[\]]|[a-z0-9-]\.(com|net|org|io|co|app|me
 const NAME = /^[\p{L}\p{M}\p{N}\u200c\u200d]+(?:['’\-\u2010·][\p{L}\p{M}\p{N}\u200c\u200d]+)*$/u;
 // Small words that start many surnames, typed in small letters.
 const PARTICLES = new Set(["de", "da", "do", "dos", "das", "del", "della", "di", "du", "van", "von", "der", "den", "la", "le", "bin", "ibn", "al", "el"]);
-// The first half of a joined name ("Abd al-Rahman").
 // Titles a reader may type before a name, in the store's languages, without the period; never a first name to greet them by.
-const TITLES = new Set(["mr", "mrs", "ms", "miss", "mx", "dr", "dra", "prof", "profa", "sr", "sra", "srta", "sir", "rev", "herr", "frau", "mme", "mlle", "m", "dhr", "mevr", "sig", "sig.ra", "dott"]);
+const TITLES = new Set(["mr", "mrs", "ms", "miss", "mx", "dr", "dra", "prof", "profa", "sr", "sra", "srta", "sir", "rev", "herr", "frau", "mme", "mlle", "m", "dhr", "mevr", "sig", "sig.ra", "dott", "ing", "lic", "mag"]);
+// The first half of a joined name ("Abd al-Rahman").
 const FIRST_HALVES = new Set(["abd", "abdul", "abdel", "عبد"]);
 const FAMILY_FIRST = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+$/u;
 
@@ -110,10 +110,11 @@ const OTHER_FIELD = /\*\|[^|*\n]{1,60}\|\*|\{\{[^{}\n]{1,80}\}\}|\{%[^%\n]{0,80}
 // One word in curly braces, {name}, or between percent signs, %NAME%: a field only when the word names a person's details, so a course's
 // code ("function f() {return}") or a path ("%APPDATA%") is never refused.
 const MAYBE_FIELD = /%([A-Za-z][A-Za-z0-9_]{1,40})%|\{[ \t]*([\p{L}_][\p{L}\p{N}_. ]{0,40}?)[ \t]*\}/gu;
-const PERSON_WORD = /^(?:(?:first|last|full|sur|given|family|user|nick)?[ _.-]?name|[fl]name|e[ _-]?mail|nome|primeiro[ _]?nome|nombre|nom|pr[ée]nom|vorname|nachname|voornaam|achternaam|cognome|名前|氏名|이름|subscriber|contact)$/iu;
+const PERSON_WORD = /^(?:(?:first|last|full|sur|given|family|user|nick|company|business)?[ _.-]?name|[fl]name|e[ _-]?mail|nome|primeiro[ _]?nome|nombre|nom|pr[ée]nom|vorname|nachname|voornaam|achternaam|cognome|名前|氏名|이름|subscriber|contact|company|phone|city|country|zip|address|unsubscribe|unsub|coupon)$/iu;
 const NEAR_TOKEN = /^\{[ \t]*first[ _]?name[ \t]*\}$/i;
-// Where a web address can start: a scheme, "www." or a host with a dot and a slash after it ("example.com/p?n=").
-const LINK_START = /https?:|www\.|mailto:|[\p{L}\p{N}-]\.[\p{L}]{2,}\//iu;
+// Where a web address can start: a scheme, "www." or a host with a dot and a path, query or fragment after it ("example.com/p",
+// "example.com?n=", "example.com#"), since an email program makes any of those a link by itself.
+const LINK_START = /https?:|www\.|mailto:|[\p{L}\p{N}-]\.[\p{L}]{2,}[/?#]/iu;
 
 /** Whether the token is inside a web address: the run of characters before it, up to a space or a bracket, reads as one. Linear: each token looks back once, at most 300 characters. */
 function inLink(text: string): boolean {

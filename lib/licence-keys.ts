@@ -62,7 +62,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { refundedInFull } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -474,7 +474,18 @@ export function storeHasKeys(store: Store): boolean {
  * made that payment (a cs_… reference), or the payment itself for an offer
  * taken in one click (a pi_… reference). Both the product bought and the one
  * ticked at checkout lose their keys, since both were paid by that payment.
- * A partial refund changes nothing. Returns how many keys it revoked.
+ * A partial refund changes nothing. A dispute Stripe closed as lost takes
+ * the key back as a full refund does (queue 388 [TB14]): the disputes closed
+ * since the last run are read with the first page of refunds, from Stripe's
+ * closing events, so a lost dispute revokes within the same five minutes;
+ * one still open or won changes nothing, and one lost for less than the
+ * price is read as lost (lib/refunds.ts says why). That is up to
+ * LOST_DISPUTE_PAGES more GET /events every five minutes per store that
+ * hands out keys, inside the run's deadline, and no other call. Stripe keeps events thirty days,
+ * so a job down longer than that misses lost disputes; refunds are not
+ * affected. A failed read of the disputes leaves the refunds handled and the
+ * anchor where it was. The limit of the pages and lookups read per run,
+ * which also keeps the anchor, was there before. Returns how many keys it revoked.
  */
 const idOf = (value: unknown): string =>
   typeof value === "string"
@@ -528,6 +539,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // A refund whose sale could not be told for sure is left unread, and the
   // anchor stays, so the next run looks at it again.
   let unsure = false;
+  let lostRead: LostRead | null = null;
   const handles = saleHandles(store);
 
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
@@ -535,21 +547,35 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : null;
+    if (lost) lostRead = lost;
+    if (lost && !lost.complete) unsure = true;
+    const rows = [...(lost?.rows ?? []), ...refunds];
     for (const refund of rows) {
       if (Date.now() >= deadline) break;
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      if (!refundedInFull(refund.charge)) continue;
+      if (!rowGivesBack(refund)) continue;
       const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
       if (Number(seen) === 1) {
         newest = Math.max(newest, created);
         continue;
       }
       const intent = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      if (!INTENT_PATTERN.test(intent) || lookups <= 0) continue;
+      if (!INTENT_PATTERN.test(intent)) {
+        // No payment to look up (a charge made without one): no sale of this store can be told from it, so it is
+        // read, and a lost dispute like it never holds the place back (review of #2158).
+        await redisPipeline([
+          ["SADD", refundSeenKey(store), id],
+          ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+        ]);
+        newest = Math.max(newest, created);
+        continue;
+      }
+      if (lookups <= 0) continue;
       lookups -= 1;
 
       // Which sale that payment was: a checkout of this store, or an offer.
@@ -601,11 +627,11 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       }
       await redisPipeline([
         ["SADD", refundSeenKey(store), id],
-        ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS + 86_400],
+        ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
       ]);
       newest = Math.max(newest, created);
     }
-    const last = rows[rows.length - 1];
+    const last = refunds[refunds.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") {
       complete = true;
       break;
@@ -615,8 +641,24 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   // Only moved forward past what was read to the end: a run cut short by
   // its deadline, its pages or its lookups starts from the same place next
   // time, and the refunds it already handled are skipped as read.
-  if (complete && !unsure && lookups > 0 && Date.now() < deadline) {
-    await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
+  // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
+  // meanwhile is read from the top next run (review of #2158, inbox C4-24).
+  if (lostRead) {
+    if (!(await confirmLostRead(lostRead, refundSeenKey(store)))) unsure = true;
+    else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
+  }
+  // The place moves only past what was read to the end, sure, with lookups left and inside its time. A store with no place yet keeps
+  // the one it started from, so the next run reads the same window and the lost disputes' kept place still counts; its
+  // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
+  // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
+  const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
+  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  else if (!(Number(anchorRaw) > 0)) {
+    await redisPipeline([
+      ["SET", refundAnchorKey(store), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
+      ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+    ]);
   }
   return revoked;
 }

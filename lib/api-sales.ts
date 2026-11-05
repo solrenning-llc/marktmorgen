@@ -32,6 +32,10 @@ import { readListings } from "@/lib/catalog";
 import { sourceOf } from "@/lib/webhooks";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
+import { listingsToRead } from "@/lib/catalog-read-count";
+import { apiReadUnits, listingsWork } from "@/lib/api-read-rules";
+import { API_SALES_UNITS } from "@/lib/store-allowance-rules";
+import type { Charge } from "@/lib/api-read";
 
 /** Checkouts asked of Stripe per call: its own most. */
 export const SALES_PAGE = 100;
@@ -140,19 +144,28 @@ function isSale(row: Row): boolean {
   return isSettled(row) && (row.mode === "payment" || row.mode === "subscription") && row.metadata?.kind !== "card";
 }
 
-type Read = { row: Row; paid: Payment; amount: number; discount: number | null; openedAt: string };
+type Read = { row: Row; paid: Payment; amount: number; discount: number | null; openedAt: string; currency: string };
 
-/** A sale's money and payment, or null when Stripe's answer for it cannot be read. */
+/** A currency as Stripe writes it: three lowercase letters (ISO 4217). */
+const CURRENCY = /^[a-z]{3}$/;
+
+/**
+ * A sale's money and payment, or null when Stripe's answer for it cannot be
+ * read: an amount that is not whole cents at or above zero, or a currency
+ * that is not one, is unknown, never a zero or a guessed currency (Codex G2
+ * on #1899).
+ */
 function readSale(row: Row): Read | null {
   const amount = cents(row.amount_total);
   const paid = payment(row);
   // When the checkout page was opened: the order of the list, and what a sync reads back to.
   const openedAt = iso(row.created);
-  if (amount === null || !paid || !openedAt) return null;
+  const currency = typeof row.currency === "string" && CURRENCY.test(row.currency) ? row.currency : null;
+  if (amount === null || !paid || !openedAt || !currency) return null;
   // No discount details from Stripe is an unknown discount (null); details that cannot be read make the sale unknown.
-  if (row.total_details === null || row.total_details === undefined) return { row, paid, amount, discount: null, openedAt };
+  if (row.total_details === null || row.total_details === undefined) return { row, paid, amount, discount: null, openedAt, currency };
   const discount = cents(obj(row.total_details)?.amount_discount);
-  return discount === null ? null : { row, paid, amount, discount, openedAt };
+  return discount === null ? null : { row, paid, amount, discount, openedAt, currency };
 }
 
 /**
@@ -173,12 +186,20 @@ export function titleIds(metas: Record<string, string>[]): string[] {
   return wanted;
 }
 
-/** One page of the store's sales, or null when Stripe's answer could not be read whole. */
-export async function sales(store: Store, cursor: string | null): Promise<SalesPage | null> {
+/**
+ * One page of the store's sales, null when Stripe's answer could not be read
+ * whole, or the refusal when the listings its titles need cannot be taken
+ * from the month. The page itself is API_SALES_UNITS of the store's API
+ * requests, taken by the route before Stripe is read; the listings read for
+ * titles the checkouts do not carry are taken with `charge` before they are
+ * read (listingsWork), so nothing is read beyond what was paid (Codex G2 on
+ * #1899).
+ */
+export async function sales(store: Store, cursor: string | null, charge: Charge): Promise<SalesPage | null | Response> {
   if (cursor !== null && !CURSOR.test(cursor)) throw new Error("A sales cursor is checked (cursorOf) before it is sent to Stripe");
   const page = await onAccount("GET", store.stripeAccountId as string, `/checkout/sessions?limit=${SALES_PAGE}&expand[]=data.payment_intent.latest_charge&expand[]=data.invoice${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ""}`);
   // An unreadable list is unknown, never proof of no sales.
-  if (typeof page !== "object" || page === null || Array.isArray(page) || !Array.isArray(page.data) || typeof page.has_more !== "boolean" ||
+  if (typeof page !== "object" || page === null || Array.isArray(page) || page.object !== "list" || !Array.isArray(page.data) || typeof page.has_more !== "boolean" ||
       page.data.length > SALES_PAGE || page.data.some((row: unknown) => typeof row !== "object" || row === null || Array.isArray(row))) return null;
   const rows = page.data as Row[];
   // More to come without a cursor to go on from would look like the end: unknown instead.
@@ -186,7 +207,11 @@ export async function sales(store: Store, cursor: string | null): Promise<SalesP
   const last = typeof lastId === "string" && CURSOR.test(lastId) ? lastId : null;
   if (page.has_more === true && !last) return null;
   const handles = saleHandles(store);
-  const mine = rows.filter((row) => typeof row.id === "string" && isSale(row) && handles.has(row.metadata?.store ?? ""));
+  // A checkout of this store is classed by its status, payment status and mode: one Stripe sent without them is
+  // unknown, never left out of the page as though it were no sale (Codex G2 on #1899).
+  const ours = rows.filter((row) => handles.has(row.metadata?.store ?? ""));
+  if (ours.some((row) => typeof row.id !== "string" || typeof row.status !== "string" || typeof row.payment_status !== "string" || typeof row.mode !== "string")) return null;
+  const mine = ours.filter((row) => isSale(row));
   // One sale that cannot be read makes the page unknown: never a guessed zero, a negative amount or "nothing charged".
   const read: Read[] = [];
   for (const row of mine) {
@@ -196,7 +221,10 @@ export async function sales(store: Store, cursor: string | null): Promise<SalesP
   }
 
   const meta = (row: Row): Record<string, string> => row.metadata ?? {};
-  const wanted = titleIds(mine.map(meta));
+  // A product sold whose checkout wrote its title is named by it, its listing never read for that.
+  const wanted = titleIds(mine.map((row) => (cutText(meta(row).title, SALE_TEXT_LIMITS.title) ? { ...meta(row), product: "" } : meta(row))));
+  const refused = await charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS);
+  if (refused) return refused;
   const titles = new Map((wanted.length ? await readListings(store, wanted) : []).map((p) => [p.id, cutText(p.title, MAX_TITLE_LENGTH)]));
   const product = (id: string) => ({ id, title: titles.get(id) ?? null });
   const inside = (m: Record<string, string>, slot: BundleSlot) => {
@@ -205,7 +233,7 @@ export async function sales(store: Store, cursor: string | null): Promise<SalesP
   };
   const { title: TITLE, utm: UTM, site: SITE, name: NAME, email: EMAIL } = SALE_TEXT_LIMITS;
   return {
-    data: read.map(({ row, paid, amount, discount, openedAt }) => {
+    data: read.map(({ row, paid, amount, discount, openedAt, currency }) => {
       const m = meta(row);
       const details = (obj(row.customer_details) ?? {}) as { email?: unknown; name?: unknown };
       // An address is kept only as it is: longer than an address can be, or holding what cutText drops, it is null, never cut.
@@ -225,8 +253,8 @@ export async function sales(store: Store, cursor: string | null): Promise<SalesP
         order_bumps: checked,
         amount_cents: amount,
         discount_cents: discount,
-        // Unknown is null, never a guessed currency.
-        currency: typeof row.currency === "string" && /^[a-z]{3}$/.test(row.currency) ? row.currency : null,
+        // Read with the sale: one without a currency is unknown, so the page is (readSale).
+        currency,
         buyer: { email, name: cutText(details.name, NAME) },
         opened_at: openedAt,
         paid_at: paid.paidAt,

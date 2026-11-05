@@ -105,7 +105,7 @@ async function finishHostConnect(
   email: string,
   taken: { statsId: string; sid: string; verifier: string; host: string },
 ): Promise<Response> {
-  const allowed = await resolveAccess(email, { pinned: taken.sid }, "member");
+  const allowed = await resolveAccess(email, { pinned: taken.sid, session: request.cookies.get(SESSION_COOKIE)?.value ?? "" }, "member");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { store } = allowed.access;
   const back = (query: string) => away(origin, studioPath(store, query, "calendar"));
@@ -157,7 +157,7 @@ export async function finishConnect(request: NextRequest, provider: MeetProvider
   if (taken.host) return finishHostConnect(request, origin, email, taken);
   // Still allowed on that very store, read now: a role taken away while the
   // person was on the provider's page counts.
-  const allowed = await resolveAccess(email, { pinned: taken.sid }, "settings");
+  const allowed = await resolveAccess(email, { pinned: taken.sid, session: cookie }, "settings");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { store, role } = allowed.access;
   // A consent for a provider the store is not openly offered was started

@@ -199,7 +199,6 @@ async function main(): Promise<void> {
       session("cs_test_newyear", { created: opened, payment_intent: { id: "pi_ny", object: "payment_intent", created: opened, latest_charge: charge("ch_ny", paid) } }),
       session("cs_test_newyear_sub", { mode: "subscription", created: opened, payment_intent: null, invoice: { id: "in_ny", object: "invoice", status_transitions: { paid_at: firstInvoicePaid } } }),
       session("cs_test_free", { payment_status: "no_payment_required", amount_total: 0, created: opened, payment_intent: null, invoice: null }),
-      session("cs_test_nocurrency", { currency: null, payment_intent: { id: "pi_nc", object: "payment_intent", created: paid, latest_charge: charge("ch_nc", paid) } }),
     ],
   }];
   const asOf = asked.length;
@@ -208,7 +207,9 @@ async function main(): Promise<void> {
   is("opened on 31 December, paid on 1 January: the 1 January moment, the year the webhook says", newYear.data[0].paid_at, "2027-01-01T00:05:00.000Z");
   is("a membership: when its first invoice was paid", newYear.data[1].paid_at, "2027-01-01T00:07:00.000Z");
   is("nothing charged at checkout: no payment moment, never the page's opening", newYear.data[2].paid_at, null);
-  is("no currency from Stripe: null, never a guessed usd", newYear.data[3].currency, null);
+  // Codex G2 on #1899: a sale Stripe sent without a currency is unknown, so the page is: never a guessed usd, nor a sale with none.
+  pages = [{ object: "list", has_more: false, data: [session("cs_test_nocurrency", { currency: null })] }];
+  is("no currency from Stripe: the page is unknown, 502, never a guessed usd", (await call()).status, 502);
   is("a membership's first invoice is not read for refunds or disputes: null, never a guessed none", [newYear.data[1].refunded_cents, newYear.data[1].disputed], [null, null]);
   is("nothing charged: no refund or dispute to read either", [newYear.data[2].refunded_cents, newYear.data[2].disputed], [null, null]);
 
@@ -316,8 +317,8 @@ async function main(): Promise<void> {
     metadata: { ...full, kind: "plan" },
   });
   pages = [{ object: "list", has_more: true, data: Array.from({ length: SALES_PAGE }, (_, i) => worst(i)) }];
-  const heavy = await sales(wide, null);
-  if (!heavy) throw new Error("the worst page was not read");
+  const heavy = await sales(wide, null, async () => null);
+  if (!heavy || heavy instanceof Response) throw new Error("the worst page was not read");
   const bytes = Buffer.byteLength(JSON.stringify(heavy));
   const one = Buffer.byteLength(JSON.stringify(heavy.data[0]));
   const sale = heavy.data[0] as { order_bumps: unknown[]; bundle_items: { title: string | null }[] };

@@ -24,9 +24,9 @@ import { done, is, part } from "./check";
 part("The template reads back");
 const template = readSequenceCsv(sequenceTemplateCsv());
 is(
-  "its two example emails and their waits; only its preview text is reported, as not kept yet",
+  "its two example emails and their waits, with nothing reported: its preview column is left empty, since preview text is not kept yet",
   template.ok ? [template.steps.map((s) => [s.delayHours, s.subject]), template.report] : template,
-  [[[0, "Welcome! Here is your guide"], [72, "A tip for your first week"]], [{ line: 2, column: "preview", reason: "Preview text is not kept yet: a sequence's email has no place for it." }]],
+  [[[0, "Welcome! Here is your guide"], [72, "A tip for your first week"]], []],
 );
 is("its header is the template's columns", sequenceTemplateCsv().split("\n")[0], SEQUENCE_TEMPLATE.map((c) => `"${c}"`).join(","));
 

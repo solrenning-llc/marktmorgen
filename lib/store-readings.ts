@@ -261,17 +261,23 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     return { value: unnamed, at: now, stale: false, unnamed: true };
   }
   // Kept only when nobody it names was deleted meanwhile, checked where it is written (READING_COPY). Someone was:
-  // shown without them and not kept; the next reading is made again without them. The step could not be run:
-  // nothing kept, since its check could not be made, and shown as read (its read left the deleted out already).
+  // shown without them and not kept; the next reading is made again without them. The step could not be run, or
+  // its reply is not whole (a list of places among the names, nothing else): it fails closed (Codex E on #2111):
+  // whatever it may have kept goes, and the reading is shown naming nobody; the next reading is made again.
   const listId = guard.listId;
+  const closed = async (): Promise<Kept<T>> => {
+    await redisPipeline([["DEL", key]]).catch(() => {});
+    return { value: guard.without(value, new Set(names)), at: now, stale: false };
+  };
   try {
-    const [reply] = await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]);
-    if (!Array.isArray(reply)) return { value, at: now, stale: false };
-    if (!reply.length) return { value, at: now, stale: false };
-    const gone = new Set(reply.map((i) => names[Number(i) - 1]).filter((e): e is string => typeof e === "string"));
-    return { value: guard.without(value, gone), at: now, stale: false };
+    const replies = await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]);
+    const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+    const places = Array.isArray(reply) && reply.every((i) => Number.isInteger(i) && (i as number) >= 1 && (i as number) <= names.length) ? (reply as number[]) : null;
+    if (!places) return await closed();
+    if (!places.length) return { value, at: now, stale: false };
+    return { value: guard.without(value, new Set(places.map((i) => names[i - 1]))), at: now, stale: false };
   } catch {
-    return { value, at: now, stale: false };
+    return await closed();
   }
 }
 

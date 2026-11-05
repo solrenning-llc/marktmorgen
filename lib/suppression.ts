@@ -71,14 +71,28 @@ export function suppressedAmongCommand(listId: string, emails: string[]): Comman
   return ["HMGET", suppressedKey(listId), ...emails.map((e) => suppressionPrint(listId, e))];
 }
 
-/** Which of these addresses were deleted from this store, in one command. */
+/**
+ * A reply to suppressedAmongCommand, read only when it is whole: a list of
+ * exactly one entry for each address, each nothing (not deleted), text or a
+ * number (deleted). Anything else throws, so a print where nothing came back
+ * is never read as "not deleted" (Codex E on #2111): the caller fails closed.
+ */
+export function wholeErasedReply(reply: unknown, addresses: number): (string | number | null)[] {
+  if (!Array.isArray(reply) || reply.length !== addresses || !reply.every((v) => v === null || typeof v === "string" || typeof v === "number")) {
+    throw new Error("the store's deleted people could not be read whole");
+  }
+  return reply as (string | number | null)[];
+}
+
+/** Which of these addresses were deleted from this store, in one command. Throws when the reply is not whole (wholeErasedReply). */
 export async function suppressedAmong(listId: string | null | undefined, emails: string[]): Promise<Set<string>> {
   const out = new Set<string>();
   if (!listId || !emails.length || !isRedisConfigured()) return out;
-  const [rows] = await redisPipeline([suppressedAmongCommand(listId, emails)]);
-  const list = Array.isArray(rows) ? rows : [];
+  const replies = await redisPipeline([suppressedAmongCommand(listId, emails)]);
+  if (!Array.isArray(replies) || replies.length !== 1) throw new Error("the store's deleted people could not be read whole");
+  const list = wholeErasedReply(replies[0], emails.length);
   emails.forEach((email, i) => {
-    if (list[i] !== null && list[i] !== undefined) out.add(email);
+    if (list[i] !== null) out.add(email);
   });
   return out;
 }

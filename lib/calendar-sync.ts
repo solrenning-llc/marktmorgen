@@ -801,10 +801,14 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     const marks = owner.callsId ? [bookingsChangedKey(owner.callsId), bookingCreditsKey(owner.callsId, day)] : ["", ""];
     const counts = [calendarAttemptsKey(owner.statsId, day), buildsKey(owner.statsId, day), creditsUsedKey(owner.statsId, day)];
     raw = await redisPipeline([["MGET", outKey(owner.statsId), storeHandleKey(owner.handle), ...counts, ...marks.filter(Boolean)]]);
+    // Read only when whole: one entry for each key asked, each nothing or text. A read that is not whole is nothing
+    // answered, never a store taken for gone (its copy deleted and 404 answered; Codex E on #2111).
+    const asked = 2 + counts.length + marks.filter(Boolean).length;
+    if (!Array.isArray(raw) || raw.length !== 1 || !Array.isArray(raw[0]) || raw[0].length !== asked || !raw[0].every((v) => v === null || typeof v === "string")) return { state: "none" };
   } catch {
     return { state: "none" };
   }
-  const values = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : [];
+  const values = raw[0] as unknown[];
   const [copyRaw, handleRaw, attemptsRaw, ownRaw, creditsUsedRaw, changedRaw, creditsRaw] = [0, 1, 2, 3, 4, 5, 6].map((i) => values[i] ?? null);
   // The store was deleted or closed (its handle let go): what it kept, which names its buyers, goes now.
   if (!handleLeadsToStore(handleRaw)) {
@@ -882,24 +886,27 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // made: the route makes it first) is answered while the settings exist, but never kept: its check cannot be made.
   const listId = made.listId;
   const named = [...new Set(made.named)];
+  // Each reply read only when it is one of the answers its step gives (0, 1 or 2): one that cannot be run or answers
+  // anything else is neither "gone" (Number(null) is 0, which answered 404) nor kept (Codex E on #2111).
   let written: unknown;
   if (!listId && named.length) {
     const [settings] = await redisPipeline([["EXISTS", cfgKey(owner.statsId)]]).catch(() => [null]);
-    written = settings === null ? null : Number(settings) === 0 ? 0 : 1;
+    written = settings === 0 || settings === 1 ? settings : null;
   } else {
     const prints = listId ? named.map((email) => suppressionPrint(listId, email)) : [];
     const erased = listId ? suppressedKey(listId) : "nl:none";
     [written] = await redisPipeline([["EVAL", KEEP_COPY, 3, cfgKey(owner.statsId), outKey(owner.statsId), erased, file, CALENDAR_COPY_SECONDS, ...prints]]).catch(() => [null]);
   }
-  if (Number(written) === 0) return { state: "gone" };
-  if (Number(written) === 2) {
+  if (written !== 0 && written !== 1 && written !== 2) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  if (written === 0) return { state: "gone" };
+  if (written === 2) {
     // Its copy gone with nothing kept in its place, the erasure's own DEL may find none and give no making back
     // (review of fe4cb5e56): this one is given back, so the app's next check makes the file again without them.
     // The try stays counted (calendarAttemptsKey), so what it read stays inside the priced figure.
     await giveCounted(taken, 2 * 86_400);
     return { state: "none" };
   }
-  if (Number(written) !== 1) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+
   // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
   // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):
   // for FEED_REFUNDS_SECONDS after each making, which a feed that is read makes at least every CALENDAR_REFRESH_SECONDS.

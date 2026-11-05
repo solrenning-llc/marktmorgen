@@ -15,7 +15,7 @@ import { type Store, storeForEmail } from "@/lib/store";
 import { erasePerson } from "@/lib/person-erasure";
 import { keptReading, keptSales, withoutErasedBuyers } from "@/lib/store-readings";
 import { CALENDAR_BUILDS_PER_DAY, bookedCalendar, bookedCalendarFeed, ensureFeedToken, newFeedToken, withoutErasedBookers } from "@/lib/calendar-sync";
-import { suppressCommand } from "@/lib/suppression";
+import { suppressCommand, suppressedAmong } from "@/lib/suppression";
 import { setStripeAccount } from "@/lib/store";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import { createHash } from "node:crypto";
@@ -27,6 +27,8 @@ import { done, is, part } from "./check";
 process.env.STRIPE_SECRET_KEY = "sk_test_readings_erasure_only";
 /** The checkouts the stand-in for Stripe lists (the races below); none otherwise. */
 let checkouts: Record<string, unknown>[] = [];
+/** The one-click extras the stand-in for Stripe lists (paid with the checkout's card, named by their receipt address). */
+let intents: Record<string, unknown>[] = [];
 /** Run once while Stripe lists the checkouts (a person's erasure while a reading is being made), then let go. */
 let whileListing: (() => Promise<unknown>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -36,7 +38,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     whileListing = null;
     await run();
   }
-  return new Response(JSON.stringify({ object: "list", data: listing ? checkouts : [], has_more: false }), { status: 200 });
+  const extrasListed = String(input).includes("/payment_intents?") && (init?.method ?? "GET") === "GET";
+  return new Response(JSON.stringify({ object: "list", data: listing ? checkouts : extrasListed ? intents : [], has_more: false }), { status: 200 });
 }) as typeof fetch;
 
 /**
@@ -177,7 +180,7 @@ async function main(): Promise<void> {
   const unchecked = await keptSales(selling, Date.now(), true).finally(() => {
     redis.pipeline = realPipeline;
   });
-  is("when the step that checks and keeps cannot run, nothing is kept (its check could not be made), and the reading is shown", [redis.run(["GET", key]), unchecked.value?.buyers?.top.length], [null, 1]);
+  is("when the step that checks and keeps cannot run, nothing is kept (its check could not be made), and the reading is shown naming nobody (fails closed)", [redis.run(["GET", key]), unchecked.value?.buyers?.top.length], [null, 0]);
 
   part("A calendar file begun before a booker's erasure is neither kept nor answered naming them (the race, review of #2111)");
   checkouts = [];
@@ -358,6 +361,128 @@ async function main(): Promise<void> {
   is("the file answered and kept keeps the times and names nobody", [feedShown.includes("BEGIN:VEVENT"), feedShown.includes(shyCaller), feedShown.includes(bold), feedKept.includes(shyCaller), feedKept.includes(bold), feedKept.includes("BEGIN:VEVENT")], [true, false, false, false, false, true]);
   is("each booker is shown as a buyer, never as one whose details were deleted", [feedShown.includes("A buyer"), feedShown.includes("whose details were deleted")], [true, false]);
   redis.run(["DEL", lockKey]);
+
+  part("The real journey: a buyer erased, then the sales read again from Stripe, which keeps the purchase; nothing kept or shown names them (review of dba545a17, C4-54)");
+  redis.run(["SET", ownerKey, JSON.stringify(record)]);
+  redis.run(["DEL", lockKey]);
+  const listed = { ...(await storeForEmail(OWNER))!, stripeAccountId: "acct_test_readings_race" } as Store;
+  is("the store has its list again", typeof listed.listId, "string");
+  const gone = normaliseEmail("gone.buyer@example.com");
+  const still = normaliseEmail("still.buyer@example.com");
+  // As Stripe may hold it: the address typed with capitals and spaces, and a one-click extra named by its receipt address.
+  checkouts = [checkout(`  ${gone.toUpperCase()} `, 4_900, 21), checkout(still, 2_900, 22), checkout(gone, 1_900, 23)];
+  intents = [{
+    id: "pi_test_journey_extra", object: "payment_intent", status: "succeeded", amount: 9_900, currency: store.currency, created: Math.floor(Date.now() / 1000) - 600,
+    receipt_email: ` ${gone.toUpperCase()}`, metadata: { kind: "upsell", store: listed.handle, product: "p2" },
+  }];
+  freshDay();
+  redis.run(["DEL", key]);
+  const before = await keptSales(listed, Date.now(), true);
+  is("before: the reading names them", JSON.stringify(before.value).includes(gone), true);
+  const journeyErased = await erasePerson(listed, gone, { kind: "person" });
+  is("the erasure ends", journeyErased.ok, true);
+  freshDay();
+  const afterErasure = await keptSales((await storeForEmail(OWNER).then((s) => ({ ...s!, stripeAccountId: "acct_test_readings_race" }))) as Store, Date.now(), true);
+  const raw = String(redis.run(["GET", key]) ?? "");
+  const where = (text: string) => {
+    const found: string[] = [];
+    const walk = (value: unknown, path: string) => {
+      if (typeof value === "string" && value.toLowerCase().includes(gone)) found.push(path);
+      else if (Array.isArray(value)) value.forEach((v, i) => walk(v, `${path}[${i}]`));
+      else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) walk(v, `${path}.${k}`);
+    };
+    try {
+      walk(JSON.parse(text), "$");
+    } catch {
+      if (text.includes(gone)) found.push("(raw)");
+    }
+    return found;
+  };
+  is("the sales read again: the copy kept holds their address nowhere (raw JSON searched)", where(raw), []);
+  is("nor the reading shown in the studio", where(JSON.stringify(afterErasure.value)), []);
+  is("the others are still there", raw.includes(still), true);
+  intents = [];
+
+  part("A reply read by position is refused unless it is whole (Codex E on #2111): never keep or name someone whose print may sit where nothing came back");
+  /** `work` with the reply to the first command `which` picks replaced by `reply` (a function: thrown). */
+  const answered = async <T>(which: (c: (string | number)[]) => boolean, reply: unknown, work: () => Promise<T>): Promise<T | Error> => {
+    const real = redis.pipeline;
+    let done = false;
+    redis.pipeline = async (batch) => {
+      const at = done ? -1 : batch.findIndex(which);
+      if (at < 0) return real(batch);
+      done = true;
+      if (typeof reply === "function") throw new Error("the database did not answer");
+      const answers = await real(batch);
+      answers[at] = reply;
+      return answers;
+    };
+    try {
+      return await work();
+    } catch (error) {
+      return error as Error;
+    } finally {
+      redis.pipeline = real;
+    }
+  };
+  const erasedA = normaliseEmail("ann.erased@example.com");
+  const erasedB = normaliseEmail("ben.erased@example.com");
+  await redis.pipeline([suppressCommand(listed.listId as string, erasedA), suppressCommand(listed.listId as string, erasedB)]);
+  const isLookup = (c: (string | number)[]) => c[0] === "HMGET" && c[1] === `nl:erased:${listed.listId}`;
+  const partial = await answered(isLookup, ["1"], () => suppressedAmong(listed.listId, [erasedA, erasedB]));
+  is("a partial reply ([\"1\"] for two addresses) is refused, not read as \"the second was never deleted\"", partial instanceof Error, true);
+  const notList = await answered(isLookup, "not-an-array", () => suppressedAmong(listed.listId, [erasedA, erasedB]));
+  is("a reply that is not a list is refused, not read as \"nobody was deleted\"", notList instanceof Error, true);
+  const oddEntry = await answered(isLookup, [null, { x: 1 }], () => suppressedAmong(listed.listId, [erasedA, erasedB]));
+  is("an entry that is neither nothing, text nor a number is refused", oddEntry instanceof Error, true);
+  const whole = await suppressedAmong(listed.listId, [erasedA, still, erasedB]);
+  is("a whole reply is read as before", [...whole].sort(), [erasedA, erasedB].sort());
+  const top = { buyers: { top: [erasedA, erasedB].map((email) => ({ email, cents: 100, orders: 1, last: 0, reference: "cs_x" })) } };
+  const filtered = await answered(isLookup, ["1"], () => withoutErasedBuyers(listed, top));
+  is("so the sales filter fails rather than keep them", filtered instanceof Error, true);
+  const booked2 = [erasedA, erasedB].map((email, i) => ({ session: `cs_s${i}`, start: Date.now() + 86_400_000, end: Date.now() + 90_000_000, product: "p1", email, name: "N", moves: 0 }));
+  const named2 = await answered(isLookup, "not-an-array", () => withoutErasedBookers(listed, booked2));
+  is("and the calendar's fails rather than name them", named2 instanceof Error, true);
+
+  // The step that checks and keeps a reading: its reply is the places of who was found, and nothing else.
+  checkouts = [checkout(erasedA, 9_900, 31), checkout(still, 1_900, 32)];
+  intents = [];
+  freshDay();
+  redis.run(["DEL", key]);
+  const isCopyStep = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:reading-copy:");
+  // The look before it misses them (as in the race), and the step's reply is not whole.
+  const looked = (c: (string | number)[]) => isLookup(c);
+  const realPipe = redis.pipeline;
+  let lookedOnce = false;
+  redis.pipeline = async (batch) => {
+    if (!lookedOnce && batch.some(looked)) {
+      lookedOnce = true;
+      const answers = await realPipe(batch);
+      return answers.map((a, i) => (looked(batch[i]) ? [null, null] : a));
+    }
+    return realPipe(batch);
+  };
+  const oddStep = await answered(isCopyStep, "OK", () => keptSales(listed, Date.now(), true)).finally(() => {
+    redis.pipeline = realPipe;
+  });
+  is("the step answering anything but places: nothing kept naming them, and nothing shown naming them", [String(redis.run(["GET", key]) ?? "").includes(erasedA), oddStep instanceof Error ? "error" : JSON.stringify(oddStep.value).includes(erasedA)], [false, false]);
+
+  // The calendar feed: the copy's step that cannot run is not a store that is gone, and a read that is not whole is nothing.
+  checkouts = [];
+  freshFeed();
+  const failedStep = await answered((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:calendar-copy:"), () => null, () => bookedCalendarFeed(owner, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] })));
+  is("the copy's step could not run: not \"gone\" (the address would answer 404), but nothing or the old copy", failedStep instanceof Error ? "error" : failedStep.state, "none");
+  freshFeed();
+  const oddKeep = await answered((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:calendar-copy:"), "weird", () => bookedCalendarFeed(owner, async () => ({ ics: "BEGIN:VCALENDAR\r\nX-ODD:1\r\nEND:VCALENDAR", listId: null, named: [] })));
+  is("its reply anything but 0, 1 or 2: the file made is not answered as kept", oddKeep instanceof Error ? "error" : oddKeep.state, "none");
+  freshFeed();
+  redis.run(["SET", feedKey, JSON.stringify({ at: Date.now(), ics: "BEGIN:VCALENDAR\r\nX-KEPT:1\r\nEND:VCALENDAR", ref: OWNER, sid: store.statsId }), "EX", 86_400]);
+  const isFeedRead = (c: (string | number)[]) => c[0] === "MGET" && c[1] === feedKey;
+  const shortRead = await answered(isFeedRead, [null], () => bookedCalendarFeed(owner, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] })));
+  is("the feed's read not whole: nothing answered, and the store not taken for gone (its copy stays)", [shortRead instanceof Error ? "error" : shortRead.state, redis.run(["GET", feedKey]) !== null], ["none", true]);
+  redis.run(["DEL", `nl:cal:pace:${store.statsId}`]);
+  const notListRead = await answered(isFeedRead, "not-an-array", () => bookedCalendarFeed(owner, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] })));
+  is("nor when it is not a list", [notListRead instanceof Error ? "error" : notListRead.state, redis.run(["GET", feedKey]) !== null], ["none", true]);
   done();
 }
 

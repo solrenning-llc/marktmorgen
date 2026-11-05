@@ -585,12 +585,15 @@ async function main(): Promise<void> {
   }
   // A count and its expiry go in one write (third round, L2): a request that
   // died between two writes left a count kept for ever. The window's requests
-  // and its signals alike, with NX so a set expiry is not moved.
+  // and its signals alike. The expiry is set by the count's first write, SET
+  // NX EX, so a set expiry is not moved, and never by an EXPIRE with an
+  // option, which a Redis or REST service may refuse (tests/letter-members.test.ts).
   sentPipelines.length = 0;
   await counted(() => signal(clicks.l, `192.0.2.${clickIp++}`));
   await counted(async () => { await isResting((await storeForHandle("joy"))!); });
-  const together = (prefix: string, add: string) => sentPipelines.some((list) => list.some((c) => c[0] === add && String(c[1]).startsWith(prefix)) && list.some((c) => c[0] === "EXPIRE" && String(c[1]).startsWith(prefix) && c[3] === "NX"));
-  is("a count of the window's signals and of its requests is written with its expiry, in one write", [together("nl:traffic:s:", "INCR"), together("nl:traffic:r:", "INCRBY")], [true, true]);
+  const together = (prefix: string, add: string) => sentPipelines.some((list) => list.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith(prefix) && c[2] === "0" && c[3] === "NX" && c[4] === "EX" && Number(c[5]) > 0) >= 0 && list.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith(prefix)) < list.findIndex((c) => c[0] === add && String(c[1]).startsWith(prefix)));
+  const optioned = sentPipelines.some((list) => list.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && String(c[1]).startsWith("nl:traffic:") && c.length > 3));
+  is("a count of the window's signals and of its requests is written with its expiry, in one write, and no EXPIRE takes an option", [together("nl:traffic:s:", "INCR"), together("nl:traffic:r:", "INCRBY"), optioned], [true, true, false]);
   // The help center says it, its figures from the rule (third round, M3).
   const helpText = JSON.stringify(HELP_SECTIONS);
   is("the help center says how many clicks, affiliates' visits and funnel steps are counted, and what happens past them", [helpText.includes(JSON.stringify(signalsWords()).slice(1, -1)), signalsWords().includes(countWords(SIGNALS_PER_VISIT * VISITS_INCLUDED.creator)), (helpText.match(/Clicks on your store's links, visits through an affiliate's link and steps of your page funnels are counted up to/g) ?? []).length >= 2], [true, true, true]);

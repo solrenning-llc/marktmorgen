@@ -1,8 +1,9 @@
 /**
  * A signal's count (lib/traffic.ts, takeSignal) is made only from Redis's own
- * answer to its two commands, INCR and EXPIRE NX: two replies, the first an
- * integer of at least one, the second 0 or 1 (CX-123, rule 24). Anything else
- * (a `true`, a text, a missing or extra item) is a count that cannot be made:
+ * answer to its two commands, SET NX EX (the count made with its expiry) and
+ * INCR: two replies, "OK" or null, then an integer of at least one, and
+ * exactly one when the SET made the count (CX-123, rule 24). Anything else (a
+ * `true`, a text, a missing or extra item) is a count that cannot be made:
  * nothing is written, and the count not made is written down (countGap).
  * Synthetic Redis (tests/redis-stub.ts), synthetic store.
  */
@@ -32,11 +33,11 @@ test("a signal's count from Redis's exact answer is taken, and the write runs", 
   assert.equal(await countGap(store), null);
 });
 
-for (const receipt of [[true, 1], ["1", 1], [1], [1, 1, 1], [1, "1"], [1, true], [null, 1], [1.5, 1]]) {
+for (const receipt of [[true, 1], ["1", 1], [1], [1, 1], ["OK"], ["OK", 1, 1], ["OK", "1"], ["OK", true], [null, "1"], [null, 0], ["OK", 2], [null, 1.5], [1, 0]]) {
   test(`a signal's count answered ${JSON.stringify(receipt)} is not made: nothing written, and written down`, async () => {
     const store = await seed();
     const original = redis.pipeline.bind(redis);
-    redis.pipeline = async (commands) => (commands[0]?.[0] === "INCR" ? (receipt as never) : original(commands));
+    redis.pipeline = async (commands) => (commands.some((c) => c[0] === "INCR") ? (receipt as never) : original(commands));
     let wrote = 0;
     let taken: boolean;
     try {
@@ -58,4 +59,24 @@ test("a key deleted takes its expiry with it, as in Redis: a count made again ge
   assert.deepEqual(await r.pipeline([["INCRBY", "count", 1], ["EXPIRE", "count", 60, "NX"]]), [1, 1]);
   assert.deepEqual(await r.pipeline([["DEL", "count"], ["TTL", "count"]]), [1, -2]);
   assert.deepEqual(await r.pipeline([["INCRBY", "count", 1], ["TTL", "count"], ["EXPIRE", "count", 60, "NX"]]), [1, -1, 1]);
+});
+
+test("a count is made with its expiry by SET NX EX, never by an EXPIRE with an option", async () => {
+  // EXPIRE NX is refused by a Redis or REST service that does not take
+  // options (tests/letter-members.test.ts): the count's first write sets the
+  // expiry instead, in the same pipeline.
+  const store = await seed();
+  const original = redis.pipeline.bind(redis);
+  const sent: (string | number)[][][] = [];
+  redis.pipeline = async (commands) => { sent.push(commands.map((c) => [...c])); return original(commands); };
+  try {
+    assert.equal(await takeSignal(store, async () => false), false);
+    assert.equal(await takeSignal(store), true);
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.equal(sent.flat().some((c) => String(c[0]).toUpperCase() === "EXPIRE" && c.length > 3), false);
+  const counts = sent.filter((list) => list.some((c) => c[0] === "INCR" || c[0] === "DECR"));
+  assert.ok(counts.length >= 3);
+  for (const list of counts) assert.ok(list.some((c) => c[0] === "SET" && c[2] === "0" && c[3] === "NX" && c[4] === "EX"), JSON.stringify(list));
 });

@@ -1,0 +1,47 @@
+{
+  "repository": "solrenning-llc/marktmorgen",
+  "pr": 2537,
+  "head": "22549a3be7e8a04737d5a8d8172503a17e7a0112",
+  "run": 41963473129,
+  "job": 127046523434,
+  "attempt": 1,
+  "configuredTimeoutMinutes": 35,
+  "firstLog": "2026-11-05T04:51:01.9214639Z",
+  "finalAllPassedLog": "2026-11-05T05:26:13.1597514Z",
+  "cancelledLog": "2026-11-05T05:26:13.2165162Z",
+  "observedSeconds": 2111.295,
+  "stageStartMarkers": [
+    {
+      "name": "install",
+      "time": "2026-11-05T04:51:07.7049148Z"
+    },
+    {
+      "name": "lint",
+      "time": "2026-11-05T04:51:19.0999954Z"
+    },
+    {
+      "name": "behavior",
+      "time": "2026-11-05T04:53:06.1651591Z"
+    },
+    {
+      "name": "build",
+      "time": "2026-11-05T05:05:13.9580841Z"
+    },
+    {
+      "name": "runtime-dependencies",
+      "time": "2026-11-05T05:07:27.8794042Z"
+    },
+    {
+      "name": "agreements-browser",
+      "time": "2026-11-05T05:07:28.0845387Z"
+    },
+    {
+      "name": "store-copy-browser",
+      "time": "2026-11-05T05:10:17.4206637Z"
+    }
+  ],
+  "interpretation": "The cancellation is compatible with the configured 35-minute ceiling; no failed assertion was found in the inspected final output. This is not proof that the provider's cancellation reason was a timeout.",
+  "rerunState": "One request for only this cancelled job was rejected with 403 because its parent workflow was still running/queued. No rerun was started. Wait for terminal run status, then retry this job once.",
+  "ciCost": "unknown, never zero",
+  "scope": "No workflow, timeout, assertion, product or head change; no manual cancellation."
+}

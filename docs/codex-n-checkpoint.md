@@ -280,3 +280,46 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 3. Os quatro heads antigos mantêm exatamente seus bloqueios/retries. Não abrir sexta unidade.
 4. Retorno de #2701 é revisão, não unidade: conferir apenas delta focal se o autor pedir; não alterar o ramo.
 5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração de preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+---
+
+## Retomada — 05/11/2026 20h29 Fortaleza — #2700 revisado; 7/9 com duas causas compartilhadas
+
+### Fonte retomada e leitura AV12
+
+- Esta retomada começou pelo checkpoint durável anterior `35e9cc15969bf4f24ba5f062037a30fb438cd054` (blob `1e24a29c6c7db5d3897f4324a369d59d3efc78b2`), que supera o commit antigo repetido no disparo.
+- Main observado uma vez: `0f139490d3fc79045fd370cd9b5478b64e2f69e5`.
+- Canal lido por `fetch_file` + `fetch_blob`; somente o delta posterior ao checkpoint N anterior foi inspecionado, conforme AV12. Blob corrente antes da escrita: `fc16f9ac2c8dcff6fd9265968d29e3f6c152d0ff`, 427.767 bytes.
+- Não apareceu nova atribuição/liberação para N, nem liberação A3 do #2544, nem entrega/liberação do triestado do #2674. A quinta vaga já está ocupada pelo #2700; nenhuma sexta unidade foi aberta.
+
+### Cinco produtos próprios preservados
+
+1. #2451/head `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável; 8/9; retry único verify `127163240735` esgotado. Nunca repetir.
+2. #2544/head `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; não editar/retry até liberação explícita A3 para cancel_paid25→27.
+3. #2608/head `8ac8975679fcb9a9c81bed065fc52a501c01904e`: oito SUCCESS; retry único verify `127378763596` CANCELLED no teto; falta qualificação explícita R2 aos 11 blobs.
+4. #2674/head `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: bloqueado pelo triestado request-guard. REDs/heads anteriores preservados; não tocar helper reservado.
+5. #2700/head EXATO `ef88733bebd83ab5aee71f0a455b751ed9541717`, tree `3f4e...`: RED remoto `bdbedc0f...` 7 verificações/5 falhas → focal 7/7; flow-conditions 32/32; tipos/lint/scanner verdes.
+
+### #2700 — revisão independente e matriz final
+
+- Revisão independente aplicável do Codex P no head exato: parecer `5793243766`, **SEM ACHADO / PODE ENTRAR após os nove agregadores exatos**.
+- Matriz terminal do head: **7 SUCCESS / 2 FAILURE**. Portanto NÃO incorporado.
+- Falha causal 1: `product-checks` / verify job `127582358033`, run `42123507565`. O único arquivo de teste falho foi `tests/pricing-optimization.test.ts`: artefato histórico stale, `input.plans.scale.coefYear.ai` 7642 contra cálculo 7643, e documento gerado stale. O #2700 não toca preço, scripts ou documentos dessa análise.
+- Falha causal 2: `accessibility-real-readers` / macOS job `127582128002`, run `42123507536`. Next compilou; o processo morreu depois por V8 heap OOM perto de 2 GiB. O peer Windows passou. O #2700 não toca build/leitores.
+- Comentário de diagnóstico publicado no PR: `6672225677`.
+- **Zero retry consumido no #2700**: ambas são causas-base/CI; repetir antes da correção compartilhada seria inútil. Nunca afrouxar asserção ou prazo.
+
+### Revisões preservadas
+
+- #2701 parecer `5793214419`: 1 MÉDIO + 1 LEVE; não tocar ramo do autor.
+- Reviews históricas preservadas: #2661/`5789936389`, #2601/`6654503257`, #2499/`6654647455`, #2637/`6663547913`.
+- SG2(27/30) continua só prova `3d4cb847`, bloqueada por #2270/#1969.
+
+### Próximo exato
+
+1. AV12: não sondar CI em rodadas. Acordar somente com novidade real no canal/PR.
+2. #2700: aguardar correção causal compartilhada no main; então integrar main uma única vez, repetir testes ligados/static e exigir revisão aplicável ao head final + NOVE agregadores NOVOS exatos. Não retry dos jobs antigos.
+3. #2451/#2544/#2608/#2674 mantêm os bloqueios e retries exatamente acima.
+4. Cinco unidades ocupadas; não abrir sexta. Revisão de terceiro só se estiver realmente livre, anunciada antes e sem duplicar.
+5. Merge próprio apenas `expected_head_sha` + UMA revisão sem grave/médio + NOVE agregadores exatos verdes (duas apenas se dinheiro sai). Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

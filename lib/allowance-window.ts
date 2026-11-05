@@ -127,16 +127,20 @@ function monthOfPeriod(period: BillingPeriod, cycle: Cycle, now: number): Allowa
 /**
  * Where the periods after a renewing one are counted from. Stripe counts every period from its anchor, not from the
  * last period's end: an anchor on the 29th to the 31st is cut to a short month's last day and comes back after it
- * (31 January, 28 February, 31 March). Of the period's two ends, the later day of the month is the anchor's (the
- * other may have been cut), so the k-th period after this one starts at addMonthsMs(anchor, offset + k * step) and
- * ends a step later, each cut to its month as Stripe cuts it.
+ * (31 January, 28 February, 31 March). The next period always begins at this one's end, the boundary Stripe gave.
+ * Only a whole period (exactly a step from its start, as Stripe cuts it) whose end fell on an earlier day than its
+ * start proves a cut end, and then the anchor is the start's day; any other period, a partial first one included
+ * (31 January to 15 February, before the first whole invoice), is anchored on its end (Codex H, #2269: inferring the
+ * anchor from the later day of either end put the next window on 28 February, after now, and a second allowance
+ * opened once the real period came). So the k-th period after this one starts at addMonthsMs(anchor, offset + k *
+ * step), the first of them at this one's end, and ends a step later, each cut to its month as Stripe cuts it.
  */
 function anchorOf(period: BillingPeriod, yearly: boolean): { anchor: number; offset: number; step: number } {
   const step = yearly ? 12 : 1;
   const startMs = period.start * 1000;
   const endMs = period.end * 1000;
-  const anchor = new Date(endMs).getUTCDate() >= new Date(startMs).getUTCDate() ? endMs : startMs;
-  return { anchor, offset: anchor === endMs ? 0 : step, step };
+  const cutEnd = addMonthsMs(startMs, step) === endMs && new Date(startMs).getUTCDate() > new Date(endMs).getUTCDate();
+  return cutEnd ? { anchor: startMs, offset: step, step } : { anchor: endMs, offset: 0, step };
 }
 
 /**
@@ -169,6 +173,8 @@ export function allowanceWindow(store: WindowFields, now = Date.now()): Allowanc
   const { anchor, offset, step } = anchorOf(period, cycle === "year");
   const start = addMonthsMs(anchor, offset);
   const end = addMonthsMs(anchor, offset + step);
+  // It begins at the period's end, by construction; a window that would begin after now is never answered (Codex H, #2269).
+  if (start !== period.end * 1000 || now < start || now >= end) return null;
   if (cycle === "year") return monthOfPeriod({ start: start / 1000, end: end / 1000, renews: true }, "year", now);
   return { id: day(start), start, end, billing: true };
 }

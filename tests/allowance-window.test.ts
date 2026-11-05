@@ -134,6 +134,12 @@ test("the window right after a period cut to February's end ends on the anchor's
   // A period not cut keeps a month from its own end: 15 February to 15 March, then to 15 April.
   const mid = paying(at(2027, 2, 15, 9), at(2027, 3, 15, 9));
   assert.equal(allowanceWindow(mid, at(2027, 3, 16))!.end, at(2027, 4, 15, 9));
+  // A partial first period (Codex H, #2269): 31 January to 15 February, before the first whole invoice. The next begins
+  // on its end, 15 February, and runs to 15 March; never 28 February to 31 March, which begins after now.
+  const partial = paying(at(2027, 1, 31, 9), at(2027, 2, 15, 9));
+  const afterPartial = allowanceWindow(partial, at(2027, 2, 16, 9))!;
+  assert.deepEqual([afterPartial.id, afterPartial.start, afterPartial.end], ["2027-02-15", at(2027, 2, 15, 9), at(2027, 3, 15, 9)]);
+  assert.deepEqual(windowAt(partial, at(2027, 3, 20, 9))?.start, at(2027, 3, 15, 9));
   // A yearly plan whose period began on a leap day: the next year begins on its cut end and its first month runs to 28 March.
   const yearly = paying(at(2024, 2, 29, 9), at(2025, 2, 28, 9), "year");
   const first = allowanceWindow(yearly, at(2025, 3, 1))!;

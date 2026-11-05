@@ -52,6 +52,30 @@ const membersKey = (id: string) => `nl:cm:${id}:m`;
 const dayOf = (ms: number) => Math.floor(ms / 86_400_000);
 
 /**
+ * Removes at most one point from each board in one Redis turn. Older races
+ * could leave a negative integer; the next removal repairs that value to
+ * zero. Non-integer or unsafe scores are unknown and nothing is changed.
+ */
+export const REMOVE_POINT = `-- marktmorgen:community-point-remove:v1
+local function score(key)
+  local raw = redis.call('ZSCORE', key, ARGV[1])
+  if raw == false then return 0 end
+  local value = tonumber(raw)
+  if not value or value ~= math.floor(value) or math.abs(value) > 9007199254740991 then return false end
+  return value
+end
+local total = score(KEYS[1])
+local today = score(KEYS[2])
+if total == false or today == false then return {-1, -1} end
+local function take(key, value)
+  if value < 0 then redis.call('ZADD', key, 0, ARGV[1]); return 0 end
+  if value == 0 then return 0 end
+  redis.call('ZINCRBY', key, -1, ARGV[1])
+  return 1
+end
+return {take(KEYS[1], total), take(KEYS[2], today)}`;
+
+/**
  * Gives a member a point, or takes one back. Only a member's own key earns:
  * the creator, and anything that is not a member key, is passed over.
  * All-time points never go below zero.
@@ -68,18 +92,13 @@ export async function award(id: string, who: string, delta: 1 | -1, owner: DataO
     ]);
     return;
   }
-  const [total, today] = await redisPipeline([
-    ["ZSCORE", allKey(id), who],
-    ["ZSCORE", day, who],
-  ]);
-  // A like taken back comes off the day it is taken back on when that day has
-  // a point to give, and off the all-time total always: the recent boards may
-  // stay a point high for a like given last week and taken back today, which
-  // is the kinder error of the two.
-  const writes: (string | number)[][] = [];
-  if (Number(total) > 0) writes.push(["ZINCRBY", allKey(id), -1, who]);
-  if (Number(today) > 0) writes.push(["ZINCRBY", day, -1, who]);
-  if (writes.length) await redisPipeline(writes);
+  // A like taken back comes off today only when today has a point to give;
+  // a like from last week can therefore leave a recent board one point high.
+  // Both decisions are made atomically so two presses cannot cross at zero.
+  const [reply] = await redisPipeline([["EVAL", REMOVE_POINT, 2, allKey(id), day, who]]);
+  if (!Array.isArray(reply) || reply.length !== 2 || reply.some((value) => value !== 0 && value !== 1)) {
+    throw new Error("Community points could not be removed");
+  }
 }
 
 /** Each member's all-time points; 0 for anybody with none. */

@@ -230,16 +230,23 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * Open/recovery repeats Redis/provider reads, so these are NOT a full call or
  * lifetime envelope. Activation remains blocked on missing lifecycle work
  * and unknown/rejected full retention/failure/cleanup costs.
- * Its accounting hooks remain unconnected to a payment worker. Their68-byte
+ * The protected-origin accounting contract has a68-byte
  * OCI/OC1 receipt horizon is ORIGINAL window end+400
  * days (at most767 from capture), first apply23 commands; the200-byte MEMORY
- * fixture is not universal storage coverage. The legacy45-day '1' marker's
- * priced part excludes this new path. Other effects can lose TTL after a
+ * fixture is not universal storage coverage. This is distinct from LIVE
+ * legacy checkout accounting: its first atomic application is23billed
+ * commands plus8KB of serialized Lua/keys/arguments/reply transfer, added
+ * explicitly below, and its47-byte key/68-byte receipt has
+ * KEY256 allocated for45days in store-data-registry. Replays keep the same
+ * absolute checkout-created deadline; requests that retry still have their
+ * existing request budget, not a new free retry allowance.
+ * Shared counter/index effects can lose TTL after a
  * partial Lua failure; the whole tail is unknown, not bounded by the receipt.
- * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
- * financial envelope or retention approval is changed/certified here.
+ * No PER_EMAIL coefficient, real review, quota protection or protected-origin
+ * financial envelope/retention approval is changed/certified here.
  */
-export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
+export const LEGACY_ORDER_ACCOUNTING = 23 * COMMAND + 8_192 * DB_BYTE;
+export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + LEGACY_ORDER_ACCOUNTING;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -733,6 +740,7 @@ export const COST_LINES: CostLine[] = [
       // A payment request's checkout is one order, admitted before Stripe's page opens and counted at its receipt (18 October 2026).
       { file: "lib/payment-requests.ts", names: ["admitOrders(store, 1, now, 1)"] },
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },
+      { file: "lib/orders.ts", names: ["countLegacyCheckout", "COMMIT_ORDER_CONFIRMATION", "SEEN_SECONDS"] },
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },
       // A cart's checkout reads the offers of each of its products, and what each bundle in it hands over, at most MAX_CART of each, to know whose offers follow it (556 [CT1], 1 and 2 November 2026): reads only, inside that order.
@@ -1451,7 +1459,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE,
-  "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE,
+  "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
   "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,
   "lib/payment-recovery.ts": STORE, "lib/podcast-access.ts": STORE, "lib/quiet-sales.ts": STORE, "lib/store-contact.ts": STORE,
   "lib/store-join.ts": STORE, "lib/team.ts": STORE, "lib/tier-switch.ts": STORE, "lib/waitlist.ts": STORE,

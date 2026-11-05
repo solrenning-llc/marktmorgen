@@ -55,7 +55,7 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
    await route.abort("blockedbyclient");
   });
   await initial.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
-  const control=initial.getByRole("button",{name:/^(Add|Edit) your profiles$/});
+  const control=initial.getByRole("button",{name:"Loading…",exact:true});
   await control.waitFor({state:"attached"});
   is("profile control says its handler is unavailable before hydration",await control.getAttribute("aria-disabled"),"true");
   is("profile control visibly reports preparation before hydration",(await control.innerText()).trim(),"Loading…");

@@ -50,6 +50,7 @@ async function main() {
   redis.clear();
   part("The producer's complete known and unknown-sales records remain readable");
   is("known stored figures roundtrip unchanged", await roundtrip(known), known);
+  is("a producer currency in uppercase remains unchanged", await roundtrip({ ...known, currency: "USD" }), { ...known, currency: "USD" });
   is("unknown sales remain explicit nulls without products or countries", await roundtrip(unavailable), unavailable);
   const zero = verifiedFrom({ ...data, totals: { d7: { ...window, visitors: 0, views: 0, checkouts: 0, sales: 0, cents: 0 }, d30: { ...window, visitors: 0, views: 0, checkouts: 0, sales: 0, cents: 0 }, d90: { ...window, visitors: 0, views: 0, checkouts: 0, sales: 0, cents: 0 }, all: window }, channels: { d7: [], d30: [], d90: [] }, products: [], salesCountries: { d7: [], d30: [], d90: [] } }, new Map(), now);
   is("confirmed zero is not confused with an unknown record", await roundtrip(zero), zero);

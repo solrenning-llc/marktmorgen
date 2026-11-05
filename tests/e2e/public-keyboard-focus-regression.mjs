@@ -15,6 +15,13 @@ function revealFixtureSource(){
  return {script:exports.REVEAL_WATCH,css:hidden+shown};
 }
 
+function helpFocusInsetSource(){
+ const css=readFileSync(new URL("../../app/help/focus-scroll.css",import.meta.url),"utf8");
+ assert.match(css,/scroll-padding-bottom:\s*3rem/,"help document keeps a native-focus bottom inset");
+ assert.match(css,/scroll-margin-block:\s*3rem/,"help disclosures carry the same native-focus clearance");
+ return css;
+}
+
 /** Disposable documents exercise the real helper with native keys, without app writes. */
 export async function checkPublicKeyboardFocusRegressions({browser}) {
  const context=await browser.newContext({viewport:{width:390,height:900},serviceWorkers:"block"});
@@ -52,10 +59,12 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
   const tall=await context.newPage();
   try{
    const source=revealFixtureSource();
+   const helpCss=helpFocusInsetSource();
    await tall.setViewportSize({width:1280,height:720});
-   await tall.setContent(`<!doctype html><html data-reveal="on"><head><style>${style}:root{--ease:linear}${source.css}</style></head><body><button>Before the section</button><div style="height:1000px"></div><section class="reveal" style="height:9305px"><div style="height:8500px"></div><button>Inside a tall section</button></section><button>After the section</button></body></html>`);
+   await tall.setContent(`<!doctype html><html data-reveal="on"><head><style>${style}:root{--ease:linear}${source.css}${helpCss}</style></head><body><button>Before the section</button><div style="height:1000px"></div><section class="reveal" data-help-section style="height:9305px"><div style="height:8500px"></div><details open data-help-item><summary>Inside a tall help section</summary></details></section><button>After the section</button></body></html>`);
    await tall.addScriptTag({content:source.script});
    assert.equal(await tall.locator(".reveal").evaluate(node=>getComputedStyle(node).opacity),"0","below-fold section starts unrevealed");
+   assert.deepEqual(await tall.locator("summary").evaluate(node=>({bottom:getComputedStyle(document.documentElement).scrollPaddingBottom,margin:getComputedStyle(node).scrollMarginBlock})),{bottom:"48px",margin:"48px"},"real help focus insets are active in the browser fixture");
    await checkPublicKeyboardCycle({page:tall,path:"real-reveal-tall-section",is});
    await tall.waitForFunction(()=>{
     const node=document.querySelector(".reveal"),style=getComputedStyle(node);

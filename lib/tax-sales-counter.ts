@@ -52,6 +52,10 @@ const invalid = (): TaxSalesCount => ({ status: "invalid" });
 function data(value: unknown, keys: readonly string[]): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return null;
+  // JSON consults inherited serialization hooks before own evidence fields.
+  // Inspect descriptors only: a hook may itself be an executable accessor.
+  if (Object.getPrototypeOf(value) !== null
+    && Object.getOwnPropertyDescriptor(Object.prototype, "toJSON")) return null;
   if (Reflect.ownKeys(value).length !== keys.length) return null;
   const fields = Object.getOwnPropertyDescriptors(value);
   const out: Record<string, unknown> = Object.create(null);
@@ -94,6 +98,8 @@ export function countTaxSales(value: unknown): TaxSalesCount {
       || ledger.coverageThrough < ledger.periodEnd) return unknown();
     const entries = ledger.entries;
     if (!Array.isArray(entries) || Object.getPrototypeOf(entries) !== Array.prototype) return unknown();
+    if (Object.getOwnPropertyDescriptor(Array.prototype, "toJSON")
+      || Object.getOwnPropertyDescriptor(Object.prototype, "toJSON")) return unknown();
     const length = Object.getOwnPropertyDescriptor(entries, "length")?.value;
     if (!Number.isSafeInteger(length) || length < 0 || length > MAX_TAX_SALES_ENTRIES) return unknown();
     if (Reflect.ownKeys(entries).length !== length + 1) return unknown();

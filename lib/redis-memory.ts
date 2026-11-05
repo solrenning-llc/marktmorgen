@@ -99,6 +99,18 @@ export class MemoryRedis {
     const name = String(rawName).toUpperCase();
     const key = String(rest[0] ?? "");
     const args = rest.slice(1).map(String);
+    // Redis checks command arity before looking up or changing any key.
+    const minimum = name === "HSET" || name === "ZADD" ? 4
+      : name === "DEL" || name === "MGET" ? 2
+      : ["HDEL", "SADD", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
+    if (command.length < minimum || (name === "HSET" && command.length % 2 !== 0)) {
+      throw new Error(`ERR wrong number of arguments for '${name.toLowerCase()}' command`);
+    }
+    if (name === "ZADD") {
+      let firstPair = 0;
+      while (["NX", "XX", "GT", "LT", "CH", "INCR"].includes(args[firstPair]?.toUpperCase())) firstPair += 1;
+      if ((args.length - firstPair) === 0 || (args.length - firstPair) % 2 !== 0) throw new Error("ERR syntax error");
+    }
     this.live(key);
 
     switch (name) {

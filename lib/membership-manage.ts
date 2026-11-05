@@ -93,12 +93,21 @@ const configKey = (account: string, language: unknown = "en") => {
 /** What Stripe's own pages are asked to speak (the portal's `locale`). */
 const stripeLocale = (store: Store) => LANGUAGES[parseLanguage(store.language)].stripe;
 
+/** An incomplete reply cannot prove that a request fits its funded limit. */
+function confirmedCount(reply: unknown): number | null {
+  if (!Array.isArray(reply) || reply.length !== 2 || !Object.hasOwn(reply, 0) || !Object.hasOwn(reply, 1)) return null;
+  const [set, count] = reply;
+  if (set !== "OK" && set !== null) return null;
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 1 ? count : null;
+}
+
 async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
+  const count = confirmedCount(await redisPipeline([
     ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+  ]));
+  if (count === null) throw new Error("Membership request limit could not be confirmed");
+  return count <= limit;
 }
 
 /** Whether members of this store can be offered the way out. */
@@ -307,11 +316,12 @@ export async function openPortal(store: Store, token: string, origin: string): P
   if (!grant || grant.a !== store.stripeAccountId) return { ok: false, reason: "expired" };
 
   const key = await opensKey(token);
-  const [, count] = await redisPipeline([
+  const count = confirmedCount(await redisPipeline([
     ["SET", key, "0", "EX", MANAGE_LINK_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  if (Number(count) > MAX_OPENS) return { ok: false, reason: "used" };
+  ]));
+  if (count === null) return { ok: false, reason: "error" };
+  if (count > MAX_OPENS) return { ok: false, reason: "used" };
 
   const session = async (configuration: string) =>
     onAccount(
@@ -524,11 +534,12 @@ export async function openCancel(store: Store, token: string, subscription: stri
   // The same counter as the portal button: one link opens Stripe a limited
   // number of times, whichever button is pressed.
   const key = await opensKey(token);
-  const [, count] = await redisPipeline([
+  const count = confirmedCount(await redisPipeline([
     ["SET", key, "0", "EX", MANAGE_LINK_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  if (Number(count) > MAX_OPENS) return { ok: false, reason: "used" };
+  ]));
+  if (count === null) return { ok: false, reason: "error" };
+  if (count > MAX_OPENS) return { ok: false, reason: "used" };
 
   try {
     const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);

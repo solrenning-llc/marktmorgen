@@ -1089,8 +1089,21 @@ export async function movedCount(catalog: string): Promise<number | null> {
 export async function runWrites(commands: Command[]): Promise<void> {
   for (let i = 0; i < commands.length; i += 400) {
     const slice = commands.slice(i, i + 400);
-    if (!repliesFor(await redisPipeline(slice), slice.length)) throw new UnknownReplyError("a product write");
+    const replies = repliesFor(await redisPipeline(slice), slice.length);
+    if (!replies || !slice.every((command, at) => writeAnswered(command, replies[at]))) throw new UnknownReplyError("a product write");
   }
+}
+
+/**
+ * Whether Redis answered one write as that write is answered when it was done (Codex T on #2690): an unconditional
+ * SET only with OK; DEL, HSET and HDEL only with a count (a safe integer, 0 or more); any other command with
+ * something that is not nil. A nil, a count as text or an error text is not a done write.
+ */
+function writeAnswered(command: Command, reply: unknown): boolean {
+  const name = String(command[0] ?? "").toUpperCase();
+  if (name === "SET") return command.length === 3 ? reply === "OK" : reply !== null && reply !== undefined;
+  if (name === "DEL" || name === "HSET" || name === "HDEL") return typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0;
+  return reply !== null && reply !== undefined;
 }
 
 /**

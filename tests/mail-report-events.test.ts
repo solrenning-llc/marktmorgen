@@ -12,6 +12,7 @@ import { MAIL_REPORT_TAG, RECORD_MAIL_REPORT, mailReportDay, noteMailReportEvent
 import { readSesEvent } from "@/lib/sns";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import * as callbackCosts from "./plan-cost-registry";
 
 const SECRET = Buffer.from("mail-report-events-test-secret");
 const STORE = "0123456789abcdef0123456789abcdef";
@@ -99,6 +100,26 @@ async function main() {
   await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }));
   is("a provider replay under another webhook id is still the same email outcome", (await mailReportDay(STORE, CAMPAIGN))?.temporaryBounces, 1);
   is("temporary delivery trouble never creates a pause or recipient mark", redis.keys().some((key) => key.startsWith(`nl:mail:paused:${STORE}`) || key.startsWith(`nl:mail:health:${STORE}:seen:`)), false);
+  for (const bounceType of ["Transient", "Undetermined"]) {
+    const event = readSesEvent(JSON.stringify({ eventType: "Bounce", bounce: { bounceType, bouncedRecipients: [{ emailAddress: "temporary@example.test" }] }, mail: { messageId: `ses_${bounceType}`, timestamp: EVENT_AT, tags } }));
+    is(`${bounceType} is explicitly non-permanent`, event?.permanent, false);
+    is(`${bounceType} records only a temporary SES outcome`, event && await recordSesEvent(event), "temporary");
+    const answer = await POST(announce("email.bounced", { email_id: `resend_${bounceType}`, to: ["temporary@example.test"], tags, bounce: { type: bounceType } }));
+    is(`${bounceType} records only a temporary Resend outcome`, await answer.json(), { ok: true, result: "temporary" });
+  }
+  is("neither temporary bounce type removes recipients or writes health/pause state", redis.keys().some(key => key.startsWith(`nl:mail:paused:${STORE}`) || key.startsWith(`nl:mail:health:${STORE}:seen:`)), false);
+  part("Every delivered email brings its own callback bill");
+  const price = (callbackCosts as unknown as { mailReportCallbackCost?: (deliveries: number, attempts: number, snsTransferPerGb: number | null) => { notices: number; invocations: number; redisCommands: number; totalUsd: number } | null }).mailReportCallbackCost;
+  is("callback costing is executable, not a null component placeholder", typeof price, "function");
+  if (price) {
+    const one = price(1, 1, 0.2);
+    is("one delivered email is one notice, one invocation and eleven Redis commands", one && [one.notices, one.invocations, one.redisCommands], [1, 1, 11]);
+    is("SNS, hosting, commands, transferred/retained bytes all cost money", Boolean(one && one.totalUsd > 0.0012), true);
+    is("the whole allowance is counted, with no provider free tier", price(10_000, 1, 0.2)?.totalUsd, one && one.totalUsd * 10_000);
+    is("a retry still costs an invocation and commands despite no second outcome", price(1, 101, 0.2)?.invocations, 101);
+    is("unknown regional SNS transfer never becomes a zero-cost callback", price(1, 1, null), null);
+    for (const bad of [-1, NaN, Infinity, 0.5]) is("invalid counts never acquire a price", price(bad, 1, 0.2), null);
+  }
   is("no key or report field contains a recipient address", [
     redis.keys().some((key) => key.includes("reader@") || key.includes("full@")),
     String(redis.run(["HGETALL", `nl:mail:health:${STORE}:${new Date().toISOString().slice(0, 10)}`])).includes("@"),

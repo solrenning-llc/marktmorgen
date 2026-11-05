@@ -29,33 +29,29 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const HOUR = 3_600_000;
 const realNow = Date.now;
 let shift = 0;
 Date.now = () => realNow() + shift;
 
-const sent: { to: string; subject: string; html: string; text: string }[] = [];
 let sessions: Record<string, unknown>[] = [];
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (url.hostname === "api.resend.com") {
-    type Sent = { to: string | string[]; subject: string; html?: string; text?: string };
-    const body = JSON.parse(String(init?.body)) as Sent | Sent[];
-    const all = Array.isArray(body) ? body : [body];
-    for (const m of all) sent.push({ to: [m.to].flat()[0], subject: m.subject, html: m.html ?? "", text: m.text ?? "" });
-    return json(Array.isArray(body) ? { data: all.map((_, i) => ({ id: `email_${sent.length}_${i}` })) } : { id: `email_${sent.length}` });
-  }
-  if (url.pathname === "/v1/checkout/sessions") return json({ object: "list", data: sessions, has_more: false });
-  return json({ object: "list", data: [], has_more: false });
-}) as typeof fetch;
-
-const to = (subject: string) => sent.filter((m) => m.subject === subject).map((m) => m.to).sort();
+const mail = installSesMailFixture({
+  fallback: (input) => {
+    const url = new URL(String(input));
+    const data = url.pathname === "/v1/checkout/sessions" ? sessions : [];
+    return new Response(JSON.stringify({ object: "list", data, has_more: false }));
+  },
+});
+const to = (subject: string) =>
+  mail.ses.filter((message) => message.subject === subject).flatMap((message) => message.to).sort();
 const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   process.env.STRIPE_SECRET_KEY = "sk_test_conditions_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_conditions_only_a_stand_in";
 
@@ -189,8 +185,8 @@ async function main(): Promise<void> {
   const cf = clicksFlow.flows.at(-1)!;
   for (const email of ["gus@example.com", "hal@example.com"]) await enroll(store, email, { joined: false, productId: guide.product.id });
   await run();
-  const toGus = sent.find((m) => m.to === "gus@example.com" && m.subject === "The guide, and the course")!;
-  const toHal = sent.find((m) => m.to === "hal@example.com" && m.subject === "The guide, and the course")!;
+  const toGus = mail.ses.find((m) => m.to.includes("gus@example.com") && m.subject === "The guide, and the course")!;
+  const toHal = mail.ses.find((m) => m.to.includes("hal@example.com") && m.subject === "The guide, and the course")!;
   const gusLink = new URL(toGus.html.match(/href="([^"]+\/p\/[^"]+)"/)![1].replace(/&amp;/g, "&"));
   const halLink = new URL(toHal.html.match(/href="([^"]+\/p\/[^"]+)"/)![1].replace(/&amp;/g, "&"));
   const gusToken = (await row("gus@example.com"))!.t;
@@ -238,6 +234,7 @@ async function main(): Promise<void> {
   is("a buyer who checked both boxes at checkout", [withClicks, Boolean((await row("kai@example.com"))?.clicks)], ["done", true]);
 
   Date.now = realNow;
+  mail.restore();
   done();
 }
 

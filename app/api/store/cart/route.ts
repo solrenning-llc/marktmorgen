@@ -294,7 +294,10 @@ export async function POST(request: NextRequest) {
   const fit = products.length === ids.length && products.every((p) => cartable(p) && p.fields.length === 0 && !coming.soon.has(p.id));
   if (!fit) return away(`/@${store.handle}?cart=changed#cart`);
   for (const product of products) {
-    if (await outOfKeys(store, product).catch(() => false)) return away(`/@${store.handle}?cart=changed#cart`);
+    // A key count that cannot be read never sells (SG2, finding 12): back to the cart to try again, nothing charged.
+    const out = await outOfKeys(store, product).catch(() => null);
+    if (out === null) return away(`/@${store.handle}?cart=error#cart`);
+    if (out) return away(`/@${store.handle}?cart=changed#cart`);
   }
 
   try {
@@ -323,7 +326,7 @@ export async function POST(request: NextRequest) {
       via,
       digitalConsent,
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,
-    }));
+    }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused);
     // Sold out since the cart was opened: back to it, which says which; busy or unreadable: nothing was charged, try again.
     if (!holding.ok) return away(`/@${store.handle}?cart=${holding.reason === "soldout" ? "changed" : "error"}#cart`);
     const opened = holding.value;

@@ -238,6 +238,34 @@ export async function forgetPointsPerson(id: string, who: string, now = Date.now
   return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
 }
 
+const STORED_PRODUCT = /^[a-z0-9]{6,40}$/;
+
+function storedPoints(value: unknown): number | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error("Incomplete community points record");
+  const points = Number(value);
+  if (!Number.isSafeInteger(points)) throw new Error("Incomplete community points record");
+  return points;
+}
+
+function storedRewards(value: unknown): Record<string, string> {
+  if (!Array.isArray(value) || value.length % 2 !== 0 || value.length > MAX_REWARDS * 2) {
+    throw new Error("Incomplete community points record");
+  }
+  const rewards: Record<string, string> = {};
+  for (let i = 0; i < value.length; i += 2) {
+    const product = value[i];
+    const at = value[i + 1];
+    if (typeof product !== "string" || !STORED_PRODUCT.test(product) || typeof at !== "string" || !/^(0|[1-9][0-9]*)$/.test(at)) {
+      throw new Error("Incomplete community points record");
+    }
+    const reachedAt = Number(at);
+    if (!Number.isSafeInteger(reachedAt)) throw new Error("Incomplete community points record");
+    rewards[product] = at;
+  }
+  return rewards;
+}
+
 /**
  * One member's points, for the copy of their data (619 [SZ3],
  * lib/person-copy.ts): the all-time total, each kept day's, and the rewards
@@ -247,13 +275,14 @@ export async function pointsRecordOf(id: string, who: string, now = Date.now()):
   if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return { total: 0, days: [], rewards: {} };
   const today = dayOf(now);
   const dayList = Array.from({ length: DAYS_KEPT + 1 }, (_, i) => today - i);
-  const [total, unlocked, ...days] = await redisPipeline([["ZSCORE", allKey(id), who], ["HGETALL", unlockedKey(id, who)], ...dayList.map((day) => ["ZSCORE", dayKey(id, day), who])]);
-  const flat = Array.isArray(unlocked) ? unlocked.map(String) : [];
-  const rewards: Record<string, string> = {};
-  for (let i = 0; i + 1 < flat.length; i += 2) rewards[flat[i]] = flat[i + 1];
+  const replies = await redisPipeline([["ZSCORE", allKey(id), who], ["HGETALL", unlockedKey(id, who)], ...dayList.map((day) => ["ZSCORE", dayKey(id, day), who])]);
+  if (!Array.isArray(replies) || replies.length !== dayList.length + 2) throw new Error("Incomplete community points record");
+  const total = storedPoints(replies[0]);
+  const rewards = storedRewards(replies[1]);
+  const days = replies.slice(2).map(storedPoints);
   return {
-    total: Math.max(0, Number(total) || 0),
-    days: dayList.flatMap((day, i) => (days[i] === null || days[i] === undefined ? [] : [{ day, points: Number(days[i]) || 0 }])),
+    total: total ?? 0,
+    days: dayList.flatMap((day, i) => (days[i] === null ? [] : [{ day, points: days[i] }])),
     rewards,
   };
 }

@@ -99,6 +99,18 @@ export class MemoryRedis {
     const name = String(rawName).toUpperCase();
     const key = String(rest[0] ?? "");
     const args = rest.slice(1).map(String);
+    // Redis checks command arity before looking up or changing any key.
+    const minimum = name === "HSET" || name === "ZADD" ? 4
+      : name === "DEL" || name === "MGET" ? 2
+      : ["HDEL", "SADD", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
+    if (command.length < minimum || (name === "HSET" && command.length % 2 !== 0)) {
+      throw new Error(`ERR wrong number of arguments for '${name.toLowerCase()}' command`);
+    }
+    if (name === "ZADD") {
+      let firstPair = 0;
+      while (["NX", "XX", "GT", "LT", "CH", "INCR"].includes(args[firstPair]?.toUpperCase())) firstPair += 1;
+      if ((args.length - firstPair) === 0 || (args.length - firstPair) % 2 !== 0) throw new Error("ERR syntax error");
+    }
     this.live(key);
 
     switch (name) {
@@ -122,6 +134,21 @@ export class MemoryRedis {
           this.run(["EXPIRE", notes, seconds]);
           this.run(["SADD", who, person]);
           this.run(["EXPIRE", who, seconds]);
+          return 1;
+        }
+        // DR1: one provider receipt and its campaign counter, atomically.
+        if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, daily, receipt, aggregate, count, expiry, limit] = args;
+          const type = this.run(["TYPE", daily]);
+          if (type !== "none" && type !== "hash") return -1;
+          const old = this.run(["HGET", daily, receipt]);
+          const total = this.run(["HGET", daily, aggregate]);
+          if (total !== null && (!/^(0|[1-9][0-9]*)$/.test(String(total)) || Number(total) > 1_000_000_000)) return -1;
+          if (old !== null) return old === count && total !== null && Number(total) >= Number(count) ? 2 : -1;
+          if (Number(this.run(["HLEN", daily])) + (total === null ? 2 : 1) > Number(limit)) return -1;
+          this.run(["HSET", daily, receipt, count]);
+          this.run(["HINCRBY", daily, aggregate, count]);
+          this.run(["EXPIREAT", daily, expiry]);
           return 1;
         }
         // CX-67: existing exposure reservation used by held-store company work.
@@ -197,6 +224,14 @@ export class MemoryRedis {
           const [, lock, target, token, value] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", target, value]);
+          return 1;
+        }
+        // The customer voice's summary, written only while its reading's lock is its own (lib/customer-voice.ts, VOICE_KEEP).
+        if (key.startsWith("-- marktmorgen:voice-keep:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lock, target, token, value, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", target, value, "EX", seconds]);
+          this.run(["DEL", lock]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:fenced-set-new:v1\n") && args[0] === "2" && args.length === 5) {
@@ -427,6 +462,38 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/calendar-sync.ts, KEEP_COPY: the feed's copy written only while the store's calendar settings exist, and
+        // only when nobody it names was deleted from the store (their prints in KEYS[3]); one was: the copy goes, 2.
+        if (key.startsWith("-- marktmorgen:calendar-copy:v2\n") && args[0] === "3" && args.length >= 6) {
+          const [, settings, copy, erased, value, seconds, ...prints] = args;
+          this.live(settings);
+          this.scriptCalls += 1;
+          if (!this.data.has(settings)) return 0;
+          if (prints.length) {
+            this.scriptCalls += 1;
+            const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+            if (found.some((one) => one !== null)) {
+              this.scriptCalls += 1;
+              this.run(["DEL", copy]);
+              return 2;
+            }
+          }
+          this.scriptCalls += 1;
+          this.run(["SET", copy, value, "EX", seconds]);
+          return 1;
+        }
+        // lib/store-readings.ts, READING_COPY: a reading kept only when nobody it names was deleted from the store;
+        // the places of those who were answered, and the copy gone.
+        if (key.startsWith("-- marktmorgen:reading-copy:v1\n") && args[0] === "2" && args.length >= 6) {
+          const [, copy, erased, value, seconds, ...prints] = args;
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+          const gone = found.flatMap((one, i) => (one !== null ? [i + 1] : []));
+          this.scriptCalls += 1;
+          if (gone.length) this.run(["DEL", copy]);
+          else this.run(["SET", copy, value, "EX", seconds]);
+          return gone;
+        }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
           this.live(target);
@@ -585,6 +652,33 @@ export class MemoryRedis {
           return typeof before === "string" ? [1, before] : [1];
         }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
+        // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
+        if (key.startsWith("-- marktmorgen:api-key-record-swap:v1\n") && args[0] === "1" && (args.length - 2) % 3 === 0) {
+          const [, list, ...triples] = args;
+          const changed: string[] = [];
+          for (let i = 0; i + 2 < triples.length; i += 3) {
+            if (this.run(["HGET", list, triples[i]]) !== triples[i + 1]) continue;
+            this.run(["HSET", list, triples[i], triples[i + 2]]);
+            changed.push(triples[i]);
+          }
+          return changed;
+        }
+        // lib/api-keys.ts HOLD_SWAP: each field still in the list, whose hold is one of the allowed, takes the new one.
+        if (key.startsWith("-- marktmorgen:api-hold-swap:v1\n") && args[0] === "2" && args.length >= 5) {
+          const [, holds, list, next, rawCount, ...rest] = args;
+          const count = Number(rawCount);
+          const fields = rest.slice(0, count);
+          const allowed = rest.slice(count);
+          const changed: string[] = [];
+          for (const field of fields) {
+            if (Number(this.run(["HEXISTS", list, field])) !== 1) continue;
+            const now = this.run(["HGET", holds, field]);
+            if (!allowed.includes(typeof now === "string" ? now : "")) continue;
+            this.run(next === "" ? ["HDEL", holds, field] : ["HSET", holds, field, next]);
+            changed.push(field);
+          }
+          return changed;
+        }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
           const n = Number(this.data.get(args[1]) ?? "0") || 0;
@@ -663,6 +757,23 @@ export class MemoryRedis {
             this.data.set(listKey, kept);
           }
           return removed;
+        }
+        // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
+        if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, room, target, limit, month, size, json] = args;
+          const taken = this.storeData([room, limit, "0", month, "s", "card", size]);
+          if (Array.isArray(taken) && taken[0] === 1) {
+            this.data.set(target, json);
+            this.until.delete(target);
+          }
+          return taken;
+        }
+        if (key.startsWith("-- marktmorgen:card-drop:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, room, target, limit, month, seen] = args;
+          const held = this.run(["GET", target]);
+          if ((typeof held === "string" ? held : "") !== seen) return [2, 0];
+          if (typeof held === "string") this.run(["DEL", target]);
+          return this.storeData([room, limit, "1", month, "s", "card", "0"]);
         }
         if (key.startsWith("-- marktmorgen:path-write:v1\n")) {
           const count=Number(args[0]);

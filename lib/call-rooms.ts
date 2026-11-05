@@ -40,7 +40,7 @@
  */
 import { whereOf } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type CallSetup, isGroup, roomFor } from "@/lib/call-setup";
+import { type CallSetup, cleanRoom, isGroup, roomFor } from "@/lib/call-setup";
 import { callScope, givenLink, parseRecord, recordKey } from "@/lib/meet-records";
 import { bookingWords } from "@/lib/buyer-words/booking";
 
@@ -90,7 +90,12 @@ function storedMeetingLink(raw: string | null, scope: string): string | null {
     const record = parseRecord(raw);
     if (!record || record.scope !== scope || typeof value.gone !== "boolean" ||
       typeof value.link !== "string" || value.link !== record.link) throw unreadableRooms();
-    return givenLink(record);
+    const link = givenLink(record);
+    if (link) {
+      const room = cleanRoom(link);
+      if (room === null || room === "bad") throw unreadableRooms();
+    }
+    return link;
   } catch {
     throw unreadableRooms();
   }

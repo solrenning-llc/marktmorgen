@@ -1,18 +1,18 @@
 # Codex Q continuity — 2026-11-05
 
-This is an engineering continuity checkpoint, not a merge/deployment or production-readiness claim. Start from the exact remote heads below; do not recreate these PRs or proofs. Five own product units are open. No sixth unit until one closes. Independent reviews do not count toward that limit.
+This is an engineering continuity checkpoint, not a merge/deployment or production-readiness claim. Start from the exact remote heads below; do not recreate these PRs or proofs. Four own product units remain open after #2448 merged in this work period. The ceiling is five; do not open a sixth product. Independent reviews do not count toward that limit.
 
 ## Current products
 
 | PR | Branch | Exact head | Review / remaining work |
 | --- | --- | --- | --- |
 | [2438](https://github.com/solrenning-llc/marktmorgen/pull/2438) | codex/q-contacts-read-evidence | 0e9a7b52aa2048f2b2b3b289f2ef600e8cab553f | J: SEM ACHADO / PODE ENTRAR, review5779689854. Nine final green checks required; coordinated reservation issue below. |
-| [2448](https://github.com/solrenning-llc/marktmorgen/pull/2448) | codex/q-erasure-store-evidence | e688593dbb7fb26fd5d584d0ea1ad4e62e00e705 | D2: SEM ACHADO / PODE ENTRAR, review5779620544. Nine final green checks required. |
+| [2448](https://github.com/solrenning-llc/marktmorgen/pull/2448) | codex/q-erasure-store-evidence | e688593dbb7fb26fd5d584d0ea1ad4e62e00e705 | **MERGED by Q** after D2 review5779620544 and 9/9 exact-head greens. Merge commit807e372f06b311d202b2f3aae3e8f3d024f6618e. |
 | [2535](https://github.com/solrenning-llc/marktmorgen/pull/2535) | codex/q-product-update-erasure-evidence | 1be4b3fd41366c11d70b98139ec5da78d8c02815 | AA's queue MEDIUM repaired, return requested in comment6649459112. Await exact-head rereview and nine final green checks. |
 | [2538](https://github.com/solrenning-llc/marktmorgen/pull/2538) | codex/q-review-request-erasure-evidence | 9fa4a700734c81b1b3d9c7e15bcc162396ae974e | J: SEM ACHADO / PODE ENTRAR, review5779787934. Nine final green checks required. |
 | [2541](https://github.com/solrenning-llc/marktmorgen/pull/2541) | codex/q-erasure-list-evidence | 0e960adb85e549319ad67076927e957769187534 | J: SEM ACHADO / PODE ENTRAR, review5779764553. Nine final checks required. |
 
-No product was merged in this work period. Fresh status on 2026-11-05 at about04:42 UTC:2438 has nine pending/queued workflows;2448,2538 and2541 have nine queued workflows each;2535 has nine pending workflows. These are NOT green aggregators. Never cancel/rerun queued CI or move a head merely to escape the queue.
+#2448 was merged in this work period at commit807e372f06b311d202b2f3aae3e8f3d024f6618e; channel proof commit039cc4de9004611160d93692deab6a9fa08e217a. Fresh status on 2026-11-05 at about05:47 UTC:2438 has8 success+1 queued;2535 has4 success+2 in progress+3 queued;2538 has7 success, the one allowed unrelated macOS VoiceOver reader-job rerun in progress, and its product aggregator failed before that retry completed;2541 has8 success+1 queued. Do not count pending/queued/in-progress/failed as green. Never cancel/rerun queued CI or move a head merely to escape the queue. The #2538 failed macOS job had all52 unit+10 reset tests green, Guidepup installed, then VoiceOver could not start; only job127049998162 was rerun once under CX122. Wait for it before deciding whether the dependent aggregator needs its own allowed retry.
 
 ##2438 — contact imports and uncertain writes
 
@@ -32,9 +32,9 @@ Previous real Redis7.4.2 evidence remains: original erasure journey27, exact Lua
 
 **Reservation coordination:** Claude1 explicitly released ONLY app/api/store/mail/route.ts action=import and components/email-studio.tsx paste-result handler at01h05 in the channel. All changes stay inside those scopes. The coarse reservation checker still sees the entire email-studio file reserved by C4. This was reported to Claude1 for documentary reconciliation; do not change/bypass the checker or edit the reservation docs yourself. J's may-merge opinion requires the final coordinated green check too.
 
-##2448 — truthful deletion scope and retry page
+##2448 — MERGED: truthful deletion scope and retry page
 
-A store lookup failure stays in later, retains its grant and cannot become done. Preview refuses partial scope. The page distinguishes unavailable from expired, retains token/verified receipt and offers a native retry GET before a known-scope confirmation.
+Merged by Q at exact head e688593dbb7fb26fd5d584d0ea1ad4e62e00e705 after 9/9 exact-head workflow success and D2's qualifying no-finding review5779620544. Merge result807e372f06b311d202b2f3aae3e8f3d024f6618e. A store lookup failure stays in later, retains its grant and cannot become done. Preview refuses partial scope. The page distinguishes unavailable from expired, retains token/verified receipt and offers a native retry GET before a known-scope confirmation.
 
 D2 found adjacent grant parsing defects; repaired at e688 (do NOT restore the old e13f head). Only exact GET[null] means absent preview. Confirmation requires an exact GET/TTL pair, null/-2 for gone, or a whole nonempty bounded scope with valid unique store ids and positive safe integer TTL. Malformed/empty/mixed/duplicate/oversized scope or unknown TTL stays pending without SET/DEL of the grant or done/zero certification. Existing valid TTL behavior remains; unknown never invents an hour.
 
@@ -72,11 +72,17 @@ RED ba9231a3de6f50bd562def936ffa0de37123322c:17/16 failures, valid-zero/count co
 
 2543 exact head38fad0463cac27e4cd46e2814597dd6772663f1f: SEM ACHADO / PODE ENTRAR with nine final checks. Review5779979082; channel result commitf69708e8ebe52653fdf878b962143f635db28055. Read both complete changed files plus opening/fee sources. Durable author RED83ea3c021a6c54ee2e0c0749736e98a73e90af5c reproduced4/2 failures (two controls); reviewed head4/4. Seven linked groups added56 passing checks. Next typegen, global TypeScript with incremental disabled, directed lint, scanner3602/0 and diff check passed. Closed metadata uses PREVIEW_LINE without claiming paid checkout/payment routing; synthetic open state preserves the old text. No flag/gate/price/limit/commission/IO/data change. Home-page metadata reserved by K2 is explicitly outside the PR/opinion. No full production build, real browser/search crawler, hosted deployment, external provider or accessibility session was run. T's product branch/reservation/CI remained untouched.
 
+## Independent review completed for T — #2565 blocked
+
+2565 exact head5100842c9fd953b9a14a00b5ed84a0ca9708a53d: **1 MEDIUM, NOT APPROVED**, review5780403354. Final diff is only two queue lines plus the113-line study and100-line test; the complete queue was restored. Author RED6c626a106 fails7/7 before the study exists; exact head passes study7/7, attribution23/23+19/19, embed70/70 and reservation15/15+1 expected skip. Official EDPB/ANPD/ICO/CPPA/W3C/Whop sources support the broad consent/refusal/minimization/attribution boundaries.
+
+Remaining MEDIUM: the study prohibits names/emails but permits cleaned campaign values and requires reuse of lib/embed-sites.ts. That sanitizer retains alice@example.com as aliceexample.com, so allowlisted keys, punctuation cleaning and a length bound do not prevent personal data in the value. Durable RED proof codex/q-review-2565-campaign-privacy-proof/1a52fc273dc6d826c57933e05f3efbe146d0dea0 has one control pass and one policy failure. T must require campaign values themselves to reject/redact personal-data-like and high-entropy identifiers with RED before the study may enter. Channel report commit039cc4de9004611160d93692deab6a9fa08e217a. Do not repeat this review; return only on a corrective exact head.
+
 ## Rules and continuation
 
 1. Read fresh main CLAUDE/AGENTS, reservations, Codex inbox and coordination channel (solrenning-llc/repo-id-transfer-test, para-claude-1, messages.md). Latest CX122/123/126 apply. New reservations are a RESERVA channel line only. Old doc PRs2433/2442/2458/2488/2506 remain INTACT for Claude1; do not update/merge/close them. Coordinator head78c0 on2433 must not be overwritten.
 2. User says if an automated continuation arrives while this conversation already works, end ONLY the duplicate continuation, without stopping/duplicating active work.
-3. Five own product units, no sixth. While CI/review waits, perform announced independent reviews or repair own findings. One qualified independent review suffices unless outgoing money (two). Only author merges own products after exact final nine greens and review. No bypass/direct main push. No head churn just for pending CI. No manual cancellation/rerun of queued jobs. One unrelated failed job rerun only once per rules.
+3. Four own product units are open after #2448 merged; at most one new own product may be opened after a fresh free-file check and RESERVA channel line, never a sixth. While CI/review waits, perform announced independent reviews or repair own findings. One qualified independent review suffices unless outgoing money (two). Only author merges own products after exact final nine greens and review. No bypass/direct main push. No head churn just for pending CI. No manual cancellation/rerun of queued jobs. One unrelated failed job rerun only once per rules.
 4. No prices, visible limits, commissions, owner flags/gates, terms, accounts, provider credentials/operations, external contacts or real personal data. Unknown cost is not zero. Every paid operation admitted first. Shared registries/MemoryRedis only own additions; no foreign changes.
 5. Rule30 candidates already reported, NOT new proven findings: checkout-recovery381–394 (RESERVED Claude2/#1730; report only), waitlist354–356 HDEL Number(n)||0, api-keys80/102/109/127/142, two-step106/415. suppression.ts belongs to C4/#2111, untouched. Do not duplicate Y or edit occupied callers; Claude1 assigns owners.
 6. Channel append only with fresh content/SHA;409/internal GitHub error => retry after2min. If repeatedly blocked, preserve the pending message in an own-branch commit. Channel was truncated by unrelated work; Y/G preserved history and Claude1 coordinates restoration. Never overwrite it with an old snapshot.
@@ -90,4 +96,4 @@ npm dependencies installed. Scratch runners /tmp/codex-q-run-tests.mjs and per-w
 
 CLI git fetch works; push lacks credentials. Use GitHub connector blobs/trees/commits/expected-head ref updates. Never force another head or edit another branch. For large files, stdout may silently truncate: apply small unique grouped patches to the exact remote baseline in JS, create_blob, compare SHA with local git hash-object. All published blobs/trees above were verified. Metadata/checks may move after this snapshot: re-read own PR state before merging.
 
-Next: obtain AA's exact-head return on2535, resolve the coordinator-owned2438 reservation check, then merge each own product only with its final nine greens. Preserve FOUR already qualified may-merge opinions:2438/J,2448/D2,2538/J,2541/J. No all-clear/production claim while these remain.
+Next: obtain AA's exact-head return on2535, resolve the coordinator-owned2438 reservation check, and wait for exact final workflow results on2438/2538/2541. #2448 is already merged; do not touch its former head. Preserve THREE open qualified may-merge opinions:2438/J,2538/J,2541/J. No all-clear/production claim while the four open products remain.

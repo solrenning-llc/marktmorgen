@@ -125,7 +125,8 @@ async function main() {
   redis.clear();
   process.env.RESEND_WEBHOOK_SECRET = `whsec_${SECRET.toString("base64")}`;
   part("CX-112: missing reviewed admission cannot spend on a report");
-  is("the production report admission is explicitly unknown", (reportCheckpoint as unknown as { CURRENT_MAIL_REPORT_ADMISSION?: unknown }).CURRENT_MAIL_REPORT_ADMISSION, null);
+  is("the production report admission is explicitly unknown", reportCheckpoint.CURRENT_MAIL_REPORT_ADMISSION, null);
+  is("the cost registry cannot claim a different admission", callbackCosts.MAIL_REPORT_COST_COMPONENTS.reviewedAdmission, reportCheckpoint.CURRENT_MAIL_REPORT_ADMISSION);
   const checkpointPipeline = redis.pipeline.bind(redis);
   const checkpointCommands: (string | number)[][] = [];
   redis.pipeline = async commands => { checkpointCommands.push(...commands); return checkpointPipeline(commands); };
@@ -134,155 +135,104 @@ async function main() {
       is(`an unreviewed ${outcome} cannot record a report`, await noteMailReportEvent(STORE, CAMPAIGN, outcome, 1, `ses:unreviewed-${outcome}`, Date.now()), false);
     }
     is("a direct report writer without admission makes zero Redis requests", checkpointCommands, []);
-    await mailReportDay(STORE, CAMPAIGN);
+    is("an unavailable report is unknown, never four zero counts", await mailReportDay(STORE, CAMPAIGN), null);
     is("an unreviewed report reader also makes zero Redis requests", checkpointCommands, []);
   } finally {
     redis.pipeline = checkpointPipeline;
     redis.clear();
   }
-  is("an email with no recorded provider outcome is unavailable", await mailReportDay(STORE, CAMPAIGN), null);
 
-  part("One shared email identity goes to the providers");
-  is(
-    "the report tag is shared by the whole email and contains no recipient",
-    healthTags({ sid: STORE, listId: LIST }, true, CAMPAIGN),
-    { nl_store: STORE, nl_list: LIST, [MAIL_REPORT_TAG]: CAMPAIGN },
-  );
-  is(
-    "an arbitrary provider tag cannot create a report field",
-    healthTags({ sid: STORE, listId: LIST }, true, "reader@example.test"),
-    { nl_store: STORE, nl_list: LIST },
-  );
-
-  part("Amazon events retain their distinct meanings");
-  is(
-    "delivery recipients are read without being retained in the report identity",
-    readSesEvent(JSON.stringify({ eventType: "Delivery", delivery: { recipients: ["reader@example.test"] }, mail: { messageId: "ses_delivery_1", tags: { ...tags, other: ["x"] } } })),
-    { kind: "delivered", permanent: false, recipients: ["reader@example.test"], tags: { ...tags, other: "x" }, messageId: "ses_delivery_1" },
-  );
-  is(
-    "a transient bounce remains temporary",
-    readSesEvent(JSON.stringify({ eventType: "Bounce", bounce: { bounceType: "Transient", bouncedRecipients: [{ emailAddress: "full@example.test" }] }, mail: { messageId: "ses_bounce_1", tags } })),
-    { kind: "bounced", permanent: false, recipients: ["full@example.test"], tags, messageId: "ses_bounce_1" },
-  );
-  is(
-    "a delivery delay is the provider's other temporary outcome",
-    readSesEvent(JSON.stringify({ eventType: "DeliveryDelay", deliveryDelay: { delayedRecipients: [{ emailAddress: "slow@example.test" }] }, mail: { messageId: "ses_delay_1", tags } })),
-    { kind: "delayed", permanent: false, recipients: ["slow@example.test"], tags, messageId: "ses_delay_1" },
-  );
-  const sesCampaign = "b-abcdef0123456789abcdef01";
+  part("The prepared email identity and event parser do not admit writes");
+  is("the report tag is shared by the email and contains no recipient", healthTags({ sid: STORE, listId: LIST }, true, CAMPAIGN), tags);
+  is("a recipient cannot be a report identity", healthTags({ sid: STORE, listId: LIST }, true, "reader@example.test"), { nl_store: STORE, nl_list: LIST });
   const previousDay = new Date(Date.now() - 86_400_000).toISOString();
-  is("SES uses the delivery event time, not the earlier send time", readSesEvent(JSON.stringify({ eventType: "Delivery", delivery: { timestamp: EVENT_AT, recipients: ["reader@example.test"] }, mail: { timestamp: previousDay, messageId: "ses_cross_midnight", tags } }))?.occurredAt, Date.parse(EVENT_AT));
-  for (const [kind, field] of [["Bounce", "bounce"], ["Complaint", "complaint"], ["DeliveryDelay", "deliveryDelay"]]) {
-    is(`${kind} uses its own event timestamp`, readSesEvent(JSON.stringify({ eventType: kind, [field]: { timestamp: EVENT_AT }, mail: { timestamp: previousDay, messageId: `ses_${kind}`, tags } }))?.occurredAt, Date.parse(EVENT_AT));
+  for (const [kind, field] of [["Delivery", "delivery"], ["Bounce", "bounce"], ["Complaint", "complaint"], ["DeliveryDelay", "deliveryDelay"]]) {
+    is(`${kind} uses its own event time, not the send time`, readSesEvent(JSON.stringify({ eventType: kind, [field]: { timestamp: EVENT_AT }, mail: { timestamp: previousDay, messageId: `ses_${kind}`, tags } }))?.occurredAt, Date.parse(EVENT_AT));
   }
-  const sesTags = { nl_store: STORE, nl_list: LIST, [MAIL_REPORT_TAG]: sesCampaign };
-  is("the authenticated SES route action records delivery", await recordSesEvent({ kind: "delivered", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delivery_2", occurredAt: Date.now() }), "delivered");
-  is("and records a temporary outcome without treating it as permanent", await recordSesEvent({ kind: "delayed", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delay_2", occurredAt: Date.now() }), "temporary");
-  is("the SES outcomes remain separate", await mailReportDay(STORE, sesCampaign), { delivered: 1, permanentBounces: 0, temporaryBounces: 1, complained: 0 });
-
-  part("Signed outcomes are counted for the email, without recipient data");
-  const delivered = await POST(announce("email.delivered", { email_id: "em_1", to: ["reader@example.test"], tags }));
-  const delayed = await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }, "report_delay"));
-  is("delivery and delay are acknowledged as report outcomes", [await delivered.json(), await delayed.json()], [
-    { ok: true, result: "delivered" },
-    { ok: true, result: "temporary" },
-  ]);
-  is("they are separate counters", await mailReportDay(STORE, CAMPAIGN), {
-    delivered: 1,
-    permanentBounces: 0,
-    temporaryBounces: 1,
-    complained: 0,
-  });
-
-  await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }, "report_delay"));
-  is("the same signed event is not counted twice", (await mailReportDay(STORE, CAMPAIGN))?.temporaryBounces, 1);
-  await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }));
-  is("a provider replay under another webhook id is still the same email outcome", (await mailReportDay(STORE, CAMPAIGN))?.temporaryBounces, 1);
-  is("temporary delivery trouble never creates a pause or recipient mark", redis.keys().some((key) => key.startsWith(`nl:mail:paused:${STORE}`) || key.startsWith(`nl:mail:health:${STORE}:seen:`)), false);
+  is("SES keeps the delivery recipients and shared tags", readSesEvent(JSON.stringify({ eventType: "Delivery", delivery: { timestamp: EVENT_AT, recipients: ["reader@example.test"] }, mail: { messageId: "ses_delivery_1", tags } })), { kind: "delivered", permanent: false, recipients: ["reader@example.test"], tags, messageId: "ses_delivery_1", occurredAt: Date.parse(EVENT_AT) });
+  for (const kind of ["delivered", "delayed"] as const) {
+    is(`an authenticated SES ${kind} remains unrecorded`, await recordSesEvent({ kind, permanent: false, recipients: ["reader@example.test"], tags, messageId: `ses_${kind}`, occurredAt: Date.now() }), null);
+  }
+  is("SES delivery/delay do not create any Redis key", redis.keys(), []);
+  for (const type of ["email.delivered", "email.delivery_delayed"]) {
+    const answer = await POST(announce(type, { email_id: type, to: ["reader@example.test"], tags }));
+    is(`signed ${type} is acknowledged without claiming a recorded outcome`, [answer.status, await answer.json()], [200, { ok: true }]);
+  }
+  is("existing transport deduplication does not create report or health storage", redis.keys().some(key => key.startsWith("nl:mail:health:") || key.startsWith("nl:mail:paused:")), false);
   for (const bounceType of ["Transient", "Undetermined"]) {
-    const event = readSesEvent(JSON.stringify({ eventType: "Bounce", bounce: { bounceType, timestamp: EVENT_AT, bouncedRecipients: [{ emailAddress: "temporary@example.test" }] }, mail: { messageId: `ses_${bounceType}`, timestamp: EVENT_AT, tags } }));
+    const event = readSesEvent(JSON.stringify({ eventType: "Bounce", bounce: { bounceType, timestamp: EVENT_AT, bouncedRecipients: [{ emailAddress: "temporary@example.test" }] }, mail: { messageId: `ses_${bounceType}`, tags } }));
     is(`${bounceType} is explicitly non-permanent`, event?.permanent, false);
-    is(`${bounceType} records only a temporary SES outcome`, event && await recordSesEvent(event), "temporary");
+    is(`${bounceType} never enters SES health protection`, event && await recordSesEvent(event), "ignored");
     const answer = await POST(announce("email.bounced", { email_id: `resend_${bounceType}`, to: ["temporary@example.test"], tags, bounce: { type: bounceType } }));
-    is(`${bounceType} records only a temporary Resend outcome`, await answer.json(), { ok: true, result: "temporary" });
+    is(`${bounceType} never enters Resend health protection`, await answer.json(), { ok: true, result: "ignored" });
   }
-  is("neither temporary bounce type removes recipients or writes health/pause state", redis.keys().some(key => key.startsWith(`nl:mail:paused:${STORE}`) || key.startsWith(`nl:mail:health:${STORE}:seen:`)), false);
-  part("Every delivered email brings its own callback bill");
-  const price = (callbackCosts as unknown as { mailReportCallbackCost?: (deliveries: number, attempts: number, snsTransferPerGb: number | null) => { notices: number; invocations: number; redisCommands: number; totalUsd: number } | null }).mailReportCallbackCost;
-  is("callback costing is executable, not a null component placeholder", typeof price, "function");
-  if (price) {
-    const one = price(1, 1, 0.2);
-    is("one delivered email is one notice, one invocation and eleven Redis commands", one && [one.notices, one.invocations, one.redisCommands], [1, 1, 11]);
-    is("SNS, hosting, commands, transferred/retained bytes all cost money", Boolean(one && one.totalUsd > 0.0012), true);
-    is("the whole allowance is counted, with no provider free tier", price(10_000, 1, 0.2)?.totalUsd, one && one.totalUsd * 10_000);
-    is("a retry still costs an invocation and commands despite no second outcome", price(1, 101, 0.2)?.invocations, 101);
-    is("unknown regional SNS transfer never becomes a zero-cost callback", price(1, 1, null), null);
-    for (const bad of [-1, NaN, Infinity, 0.5]) is("invalid counts never acquire a price", price(bad, 1, 0.2), null);
-  }
-  is("no key or report field contains a recipient address", [
-    redis.keys().some((key) => key.includes("reader@") || key.includes("full@")),
-    String(redis.run(["HGETALL", `nl:mail:health:${STORE}:${new Date().toISOString().slice(0, 10)}`])).includes("@"),
-  ], [false, false]);
+  is("temporary bounces never create report, suppression, recipient-health or pause keys", redis.keys().filter(key => !key.startsWith("nl:rl:mail-inbound:") && !key.startsWith("nl:inbound:seen:")), []);
 
-  const originalNow = Date.now;
-  const reportKey = `nl:mail:health:${STORE}:${new Date().toISOString().slice(0, 10)}`;
-  const expiryBefore = Number(redis.run(["TTL", reportKey]));
+  part("Existing permanent bounce and complaint protection is unchanged");
+  const realNow = Date.now;
+  const at = realNow();
+  Date.now = () => at;
   try {
-    const nextDay = originalNow() + 86_400_000;
-    Date.now = () => nextDay;
-    await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }));
-    is("a replay after midnight stays in the provider event's original UTC day", await mailReportDay(STORE, CAMPAIGN, nextDay), null);
-    is("a replay cannot renew the original hash's lifetime", Number(redis.run(["TTL", reportKey])) <= expiryBefore - 86_400, true);
-  } finally {
-    Date.now = originalNow;
-  }
-  const clockNow = Date.now();
-  is("a signed provider clock three seconds ahead is retained at its own instant", await noteMailReportEvent(STORE, "b-clock-skew", "delivered", 1, "ses:clock-skew", clockNow + 3000, clockNow), true);
-  const keysBefore = redis.keys();
-  for (const occurredAt of [undefined, NaN, Infinity, -1, Date.now() + 60_000, Date.now() - 11 * 86_400_000]) {
-    is("an unconfirmed, future or expired event time authorizes no report write: " + String(occurredAt), await noteMailReportEvent(STORE, CAMPAIGN, "delivered", 1, "ses:time-invalid", occurredAt), false);
-  }
-  is("refused timestamps leave every key intact", redis.keys(), keysBefore);
+    for (const provider of ["ses", "resend"]) for (const outcome of ["permanent-bounce", "complained"] as const) {
+      const observations: unknown[] = [];
+      for (const withReportTag of [false, true]) {
+        redis.clear();
+        const dayKey = `nl:mail:health:${STORE}:${new Date(at).toISOString().slice(0, 10)}`;
+        redis.run(["HSET", dayKey, "s", 1000, outcome === "complained" ? "c" : "b", outcome === "complained" ? 4 : 24]);
+        const providerTags = withReportTag ? tags : { nl_store: STORE, nl_list: LIST };
+        const commands: (string | number)[][] = [];
+        const pipeline = redis.pipeline.bind(redis);
+        redis.pipeline = async batch => { commands.push(...batch); return pipeline(batch); };
+        let result: unknown;
+        try {
+          if (provider === "ses") result = await recordSesEvent({ kind: outcome === "complained" ? "complained" : "bounced", permanent: outcome !== "complained", recipients: ["health@example.test"], tags: providerTags, messageId: "ses_health", occurredAt: at });
+          else result = (await (await POST(announce(outcome === "complained" ? "email.complained" : "email.bounced", { email_id: "resend_health", to: ["health@example.test"], tags: providerTags, bounce: { type: "Permanent" } }, "same_health_notice"))).json()).result;
+        } finally { redis.pipeline = pipeline; }
+        is(`${provider} ${outcome} still pauses at the existing threshold`, result, "paused");
+        is(`${provider} ${outcome} has no report EVAL or four-field report read`, commands.some(command => command[0] === "EVAL" && command[1] === RECORD_MAIL_REPORT || command[0] === "HMGET" && command.slice(2).some(field => String(field).startsWith("r:"))), false);
+        is(`${provider} ${outcome} adds no report field`, (redis.run(["HKEYS", dayKey]) as string[]).some(field => field.startsWith("r:")), false);
+        observations.push({ result, commands, health: redis.run(["HGETALL", dayKey]), paused: redis.run(["GET", `nl:mail:paused:${STORE}`]) });
+      }
+      is(`${provider} ${outcome}: adding the prepared tag preserves every legacy command and result`, observations[1], observations[0]);
+    }
+  } finally { Date.now = realNow; }
 
-  part("Reading one email has a fixed Redis response envelope");
-  const pipeline = redis.pipeline.bind(redis);
-  const reads: (string | number)[][] = [];
-  redis.pipeline = async (commands) => { reads.push(...commands); return pipeline(commands); };
-  try {
-    await mailReportDay(STORE, CAMPAIGN);
-    is("only the four aggregate fields are read", reads.map((command) => [command[0], command.length - 2]), [["HMGET", 4]]);
-  } finally {
-    redis.pipeline = pipeline;
-  }
+  part("Every delivered email would bring its own callback bill");
+  const price = callbackCosts.mailReportCallbackCost;
+  const one = price(1, 1, 0.2);
+  is("one delivery scenario includes its notice, invocation and eleven commands", one && [one.notices, one.invocations, one.redisCommands], [1, 1, 11]);
+  is("the known sizing components have positive cost", Boolean(one && one.totalUsd > 0.0012), true);
+  is("the full allowance is counted without free tier", price(10_000, 1, 0.2)?.totalUsd, one && one.totalUsd * 10_000);
+  is("retries still have an invocation cost", price(1, 101, 0.2)?.invocations, 101);
+  is("unknown regional transfer cannot become zero", price(1, 1, null), null);
+  for (const bad of [-1, NaN, Infinity, 0.5]) is("invalid counts do not acquire a price", price(bad, 1, 0.2), null);
 
-  part("A receipt and its aggregate change together");
-  const at = Date.now();
-  const concurrentCampaign = "b-concurrent-test";
-  const repeats = await Promise.all(Array.from({ length: 64 }, () => noteMailReportEvent(STORE, concurrentCampaign, "delivered", 1, "ses:one-concurrent-email", at)));
-  is("identical concurrent outcomes are all acknowledged", repeats.every(Boolean), true);
-  is("but counted once", (await mailReportDay(STORE, concurrentCampaign))?.delivered, 1);
-  const boundedKey = `nl:mail:health:${STORE}:bounded-fixture`;
+  part("The disconnected Lua primitive preserves its prepared invariants");
+  redis.clear();
+  const boundedKey = "synthetic:mail-report:bounded";
   const first = ["EVAL", RECORD_MAIL_REPORT, 1, boundedKey, "receipt", "aggregate", 1, Math.floor(at / 1000) + 3600, 2];
-  is("the exact field ceiling admits the receipt and aggregate", redis.run(first), 1);
-  is("a second receipt is refused before another field is written", redis.run(["EVAL", RECORD_MAIL_REPORT, 1, boundedKey, "receipt2", "aggregate", 1, Math.floor(at / 1000) + 3600, 2]), -1);
+  is("the exact field ceiling admits receipt and aggregate in the primitive", redis.run(first), 1);
+  is("an identical primitive replay is confirmed", redis.run(first), 2);
+  is("a new receipt above the ceiling is refused before writing", redis.run(["EVAL", RECORD_MAIL_REPORT, 1, boundedKey, "receipt2", "aggregate", 1, Math.floor(at / 1000) + 3600, 2]), -1);
   is("refusal preserves both original fields", redis.run(["HGETALL", boundedKey]), ["receipt", "1", "aggregate", "1"]);
   is("a contradictory replay cannot change the count", redis.run(["EVAL", RECORD_MAIL_REPORT, 1, boundedKey, "receipt", "aggregate", 2, Math.floor(at / 1000) + 3600, 2]), -1);
-
-  part("A corrupt aggregate cannot leave an accepted receipt");
+  const expiresBefore = redis.run(["TTL", boundedKey]);
+  redis.advance(1000);
+  redis.run(first);
+  is("a primitive replay never renews the original expiry", redis.run(["TTL", boundedKey]), Number(expiresBefore) - 1);
   for (const bad of ["01", "00000"]) {
-    const key = `nl:mail:health:${STORE}:corrupt-${bad}`;
+    const key = `synthetic:mail-report:corrupt-${bad}`;
     redis.run(["HSET", key, "aggregate", bad]);
-    const evalArgs = ["EVAL", RECORD_MAIL_REPORT, 1, key, "receipt", "aggregate", 1, Math.floor(at / 1000) + 3600, 3];
-    is(`the emulator refuses ${bad} before writing`, redis.run(evalArgs), -1);
+    const args = ["EVAL", RECORD_MAIL_REPORT, 1, key, "receipt", "aggregate", 1, Math.floor(at / 1000) + 3600, 3];
+    is(`the emulator refuses ${bad} before writing`, redis.run(args), -1);
     is(`no receipt survives ${bad}`, redis.run(["HGET", key, "receipt"]), null);
-    is(`a replay over ${bad} is not success`, redis.run(evalArgs), -1);
+    is(`a replay over ${bad} is not success`, redis.run(args), -1);
     is(`the malformed aggregate ${bad} stays unchanged`, redis.run(["HGET", key, "aggregate"]), bad);
     redis.run(["HSET", key, "receipt", "1"]);
-    is(`an orphaned receipt over ${bad} cannot become success`, redis.run(evalArgs), -1);
+    is(`an orphaned receipt over ${bad} cannot become success`, redis.run(args), -1);
   }
+  redis.clear();
   await nativeCanonicalCounters();
-
   done();
 }
 

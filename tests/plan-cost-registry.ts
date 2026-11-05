@@ -1,4 +1,5 @@
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
+import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 /**
  * Every metered feature's per-store worst month, in one registry (added 17
  * October 2026). tests/plan-cost-model.ts sums COST_LINES into worstCost,
@@ -126,8 +127,10 @@ export const FETCHED_AHEAD = 1.25;
 export const PER_EMAIL = 0.0009;
 /** DR1 unit 1 components. A priced successful delivery is not evidence of
  * the live retry policy, total provider publications or admission funding.
- * Lua includes EVAL and every internal command; storage is separately in
- * the mail-health family of store-data-registry, without free-tier credit. */
+ * Lua includes EVAL and every internal command. These are disconnected
+ * sizing components, not an active plan coefficient: CX-112 keeps report
+ * reads/writes without admission and without Redis IO. Future activation
+ * must fund the entire callback lifecycle and add its retained bytes. */
 export const MAIL_REPORT_COST_COMPONENTS = {
   firstOutcomeCommands: 8,
   duplicateOutcomeCommands: 4,
@@ -139,7 +142,7 @@ export const MAIL_REPORT_COST_COMPONENTS = {
   callbackAttemptsPerEmailCeiling: null,
   snsAndHostingMonthlyUsd: null,
   completeMonthlyUsd: null,
-  reviewedAdmission: null,
+  reviewedAdmission: CURRENT_MAIL_REPORT_ADMISSION,
 } as const;
 /** One published delivery notice, without supplier free-tier credit:
  * SNS $0.50/million publishes + $0.60/million HTTPS deliveries, each 64 KiB

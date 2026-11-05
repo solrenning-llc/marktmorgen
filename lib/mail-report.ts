@@ -17,6 +17,11 @@ import { SCALE_MONTHLY_EMAILS, TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 
 export { MAIL_REPORT_TAG };
 
+/** CX-112: no report operation is admitted until its complete callback
+ * lifecycle has a reviewed funding ceiling. This is not an environment
+ * switch; a later reviewed unit must supply and validate that evidence. */
+export const CURRENT_MAIL_REPORT_ADMISSION: null = null;
+
 export type MailReportEvent = "delivered" | "permanent-bounce" | "temporary-bounce" | "complained";
 export type MailReportCounts = {
   delivered: number;
@@ -67,6 +72,7 @@ export async function noteMailReportEvent(
   occurredAt: number | undefined,
   now = Date.now(),
 ): Promise<boolean> {
+  if (CURRENT_MAIL_REPORT_ADMISSION === null) return false;
   const report = mailReportCampaign(campaign);
   if (!HEALTH_ID.test(store) || !report || !Number.isSafeInteger(count) || count <= 0 || count > 50 ||
       typeof providerIdentity !== "string" || providerIdentity.length < 3 || providerIdentity.length > 240 ||
@@ -90,6 +96,7 @@ const readCount = (value: unknown): number | null => {
 
 /** One confirmed UTC day's aggregate. Null means the stored answer was not trustworthy. */
 export async function mailReportDay(store: string, campaign: string, now = Date.now()): Promise<MailReportCounts | null> {
+  if (CURRENT_MAIL_REPORT_ADMISSION === null) return null;
   const report = mailReportCampaign(campaign);
   if (!HEALTH_ID.test(store) || !report || !isRedisConfigured()) return null;
   const wanted = prefixes(report);

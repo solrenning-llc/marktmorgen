@@ -29,7 +29,7 @@ export async function redisPipeline(commands: unknown[][]): Promise<unknown[]> {
   if (commands[0]?.[0] === "SET") fixture.saves++;
   return commands.map(() => 1);
 }
-export async function orderWrite(_store: Store, _commands: unknown[][]): Promise<unknown[]> {
+export async function orderWrite(): Promise<unknown[]> {
   fixture.claims++;
   return fixture.claim as unknown[];
 }

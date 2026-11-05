@@ -146,6 +146,7 @@ export function vcardFileName(card: CreatorCard): string {
 }
 
 const cardKey = (statsId: string) => `nl:vcard:${statsId}`;
+/** The card's slot in the store's data room, as SAVE_CARD and DROP_CARD set it. */
 const CARD_SLOT = "card";
 /** The longest record a card can make, with room for JSON's quoting. */
 export const MAX_STORED_CARD_BYTES = (MAX_CARD_NAME + MAX_CARD_TITLE + MAX_CARD_EMAIL + 40 + 200 + MAX_CARD_NOTE) * 6 + 256;
@@ -195,7 +196,7 @@ export async function dropCreatorCard(statsId: string | null, room: DataStore): 
 /** The data room's own steps (TAKE_DATA) for the card's slot, set to `size`, inside a script whose KEYS[1] is the room. */
 const CARD_ROOM = `local function cardRoom(limit, always, month, size)
   local KEYS = {KEYS[1]}
-  local ARGV = {limit, always, month, 's', 'card', size}
+  local ARGV = {limit, always, month, 's', '${CARD_SLOT}', size}
 ${TAKE_DATA}
 end`;
 

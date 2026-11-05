@@ -2,6 +2,7 @@ import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { proposeDescription, proposeSummary, proposeTitle } from "@/lib/agent-propose";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
+import { BUNDLE_CHOICES_MOST, IMPORTS_MOST, type ReadMeter, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
 import { apiNumbers } from "@/lib/api-numbers";
 import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
@@ -128,6 +129,19 @@ export async function POST(request: Request) {
       return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be read just now. Try again in a moment.");
     };
     const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
+    // A tool of the creator's own records (631 [AA1]): set aside at its most before it reads anything, metered as it
+    // reads, and settled at what it read and sends before it is sent (Codex G2 on #1933). Not read, nothing is shown.
+    const paid = async (most: ReadWork, read: (meter: ReadMeter) => Promise<unknown>, unavailable: string) => {
+      const held = apiReadUnits(most);
+      const settle = await hold(held);
+      if (settle instanceof Response) return refusedWith(settle);
+      const meter: ReadMeter = { bytes: 0, commands: 0 };
+      const value = await read(meter);
+      const out = value === null || value === undefined ? said({ error: unavailable }, true) : said(value);
+      const work = { commands: meter.commands, bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: Math.min(most.roundTrips, meter.commands) };
+      const refused = await settle(settledUnits(work, held));
+      return refused ? refusedWith(refused) : result(id, out);
+    };
     const days = windowOf(params.arguments?.days);
     const windowed: Record<string, (data: StatsData) => unknown | Promise<unknown>> = {
       get_numbers: (data) => summaryOf(data),
@@ -198,14 +212,8 @@ export async function POST(request: Request) {
       return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
     }
     if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
-    if (params.name === "list_bundle_choices") {
-      const choices = await bundleChoicesTool(store, params.arguments ?? {});
-      return result(id, choices ? said(choices) : said({ error: "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment." }, true));
-    }
-    if (params.name === "get_imports") {
-      const imports = await importsTool(store);
-      return result(id, imports ? said(imports) : said({ error: "Your imports could not be read just now. This is not an empty history; try again in a moment." }, true));
-    }
+    if (params.name === "list_bundle_choices") return paid(BUNDLE_CHOICES_MOST, (meter) => bundleChoicesTool(store, params.arguments ?? {}, meter), "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment.");
+    if (params.name === "get_imports") return paid(IMPORTS_MOST, (meter) => importsTool(store, meter), "Your imports could not be read just now. This is not an empty history; try again in a moment.");
     if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
     if (params.name === "get_emails") return answer(await emailsTool(store, charge));
     if (params.name === "get_affiliates") return answer(await affiliatesTool(store, charge));

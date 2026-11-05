@@ -214,7 +214,8 @@ export const RAW_DAYS = 3;
 /** An upload that stops before its last batch is given up after this long. */
 const RECEIVING_MS = 2 * 60 * 60 * 1000;
 const LOCK_SECONDS = 70;
-const LIST_SIZE = 10;
+export const IMPORTS_LIST_SIZE = 10;
+const LIST_SIZE = IMPORTS_LIST_SIZE;
 
 export const IMPORT_ID_PATTERN = /^[0-9a-f]{24}$/;
 
@@ -330,15 +331,21 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
  * get_imports; Codex A3 on #1933): a list from LRANGE, then a text or null
  * for each GET. Any other answer is null, unknown, never an empty history.
  */
-export async function storeImportsRead(store: Store): Promise<ImportJob[] | null> {
+export async function storeImportsRead(store: Store, meter?: { bytes: number; commands: number }): Promise<ImportJob[] | null> {
   if (!store.sid || !isRedisConfigured()) return null;
   const [ids] = await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]);
+  if (meter) {
+    meter.commands += 1;
+    if (Array.isArray(ids)) meter.bytes += (ids as unknown[]).reduce((n: number, id) => n + (typeof id === "string" ? Buffer.byteLength(id) : 0), 0);
+  }
   // Every entry an import's id before anything is read: one that is not is unknown, never left out of the history (Codex G2, #1933).
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && IMPORT_ID_PATTERN.test(id))) return null;
   const list = ids as string[];
   if (!list.length) return [];
   const raws: unknown = await redisPipeline(list.map((id) => ["GET", jobKey(id)]));
+  if (meter) meter.commands += list.length;
   if (!Array.isArray(raws) || raws.length !== list.length || raws.some((raw) => raw !== null && typeof raw !== "string")) return null;
+  if (meter) meter.bytes += (raws as (string | null)[]).reduce((n, raw) => n + (raw ? Buffer.byteLength(raw) : 0), 0);
   return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
 }
 

@@ -427,3 +427,27 @@ export const CODE_SENT_BYTES = 1_024;
 export function codesWork(): ReadWork {
   return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 1, roundTrips: 0 };
 }
+
+// ---------------------------------------------------------------- the MCP tools of the creator's own records (631 [AA1])
+
+/**
+ * What a tool past the door reads and sends, metered as it reads (app/api/mcp/route.ts, `paid`): it is set aside at
+ * its most before anything is read, and settled at what was read and sent before it is sent.
+ */
+export type ReadMeter = { bytes: number; commands: number };
+
+/** A product's cached card as kept for searching (title, price, page), read whole: a review ceiling, as LISTING_BYTES. */
+export const CARD_READ_BYTES = 1_024;
+/** One page of list_bundle_choices as sent: a product each, PRODUCT_SENT_BYTES, and the note. */
+export const BUNDLE_PAGE_SENT_BYTES = 20 * PRODUCT_SENT_BYTES + 4_096;
+/**
+ * list_bundle_choices at its most (lib/bundle-choices.ts): one HMGET of SEARCH_STRETCH (100) cached cards, then at
+ * most PICKER_PAGE (20) listings, in two trips (Codex G2 on #1933: twenty listings read on the door's one request).
+ */
+export const BUNDLE_CHOICES_MOST: ReadWork = { commands: 1 + 20, bytes: 100 * CARD_READ_BYTES + 20 * LISTING_BYTES, sent: BUNDLE_PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };
+/** An import's record (lib/imports.ts), read whole: its counts, kind, source, file name and tags; a review ceiling. */
+export const IMPORT_JOB_BYTES = 16_384;
+/** An import as get_imports sends it, counts only. */
+export const IMPORT_SENT_BYTES = 1_024;
+/** get_imports at its most: the index (IMPORTS_LIST_SIZE, 10, ids of 64 bytes at most) and each import's record, in two trips. */
+export const IMPORTS_MOST: ReadWork = { commands: 1 + 10, bytes: 10 * 64 + 10 * IMPORT_JOB_BYTES, sent: 10 * IMPORT_SENT_BYTES + 2_048, stripePages: 0, roundTrips: 2 };

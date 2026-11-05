@@ -82,3 +82,19 @@ JS
 Expected current RED:16tests/4pass/12fail, exit1. No fake GREEN or fix is claimed.
 
 Next exact actions remain: own returns first; shared #2632 legitimate merge then one main integration per own eligible branch, reviewed blobs retained, linked tests/scoped types/lint/scanner/diff and nine NEW checks; normal expected-head merge with applicable review and fresh clean merge-tree; advance2551→2564. Until a product slot opens, no additional product implementation; continue only bounded read-only evidence or nominal unclaimed reviews. Buyer-profile HGETALL/JSON.parse and buyer-orders grants were inventoried as candidates, NOT certified defects; buyer-list email/Number reads are outside this audit and left to N/C4.
+
+## Update — read-only ordersGrant audit, 2026-11-05
+
+Own returns:2472/3f25bac2,2551/c432fc56,2564/e72e90dd,2637/c53714a8 metadata and updated_at remain unchanged. Existing bundle9df135f0 is still the fifth unit. Shared2632/f183d78f remains OPEN under C3/V; no repeated CI queries, own integration, retry or merge. Latest main82c53df00 adds only Z code plus reservation batch since prior main18f206cc; core instructions unchanged.
+
+Second bounded audit: MEDIUM at lib/buyer-orders.ts:1117–1126 (ordersGrant), source29ad5768fa84db8a2f594a7b0ec69b315493e7c9 identical in current main and the own evidence branch. The real function returns an email for an extra pipeline result, inherited result slot, unexpected JSON field, conflicting duplicate a/e JSON members and invalid nonempty email. The proof does NOT open a real session, access a purchase, charge, send email, write data or call any provider. No remote exploit or complete authorization journey is certified.
+
+Proof:59cabc181a30a596b8bcd898f7d196682cf0eb5c, proofs/k2/orders-grant-read-evidence.proof.ts, blob5917ed7c32514dd27c12e2289137b5544f312b5c. Ten tests:six causal failures/four passing controls. Exact valid record retains address; exact null record is expired; another account stays refused; invalid token performs zero reads. Stub accepts ONLY a single GET per read; fetch throws. Expected outcome for malformed evidence is null or a thrown unknown error, never a confirmed email. No assertions loosened.
+
+Initial synthetic fixture used an account-shaped literal long enough to trigger the public-data detector. Descendant proof changes ONLY that synthetic literal to a short fixture; RED stays6fail/4pass. Original e3c62f4e is preserved as parent. Scoped TypeScript/imports0 on the same proof logic; final lint0, tracked scanner3802/0, diff clean. This is a .proof.ts outside automatic product tests, intentionally RED, not a product PR.
+
+Ownership: complete changed-file list of #2672/C4 includes lib/buyer-orders.ts. Only this new own proof path was reserved; no product path was reserved/edited, no concurrent review assumed, no sixth product. Coordinate C4/C1/S for strict complete pipeline evidence and exact stored grant validation, including duplicate-member evidence, preserving valid legacy emails and account/token controls. No speculative account operation or commercial policy change.
+
+Reproduce with the existing esbuild/testAliases/testEnvironment recipe above, substituting entry proofs/k2/orders-grant-read-evidence.proof.ts, alias selector buyer-orders-proof and output /tmp/k2-orders-grant-proof.cjs. Current expected RED:10tests/4pass/6fail,exit1. First library finding041512b6 remains open for N/C3 coordination; do not rerun unchanged proof without a candidate.
+
+Next: own returns and shared legitimate merge first; then ordered one-time integrations and new exact-head checks, retaining five-product limit and all prior reviewed blobs/REDs. Read-only audit evidence does not imply product correction or availability.

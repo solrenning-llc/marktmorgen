@@ -20,7 +20,7 @@ Those sources state conditions, not findings about Marktmorgen. The evidence doe
 
 Article 7 of the Law 47/2020 regime requires an electronic VAT return even when no covered operation occurred in any Member State during the period. A zero return is not evidence of zero preparation, review, submission or payment cost.
 
-For the non-Union regime, Article 18 requires the return by the end of the month following each calendar quarter to which the services relate.
+For the non-Union regime, Article 18 requires the return by the end of the following month after each calendar quarter to which the services relate.
 
 The Tax Authority-hosted [OSS guide](https://info.portaldasfinancas.gov.pt/pt/apoio_contribuinte/Comercio_eletronico/Orientacoes/Documents/OSS_guidelines_pt_1.pdf), checked 2026-11-05, lists the same calendar-quarter cycle: Q1 to 30 April, Q2 to 31 July, Q3 to 31 October and Q4 to 31 January. It states that the deadline does not extend when it falls on a weekend or national holiday. These dates are scheme evidence, not a calendar assigned to the LLC.
 

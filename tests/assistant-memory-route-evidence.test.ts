@@ -30,7 +30,7 @@ async function setup(){
 }
 // The record's write and delete as they are sent now: a SET or DEL, or the scripts that hold them (MEMORY_WRITE, MEMORY_FORGET).
 const sets=(c:(string|number)[],key:string)=>(c[0]==='SET'&&c[1]===key)||(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:amem-write:v1')&&c[4]===key&&c[6]!=='');
-const dels=(c:(string|number)[],key:string)=>(c[0]==='DEL'&&c[1]===key)||(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:amem-forget:v2')&&c[4]===key);
+const dels=(c:(string|number)[],key:string)=>(c[0]==='DEL'&&c[1]===key)||(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:amem-forget:v3')&&c[4]===key);
 const latch=()=>{let release!:()=>void;const promise=new Promise<void>(r=>{release=r;});return{promise,release};};
 test('a missing Redis read envelope cannot erase an existing note through POST',async()=>{
  const {shop,post}=await setup();await post({action:'add',kind:'preference',text:'Keep the existing note.'});

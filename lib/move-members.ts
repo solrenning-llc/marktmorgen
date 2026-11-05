@@ -163,7 +163,7 @@ export async function moveCounts(store: Store): Promise<{ invited: number; kept:
  * reads as an invitation. Anything else (no reading, a reply that is not a list, a record that does not read)
  * makes every count unknown (null), never 0; 0 only when the whole list was read and none names the option.
  */
-export async function pendingInvitesOnOptions(store: Store, productId: string, optionIds: string[], maxBytes = INVITED_READ_BYTES): Promise<Record<string, number | null>> {
+export async function pendingInvitesOnOptions(store: Store, productId: string, optionIds: string[], maxBytes = INVITED_READ_BYTES, now = Date.now()): Promise<Record<string, number | null>> {
   const unknown = Object.fromEntries(optionIds.map((id) => [id, null])) as Record<string, number | null>;
   if (!store.statsId || !isRedisConfigured()) return unknown;
   // Bounded before anything is transferred (Codex Z on #2690): the invitations' bytes as the store's data room
@@ -195,7 +195,12 @@ export async function pendingInvitesOnOptions(store: Store, productId: string, o
     const slot = Object.getOwnPropertyDescriptor(reply, String(at));
     const invite = slot && Object.hasOwn(slot, "value") ? parseInvite(slot.value) : null;
     if (!invite) return unknown;
-    if (invite.p !== productId || invite.kept > 0 || !Object.hasOwn(counts, invite.o)) continue;
+    if (invite.p !== productId || !Object.hasOwn(counts, invite.o)) continue;
+    // One whose state cannot be read: not a guess either way (Claude 4 on #2690).
+    if (invite.kept < 0) return unknown;
+    if (invite.kept > 0) continue;
+    // Only while its link still works: the link lives linkSeconds from the day it was sent (lib/move-rules.ts).
+    if (invite.at + linkSeconds(invite.r, invite.at * 1000) <= Math.floor(now / 1000)) continue;
     counts[invite.o] = (counts[invite.o] ?? 0) + 1;
   }
   return counts;

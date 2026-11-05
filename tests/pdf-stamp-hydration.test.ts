@@ -9,7 +9,7 @@ function is(name: string, actual: unknown, expected: unknown) {
   console.log("  ok   ", name);
 }
 
-const source = readFileSync(new URL("./e2e/pdf-stamp-acknowledgment.mjs", import.meta.url), "utf8");
+const source = readFileSync("tests/e2e/pdf-stamp-acknowledgment.mjs", "utf8");
 const control = source.indexOf('const select=page.locator(\'[id="stamp-\'+fixture.product+\'"]\')');
 const reactProps = source.indexOf('key.startsWith("__reactProps$")');
 const hydrated = source.indexOf('typeof element[key]?.onChange==="function"');

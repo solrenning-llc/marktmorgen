@@ -136,7 +136,8 @@ async function main(): Promise<void> {
     '<div class="sp-space sp-space-medium" aria-hidden="true"></div>',
     '<div class="sp-space sp-space-large" aria-hidden="true"></div>',
   ]);
-  is("neither draws a word", [line, ...room].map((html) => html.replace(/<[^>]*>/g, "")), ["", "", "", ""]);
+  // No text between tags: every character after a ">" is the start of the next tag.
+  is("neither draws a word", [line, ...room].some((html) => />[^<]/.test(html)), false);
   is("neither takes the focus", [line, ...room].some((html) => /tabindex|<a |<button/.test(html)), false);
   const text = (id: string) => ({ id, kind: "text", heading: id, body: "Words." });
   const bands = (blocks: unknown[]) =>

@@ -27,7 +27,7 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
 /** What is deleted, said to the person; lib/person-data.ts says the same to the creator, line by line. */
 const DELETED = [
   "Your place on the store's list, and every link in its emails to you",
-  "What the store's team noted about you: its fields, notes and deals",
+  "What the store's team noted about you: its fields, notes, deals and tasks",
   "Your answers to its forms, your conversations with its inbox, your reviews and their photos, and your places on its waitlists",
   "Your way through its sequences and workflows, and any email still waiting to reach you",
   "Your progress, quiz results, handed-in work, lesson comments and certificates in its courses, and your private podcast feeds",

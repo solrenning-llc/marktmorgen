@@ -52,6 +52,19 @@ function commentsFrom(raw: unknown): LessonComment[] {
   return Array.isArray(raw) ? raw.map(parseComment).filter((c): c is LessonComment => c !== null) : [];
 }
 
+const unreadableComments = () => new Error("Lesson comments could not be read. Try again.");
+
+function dataSlot(array: unknown[], index: number): unknown {
+  const slot = Object.getOwnPropertyDescriptor(array, String(index));
+  if (!slot || !Object.hasOwn(slot, "value")) throw unreadableComments();
+  return slot.value;
+}
+
+function oneReply(reply: unknown): unknown {
+  if (!Array.isArray(reply) || reply.length !== 1) throw unreadableComments();
+  return dataSlot(reply, 0);
+}
+
 export async function commentsOn(courseId: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const [off] = await redisPipeline([["GET", offKey(courseId)]]);
@@ -72,17 +85,37 @@ export async function commenterName(courseId: string, key: string): Promise<stri
 /** Every comment kept under one lesson, newest first. */
 export async function lessonComments(courseId: string, lessonId: string): Promise<LessonComment[]> {
   if (!isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([["ZREVRANGE", lessonKey(courseId, lessonId), 0, LESSON_KEPT - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  const ids = oneReply(await redisPipeline([["ZREVRANGE", lessonKey(courseId, lessonId), 0, LESSON_KEPT - 1]]));
+  if (!Array.isArray(ids) || ids.length > LESSON_KEPT) throw unreadableComments();
+  const list: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < ids.length; i += 1) {
+    const id = dataSlot(ids, i);
+    if (typeof id !== "string" || !COMMENT_ID_PATTERN.test(id) || seen.has(id)) throw unreadableComments();
+    seen.add(id);
+    list.push(id);
+  }
   if (!list.length) return [];
-  const [rows] = await redisPipeline([["HMGET", commentsKey(courseId), ...list]]);
-  return commentsFrom(rows);
+  const rows = oneReply(await redisPipeline([["HMGET", commentsKey(courseId), ...list]]));
+  if (!Array.isArray(rows) || rows.length !== list.length) throw unreadableComments();
+  const comments: LessonComment[] = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const raw = dataSlot(rows, i);
+    if (raw === null) continue;
+    const comment = parseComment(raw);
+    if (!comment || comment.id !== list[i] || comment.lesson !== lessonId) throw unreadableComments();
+    comments.push(comment);
+  }
+  return comments;
 }
 
 export async function readComment(courseId: string, id: string): Promise<LessonComment | null> {
   if (!isRedisConfigured() || !COMMENT_ID_PATTERN.test(id)) return null;
-  const [raw] = await redisPipeline([["HGET", commentsKey(courseId), id]]);
-  return parseComment(raw);
+  const raw = oneReply(await redisPipeline([["HGET", commentsKey(courseId), id]]));
+  if (raw === null) return null;
+  const comment = parseComment(raw);
+  if (!comment || comment.id !== id) throw unreadableComments();
+  return comment;
 }
 
 export type AddResult =

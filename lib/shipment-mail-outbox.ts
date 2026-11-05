@@ -240,7 +240,8 @@ local function pool(key)
  return {n,b}
 end
 local function drop()
- if op=='cancel' then
+ -- Confirmation origins do not create physical refused summaries.
+ if op=='cancel' and r.kind~='confirmation' then
   redis.call('HDEL',KEYS[6],'refused:'..r.id)
   redis.call('HDEL',KEYS[7],'refused:'..r.person..':'..r.id)
  end
@@ -314,9 +315,12 @@ if op == 'enqueue' then
  if a[1]>=p.globalItems or b[1]>=p.storeItems or a[2]+n.bytes>p.globalBytes or b[2]+n.bytes>p.storeBytes then return {'full'} end
  -- Reserve finite room for a refused summary before this row can exist.
  -- Expiring metadata is separate from the live items/bytes counters.
- local gh=kinds[6]=='none' and 0 or redis.call('HLEN',KEYS[6])
- local sh=kinds[7]=='none' and 0 or redis.call('HLEN',KEYS[7])
- if gh+a[1]>=10002 or sh+b[1]>=10002 then return {'full'} end
+ -- The separate confirmation protocol retains its own outcome evidence.
+ if n.kind~='confirmation' then
+  local gh=kinds[6]=='none' and 0 or redis.call('HLEN',KEYS[6])
+  local sh=kinds[7]=='none' and 0 or redis.call('HLEN',KEYS[7])
+  if gh+a[1]>=10002 or sh+b[1]>=10002 then return {'full'} end
+ end
  redis.call('HSET',KEYS[6],'items',a[1]+1,'bytes',a[2]+n.bytes)
  redis.call('HSET',KEYS[7],'items',b[1]+1,'bytes',b[2]+n.bytes)
  redis.call('SET',KEYS[1],supplied)
@@ -406,7 +410,10 @@ elseif op == 'refused' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
  -- Known non-delivery ends only a renewal request, never an unknown ACK.
  -- drop preserves its source receipt while atomically releasing its slot.
- if r.originKind=='single_digital_renewal' then drop(); return {'refused'} end
+ if r.kind=='confirmation' then
+  if r.originKind=='single_digital_renewal' then drop(); return {'refused'} end
+  r.state='refused'; r.next=0
+ else
  -- Save only non-content outcome evidence, with individual field expiry.
  -- These HASHes already exist and their cardinality was reserved at enqueue.
  local summary=cjson.encode({state='refused',at=now,session=r.session})
@@ -419,7 +426,8 @@ elseif op == 'refused' then
  redis.call('HSET',KEYS[7],sf,summary)
  local se=redis.call('HEXPIRE',KEYS[7],34560000,'FIELDS',1,sf)
  if type(ge)~='table' or ge[1]~=1 or type(se)~='table' or se[1]~=1 then return {'unknown'} end
- drop(); return {'refused'}
+  drop(); return {'refused'}
+ end
 elseif op == 'accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
  drop(); return {'accepted'}

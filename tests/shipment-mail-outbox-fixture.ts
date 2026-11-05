@@ -84,8 +84,8 @@ export function shipmentOutboxFixture() {
       })())) answer = ["changed"];
       else {
         const value = JSON.parse(raw);
-        if (op === "accepted" || op === "cancel" || op === "refused") {
-          if (op === "refused" && value.originKind !== "single_digital_renewal") {
+        if (op === "accepted" || op === "cancel" || op === "refused" && (value.kind !== "confirmation" || value.originKind === "single_digital_renewal")) {
+          if (op === "refused" && value.kind !== "confirmation") {
             const summary = JSON.stringify({ state: "refused", at: now, session: value.session });
             store.run(["HSET", k[5], `refused:${value.id}`, summary]);
             store.run(["HSET", k[6], `refused:${value.person}:${value.id}`, summary]);

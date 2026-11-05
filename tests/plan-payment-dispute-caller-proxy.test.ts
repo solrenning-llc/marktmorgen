@@ -424,6 +424,42 @@ for (const inherited of ["data", "getter"] as const) {
   });
 }
 
+for (const kind of ["getter", "proxy"] as const) {
+  test(`clock ${kind} cannot mutate an admitted funding graph`, () => {
+    const fixture = contractFixture();
+    assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
+    const at = Date.prototype.getTime.call(fixture.now);
+    let reads = 0;
+    const getTime = () => {
+      reads++;
+      if (reads === 1) {
+        fixture.review.planPaymentDisputes!.creator_year = new Proxy(
+          {
+            ...fixture.review.planPaymentDisputes!.creator_year!,
+            additionalFeesCents: null,
+          },
+          {
+            ownKeys: (target) =>
+              Reflect.ownKeys(target).filter((key) => key !== "additionalFeesCents"),
+          },
+        );
+      }
+      return () => at;
+    };
+    const now = kind === "getter"
+      ? Object.defineProperty(new Date(at), "getTime", { configurable: true, get: getTime })
+      : new Proxy(new Date(at), {
+          get(target, key, receiver) {
+            return key === "getTime" ? getTime() : Reflect.get(target, key, receiver);
+          },
+        });
+
+    const actual = contractFundingConfiguration(fixture.policy, fixture.context, now);
+    assert.equal(reads, 0, "clock validation must not invoke supplied getters or traps");
+    assert.equal(actual, null, "an executable clock must fail closed without throwing");
+  });
+}
+
 for (const boundary of ["context", "review"] as const) {
   test(`capture does not normalize an unsupported ${boundary} prototype`, () => {
     const fixture = contractFixture();

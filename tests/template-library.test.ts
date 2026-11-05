@@ -55,12 +55,10 @@ test("a course card carries the previewed structure to the course editor",()=>{
  assert.match(picker,/initialTemplate/);
 });
 
-test("course cards are offered only for a paid course that still accepts a ready structure",()=>{
+test("course cards say that ready structures only fit an untouched paid course",()=>{
  const component=readFileSync("components/template-library.tsx","utf8");
- const page=readFileSync("app/studio/growth/page.tsx","utf8");
- assert.match(component,/selected\.newCourse/);
- assert.match(page,/newCourse:.*templateFits\(product\.course\)\.ok/);
- assert.match(component,/Choose an untouched paid course above/);
+ assert.match(component,/Ready structures fit only a course with its original empty Module 1/);
+ assert.match(component,/the editor leaves it unchanged/);
 });
 
 test("the library screen distinguishes an existing paid course from another product before offering the course link",()=>{

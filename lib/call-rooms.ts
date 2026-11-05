@@ -69,6 +69,33 @@ export function isVideoRoom(url: string | null | undefined): boolean {
 const bookingKey = (callsId: string, session: string) => `nl:call:room:${callsId}:b:${session}`;
 const timeKey = (callsId: string, product: string, start: number) => `nl:call:room:${callsId}:t:${product}:${start}`;
 
+const unreadableRooms = () => new Error("The booking rooms could not be read.");
+
+/** Only explicit nulls prove that no room or meeting was stored. */
+function roomReplies(reply: unknown, count: number): (string | null)[] {
+  if (!Array.isArray(reply) || reply.length !== count) throw unreadableRooms();
+  const values: (string | null)[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const slot = Object.getOwnPropertyDescriptor(reply, String(i));
+    if (!slot || !("value" in slot) || (slot.value !== null && typeof slot.value !== "string")) throw unreadableRooms();
+    values.push(slot.value);
+  }
+  return values;
+}
+
+function storedMeetingLink(raw: string | null, scope: string): string | null {
+  if (raw === null) return null;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const record = parseRecord(raw);
+    if (!record || record.scope !== scope || typeof value.gone !== "boolean" ||
+      typeof value.link !== "string" || value.link !== record.link) throw unreadableRooms();
+    return givenLink(record);
+  } catch {
+    throw unreadableRooms();
+  }
+}
+
 /** One booked seat, as much of it as picks its room. */
 export type RoomAsk = {
   product: string;
@@ -107,7 +134,7 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
     return out;
   }
   if (!callsId || !isRedisConfigured() || asks.length === 0) return asks.map((a) => roomFor(a.setup, a.start));
-  const read = await redisPipeline(
+  const read = roomReplies(await redisPipeline(
     asks.flatMap((a) => [
       ["GET", bookingKey(callsId, a.session)],
       ["GET", timeKey(callsId, a.product, a.start)],
@@ -117,11 +144,14 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
       ["GET", recordKey(callScope(callsId, { group: false, session: a.session, product: a.product, start: a.start }))],
       ["GET", recordKey(callScope(callsId, { group: true, session: a.session, product: a.product, start: a.start }))],
     ]),
-  );
-  const found: (string | null)[] = asks.map((_, i) => {
+  ), asks.length * 4);
+  const found: (string | null)[] = asks.map((ask, i) => {
     const own = read[i * 4];
     const shared = read[i * 4 + 1];
-    const meeting = givenLink(parseRecord(read[i * 4 + 2])) ?? givenLink(parseRecord(read[i * 4 + 3]));
+    if ((own !== null && !isVideoRoom(own)) || (shared !== null && !isVideoRoom(shared))) throw unreadableRooms();
+    const ownMeeting = storedMeetingLink(read[i * 4 + 2], callScope(callsId, { ...ask, group: false }));
+    const groupMeeting = storedMeetingLink(read[i * 4 + 3], callScope(callsId, { ...ask, group: true }));
+    const meeting = ownMeeting ?? groupMeeting;
     if (meeting) return meeting;
     if (isVideoRoom(own as string)) return own as string;
     if (isVideoRoom(shared as string)) return shared as string;
@@ -141,16 +171,18 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
   });
   if (making.size) {
     const keys = [...making.keys()];
-    const made = await redisPipeline(
+    const made = roomReplies(await redisPipeline(
       keys.flatMap((key) => [
         ["SET", key, newVideoRoom(), "NX", "EX", making.get(key)!.ttl],
         // Whoever won the race, this is the room.
         ["GET", key],
       ]),
-    );
+    ), keys.length * 2);
     keys.forEach((key, k) => {
+      const acknowledgement = made[k * 2];
       const room = made[k * 2 + 1];
-      for (const i of making.get(key)!.at) found[i] = isVideoRoom(room as string) ? (room as string) : null;
+      if ((acknowledgement !== null && acknowledgement !== "OK") || !isVideoRoom(room)) throw unreadableRooms();
+      for (const i of making.get(key)!.at) found[i] = room;
     });
   }
   return asks.map((a, i) => found[i] ?? roomFor(a.setup, a.start));

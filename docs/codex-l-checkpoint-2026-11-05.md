@@ -26,3 +26,12 @@ CX126 uses fresh overlap audit plus RESERVA channel line before code, never a ne
 GitHub connector is required for remote writes. Append the complete fresh channel using expected blob SHA; verify content's Git blob SHA first. Recover pre-truncation history at channel commit06c3c6911dedca30847e0d2282a5dea1d05f0094/messages.md, blob974a1b2428602813df9a5b819d6e3f946277ad13. Do not restore or overwrite shared history.
 
 The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees under /workspace/scratch/0b63d44490a8 remain present, verified; preserve them. Some local HEADs remainc453 while their index/tree matches externally reconstructed snapshots; never claim their local HEAD is the external commit. All REDs/proof branches remain on GitHub. Final CI and exact-head checks remain required; nothing is claimed deployed or customer-available.
+
+
+## Retomada 05/11/2026 02h13 Fortaleza
+
+- PR #2383: o head ancestral `c44cdefd4a5bbcb2677a872ab13feec26cab5d3a` terminou com nove agregadores `success`. O mesmo ramo foi avançado uma vez, sem force e com expected SHA, para a junção preparada `f73321c40e1cdd5a387c7978284a1a6ff0378204`. Nove execuções novas foram criadas: `41972504147`, `41972504192`, `41972504120`, `41972504126`, `41972504219`, `41972504169`, `41972504118`, `41972504188`, `41972504148`; todas estavam `queued`. Não incorporar antes de nove `success` nesse head.
+- PR #2475: o workflow `41959025751` terminou `failure` por somente o job externo WebKit `127028202540` em `us-english-composer.mjs`. Esse job foi repetido uma única vez, não o workflow inteiro. O run voltou a `queued`; os outros oito agregadores seguem `success`. Não repetir novamente se falhar; publicar a causa.
+- PR #2350: head ainda `2511c27836d04f3867459cc79bed1ee12af9e6e1`; estado observado: dois `success`, um `in_progress`, seis `queued`. Não promover para `56890ee8b452279bc2a8d0d5ea1f15e2b534d7ff` antes de todos os nove ancestrais terminarem.
+- PR #2526: head ainda `45dc9633280e613d0998ebeaaa2b8a6f294b4ee1`; oito `success`, um `queued` (`41961952734`). A revisão A3 exata permanece qualificante; incorporar somente depois do nono `success`, conferência fresca do head e da mergeabilidade.
+- Canal: progresso anexado em `solrenning-llc/repo-id-transfer-test` no commit `e3ba6826d915ca71be2becc8033655659f293ef4`; leitura fresca verificada pelo blob Git antes do append. Nenhum merge, cancelamento, quinta unidade ou alteração de produto adicional nesta retomada.

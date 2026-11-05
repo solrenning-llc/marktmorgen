@@ -331,7 +331,7 @@ export function coveredByShare(store: Parameters<typeof shareBps>[0], paidCents:
  * Never throws: a count that cannot be written must not cost a buyer their
  * email.
  */
-export async function countOrder(store: Store, reference: string, paidCents: number, now = Date.now()): Promise<boolean> {
+export async function countOrder(store: Store, reference: string, paidCents: number, now = Date.now(), settleAdmission?: () => Promise<void>): Promise<boolean> {
   if (!isRedisConfigured() || !reference) return false;
   try {
     const [fresh] = await redisPipeline([["SET", seenKey(reference), "1", "NX", "EX", SEEN_SECONDS]]);
@@ -340,7 +340,10 @@ export async function countOrder(store: Store, reference: string, paidCents: num
     // room by the writes that leave it, at what each really adds
     // (lib/order-data.ts), never refused: its room was held when its checkout
     // was admitted (lib/order-admission.ts), at the most an order can take.
-    if (coveredByShare(store, paidCents, now / 1000)) return false;
+    if (coveredByShare(store, paidCents, now / 1000)) {
+      if (settleAdmission) await settleAdmission();
+      return false;
+    }
     const owner = storeRef(store);
     const folder = await storeFolder(owner);
     // Counted in the store's window (lib/allowance-window.ts). An order paid
@@ -364,6 +367,9 @@ export async function countOrder(store: Store, reference: string, paidCents: num
       // Whose folder this is, for the daily job that bills and writes (lib/usage-billing.ts, storeOf).
       await rememberFolderOwner(folder, owner);
     }
+    // Only the first accounting occurrence owns this release. Replaying an
+    // email must not release another checkout admitted in the same hour.
+    if (settleAdmission) await settleAdmission();
     return true;
   } catch (error) {
     console.error("could not count an order", error);

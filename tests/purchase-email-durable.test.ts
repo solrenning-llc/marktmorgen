@@ -127,6 +127,62 @@ test("paid legacy accounting precedes SES and an unknown send never releases ano
   } finally { mail.restore(); }
 });
 
+test("accepted SES followed by a lost consumer mark still counts and settles the order exactly once", async () => {
+  const f = await fixture(), held = await admitOrders(f.store, 2);
+  assert.ok(held.ok);
+  const sessionId = "cs_test_C97ConsumerMarkLost000001";
+  const session = { id: sessionId, status: "complete", payment_status: "paid", mode: "payment",
+    created: Math.floor(Date.now()/1000), amount_total: 4000, currency: "usd",
+    metadata: { store: f.store.handle, product: f.product.id, [ADMITTED_FIELD]: String(held.hour) },
+    customer_details: { email: "c97-mark-buyer@example.test" } };
+  const pipeline = redis.pipeline, mail = installSesMailFixture();
+  try {
+    mail.configure(); await mail.setReady(true);
+    let interrupted = false;
+    redis.pipeline = async commands => {
+      if (!interrupted && commands.some(c => c[0] === "SET" && c[1] === confirmationKey(sessionId) && c[2] === "sent")) {
+        interrupted = true;
+        throw Error("Synthetic crash before the consumer sent marker was saved");
+      }
+      return pipeline(commands);
+    };
+    await assert.rejects(confirmPurchase(f.store, sessionId, session), /Synthetic crash/);
+    redis.pipeline = pipeline;
+    assert.equal(await storeOrdersThisMonth(f.store), 1);
+    assert.equal(mail.calls.ses, 1, "SES accepted before the consumer marker failed");
+    redis.advance(16 * 60_000); // The short consumer claim expires; the SES claim remains.
+    assert.equal(await confirmPurchase(f.store, sessionId, session), "failed");
+    assert.equal(await storeOrdersThisMonth(f.store), 1);
+    const folder = await storeFolder(storeRef(f.store));
+    assert.equal(redis.run(["HGET", `nl:orders:open:${folder}`, String(held.hour)]), "1");
+    assert.equal(redis.run(["GET", confirmationKey(sessionId)]), null);
+    assert.equal(mail.calls.ses, 1);
+  } finally { redis.pipeline = pipeline; mail.restore(); }
+});
+
+test("unpaid, other-store, tip and protected-source checkouts cannot enter legacy accounting", async () => {
+  const f = await fixture(), mail = installSesMailFixture();
+  const base = { status: "complete", payment_status: "paid", mode: "payment", created: Math.floor(Date.now()/1000),
+    amount_total: 4000, currency: "usd", metadata: { store: f.store.handle, product: f.product.id },
+    customer_details: { email: "c97-negative-buyer@example.test" } };
+  try {
+    mail.configure(); await mail.setReady(true);
+    const cases = [
+      { ...base, payment_status: "unpaid" },
+      { ...base, metadata: { ...base.metadata, store: "someone-else" } },
+      { ...base, metadata: { ...base.metadata, kind: "tip" } },
+      { ...base, metadata: { ...base.metadata, mm_order_origin: "physical-v1" } },
+      { ...base, metadata: { ...base.metadata, mm_order_origin: "single-digital-v1" } },
+    ];
+    for (const [i, value] of cases.entries()) {
+      const id = `cs_test_C97NegativeAccounting000${i}`;
+      assert.equal(await confirmPurchase(f.store, id, { ...value, id }), "skip");
+    }
+    assert.equal(await storeOrdersThisMonth(f.store), 0);
+    assert.equal(mail.calls.ses, 0);
+  } finally { mail.restore(); }
+});
+
 test("the real physical checkout reserves a protected source and returns only its CAS winner", async () => {
   const f = await fixture();
   const checkout = await createCheckout(f.store, f.product, "https://example.test", undefined, {}, f.runtime);

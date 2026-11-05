@@ -280,6 +280,12 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
   rows:COMMERCIAL_PROFIT_SOURCES.map(source=>({source,netProfitCents:null,shareOfNetProfitBps:null})),
   totalNetProfitCents:null,reason:"unknown",
  };
+ const inputKeys=["basis","interval","period","currency","companyFixedCostsCents","sources"] as const;
+ // Refuse unmodelled root costs/context before traversing executable metadata.
+ try{
+  if(!input||Array.isArray(input)||Reflect.ownKeys(input).length!==inputKeys.length||
+   !inputKeys.every(key=>Object.hasOwn(input,key)))return result;
+ }catch{return result;}
  // Retain the original financial containers before an executable Proxy trap
  // can replace its reference while the shared encoder inspects descriptors.
  let originals:unknown[];

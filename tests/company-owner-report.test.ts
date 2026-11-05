@@ -127,3 +127,18 @@ test("an ambient inherited source cannot execute or fabricate an absent observat
     Reflect.deleteProperty(Object.prototype, "sesPause");
   }
 });
+
+test("an inherited timestamp cannot execute while refusing an incomplete source", () => {
+  let calls = 0;
+  Object.defineProperty(Object.prototype, "observedAtMs", { configurable: true, get() {
+    calls += 1;
+    return NOW;
+  } });
+  try {
+    const report = companyOwnerReport('{"sesPause":{"status":"ready","holdUntilMs":null}}', MONTH, NOW);
+    assert.equal(report.sections[4].status, "unknown");
+    assert.equal(calls, 0);
+  } finally {
+    Reflect.deleteProperty(Object.prototype, "observedAtMs");
+  }
+});

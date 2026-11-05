@@ -15,7 +15,7 @@ export function PageTime({ ranges, least, partial = null }: { ranges: { words: s
         How long visitors stay
       </h2>
       {partial ? (
-        // This month's readings went past their ceiling (lib/page-read.ts, readingsPartial): said, never made up.
+        // This month's readings reached their ceiling (lib/page-read.ts, readingsPartial): said, never made up.
         <p className="notice notice-info mt-2 text-sm" role="note">
           {readingsPartialWords(partial.counted, partial.opens, partial.resumed === true)}
         </p>

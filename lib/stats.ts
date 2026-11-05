@@ -1993,7 +1993,7 @@ export type StatsData = {
    * clicked it, in the order of the page. Measured on one visitor in eight.
    */
   reach: Record<"d7" | "d30" | "d90", { visitors: number; rows: ReachItem[] }>;
-  /** Set when this month's page readings went past their ceiling: only the first `counted` were counted (lib/page-read.ts, readingsPartial). */
+  /** Set when this month's page readings reached their ceiling: only the first `counted` were counted (lib/page-read.ts, readingsPartial). */
   readsPartial?: ReadingsPartial | null;
   /**
    * The stretch of days just before each window, to set the window beside:

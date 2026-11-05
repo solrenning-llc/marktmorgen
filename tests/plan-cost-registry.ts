@@ -1012,11 +1012,11 @@ export const COST_LINES: CostLine[] = [
     feature: "How a page was read: time on page, reading depth, the store page item by item (639 [GL7](25), 4 November 2026)",
     monthlyUsd: (tier) => readingsAtCeiling(REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier]) * readBeaconCost(),
     sources: [
-      { file: "lib/page-read.ts", names: ["readCeiling", "publicVisitLimit(requestLimitFor(store, now / 1000)) / READ_SAMPLE", "takeReading", "noteReadStore"] },
-      { file: "app/api/store/read/route.ts", names: ["spendReadToken(pass.nonce, pass.issued)", "takeReading(pass)"] },
-      { file: "lib/traffic.ts", names: ["noteReadStore(store.statsId"] },
+      { file: "lib/page-read.ts", names: ["readCeiling", "publicVisitLimit(requestLimitFor(store, now / 1000)) / READ_SAMPLE", "readSlot", "slot: readSlot(window.id, place)", "if (!window || !window.slot", "window.slot = false;", "takeReading", "noteReadStore", "if (readingsFull(pass, now)) return false;", "countedReceipt(reply)"] },
+      { file: "app/api/store/read/route.ts", names: ["if (readingsFull(pass)) return done();", "spendReadToken(pass.nonce, pass.issued)", "takeReading(pass)"] },
+      { file: "lib/traffic.ts", names: ["noteReadStore(store.statsId, resting || store.suspended ? null : store, now, at)", "return n <= limit ? n : 0;"] },
     ],
-    basis: "Readings have their own count in the store's window, apart from its public requests, so they never make its pages rest; it stops at one reading for every READ_SAMPLE requests the public pages may answer (readCeiling), and past it a reading costs the token's mark and the count and nothing else. Every reading the ceiling allows is priced here at readBeaconCost (tests/traffic-cost.ts, 12 commands, the cost lane's CX-35), and none inside the visits line.",
+    basis: "Readings have their own count in the store's window, apart from its public requests, so they never make its pages rest; it stops at one reading for every READ_SAMPLE requests the public pages may answer (readCeiling). The slot is reserved before a token is made (the review of #2571, 5 November 2026): a page gets a token only when its own request, counted by its page check, is the one place of its block of READ_SAMPLE drawn for readings (readSlot), and once for it, so a window's public requests carry at most its ceiling of tokens, every one priced here at readBeaconCost (tests/traffic-cost.ts, 12 commands, the cost lane's CX-35), whether it is counted or refused, and none inside the visits line; held over a whole window, every page drawn, in tests/page-read-ceiling.test.ts.",
   },
   {
     id: "studio",

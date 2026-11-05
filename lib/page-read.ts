@@ -30,9 +30,17 @@
  * cost lane's finding of 4 November 2026: the eighth was drawn only in the
  * browser, a token never expired, and the route was in no store's figure):
  *
- *   - the eighth is drawn on the server: a page view gets a token only when
- *     its visit's random nonce is drawn (readSampled), and the route checks
- *     the same draw, so a call made by hand cannot pick itself in;
+ *   - the eighth is drawn on the server, and reserved before any token is
+ *     made (the review of #2571, 5 November 2026): a page view gets a token
+ *     only when its place among its window's requests, counted by the check
+ *     every store page makes before it is drawn (lib/traffic.ts, isResting),
+ *     is the one place in its block of READ_SAMPLE requests drawn for
+ *     readings (readSlot), and only one token for that place. A window's
+ *     public pages answer at most publicVisitLimit of its requests, so it
+ *     can never be sent more readings than its ceiling, however the draw
+ *     falls; a token's nonce is also one the route's draw accepts
+ *     (readSampled), checked again there, so a call made by hand cannot
+ *     pick itself in;
  *   - a token is good for READ_TOKEN_SECONDS after the page was drawn and
  *     for one reading: the route marks its nonce used (spendReadToken, one
  *     SET NX that expires two hours after the page was drawn) before
@@ -47,6 +55,11 @@
  *     requests the store's public pages may answer in the window; past it
  *     nothing is counted, and the studio says the window's readings are
  *     partial (readingsPartial), with no figure made up for the rest;
+ *   - a server that saw the window's count reach a token's ceiling asks
+ *     nothing more for it (readingsFull, checked by the route before the
+ *     token's mark): no mark, no count, no expiry. A reading is counted only
+ *     on an answer that is exactly the two replies sent; any other counts
+ *     nothing and writes nothing, and the count is given its expiry again;
  *   - the route never reads the store: the token says which window it counts
  *     in, when that window ends and its ceiling, signed with the rest. The
  *     page learns them from the check every store page makes before it is
@@ -114,8 +127,12 @@ export function readCeiling(store: WindowFields & { tier?: Tier }, now = Date.no
   return Number.isSafeInteger(cap) && cap > 0 ? cap : 0;
 }
 
-/** A store's readings' window as its last page check found it: its name, its end in seconds, its ceiling, and when it was found. */
-type ReadWindow = { id: string; end: number; cap: number; at: number };
+/**
+ * A store's readings' window as its last page check found it: its name, its
+ * end in seconds, its ceiling, when it was found, and whether that page's
+ * request is its block's reading slot and has not yet been given a token.
+ */
+type ReadWindow = { id: string; end: number; cap: number; at: number; slot: boolean };
 /** By statistics id, the oldest let go past READ_WINDOWS_HELD: a page's token is made moments after its check. */
 const readWindows = new Map<string, ReadWindow>();
 export const READ_WINDOWS_HELD = 1_000;
@@ -123,14 +140,34 @@ export const READ_WINDOWS_HELD = 1_000;
 const READ_WINDOW_FRESH_MS = 10 * 60_000;
 
 /**
+ * Whether a request's place among its window's requests (1 or more) is the
+ * one place of its block of READ_SAMPLE drawn for readings: exactly one in
+ * each block (1 to READ_SAMPLE, then the next READ_SAMPLE...), where in it
+ * drawn with a key only this deployment has, so no rhythm of a page's own
+ * requests always misses it. The first `n` places hold at most
+ * ceil(n / READ_SAMPLE) of them, so the public requests a window may answer
+ * hold at most its ceiling (readCeiling). False when nothing can be signed.
+ * Pure.
+ */
+export function readSlot(window: string, place: number): boolean {
+  const k = key();
+  if (!k || !WINDOW_ID.test(window) || !Number.isSafeInteger(place) || place < 1) return false;
+  const block = Math.floor((place - 1) / READ_SAMPLE);
+  const drawn = createHmac("sha256", k).update(`page-read-slot|${window}|${block}`).digest()[0] % READ_SAMPLE;
+  return (place - 1) % READ_SAMPLE === drawn;
+}
+
+/**
  * What a reading of the store page about to be drawn may count: its window
- * and ceiling, kept for the page's token (readToken). Called by the check
+ * and ceiling, kept for the page's token (readToken), and whether the page
+ * is its block's reading slot (readSlot), from `place`, its request's place
+ * among the window's requests as the check counted it. Called by the check
  * every store page makes before it is drawn (lib/traffic.ts, isResting),
  * with the store when its public pages may be drawn, and with null when
  * they rest or the store is suspended, which forgets what was kept, so such
  * a page can make no token. No command.
  */
-export function noteReadStore(statsId: string | null, store: (WindowFields & { tier?: Tier }) | null, now = Date.now()): void {
+export function noteReadStore(statsId: string | null, store: (WindowFields & { tier?: Tier }) | null, now = Date.now(), place = 0): void {
   if (!statsId) return;
   readWindows.delete(statsId);
   if (!store || !STATS_ID.test(statsId)) return;
@@ -141,34 +178,51 @@ export function noteReadStore(statsId: string | null, store: (WindowFields & { t
     const oldest = readWindows.keys().next().value;
     if (oldest !== undefined) readWindows.delete(oldest);
   }
-  readWindows.set(statsId, { id: window.id, end: Math.ceil(window.end / 1000), cap, at: now });
+  readWindows.set(statsId, { id: window.id, end: Math.ceil(window.end / 1000), cap, at: now, slot: readSlot(window.id, place) });
 }
 
 /**
- * Whether a visit's nonce is one of the READ_SAMPLE measured: a draw from the
- * nonce itself, the same wherever it is made, so the route checks the very
- * draw the page was given its token by. Pure.
+ * Whether a visit's nonce is one the route's draw accepts, one in
+ * READ_SAMPLE: a draw from the nonce itself, the same wherever it is made, so
+ * the route checks again the draw the page's token was made with, and a
+ * nonce picked by hand is refused even signed. Which page views are measured
+ * is readSlot's. Pure.
  */
 export function readSampled(nonce: string): boolean {
   return NONCE.test(nonce) && createHash("sha256").update(`page-read|${nonce}`).digest()[0] % READ_SAMPLE === 0;
 }
 
+/** A fresh nonce the route's draw accepts (readSampled), or "" in the one chance in about 10^30 none is found. */
+function drawnNonce(): string {
+  for (let i = 0; i < 64 * READ_SAMPLE; i += 1) {
+    const nonce = randomBytes(12).toString("base64url");
+    if (readSampled(nonce)) return nonce;
+  }
+  return "";
+}
+
 /**
  * The token a page view carries: which store's numbers it writes to, that it
  * may, when the page was drawn, the visit's nonce, and the window its reading
- * counts in with that window's end and ceiling (noteReadStore). Empty for the
- * visitors not drawn, seven in eight (readSampled), so their pages send
- * nothing; when the store's window was not found by its page's check moments
- * before (never a token without its ceiling); and when nothing can be
- * signed. A fresh nonce each page view.
+ * counts in with that window's end and ceiling (noteReadStore). Made only
+ * when the page's check found its request at its block's reading slot
+ * (readSlot), and once for that slot, so seven page views in eight send
+ * nothing and a window never has more tokens than its ceiling. Empty too
+ * when the store's window was not found by its page's check moments before
+ * (never a token without its ceiling), for a nonce the route's draw would
+ * refuse (readSampled), and when nothing can be signed. A fresh nonce each
+ * page view; `nonce` is for the tests.
  */
-export function readToken(statsId: string | null, scope: string, now = Date.now(), nonce = randomBytes(12).toString("base64url")): string {
+export function readToken(statsId: string | null, scope: string, now = Date.now(), nonce = drawnNonce()): string {
   if (!statsId || !STATS_ID.test(statsId) || !SCOPE.test(scope) || !readSampled(nonce)) return "";
   const window = readWindows.get(statsId);
-  if (!window || Math.abs(now - window.at) > READ_WINDOW_FRESH_MS || now >= window.end * 1000) return "";
+  if (!window || !window.slot || Math.abs(now - window.at) > READ_WINDOW_FRESH_MS || now >= window.end * 1000) return "";
   const fields = [statsId, Math.floor(now / 1000).toString(36), nonce, window.id, window.end.toString(36), window.cap.toString(36)];
   const signature = sign(scope, fields);
-  return signature ? `${fields.join(".")}.${signature}` : "";
+  if (!signature) return "";
+  // The slot is spent: one token for it, whichever page of the store asks first.
+  window.slot = false;
+  return `${fields.join(".")}.${signature}`;
 }
 
 /**
@@ -231,31 +285,94 @@ export async function spendReadToken(nonce: string, issued: number, now = Date.n
 const readsKey = (statsId: string, window: string) => `nl:traffic:read:${statsId}:${window}`;
 
 /**
+ * What this server last saw of each window's count of readings, by its key:
+ * the count, and the window's end in seconds, after which it is let go. A
+ * count only grows, so a count seen at or past a token's ceiling is still
+ * there; the oldest are let go past READINGS_SEEN_HELD.
+ */
+const readingsSeen = new Map<string, { count: number; until: number }>();
+export const READINGS_SEEN_HELD = 1_000;
+
+function noteReadings(key: string, count: number, until: number): void {
+  const known = readingsSeen.get(key);
+  readingsSeen.delete(key);
+  if (readingsSeen.size >= READINGS_SEEN_HELD) {
+    const oldest = readingsSeen.keys().next().value;
+    if (oldest !== undefined) readingsSeen.delete(oldest);
+  }
+  readingsSeen.set(key, { count: Math.max(count, known?.count ?? 0), until });
+}
+
+/**
+ * Whether this server already saw the token's window counted at or past the
+ * token's ceiling: then its reading can only be refused, and is, with no
+ * command at all, not even the token's mark. No command.
+ */
+export function readingsFull(pass: ReadPass, now = Date.now()): boolean {
+  if (!STATS_ID.test(pass.statsId) || !WINDOW_ID.test(pass.window)) return false;
+  const known = readingsSeen.get(readsKey(pass.statsId, pass.window));
+  return known !== undefined && known.until > now / 1000 && known.count >= pass.cap;
+}
+
+/** Forgets what this server saw of the windows' counts: what a server just started knows (the tests stand for one with it). */
+export function forgetReadingsSeen(): void {
+  readingsSeen.clear();
+}
+
+/**
+ * The window's count after this reading, from the answer to its pipeline
+ * (the INCR and the EXPIRE sent together), only when the answer is exactly
+ * that: two replies, the count a whole number of at least one and the expiry
+ * set (1). Anything else is unknown, never a count. Pure.
+ */
+function countedReceipt(reply: unknown): number | null {
+  if (!Array.isArray(reply) || reply.length !== 2) return null;
+  const [count, expiry] = reply;
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 1 && expiry === 1 ? count : null;
+}
+
+/**
  * One reading taken in its window's count: true while the count is within
  * the token's ceiling, false past it or when it cannot be counted. One
  * pipeline of two commands, the count and its expiry together, never a read
  * and then an add, so readings sent at once can never pass the ceiling
  * between them. Kept to the window's end and a day, as the window's other
  * counts are (lib/allowance-window.ts, keepSecondsFor).
+ *
+ * Past the ceiling the paid work stops (the review of #2571, 5 November
+ * 2026): a window this server saw reach the token's ceiling (readingsFull)
+ * is refused with no command. An answer that is not exactly the two replies
+ * sent (countedReceipt), or no answer, counts nothing and lets nothing be
+ * written: the count may have been added without its expiry, so the expiry
+ * is set once more, and the reading is still refused.
  */
 export async function takeReading(pass: ReadPass, now = Date.now()): Promise<boolean> {
   if (!STATS_ID.test(pass.statsId) || !WINDOW_ID.test(pass.window) || !Number.isSafeInteger(pass.cap) || pass.cap < 1) return false;
+  if (readingsFull(pass, now)) return false;
   const key = readsKey(pass.statsId, pass.window);
   const keep = Math.max(86_400, pass.end - Math.floor(now / 1000) + 86_400);
+  let reply: unknown = null;
   try {
-    const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, keep]]);
-    const n = Number(count);
-    // The first reading past the ceiling marks the window, once: the studio then says it is partial even if the plan grows later.
-    // It keeps the ceiling that was passed, so the studio says how many were counted, not how many came.
-    if (n === pass.cap + 1) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));
-    return Number.isSafeInteger(n) && n >= 1 && n <= pass.cap;
+    reply = await redisPipeline([["INCR", key], ["EXPIRE", key, keep]]);
   } catch {
+    reply = null;
+  }
+  const n = countedReceipt(reply);
+  if (n === null) {
+    // Never a count: the count may stand with no expiry, so it is given one again, and nothing is confirmed.
+    await redisPipeline([["EXPIRE", key, keep]]).catch((error: unknown) => console.error("keeping a window's readings to its end failed", error));
     return false;
   }
+  noteReadings(key, n, pass.end);
+  // The reading that reaches the ceiling marks the window, once: from it on nothing more is counted, and the studio
+  // says the window is partial even if the plan grows later. It keeps the ceiling reached, so the studio says how many
+  // were counted, not how many came.
+  if (n === pass.cap) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));
+  return n <= pass.cap;
 }
 
 /**
- * A window whose readings went past their ceiling: only the first `counted`
+ * A window whose readings reached their ceiling: only the first `counted`
  * were counted, and counting starts again at `opens` (milliseconds). When
  * the plan grew since (`resumed`), counting went on after the change, so
  * `counted` is the ceiling that was reached, not every reading counted: the
@@ -264,13 +381,14 @@ export async function takeReading(pass: ReadPass, now = Date.now()): Promise<boo
 export type ReadingsPartial = { counted: number; opens: number; resumed?: true };
 
 /**
- * Whether the store's readings of its current window went past the window's
+ * Whether the store's readings of its current window reached the window's
  * ceiling, for the studio to say that the window's time on page and reading
- * depth are partial: then only the first `counted` readings were counted.
- * One command; null when they did not, or when it cannot be told. Compared
- * with the ceiling of the store's plan now, and with the mark the first
- * reading past the ceiling left: a window that went past it stays partial
- * if the plan grows later in it.
+ * depth are partial: from then on nothing more is counted (a server that saw
+ * it asks nothing more, readingsFull), so only the first `counted` readings
+ * were. One command; null when they did not, or when it cannot be told.
+ * Compared with the ceiling of the store's plan now, and with the mark the
+ * reading that reached the ceiling left: a window that reached it stays
+ * partial if the plan grows later in it.
  */
 export async function readingsPartial(store: WindowFields & { tier?: Tier; statsId: string | null }, now = Date.now()): Promise<ReadingsPartial | null> {
   const statsId = store.statsId;
@@ -284,9 +402,9 @@ export async function readingsPartial(store: WindowFields & { tier?: Tier; stats
     if (raw === null || raw === undefined) return null;
     const n = Number(raw);
     const passed = Number(over);
-    // Past the ceiling now, or once this window (the mark keeps the ceiling passed, if the plan grew since).
+    // At the ceiling now, or once this window (the mark keeps the ceiling reached, if the plan grew since).
     if (!Number.isSafeInteger(n)) return null;
-    if (n > cap) return { counted: cap, opens: window.end };
+    if (n >= cap) return { counted: cap, opens: window.end };
     // A mark left before the plan grew: the ceiling then was reached, and counting went on after the change.
     if (Number.isSafeInteger(passed) && passed > 0) return n > passed ? { counted: passed, opens: window.end, resumed: true } : { counted: n, opens: window.end };
     return null;

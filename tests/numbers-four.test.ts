@@ -23,7 +23,8 @@
  *     goes once, only where it may;
  *   - a cohort is read only at ages all its members have reached.
  */
-import { STORE_SCOPE, noteReadStore, reachField, reachRows, readSampled, readToken, readTokenStats } from "@/lib/page-read";
+import { STORE_SCOPE, noteReadStore, reachField, reachRows, readSampled, readSlot, readToken, readTokenStats } from "@/lib/page-read";
+import { allowanceWindow } from "@/lib/allowance-window";
 import { countDepth, readDepth } from "@/lib/page-depth";
 import { readStats, recordHit, readSales, studioStats } from "@/lib/stats";
 import { classifySource } from "@/lib/source-rules";
@@ -96,9 +97,16 @@ async function main(): Promise<void> {
       if (readSampled(nonce)) return nonce;
     }
   };
-  // What the store's page check leaves for its token (lib/traffic.ts, isResting): its window and ceiling.
-  noteReadStore(statsId, store);
-  const tokenFor = (scope: string) => readToken(statsId, scope, Date.now(), drawn());
+  // What the store's page check leaves for its token (lib/traffic.ts, isResting): its window and ceiling, for a page
+  // whose own request is its block's reading slot (lib/page-read.ts, readSlot), one token for each.
+  let place = 0;
+  const tokenFor = (scope: string) => {
+    const window = allowanceWindow(store, Date.now())!.id;
+    do place += 1;
+    while (!readSlot(window, place));
+    noteReadStore(statsId, store, Date.now(), place);
+    return readToken(statsId, scope, Date.now(), drawn());
+  };
   const productToken = tokenFor("prod000001");
   is("opens its own store's numbers for its own page", readTokenStats(productToken, "prod000001"), statsId);
   is("and no other page", readTokenStats(productToken, "prod000002"), null);

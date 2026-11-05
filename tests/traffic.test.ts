@@ -55,7 +55,7 @@ import { centsWords } from "@/lib/watch-rules";
 import { store as redis } from "./redis-stub";
 import { COMMANDS, PAGES_PER_VISIT, STATIC_FILES, visitCost } from "./traffic-cost";
 import { POST as readRoute } from "@/app/api/store/read/route";
-import { STORE_SCOPE, noteReadStore, readSampled, readToken } from "@/lib/page-read";
+import { STORE_SCOPE, noteReadStore, readSampled, readSlot, readToken } from "@/lib/page-read";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { addMonthsMs, allowanceWindow } from "@/lib/allowance-window";
@@ -351,9 +351,14 @@ async function main(): Promise<void> {
   // readings and never as one of its public requests (lib/page-read.ts): the mark, the count of readings with its
   // expiry, and the reading's count, at most COMMANDS.readBeacon.
   const readStore = (await storeForHandle("joy"))!;
-  noteReadStore(readStore.statsId, readStore);
   let visit = 0;
+  let place = 0;
+  // Each token for a page whose own request is its block's reading slot (lib/page-read.ts, readSlot), as its check leaves it.
   const drawnToken = (scope: string) => {
+    const window = allowanceWindow(readStore, Date.now())!.id;
+    do place += 1;
+    while (!readSlot(window, place));
+    noteReadStore(readStore.statsId, readStore, Date.now(), place);
     for (;;) {
       const nonce = `trafficvisit${String((visit += 1)).padStart(4, "0")}`;
       if (readSampled(nonce)) return readToken(readStore.statsId, scope, Date.now(), nonce);

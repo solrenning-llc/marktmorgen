@@ -406,7 +406,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sweep:cursor@lib/checkout-sweep.ts": company("Where the checkout sweep stopped", "One key, the company's job."),
   "nl:taxobs:v1:@lib/checkout-sweep.ts": room("Inactive diagnostic checkout observations: no production policy. A reviewed synthetic policy reserves its whole bounded document, index and byte count atomically in the existing room before one SET PXAT; at most 300 observations and an absolute expiry within 24 hours. Activation still needs reviewed scope, retention and full-lifetime cost funding.", "lib/checkout-sweep.ts"),
   "nl:wf:abandoned:@lib/checkout-sweep.ts": short("An abandoned checkout noticed", "request", 2, KEY, REQ("checkout")),
-  "nl:cotrouble:@lib/checkout-trouble.ts": { what: "Checkouts refused by day, and the last reason", parts: [capped(40 * 64 + KB, "A field a day, 35 days, and the last one.")] },
+  // The reader now selects seven days + last (CHECKOUT_TROUBLE_READ in the
+  // plan registry); historical fields are not downloaded. Separate audit gap:
+  // renewing the hash TTL does not enforce this legacy per-field storage cap.
+  // Bounding the read does not certify the stored-byte allocation below.
+  "nl:cotrouble:@lib/checkout-trouble.ts": { what: "Checkouts refused by day, and the last reason", parts: [capped(40 * 64 + KB, "Legacy 35-day allocation; per-field retention remains unverified.")] },
   "nl:cotrouble:mail:@lib/checkout-trouble.ts": short("The day's email about it claimed", "day", 2, 128),
   "nl:imports:cf:@lib/clickfunnels-funnel.ts": { what: "What a ClickFunnels move made, so it is not made twice", parts: [capped((tier) => (IMPORT_ALLOWANCES[tier].funnelSaves * 14 + 1) * 4 * KB, "A record per funnel made, 400 days.", src("lib/import-limits.ts", "IMPORT_ALLOWANCES"))] },
   "nl:imports:cf:lock:@lib/clickfunnels-funnel.ts": short("One move at a time", "studio", 1, 128),

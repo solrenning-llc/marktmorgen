@@ -43,6 +43,38 @@ async function main(): Promise<void> {
     is(`${name} increment evidence is not compensated without a confirmed count`, result.commands.length, 1);
   }
 
+  const inherited = Array(1) as unknown[];
+  const inheritedPrototype = Object.create(Array.prototype) as Record<string, unknown>;
+  inheritedPrototype[0] = 1;
+  Object.setPrototypeOf(inherited, inheritedPrototype);
+  is("an inherited slot cannot open the door", (await take([inherited])).opened, false);
+
+  let getterReads = 0;
+  const accessor = Array(1) as unknown[];
+  Object.defineProperty(accessor, "0", {
+    get() {
+      getterReads += 1;
+      return 1;
+    },
+    enumerable: true,
+  });
+  is("an accessor slot cannot open the door", (await take([accessor])).opened, false);
+  is("validation does not execute the accessor", getterReads, 0);
+
+  let proxyReads = 0;
+  const proxy = new Proxy([1], {
+    get(target, property, receiver) {
+      proxyReads += 1;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  is("a proxy reply cannot open the door", (await take([proxy])).opened, false);
+  is("validation does not execute proxy traps", proxyReads, 0);
+
+  const decorated = [1] as unknown[] & { extra?: number };
+  decorated.extra = 0;
+  is("a decorated reply cannot open the door", (await take([decorated])).opened, false);
+
   part("Only a confirmed count past the limit is compensated");
   is("the first confirmed place past the limit is returned", await take([[4], [3]]), {
     opened: false,

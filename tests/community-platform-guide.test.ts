@@ -11,6 +11,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { overdue, writtenDates } from "@/lib/competitor-review";
 import { COLUMNS, readBatch, startProblem } from "@/lib/imports";
 import type { Store } from "@/lib/store";
+import { CREATOR_GUIDE_SLUGS } from "@/lib/evergreen-guides";
 
 const SLUG = "skool-alternatives-community-platforms";
 function guide() {
@@ -38,11 +39,15 @@ test("Marktmorgen's availability and payment description come from the real prod
     assert.ok(post.body.some((block) => block.type === "note" && block.text === PREVIEW_LINE));
     assert.ok(post.faq?.some((item) => item.a === PREVIEW_LINE));
   }
-  assert.ok(post.body.some((block) => block.type === "p" && block.text === feeWords().whoHolds));
+  assert.ok(post.faq?.some((item) => item.q === "Who holds the money from my sales?" && item.a === feeWords().whoHolds));
+  assert.ok(!post.body.some((block) => block.type === "p" && block.text === feeWords().whoHolds), "the payment answer needs its question");
   assert.ok(text.includes("A CSV file does not move payment cards or live billing agreements."));
   assert.ok(text.includes("comma-separated values (CSV)"));
   assert.deepEqual(COLUMNS.members, ["email", "product", "renews", "option"]);
-  assert.equal(readBatch("members", [[1, "person@example.test", "membership", "2026-12-05", "", "card-token"]]), null);
+  // Extra columns are refused by shape; option remains a free-text field, not a card detector.
+  assert.equal(readBatch("members", [[1, "person@example.test", "membership", "2026-12-05", "", "extra-column"]]), null);
+  assert.deepEqual(readBatch("members", [[1, "person@example.test", "membership", "2026-12-05", "card-token"]]),
+    [["1", "person@example.test", "membership", "2026-12-05", "card-token"]]);
   assert.equal(startProblem({ sid: "synthetic-store", catalog: { items: [] } } as unknown as Store,
     "contacts", { expected: 1, agreed: false, file: "community.csv" })?.reason, "consent");
   assert.doesNotMatch(text, /\$\d|guaranteed income|best platform|move everything|one-click migration/i);
@@ -91,6 +96,8 @@ test("the actual article renders its copy, sources, FAQ and structured headline 
     const html = renderToStaticMarkup(await PostPage({ params: Promise.resolve({ slug: SLUG }) }));
     assert.ok(html.includes(post.title));
     assert.ok(html.includes('href="https://circle.so/pricing"'));
+    assert.equal([...html.matchAll(/<nav aria-label="Sources and next steps"/g)].length, 1, "one named sources landmark");
+    assert.match(html, /<h2[^>]*id="sources-and-further-reading"[^>]*>Sources and further reading<\/h2>[\s\S]*<nav aria-label="Sources and next steps"/);
     const documents = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((match) => JSON.parse(match[1]));
     const article = documents.find((document) => document["@type"] === "BlogPosting");
     assert.equal(article?.headline, post.title);
@@ -102,6 +109,30 @@ test("the actual article renders its copy, sources, FAQ and structured headline 
     assert.equal(requests, 0);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("offer-guide navigation stays with offer guides rather than every article with a FAQ", async () => {
+  const comparison = renderToStaticMarkup(await PostPage({ params: Promise.resolve({ slug: SLUG }) }));
+  assert.ok(comparison.includes('data-article-faq'), "comparison questions remain visible");
+  assert.ok(!comparison.includes('aria-label="More creator guides"'), "a comparison does not become an offer guide by having questions");
+  const offer = renderToStaticMarkup(await PostPage({ params: Promise.resolve({ slug: CREATOR_GUIDE_SLUGS[0] }) }));
+  assert.ok(offer.includes('aria-label="More creator guides"'), "existing offer guides keep their next-step links");
+});
+
+test("the guide's own narrative uses short sentences", () => {
+  const post = guide();
+  const narrative = post.body.flatMap((block) => {
+    if (block.type === "p") return [block.text];
+    if (block.type === "ul") return block.items;
+    if (block.type === "steps") return block.items.flatMap((item) => [item.title, item.text]);
+    return [];
+  });
+  for (const paragraph of narrative) {
+    for (const sentence of paragraph.split(/[.!?]+(?:\s|$)/u).filter(Boolean)) {
+      const words = sentence.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? [];
+      assert.ok(words.length <= 25, `${words.length} words: ${sentence}`);
+    }
   }
 });
 

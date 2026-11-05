@@ -124,69 +124,76 @@ export function priceWords(product: Listing, currency: string, tiers: readonly s
   return `${money(product.priceCents)}, paid once.${plan ? ` Or in ${planWords(plan, currency)}.` : ""}`;
 }
 
+/** Told after a plain part of the page the length cut ended early, so the model never reads its kept lines as all it says. */
+export const PAGE_GOES_ON = "(The page goes on here; the rest of this part is not repeated.)";
+/** Told when a refund promise on the page did not fit, so its absence is never read as "no refunds". */
+export const REFUND_ON_PAGE = "The page also states the creator's refund terms, which are not repeated here.";
+
 /**
  * Everything the model is told: the page as the public reads it, in plain
  * lines, and the creator's own notes. Pure, so it can be tested and hashed.
  */
 export function factsFor(store: Store, product: Listing, about: string, page: SalesPage | null): string {
-  const parts: string[] = [
-    `Store: ${store.name}`,
-    `Product: ${product.title}`,
-    `Price: ${priceWords(product, store.currency, store.tiers)}`,
-    `How it is delivered: ${deliveryWords(product, store.currency)}`,
-  ];
+  const parts: Part[] = [];
+  // What a part is decides how the length cut may treat it (see keptParts): the price and the terms are whole or absent.
+  const prose = (text: string) => parts.push({ text, tier: PROSE });
+  const whole = (text: string, tier: Tier = TERMS, refund = false) => parts.push({ text, tier, refund });
+  whole(`Store: ${store.name}`, FIRST);
+  whole(`Product: ${product.title}`, FIRST);
+  whole(`Price: ${priceWords(product, store.currency, store.tiers)}`, FIRST);
+  whole(`How it is delivered: ${deliveryWords(product, store.currency)}`, FIRST);
   if (!isFree(product)) {
-    parts.push(`How it is paid for: on a secure payment page${store.stripeAccountId ? " run by Stripe" : ""}, into ${store.name}'s own account. Nothing is charged until the buyer confirms there.`);
+    whole(`How it is paid for: on a secure payment page${store.stripeAccountId ? " run by Stripe" : ""}, into ${store.name}'s own account. Nothing is charged until the buyer confirms there.`, FIRST);
   }
-  if (product.summary) parts.push(`Its one-line summary: ${product.summary}`);
-  if (about.trim()) parts.push(`Its description:\n${about.trim()}`);
+  if (product.summary) prose(`Its one-line summary: ${product.summary}`);
+  if (about.trim()) prose(`Its description:\n${about.trim()}`);
   for (const block of page?.blocks ?? []) {
     switch (block.kind) {
       case "hero":
-        if (block.headline || block.sub) parts.push(`Headline: ${[block.headline, block.sub].filter(Boolean).join(" — ")}`);
+        if (block.headline || block.sub) prose(`Headline: ${[block.headline, block.sub].filter(Boolean).join(" — ")}`);
         break;
       case "text":
-        if (block.body) parts.push(`${block.heading ? `${block.heading}:\n` : ""}${block.body}`);
+        if (block.body) prose(`${block.heading ? `${block.heading}:\n` : ""}${block.body}`);
         break;
       case "feature": {
         // The words beside the picture, then what the picture shows and its caption, as a visitor reads them.
         const shown = block.picture ? pictureWords(block.picture, false) : "";
         const words = [block.body, shown].filter(Boolean).join("\n");
-        if (words) parts.push(`${block.heading ? `${block.heading}:\n` : ""}${words}`);
+        if (words) prose(`${block.heading ? `${block.heading}:\n` : ""}${words}`);
         break;
       }
       case "benefits":
-        if (block.items.length) parts.push(`${block.heading || "What the buyer gets"}:\n${block.items.map((item) => `- ${item}`).join("\n")}`);
+        if (block.items.length) prose(`${block.heading || "What the buyer gets"}:\n${block.items.map((item) => `- ${item}`).join("\n")}`);
         break;
       case "inside":
-        if (block.items.length) parts.push(`${block.heading || "What is inside"}:\n${block.items.map((item) => `- ${item.title}${item.detail ? `: ${item.detail}` : ""}`).join("\n")}`);
+        if (block.items.length) prose(`${block.heading || "What is inside"}:\n${block.items.map((item) => `- ${item.title}${item.detail ? `: ${item.detail}` : ""}`).join("\n")}`);
         break;
       case "bio":
-        if (block.body) parts.push(`About ${store.name}:\n${block.body}`);
+        if (block.body) prose(`About ${store.name}:\n${block.body}`);
         break;
       case "faq":
-        for (const item of block.items) parts.push(`Question on the page: ${item.q}\nIts answer: ${item.a}`);
+        for (const item of block.items) whole(`Question on the page: ${item.q}\nIts answer: ${item.a}`);
         break;
       case "guarantee":
-        if (block.body) parts.push(`The creator's refund promise, in their words:\n${block.body}`);
+        if (block.body) whole(`The creator's refund promise, in their words:\n${block.body}`, BINDING, true);
         break;
       case "countdown":
-        if (block.until && block.note) parts.push(`A deadline on the page: ${block.note} (${new Date(block.until * 1000).toUTCString()})`);
+        if (block.until && block.note) whole(`A deadline on the page: ${block.note} (${new Date(block.until * 1000).toUTCString()})`, BINDING);
         break;
       case "fit":
-        if (block.yes.length) parts.push(`Who it is for, in the creator's words:\n${block.yes.map((item) => `- ${item}`).join("\n")}`);
-        if (block.no.length) parts.push(`Who it is NOT for, in the creator's words:\n${block.no.map((item) => `- ${item}`).join("\n")}`);
+        if (block.yes.length) whole(`Who it is for, in the creator's words:\n${block.yes.map((item) => `- ${item}`).join("\n")}`);
+        if (block.no.length) whole(`Who it is NOT for, in the creator's words:\n${block.no.map((item) => `- ${item}`).join("\n")}`);
         break;
       case "steps":
-        if (block.items.length) parts.push(`${block.heading || "How it works"}, step by step:\n${block.items.map((item, i) => `${i + 1}. ${item.title}${item.detail ? `: ${item.detail}` : ""}`).join("\n")}`);
+        if (block.items.length) prose(`${block.heading || "How it works"}, step by step:\n${block.items.map((item, i) => `${i + 1}. ${item.title}${item.detail ? `: ${item.detail}` : ""}`).join("\n")}`);
         break;
       case "bonuses":
-        if (block.items.length) parts.push(`Bonuses that come with it:\n${block.items.map((item) => `- ${item.title}${item.detail ? `: ${item.detail}` : ""}`).join("\n")}`);
+        if (block.items.length) whole(`Bonuses that come with it:\n${block.items.map((item) => `- ${item.title}${item.detail ? `: ${item.detail}` : ""}`).join("\n")}`);
         break;
       case "compare":
         if (block.rows.length) {
           const cell = (text: string) => (text === CELL_YES ? "yes" : text === CELL_NO ? "no" : text || "-");
-          parts.push(
+          whole(
             `A comparison on the page, "${block.columnA || product.title}" against "${block.columnB || "another way"}":\n${block.rows.map((row) => `- ${row.label}: ${cell(row.a)} / ${cell(row.b)}`).join("\n")}`,
           );
         }
@@ -215,7 +222,7 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
           }
         };
         const columns = block.columns.map((column) => column.map(said).filter(Boolean).join("\n")).filter(Boolean);
-        if (columns.length) parts.push(`Columns on the page:\n${columns.join("\n\n")}`);
+        if (columns.length) prose(`Columns on the page:\n${columns.join("\n\n")}`);
         break;
       }
       default:
@@ -224,28 +231,78 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
   }
   // The creator's own notes are never what the cut takes: the page's lines give way to them (inbox C4-16 (f)).
   const notes = store.answers.facts ? `What ${store.name} wants buyers to know, in their words:\n${store.answers.facts}` : "";
-  // The page is cut between its parts, never inside one, so no price or date reaches the model half read (review of #2177).
   const room = notes ? Math.max(0, MAX_FACTS_CHARS - notes.length - 2) : MAX_FACTS_CHARS;
-  const kept = wholeParts(parts, room);
+  const kept = keptParts(parts, room);
   if (!notes) return kept;
   return `${kept}${kept ? "\n\n" : ""}${notes}`.slice(0, MAX_FACTS_CHARS);
 }
 
-/** As many of the page's parts as fit in `room` characters, whole, joined as they are. Pure. */
-function wholeParts(parts: string[], room: number): string {
-  let out = "";
-  for (const part of parts) {
-    const next = out ? `${out}\n\n${part}` : part;
-    if (next.length > room) {
-      // The part that does not fit gives its whole lines that do, never half of one.
-      const cut = next.slice(0, room);
-      const line = cut.lastIndexOf("\n");
-      out = line > out.length ? cut.slice(0, line).trimEnd() : out || cut;
-      break;
-    }
-    out = next;
+/** First the store, the product, its price and how it is paid; then refund promises and deadlines; then other terms; then the rest. */
+const FIRST = 0;
+const BINDING = 1;
+const TERMS = 2;
+const PROSE = 3;
+type Tier = typeof FIRST | typeof BINDING | typeof TERMS | typeof PROSE;
+type Part = { text: string; tier: Tier; refund?: boolean };
+
+/**
+ * The page's parts that fit in `room` characters, in the page's order. Pure.
+ *
+ * The rule (Codex D's review of #2177): a cut at a line's end can keep a
+ * promise and drop the condition on the next line ("Full refunds within
+ * fourteen days." / "Only if the file was never downloaded."), and the model
+ * would then answer a broader promise than the page makes. So:
+ * - every part that carries money or terms — the price and how it is paid,
+ *   a refund promise, a deadline, a question's answer, who it is and is not
+ *   for, a bonus, a comparison — is told WHOLE or left out WHOLE, never in
+ *   part;
+ * - the room goes to them first, in that order (the price, then refund
+ *   promises and deadlines, then the other terms), each in the page's order,
+ *   and one that does not fit is left out while smaller ones after it may
+ *   still be told;
+ * - only plain descriptive parts (the summary, the description, a headline,
+ *   text, pictures, benefits, what is inside, the creator's story, steps, a
+ *   row's columns) fill what is left, in the page's order; the first that
+ *   does not fit gives its whole lines that do, followed by PAGE_GOES_ON so
+ *   the model knows the page says more (PAGE_GOES_ON alone when not one of
+ *   its lines fits), and no plain part after it is told;
+ * - when a refund promise is left out, REFUND_ON_PAGE says the page has refund
+ *   terms, so the model says it does not know rather than that there are none.
+ */
+function keptParts(parts: Part[], room: number): string {
+  const sep = 2;
+  // Room kept for the two lines the code may add, so they always fit.
+  const reserve = REFUND_ON_PAGE.length + PAGE_GOES_ON.length + 2 * sep;
+  let used = -sep;
+  const take = new Map<number, string>();
+  let refundLeft = false;
+  for (const tier of [FIRST, BINDING, TERMS] as const) {
+    parts.forEach((part, i) => {
+      if (part.tier !== tier) return;
+      if (used + sep + part.text.length <= room - reserve) {
+        take.set(i, part.text);
+        used += sep + part.text.length;
+      } else if (part.refund) refundLeft = true;
+    });
   }
-  return out;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.tier !== PROSE) continue;
+    const free = room - reserve - used - sep;
+    if (part.text.length <= free) {
+      take.set(i, part.text);
+      used += sep + part.text.length;
+      continue;
+    }
+    // The whole lines that fit, then the line that says the page goes on (alone, when not one line fits).
+    const cut = part.text.slice(0, Math.max(0, free));
+    const line = cut.lastIndexOf("\n");
+    take.set(i, line > 0 ? `${cut.slice(0, line).trimEnd()}\n${PAGE_GOES_ON}` : PAGE_GOES_ON);
+    break;
+  }
+  const kept = [...take.entries()].sort((a, b) => a[0] - b[0]).map(([, text]) => text);
+  if (refundLeft) kept.push(REFUND_ON_PAGE);
+  return kept.join("\n\n");
 }
 
 /**

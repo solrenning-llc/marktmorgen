@@ -8,7 +8,7 @@
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { parsePage } from "@/lib/sales-page";
-import { factsFor } from "@/lib/answers";
+import { factsFor, PAGE_GOES_ON, REFUND_ON_PAGE } from "@/lib/answers";
 import { MAX_FACTS_CHARS } from "@/lib/answers-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -88,9 +88,58 @@ async function main(): Promise<void> {
     const parts = Array.from({ length: 800 }, (_, i) => `Line ${i}: the price is $129.`).join("\n");
     const cut = factsFor(noted, product, parts, page);
     const pagePart = cut.slice(0, cut.lastIndexOf("\n\nWhat "));
-    is("a long page is cut at the end of a line: its last line whole", [cut.length <= MAX_FACTS_CHARS, /the price is \$129\.$/.test(pagePart.trimEnd())], [true, true]);
+    is("a long page is cut at the end of a line: its last line whole", [cut.length <= MAX_FACTS_CHARS, /the price is \$129\.$/.test(pagePart.split(PAGE_GOES_ON).join("").trimEnd())], [true, true]);
   }
   is("and a short page keeps everything, the notes last", factsFor(noted, product, "", page).endsWith(NOTES) && factsFor(noted, product, "", page).includes("Fast dinners"), true);
+
+  part("A promise and its condition reach the model together or not at all (Codex D's review of #2177)");
+  {
+    // Codex D's case (codex/d-review-2177-refund-red): a valid page whose text blocks end just before the guarantee,
+    // so that cutting at a line's end kept the refund promise and dropped the condition under it.
+    const PROMISE = "Full refunds are available within fourteen days.";
+    const CONDITION = "Only if the purchased file has never been downloaded.";
+    const baseline = factsFor(noted, product, "", null);
+    const fixed = baseline.slice(0, baseline.lastIndexOf("\n\nWhat "));
+    const room = MAX_FACTS_CHARS - (baseline.length - fixed.length);
+    let remaining = room - fixed.length - "\n\nThe creator's refund promise, in their words:\n".length - PROMISE.length - 2;
+    const blocks: Record<string, unknown>[] = [];
+    while (remaining > 0) {
+      const n = Math.min(3_000, remaining - 2);
+      if (n <= 0) throw new Error("bad test boundary");
+      blocks.push({ id: `fill${String(blocks.length).padStart(4, "0")}`, kind: "text", heading: "", body: "x".repeat(n) });
+      remaining -= n + 2;
+    }
+    blocks.push({ id: "refund01", kind: "guarantee", heading: "Refunds", body: `${PROMISE}\n${CONDITION}` });
+    const boundary = parsePage({ blocks });
+    is("the page parser keeps every block and the whole guarantee", [boundary.blocks.length, boundary.blocks.some((b) => b.kind === "guarantee" && b.body.includes(CONDITION))], [blocks.length, true]);
+    const facts = factsFor(noted, product, "", boundary);
+    is("the refund promise is told with its condition, the notes kept, within the limit", [facts.includes(PROMISE), facts.includes(CONDITION), facts.endsWith(NOTES), facts.length <= MAX_FACTS_CHARS], [true, true, true, true]);
+    is("the text that gave way says the page goes on", facts.includes(PAGE_GOES_ON), true);
+
+    // More refund terms than the room holds: each guarantee is told whole or left out whole, and the model is told
+    // the page has refund terms it was not given, so it never takes their absence for "no refunds".
+    const many = parsePage({
+      blocks: Array.from({ length: 20 }, (_, i) => ({ id: `refund${String(i).padStart(2, "0")}`, kind: "guarantee", heading: "", body: `Promise ${i}: ${"y".repeat(900)}\nCondition ${i}: only if never downloaded.` })),
+    });
+    const crowded = factsFor(noted, product, "", many);
+    const told = Array.from({ length: 20 }, (_, i) => [crowded.includes(`Promise ${i}:`), crowded.includes(`Condition ${i}:`)]);
+    is("no guarantee is told without its condition", told.every(([p, c]) => p === c), true);
+    is("some are told and some left out, within the limit, the notes kept", [told.some(([p]) => p), told.some(([p]) => !p), crowded.length <= MAX_FACTS_CHARS, crowded.endsWith(NOTES)], [true, true, true, true]);
+    is("the refund terms left out are said to be on the page", crowded.includes(REFUND_ON_PAGE), true);
+    is("and that is never said when every refund term was told", [facts.includes(REFUND_ON_PAGE), factsFor(noted, product, "", null).includes(REFUND_ON_PAGE)], [false, false]);
+
+    // A question's answer is a term too (a refund, a delivery time, a price): told whole or not at all.
+    const ANSWER_LINE_2 = "Unless the order was a gift card.";
+    const asked = parsePage({
+      blocks: [
+        ...blocks.slice(0, -1),
+        { id: "faq00001", kind: "faq", heading: "", items: [{ q: "Can I get a refund?", a: `Yes, within fourteen days.\n${ANSWER_LINE_2}` }] },
+      ],
+    });
+    const answered = factsFor(noted, product, "", asked);
+    is("a question's answer is never told without its second line", answered.includes("Yes, within fourteen days.") === answered.includes(ANSWER_LINE_2), true);
+    is("and the price, told first, is always whole", answered.includes(`Price: ${baseline.split("Price: ")[1].split("\n")[0]}`), true);
+  }
 
   done();
 }

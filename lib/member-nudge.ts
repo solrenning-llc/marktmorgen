@@ -70,7 +70,13 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
     if (!unsub || !listing) continue;
     const away = new Set(member.factors.map((f) => f.reason));
     const key = sentKey(statsId, member.sub, member.periodEnd);
-    const [claimed] = await redisPipeline([["SET", key, String(now), "NX", "EX", KEEP_SECONDS]]);
+    const claim = await redisPipeline([["SET", key, String(now), "NX", "EX", KEEP_SECONDS]]);
+    if (!Array.isArray(claim) || claim.length !== 1 || !Object.hasOwn(claim, 0) || (claim[0] !== "OK" && claim[0] !== null)) {
+      // The mark may already exist. Never send or delete it without proof
+      // that this attempt owns it.
+      throw new Error("Member notice ownership could not be confirmed");
+    }
+    const [claimed] = claim;
     if (claimed === null) continue;
     try {
       const mail = nudgeEmail({

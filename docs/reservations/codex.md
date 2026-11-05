@@ -73,3 +73,5 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex Z | SG2(17)/465 [MR2]: require confirmed outreach day and AI counters before paid reads/drafts | codex/z-outreach-counter-admission | `app/api/store/outreach/route.ts`, `tests/outreach-counter-admission.test.ts`, `tests/outreach-counter-admission-world.ts`; shared only own alias in `tests/test-config.mjs` | 05/11/2026 |
 | Codex Z | SG2(17)/465 [MR2]: require confirmed preview counter before store lookup and PDF work | codex/z-preview-counter-admission | `app/api/store/preview/route.ts`, `tests/preview-counter-admission.test.ts`, `tests/preview-counter-admission-world.ts`; shared only own alias in `tests/test-config.mjs` | 05/11/2026 |
 | Codex A3 | CX-121(3), same no-POST contract unit; direct transport expectation update and unknown-debit control | codex/a3-c121-not-posted-integration | additional existing `tests/resend-meter-dispatch.test.ts` | 05/11/2026 |
+
+| Codex W | 427 [VR1], CX-123(24): confirmed meeting read evidence before retry or privacy copy | codex/w-meeting-record-evidence | `lib/meet-records.ts`, `tests/meeting-record-evidence.test.ts` | 05/11/2026 |

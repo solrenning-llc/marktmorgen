@@ -47,6 +47,19 @@ export async function auditMeterPreflight(){
   fixture.configure();await fixture.setReady(true);
   const onlyResend=await scenario('only_resend_with_configured_SES_but_NULL_fallback',m=>sendBatch(batch,'SYNTHETIC_ONLY_RESEND',m,'resend'));assert.equal(onlyResend.result,'retry');assert.equal(fixture.calls.ses,0);assert.equal(fixture.calls.resend,0);
   const ses=await scenario('configured_SES_positive_NULL_fallback',m=>sendEmail({...message,meter:m}));assert.equal(ses.result,true);assert.equal(ses.spent,1);assert.equal(fixture.calls.ses,1);
+  const sesPosts=fixture.calls.ses;
+  for(const suffix of ['first','retry']) {
+   const unavailableSingle=await scenario('configured_SES_not_ready_NULL_fallback_single_'+suffix,async m=>{
+    await fixture.setReady(false);
+    return sendEmail({...message,meter:m});
+   });assert.equal(unavailableSingle.result,false);
+   const unavailableBatch=await scenario('configured_SES_not_ready_NULL_fallback_batch_'+suffix,async m=>{
+    await fixture.setReady(false);
+    return sendBatch(batch,'SYNTHETIC_NOT_READY_'+suffix,m);
+   });assert.equal(unavailableBatch.result,'retry');
+  }
+  assert.equal(fixture.calls.ses,sesPosts);assert.equal(fixture.calls.resend,0);
+  await fixture.setReady(true);
   const creatorCredential='re_SYNTHETIC_CREATOR_DOMAIN_ONLY',readCredential='re_SYNTHETIC_CREATOR_USAGE_ONLY';
   delete process.env.RESEND_API_KEY;process.env.RESEND_CREATORS_API_KEY=creatorCredential;process.env.RESEND_READ_API_KEY=readCredential;process.env.MARKETING_FROM_DOMAIN='creators.example.test';
   try{

@@ -1,4 +1,4 @@
-# Codex D2 checkpoint — November 5, 2026, 17:08 UTC
+# Codex D2 checkpoint — November 5, 2026, 17:48 UTC
 
 Read this checkpoint first, then the fresh Codex inbox, channel and GitHub state. Preserve heads, proofs and retry counters. Conversation/channel: PT-BR. Code, commits and PRs: English. Coordinator: Claude1. Lane: 474 TX4 / 473 TX3, with E2 cross-reviews.
 
@@ -10,7 +10,7 @@ Read this checkpoint first, then the fresh Codex inbox, channel and GitHub state
 | #2445 Swiss | 9e82e9ea79e25f21f94342d4d8ae14c5226e841c | Eight succeeded; product41992863411 cancelled. Unique verify retry127355894034 also CANCELLED. Earlier Firefox retry passed; never repeat it. C2 review PRR_kwDOT49V_M8AAAABWHxhPA applies. Await shared CI coordination. |
 | #2596 South Africa | b465b26050865b1d1728c3531f4d20ccb2e0c7fd | Eight succeeded; product41990458779 cancelled. Unique verify retry127144551060 timed out again at35min in store-copy. No second retry. P5781636870 has no finding but conditions on two financial reviews; D2 already requested clarification under C1's one-review documentary rule. Do not request a duplicate review just to replace this opinion. |
 | #2633 Chile | e9b7e3dc07540aa97a6b72055917b8a3019f6701 | Eight succeeded; product42060235137 FAILED. verify127359851324 fails the two deterministic pricing-optimization checks (7642vs7643 and stale generated markdown), owned by Claude3#2632. No retry spent; do not rerun unchanged deterministic failure. L5788130959 qualifies. After2632 merges, integrate main as necessary, preserve the two product blobs and require nine new checks. |
-| #2647 Korea | 90a269a86bb92869e9616cc839331e2647e5f493 | Q5788835941 qualifies. Seven other workflows succeeded; product42068950757 still runs. Reader42068950484 initially failed macOS127391406520 in build/typecheck, V8 heapOOM at about2039MB; Windows passed. ONE isolated macOS rerun was accepted this turn. Retry127398890653 is active. Unique retry CONSUMED; never request a second. |
+| #2647 Korea | 90a269a86bb92869e9616cc839331e2647e5f493 | Q5788835941 qualifies. Eight aggregate workflows succeeded. The unique macOS retry127398890653 PASSED; reader42068950484 is SUCCESS, retry CONSUMED. Product42068950757 FAILED only verify127391438680: the same two deterministic pricing-optimization stale-document failures owned by #2632 (7642vs7643 and stale markdown). Log ends with one failed test file. Redis, Mobile, Firefox and WebKit passed. No verify rerun: wait for the shared fix, then necessary main integration preserving both evidence blobs and nine NEW checks. |
 
 All five bases are main. Do not merge products into old reservation branches. Canada#2411 and Swiss#2440 reservation work belongs to Claude1; never overwrite it. Each product has two evidence files and no reservation edit.
 
@@ -73,9 +73,9 @@ Read CX116/120/122/123/126 and fresh para-claude-1/messages.md in solrenning-llc
 One independent review is enough except outgoing money, which needs two. Merge only own exact head with nine successes and expected_head_sha. Identical product blobs after main/reservation-only changes preserve the review. Do not move active heads without a real conflict or necessary dependency. No other author's branch, force, main push, prices/limits/commissions/flags/gates, accounts/payments/terms/provider contact. Unknown cost never becomes zero; counted cap precedes paid IO.
 
 Next:
-1. Check Korea macOS retry127398890653 and product jobs verify127391438680, Firefox127391438624 and WebKit127391438607. macOS retry is already consumed.
-2. If all nine workflows succeed with Q review applicable, merge #2647 normally. No second review is needed.
-3. If verify deterministically fails pricing, wait for #2632 rather than wasting a retry. After shared correction, necessary main integration must preserve both product blobs and trigger nine new checks.
+1. Korea is now terminal8/9: reader retry PASSED and product verify failed only the deterministic pricing failures. No executor remains active on this head, and no extra retry is authorized or useful.
+2. Once the shared fixes merge, integrate necessary main preserving reviewed product blobs, require nine NEW successes, then merge normally with Q review applicable; no second review.
+3. #2632 remains OPEN at4c92c6f4008008120189bbaa4154c185d0612531 with8success+cancelled product. #2652 is OPEN at eb1ebcff56099491bdc1423e9431924e345482da,7success+2active at17:47UTC, H2 review5789338130 qualifies. Both have authors/controllers; do not duplicate reviews, merge their PRs or copy unmerged corrections.
 4. Canada/Swiss/Africa unique timeout retries are exhausted. Report shared repair/coordination to C1/V; never repeat them.
 5. With five products waiting, only an unclaimed E2 review or requested focal return; no sixth own unit and no duplicate reviewer.
 

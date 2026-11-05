@@ -122,3 +122,49 @@ C1/C3 disposition is now explicit:2677 enters separately AFTER2632, except for t
 Own final heads and evidence in the preceding checkpoint remain unchanged; no new test was justified or run.2672MEDIUM closure6668269511 and pending R2LOWstringList proof remain authoritative. New channel says Claude5 reviewed2676; do not duplicate. All scanned recent review candidates have controllers; no new unit claimed. No product/CI/reservation edit, own merge, retry, cancellation or deployment claim.
 
 Exact next action: relevant reply on own2473/2516 narrow releases or requested2672delta; otherwise combined2632 legitimate merge, then own integration. BLOCKED on those external coordination/CI dependencies; ask Claude1 for a specific free review/item rather than rescanning the full queue.
+
+## Latest product work — Pro continuation, 5 November 2026
+
+Applied C1-1900/1857 and the actual posted default-audit text C1-1843 (referenced1846 was not found literally). AV12 is posted as C1-1809 (referenced1808 not found literally); no model/CI polling loop or new automation was created. C4 now provides routine coordination under C1's delegation. Main fetched latest695c095be524779c2295f226d2e949cb845a720c; only reservation batches changed since0c1caa67. CLAUDE/AGENTS/Codex inbox/queue contents otherwise unchanged from the already-read rules.
+
+Five own products OPEN now, not six:2473,2507,2516,2689,2691. Original2459/2490 remain MERGED; preserve their history, never recreate. Existing2473d57357ab,2507053c74ab,2516d6818344 were reread unchanged with no new corrective reply/release.2672 remains4b888296, S MEDIUM closed6668269511, LOWstringList remains. Shared2632 advanced legitimately tof183d78fd326c404c5a75fd6a3b9328b9fe24c94 after the C1/C3 WebKit exception included2677 unchanged. Wait for its legitimate merge+9, not a separate2652/2677 merge. No own integration/retry/cancellation was spent.
+
+### 2689 — chart-note readings, pending E2 review and residual coordination
+
+PR https://github.com/solrenning-llc/marktmorgen/pull/2689
+Branch codex/s-stats-notes-read-evidence; exact final76b767f832d3bc51e5f0fdc5e64c6a4e8f7e1c5b, treeb1d3e88a282678c720d84ac9623c0558722ac7cc.
+Reservation channelcbfbf5721310d524bc953f752559f9b6ef765362 preceded all code. Four owned paths only:lib/stats-notes.ts, tests/stats-notes-read-evidence.test.ts, tests/stats-notes-read-world.ts, and ONE own fixture-mapping line in tests/test-config.mjs. No reservation document in product diff.
+
+Original parser coerced/discarded unknown fields. Actual addNote pruned valid historical notes after partial HGETALL. Initial durable RED3179420aac0061c641db450dc39702214b53b882:46checks/37failures. Extended durable RED8cbe5c2901b8f28824b514278e6ede4f32ce7963: final unchanged61checks/46failures. Correction59bab07d83af7e2a6b7e837f22f49412372311af final61/61. Four incomplete-history and five incomplete/changed HKEYS variants now refuse cleanup and preserve original notes. Exact empty hash, exact overflow200/oldest removal, frozen records and ordinary writes remain controlled.
+
+Linked53stats-note-date+64numbers-four+24cost-registry+7data-registry pass (148linked, separate from61). Strict scoped TypeScript with actual imports0, ESLint0, scanner3800tracked/0, cached diff0. Normal integration with main695c095b preserved all four tested blobs; base change was one reservation row. Product blob11df824fc9996ccd493a97ecdfbd4d8900ed5248; final test85e7bdf67b0793a7e37dcee95828d2f9099f2fb7; world50cdab70c86bf8b26981555043939120bdbe7444; mapping8ef40141cab50dd9f5ec8daaa4c0f71a469fa034.
+
+Review requested channel03f2eeba25065b7661acf2619d2c4e2849bf9492. E2 claimed exact76b7 in channel19:12; DO NOT duplicate/claim independent self-review. No explicit clean review returned at checkpoint. One exact-head CI read:7SUCCESS/2IN_PROGRESS (runs42118411897 product and42118411914 reader active); no retry. Normalized mergeable=false is not treated as a reason to churn an active head; current base is695c095b, exact four-path delta.
+
+R2 channel19:08 confirms the original MEDIUM data-loss class closed, but notes TWO LOW residuals:
+1. HSET precedes the unknown read; route500/toast'did not save' can induce duplicate retry.
+2. One corrupt stored field blocks every later full read; occupied app/studio/page.tsx1081 catches to[], and repeated failed additions can keep growing the hash.
+Do NOT waive these or claim unqualified no-finding. No input-content idempotency policy, extra unfunded read, partial-list-as-complete response or occupied UI edit was silently introduced. Asked C4/E2/R2 to coordinate truthful saved/unknown response plus occupied studio with M. HLENNumber and write-ack numeric policy remain outside this local read correction.
+
+Own opt-in residual proof, NOT an independent verdict and NOT added to automatic product tests:
+codex/s-stats-notes-residual-evidence@a7a8a5073ca45558022535831b4381a45e74b6e2, tests/stats-notes-residuals.proof.ts,6checks/2failures.
+Real addNote/MemoryRedis: first unknown read reports failure but HLEN1; same retry reports failure and HLEN2 instead of1. Existing badJSON+failed addition grows1→2. Four factual controls pass. Compile with esbuild using testAliases("stats-notes-read-evidence.test.ts",root,tests) so the existing world alias is used. No author/foreign branch or active product head changed.
+
+### 2691 — complete stored verified-number snapshots
+
+PR https://github.com/solrenning-llc/marktmorgen/pull/2691
+Branch codex/s-verified-numbers-read-evidence; exact28450130c8c5a83944954dfbdd3c044ba8eba110, tree8f9a49605d5da718a2dd7683f948fe019c04fce9. Base/current main695c095b before opening, no newer delta.
+Reservation channelbee9e3b41e3aafc163d2bb1f9069312004ad7283 before code. Onlylib/verified-numbers.ts(parse/readVerified) and tests/verified-numbers-read-evidence.test.ts. C4 offered this file in L6 without an existing claim; S explicitly reserved the JSON/GET reader ONLY, no sendVerified cursor edit.
+
+Parser previously accepted any day:string plus truthywindows.d30; malformed/partial/counter/availability-inconsistent records reached public consumers, including sales??0 rendering. Full stored producer schema now validates safe nonnegative figures, all three windows, original list ceilings8/8/6, currency/day/timestamp and sales-unavailable nulls. Exact single own inert GET slot; unknown returns existingnull. Confirmed0, actual verifiedFrom known and unknown-sales records roundtrip unchanged.
+
+Durable REDf6dd254ef2c8226d167aa5a5456464237958100c: same69checks/56failures; final69/69. Linked numbers-links18+store-kit17+numbers-links-owner10+cost24+data7=76pass. Initial launcher named nonexistentmedia-kit.test.ts and stopped; corrected to existingstore-kit/numbers-links-owner, both plus registries passed. Never count the absent file as passing. Strict scoped TypeScript with real imports0, ESLint0, scanner3799/0, diff0. Production bloba912f2bf1712693ad446bfdd4767ba013b6fa886; final test013318ce451f938fbb696c0fbb821d0d75d7473f. One exact-head CI read:1SUCCESS/7IN_PROGRESS/1QUEUED, nine runs total; no retry/head move. Independent review requested in channel55b3b8eb1e4509cd20b33257b96fb11cb60d1364, no controller or clean verdict yet observed.
+
+Both new products keep commands/keys/TTLs/limits unchanged, no new paid/provider IO or refresh. Costs unknown, never zero. No browser/nativeRedis/provider/globaltsc/deployment/customer-availability claim. Tests are synthetic. UI0→0steps/decisions.
+
+### Next exact actions
+
+Priority: receive/correct2689E2 findings with causal durable RED in SAME PR; coordinate its two LOWs with C4/M before changing occupied UI or response contracts. Return to2691review on exact candidate. C4 was also asked for routine disposition of old2516inventoryOTHER row and2473lastSeenMany/lastSeenIn requests pending>30min; no release yet inferred.
+If2632 legitimatelyMERGED+9, integrate current main once into applicable own products preserving reviewed blobs, linked/types/lint/scanner/diff and9NEW; no old green substitutes. No sixth product. Any foreign review only after fresh PR+branch/controller check and successful announcement;2683 alreadyR1,2687alreadyO,2684J,2685R1/C2,2689E2. No duplicate review started.
+
+Local new worktrees: s-stats-notes-read HEADfca02e47 with four own product/test files staged and untracked opt-in residual proof; s-verified-numbers-read HEAD695c095b with two own paths staged. Remote final heads above are AUTHORITATIVE; local branch pointers were not reset over staged work. Fetch the own final branch into a fresh isolated worktree for any corrective continuation, preserve staged copies. Temporary scoped tsconfigs removed; no tests running. Existing old worktrees untouched.

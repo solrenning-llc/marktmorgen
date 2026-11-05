@@ -18,8 +18,9 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CAMPAIGN_TAG, type CampaignLanding } from "@/lib/campaign-landing";
 import { MAX_CTA_LABEL, MAX_HEADLINE, MAX_SUBHEADLINE } from "@/lib/sales-page";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { type DataStore, DataRoomError, TAKE_DATA, dataKey, monthOf } from "@/lib/store-data";
+import { contentRoomFor, dataBytes, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
+import { largerPlanFor } from "@/lib/larger-plan";
 
 /** The most campaigns one product keeps a landing for. */
 export const MAX_LANDINGS = 10;
@@ -65,6 +66,42 @@ function landingsOf(raw: unknown): CampaignLanding[] {
   }
 }
 
+/** A product's landings could not be read as they are: a save refuses rather than take them for none (Codex G and J, #1947/#1950). */
+export class LandingsUnreadable extends Error {
+  constructor() {
+    super("The landing pages could not be read just now, so nothing was saved. Try again in a moment.");
+  }
+}
+
+/** A write whose answer was not the one expected: it may or may not have landed, and no room is given back for it. */
+export class LandingsWriteUnconfirmed extends Error {
+  constructor() {
+    super("We could not confirm the landing pages were saved. Reload the page to see what they are now.");
+  }
+}
+
+/**
+ * The record exactly as kept: its text, or null when the product has none.
+ * Only Redis's exact answer counts (one GET: a text or null), and a text
+ * must be valid JSON; anything else throws LandingsUnreadable, never "none"
+ * (Codex G and J: an empty or broken read let the next save erase the others).
+ */
+async function readRecord(statsId: string, productId: string): Promise<{ raw: string | null; landings: CampaignLanding[] }> {
+  const reply: unknown = await redisPipeline([["GET", landingKey(statsId, productId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new LandingsUnreadable();
+  const raw = reply[0] as string | null;
+  if (raw === null) return { raw: null, landings: [] };
+  if (raw.length > MAX_STORED_LANDINGS_BYTES) throw new LandingsUnreadable();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new LandingsUnreadable();
+  }
+  if (!Array.isArray(parsed)) throw new LandingsUnreadable();
+  return { raw, landings: parseLandings(parsed) };
+}
+
 /** A product's landings, or none when it has none (or they cannot be read). */
 export async function readLandings(statsId: string | null, productId: string): Promise<CampaignLanding[]> {
   if (!statsId || !isRedisConfigured()) return [];
@@ -86,33 +123,88 @@ export function withLanding(landings: readonly CampaignLanding[], landing: Campa
   return [...landings, landing];
 }
 
-async function writeLandings(statsId: string, productId: string, landings: CampaignLanding[], room: DataStore): Promise<void> {
-  const json = JSON.stringify(landings);
-  const bytes = landings.length ? dataBytes([json], 1) : 0;
-  // Room first: a save that does not fit throws DataRoomError and nothing is written.
-  await needData(room, [{ slot: LANDING_SLOT(productId), bytes, set: true }]);
-  await redisPipeline([landings.length ? ["SET", landingKey(statsId, productId), json] : ["DEL", landingKey(statsId, productId)]]);
+/**
+ * The data room's own steps (TAKE_DATA) for one product's slot, set to `size`, inside a script whose KEYS[1] is the room
+ * and KEYS[2] the record.
+ */
+const LANDINGS_ROOM = `local function landingsRoom(limit, always, month, slot, size)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, always, month, 's', slot, size}
+${TAKE_DATA}
+end`;
+
+/**
+ * Writes a product's landings (ARGV[6], "" to delete them) only over the record that was read (ARGV[5], "" for none),
+ * and sets its slot to their size in the same step: answers {3, 0} when the record changed since it was read, the
+ * data room's own answer otherwise ({1, total} written, {0, total} full and nothing written). Modelled by
+ * lib/redis-memory.ts.
+ */
+export const WRITE_LANDINGS = `-- marktmorgen:landings-write:v1
+${LANDINGS_ROOM}
+local held = redis.call('GET', KEYS[2])
+if (held or '') ~= ARGV[5] then return {3, 0} end
+local size = ARGV[6] == '' and '0' or ARGV[4]
+local taken = landingsRoom(ARGV[1], ARGV[6] == '' and '1' or '0', ARGV[2], ARGV[3], size)
+if taken[1] ~= 1 then return taken end
+if ARGV[6] == '' then redis.call('DEL', KEYS[2]) else redis.call('SET', KEYS[2], ARGV[6]) end
+return taken`;
+
+/** Deletes a product's landings and sets its slot to nothing in one step, whatever was kept. Modelled by lib/redis-memory.ts. */
+export const DROP_LANDINGS = `-- marktmorgen:landings-drop:v1
+${LANDINGS_ROOM}
+redis.call('DEL', KEYS[2])
+return landingsRoom(ARGV[1], '1', ARGV[2], ARGV[3], '0')`;
+
+/** How many times a change is tried again when another change landed between its read and its write. */
+const WRITE_TRIES = 3;
+
+/**
+ * Reads the record, works out the new list, and writes it only over what was read, its room set in the same step
+ * (WRITE_LANDINGS); read again and tried again when another change came in between. The answer is checked exactly:
+ * written, full (DataRoomError, nothing written) or changed; anything else is LandingsWriteUnconfirmed, and no room is
+ * given back for it.
+ */
+async function changeLandings(statsId: string, productId: string, room: DataStore, change: (landings: CampaignLanding[]) => CampaignLanding[] | "full" | "same"): Promise<"saved" | "full" | "same"> {
+  const key = dataKey(room);
+  if (!key || !isRedisConfigured()) throw new LandingsUnreadable();
+  for (let tries = 0; tries < WRITE_TRIES; tries += 1) {
+    const { raw, landings } = await readRecord(statsId, productId);
+    const next = change(landings);
+    if (next === "full" || next === "same") return next;
+    const json = next.length ? JSON.stringify(next) : "";
+    const now = Date.now();
+    const reply: unknown = await redisPipeline([["EVAL", WRITE_LANDINGS, 2, key, landingKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId), json ? dataBytes([json], 1) : 0, raw ?? "", json]]);
+    const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+    const [state, total] = Array.isArray(answer) && answer.length === 2 ? answer.map(Number) : [NaN, NaN];
+    if (state === 3) continue;
+    if (state === 1 && Number.isFinite(total)) return "saved";
+    if (state === 0 && Number.isFinite(total)) {
+      const limit = dataRoomFor(room, now / 1000);
+      throw new DataRoomError({ ok: false, reason: "full", used: total, room: limit, message: dataFullWords(total, limit, largerPlanFor(room, now / 1000)) });
+    }
+    throw new LandingsWriteUnconfirmed();
+  }
+  throw new LandingsWriteUnconfirmed();
 }
 
 /** Keeps a campaign's landing, in place of the one it had. "full" when MAX_LANDINGS other campaigns have one. */
 export async function saveLanding(statsId: string, productId: string, landing: CampaignLanding, room: DataStore): Promise<"saved" | "full"> {
-  const next = withLanding(await readLandings(statsId, productId), landing);
-  if (!next) return "full";
-  await writeLandings(statsId, productId, next, room);
-  return "saved";
+  const done = await changeLandings(statsId, productId, room, (landings) => withLanding(landings, landing) ?? "full");
+  return done === "full" ? "full" : "saved";
 }
 
 /** Forgets a campaign's landing; forgetting one that is gone is not an error. */
 export async function removeLanding(statsId: string, productId: string, campaign: string, room: DataStore): Promise<void> {
-  const landings = await readLandings(statsId, productId);
-  const next = landings.filter((one) => one.campaign !== campaign);
-  if (next.length === landings.length) return;
-  await writeLandings(statsId, productId, next, room);
+  await changeLandings(statsId, productId, room, (landings) => {
+    const next = landings.filter((one) => one.campaign !== campaign);
+    return next.length === landings.length ? "same" : next;
+  });
 }
 
 /** Forgets every landing of a product that is gone, and gives back its room. */
 export async function dropLandings(statsId: string | null, productId: string, room: DataStore): Promise<void> {
-  if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", landingKey(statsId, productId)]]);
-  await giveData(room, [{ slot: LANDING_SLOT(productId), bytes: 0, set: true }]);
+  const key = dataKey(room);
+  if (!statsId || !key || !isRedisConfigured()) return;
+  const now = Date.now();
+  await redisPipeline([["EVAL", DROP_LANDINGS, 2, key, landingKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId)]]);
 }

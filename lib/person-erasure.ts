@@ -88,8 +88,11 @@ import { forgetInboxPerson } from "@/lib/inbox";
 import { forgetDiscordPerson } from "@/lib/discord-access";
 import { forgetSyncPerson } from "@/lib/email-sync";
 import { forgetLedgerCopy } from "@/lib/segments";
+import { forgetReadingsPerson } from "@/lib/store-readings";
+import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
+import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
 import { forgetRequestsPerson } from "@/lib/payment-request-store";
@@ -183,6 +186,10 @@ export const ERASERS: Eraser[] = [
     },
   },
   { module: "lib/segments.ts", run: (s) => forgetLedgerCopy(s.statsId) },
+  // The studio's kept reading of the sales names the biggest buyers by address (inbox C4-48): it goes, and is read again.
+  { module: "lib/store-readings.ts", run: (s) => forgetReadingsPerson(s.statsId) },
+  // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
+  { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
   {
     module: "lib/reviews.ts",
@@ -193,6 +200,8 @@ export const ERASERS: Eraser[] = [
       return done.records;
     },
   },
+  // The month's summary of what customers say quotes their reviews (rule 28): it goes after them, and a reading under way is not kept.
+  { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
   { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },

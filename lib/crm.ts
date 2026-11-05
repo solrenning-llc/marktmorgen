@@ -157,8 +157,9 @@ const PERSON = /^[0-9a-f]{32}$/;
  * only the server's time of the deletion. While it is there, nothing is set
  * about them (SET_CRM_VALUE refuses, whatever a request says). Only the
  * server takes it away, when the person comes back on their own: a paid
- * order, a confirmed sign-up, a free product claimed, a form they sent
- * (personReturned). A request's own word never does (C3-125).
+ * order, a confirmed sign-up or waitlist place, a free product claimed
+ * through the emailed link (personReturned). A request's own word never
+ * does (C3-125), nor an address typed into a form, which anybody can type.
  */
 const erasedKey = (statsId: string, person: string) => `nl:crm:erased:${statsId}:${person}`;
 /**
@@ -201,15 +202,16 @@ export async function readGenerations(statsId: string, persons: string[]): Promi
 }
 
 /**
- * The person came back on their own (a paid order, a confirmed sign-up, a
- * free product claimed, a form they sent): the mark of their deletion goes,
+ * The person came back on their own (a paid order, a confirmed sign-up or
+ * place, a free product claimed through the emailed link; never an address
+ * typed into a form, Revisor 2 on #2287): the mark of their deletion goes,
  * so the store may keep fields about them again. Their generation stays, so
  * a page read before the deletion is still refused. Server paths only; never
  * throws (a mark that stays only refuses more).
  *
  * `at` is when the person did it, in milliseconds, from the server's own
  * record of the act (the payment's time, when the sign-up, the place or the
- * copy was asked for, a form's arrival), never from a request. The mark goes
+ * copy was asked for), never from a request. The mark goes
  * only when that is after the deletion, compared in one step with the mark
  * as it is (MARK_RETURNED): an order paid before the deletion and listed only
  * after it (a late job, a thanks page opened again), or an old link used
@@ -296,8 +298,8 @@ export async function readValues(statsId: string | null, person: string, fields:
  * line), at three bytes a UTF-16 unit, the most any takes.
  */
 export const CRM_VALUE_MOST_BYTES = 3 * Math.max(MAX_FIELD_VALUE, MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1);
-/** What SET_CRM_VALUE runs inside, at the most, which Upstash bills one by one beside the EVAL: the mark and the generation read, the value read and written. */
-export const CRM_VALUE_SCRIPT_CALLS = 4;
+/** What SET_CRM_VALUE runs inside, at the most, which Upstash bills one by one beside the EVAL: the mark and the generation read, a workflow run's lease read, the value read and written. */
+export const CRM_VALUE_SCRIPT_CALLS = 5;
 /**
  * A field saved from the studio (app/api/store/crm/route.ts, "value"), at the
  * most, measured through the real route in tests/crm-contact-writes.test.ts
@@ -330,8 +332,9 @@ export const CRM_VALUE_SAVE_UNITS = 2;
  * {1}. It never takes the mark away. Inside: the mark and the generation
  * read, the value read and written (CRM_VALUE_SCRIPT_CALLS).
  */
-export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v4
+export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v5
 if redis.call("EXISTS", KEYS[2]) == 1 then return 2 end
+if KEYS[4] and not redis.call("ZSCORE", KEYS[4], ARGV[4]) then return 2 end
 if tonumber(redis.call("GET", KEYS[3]) or "0") ~= tonumber(ARGV[3]) then return 2 end
 local before = redis.call("HGET", KEYS[1], ARGV[1])
 if ARGV[2] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]) end
@@ -342,7 +345,9 @@ return {1}`;
  * Sets one value for one person; "" clears it. False when it is not a value the field keeps.
  *
  * `generation` is the person's generation as the page read it (readGeneration), or as a workflow step read it when
- * it started. While the person's deletion mark is there, or for a save that carries another generation (a page read
+ * it started. A workflow step also gives its run's `lease` (lib/flows.ts, LEASE): a deletion takes the run out of it
+ * (forgetWorkflowPerson), so a run already under way when the person was deleted writes nothing, in the same step as
+ * the write, even if they came back before its generation was read (Codex G, #2287). While the person's deletion mark is there, or for a save that carries another generation (a page read
  * before a deletion, even if they came back since), nothing is written (CrmPersonGone, with the room taken given
  * back), in the same step as the write. The deletion leaves its mark before it takes the values away, and each value
  * is taken in one script that answers what it removed, so a write is either refused or deleted with the rest. The new
@@ -352,7 +357,7 @@ return {1}`;
  * From the studio it is counted as CRM_VALUE_SAVE_UNITS studio requests, taken before anything is read
  * (app/api/store/crm/route.ts; tests/plan-cost-registry.ts, CRM_VALUE_SAVE).
  */
-export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore, generation: number): Promise<boolean> {
+export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore, generation: number, lease?: { key: string; member: string }): Promise<boolean> {
   if (!PERSON.test(person)) return false;
   const value = fieldValue(field, raw);
   if (value === null) return false;
@@ -364,7 +369,8 @@ export async function setValue(statsId: string, person: string, field: CrmField,
   if (charged > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: charged }]);
   let answer: unknown;
   try {
-    const response = await redisPipeline([["EVAL", SET_CRM_VALUE, 3, valuesKey(statsId, field.id), erasedKey(statsId, person), generationKey(statsId, person), person, value, carried]]);
+    const keys = [valuesKey(statsId, field.id), erasedKey(statsId, person), generationKey(statsId, person), ...(lease ? [lease.key] : [])];
+    const response = await redisPipeline([["EVAL", SET_CRM_VALUE, keys.length, ...keys, person, value, carried, ...(lease ? [lease.member] : [])]]);
     answer = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
   } catch { throw new CrmValueWriteUnconfirmed(); }
   if (answer === 2) {

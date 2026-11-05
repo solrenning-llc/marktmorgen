@@ -38,7 +38,7 @@ import { can } from "@/lib/team-roles";
  */
 import { emitEvent } from "@/lib/webhooks";
 import { hasPlaceholder } from "@/lib/mail-body";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
@@ -164,6 +164,15 @@ const QUEUE = "nl:mail:flowq";
  */
 const LEASE = "nl:mail:flowq:lease";
 export const LEASE_SECONDS = 15 * 60;
+/**
+ * The score one take of the queue writes in the lease: its time up, plus a fraction of a second drawn for that take
+ * alone (k/2^21, kept exactly at this size of number). A write checked at it (lib/crm.ts, setValue's lease) is this
+ * take's only: the same entry taken again by a later run, after a deletion took it from this one and the person came
+ * back, has another score (Codex G2, #2287).
+ */
+export function leaseScore(now: number): number {
+  return now + LEASE_SECONDS + randomInt(1, 2 ** 20) / 2 ** 21;
+}
 /**
  * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
  * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
@@ -611,7 +620,7 @@ const each = (emails: string[], state: Acted["state"], note: string): Acted[] =>
  * sequence that starts with it, and nobody is started twice. A write whose
  * answer is lost is "uncertain": the run is held, never repeated by itself.
  */
-async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => string }): Promise<Acted[]> {
+async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => { member: string; score: number } }): Promise<Acted[]> {
   const listId = store.listId;
   if (!listId || !emails.length) return [];
   if (action.do === "wait") return each(emails, "confirmed", "Waited.");
@@ -732,7 +741,7 @@ async function actOnPeople(
   store: Store,
   action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => string },
+  at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => { member: string; score: number } },
 ): Promise<Acted[]> {
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
@@ -751,7 +760,7 @@ async function actOnPeople(
     for (const [i, email] of emails.entries()) {
       try {
         // And only while this run still holds its lease, checked in the write itself: a deletion takes it away (Codex G, #2287).
-        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, generations[i], at.lease ? { key: LEASE, member: at.lease(email) } : undefined)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
+        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, generations[i], at.lease ? { key: LEASE, ...at.lease(email) } : undefined)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: `“${field.name}” was not set: the store's data room is full.` });
@@ -1079,7 +1088,8 @@ export async function sendDueSteps(
     // Whoever removes a member from the queue is the one who sends it.
     const taken = await redisPipeline(members.map((m) => ["ZREM", QUEUE, m]));
     const owned = members.filter((_, i) => Number(taken[i]) === 1);
-    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, now + LEASE_SECONDS, m]));
+    const score = leaseScore(now);
+    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, score, m]));
     const groups = new Map<string, string[]>();
     members.forEach((member, i) => {
       if (Number(taken[i]) !== 1) return;
@@ -1104,7 +1114,7 @@ export async function sendDueSteps(
         continue;
       }
       try {
-        await sendGroup(group, emails);
+        await sendGroup(group, emails, score);
         await redisPipeline([["ZREM", LEASE, ...emails.map((email) => `${group}|${email}`)]]);
       } catch (error) {
         // Put back for a later run rather than lost; the send's own key keeps
@@ -1116,7 +1126,7 @@ export async function sendDueSteps(
   }
   return counts;
 
-  async function sendGroup(group: string, emails: string[]): Promise<void> {
+  async function sendGroup(group: string, emails: string[], score: number): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
     const [listId, handle, flowId, stepRaw] = group.split("|");
     const index = Number(stepRaw);
@@ -1248,7 +1258,7 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, lease: (email) => `${group}|${email}` }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, lease: (email) => ({ member: `${group}|${email}`, score }) }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
         // Anybody act did not answer for has no known outcome.
         const answered = new Set(outcomes.map((o) => o.email));
         const all = [...outcomes, ...each(going.filter((e) => !answered.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];

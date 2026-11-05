@@ -35,7 +35,7 @@ is("an address it can keep passes", flowConfigurationIssues(step("example.com"),
 is("one it cannot is named", flowConfigurationIssues(step("javascript:alert(1)"), context).some((i) => i.includes("incompatible with contact field “Website”")), true);
 
 part("On the contact's record");
-const render = (initial: Record<string, string>) => renderToStaticMarkup(createElement(PersonFields, { person: "p".repeat(16), fields: [field], initial, generation: 0 }));
+const render = (initial: Record<string, string>) => renderToStaticMarkup(createElement(PersonFields, { person: "p".repeat(16), fields: [field], initial, mark: "" }));
 const empty = render({});
 is("a web address input with its keyboard", /type="url"/.test(empty) && /inputMode="url"|inputmode="url"/.test(empty), true);
 is("no link before an address is saved", empty.includes("Open https"), false);

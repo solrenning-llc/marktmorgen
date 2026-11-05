@@ -9,7 +9,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { ROUND_TRIP_SECONDS, SHAPES } from "./plan-cost-registry";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { crmAnswer } from "@/lib/crm-response";
-import { CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, CRM_VALUE_SCRIPT_CALLS, CrmPersonGone, CrmValueWriteUnconfirmed, SET_CRM_VALUE, forgetCrmPerson, readGeneration, setValue } from "@/lib/crm";
+import { CRM_VALUE_SAVE_BYTES, CRM_VALUE_SAVE_COMMANDS, CRM_VALUE_SAVE_TRIPS, CRM_VALUE_SAVE_UNITS, CRM_VALUE_SCRIPT_CALLS, CrmPersonGone, CrmValueWriteUnconfirmed, SET_CRM_VALUE, forgetCrmPerson, pageMark, readGeneration, setValue } from "@/lib/crm";
 import { dataUsed } from "@/lib/store-data";
 import { utf8Length } from "@/lib/store-data-rules";
 import { type CrmField } from "@/lib/crm-rules";
@@ -74,7 +74,7 @@ async function main() {
     const stored=async(p=person)=>(await original.call(redis,[["HGET","nl:crm:v:"+sid+":"+field.id,p]]))[0];
     writes=0;
     redis.pipeline=async commands=>{if(commands.some(isWrite)){writes++;await original.call(redis,commands);return [];}return original.call(redis,commands);};
-    const response=await post({action:"value",field:field.id,person,value:"Acme",generation:0});
+    const response=await post({action:"value",field:field.id,person,value:"Acme",mark:pageMark(sid,person,0)});
     const body=await response.json();
     is("API exposes uncertain write",[response.status,body.error],[502,"crm_write_unconfirmed"]);
     is("client recognizes recovery state",crmAnswer(response.ok,body),{ok:false,error:"crm_write_unconfirmed"});
@@ -88,10 +88,10 @@ async function main() {
       const size=(v:unknown):number=>typeof v==="string"?utf8Length(v):typeof v==="number"?String(v).length:Array.isArray(v)?v.reduce((n:number,x)=>n+size(x),0):v&&typeof v==="object"?size(Object.values(v)):0;
       const allowance=()=>redis.keys().find(k=>k.startsWith("nl:allow:studio:"));
       // The widest value a field keeps (three bytes a character), over another as wide: the most a save moves.
-      await post({action:"value",field:field.id,person,value:"\u00e9".repeat(200),generation:0},cookie);
+      await post({action:"value",field:field.id,person,value:"\u00e9".repeat(200),mark:pageMark(sid,person,0)},cookie);
       const before=Number((await original.call(redis,[["GET",allowance()!]]))[0]);
       redis.pipeline=async sent=>{trips++;commands+=sent.length;inside+=sent.filter(isWrite).length*CRM_VALUE_SCRIPT_CALLS;const r=await original.call(redis,sent);bytes+=size(sent)+size(r);return r;};
-      const saved=await post({action:"value",field:field.id,person,value:"\u20ac".repeat(200),generation:0},cookie);
+      const saved=await post({action:"value",field:field.id,person,value:"\u20ac".repeat(200),mark:pageMark(sid,person,0)},cookie);
       redis.pipeline=original;
       const after=Number((await original.call(redis,[["GET",allowance()!]]))[0]);
       is(`${who}: saved, ${CRM_VALUE_SAVE_UNITS} studio requests taken`,[saved.status,after-before],[200,CRM_VALUE_SAVE_UNITS]);
@@ -100,14 +100,15 @@ async function main() {
 
     part("While a person is deleted, no save writes about them, whatever it carries (C3-125)");
     const read=await readGeneration(sid,zoe);
-    is("a page read before: generation 0",[(await post({action:"value",field:field.id,person:zoe,value:"Globex",generation:read})).status,await stored(zoe)],[200,"Globex"]);
+    is("a page read before: generation 0",[(await post({action:"value",field:field.id,person:zoe,value:"Globex",mark:pageMark(sid,zoe,read)})).status,await stored(zoe)],[200,"Globex"]);
     await forgetCrmPerson(sid,zoe,"zoe@example.com",store);
     // However long ago (the mark's time put back a day), with the page's generation, the one now, or one made up.
     await original.call(redis,[["SET","nl:crm:erased:"+sid+":"+zoe,String(Date.now()-86_400_000),"EX",3600]]);
     for(const carried of [read,await readGeneration(sid,zoe),99,undefined]){
-      const late=await post({action:"value",field:field.id,person:zoe,value:"Umbrella",...(carried===undefined?{}:{generation:carried}),preparedAt:Date.now()});
+      const late=await post({action:"value",field:field.id,person:zoe,value:"Umbrella",...(carried===undefined?{}:{mark:pageMark(sid,zoe,carried)})});
       const lateBody=await late.json();
-      is(`carrying ${String(carried)}: 404 unknown, read as a refusal`,[late.status,crmAnswer(late.ok,lateBody)],[404,{ok:false,error:"unknown"}]);
+      // No mark at all: a page that cannot show when it was read saves nothing (Codex G2).
+      is(`carrying ${String(carried)}: refused`,[late.status,crmAnswer(late.ok,lateBody)],carried===undefined?[409,{ok:false,error:"stale"}]:[404,{ok:false,error:"unknown"}]);
     }
     is("nothing written again",await stored(zoe),null);
     is("and the mark stays",(await original.call(redis,[["EXISTS","nl:crm:erased:"+sid+":"+zoe]]))[0],1);
@@ -117,15 +118,15 @@ async function main() {
     is("(the old order is put on the list)",await listOrder(store,{sessionId:"cs_test_contacthistoric1",email:"zoe@example.com",news:false,created:Math.floor((Date.now()-2*86_400_000)/1000),products:[{id:"prod01",title:"Course"}]}),"done");
     is("the mark stays",(await original.call(redis,[["EXISTS","nl:crm:erased:"+sid+":"+zoe]]))[0],1);
     const fresh=await readGeneration(sid,zoe);
-    const historic=await post({action:"value",field:field.id,person:zoe,value:"Restored from a historical order",generation:fresh});
+    const historic=await post({action:"value",field:field.id,person:zoe,value:"Restored from a historical order",mark:pageMark(sid,zoe,fresh)});
     is("a page read after it is still refused, and nothing is written",[historic.status,await stored(zoe)],[404,null]);
 
     part("A real return, by a paid order: the mark goes; a page read since writes, one read before never does");
     is("(the order is put on the list)",await listOrder(store,{sessionId:"cs_test_contactreturn01",email:"zoe@example.com",news:false,created:Math.floor(Date.now()/1000),products:[{id:"prod01",title:"Course"}]}),"done");
     is("the mark is gone",(await original.call(redis,[["EXISTS","nl:crm:erased:"+sid+":"+zoe]]))[0],0);
-    is("a page read before the deletion: still 404",(await post({action:"value",field:field.id,person:zoe,value:"Stale",generation:read})).status,404);
+    is("a page read before the deletion: still 404",(await post({action:"value",field:field.id,person:zoe,value:"Stale",mark:pageMark(sid,zoe,read)})).status,404);
     const since=await readGeneration(sid,zoe);
-    is("a page read since: saved",[(await post({action:"value",field:field.id,person:zoe,value:"Initech",generation:since})).status,await stored(zoe)],[200,"Initech"]);
+    is("a page read since: saved",[(await post({action:"value",field:field.id,person:zoe,value:"Initech",mark:pageMark(sid,zoe,since)})).status,await stored(zoe)],[200,"Initech"]);
     is("(the value set directly, from a page read before, is refused too)",await setValue(sid,zoe,field,"Stale",store,read).then(()=>"written",(error:unknown)=>error instanceof CrmPersonGone?"gone":String(error)),"gone");
   } finally {redis.pipeline=original;}
   done();

@@ -136,7 +136,9 @@ def main():
             client = Redis()
             try:
                 if index % 2 == 0:
-                    return client.command("EVAL", save_script, 1, keys[3], "manual-" + str(index), "manual", cap)
+                    # crm-deal-save:v5 answers {1} for a new deal, 0 when the list is full.
+                    saved = client.command("EVAL", save_script, 1, keys[3], "manual-" + str(index), "manual", cap)
+                    return 1 if saved == [1] else 0
                 reply = client.command("EVAL", script, 1, keys[3], "form-" + str(index), "form", cap)
                 return 1 if reply[0] == 1 else 0
             finally:
@@ -145,12 +147,13 @@ def main():
             mixed = list(pool.map(mixed_save, range(64)))
         assert sum(mixed) == 1, mixed
         assert redis.command("HLEN", keys[3]) == cap
-        assert redis.command("EVAL", save_script, 1, keys[3], "entry-0", "updated", cap) == 1
+        # An update answers {1, the length of the record it replaced} ("existing").
+        assert redis.command("EVAL", save_script, 1, keys[3], "entry-0", "updated", cap) == [1, len("existing")]
         assert redis.command("HGET", keys[3], "entry-0") == "updated"
         assert redis.command("HLEN", keys[3]) == cap
         print("PASS: 64 mixed manual/form creations share the last slot and allow updates")
         redis.command("HDEL", keys[3], "entry-0")
-        assert redis.command("EVAL", save_script, 1, keys[3], "replacement", "new", cap) == 1
+        assert redis.command("EVAL", save_script, 1, keys[3], "replacement", "new", cap) == [1]
         assert redis.command("HLEN", keys[3]) == cap
         print("PASS: deletion frees exactly one reusable slot")
         assert redis.command("EVAL", move_script, 1, keys[4], "deleted", "old", "moved") == 0

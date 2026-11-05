@@ -1,3 +1,8 @@
+/**
+ * Codex G2 on #1963, kept as a permanent browser proof. Run it with a Chromium Playwright can find, e.g.
+ * PLAYWRIGHT_BROWSERS_PATH=<browsers> node tests/creator-card-editor-browser-evidence.mjs. The editor says saved or
+ * deleted only on a whole confirmation, keeps the draft otherwise, and an answer never writes over a later edit.
+ */
 /** Review-only local fixture. Real React component; all writes intercepted; no account or provider. */
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';

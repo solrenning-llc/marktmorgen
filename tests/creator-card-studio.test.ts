@@ -45,7 +45,7 @@ is("the card itself, outside the studio, keeps its links and its heading", page.
 
 part("Deleting, undone");
 const editor = readFileSync("components/creator-card-editor.tsx", "utf8");
-is("the words stay on the screen, and saving puts it back", editor.includes("setCard((typed) => ({ ...typed, on: false }))") && editor.includes("Its words are still below: save to put it back."), true);
+is("the words stay on the screen, and saving puts it back", editor.includes("edit((typed) => ({ ...typed, on: false }))") && editor.includes("Its words are still below: save to put it back."), true);
 
 part("In the studio");
 const studio = readFileSync("app/studio/card/page.tsx", "utf8");

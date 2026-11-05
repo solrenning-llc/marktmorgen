@@ -1,3 +1,4 @@
+/** Codex G2 on #1963 (preview), kept as a permanent test: the preview has no live links and no page heading of its own. */
 /** Review control for the change from a public card to an inert studio preview. */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";

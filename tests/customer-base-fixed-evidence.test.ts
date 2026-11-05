@@ -105,3 +105,13 @@ test("the real funding configuration refuses a bound review with an extra fixed 
   policy.financialSnapshot = canonicalFinancialSnapshot(review)!;
   assert.equal(contractFundingConfiguration(policy, context, now), null);
 });
+
+
+test("commercial caller cannot project away an unpriced category before the fixed-review reader", () => {
+  const review = commercial();
+  const target = { ...review.companyBase!, unreviewedSupplier: 100_000 };
+  review.companyBase = new Proxy(target, {
+    ownKeys: value => Reflect.ownKeys(value).filter(key => key !== "unreviewedSupplier"),
+  });
+  assert.equal(commercialMarginReady(review), false);
+});

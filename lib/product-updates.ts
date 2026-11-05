@@ -207,14 +207,32 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
 
 export async function readUpdateJob(id: string): Promise<UpdateJob | null> {
   if (!JOB_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", jobKey(id)]]);
-  if (typeof raw !== "string") return null;
+  const reply = await redisPipeline([["GET", jobKey(id)]]);
+  const unknown = () => new Error("This update could not be checked. Try again.");
+  if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0)) throw unknown();
+  const raw = reply[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw unknown();
+  let value: unknown;
   try {
-    const job = JSON.parse(raw) as UpdateJob;
-    return JOB_ID.test(job.id) ? job : null;
+    value = JSON.parse(raw);
   } catch {
-    return null;
+    throw unknown();
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw unknown();
+  const job = value as Record<string, unknown>;
+  for (const field of ["id", "handle", "statsId", "product", "title", "words", "status", "note"]) {
+    if (!Object.hasOwn(job, field) || typeof job[field] !== "string") throw unknown();
+  }
+  for (const field of ["total", "done", "sent", "failures", "createdAt"]) {
+    if (!Object.hasOwn(job, field) || typeof job[field] !== "number" ||
+        !Number.isSafeInteger(job[field]) || job[field] < 0) throw unknown();
+  }
+  if (job.id !== id || !job.handle || !job.statsId || !job.product ||
+      !["sending", "waiting", "sent", "failed"].includes(job.status as string) ||
+      (job.total as number) === 0 || (job.total as number) > MAX_UPDATE_RECIPIENTS ||
+      (job.done as number) > (job.total as number) || (job.sent as number) > (job.done as number)) throw unknown();
+  return value as UpdateJob;
 }
 
 /** The last update sent about this product in the past two months, for the studio to show; null when none. */
@@ -260,7 +278,10 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
   const [got] = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]);
   if (got === null) return null;
   try {
-    let job = await readUpdateJob(id);
+    // Unknown evidence must not dequeue a real job or overwrite its payload.
+    // Keep it for the next automatic read; only a confirmed null is absent.
+    let job: UpdateJob | null;
+    try { job = await readUpdateJob(id); } catch { return null; }
     if (!job || job.status === "sent" || job.status === "failed") {
       await redisPipeline([["SREM", QUEUE, id]]);
       return job;

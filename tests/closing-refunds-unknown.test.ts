@@ -77,7 +77,7 @@ const BUTTON = "Go back without refunding";
 /** As React writes text into the markup. */
 const html = (text: string) => text.replace(/'/g, "&#x27;");
 /** Promises the code does not keep (audit of #2554): members past the call budget or whose hold failed are never refunded by it. */
-const OVERPROMISE = ["are owed are made for you", "are still made for you", "as far as your Stripe balance covers them"];
+const OVERPROMISE = ["are made for you", "are still made for you", "as far as your Stripe balance covers them"];
 
 async function main() {
   const { world: w, cleanup } = await world();
@@ -146,6 +146,8 @@ async function main() {
     const owed = await w.render();
     is("the member and the button", [owed.includes("member@example.com"), owed.includes("to 1 member"), owed.includes(BUTTON)], [true, true, true]);
     is("not the words for a failed read", owed.includes("We could not"), false);
+    is("says only what is done: the same refunds tried on the day, may fail, and anyone unlisted is the creator's to refund", owed.includes(`If you do nothing, we try to make the same refunds on ${dayWords(Date.now())}, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this list, refund them yourself in Stripe. Starting a plan again before then keeps your store, and then nothing is refunded.`), true);
+    is("no promise that every refund owed is made", OVERPROMISE.some((p) => owed.includes(p)), false);
   } finally {
     cleanup();
   }

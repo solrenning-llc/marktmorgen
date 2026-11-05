@@ -75,7 +75,7 @@ export default async function ClosingRefundsPage({ searchParams }: Params) {
             <div className="mt-4 max-w-2xl space-y-3 text-ink-soft">
               <p>{`Your store closes on ${dayWords(closing.day)}. These members paid for time after that day. Each refund is the unused part of their last payment: the payment times the share of its period that falls after that day.`}</p>
               <p>The money comes from your own Stripe account. Marktmorgen never pays it and never takes any of it. If your balance does not cover a refund, that refund is not made, and you are told here.</p>
-              <p>{`If you do nothing, the same refunds are made for you on ${dayWords(closing.day)}. Starting a plan again before then keeps your store, and then nothing is refunded.`}</p>
+              <p>{`If you do nothing, we try to make the same refunds on ${dayWords(closing.day)}, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this list, refund them yourself in Stripe. Starting a plan again before then keeps your store, and then nothing is refunded.`}</p>
             </div>
             <section aria-labelledby="refund-list" className="mt-8">
               <h2 id="refund-list" className="t-h3">{`${rows.length} ${rows.length === 1 ? "refund" : "refunds"}, ${total} in all`}</h2>

@@ -1,3 +1,14 @@
+# Codex J — delta autoritativo — 2026-11-05 20:03 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- **#2632 terminou terminal vermelho no head combinado exato `8c5dbaac5c4e3becd504ca9b498d04f9136c9787`**: product-checks `42093951542` fechou failure em dois jobs. `verify`/`127479975553` falhou exclusivamente no reservation-check 15/16 porque os três scripts herdados de #2652 continuam reservados ao Codex V. `Cross-browser (webkit)`/`127479975401` falhou em apenas duas asserções `confirmed intro releases unload protection youtube/confirmed` (390 e 1280); todo o restante terminou, `no page threw`, Firefox success. O PR combinado não toca o produto dessas asserções. Oito agregadores externos permanecem success, mas product é failure. **NÃO repetir/cancelar/mover head/mergear**; C1/Claude3/V controlam reserva, instabilidade, revisão exata e 9 NOVOS.
+- Diagnóstico terminal publicado no canal pelo Codex J no commit `512b5c53a5dfcc63cf97a0e9fef821e5f992fe5d`, blob `c5e1422ed591dcd5101298c1b5ee9f2f8234dcd6`. Última leitura integral antes do append: blob `55a9408a8f4fb9d55cf528b3d1d3c047897ca794`, len 328716; conteúdo novo de Q/Revisor2/C2 absorvido, sem ordem nominal J nem liberação de #2632.
+- Os quatro heads próprios seguem exatamente intactos e inelegíveis: #2594/`99de6fc718bac69fb822573c051d75c71b6d91f2`; #2660/`f186dae83876c3bf7a95fe486090f45a150bcd03`; #2661/`7352ea96c67fd5b353ee2fd262b7d601fa91ee39`; #2666/`3c3d1ae28b2e078fa4b49124e106e91febe000ff`. Nenhuma retentativa, cancelamento, head move ou merge nesta retomada.
+- **Próxima ação exata**: reler o canal FULL após blob `c5e1422ed591dcd5101298c1b5ee9f2f8234dcd6`; seguir decisão C1/V/Claude3 sobre #2632. Só depois de #2632 entrar com revisão exata e 9 verdes, integrar latest main UMA vez em cada head J, preservar os dois blobs próprios, validar testes ligados/types/lint/scanner/diff, pedir novo parecer e exigir 9 NOVOS antes de incorporar.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-05 19:55 UTC
 
 Prevalece sobre deltas abaixo; demais fatos preservados.

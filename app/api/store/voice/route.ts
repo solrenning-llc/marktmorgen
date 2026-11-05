@@ -3,6 +3,7 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { withinLimit } from "@/lib/request-guard";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { makeVoice } from "@/lib/customer-voice";
+import { withCutoff } from "@/lib/fetch-timeout";
 
 /**
  * The request ends before the reading's lock (LOCK_SECONDS, 120 s) runs out,
@@ -10,6 +11,8 @@ import { makeVoice } from "@/lib/customer-voice";
  * while this one still runs. The model's answer takes 45 s at most (lib/ai.ts).
  */
 export const maxDuration = 60;
+/** Kept before the platform's cut, for the answer to reach the creator. */
+const CUT_MARGIN_MS = 2_000;
 
 /**
  * This month's summary of what customers are saying (lib/customer-voice.ts):
@@ -17,13 +20,16 @@ export const maxDuration = 60;
  * jobs. For whoever may see the numbers.
  */
 export async function POST(request: NextRequest) {
+  // Every request inside is given up by then, and the summary is not counted
+  // when too little of it is left for the model (makeVoice, "late").
+  const cutoff = Date.now() + maxDuration * 1000 - CUT_MARGIN_MS;
   const guarded = await guardStoreWrite(request, "stats", 200);
   if (!guarded.ok) return guarded.response;
   const { store } = guarded;
   if (!(await withinLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   try {
-    const done = await makeVoice(store);
-    if (!done.ok) return Response.json({ ok: false, error: done.reason, texts: done.texts ?? null }, { status: done.reason === "failed" ? 502 : done.reason === "busy" || done.reason === "changed" ? 409 : 400 });
+    const done = await withCutoff(cutoff, () => makeVoice(store));
+    if (!done.ok) return Response.json({ ok: false, error: done.reason, texts: done.texts ?? null }, { status: done.reason === "failed" ? 502 : done.reason === "busy" || done.reason === "changed" ? 409 : done.reason === "late" ? 503 : 400 });
     return Response.json({ ok: true, summary: done.summary, fresh: done.fresh, left: done.left });
   } catch (error) {
     console.error("summing up what customers say failed", error);

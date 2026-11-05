@@ -413,6 +413,25 @@ export type Attempt = {
 
 const NO_ATTEMPT: Attempt = { used: 0, last: null, best: 0, passed: false };
 
+class QuizAttemptReadError extends Error {
+  constructor() {
+    super("Quiz attempt evidence is unavailable");
+    this.name = "QuizAttemptReadError";
+  }
+}
+
+function exactAttemptReply(reply: unknown): [unknown, unknown] {
+  if (!Array.isArray(reply)) throw new QuizAttemptReadError();
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  const raw = Object.getOwnPropertyDescriptor(reply, "0");
+  const used = Object.getOwnPropertyDescriptor(reply, "1");
+  if (!length || !Object.hasOwn(length, "value") || length.value !== 2 ||
+      !raw || !Object.hasOwn(raw, "value") || !used || !Object.hasOwn(used, "value")) {
+    throw new QuizAttemptReadError();
+  }
+  return [raw.value, used.value];
+}
+
 function parseAttempt(raw: unknown, used: unknown): Attempt {
   const count = Number(used);
   const tries = Number.isInteger(count) && count > 0 ? count : 0;
@@ -433,10 +452,11 @@ function parseAttempt(raw: unknown, used: unknown): Attempt {
 /** How this student has done on this quiz. `who` is lib/learn.ts emailKey. */
 export async function attemptOf(courseId: string, lessonId: string, who: string): Promise<Attempt> {
   if (!isRedisConfigured()) return NO_ATTEMPT;
-  const [raw, used] = await redisPipeline([
+  const reply = await redisPipeline([
     ["GET", resultKey(courseId, lessonId, who)],
     ["GET", triesKey(courseId, lessonId, who)],
   ]);
+  const [raw, used] = exactAttemptReply(reply);
   return parseAttempt(raw, used);
 }
 
@@ -474,7 +494,13 @@ export async function submitQuiz(
   /** The question ids the page showed; needed when the quiz draws from a bank. */
   shown: string[] | null = null,
 ): Promise<SubmitResult> {
-  const before = await attemptOf(courseId, lessonId, who);
+  let before: Attempt;
+  try {
+    before = await attemptOf(courseId, lessonId, who);
+  } catch (error) {
+    if (error instanceof QuizAttemptReadError) return { ok: false, reason: "unavailable" };
+    throw error;
+  }
   if (before.passed) return { ok: false, reason: "passed" };
   if (quiz.attempts > 0 && before.used >= quiz.attempts) return { ok: false, reason: "no_tries" };
   if (quizWait(quiz, before, Date.now()) > 0) return { ok: false, reason: "wait" };

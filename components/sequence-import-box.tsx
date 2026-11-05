@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useRef, useState } from "react";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE, sequenceTemplateCsv } from "@/lib/sequence-template";
+import { MAX_STEPS } from "@/lib/flow-limits";
 
 export type ImportedStep = { delayHours: number; subject: string; body: string };
 export type ImportReportLine = { line: number; column: string; reason: string };
@@ -100,7 +101,7 @@ export function SequenceImportBox({
           setError(null);
         }}
       />
-      <p id={`${id}-help`} className="mt-1 text-sm text-ink-soft">{`A CSV file, up to ${MAX_SEQUENCE_FILE_BYTES / 1000} KB and 20 emails. HTML is read as text; images, tracking and the old service's merge fields are taken out and listed.`}</p>
+      <p id={`${id}-help`} className="mt-1 text-sm text-ink-soft">{`A CSV file, up to ${MAX_SEQUENCE_FILE_BYTES / 1000} KB and ${MAX_STEPS} emails. HTML is read as text; images, tracking and the old service's merge fields are taken out and listed.`}</p>
       <button type="button" className="btn btn-secondary mt-3" disabled={disabled || busy || !file} aria-busy={busy} onClick={() => void read()}>
         {busy ? "Reading…" : "Read the file"}
       </button>

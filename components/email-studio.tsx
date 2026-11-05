@@ -36,7 +36,7 @@ import { broadcastAnswer, cancellationAnswer } from "@/lib/broadcast-response";
 import type { DraftSubjectTest } from "@/lib/mail-draft-test";
 import { subjectTestPreview, type SubjectTestPreview } from "@/lib/mail-test-preview";
 import { readMailSchedule } from "@/lib/mail-schedule";
-import { PUBLISH_WARNING } from "@/lib/letter-rules";
+import { PublishControl } from "@/components/letter-publish-control";
 import { channelName } from "@/lib/channel-names";
 import { type Narrow, ACTIVE_DAYS, MAX_SPENT, readSegmentSpend, QUIET_DAYS, type Segment } from "@/lib/segments-rules";
 
@@ -109,6 +109,7 @@ const MESSAGES: Record<string, string> = {
   keep_full: `That sequence already holds ${MAX_STEPS} steps. Remove one under Sequences first.`,
   too_many_flows: `A store keeps ${MAX_FLOWS} sequences at most. Remove one under Sequences first.`,
   server_error: "Something went wrong on our side. Try again in a moment.",
+  store_full: "Your store's data room is full, so this email was not saved and nothing was sent. Nothing was set aside for it. Delete something you no longer need, such as old drafts or contacts, then try again.",
 };
 
 type Answer = MailAnswer;
@@ -135,7 +136,8 @@ async function call(payload: Record<string, unknown>): Promise<Answer> {
   }
 }
 
-const message = (a: Answer) => MESSAGES[a.error ?? ""] ?? MESSAGES.server_error;
+// A refusal for the studio's requests carries its own sentence (how many this needs, how many are left).
+const message = (a: Answer) => (a.error === "studio_used" && typeof a.message === "string" && a.message ? a.message : MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
 const n = (x: number) => x.toLocaleString("en-US");
 
 type BroadcastRow = {
@@ -147,6 +149,8 @@ type BroadcastRow = {
   total: number;
   sent: number;
   note: string;
+  /** Whether its list of who it goes to was made: a waiting email without one, nothing sent, can still be canceled. */
+  listed?: boolean;
   productId: string | null;
   /** Everybody, only buyers, or only people who have not bought yet (lib/contacts.ts). */
   who: Who;
@@ -166,6 +170,10 @@ type BroadcastRow = {
   test: SubjectTest | null;
   /** Where it is published on the store, or null when it is not (lib/letters.ts). */
   published?: string | null;
+  /** Whether it is published could not be read: then nothing is offered that would publish it on a guess. */
+  publishedUnknown?: boolean;
+  /** Whether it is published for members only (lib/letters.ts, listScore). */
+  publishedMembers?: boolean;
 };
 type Money = { sales: number; cents: number; elsewhere?: number };
 type FlowRow = Flow & { stats: FlowCounts; statsAvailable?: boolean; money: Money | null };
@@ -768,6 +776,8 @@ function Compose(props: {
   const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, activeDays, more, savedContent, uncertain: draftSaveBlocked, label, buyerGroup });
   useImperativeHandle(props.composerState, () => ({ dirty, busy: locked, snapshot }));
 
+  // The sentence the last count showed, so a count that then goes through takes away its own message and no other.
+  const countError = useRef<string | null>(null);
   useEffect(() => {
     if (invalidSpent) return;
     let live = true;
@@ -783,7 +793,13 @@ function Compose(props: {
           setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
         }
         if (typeof a.partial === "boolean") setPartial(a.partial);
-      } else if (a.error === "stripe") setError(message(a));
+        const shown = countError.current;
+        countError.current = null;
+        if (shown !== null) setError((current) => (current === shown ? null : current));
+      } else if (a.error === "stripe" || a.error === "studio_used") {
+        countError.current = message(a);
+        setError(countError.current);
+      }
     });
     return () => {
       live = false;
@@ -1254,7 +1270,15 @@ function Compose(props: {
               </div>
             </dl>
             <SubjectTestReview preview={testPreview} />
-            <p id="mail-send-note" className="mt-2">Eligibility is checked again when sending starts.</p>
+            <p id="mail-send-note" className="mt-2">
+              Eligibility is checked again when sending starts.
+              {/* A narrowed email holds its later readings of the buyers in the month it goes out (lib/broadcasts.ts, createBroadcast). */}
+              {minSpent || channel || quietDays || buyerGroup || activeDays
+                ? later
+                  ? " Scheduling it sets aside, from the month it goes out, the studio requests needed to find these buyers then, and to find them once more if it has to wait. If that month has too few left, it is not scheduled, and you see how many it needs. What it has not used is given back, also if you cancel."
+                  : " Sending it sets aside the studio requests needed to find these buyers once more if it has to wait. What it does not use is given back."
+                : null}
+            </p>
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
@@ -1497,60 +1521,6 @@ function waitWords(hours: number): string {
   return hours === 1 ? "an hour" : `${hours} hours`;
 }
 
-/**
- * Publishing a sent email on the store, or taking it off (lib/letter-rules.ts):
- * asked before it is published, because anyone can read it once it is.
- */
-function PublishControl({ id, path, disabled, onDone }: { id: string; path: string | null; disabled: boolean; onDone: () => void }) {
-  const [asking, setAsking] = useState(false);
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  async function act(action: "publish" | "unpublish") {
-    if (working) return;
-    setWorking(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/store/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, id }) });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string };
-      if (data.ok !== true) setError(data.message ?? MESSAGES.server_error);
-      else {
-        toast(action === "publish" ? "Published on your store." : "Taken off your store.");
-        setAsking(false);
-        onDone();
-      }
-    } catch {
-      setError(MESSAGES.server_error);
-    } finally {
-      setWorking(false);
-    }
-  }
-  if (path) {
-    return (
-      <span className="inline-flex min-h-11 flex-wrap items-center gap-x-4 text-sm">
-        <a href={path} className="font-bold text-ink underline underline-offset-4">Published on your store</a>
-        <button type="button" disabled={disabled || working} aria-busy={working} className="font-bold text-ink-soft underline underline-offset-4 hover:text-danger" onClick={() => act("unpublish")}>
-          Take it off
-        </button>
-        {error ? <span role="alert" className="text-danger">{error}</span> : null}
-      </span>
-    );
-  }
-  return asking ? (
-    <span className="block w-full rounded-[var(--r-sm)] bg-sand p-3 text-sm text-ink">
-      <span className="block">{PUBLISH_WARNING}</span>
-      <span className="mt-2 flex flex-wrap gap-3">
-        <button type="button" className="btn btn-primary btn-sm" disabled={disabled || working} aria-busy={working} onClick={() => act("publish")}>Publish it</button>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={working} onClick={() => setAsking(false)}>Not now</button>
-      </span>
-      {error ? <span role="alert" className="mt-2 block text-danger">{error}</span> : null}
-    </span>
-  ) : (
-    <button type="button" disabled={disabled} className="inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4" onClick={() => setAsking(true)}>
-      Publish on your store
-    </button>
-  );
-}
-
 function History({
   readFailed,
   broadcasts,
@@ -1698,11 +1668,11 @@ function History({
             {b.status === "sent" && b.tagged ? (
               <p className="mt-1 text-sm font-semibold text-ink">{broughtWords(b.visits, b.money, currency)}</p>
             ) : null}
-            {b.status === "scheduled" && canSend ? (
+            {(b.status === "scheduled" || (b.status === "waiting" && b.listed === false && b.sent === 0)) && canSend ? (
               <button
                 type="button"
                 aria-busy={busy} disabled={busy}
-                className="mt-2 text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+                className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
                 onClick={async () => {
                   if (busy) return;
                   setBusy(true);
@@ -1713,7 +1683,7 @@ function History({
                     setError("Cancellation of “" + b.subject + "” could not be confirmed. Reload to check its current status. " + message(a));
                     return;
                   }
-                  toast("Scheduled email canceled.");
+                  toast(b.status === "scheduled" ? "Scheduled email canceled." : "Waiting email canceled. Nothing was sent.");
                   refreshHistory();
                 }}
               >
@@ -1730,7 +1700,7 @@ function History({
                 >
                   Write it again
                 </button>
-                {canSend ? <PublishControl id={b.id} path={b.published ?? null} disabled={busy} onDone={refreshHistory} /> : null}
+                {canSend ? <PublishControl id={b.id} path={b.published ?? null} members={b.publishedMembers ?? false} unknown={b.publishedUnknown ?? false} disabled={busy} onDone={refreshHistory} products={products} /> : null}
                 {/* Not offered for an email narrowed two ways at once: an
                     email in a sequence keeps one condition (lib/mail-reuse.ts). */}
                 {canSend && keepable(b) ? (
@@ -1763,7 +1733,7 @@ type StepDraft = {
   editorKey: string;
   id?: string;
   /** An email, or a step that acts instead (lib/flow-rules.ts, FlowAction). */
-  kind: "email" | "tag" | "untag" | "start" | "webhook" | "field" | "deal" | "note" | "notify" | "wait" | "assign" | "next" | "rotate";
+  kind: "email" | "tag" | "untag" | "start" | "stop" | "webhook" | "field" | "deal" | "note" | "notify" | "wait" | "assign" | "next" | "rotate";
   actionTag: string;
   /** For a step that makes a teammate responsible for the person's deal. */
   actionAssignee: string;
@@ -1848,6 +1818,7 @@ function actionWords(action: FlowAction, flows: { id: string; name: string }[]):
     const target = action.flowId;
     return `starts the sequence “${flows.find((f) => f.id === target)?.name ?? "a sequence no longer in your store"}”`;
   }
+  if (action.do === "stop") return `takes them out of the sequence “${flows.find((f) => f.id === action.flowId)?.name ?? "a sequence no longer in your store"}”`;
   if (action.do === "webhook") return "tells your webhooks who reached it";
   if (action.do === "field") return `sets a field to “${action.value}”`;
   if (action.do === "deal") return "puts their deal in a stage of your deals board";
@@ -1872,6 +1843,7 @@ function stepCount(steps: Pick<FlowStep, "action">[]): string {
 function actionOf(s: StepDraft): FlowAction | null {
   if (s.kind === "tag" || s.kind === "untag") return { do: s.kind, tag: s.actionTag };
   if (s.kind === "start") return { do: "start", flowId: s.actionFlow };
+  if (s.kind === "stop") return { do: "stop", flowId: s.actionFlow };
   if (s.kind === "webhook") return { do: "webhook" };
   if (s.kind === "field") return { do: "field", field: s.actionField, value: s.actionValue };
   if (s.kind === "deal") return { do: "deal", stage: s.actionStage, title: s.actionTitle };
@@ -2161,7 +2133,7 @@ function Flows({
     if (locked || draft !== null) return;
     const opened = toDraft(flow, products);
     const others = flows.filter(other => other.id !== flow?.id);
-    const next = { ...opened, steps: opened.steps.map(step => step.kind === "start" && !others.some(other => other.id === step.actionFlow) ? { ...step, actionFlow: "" } : step) };
+    const next = { ...opened, steps: opened.steps.map(step => (step.kind === "start" || step.kind === "stop") && !others.some(other => other.id === step.actionFlow) ? { ...step, actionFlow: "" } : step) };
     setDraftBaseline(JSON.stringify(next));
     setError(null);
     setDraft(next);
@@ -2690,7 +2662,7 @@ function Flows({
                       value={s.kind}
                       onChange={(e) => {
                         const v = e.target.value;
-                        const kind = v === "tag" || v === "untag" || v === "start" || v === "webhook" || v === "field" || v === "deal" || v === "note" || v === "notify" || v === "wait" || v === "assign" || v === "next" || v === "rotate" ? v : "email";
+                        const kind = v === "tag" || v === "untag" || v === "start" || v === "stop" || v === "webhook" || v === "field" || v === "deal" || v === "note" || v === "notify" || v === "wait" || v === "assign" || v === "next" || v === "rotate" ? v : "email";
                         setStep(s.editorKey, {
                           kind,
                           actionAssignee: s.actionAssignee || assignees[0] || "",
@@ -2703,7 +2675,8 @@ function Flows({
                       <option value="email">Sends an email</option>
                       <option value="tag">Gives a label</option>
                       <option value="untag">Takes a label off</option>
-                      {otherFlows.length ? <option value="start">Starts another sequence</option> : null}
+                      {otherFlows.length || s.kind === "start" ? <option value="start">Starts another sequence</option> : null}
+                      {otherFlows.length || s.kind === "stop" ? <option value="stop">Takes them out of another sequence</option> : null}
                       <option value="webhook">Tells your webhooks</option>
                       {automation.fields.length ? <option value="field">Sets a field</option> : null}
                       {automation.stages.length ? <option value="deal">Puts their deal in a stage</option> : null}
@@ -2760,6 +2733,17 @@ function Flows({
                       ))}
                     </select>
                     <span className="mt-1 block text-sm text-ink-soft">Each person goes through a sequence once, so nobody is started on it twice.</span>
+                  </label>
+                ) : s.kind === "stop" ? (
+                  <label className="mt-3 block">
+                    <span className="text-sm text-ink-soft">The sequence to take them out of</span>
+                    <select className="field mt-1" value={s.actionFlow} onChange={(e) => setStep(s.editorKey, { actionFlow: e.target.value })} required>
+                      {s.actionFlow ? null : <option value="">A sequence that was removed: choose another</option>}
+                      {otherFlows.map((f) => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-sm text-ink-soft">They stop where they are in it, also when it waits for your choice, and are not started on it again, since each person goes through a sequence once. If a step of it is being done for them at that moment, that one step may still go, and they are taken out right after.</span>
                   </label>
                 ) : s.kind === "field" ? (
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">

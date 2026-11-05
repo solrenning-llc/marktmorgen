@@ -11,7 +11,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
+import { receivingOf } from "@/lib/receiving-costs";
+import { reviewedUnitUnder } from "@/lib/reviewed-receiving";
 import { allUnits, evaluate, roomKept } from "./margin-alignment-table";
+import { txCustomerFixture } from "./customer-tax-review-fixture";
 import { ASSISTANT_INPUT_BYTES } from "@/lib/store-assistant-rules";
 import { CENTS_PER_MINUTE, MIN_CENTS } from "@/lib/auto-captions-rules";
 import { ORDER, assistantAt, assistantInputCap, captionsMinimumFor, captionsOptions, captionsPrice, captionsTodayAnyMinimum, captionsWorstBps, figures, perMinuteHolds, proposals, renderLimitsProposal } from "./limits-proposal-table";
@@ -41,6 +44,39 @@ test("every proposed figure is a cut, never a raise, and at today's figures ever
     const withRoom = evaluate({ ...unit, usageCents: unit.usageCents + roomKept(unit) });
     assert.ok(withRoom.netCents > 0, `${p.tier} ${p.cycle}: ${withRoom.netCents} cents net with ${roomKept(unit)} cents of room`);
   }
+});
+
+test("archived proposals never raise a figure and viable proposals meet their historical 60% target", () => {
+  for (const p of proposals()) {
+    const today = figures(p.tier);
+    for (const id of ORDER) p.proposed[id].forEach((n, i) => assert.ok(n <= today[id][i], `${p.tier} ${p.cycle} ${id}: ${n} above today's ${today[id][i]}`));
+    // This archived solver retains its historical target. Updated measured
+    // costs may produce a historical proposal; it never changes live rights.
+    assert.equal(p.feasible, p.netBps >= 6_000, `${p.tier} ${p.cycle}: feasibility must agree with the archived result`);
+    if (p.feasible) assert.ok(p.netBps >= 6_000, `${p.tier} ${p.cycle}: a viable archived proposal must reach 60%`);
+    if (p.todayNetBps >= 6_000) {
+      assert.equal(p.feasible, true);
+      assert.deepEqual(p.cut, [], `${p.tier} ${p.cycle}: no cut is needed when today already meets the archived target`);
+    }
+  }
+});
+
+test("the current MR unit floor is positive profit, while a loss fails and sales stay closed", () => {
+  // Synthetic unit arithmetic, not a real cost review or a launch approval.
+  const evaluate = (usageCents: number) => {
+    const row = txCustomerFixture(10_000, receivingOf(10_000).totalCents + usageCents);
+    return reviewedUnitUnder(10_000, usageCents, { taxReview: row.taxReview!, taxContext: row.taxContext! });
+  };
+  const positive = evaluate(6_000);
+  assert.ok(positive, "complete synthetic TX evidence is still required for current MR arithmetic");
+  assert.ok(positive.netCents > 0 && positive.netBps < 6_000);
+  assert.equal(positive.meetsFloor, true);
+  const loss = evaluate(10_000);
+  assert.ok(loss);
+  assert.ok(loss.netCents < 0);
+  assert.equal(loss.meetsFloor, false);
+  assert.equal(reviewedUnitUnder(10_000, 6_000, null), null, "missing tax evidence never becomes a sizing assumption");
+  assert.equal(PLANS_ON_SALE, false);
 });
 
 test("the Store assistant's input cap: today's keeps 60% with its room at $69, and the largest cap is where one byte more misses", () => {

@@ -28,7 +28,9 @@
  */
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
 import { MAX_LINK_LENGTH } from "@/lib/product-link";
-import { readShippingSku } from "@/lib/shipping";
+import { activeShipping, readShippingSku } from "@/lib/shipping";
+import { MIN_BUNDLE_ITEMS } from "@/lib/bundle-rules";
+import type { Listing } from "@/lib/catalog";
 
 /**
  * How many prices one product may carry: fifty.
@@ -197,6 +199,74 @@ export function parseOptions(raw: unknown): ProductOption[] {
  */
 export function optionDelivers(option: ProductOption, opens = false): boolean {
   return opens || option.file !== null || option.link !== null;
+}
+
+/**
+ * The options a buyer may actually be offered.
+ *
+ * An option with nothing behind it is left off the page rather than sold and
+ * apologised for afterward. The creator is told about it in the studio, which
+ * is where it can be fixed; the buyer never meets it.
+ */
+export function sellableOptions(product: Listing): ProductOption[] {
+  // A course or a private podcast is its own delivery: every option opens it,
+  // and a file or link on one is something extra that option includes.
+  const opens = Boolean(product.course || product.podcast || product.shipping);
+  return product.options.filter((option) => optionDelivers(option, opens));
+}
+
+/**
+ * Whether a product has something to hand over once it is paid for, read
+ * from the product alone: the part of canSellProduct (lib/store-checkout.ts)
+ * that needs no store, so the studio can say what a change does to it
+ * (lib/price-review.ts, optionRemovalWords) from the same rule the checkout
+ * follows.
+ *
+ * Either kind counts: a file we host, or a link to wherever the creator keeps
+ * it. What is refused is a product with neither, because a buyer would pay and
+ * then be shown nothing.
+ *
+ * With price options the same question is asked of them instead of the
+ * product: at least one has to be ready, because that is what the buyer picks.
+ */
+export function handsOver(product: Listing): boolean {
+  // A bundle hands over its products: it is ready once it holds two. Whether
+  // each can still be handed over is read when the checkout opens.
+  if (product.bundle) return product.options.length === 0 && product.recurring === null && product.bundle.length >= MIN_BUNDLE_ITEMS;
+  // A call delivers a time, not a file: it is ready once it has hours set.
+  if (product.call) return product.options.length === 0 && product.recurring === null;
+  // A course delivers its lessons: it is ready once it has one, at one price
+  // or at several (each option opens the same course).
+  if (product.course) return product.course.lessons > 0;
+  // A private podcast delivers its episodes: it is ready once it has one.
+  if (product.podcast) return product.podcast.episodes > 0;
+  // A physical product delivers what the creator ships (lib/shipping.ts).
+  if (activeShipping(product)) return true;
+  if (product.options.length > 0) return sellableOptions(product).length > 0;
+  return product.file !== null || product.link !== null;
+}
+
+/**
+ * Whether the price an email named is no longer offered: the option it named
+ * (`optionId`) was removed, or it named the product's own price (no option)
+ * and the product is now sold only at its options. A member's moving-in link
+ * (lib/move-members.ts) and a come-back offer (lib/winback-send.ts) then open
+ * nothing, never another price than the one the email named (owner, C2-89).
+ */
+export function namedPriceGone(product: { options: { id: string }[] }, optionId: string): boolean {
+  return optionId ? !product.options.some((option) => option.id === optionId) : product.options.length > 0;
+}
+
+/**
+ * Whether the price an email named can be bought today: not gone
+ * (namedPriceGone), and, when it names an option, that option is one the
+ * checkout offers (sellableOptions: it hands something over). An option kept
+ * with nothing to hand over is not a price on sale: the link opens nothing
+ * and no email or reminder names it.
+ */
+export function namedPriceOffered(product: Listing, optionId: string): boolean {
+  if (namedPriceGone(product, optionId)) return false;
+  return !optionId || sellableOptions(product).some((option) => option.id === optionId);
 }
 
 /** The option to have chosen when the page opens: the creator's pick, else the first. */

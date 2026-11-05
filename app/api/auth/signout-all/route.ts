@@ -25,11 +25,12 @@ export async function POST(request: NextRequest) {
   if (email && (await lockedUntil(id)) > 0) {
     return new Response(null, { status: 303, headers: { Location: `${originFrom(request)}/studio?two-step=locked` } });
   }
-  if (email) await endAllSessions(email);
+  // Said as done only when it was: sessions that could not be read are said as such (audit SG2, rule 27).
+  const ended = email ? await endAllSessions(email) : 0;
 
   const response = new Response(null, {
     status: 303,
-    headers: { Location: `${originFrom(request)}/signin?status=out-everywhere` },
+    headers: { Location: `${originFrom(request)}/signin?status=${ended === null ? "out-everywhere-unknown" : "out-everywhere"}` },
   });
   response.headers.append(
     "Set-Cookie",

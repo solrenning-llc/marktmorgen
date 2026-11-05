@@ -4,6 +4,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { confirmRecoveryAddress, removeRecoveryAddress, startRecoveryAddress } from "@/lib/recovery-address";
 import { lockedUntil } from "@/lib/two-step";
+import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 
 /**
  * The signed-in person's recovery address (lib/recovery-address.ts):
@@ -13,7 +14,11 @@ import { lockedUntil } from "@/lib/two-step";
  *   { action: "remove" }           forgets it
  *
  * Each needs a login from the last 15 minutes and a session that got in with
- * everything open: a way into the account is added or taken away here.
+ * everything open: a way into the account is added or taken away here. On an
+ * account with a passkey or an app, each also needs a session opened with one
+ * (lib/second-step-gate.ts liveSecondStep): the recovery address is where the
+ * notices go that the sign-in inbox may not be trusted with (MM-SA-19), so an
+ * emailed link alone never changes it, and the old address is told.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -33,6 +38,7 @@ export async function POST(request: NextRequest) {
   }
   if (!(await withinLimit("recovery-address-change", email, 20, 60 * 60))) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   if (!(await isFreshSession(session))) return Response.json({ ok: false, error: "reauth" }, { status: 403 });
+  if ((await hasSecondStep(email)) && (await liveSecondStep(email, session)) === null) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
 
   try {
     if (body.action === "start") {

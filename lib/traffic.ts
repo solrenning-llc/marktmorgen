@@ -278,8 +278,12 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
   // apart, after the first count, was lost with a request that died between
   // the two, and the count was then kept for ever. NX leaves an expiry already
   // set as it is.
-  const [count] = await redisPipeline([["INCRBY", key, units], ["EXPIRE", key, keepSecondsFor(window, now), "NX"]]);
-  const n = Number(count);
+  const reply = await redisPipeline([["INCRBY", key, units], ["EXPIRE", key, keepSecondsFor(window, now), "NX"]]);
+  // Only Redis's own answer to these two commands counts (Codex G2 on #2583):
+  // two replies, the first an integer at least `units`, the second 0 or 1.
+  // Anything else, a `true`, a text or a missing item, is a count that cannot
+  // be made: the request is refused.
+  const n = Array.isArray(reply) && reply.length === 2 && typeof reply[0] === "number" && (reply[1] === 0 || reply[1] === 1) ? reply[0] : NaN;
   if (!Number.isSafeInteger(n) || n < units) return false;
   return n <= limit;
 }
@@ -291,14 +295,18 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
  * `units` is how many requests it counts as: more than one for a request
  * that sends a file's bytes through us (a community picture, since 18
  * October 2026), so each is priced at what it costs (tests/plan-cost-registry.ts).
+ * `shared` is for work done once for everybody, not for the connection that
+ * happens to ask (an affiliate program's book refreshed for all its
+ * affiliates, lib/affiliate-page-admission.ts): it counts against the
+ * store's window alone, not the connection's share of the day.
  */
-export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1): Promise<boolean> {
+export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1, from: { shared?: boolean } = {}): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   try {
     const window = allowanceWindow(store, now);
     if (!window) return false;
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, await askingConnection());
+    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, from.shared ? null : await askingConnection());
   } catch {
     return false;
   }

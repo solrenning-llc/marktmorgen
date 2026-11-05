@@ -553,19 +553,21 @@ export async function directorySize(id: string): Promise<number> {
  * Everyone who has come in, for the creator's list: a page at a time, in the
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
-export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number }> {
+export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
   const [reply, total] = await redisPipeline([
     ["HSCAN", membersKey(id), cursor, "COUNT", count],
     ["HLEN", membersKey(id)],
   ]);
-  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0 };
+  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0, bytes: 0 };
   const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
   const members: Member[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const member = parseMember(flat[i + 1]);
     if (member) members.push(member);
   }
-  return { members, next: String(reply[0]), total: Number(total) || 0 };
+  // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
+  const bytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
+  return { members, next: String(reply[0]), total: Number(total) || 0, bytes };
 }
 
 /** Every member who asked for announcement emails and is still here. */
@@ -1027,20 +1029,71 @@ export async function report(id: string, target: ReportTarget, who: string, room
   return "added";
 }
 
-export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number };
+export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number | null };
+
+/** A failed moderation read is never evidence that nobody reported anything. */
+export class ReportQueueReadError extends Error {
+  constructor() {
+    super("The community report queue could not be read completely.");
+    this.name = "ReportQueueReadError";
+  }
+}
+
+async function readReportedRecord<T>(command: (string | number)[], parse: (raw: unknown) => T | null): Promise<T | null> {
+  const reply = await redisPipeline([command]);
+  const slot = Array.isArray(reply) && reply.length === 1 ? Object.getOwnPropertyDescriptor(reply, "0") : undefined;
+  if (!slot || !Object.hasOwn(slot, "value")) throw new ReportQueueReadError();
+  if (slot.value === null) return null;
+  const record = parse(slot.value);
+  if (!record) throw new ReportQueueReadError();
+  return record;
+}
+
+/** Resolve a confirmed report without treating a missing reply as a deleted target. */
+export async function readReportedTarget(id: string, target: ReportTarget): Promise<{ post: Post; comment: Comment | null } | null> {
+  const post = await readReportedRecord(["GET", postKey(id, target.post)], parsePost);
+  if (!post) return null;
+  if (post.id !== target.post) throw new ReportQueueReadError();
+  if (target.kind === "post") return { post, comment: null };
+  const comment = await readReportedRecord(["HGET", commentsKey(id, target.post), target.comment], parseComment);
+  if (!comment) return null;
+  if (comment.id !== target.comment) throw new ReportQueueReadError();
+  return { post, comment };
+}
+
+function reportInteger(raw: unknown): number | null {
+  if (typeof raw !== "number" && (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw))) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
 
 /** The creator's moderation queue, newest report first. */
 export async function reportQueue(id: string, limit = 100): Promise<QueuedReport[]> {
-  const [raw] = await redisPipeline([["ZREVRANGEBYSCORE", reportsKey(id), "+inf", "-inf", "WITHSCORES", "LIMIT", 0, limit]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_REPORT_QUEUE) throw new ReportQueueReadError();
+  const reply = await redisPipeline([["ZREVRANGEBYSCORE", reportsKey(id), "+inf", "-inf", "WITHSCORES", "LIMIT", 0, limit]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new ReportQueueReadError();
+  const flat: unknown = reply[0];
+  if (!Array.isArray(flat) || flat.length % 2 !== 0 || flat.length > limit * 2) throw new ReportQueueReadError();
   const rows: { key: string; at: number; target: ReportTarget }[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i + 1 < flat.length; i += 2) {
-    const target = parseTarget(flat[i]);
-    if (target) rows.push({ key: flat[i], at: Math.floor(Number(flat[i + 1]) / 1000), target });
+    const key: unknown = flat[i];
+    const target = typeof key === "string" ? parseTarget(key) : null;
+    const score = reportInteger(flat[i + 1]);
+    if (typeof key !== "string" || !target || score === null || score > 8_640_000_000_000_000 || seen.has(key)) throw new ReportQueueReadError();
+    seen.add(key);
+    rows.push({ key, at: Math.floor(score / 1000), target });
   }
   if (!rows.length) return [];
   const counts = await redisPipeline(rows.map((r) => ["SCARD", reportersKey(id, r.key)]));
-  return rows.map((r, i) => ({ ...r, count: Math.max(1, Number(counts[i]) || 0) }));
+  if (!Array.isArray(counts) || counts.length !== rows.length) throw new ReportQueueReadError();
+  return rows.map((r, i) => {
+    const count = reportInteger(counts[i]);
+    if (count === null) throw new ReportQueueReadError();
+    // Reporter sets expire after 90 days; their absence does not say how
+    // many people originally reported an item that still waits in the queue.
+    return { ...r, count: count === 0 ? null : count };
+  });
 }
 
 /** Takes an item off the queue without touching it: the creator saw nothing wrong. */

@@ -282,6 +282,10 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
  };
  const encoded=canonicalFinancialSnapshot(input);
  if(encoded===null)return result;
+ // The own-data encoder rejects accessors before this native clone probe.
+ // A Proxy may conceal an unreviewed cost from its descriptor snapshot; native
+ // cloning rejects proxies anywhere in the original graph, without trusting traps.
+ try{structuredClone(input);}catch{return result;}
  const data=JSON.parse(encoded) as CommercialProfitMixInput|null;
  if(!data||Array.isArray(data)||(data.basis!=="worst_case"&&data.basis!=="reconciled_actual")||
   (data.interval!=="month"&&data.interval!=="year")||data.currency!=="USD"||
@@ -294,8 +298,9 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
  for(const row of result.rows){
   const amounts=data.sources[row.source];
   if(!amounts||Array.isArray(amounts)||typeof amounts!=="object"||
+   Object.keys(amounts).length!==profitAmountKeys.length+1||!Object.hasOwn(amounts,'evidence')||
    typeof amounts.evidence!=="string"||!amounts.evidence.trim()||
-   !profitAmountKeys.every(key=>profitCents(amounts[key]))){complete=false;continue;}
+   !profitAmountKeys.every(key=>Object.hasOwn(amounts,key)&&profitCents(amounts[key]))){complete=false;continue;}
   const net=BigInt(amounts.revenueCents!)-BigInt(amounts.variableCostsCents!)-
    BigInt(amounts.allocatedFixedCostsCents!)-BigInt(amounts.taxesCents!)-
    BigInt(amounts.refundsCents!)-BigInt(amounts.reservesCents!);

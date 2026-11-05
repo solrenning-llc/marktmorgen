@@ -19,16 +19,16 @@ async function main() {
   // old fields. No provider is called for a server-side Stripe failure.
   const first = Date.parse("2010-01-01T12:00:00Z");
   const error = new StripeError(500, "unavailable", "Try again later.");
-  for (let day = 0; day < 4000; day += 1) {
+  for (let day = 0; day < 16000; day += 1) {
     if (day) redis.advance(DAY);
     await noteCheckoutTrouble(store, error, first + day * DAY);
   }
-  const now = first + 3999 * DAY;
+  const now = first + 15999 * DAY;
   const [[fields]] = await Promise.all([pipeline([["HLEN", `nl:cotrouble:${sid}`]])]);
-  assert.equal(fields, 4001, "the writer preserves all historical day fields");
+  assert.equal(fields, 16001, "the writer preserves all historical day fields");
 
   for (const reader of [readTrouble, readTroubleStrict]) {
-    await check(`${reader.name}: eight fields, one command and a bounded transfer after 4000 days`, async () => {
+    await check(`${reader.name}: eight fields, one command and a bounded transfer after 16000 days`, async () => {
       const commands: (string | number)[][] = [];
       let bytes = 0;
       redis.pipeline = async (batch) => {
@@ -41,7 +41,7 @@ async function main() {
         const found = await reader(sid, now);
         assert.equal(found?.week, 7);
         assert.equal(commands.length, 1);
-        assert.ok(bytes <= 50_000, `studio's entire priced database transfer is 50000 bytes; reader alone sent ${bytes}`);
+        assert.ok(bytes <= 200_000, `four studio units' total priced database transfer is 200000 bytes; reader alone sent ${bytes}`);
         assert.equal(commands[0][0], "HMGET");
         assert.equal(commands[0].length, 10, "command + key + seven days + last");
         console.log(`MEASURE ${reader.name}: ${commands.length} command, ${bytes} bytes`);

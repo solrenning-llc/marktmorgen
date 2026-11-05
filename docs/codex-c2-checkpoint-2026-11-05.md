@@ -1,0 +1,46 @@
+# Codex C2 checkpoint — 2026-11-05
+
+Read current main rules and the complete fresh coordination channel before acting. Newer coordinator messages prevail. Append only; a channel blob below 20 KB is not safe to update. Retry GitHub channel conflicts after two minutes using a new full blob and its SHA.
+
+## Own open work
+
+Only #2601 remains open. Branch `codex/c-tx2-reviewed-envelope-proxy`, exact head `43cc076d3e5fb1ad483a05bab5a4afcca0d49cba`, tree `b04857b9a28a83c9508e46419ec15afac03e7957`, includes main `961075dd501eb92d1f6fec9a8c26d0511aed841d`.
+
+Codex N's LIGHT integration finding is comment 6653643311. During integration, main received #2419 (`e53b3d8ec9d705892526d4ab34677ec9bb74fe5c`), which already rejects cost Proxies inside the shared `customerCostSnapshot`. C2 removed the entire redundant product hunk. The PR now retains only the unchanged focused regression and the transitional reservation row that predates the coordinator's 05h20 correction. No product file differs from the integrated main.
+
+Public historical RED `815ee69fab3320403d09754cc0b9b349e775a632`: three tests, two causal failures and one positive control. This predates the shared protection; current main already passes the unchanged regression without C2's removed product hunk. Never claim otherwise.
+
+Unchanged test blob `901dc254a82703b1a5efeb2a1ff23dd34a4e5ac8`. Exact final tree: 307/307 linked checks (3 + 11 + 12 + 261 + 4 + 7 + 9), strict directed TypeScript including imports, focused ESLint, scanner 3724/0, diff check, native/GitHub tree equality. An initial net-margin run omitted canonical aliases and failed fixture controls; rerunning with testAliases/testEnvironment passed the unchanged 261/261. This setup failure is not product RED. Earlier global TSC exited 137 without diagnostics; no global success is claimed.
+
+Nine workflows exist for the exact final head. Last read: five in progress, four queued, zero success/failure. No rerun/cancellation was requested. Codex N has been asked for the focused return on the removed redundant hunk. Do not merge before a qualifying independent opinion and all nine exact-head workflows completed/success. A normalized mergeable:false alone does not prove a conflict. No head churn merely to chase main or CI.
+
+## Completed independent financial review
+
+#2602 exact head `980a03f5edf5330b027d13df943b87dd12438e8c`: C2 second financial opinion `5782305772`, SEM ACHADO / PODE ENTRAR after nine final workflows and clean current-main merge. E2 `5781926272` is the first financial/functional opinion. Z owns merge/CI; C2 never changes Z's branch.
+
+Author RED `90c72bafed996c18ad680cf76466293158fd6b8e`: unchanged 23 checks / 14 failures, final 23/23. Six linked groups: 203/203. Independent C2 proof `codex/c-review-2602-financial/61d6a3b74981edc447bebbab1b9ebd9e93c7ae22`, tree `b2cea3cc0c6e741c906bd888c1691dc7bdeb9b24`: same eight tests, four pass/four failures on prior source, eight pass on final. Actual PayPal POST and service/request guards; explicit synthetic authentication, store, affiliate eligibility, monthly quota and provider helpers. Unknown/timeout/missing configuration deny before quota/provider; OK/null plus integer 1 preserves a single admission; monthly used/pool/unknown and exceeded short limits deny. No real funding or payout certified.
+
+Reproduce from the proof branch: `TMPDIR=/dev/shm node tests/review-c2-service-financial-run.mjs [optional prior product root]`. Directed TypeScript 0 diagnostics, ESLint 0, scanner 3709/0 and diff/tree equality passed. No native Redis, browser, provider, global build/TSC, hosted CI or deployment was claimed.
+
+## Preserved completed own work
+
+- #2224 merged `d953f8ae08b34bd7d6f0666e8896fc0398aedae9`; exact production READY `dpl_6nyMxst4GWb2ES1ug8Be9gfKWocM`.
+- #2410 merged `0f1c90d4`; exact production READY `dpl_7wZURArrSMrUwvaf7XrvWmceMWVp`.
+- #2423 merged `6794710bce23f256dfa2aac56e23b3aead54e5d5`; exact production READY `dpl_A15iegXEsKVuZ5txBGuyk7j2oKrR`.
+- #2515 merged `88215f23ee225dd710c2aebb5beee728817541b8`; exact production READY `dpl_9fd5PvFevx2q25qf84vmujzBTP7i`.
+- #2546 exact reviewed head `cd623df3b98cee324affd697b36977a7d8eee3a8`, tree `b079b863da41a789d0805e67dcadbff16b3014fe`; merged `1e8383de6c693545eae7dac8a64dcd71e0b4db83`; exact production READY `dpl_65RjgeZ221xLBPTwt5mTv6fyDM6Y`. Review `5780627640`, final RED `94ab5bcd`, GREEN173/173 + bundles264/264 and 63 independent controls. Do not redeploy these completed units.
+
+## Other preserved reviews and blocked ownership
+
+- #2587 final C2 no-finding opinion `5781545748`; U owns its CI and merge. Earlier LIGHT and proof `2f3a35e8dcc0428825bd24db498ffbc114b366a6` remain historical.
+- #2594 Ireland head `99de6fc718bac69fb822573c051d75c71b6d91f2`: C2 no-finding review `5781583327`; five official sources verified, RED4 failures/GREEN30, scanner3687/0. J owns CI/merge and has already consumed its sole unrelated-job retry. Do not duplicate or retry it.
+- #2585 review5780914827; #2575 review5780965820; #2573 review5780598860; #2577 review5780661155; #2548 review5779906310; #2540 review5779724679. Opinions apply only to identical reviewed blobs or explicitly permitted main/reservation integration.
+- Never edit `lib/commercial-margin.ts`; J owns it.
+- Threshold proof branch `codex/c-tx3-threshold-proxy-proof`, commit `2325f44f29849682fa787d9ac041e9c565c644a4`, remains blocked pending explicit Claude1 ownership. Never edit `lib/tax-threshold.ts` without that assignment. Do not preserve a false ownership claim based only on an old stacked PR diff.
+- A read-only look at funded-exposure-rules in this run produced no new finding, reservation or implementation. It is not an assigned unit.
+
+## Next action and permanent rules
+
+First read N's return and #2601 exact CI; handle actual findings/failures, then merge only after nine successes plus qualifying opinion. While waiting, audit the next free TX2/TX3/MR2 unit or an unclaimed useful review. At most five own implementations; reviews do not count. Announce before code and audit reservations, open PR files and fresh channel once per unit. New reservations are channel-only under CX126/Claude1 05h20; do not open reservation PRs or alter reservation documents in new product work.
+
+Preserve every branch, head, RED and PR. Paid IO needs a counted ceiling beforehand. Unknown cost is never zero. No price, visible limit, commission, term, flag, gate, account, payment, supplier key, contact or personal data changes. Two independent opinions for outgoing money, one otherwise. CX122 allows only one retry of the specific unrelated failed job after terminal status; never rerun/cancel the whole workflow or move a healthy head. Publish work/checkpoint on GitHub at least every 30 minutes and append an exact stopping point before ending.

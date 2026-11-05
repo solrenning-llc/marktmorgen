@@ -1,3 +1,4 @@
+// Opt-in financial proof: run through review-c2-service-financial-run.mjs.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { NextRequest } from 'next/server';

@@ -13,7 +13,7 @@ const routeWorld = join(here, 'review-c2-service-financial-world.ts');
 const temporary = mkdtempSync(join(tmpdir(), 'c2-service-financial-'));
 try {
   const outfile = join(temporary, 'proof.cjs');
-  await build({ entryPoints: [join(here, 'review-c2-service-financial.test.ts')], outfile,
+  await build({ entryPoints: [join(here, 'review-c2-service-financial.proof.ts')], outfile,
     bundle: true, platform: 'node', format: 'cjs', alias: {
       '@': product, '@/lib/redis': world, '@/lib/store-allowance': world, '@/lib/traffic': world,
       '@/lib/store': routeWorld, '@/lib/store-request': routeWorld,

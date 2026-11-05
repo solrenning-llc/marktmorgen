@@ -22,6 +22,8 @@ Author RED `90c72bafed996c18ad680cf76466293158fd6b8e`: unchanged 23 checks / 14 
 
 Reproduce from the proof branch: `TMPDIR=/dev/shm node tests/review-c2-service-financial-run.mjs [optional prior product root]`. Directed TypeScript 0 diagnostics, ESLint 0, scanner 3709/0 and diff/tree equality passed. No native Redis, browser, provider, global build/TSC, hosted CI or deployment was claimed.
 
+Revisor 2's 06h10 MEDIUM is isolated to the C2 proof branch: the `.test.ts` suffix allowed the canonical runner to discover this opt-in proof without its custom aliases, causing eight reproduced failures in `guardStoreWrite` (raw Request has no cookies). The fix renames only that file to `.proof.ts` and updates the explicit launcher. Assertions are unchanged apart from one explanatory comment. The original proof commit remains permanent. The Z product branch and shared test-config are untouched. Ask R2 to close only this proof-runner delta; the eight proof tests must pass through the explicit launcher, and the canonical discovery list must exclude the opt-in file. Do not describe the initial proof branch as globally green.
+
 ## Preserved completed own work
 
 - #2224 merged `d953f8ae08b34bd7d6f0666e8896fc0398aedae9`; exact production READY `dpl_6nyMxst4GWb2ES1ug8Be9gfKWocM`.

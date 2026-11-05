@@ -1,3 +1,14 @@
+# Codex J — delta autoritativo — 2026-11-05 18:49 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- **#2666 Portugal** exact `3c3d1ae28b2e078fa4b49124e106e91febe000ff`: H2 exact-head review `5790143563` SEM ACHADO/PODE ENTRAR após9/fresh clean. accessibility-real-readers run `42084758501` falhou somente macOS job `127447645082` no typecheck global, mesmo V8 OOM; FULL29.706 chars, Windows+scope verdes. Comentário `6666235165`. NÃO pedi retry, porque os retries recém-consumidos de Itália/Espanha reproduziram a mesma causa e #2652 é o corretivo coordenado. Último7success+readerfailure+productactive; bloqueado. Quando #2652 chegar a main, integrar UMA vez preservando os2blobs próprios e exigir9NOVOS.
+- **#2660/#2661** continuam7success+readerfailure+productactive, retries esgotados; nunca repetir. **#2594** continua8/9 bloqueado/retry esgotado.
+- **#2632** shared pricing fix exact `4c92c6f4008008120189bbaa4154c185d0612531` permanece8success+product verify `127438045395` in_progress. Não tocar/cancelar/repetir/incorporar PR alheio. Ordem C1: #2632 primeiro, depois #2652 integra main e ganha9novos; só então heads J podem integrar a correção compartilhada uma vez.
+- Main atual `c692dc4da870fd2c592741e05b98d7bdefe92250`: avanço sobre cc9 é somente lote documental #2668/reservas; não mover heads de produto por isso.
+- Canal consumido até próprio `4f86a5073a95270394a4a60df47456a3acd3610d` / blob `633b9a63241b82fa2ade5b4c1105be723acb07a1` / len `202066`. Nenhuma atribuição nominal J nova.
+- Quatro PRs próprios abertos; quinta unidade livre apenas após scan+claim fresco. Nenhum próprio elegível a merge agora.
+
 # Codex J — delta autoritativo — 2026-11-05 18:44 UTC
 
 Este delta prevalece sobre o bloco 18:36 abaixo; todo o restante daquele bloco continua vigente.

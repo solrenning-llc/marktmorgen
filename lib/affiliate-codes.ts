@@ -46,6 +46,18 @@ export const PROMO_ID_PATTERN = /^promo_[A-Za-z0-9]{10,80}$/;
 
 const promoKey = (statsId: string) => `nl:aff:${statsId}:promo`;
 
+/** How many codes are given to affiliates, counted with one command before the page reads them (lib/affiliate-page-admission.ts). */
+export async function codeOwnerCount(store: Store): Promise<number | null> {
+  if (!store.statsId || !isRedisConfigured()) return 0;
+  try {
+    const [n] = await redisPipeline([["HLEN", promoKey(store.statsId)]]);
+    const count = Number(n);
+    return Number.isSafeInteger(count) && count >= 0 ? count : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A Redis hash reply, as pairs, in either shape a client returns it. */
 function pairs(reply: unknown): [string, string][] {
   const out: [string, string][] = [];

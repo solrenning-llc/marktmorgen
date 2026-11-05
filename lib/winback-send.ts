@@ -23,7 +23,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { claimMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
@@ -109,8 +110,13 @@ async function cameBack(account: string, customer: string, product: string): Pro
     const listed = await onAccount("GET", account, `/subscriptions?customer=${customer}&status=all&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
     const subs: unknown = listed.data;
     if (!Array.isArray(subs) || (listed.has_more !== true && listed.has_more !== false)) return null;
-    for (const sub of subs as { status?: unknown; metadata?: Record<string, string> | null }[]) {
-      if (LIVE.has(String(sub?.status)) && sub?.metadata?.product === product) return true;
+    // Each membership read whole (Codex N on #2714): a status in words and its metadata as an object. A row missing
+    // either cannot show it is to another product, so the answer is unknown, never "has not come back".
+    for (const sub of subs as unknown[]) {
+      if (!sub || typeof sub !== "object") return null;
+      const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
+      if (typeof status !== "string" || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+      if (LIVE.has(status) && (metadata as Record<string, unknown>).product === product) return true;
     }
     if (listed.has_more === false) return false;
     const last = (subs as { id?: unknown }[]).at(-1)?.id;
@@ -122,6 +128,12 @@ async function cameBack(account: string, customer: string, product: string): Pro
 
 /** Pages of a window's ended memberships read in one run (a hundred each). */
 const EVENT_PAGES = 10;
+/**
+ * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, up to
+ * CAME_BACK_PAGES pages of their memberships and an email. The window is read whole to decide, but no more than
+ * this is spent on it in one run, as when only its first page was read; the rest wait for the next run.
+ */
+const OFFERS_PER_RUN = 100;
 
 async function sweepStore(store: Store, deadline: number, now: number): Promise<number> {
   const account = store.stripeAccountId as string;
@@ -146,9 +158,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
     after = last;
   }
   let sent = 0;
+  let lookedAt = 0;
 
   for (const event of events) {
-    if (Date.now() >= deadline) break;
+    if (Date.now() >= deadline || lookedAt >= OFFERS_PER_RUN) break;
     const sub = event.data?.object ?? {};
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
     const customer = typeof sub.customer === "string" && CUSTOMER_PATTERN.test(sub.customer) ? sub.customer : "";
@@ -167,10 +180,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
     const count = typeof recurring?.interval_count === "number" ? recurring.interval_count : 1;
     if (!canWinBack(store.winback, interval, count)) continue;
 
-    // Ours only on an exact OK (CX-123 rule 24, L6). Anything else is somebody else's mark or unknown: nothing is
-    // sent, and an unknown mark is kept, since it may be ours, so the same offer is never sent twice.
-    const claim = repliesFor(await redisPipeline([["SET", sentKey(account, subId), "1", "NX", "EX", 90 * 86_400]]), 1);
-    if (!claim || claim[0] !== "OK") continue;
+    // Ours only when Redis says OK or, answered in another shape, the key holds this claim's own value read back
+    // (CX-123 rule 24, L6; Claude 4 on #2714). Somebody else's mark, or unknown: nothing is sent and nothing let go.
+    if ((await claimMark(sentKey(account, subId), 90 * 86_400)) !== "ours") continue;
+    lookedAt += 1;
     try {
       const found = await onAccount("GET", account, `/customers/${customer}`);
       const email = typeof found.email === "string" && EMAIL_PATTERN.test(found.email) ? normaliseEmail(found.email) : "";
@@ -189,11 +202,11 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const tokens = await tokensFor(store.listId, [email], store.handle);
       const unsub = tokens.get(email);
       if (!unsub) continue;
-      const once = repliesFor(await redisPipeline([["SET", onceKey(statsId, email, product.id), "1", "NX", "EX", ONCE_PER_DAYS * 86_400]]), 1);
-      if (!once || once[0] !== "OK") {
+      const once = await claimMark(onceKey(statsId, email, product.id), ONCE_PER_DAYS * 86_400);
+      if (once !== "ours") {
         // Heard one lately, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the next
-        // run asks again; a once-mark that did land then holds it back, as it should.
-        if (!once || once[0] !== null) await redisPipeline([["DEL", sentKey(account, subId)]]);
+        // run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
+        if (once === "unknown") await redisPipeline([["DEL", sentKey(account, subId)]]);
         continue;
       }
 

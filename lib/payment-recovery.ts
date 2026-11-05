@@ -43,6 +43,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { formatMoney } from "@/lib/money";
@@ -68,9 +69,13 @@ const CARD_PAGES = 5;
 /** Cards looked up one by one, for memberships paid with the customer's card rather than their own. */
 const CARD_LOOKUPS = 20;
 const SENT_SECONDS = 90 * 86_400;
-/** At most this many failed renewals written about per store per run. */
+/**
+ * At most this many failed renewals written about per store per run (Claude 3 on #2714): each is a claim, a card
+ * kept at Stripe and an email. Every page is read to decide, but no more than this is written in one run, as when
+ * only the first page was read; the rest wait for the next run.
+ */
 const PER_STORE = 100;
-/** Pages of past-due memberships read in one run, PER_STORE each. */
+/** Pages of past-due memberships read in one run, PER_STORE each: read to decide, not a larger number written. */
 const FAILED_PAGES = 5;
 
 const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
@@ -215,9 +220,10 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
   const ids = [...new Set(mine.map((s) => s.metadata?.product ?? "").filter(Boolean))];
   const titles = new Map((await readListings(store, ids).catch(() => [])).map((p) => [p.id, p.title]));
   let sent = 0;
+  let written = 0;
 
   for (const sub of mine) {
-    if (Date.now() >= deadline) break;
+    if (Date.now() >= deadline || written >= PER_STORE) break;
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
     const invoice = sub.latest_invoice && typeof sub.latest_invoice === "object" ? sub.latest_invoice : null;
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";
@@ -253,10 +259,11 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
     if (!step) continue;
     const key = step === 1 ? sentKey(account, invoiceId) : stepKey(account, invoiceId, step);
 
-    // Claimed before anything is done, so a second run does not write twice: ours only on an exact OK. Anything else
-    // is unknown, and the claim, which may be ours, is kept: never an email twice (CX-123 rule 24, L6).
-    const claim = repliesFor(await redisPipeline([["SET", key, String(Date.now()), "NX", "EX", SENT_SECONDS]]), 1);
-    if (!claim || claim[0] !== "OK") continue;
+    // Claimed before anything is done, so a second run does not write twice: ours on OK or, answered in another
+    // shape, when the key holds this claim's own value read back (Claude 4 on #2714). The value starts with the time,
+    // which is what a later run reads the first email's day from. Somebody else's or unknown: nothing is done.
+    if ((await claimMark(key, SENT_SECONDS)) !== "ours") continue;
+    written += 1;
 
     try {
       // First, so the card that pays becomes the one the next renewal uses.
@@ -431,8 +438,7 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
       if (finished === "updated" || finished === "paid" || finished === "declined") continue;
     }
     const key = cardKey(account, subId, card.id);
-    const claim = repliesFor(await redisPipeline([["SET", key, String(Date.now()), "NX", "EX", CARD_SENT_SECONDS]]), 1);
-    if (!claim || claim[0] !== "OK") continue;
+    if ((await claimMark(key, CARD_SENT_SECONDS)) !== "ours") continue;
     try {
       const token = await cardLink(account, customer, subId);
       const mail = cardNoticeEmail({

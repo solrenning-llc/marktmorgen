@@ -473,7 +473,14 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       ? repliesFor(await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)])), paid.length)
       : [];
     for (let i = 0; confirming && i < paid.length && Date.now() < deadline; i += 1) {
-      if (!marks || countOf(marks[i]) !== 0) continue;
+      const mark = marks ? countOf(marks[i]) : null;
+      // Unknown is said as failed (Claude 3 on #2714): past the confirmation window the order is not read again, so a
+      // silent skip would be a confirmation never sent and never noticed.
+      if (mark === null || mark > 1) {
+        counts.failed += 1;
+        continue;
+      }
+      if (mark !== 0) continue;
       const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
       if (outcome === "sent") counts.confirmed += 1;
       if (outcome === "failed") counts.failed += 1;

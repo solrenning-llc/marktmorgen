@@ -83,6 +83,26 @@ test("a second address variant must also be confirmed before returning the first
   } finally { r.restore(); }
 });
 
+test("both confirmed address variants deduplicate the same checkout without another request", async () => {
+  const r = await setup(page());
+  try {
+    assert.deepEqual(await paidCheckoutsOf(r.shop, "Copy-Person@example.test"), [{ id: sessionId, meta: checkout().metadata, payment: "pi_CopyEvidence" }]);
+    assert.equal(r.calls.length, 2);
+  } finally { r.restore(); }
+});
+
+test("confirmed null metadata and a no-payment-required checkout keep their existing meaning", async () => {
+  const r = await setup(page([
+    { ...checkout(), id: "cs_test_" + "n".repeat(24), metadata: null },
+    { ...checkout(), payment_status: "no_payment_required", payment_intent: null },
+  ]));
+  try {
+    assert.deepEqual(await paidCheckoutsOf(r.shop, person), [{ id: sessionId, meta: checkout().metadata, payment: "" }]);
+    assert.deepEqual(await paidCheckoutsOf({ ...r.shop, stripeAccountId: null }, person), []);
+    assert.equal(r.calls.length, 1);
+  } finally { r.restore(); }
+});
+
 test("the actual personal copy refuses unknown checkout evidence rather than omitting a retained shipment", async () => {
   const r = await setup({});
   try {

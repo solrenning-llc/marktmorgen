@@ -98,14 +98,13 @@ export function ShippingEditor({ product }: { product: Product }) {
               type="button"
               className={link}
               aria-disabled={ready ? undefined : true}
-              aria-label="Change"
               disabled={!ready || busy}
               onClick={() => {
                 if (!ready) return;
                 setOpen(true);
               }}
             >
-              {ready ? "Change" : "Loading…"}
+              {ready ? "Change" : "Change — Loading…"}
             </button>
             {" · "}
             <button
@@ -113,14 +112,13 @@ export function ShippingEditor({ product }: { product: Product }) {
               className={link}
               aria-busy={busy}
               aria-disabled={ready ? undefined : true}
-              aria-label="Stop shipping it"
               disabled={!ready || busy}
               onClick={() => {
                 if (!ready) return;
                 send(null, "It is no longer shipped.");
               }}
             >
-              {ready ? "Stop shipping it" : "Loading…"}
+              {ready ? "Stop shipping it" : "Stop shipping it — Loading…"}
             </button>
           </p>
         ) : (
@@ -128,14 +126,13 @@ export function ShippingEditor({ product }: { product: Product }) {
             type="button"
             className={`block ${link}`}
             aria-disabled={ready ? undefined : true}
-            aria-label="Ship it: a physical product, sent by you"
             disabled={!ready}
             onClick={() => {
               if (!ready) return;
               setOpen(true);
             }}
           >
-            {ready ? "Ship it: a physical product, sent by you" : "Loading…"}
+            {ready ? "Ship it: a physical product, sent by you" : "Ship it: a physical product, sent by you — Loading…"}
           </button>
         )}
         {error ? <p className="notice notice-error mt-2" role="alert">{error}</p> : null}

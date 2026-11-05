@@ -6,13 +6,15 @@ Needs Node 20 or later. No other dependency.
 
 ## Set your key
 
-Make an API key in your studio, under API keys, then:
+Make an API key in your studio, under API keys, then in Bash:
 
 ```bash
-export MARKTMORGEN_API_KEY=nl_live_...
+read -r -s -p "Marktmorgen API key: " MARKTMORGEN_API_KEY
+printf '\n'
+export MARKTMORGEN_API_KEY
 ```
 
-The key is read only from this variable, never from the command, so it stays out of your shell history.
+Type your key at the prompt, not as part of a command saved in shell history. The prompt does not echo it. The CLI reads the key from this variable. Do not paste it into a command or an option. A secret manager can also supply the variable.
 
 ## Use it
 

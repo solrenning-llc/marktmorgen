@@ -30,8 +30,12 @@ export const USER_AGENT = "marktmorgen-cli/0.1.0";
 
 export const HELP = `marktmorgen: your Marktmorgen store from the command line.
 
-Set your API key first (make one in your studio, under API keys):
-  export MARKTMORGEN_API_KEY=nl_live_...
+Set your API key first in Bash (make one in your studio, under API keys):
+  read -r -s -p "Marktmorgen API key: " MARKTMORGEN_API_KEY
+  printf '\\n'
+  export MARKTMORGEN_API_KEY
+
+Type your key at the prompt, not as part of a command saved in shell history.
 
 Commands:
   marktmorgen tools                  List what your key can do.

@@ -42,6 +42,8 @@ export const FORGET_TRIES = 8;
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
 export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + 4;
+/** Redis commands one monthly owner-report read sends; company cost, not a store allowance. */
+export const STORE_FORGET_MONTH_READ_COMMANDS = 4;
 /** How long a month's counts are kept: past the next yearly look at them. */
 const MONTH_SECONDS = 400 * 86_400;
 
@@ -146,7 +148,13 @@ export type StoreForgetMonth = { month: string; queued: number; done: number; ga
 export async function storeForgetMonth(month: string): Promise<StoreForgetMonth | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
   const commands = [["HGETALL", monthKey(month)], ["HLEN", monthKey(month)], ["HLEN", QUEUE], ["HLEN", KEPT]];
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  let raw: unknown;
+  try {
+    raw = await redisPipeline(commands);
+  } catch {
+    return null;
+  }
+  const replies = repliesFor(raw, STORE_FORGET_MONTH_READ_COMMANDS);
   if (!replies) return null;
   const [counts, countFields, waiting, given] = replies;
   const flat = stringList(counts);

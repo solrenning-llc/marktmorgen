@@ -14,8 +14,8 @@ import { done, is, part } from "./check";
 import { claimHandle, storeForEmail, storeRef } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
-import { finishClosed } from "@/lib/plan-closing";
-import { type Batched, DUE_KEY, FOLLOWERS, PARKED_AT, PREPARE_TRIES, WALK_GAP_MS, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { finishClosed, renewalsAskToday, renewalsLate, renewalsMayClose, RENEWAL_LATE_GAP_DAYS, RENEWAL_TRY_DAYS } from "@/lib/plan-closing";
+import { type Batched, DUE_KEY, FOLLOWERS, PAGE_TRIES, PARKED_GAP_MS, PREPARE_TRIES, WALK_GAP_MS, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -28,7 +28,7 @@ redis.pipeline = async (commands: Command[]) => {
     const rule = rules.find((r) => r.used < r.times && r.when(command));
     if (rule) {
       rule.used += 1;
-      out.push(rule.answer(command));
+      out.push(await rule.answer(command));
     } else out.push((await real([command]))[0]);
   }
   return out;
@@ -173,24 +173,36 @@ async function main(): Promise<void> {
 
   });
 
-  await section("A store that always fails is tried a bounded number of times, then said, never dropped; the others go on", async () => {
+  await section("A store that always fails is tried a bounded number of times a day, then once a week by itself, said, never dropped; the others go on", async () => {
   later();
   const dan = await closing("danclosing");
   const eve = await closing("eveclosing");
   const danStore = (await storeForEmail(dan))!;
   await putMember(danStore, "helper2@example.com", "editor");
-  failing((c) => c[0] === "GET" && c[1] === `nl:team:${danStore.sid}`, timeout, 1_000);
+  const team = failing((c) => c[0] === "GET" && c[1] === `nl:team:${danStore.sid}`, timeout, 1_000);
   let tries = 0;
   let parked = 0;
-  for (let attempt = 0; attempt < PREPARE_TRIES + 3; attempt += 1) {
+  for (let attempt = 0; attempt < PREPARE_TRIES * 2 && tries < PREPARE_TRIES; attempt += 1) {
     later();
     let report = await quietly(run);
     tries += report.failed;
     parked = report.parked;
     for (let i = 0; i < 5 && !report.done; i += 1) report = await quietly(run);
   }
-  is("it is tried exactly PREPARE_TRIES times, then parked in line and said on every run", [tries, parked, await dueScore(dan), (await storeForEmail(dan))?.handle], [PREPARE_TRIES, 1, String(PARKED_AT), "danclosing"]);
+  is("it is tried PREPARE_TRIES times a gap apart, then parked: due again a week later, said, its record kept", [tries, parked, Number(await dueScore(dan)) - clock, (await storeForEmail(dan))?.handle], [PREPARE_TRIES, 1, PARKED_GAP_MS, "danclosing"]);
   is("the store due beside it is deleted all the same", [await storeForEmail(eve), await dueScore(eve)], [null, null]);
+  clock += PARKED_GAP_MS - DAY;
+  const waiting = await quietly(run);
+  is("within the week it is not tried, and it is said on every run", [waiting.failed, waiting.parked], [0, 1]);
+  clock += 2 * DAY;
+  const weekly = await quietly(run);
+  is("a week later it is tried again by itself, with no hand", [weekly.failed, team.used > PREPARE_TRIES], [1, true]);
+  team.times = team.used;
+  clock += PARKED_GAP_MS + DAY;
+  let healed = await quietly(run);
+  for (let i = 0; i < 5 && !healed.done; i += 1) healed = await quietly(run);
+  const after = await quietly(run);
+  is("once the cause is gone, the next weekly try deletes it, and nothing is parked any more", [await storeForEmail(dan), await dueScore(dan), after.parked], [null, null, 0]);
   });
 
   await section("The same rule on Stripe: renewals are never said all stopped on an answer of another shape", async () => {
@@ -223,6 +235,84 @@ async function main(): Promise<void> {
   } finally {
     globalThis.fetch = before;
   }
+  });
+
+  /** Every run to the end of its walk; after each, a store said erased never has its record still there. */
+  async function walkedOut(refs: string[], runs = 8): Promise<boolean> {
+    let honest = true;
+    for (let i = 0; i < runs; i += 1) {
+      later();
+      for (let j = 0; j < 6; j += 1) {
+        const report = await quietly(() => run().catch(() => ({ done: false })));
+        for (const ref of refs) if ((await stateOfRef(ref)).erased && (await storeForEmail(ref)) !== null) honest = false;
+        if (report.done) break;
+      }
+    }
+    return honest;
+  }
+  const stateOfRef = async (ref: string) => JSON.parse(String((await real([["GET", `nl:plan:closing:${createHash("sha256").update(ref).digest("hex").slice(0, 40)}`]]))[0] ?? "{}")) as { erased?: number };
+
+  await section("Review A: the first step failing after its walk has it never finishes a store with its record kept", async () => {
+  // Each aimed at this store alone: another store due in the same run must not take the failure.
+  const points: [string, (ref: string) => (c: Command) => boolean, Rule["answer"]][] = [
+    ["the batch's write, done and then timed out", (ref) => (c) => c[0] === "HSET" && c[1] === "nl:closed:batch" && c[2] === ref, async (c) => {
+      await real([c]);
+      throw new Error("Redis request timed out");
+    }],
+    ["taking it out of the closing day's line", (ref) => (c) => c[0] === "ZREM" && c[1] === "nl:closing:final" && c[2] === ref, timeout],
+    ["its record's delete", () => (c) => c[0] === "DEL" && String(c[1]).startsWith("nl:store:owner:"), timeout],
+  ];
+  for (const [name, when, answer] of points) {
+    rules = [];
+    // Nothing else due: every store before this one is finished first.
+    await walkedOut([], 2);
+    later();
+    const ref = await closing(`pt${points.findIndex((p) => p[0] === name)}closing`);
+    const hit = failing(when(ref), answer);
+    const honest = await walkedOut([ref]);
+    is(`${name}: never erased with its record there; in the end its record is gone, it is erased and out of line`, [hit.used, honest, await storeForEmail(ref), (await stateOfRef(ref)).erased !== undefined, await dueScore(ref)], [1, true, null, true, null]);
+  }
+  });
+
+  await section("A store its owner deleted while it waited for its walk is finished, its keys named by its id deleted", async () => {
+  later();
+  const sid = "e".repeat(32);
+  const ref = `#${sid}`;
+  await real([["SET", `nl:api:keys:${sid}`, "{}"]]);
+  await markDue(ref, clock);
+  await walkedOut([ref], 2);
+  is("out of line, its key named by its id gone, its closing record says erased", [await dueScore(ref), (await real([["EXISTS", `nl:api:keys:${sid}`]]))[0], (await stateOfRef(ref)).erased !== undefined], [null, 0, true]);
+  });
+
+  await section("A key the walk can never read is passed over after PAGE_TRIES runs: its store waits for the next walk, the others finish", async () => {
+  later();
+  const hal = await closing("halclosing");
+  const ivy = await closing("ivyclosing");
+  const halSid = (await storeForEmail(hal))!.sid;
+  await real([["SET", `nl:pod:by:${halSid}`, "token-hal"]]);
+  const stuck = failing((c) => c[0] === "MGET" && c.includes(`nl:pod:by:${halSid}`), () => "not a list", 1_000);
+  later();
+  const reports: { left: number; finished: number; done: boolean }[] = [];
+  for (let i = 0; i < PAGE_TRIES + 2; i += 1) reports.push(await quietly(() => run().catch(() => ({ left: -1, finished: 0, done: false }))));
+  const last = reports.find((r) => r.done);
+  is("it fails PAGE_TRIES runs, then the page is passed: hal left, ivy finished, hal's key kept", [stuck.used, last?.left, await storeForEmail(ivy), (await stateOfRef(ivy)).erased !== undefined, (await stateOfRef(hal)).erased ?? null, (await real([["EXISTS", `nl:pod:by:${halSid}`]]))[0]], [PAGE_TRIES + 1, 1, null, true, null, 1]);
+  stuck.times = stuck.used;
+  await walkedOut([hal], 2);
+  is("the next walk takes it again by itself and finishes it, its key gone", [(await stateOfRef(hal)).erased !== undefined, (await real([["EXISTS", `nl:pod:by:${halSid}`]]))[0]], [true, 0]);
+  });
+
+  await section("A record a follower reads that cannot be read is unknown, never \"no token\"", async () => {
+  const entry: Batched = { ref: "y@example.com", email: "y@example.com", sid: "1".repeat(32), statsId: null, name: "y", handle: "y", handles: ["y"], marks: [], endedAt: 0, at: 0 };
+  await real([["SET", "nl:inbox:a1:c:b1", "not json"]]);
+  is("an unreadable conversation is refused", await FOLLOWERS["nl:inbox:"].find(["nl:inbox:a1:c:b1"], entry).then(() => "answered", () => "refused"), "refused");
+  });
+
+  await section("Renewals: asked every day for RENEWAL_TRY_DAYS, then weekly; closed past them only when every member is held", async () => {
+  const day = Date.UTC(2026, 10, 1);
+  is("within the days: asked every day, never closed without them", [renewalsLate(day + (RENEWAL_TRY_DAYS - 1) * DAY, day), renewalsAskToday(day + DAY, day, day), renewalsMayClose(false, true, 0)], [false, true, false]);
+  const late = day + RENEWAL_TRY_DAYS * DAY;
+  is("past them: asked once a week", [renewalsLate(late, day), renewalsAskToday(late, day, late - DAY), renewalsAskToday(late, day, late - RENEWAL_LATE_GAP_DAYS * DAY)], [true, false, true]);
+  is("and it closes only when every member is held and none is left to hold", [renewalsMayClose(true, true, 0), renewalsMayClose(true, false, 0), renewalsMayClose(true, true, 1)], [true, false, false]);
   });
 
   done();

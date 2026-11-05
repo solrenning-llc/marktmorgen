@@ -467,13 +467,16 @@ export const ORDERS_METERED_MOVES = COMMAND + MOVES_PER_MGET * (MOVE_BYTES + MOV
  * (MGET) a call. Only in the "*" state (more than KEPT_ANY_MAX accounts whose locked sessions could not be read, until
  * SESSION_TTL_SECONDS and a day after the last such read; said in the server's log and counted for the owner's report,
  * keptStarMonth) does a session with no lock of its own send three commands more: this, a call, held in
- * tests/sg2-unknown-replies.test.ts. Not in a unit below: it exists only after more than 100 failed reads of Redis.
+ * tests/sg2-unknown-replies.test.ts. Counted in the studio unit below (UNIT_COST.studio) as if every load paid it.
  */
-export const LOCKED_UNTIL_STAR_EXTRA = 3 * COMMAND;
+export const LOCKED_UNTIL_STAR_COMMANDS = 3;
+/** What those commands add to a studio request, as UNIT_COST.studio takes them (the same sum, so no rounding is lost). */
+export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000) - request("studio", 20 + TAKE_COMMANDS, 50_000);
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
-  // A studio request at its shape, its twenty commands and fifty kilobytes through the database.
-  studio: request("studio", 20 + TAKE_COMMANDS, 50_000),
+  // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's
+  // three commands more in the "*" state, taken as if every load paid them (review of #2556 at 0e308316).
+  studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000),
   // An API request: the key, the store and the answer.
   api: request("light", 20 + TAKE_COMMANDS, 20_000),
   // A message written to the inbox, and its index.

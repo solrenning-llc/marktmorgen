@@ -29,7 +29,7 @@ import { ERASERS } from "@/lib/person-erasure";
 import { SessionsUnknownError, dropSecondStep, emailForSession, endAllSessions, isMoving, moveRunning, openSession, sendMoveLink } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
 import { RESET_DAYS, STILL_LOCKED, endRecoveryAccess, finishSetup, keptStarLine, keptStarMonth, lockedUntil, moveTwoStep, openLockedSession, startSetup, twoStepOn, twoStepStatus } from "@/lib/two-step";
-import { COMMAND, LOCKED_UNTIL_STAR_EXTRA } from "./plan-cost-registry";
+import { LOCKED_UNTIL_STAR_COMMANDS } from "./plan-cost-registry";
 import { alignRecoveryLock } from "@/lib/recovery-address";
 import { PASSKEY_SESSIONS_OPEN, cancelRemoval, listPasskeys, pendingNow, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
 import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
@@ -490,7 +490,7 @@ async function main(): Promise<void> {
   const starLine = keptStarLine(starMonth, stars);
   is(
     "and it is said: counted for the month, the owner's line with numbers only, the extra within its cost line",
-    [typeof stars === "number" && stars >= 2, starLine.includes("passou do teto de 100"), /@|nl:/.test(starLine), sent - 1 <= LOCKED_UNTIL_STAR_EXTRA / COMMAND, keptStarLine(starMonth, 0), keptStarLine(starMonth, null).includes("desconhecido")],
+    [typeof stars === "number" && stars >= 2, starLine.includes("passou do teto de 100"), /@|nl:/.test(starLine), sent - 1 <= LOCKED_UNTIL_STAR_COMMANDS, keptStarLine(starMonth, 0), keptStarLine(starMonth, null).includes("desconhecido")],
     [true, true, false, true, "", true],
   );
   await real([["DEL", KEPT_LIST]]);

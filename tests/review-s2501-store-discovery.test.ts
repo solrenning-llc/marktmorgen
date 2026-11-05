@@ -62,3 +62,17 @@ for (const [name, receipt] of [
   assert.equal(accountingCalls, 0, "this is before the separately reported noteData receipt boundary");
   assert.deepEqual({ done: report?.done ?? false, pending: redis.run(["HGET", SUM_KEY, f.owner]), legacy: redis.run(["HGET", f.roomKey, "legacy"]) }, { done: false, pending: "4096", legacy: null });
 });
+
+for (const receipt of [[], [["0"]]]) test("unknown initial store discovery " + JSON.stringify(receipt) + " must not certify the inventory", async () => {
+  const f = await fixture();
+  redis.run(["HSET", STATE_KEY, "phase", "ids", "cursor", "0"]);
+  redis.run(["HDEL", SUM_KEY, f.owner]);
+  redis.pipeline = async commands => {
+    if (commands.length === 1 && commands[0][0] === "SCAN" && commands[0][3] === "nl:store:owner:*") return receipt;
+    return pipeline(commands);
+  };
+  let report: Awaited<ReturnType<typeof recountStep>> | null = null;
+  try { report = await recountStep(Date.now() + 1000); } catch { /* discovery uncertainty must remain resumable */ }
+  assert.equal(typeof redis.run(["GET", f.storeKey]), "string");
+  assert.deepEqual({ done: report?.done ?? false, phase: redis.run(["HGET", STATE_KEY, "phase"]) }, { done: false, phase: "ids" });
+});

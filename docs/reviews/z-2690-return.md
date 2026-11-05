@@ -1,5 +1,7 @@
 # Nominal return on Z's two #2690 findings
 
+**Latest focal disposition: both Z MEDIUM findings CLOSED on `162aa3871c6a5776bbe3e9b29b17791f01be4442`.** The unchanged eight-case proof reports8/8; the critical `[null,0,0]` vector now returns500/no client confirmation, and the bounded cache remains40,001B with null on overflow. This supersedes the earlier open-ACK disposition below only for these Z vectors. It is not a whole-PR/parent release: C4/T retain their financial scopes, and the parent data-registry failure remains.
+
 Reviewed corrective head: `d7fd2f0eeb86497d74e36a5d6b3d544e9db35484`, stacked on #2685 at `4808934e0e7fcea4e4b1dba0325b8c0e449b9a70`. This follows the author's 20:17 nominal request. Channel reservation/expectation explanation: `21b922f1e2640ad28b49083eddd1172b4baed309`, published before writing the new evidence. Claude 4 retains the current second financial review and T the first; this return covers only Z's critical-write and cache-transfer vectors. It does not review or release the parent or their invite findings.
 
 **NOT RELEASED: the critical-write MEDIUM remains open.** The cache-transfer vector is closed in the measured scope.
@@ -42,6 +44,8 @@ node tests/z2690-run.mjs /path/to/d7fd-checkout z2690-return.proof.ts
 The author moved to `978f48b03deb0190d2ecccd92f351d0cb24bb780`, parent `2c9bce6de1eb54c181c7bfd90f7c7961cf119b54`. Its delta changes only the move page, move words, move-members and move tests; catalog, membership-numbers, option route and store blobs are byte-identical to d7fd. The same eight-case derived proof was rerun on978f:7pass/1fail, with the same40,001-byte bounded read and false200 on `[null,0,0]`. This does not review the invite delta or update the d7fd-only linked/type/registry results into a general978f certification. The posted focal finding can therefore anchor978f while preserving the separate parent reviewers.
 
 ## Checks and limits
+
+On latest162a, the same proof is8/8 without assertion changes. The corrected product functions were read again; runWrites now requires exactOK for the actual unconditionalSET and safe nonnegative integer replies for its actualDEL/HSET/HDEL commands. Focused types/lint pass. Latest author/linked groups67+18+22+27+24+27+24=209 checks pass; data-registry still6/7, the same absent parent `nl:mv:open` family. The new parent b420 and its invitation behavior remain outside this review. No whole-suite or9-green claim is made.
 
 Corrective author/linked tests: option-sale-toggle62, membership-numbers18, option-off-sale22, option-member-count27, plan-options24, price-options27 and cost-registry24 all pass (204 checks). Data-registry is **6/7**, failing on the parent's new unregistered `nl:mv:open:@lib/move-members.ts` family. This was reported separately to C2/T/C4; it is outside this focal review, and the linked suite is not claimed wholly green. An initial batch misspelled `option-member-count.test.ts` as `option-members.test.ts`; its bundler failure was corrected by running the actual file, without changing tests.
 

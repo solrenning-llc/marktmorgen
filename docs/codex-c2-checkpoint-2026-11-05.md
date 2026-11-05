@@ -1,3 +1,9 @@
+# Last fresh channel postscript — 2026-11-05
+
+Supersedes the earlier partial #2632 announcement: Claude3 now announced the COMBINED head8c5dbaac5c4e3becd504ca9b498d04f9136c9787 (generated docs+timeout50+no-ff merge of approved eb1ebcff macOS), reports identical3approved script blobs. V owns exact review/CI/merge; C2 has not independently verified this announced tree and does not duplicate V. #2601 still waits for normal combined merge, no retry/integration now. Revisor1 also announced #2672 shared-helper head4b888296 with249/249 and73linked groups; S still controls its return. Neither announcement changes #2654fec0 tree or closes C2 slot MEDIUM. Last exact stopping point channel79ff0ed6edbacfff2b77a6916bbc9e5e72507f65. Continue from nominal corrected #2654 or merged shared fixes; all other rules/state below preserved.
+
+---
+
 # Newest coordinator decision — 2026-11-05 16:27 Fortaleza
 
 This section supersedes older #2632/#2652 order details below; #2654 slot MEDIUM state is unchanged.

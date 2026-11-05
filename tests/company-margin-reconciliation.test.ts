@@ -10,7 +10,7 @@ function fixture() {
       period: "2026-10", currency: "USD", complete: true,
       amounts: { revenueCents: 1000, variableCostsCents: 100, allocatedFixedCostsCents: 100,
         taxesCents: 200, refundsCents: 50, reservesCents: 50, evidence: "SYNTHETIC ONLY; complete source reconciliation" },
-    }])) as Record<CommercialProfitSource, { period: string; currency: string; complete: boolean; amounts: Record<string, unknown> }>,
+    }])) as unknown as Record<CommercialProfitSource, { period: string; currency: string; complete: boolean; amounts: Record<string, unknown> }>,
   };
 }
 
@@ -93,6 +93,21 @@ test("self-detaching packet and amount proxies cannot turn incomplete evidence i
     else original.amounts = proxy;
     assert.equal(reconcileCompanyMonthlyEvidence(input, NOW), null);
   }
+});
+
+test("an envelope Proxy cannot arrange a getter to run during native clone inspection", () => {
+  const input = fixture();
+  let reads = 0;
+  input.sources.training = new Proxy(input.sources.training, {
+    ownKeys(target) {
+      Object.defineProperty(input.sources.plan_subscriptions, "complete", {
+        enumerable: true, configurable: true, get() { reads++; return true; },
+      });
+      return Reflect.ownKeys(target);
+    },
+  });
+  assert.equal(reconcileCompanyMonthlyEvidence(input, NOW), null);
+  assert.equal(reads, 0);
 });
 
 test("only the last complete UTC month and safe fully allocated amounts reconcile", () => {

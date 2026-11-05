@@ -5,7 +5,7 @@ import{addProduct,addCopiedProducts,claimHandle,ensureStatsId,setProductLink,set
 import{readProduct,readListings}from'@/lib/catalog';import{offeredItems}from'@/lib/bundles';
 import{requestLimitFor}from'@/lib/traffic-rules';
 import{isResting,takePublicRequest}from'@/lib/traffic';import{collectionUnits}from'@/lib/page-read-rules';
-import{COMMAND,laterPageCost}from'./traffic-cost';import{store as redis}from'./redis-stub';import{paidPeriod}from'./billing-period-fixture';
+import{laterPageCost}from'./traffic-cost';import{COMMAND}from'./plan-cost-registry';import{store as redis}from'./redis-stub';import{paidPeriod}from'./billing-period-fixture';
 async function seed(){redis.clear();const owner='publicg2@example.test';assert.equal((await claimHandle(owner,'publicg2','Synthetic shop','')).ok,true);await ensureStatsId(owner);const paid=await setSubscription(owner,{customerId:'cus_PublicG2',subscriptionId:'sub_PublicG2',active:true,tier:'scale',period:paidPeriod()});assert.ok(paid?.subscriptionActive);const made=await addProduct(owner,'Synthetic product','','19',null);assert.ok(made.ok);assert.ok((await setProductHidden(owner,made.product.id,true)).ok);const store=await storeForEmail(owner);assert.ok(store?.statsId);return{owner,store,id:made.product.id};}
 function request(id:string){return new NextRequest(`https://marktmorgen.com/api/store/licence?store=publicg2&product=${id}&key=ABCD-EFGH-IJKL-MNOP`,{headers:{'x-forwarded-for':'198.51.100.20'}});}
 test('G2 known licence reservation precedes the actual cold product read',async()=>{

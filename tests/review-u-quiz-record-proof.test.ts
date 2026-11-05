@@ -19,7 +19,7 @@ async function main() {
   part("Every stored entry is evidence, including entries beyond the display cap");
   is("a fully readable oversized legacy bank keeps the existing cap", parseQuiz(record(valid))?.questions.length, MAX_QUESTIONS);
   for (const at of [0, MAX_QUESTIONS - 1, MAX_QUESTIONS, MAX_QUESTIONS + 1]) {
-    const damaged = [...valid];
+    const damaged: unknown[] = [...valid];
     damaged[at] = { ...question(at), correct: [99] };
     is(`an unreadable entry at ${at} refuses the whole record`, parseQuiz(record(damaged)), null);
   }
@@ -37,7 +37,7 @@ async function main() {
     return original(commands);
   };
   try {
-    const damaged = [...valid];
+    const damaged: unknown[] = [...valid];
     damaged[MAX_QUESTIONS + 1] = null;
     await original([["SET", key, record(damaged)]]);
     is("the stored reader refuses damage after the cap", await readQuizFor(storeId, lessonId), null);

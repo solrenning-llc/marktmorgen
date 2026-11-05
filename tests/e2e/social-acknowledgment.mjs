@@ -80,6 +80,7 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
      if(mode==="profiles")is("profile input stays creator-authored "+name,sent[0].url,"  @harborkitchenpreview  ");
      for(const field of await form.locator("select,input,button").all())is("all profile editing locks "+name,await field.isDisabled(),true);
      is("profile form announces pending "+name,await form.getAttribute("aria-busy"),"true");
+     if(mode==="profiles")await checkSocialDraftProtection({page,is,label:"pending/"+name});
     }finally{release();}
     if(scenario.confirmed){
      await page.locator(".nb-toast-region [role=status]").getByText(success,{exact:true}).waitFor({state:"attached"});

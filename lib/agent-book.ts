@@ -56,6 +56,14 @@ export class BookBusy extends Error {
   }
 }
 
+/** A change to the book whose write Redis did not confirm: it may or may not be kept. */
+export class BookWriteUnconfirmed extends Error {
+  constructor() {
+    super("the agent book's write could not be confirmed");
+    this.name = "BookWriteUnconfirmed";
+  }
+}
+
 const isObject = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object" && !Array.isArray(v);
 
 function readProposal(v: unknown): Proposal | null {
@@ -90,8 +98,11 @@ export function parseBook(raw: unknown): Book | null {
 /** The store's book now, tidied (expired proposals and old history gone). Throws when it cannot be read. */
 export async function readBook(statsId: string, now = Date.now()): Promise<Book> {
   if (!STATS_ID.test(statsId) || !isRedisConfigured()) throw new Error("the agent book is not available");
-  const [raw] = await redisPipeline([["GET", bookKey(statsId)]]);
-  const book = parseBook(raw);
+  // Exactly one answer, a text or null (no book yet): [] or [undefined] is not "no book", and a waiting proposal is
+  // never dropped by writing over a book that could not be read (Codex G on #1929).
+  const reply: unknown = await redisPipeline([["GET", bookKey(statsId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new Error("the agent book could not be read");
+  const book = parseBook(reply[0]);
   if (!book) throw new Error("the agent book could not be read");
   return tidy(book, now);
 }
@@ -112,7 +123,9 @@ export async function changeBook<T>(store: DataStore & { statsId: string }, chan
     if (next) {
       const json = JSON.stringify(next);
       await needData(store, [{ slot: SLOT, bytes: dataBytes([json], 1), set: true }], now);
-      await redisPipeline([["SET", bookKey(statsId), json]]);
+      // Kept only on Redis's exact "OK": anything else may not have been written, and is never answered as kept.
+      const written: unknown = await redisPipeline([["SET", bookKey(statsId), json]]);
+      if (!Array.isArray(written) || written.length !== 1 || written[0] !== "OK") throw new BookWriteUnconfirmed();
     }
     return result;
   } finally {

@@ -70,6 +70,11 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "That address has its own passkeys or two-step login",
     body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed. Remove them from that address first, or move to another address.",
   },
+  // A move refused because what the new address had open could not be read (app/api/auth/move; review of #2556).
+  "move-unread": {
+    title: "We could not finish the move just now",
+    body: "Your account was not moved, and it stays at its old address. Log in, then try the move again in a minute.",
+  },
   "move-error": {
     title: "The move did not finish",
     body: "Nothing was changed. Log in and try again.",

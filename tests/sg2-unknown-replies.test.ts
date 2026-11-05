@@ -31,8 +31,10 @@ import { hasSecondStep, liveSecondStep, mayAddSecondStep } from "@/lib/second-st
 import { RESET_DAYS, STILL_LOCKED, endRecoveryAccess, finishSetup, lockedUntil, moveTwoStep, openLockedSession, startSetup, twoStepOn, twoStepStatus } from "@/lib/two-step";
 import { alignRecoveryLock } from "@/lib/recovery-address";
 import { PASSKEY_SESSIONS_OPEN, cancelRemoval, listPasskeys, pendingNow, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
-import { forgetStoreWebhooks } from "@/lib/webhooks";
+import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_KEYS, listKeys, makeKey, resolveKey, revokeAllKeys } from "@/lib/api-keys";
+import { FORGET_TRIES, FORGET_TRY_COMMANDS, type ForgetWork, queueStoreForget, retryStoreForgets, storeForgetLine, storeForgetMonth } from "@/lib/store-forget-retry";
+import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { ApiKeyEditor, KEYS_UNREAD } from "@/components/api-key-editor";
 import { POST as signOutAll } from "@/app/api/auth/signout-all/route";
 import { POST as callback } from "@/app/api/auth/callback/route";
@@ -107,7 +109,7 @@ async function main(): Promise<void> {
   // The failures each case provokes are logged on purpose; only what they leave behind is checked.
   const shown = console.error;
   console.error = (...args: unknown[]) => {
-    if (args.some((arg) => arg instanceof Error && /unknown shape/.test(arg.message))) return;
+    if (args.some((arg) => arg instanceof Error && /unknown shape|still failing/.test(arg.message))) return;
     shown(...args);
   };
 
@@ -427,6 +429,117 @@ async function main(): Promise<void> {
   is("unread, nothing moves", [refusedMove, await twoStepOn(AWAY), await twoStepOn(HOME), await emailForSession(oldMark)], ["SessionsUnknownError", true, false, HOME]);
   await moveTwoStep(AWAY, HOME);
   is("read in their shape: it moves, and the old mark's browser is logged out", [await twoStepOn(HOME), await emailForSession(oldMark), await liveSecondStep(HOME, oldMark)], [true, null, null]);
+
+  part("Review of #2556 at df8030300: lockedUntil costs one command for every other account");
+  let sent = 0;
+  const counting = async (commands: Command[]) => {
+    sent += commands.length;
+    return real(commands);
+  };
+  const KEPT = "kept@example.com";
+  const keptUntil = Date.now() + RESET_DAYS * 86_400_000;
+  const keptLocked = await openLockedSession(KEPT, keptUntil);
+  await alignRecoveryLock(KEPT, keptUntil);
+  malform(on("SMEMBERS", "nl:2fa:lockedset:"), null);
+  await endRecoveryAccess(KEPT);
+  restore();
+  const elsewhere = await openSession("elsewhere@example.com");
+  const keptPlain = await openSession(KEPT);
+  redis.pipeline = counting;
+  const answers = [await lockedUntil(elsewhere)];
+  const forOther = sent;
+  sent = 0;
+  answers.push(await lockedUntil(keptPlain));
+  const forKept = sent;
+  sent = 0;
+  answers.push((await lockedUntil(keptLocked)) > 0 ? 1 : 0);
+  const forLocked = sent;
+  restore();
+  is("another account's session: one command; the kept account's own: four at most; the locked one: still locked", [forOther, forKept, forLocked, answers], [1, 4, 1, [0, 0, 1]]);
+
+  part("Review of #2556 at df8030300: a move refused because the new address's sessions are unread says so");
+  const FROM2 = "move2-from@example.com";
+  const TO2 = "move2-to@example.com";
+  await claimHandle(FROM2, "sg2-move2-from", "Sg2", "");
+  const asker2 = await openSession(FROM2);
+  mails.length = 0;
+  await sendMoveLink(FROM2, TO2, "https://marktmorgen.com", asker2);
+  const token2 = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === TO2)?.text ?? "")?.[1] ?? "";
+  // An app of the account, so moving it reads the new address's sessions.
+  const app2 = await startSetup(FROM2, asker2, "backup-move2@example.org");
+  if (typeof app2 === "string") throw new Error(app2);
+  if (typeof (await finishSetup(FROM2, asker2, nowCode(app2.secret), codeTo("backup-move2@example.org"))) === "string") throw new Error("not on");
+  // Only the new address's sessions unread: the account's own are put back and logged out as before.
+  malform(on("SMEMBERS", `nl:auth:sessions:${sha(`nimbus-auth-sessions:${TO2}`).slice(0, 40)}`), { 0: "x" });
+  const refusedAt = (await moveRoute(post("https://marktmorgen.com/api/auth/move", { token: token2 }))).headers.get("location");
+  restore();
+  const signinPage = readFileSync("app/signin/page.tsx", "utf8");
+  is(
+    "not moved, and said as a move that could not finish, never as the address having its own login",
+    [refusedAt, Boolean(await storeForEmail(FROM2)), await twoStepOn(FROM2), signinPage.includes('"move-unread": {'), signinPage.includes("Your account was not moved, and it stays at its old address.")],
+    ["https://marktmorgen.com/signin?status=move-unread", true, true, true, true],
+  );
+
+  part("Review of #2556, LEVE 3: a deleted store's webhooks and keys that could not be forgotten are tried again, counted, never only logged");
+  const GONE_STATS = "c".repeat(32);
+  const GONE_SID = "d".repeat(32);
+  const goneKey = await makeKey(GONE_SID, "Zapier");
+  if (!goneKey.ok) throw new Error("no key");
+  const goneLog = `nl:hooks:log:${GONE_STATS}`;
+  const goneBodies: Command[] = [];
+  for (let i = 0; i < LOG_SIZE; i += 1) {
+    const id = `dlv_${i.toString(16).padStart(24, "0")}`;
+    goneBodies.push(["SET", `nl:hooks:d:${id}`, "{}"], ["LPUSH", goneLog, id]);
+  }
+  await real([...goneBodies, ["SET", `nl:hooks:cfg:${GONE_STATS}`, JSON.stringify({ handle: "gone", endpoints: Array.from({ length: MAX_ENDPOINTS }, (_, i) => ({ id: `ep${i}`, url: `https://hooks.example.com/${i}`, events: ["sale.completed"], secret: "s" })) })]]);
+  for (let k = 1; k < MAX_KEYS; k += 1) await makeKey(GONE_SID, `Tool ${k}`);
+  const monthNow = new Date().toISOString().slice(0, 7);
+  await queueStoreForget(GONE_STATS, GONE_SID);
+  await queueStoreForget(GONE_STATS, GONE_SID);
+  let tries = 0;
+  const failing: ForgetWork = async () => {
+    tries += 1;
+    throw new Error("still failing");
+  };
+  const runs: unknown[] = [];
+  for (let day = 0; day < FORGET_TRIES - 2; day += 1) runs.push(await retryStoreForgets(Date.now() + 10_000, Date.now(), failing));
+  const waiting = await storeForgetMonth(monthNow);
+  is("queued once; failed again each day, not given up before the last try", [waiting?.queued, waiting?.waitingNow, waiting?.keptNow, tries, runs.at(-1)], [1, 1, 0, FORGET_TRIES - 2, { done: 0, failed: 1, gaveUp: 0, left: 0 }]);
+  const last = await retryStoreForgets(Date.now() + 10_000, Date.now(), failing);
+  const afterLast = await retryStoreForgets(Date.now() + 10_000, Date.now(), failing);
+  const given = await storeForgetMonth(monthNow);
+  const line = storeForgetLine(given);
+  is("the last try gives it up, it stays in line, marked, and is never tried again", [last, afterLast, tries, given?.gaveUp, given?.keptNow, given?.waitingNow], [{ done: 0, failed: 0, gaveUp: 1, left: 0 }, { done: 0, failed: 0, gaveUp: 0, left: 0 }, FORGET_TRIES - 1, 1, 1, 0]);
+  is(
+    "the owner's report says what is still kept, with numbers only: no store, no key, no person",
+    [line.includes("1 com dados ainda guardados depois de todas as tentativas"), line.includes("que podem conter dados de compradores"), line.includes(GONE_STATS), line.includes(GONE_SID), /@|nl:/.test(line)],
+    [true, true, false, false, false],
+  );
+  is("unread, the report says it is unknown, never nothing", storeForgetLine(null).includes("o estado é desconhecido"), true);
+  // A second store, the real forgets this time: one try, every command counted.
+  const OK_STATS = "e".repeat(32);
+  const [goneIds, goneCfg] = await real([["LRANGE", goneLog, 0, -1], ["GET", `nl:hooks:cfg:${GONE_STATS}`]]);
+  await real([["RPUSH", `nl:hooks:log:${OK_STATS}`, ...(goneIds as string[])], ["SET", `nl:hooks:cfg:${OK_STATS}`, String(goneCfg)]]);
+  await queueStoreForget(OK_STATS, GONE_SID);
+  sent = 0;
+  redis.pipeline = counting;
+  const real1 = await retryStoreForgets(Date.now() + 10_000);
+  restore();
+  is(
+    "tried with the real forgets: done, out of the line, the log, the bodies and the keys gone, within FORGET_TRY_COMMANDS",
+    [real1, await exists(`nl:hooks:log:${OK_STATS}`), await exists("nl:hooks:d:dlv_000000000000000000000000"), await resolveKey(goneKey.key), sent - 1 <= FORGET_TRY_COMMANDS, (await storeForgetMonth(monthNow))?.done],
+    [{ done: 1, failed: 0, gaveUp: 0, left: 0 }, false, false, null, true, 1],
+  );
+  malform(on("HGETALL", "nl:forget:q"), { 0: "x" });
+  is("a line read in another shape: the run fails, it never reads as an empty line", await rejects(() => retryStoreForgets(Date.now() + 10_000)), "Error");
+  restore();
+  const storesRoute = readFileSync("app/api/store/stores/route.ts", "utf8");
+  const closingCron = readFileSync("app/api/cron/closing/route.ts", "utf8");
+  is(
+    "a delete whose first try failed puts it in line; the daily closing job tries the line again",
+    [storesRoute.includes("await queueStoreForget(result.store.statsId ?? null, result.store.sid)"), storesRoute.includes("forgetStoreWebhooks(result.store.statsId), revokeAllKeys(result.store.sid)"), closingCron.includes("await retryStoreForgets(start + 32_000)")],
+    [true, false, true],
+  );
 
   // Last, as it moves the stand-in's clock past every session above.
   part("5 (review of #2556): a lock that could not be lifted by logging out outlasts its day, never the session");

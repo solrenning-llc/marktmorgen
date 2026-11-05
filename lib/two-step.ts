@@ -64,10 +64,10 @@
  *                         opened; kept as long as the session can last
  *   nl:2fa:lockedset:<hash> the account's locked sessions, to log them out on Cancel
  *   nl:2fa:lockedset:<hash>:kept when they last could not be logged out: those opened before stay locked
- *                         (the same mark under the name "any account": whether any account has one now)
+ *                         (the same mark under the name "any account": which accounts have one now, by tag)
  */
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, emailForSession, endSession, isMoving, normaliseEmail, openSession } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, endSession, isMoving, normaliseEmail, openSession, sessionKeyOf } from "@/lib/auth";
 import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -100,10 +100,13 @@ const lockedSetKey = (email: string) => `nl:2fa:lockedset:${sha(`nimbus-2fa-lock
 /** When the account's locked sessions last could not be logged out (endLocked): those opened before stay locked until they end. */
 const keptLockedKey = (email: string) => `${lockedSetKey(email)}:kept`;
 /**
- * Whether any account's locked sessions are kept locked now: only then does a session with no lock of its own
- * ask more. Kept as the mark of a name no address can be ("any account" has a space), in the same family.
+ * The accounts whose locked sessions are kept locked now, by accountTag, space-separated: only a session of one
+ * of them with no lock of its own asks more. Kept as the mark of a name no address can be ("any account" has a
+ * space), in the same family.
  */
 const KEPT_ANY_KEY = keptLockedKey("any account");
+/** A one-way tag of an account: its locked set's own hash, never the address. */
+const accountTag = (email: string) => lockedSetKey(email).slice("nl:2fa:lockedset:".length);
 const rescueKey = (token: string) => `nl:2fa:rescue:${sha(`nimbus-2fa-rescue:${token}`).slice(0, 40)}`;
 /**
  * A code used once: the app's step, or a recovery code, taken with SET NX so
@@ -354,23 +357,26 @@ export async function lockedFor(
  */
 export async function lockedUntil(session: string | undefined, now = Date.now()): Promise<number> {
   if (!session || !/^[0-9a-f]{64}$/.test(session) || !isRedisConfigured()) return 0;
-  // One command (MGET) for the lock and whether any account's locked sessions are kept locked now.
-  const [reply] = await redisPipeline([["MGET", lockedKey(session), KEPT_ANY_KEY]]);
-  const [raw, anyKept] = Array.isArray(reply) && reply.length === 2 ? reply : [undefined, "unknown"];
+  // One command (MGET): the session's lock, the accounts whose locked sessions are kept locked now, and the
+  // session's owner. Every session of every other account stops here (review of #2556 at df8030300: one command).
+  const [reply] = await redisPipeline([["MGET", lockedKey(session), KEPT_ANY_KEY, await sessionKeyOf(session)]]);
+  const [raw, anyKept, ownerRaw] = Array.isArray(reply) && reply.length === 3 ? reply : [undefined, undefined, undefined];
+  const owner = typeof ownerRaw === "string" && ownerRaw ? ownerRaw : null;
   if (typeof raw !== "string") {
     // No lock of its own: a lock written before 5 November 2026 lapsed on its day (review of #2556 at
-    // 47161b86e). While some account's locked sessions could not be logged out, a session still listed as
-    // its account's locked session stays locked (keptListed); otherwise, as before, it is not locked.
-    return anyKept === null ? 0 : keptListed(session, now);
+    // 47161b86e). A session of an account whose locked sessions are kept locked (listed in KEPT_ANY_KEY,
+    // or that list in another shape) asks whether it is still in its account's kept set (keptListed).
+    if (!owner || anyKept === null) return 0;
+    if (typeof anyKept === "string" && !anyKept.split(" ").includes(accountTag(owner))) return 0;
+    return keptListed(session, owner, now);
   }
   // "<until>|<opened>"; a value written before 5 November 2026 is "<until>" alone, opened at an unknown time.
   const [untilText, openedText] = raw.split("|");
   const until = Number(untilText);
   if (!Number.isFinite(until)) return 0;
   if (until > now) return until;
-  const email = await emailForSession(session);
-  if (!email) return 0;
-  const [kept, left] = await redisPipeline([["GET", keptLockedKey(email)], ["PTTL", lockedKey(session)]]);
+  if (!owner) return 0;
+  const [kept, left] = await redisPipeline([["GET", keptLockedKey(owner)], ["PTTL", lockedKey(session)]]);
   if (kept === null) return 0;
   const since = Number(kept);
   const opened = openedText === undefined ? 0 : Number(openedText);
@@ -381,15 +387,15 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
 }
 
 /**
- * A session whose own lock is gone, while its account's locked sessions are
+ * A session whose own lock is gone, of an account whose locked sessions are
  * kept locked (endLocked could not read them): locked, until the account's
  * set ends, when the session is still in it. The set is not read whole: only
  * whether this session is a member; an answer of another shape counts as one.
+ * Three commands, only for the sessions of such an account, for as long as its
+ * mark lasts (at most SESSION_TTL_SECONDS and a day after the failed read).
  */
-async function keptListed(session: string, now: number): Promise<number> {
-  const email = await emailForSession(session);
-  if (!email) return 0;
-  const [kept, member, left] = await redisPipeline([["EXISTS", keptLockedKey(email)], ["SISMEMBER", lockedSetKey(email), session], ["PTTL", lockedSetKey(email)]]);
+async function keptListed(session: string, owner: string, now: number): Promise<number> {
+  const [kept, member, left] = await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]);
   if (countOf(kept) === 0 || countOf(member) === 0) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);
@@ -492,7 +498,9 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
     // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
     await redisPipeline([
       ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
-      ["SET", KEPT_ANY_KEY, String(now), "EX", SESSION_TTL_SECONDS + 86_400],
+      // Listed by a one-way tag of the account, never its address; APPEND keeps two at once both.
+      ["APPEND", KEPT_ANY_KEY, ` ${accountTag(email)}`],
+      ["EXPIRE", KEPT_ANY_KEY, SESSION_TTL_SECONDS + 86_400],
       ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
     ]);
     return false;

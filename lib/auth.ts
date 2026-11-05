@@ -91,6 +91,9 @@ const linkKey = async (token: string) =>
 const sessionKey = async (id: string) =>
   `nl:auth:session:${(await sha256Hex(`nimbus-auth-session:${id}`)).slice(0, 40)}`;
 
+/** The key a session id is kept under, for a reader that reads it in the same command as its own keys (lib/two-step.ts lockedUntil). */
+export const sessionKeyOf = (id: string) => sessionKey(id);
+
 const freshKey = async (id: string) =>
   `nl:auth:fresh:${(await sha256Hex(`nimbus-auth-fresh:${id}`)).slice(0, 40)}`;
 

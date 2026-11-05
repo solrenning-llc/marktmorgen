@@ -3,6 +3,7 @@ import { discardTwoStep, moveTwoStep } from "@/lib/two-step";
 import { moveRecoveryAddress } from "@/lib/recovery-address";
 import { originFrom } from "@/lib/request-origin";
 import {
+  SessionsUnknownError,
   endAllSessions,
   endMoving,
   clearBrokenMove,
@@ -131,6 +132,7 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
       if ((await endAllSessions(from)) === null) throw new Error("the sessions could not be read");
     })) && ok;
     if (!ok) broke();
+    return ok;
   };
   try {
     await movePasskeys(from, to);
@@ -142,7 +144,11 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     console.error("moving the ways in refused", error);
     // Passkeys that could not be put back cleanly: the move is kept marked until it is repaired.
     if (error instanceof MoveSplitError) broke();
-    await undo();
+    const undone = await undo();
+    // The new address's sessions could not be read (lib/two-step.ts moveTwoStep; review of #2556 at df8030300):
+    // it holds no way in of its own, so that is never what the person is told. Put back cleanly, the account
+    // stays where it was; otherwise it is kept marked to repair, said as a move that did not finish.
+    if (error instanceof SessionsUnknownError) return away(undone ? "/signin?status=move-unread" : "/signin?status=move-error");
     return away("/signin?status=move-has-login");
   }
 

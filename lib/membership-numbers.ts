@@ -30,6 +30,8 @@
  */
 import { DISCOUNT_KINDS, type DiscountKind, entryOf } from "@/lib/discount-impact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { normaliseEmail } from "@/lib/auth";
+import { keepUnlessErased, suppressedAmong } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { type Invoice, type Movements, movementsFrom, pricesFrom } from "@/lib/mrr-movements";
@@ -41,6 +43,8 @@ const DAY = 86_400;
 
 export type Sub = {
   id: string;
+  /** The customer's address when Stripe gave the customer whole; "" otherwise (never kept in the numbers). */
+  email?: string;
   status: string;
   product: string;
   /** In the currency's smallest unit, per interval, quantity included. */
@@ -92,6 +96,8 @@ const COMMENT_LENGTH = 400;
 const MAX_COMMENTS = 10;
 /** The sentences of the last 90 days kept for the monthly summary of what customers say (lib/customer-voice.ts). */
 const MAX_RECENT_COMMENTS = 60;
+/** What members wrote that a reading can show at all: the latest MAX_COMMENTS and the 90 days' MAX_RECENT_COMMENTS. */
+export const SHOWN_COMMENTS = MAX_COMMENTS + MAX_RECENT_COMMENTS;
 
 export type Leaving = {
   /** Members who asked to cancel in the last year, by their own choice (not a failed payment). */
@@ -481,11 +487,67 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     cancelCause: !meta.ends_after && typeof raw.cancellation_details?.reason === "string" ? raw.cancellation_details.reason : "",
     ...feedbackOf(raw),
     customer: typeof raw.customer === "string" ? raw.customer : raw.customer && typeof raw.customer === "object" && typeof (raw.customer as { id?: unknown }).id === "string" ? (raw.customer as { id: string }).id : "",
+    // The customer's address, when Stripe gives the customer whole (expand[]=data.customer): to leave out what an erased member wrote.
+    email: raw.customer && typeof raw.customer === "object" && typeof (raw.customer as { email?: unknown }).email === "string" ? normaliseEmail((raw.customer as { email: string }).email) : "",
     comment: typeof raw.cancellation_details?.comment === "string" ? raw.cancellation_details.comment.replace(/\s+/g, " ").trim().slice(0, COMMENT_LENGTH) : "",
   };
 }
 
-const cacheKey = (store: Store) => `nl:mnum:${store.statsId}`;
+/** The store's membership numbers kept CACHE_SECONDS; a person's erasure deletes it (lib/store-readings.ts, forgetReadingsPerson). */
+export const membershipCacheKey = (statsId: string) => `nl:mnum:${statsId}`;
+const cacheKey = (store: Store) => membershipCacheKey(store.statsId as string);
+
+/** At most this many addresses read in what a member wrote; one with more is left out whole (it cannot be checked). */
+export const COMMENT_ADDRESSES = 2;
+const ADDRESS_IN_TEXT = /[^\s@<>()[\]"',;:]+@[^\s@<>()[\]"',;:]+\.[a-z]{2,}/gi;
+
+/**
+ * Who may be named by what a member wrote when leaving: their customer's
+ * address on Stripe (when Stripe gave it) and every address typed in it; null
+ * when it holds more addresses than are looked up (then it is left out).
+ */
+function commentNames(sub: Sub): string[] | null {
+  const typed = sub.comment.match(ADDRESS_IN_TEXT) ?? [];
+  if (typed.length > COMMENT_ADDRESSES) return null;
+  return [...new Set([sub.email ?? "", ...typed].map((e) => normaliseEmail(e)).filter(Boolean))];
+}
+
+/** The numbers without what members wrote (a copy that could not be checked, or named someone deleted meanwhile). */
+export function withoutMemberWords(numbers: Numbers | null): Numbers | null {
+  return numbers?.leaving ? { ...numbers, leaving: { ...numbers.leaving, comments: [], recent: [] } } : numbers;
+}
+
+/**
+ * What a member wrote when leaving, left out when it may name someone the
+ * store deleted (Codex E2 on #2111; rule: an erased person's data never comes
+ * back): Stripe keeps the membership and its comment, so every reading would
+ * show it again. One HMGET of their prints (lib/suppression.ts); a reply that
+ * is not whole throws, and nothing is read. Returns who the words left in
+ * may name, for the copies kept to be checked again where they are written.
+ */
+async function withoutErasedWords(store: Store, subs: Sub[], now: number): Promise<string[]> {
+  // Only the newest that can be shown are looked up (leavingFrom keeps MAX_COMMENTS and MAX_RECENT_COMMENTS of
+  // them); every other's words are left out, so nothing unchecked is ever shown. One deleted among them leaves
+  // fewer shown, never an older one unchecked.
+  const atOf = (s: Sub) => s.canceledAt || (s.cancelCause ? s.ended : 0);
+  const eligible = subs
+    .filter((s) => s.comment && s.cancelCause !== "payment_failed" && s.cancelCause !== "payment_disputed" && atOf(s) >= now - 365 * DAY && atOf(s) <= now)
+    .sort((a, b) => atOf(b) - atOf(a));
+  const said = eligible.slice(0, SHOWN_COMMENTS);
+  const shown = new Set(said);
+  for (const sub of subs) if (sub.comment && !shown.has(sub)) sub.comment = "";
+  const names = new Map<Sub, string[]>();
+  for (const sub of said) {
+    const found = commentNames(sub);
+    if (found === null) sub.comment = "";
+    else names.set(sub, found);
+  }
+  const all = [...new Set([...names.values()].flat())];
+  if (!store.listId || !all.length) return all;
+  const gone = await suppressedAmong(store.listId, all);
+  for (const [sub, found] of names) if (found.some((e) => gone.has(e))) sub.comment = "";
+  return all.filter((e) => !gone.has(e));
+}
 
 /**
  * How many bytes this store's kept membership numbers hold, 0 when none are
@@ -506,6 +568,16 @@ export async function membershipNumbers(store: Store, fresh = false, now = Date.
 }
 
 /**
+ * The numbers read from Stripe now, with who the words of members left in
+ * may name (lib/store-readings.ts, keptMembers checks them again where its
+ * copy is written).
+ */
+export async function membershipNumbersNamed(store: Store, now = Date.now()): Promise<{ numbers: Numbers; named: string[] } | null> {
+  const read = await readMemberships(store, null, true, now);
+  return read === "refused" || read === null ? null : { numbers: read.numbers, named: read.named ?? [] };
+}
+
+/**
  * membershipNumbers, asking `beforeStripe` first when they are not kept and
  * the creator's Stripe account is about to be read, so a reading that pays
  * for its size (lib/mcp-tools.ts, membershipsTool) takes it then: "refused"
@@ -517,12 +589,23 @@ export async function membershipNumbersPaid(
   fresh = false,
   now = Date.now(),
 ): Promise<Numbers | null | "refused"> {
+  const read = await readMemberships(store, beforeStripe, fresh, now);
+  return read === "refused" || read === null ? read : read.numbers;
+}
+
+/** membershipNumbersPaid, with who its members' words may name when read from Stripe now (null when kept). */
+async function readMemberships(
+  store: Store,
+  beforeStripe: (() => Promise<boolean>) | null,
+  fresh: boolean,
+  now: number,
+): Promise<{ numbers: Numbers; named: string[] | null } | null | "refused"> {
   if (!store.stripeAccountId || !store.statsId) return null;
   if (!fresh && isRedisConfigured()) {
     const [cached] = await redisPipeline([["GET", cacheKey(store)]]);
     if (typeof cached === "string") {
       try {
-        return JSON.parse(cached) as Numbers;
+        return { numbers: JSON.parse(cached) as Numbers, named: null };
       } catch {
         // Read again below.
       }
@@ -535,6 +618,8 @@ export async function membershipNumbersPaid(
   let complete = false;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const query = new URLSearchParams({ status: "all", limit: "100" });
+    // Each customer whole, for its address: what an erased member wrote is left out by it (withoutErasedWords).
+    query.append("expand[]", "data.customer");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", store.stripeAccountId, `/subscriptions?${query}`);
     const rows = (Array.isArray(listed.data) ? listed.data : []) as Raw[];
@@ -549,7 +634,8 @@ export async function membershipNumbersPaid(
     }
     after = last.id;
   }
-  const numbers = numbersFrom(subs, store.currency, Math.floor(now / 1000), complete);
+  const named = await withoutErasedWords(store, subs, Math.floor(now / 1000));
+  let numbers = numbersFrom(subs, store.currency, Math.floor(now / 1000), complete);
   // What moved recurring revenue each month: the invoices of the last thirteen
   // months say what each membership was charged at, and from when.
   try {
@@ -571,6 +657,20 @@ export async function membershipNumbersPaid(
   } catch (error) {
     console.error("reading invoices for recurring revenue movements failed", store.handle, error);
   }
-  if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(numbers), "EX", CACHE_SECONDS]]);
-  return numbers;
+  if (isRedisConfigured()) {
+    const text = JSON.stringify(numbers);
+    const said = numbers.leaving?.recent?.length || numbers.leaving?.comments.length;
+    if (store.listId && said && named.length) {
+      // Kept only when nobody the words may name was deleted since they were looked up, in one step with the write;
+      // otherwise, or when the step cannot run, nothing is kept and the words are not shown (Codex E2 on #2111).
+      const gone = await keepUnlessErased(cacheKey(store), store.listId, text, CACHE_SECONDS, named).catch(async () => {
+        await redisPipeline([["DEL", cacheKey(store)]]).catch(() => {});
+        return null;
+      });
+      if (gone === null || gone.size) numbers = withoutMemberWords(numbers) as Numbers;
+    } else {
+      await redisPipeline([["SET", cacheKey(store), text, "EX", CACHE_SECONDS]]);
+    }
+  }
+  return { numbers, named };
 }

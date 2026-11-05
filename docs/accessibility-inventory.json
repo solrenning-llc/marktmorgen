@@ -738,6 +738,12 @@
       "parameters": []
     },
     {
+      "source": "app/help/buyers/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/buyers",
+      "parameters": []
+    },
+    {
       "source": "app/help/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help",
@@ -1371,6 +1377,7 @@
     "components/link-picture.tsx",
     "components/link-request-form.tsx",
     "components/list-health-table.tsx",
+    "components/local-clock.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",
     "components/look-editor.tsx",
@@ -1537,6 +1544,7 @@
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",
+    "components/team-two-step-switch.tsx",
     "components/template-library.tsx",
     "components/terms-check-panel.tsx",
     "components/test-counts-notice.tsx",
@@ -1554,6 +1562,7 @@
     "components/url-field.tsx",
     "components/usage-meter.tsx",
     "components/video-embed.tsx",
+    "components/video-stamp.tsx",
     "components/video-window.tsx",
     "components/visit-us-block.tsx",
     "components/visit-us-editor.tsx",
@@ -1709,6 +1718,7 @@
     "app/api/store/course/start/route.ts",
     "app/api/store/course/task/route.ts",
     "app/api/store/course/task/upload/route.ts",
+    "app/api/store/creator-card/route.ts",
     "app/api/store/crm/route.ts",
     "app/api/store/currency/route.ts",
     "app/api/store/depth/route.ts",
@@ -1975,6 +1985,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 134
+    "pageTemplates": 135
   }
 }

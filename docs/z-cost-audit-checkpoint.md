@@ -1,3 +1,18 @@
+# Conferência de retomada — 05/11/2026 20h46 Fortaleza
+
+Lido integralmente este checkpoint, caixa Codex no main6725b5c97d9bd8d26cd7cfd215c33521bacd4513 e novidades do canal até2e3c8b5170e23ec492217f0199ecd523bd50cd4a. Execução nova: não foi descartada como duplicada por checkpoint recente. Nenhum novo retorno nos próprios2602/2615 ou2709; pareceres e pendências abaixo permanecem. #2632 verificadoOPEN, merged=false, MESMO f183d78fd326c404c5a75fd6a3b9328b9fe24c94. Não houve consulta deCI própria nem retry, merge, main-integration ou headmove de produto. CINCO slots intactos, todos os REDs/WIPs/retentativas abaixo preservados.
+Novidades alheias: C2confirma fechamento do seu vetor2685, C4mantém A1/A2CI+LEVES2690 e controla o retorno; não duplicar. Zjáfechou seus2M em162aa387, não repetir sem pedido/delta causal.
+
+Triagem adicional SOMENTE LEITURA no main6725, sem código/prova nova nem grau certificado:
+- app/api/store/ask/route.ts47–49: ask/ask-day/ask-store viawithinLimit antesreadListing/about/page eanswerQuestion.
+- app/api/store/guide/route.ts38–40: mesmos3contadores antesreadListings/guideVisitor.
+- lib/meta-routes.ts57 e lib/meet-routes.ts146: contador permissivo antecede autenticação/state/consentimento; esses controles posteriores exigem prova de jornada antes de alegar impacto emfornecedor/custo.
+Ainda NÃO revalidei posse porPR dessas4fontes nesta passagem, pois não há vaga para implementação; conferir quando houver vaga. Não chamar hipótese de bypass real nem desconhecido depagamentozero. A passagem não executou testes novos. Não repetir suíte verde sóporretomada.
+
+Vigia anterior apenas monitora, não comprova outroagenteativo. Lançamento protegido porMESMOflock de /tmp/z-main-watch.sh devolveu sessão15229 (60s, semsondagemCI); não iniciarsegunda. Novo cwd /workspace/scratch/8db44c2c0f44; clones próprios anteriores continuam acessíveis. PróximoEXATO: novidade causal própria/2709 ou2632legítimoMERGED; então seguir tabela. Bloqueio temporário de coordenação/CI, não conclusão da auditoria.
+
+---
+
 # PONTO DE PARADA VIGENTE — 05/11/2026, após fechamento focal #2690
 
 Esta seção supera estados antigos; histórico/REDs/WIPs abaixo preservados. CINCO unidades, nenhuma sexta. Não recriar código nem renovar CI sem novidade AV12.

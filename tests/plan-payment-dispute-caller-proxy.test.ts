@@ -182,3 +182,34 @@ for (const wrapper of ["context", "review"] as const) {
     });
   }
 }
+
+test("parent validation never executes a getter installed by a later scenario Proxy", () => {
+  const fixture = contractFixture();
+  assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
+
+  let reads = 0;
+  let installed = 0;
+  fixture.review.scenarios = new Proxy(fixture.review.scenarios, {
+    getOwnPropertyDescriptor(target, key) {
+      if (key === "review") {
+        installed++;
+        Object.defineProperty(fixture.review.companyBase!, "fixedCostsEvidence", {
+          configurable: true,
+          enumerable: true,
+          get() {
+            reads++;
+            throw new Error("must not execute a review getter");
+          },
+        });
+      }
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+  });
+
+  assert.equal(
+    contractFundingConfiguration(fixture.policy, fixture.context, fixture.now),
+    null,
+  );
+  assert.equal(installed, 1, "the regression must install the late getter");
+  assert.equal(reads, 0, "financial validation must not execute an original evidence getter");
+});

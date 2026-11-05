@@ -28,6 +28,8 @@ for (const [label, reply] of Object.entries({
   unknownMeeting: [null, null, "{}", null],
   unknownMeetingStatus: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "https://meet.google.com/abc-defg-hij" }), null],
   wrongMeetingScope: [null, null, JSON.stringify({ provider: "google", scope: "c:another-store:b:another-booking", link: "https://meet.google.com/abc-defg-hij", gone: false }), null],
+  unusableMeetingLink: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "not a meeting URL", gone: false }), null],
+  executableMeetingLink: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "javascript:alert(1)", gone: false }), null],
 })) {
   test(`unknown room evidence never silently switches to a fallback: ${label}`, async () => {
     initial = reply;
@@ -76,4 +78,12 @@ test("in-person calls never read or create an online room", async () => {
   initial = [];
   assert.deepEqual(await roomsFor("calls-evidence", [{ ...ask, setup: { ...setup, place: { lines: ["12 Harbor Street"] } } }]), [null]);
   assert.equal(writes, 0);
+});
+
+test("pending and removed records keep the existing fallback", async () => {
+  for (const [link, gone] of [["", false], ["https://meet.google.com/abc-defg-hij", true]] as const) {
+    initial = [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link, gone }), null];
+    assert.deepEqual(await roomsFor("calls-evidence", [ask]), [setup.room]);
+    assert.equal(writes, 0);
+  }
 });

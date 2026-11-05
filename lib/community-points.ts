@@ -134,6 +134,13 @@ export async function board(
 
 // ------------------------------------------------------------------ rewards
 
+/** Points and stored start dates are integer evidence, never coercible objects. */
+function rewardInteger(raw: unknown): number | null {
+  if (typeof raw !== "number" && (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw))) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 export async function readRewards(id: string): Promise<Reward[]> {
   if (!COMMUNITY.test(id) || !isRedisConfigured()) return [];
   const [raw] = await redisPipeline([["GET", rewardsKey(id)]]);
@@ -162,33 +169,54 @@ export async function earnedCourses(
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!COMMUNITY.test(id) || !MEMBER.test(member) || !isRedisConfigured()) return out;
-  const [rawRewards, points, record, already] = await redisPipeline([
+  const replies = await redisPipeline([
     ["GET", rewardsKey(id)],
     ["ZSCORE", allKey(id), member],
     ["HGET", membersKey(id), member],
     ["HGETALL", unlockedKey(id, member)],
   ]);
+  if (!Array.isArray(replies) || replies.length !== 4) return out;
+  const [rawRewards, points, record, already] = replies;
   const held = new Map<string, number>();
-  const flat = Array.isArray(already) ? already.map(String) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) held.set(flat[i], Number(flat[i + 1]) || 0);
-  let removed = typeof record !== "string";
-  if (typeof record === "string") {
-    try {
-      removed = (JSON.parse(record) as { removed?: unknown }).removed === true;
-    } catch {
-      removed = true;
-    }
+  if (!Array.isArray(already) || already.length % 2 !== 0) return out;
+  for (let i = 0; i < already.length; i += 2) {
+    const product: unknown = already[i];
+    const at = rewardInteger(already[i + 1]);
+    // Reuse the product rule of the existing reward parser. A retained
+    // course does not need to remain in today's reward configuration.
+    if (typeof product !== "string" || parseRewards([{ level: 2, product }]).length !== 1 || held.has(product)
+      || at === null || at === 0 || at > 8_640_000_000_000) return out;
+    held.set(product, at);
   }
-  if (removed) return out;
+  if (typeof record !== "string") return out;
+  try {
+    const value: unknown = JSON.parse(record);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+    const membership = value as { k?: unknown; removed?: unknown };
+    if (membership.k !== member || membership.removed !== false) return out;
+  } catch { return out; }
   for (const [product, at] of held) out.set(product, at);
-  const level = levelOf(Math.max(0, Number(points) || 0));
   if (!grant) return out;
-  const due = parseRewards(rawRewards).filter((r) => r.level <= level && !held.has(r.product));
+  const score = points === null ? 0 : rewardInteger(points);
+  if (score === null || !Number.isSafeInteger(now) || now <= 0 || now > 8_640_000_000_000_000 || typeof rawRewards !== "string") return out;
+  let configuration: unknown;
+  try { configuration = JSON.parse(rawRewards); } catch { return out; }
+  const rewards = parseRewards(configuration);
+  // Dropping one malformed entry would turn an unconfirmed configuration
+  // into an apparently valid partial authorization list.
+  if (!Array.isArray(configuration) || rewards.length !== configuration.length) return out;
+  const level = levelOf(score);
+  const due = rewards.filter((r) => r.level <= level && !held.has(r.product));
   if (due.length) {
     const at = Math.floor(now / 1000);
     const writes = due.map((r) => ["HSETNX", unlockedKey(id, member), r.product, at]);
-    await (owner ? orderWrite(owner, writes) : redisPipeline(writes));
-    for (const r of due) out.set(r.product, at);
+    const answers = await (owner ? orderWrite(owner, writes) : redisPipeline(writes));
+    if (!Array.isArray(answers) || answers.length !== due.length || answers.some((a) => a !== 0 && a !== 1)) return out;
+    for (let i = 0; i < due.length; i += 1) {
+      // Zero means another writer already created it. Its original date is
+      // confirmed by the next ordinary read, never replaced with this clock.
+      if (answers[i] === 1) out.set(due[i].product, at);
+    }
   }
   return out;
 }

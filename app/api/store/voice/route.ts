@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { makeVoice } from "@/lib/customer-voice";
 
@@ -14,13 +14,15 @@ export const maxDuration = 60;
 /**
  * This month's summary of what customers are saying (lib/customer-voice.ts):
  * the one already made, or made now, once a month, as one of the month's AI
- * jobs. For whoever may see the numbers.
+ * jobs. For whoever may see the numbers. The per-minute AI counter must
+ * confirm the request fits before any work: an answer it cannot read refuses
+ * with 429, never lets the job through (CX-123 rule 24, Codex Z, 6e484fea).
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "stats", 200);
   if (!guarded.ok) return guarded.response;
   const { store } = guarded;
-  if (!(await withinLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   try {
     const done = await makeVoice(store);
     if (!done.ok) return Response.json({ ok: false, error: done.reason, texts: done.texts ?? null }, { status: done.reason === "failed" ? 502 : done.reason === "busy" || done.reason === "changed" ? 409 : 400 });

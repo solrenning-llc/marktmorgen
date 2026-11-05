@@ -42,32 +42,52 @@ export function noteDay(raw: unknown, now = Date.now()): string {
   return raw;
 }
 
-/** The notes from the stored hash (id → JSON), oldest day first, at most MAX_NOTES. */
-export function parseNotes(raw: unknown): StatsNote[] {
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+/** Snapshot a complete inert Redis array without converting values or executing accessors. */
+function exactArray(raw: unknown, length?: number): unknown[] {
+  if (!Array.isArray(raw) || (length !== undefined && raw.length !== length)) throw new Error("Chart notes could not be read");
+  const out: unknown[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const slot = Object.getOwnPropertyDescriptor(raw, String(i));
+    if (!slot || !Object.hasOwn(slot, "value")) throw new Error("Chart notes could not be read");
+    out.push(slot.value);
+  }
+  return out;
+}
+
+/** Validate every stored field before choosing the most recent notes. */
+function allNotes(raw: unknown): StatsNote[] {
+  const flat = exactArray(raw);
+  if (flat.length % 2 !== 0) throw new Error("Chart notes could not be read");
   const out: StatsNote[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const id = flat[i];
-    if (!ID.test(id)) continue;
-    let value: unknown;
-    try {
-      value = JSON.parse(flat[i + 1]);
-    } catch {
-      continue;
-    }
-    if (!value || typeof value !== "object") continue;
+    const stored = flat[i + 1];
+    if (typeof id !== "string" || !ID.test(id) || seen.has(id) || typeof stored !== "string") throw new Error("Chart notes could not be read");
+    seen.add(id);
+    const value: unknown = JSON.parse(stored);
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 2 || !Object.hasOwn(value, "day") || !Object.hasOwn(value, "text")) throw new Error("Chart notes could not be read");
     const { day, text } = value as Record<string, unknown>;
-    if (typeof day !== "string" || !DAY.test(day)) continue;
-    const words = noteText(text);
-    if (words) out.push({ id, day, text: words });
+    const date = typeof day === "string" && DAY.test(day) ? Date.parse(`${day}T00:00:00Z`) : NaN;
+    if (!Number.isFinite(date) || new Date(date).toISOString().slice(0, 10) !== day || typeof text !== "string" || !text || noteText(text) !== text) throw new Error("Chart notes could not be read");
+    out.push({ id, day: day as string, text });
   }
-  return out.sort((a, b) => a.day.localeCompare(b.day) || a.id.localeCompare(b.id)).slice(-MAX_NOTES);
+  return out.sort((a, b) => a.day.localeCompare(b.day) || a.id.localeCompare(b.id));
+}
+
+/** The confirmed notes, oldest day first, at most MAX_NOTES; unknown fields fail the whole reading. */
+export function parseNotes(raw: unknown): StatsNote[] {
+  return allNotes(raw).slice(-MAX_NOTES);
+}
+
+async function readAllNotes(statsId: string): Promise<StatsNote[]> {
+  const [raw] = exactArray(await redisPipeline([["HGETALL", key(statsId)]]), 1);
+  return allNotes(raw);
 }
 
 export async function readNotes(statsId: string | null): Promise<StatsNote[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", key(statsId)]]);
-  return parseNotes(raw);
+  return (await readAllNotes(statsId)).slice(-MAX_NOTES);
 }
 
 /**
@@ -85,12 +105,18 @@ export async function addNote(statsId: string, dayRaw: unknown, textRaw: unknown
     ["HSET", key(statsId), id, JSON.stringify({ day, text })],
     ["EXPIRE", key(statsId), KEEP_SECONDS],
   ]);
-  const notes = await readNotes(statsId);
-  const [raw] = await redisPipeline([["HLEN", key(statsId)]]);
+  const complete = await readAllNotes(statsId);
+  const notes = complete.slice(-MAX_NOTES);
+  const [raw] = exactArray(await redisPipeline([["HLEN", key(statsId)]]), 1);
   if (Number(raw) > MAX_NOTES) {
+    // A short read or a concurrent change cannot choose which history to delete.
+    if (Number(raw) !== complete.length) throw new Error("Chart notes changed while being read");
     const keep = new Set(notes.map((note) => note.id));
-    const [all] = await redisPipeline([["HKEYS", key(statsId)]]);
-    const drop = (Array.isArray(all) ? (all as unknown[]).map(String) : []).filter((field) => !keep.has(field));
+    const [rawKeys] = exactArray(await redisPipeline([["HKEYS", key(statsId)]]), 1);
+    const all = exactArray(rawKeys);
+    const known = new Set(complete.map(note => note.id));
+    if (all.length !== known.size || all.some(field => typeof field !== "string" || !known.has(field)) || new Set(all).size !== all.length) throw new Error("Chart notes changed while being read");
+    const drop = (all as string[]).filter((field) => !keep.has(field));
     if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
   }
   return notes;

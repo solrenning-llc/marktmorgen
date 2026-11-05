@@ -26,7 +26,7 @@ export function PageOrderEditor({ order, on }: { order: PagePart[]; on: Record<P
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const changed = list.some((part, i) => part !== saved[i]);
-  useLeaveGuard(changed && !saving);
+  useLeaveGuard(changed);
 
   function move(at: number, by: -1 | 1) {
     if (!ready || saving) return;

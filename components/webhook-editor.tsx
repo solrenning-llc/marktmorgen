@@ -8,7 +8,7 @@ import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { DeliveryView, WebhookEvent, WebhooksView } from "@/lib/webhooks";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
+import { DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
 
 
 /** Every event, in the order the studio lists them, with what each means. */
@@ -313,6 +313,9 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
             webhook deliveries last.
           </li>
           <li>The same event can arrive twice in rare cases; its id never changes, so a receiver can ignore a repeat.</li>
+          <li>
+            {`Each text in a message is at most ${MESSAGE_TEXT_MAX} characters, with control characters turned into spaces, and a message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep. A larger one is not sent and not counted, and it is marked “Not sent” here. When the month's webhook deliveries are used, new messages are not kept or sent either: each is marked “Not sent” here, up to three a day for each reason, then one line that counts the rest.`}
+          </li>
           <li>
             Every message is signed. The header <span className="font-mono">Marktmorgen-Signature</span> reads{" "}
             <span className="font-mono">t=&lt;time&gt;,v1=&lt;signature&gt;</span>: the signature is HMAC-SHA256, in hex, of

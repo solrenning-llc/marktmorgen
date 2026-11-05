@@ -217,6 +217,9 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
               return pictureWords(element.picture, element.decorative);
             case "video":
               return element.title ? `A video: ${element.title}` : "";
+            // A video behind a button: the page says it, so the assistant does too (review of #2135).
+            case "video-window":
+              return `A video, opened from the button "${element.label}"${element.title ? `: ${element.title}` : ""}`;
             default:
               return "";
           }

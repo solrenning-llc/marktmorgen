@@ -24,7 +24,7 @@ test('TX4 Norway evidence preserves recurring returns, corrections, payment and 
   for (const source of [
     'https://www.skatteetaten.no/en/business-and-organisation/vat-and-duties/vat/foreign/e-commerce-voec/submit-vat-return/',
     'https://www.skatteetaten.no/en/business-and-organisation/vat-and-duties/vat/foreign/e-commerce-voec/sending-goods-under-the-voec-scheme/',
-    'https://www.skatteetaten.no/en/person/taxes/get-the-taxes-right/abroad/conversion-of-foreign-currency-into-norwegian-kroner/',
+    'https://www.skatteetaten.no/en/person/to-from-norway/from/conversion-foreign-currency-to-nok/',
   ]) assert.ok(text.includes(source), source);
   for (const fact of [
     'trimestre',

@@ -50,18 +50,20 @@ try {
   await page.goto("https://course.test/");
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   await page.locator('input[value="mini"]').check();
-  await page.getByRole("button", { name: "Use this structure", exact: true }).click();
+  await page.getByRole("button", { name: "Use this structure", exact: true }).focus();
+  await page.keyboard.press("Enter");
   await page.waitForFunction(() => window.calls.length === 1);
   is("pending save keeps focus on the apply button", await page.evaluate(() => document.activeElement?.textContent), "Use this structure");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Space");
   is("keyboard cannot submit a second pending save", await page.evaluate(() => window.calls), [{ action: "template", template: "mini" }]);
+  await page.keyboard.press("Tab");
+  is("Tab can leave the pending apply button normally", await page.evaluate(() => document.activeElement?.textContent), "Keep an empty course");
 
   const mini = page.locator('input[value="mini"]');
   await mini.evaluate(element => element.focus());
   is("a busy radio remains a keyboard focus target", await page.evaluate(() => document.activeElement?.getAttribute("value")), "mini");
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("Space");
+  for (const key of ["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End", "Space"]) await page.keyboard.press(key);
   is("radio keyboard actions cannot change a pending choice", await page.locator('input:checked').inputValue(), "mini");
   const weekly = await page.locator('input[value="weekly"]').locator("..").boundingBox();
   if (!weekly) throw Error("Weekly label missing");
@@ -81,7 +83,8 @@ try {
   is("a rejected save leaves focus where the user put it", await page.evaluate(() => document.activeElement?.getAttribute("value")), "mini");
   await page.locator('input[value="weekly"]').check();
   is("choices work again after rejection", await page.locator('input:checked').inputValue(), "weekly");
-  await page.getByRole("button", { name: "Use this structure", exact: true }).click();
+  await page.getByRole("button", { name: "Use this structure", exact: true }).focus();
+  await page.keyboard.press("Enter");
   is("retry sends the newly chosen structure", await page.evaluate(() => window.calls[1]), { action: "template", template: "weekly" });
   await page.evaluate(() => window.finish({ ok: false }));
   await page.waitForFunction(() => document.querySelector('fieldset').getAttribute('aria-disabled') !== 'true' && !document.querySelector('fieldset').disabled);

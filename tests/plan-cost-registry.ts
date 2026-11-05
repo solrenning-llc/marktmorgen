@@ -87,6 +87,7 @@ import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
+import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
@@ -665,6 +666,24 @@ export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
 export const PATH_READ = request("heavy", 26, LIFE_WRITE_MAX * 96 + 20_480) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 
 /**
+ * Review ceilings for a collection page's reads, paid for since 4 November 2026
+ * (lib/page-read-rules.ts). What working through a body costs past what a
+ * request's shape holds, a heavy request's CPU and wait for each megabyte.
+ */
+const bodyWork = (bytes: number) => bytes * DB_BYTE + (bytes / 1e6) * (SHAPES.heavy.cpu * CPU_SECOND + SHAPES.heavy.seconds * MEMORY_SECOND);
+/** A product's listing. */
+export const READ_LISTING_BYTES = 16_384;
+/** One product on a collection page past its drawing: its stock, its keys and the bundles holding it (four commands), and its listing, those its checkout boxes offer and a bundle's. */
+export function collectionRead(products: number): number {
+  return products * (4 * COMMAND + bodyWork((2 + MAX_BUMPS) * READ_LISTING_BYTES));
+}
+
+/** The items the bundles on a collection page hold, read to show them (lib/bundles.ts, offeredItems): each one's listing, one command each. */
+export function bundleItemRead(items: number): number {
+  return items * (COMMAND + bodyWork(READ_LISTING_BYTES));
+}
+
+/**
  * Review ceilings for a community search and the walk of its archive, paid
  * for since 4 November 2026 (lib/community-read-rules.ts). What working
  * through a body costs past what a request's shape holds, a heavy request's
@@ -1025,6 +1044,10 @@ export const COST_LINES: CostLine[] = [
     },
     sources: [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
+      // A collection's products paid before they are read, and a license check before it reads the product (4 November 2026).
+      { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
+      { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
+      { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },

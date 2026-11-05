@@ -49,7 +49,13 @@ async function main() {
     ["misspelled content type (Codex G)", (id) => ({ ...success(id), result: { content: [{ type: "txet", text: "unconfirmed" }] } })],
     ["incomplete image content (Codex G)", (id) => ({ ...success(id), result: { content: [{ type: "image" }] } })],
     ["partial text before an unknown content type (Codex G)", (id) => ({ ...success(id), result: { content: [{ type: "text", text: "partial" }, { type: "not_a_content_type" }] } })],
-    ["valid nontext content is explicitly unsupported by this text CLI", (id) => ({ ...success(id), result: { content: [{ type: "image", data: "eA==", mimeType: "image/png" }] } })],
+    ["image data must be a string", (id) => ({ ...success(id), result: { content: [{ type: "image", data: 5, mimeType: "image/png" }] } })],
+    ["audio needs its MIME type", (id) => ({ ...success(id), result: { content: [{ type: "audio", data: "eA==" }] } })],
+    ["resource needs content", (id) => ({ ...success(id), result: { content: [{ type: "resource", resource: { uri: "file:///example.txt" } }] } })],
+    ["resource text must be a string", (id) => ({ ...success(id), result: { content: [{ type: "resource", resource: { uri: "file:///example.txt", text: 5 } }] } })],
+    ["resource link needs a name", (id) => ({ ...success(id), result: { content: [{ type: "resource_link", uri: "file:///example.txt" }] } })],
+    ["empty content without error status is not confirmation (CX-109)", (id) => ({ ...success(id), result: { content: [] } })],
+    ["empty content with false error status is not confirmation", (id) => ({ ...success(id), result: { content: [], isError: false } })],
   ];
   for (const [label, body] of cases) {
     const r = await invoke(body);
@@ -73,6 +79,24 @@ async function main() {
   }
   const malformedText = await invoke((id) => ({ ...success(id), result: { content: [{ type: "text", text: "A partial result" }, null] } }));
   is("the entire tool result is checked before output", [malformedText.code, malformedText.out], [2, ""]);
+  part("All MCP 2025-06-18 content types are supported as data (CX-109)");
+  const blocks = [
+    { type: "image", data: "eA==", mimeType: "image/png" },
+    { type: "audio", data: "eA==", mimeType: "audio/wav" },
+    { type: "resource", resource: { uri: "file:///example.txt", text: "Example", mimeType: "text/plain" } },
+    { type: "resource", resource: { uri: "file:///example.bin", blob: "eA==" } },
+    { type: "resource_link", uri: "file:///example.txt", name: "example", title: "Example", size: 1 },
+  ];
+  for (const block of blocks) {
+    const result = { content: [block], isError: false };
+    const r = await invoke((id) => ({ jsonrpc: "2.0", id, result }));
+    is(`valid ${block.type} content is printed as JSON without fetching resources`, [r.code, r.out, r.err, r.calls], [0, JSON.stringify(result) + "\n", "", 1]);
+  }
+  const mixed = { content: [{ type: "text", text: "Introduction" }, ...blocks] };
+  const mixedResult = await invoke((id) => ({ jsonrpc: "2.0", id, result: mixed }));
+  is("a valid mixed response is presented whole", [mixedResult.code, mixedResult.out, mixedResult.calls], [0, JSON.stringify(mixed) + "\n", 1]);
+  const emptyError = await invoke((id) => ({ ...success(id), result: { content: [], isError: true } }));
+  is("an explicit empty tool error stays an error with a clear message", [emptyError.code, emptyError.out, emptyError.err.trim().length > 0], [1, "", true]);
   done();
 }
 void main();

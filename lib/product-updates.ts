@@ -34,7 +34,7 @@
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
-import { normaliseEmail } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -283,10 +283,10 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
     const text = updateText(store, job.title, job.words);
     const fromName = store.mail?.fromName || store.name;
     while (job.done < job.total && Date.now() < deadline) {
-      const [chunk] = await redisPipeline([["LRANGE", toKey(id), job.done, job.done + BATCH_SIZE - 1]]);
-      const emails = Array.isArray(chunk) ? (chunk as string[]) : [];
-      if (!emails.length) {
-        job = { ...job, done: job.total };
+      const reply = await redisPipeline([["LRANGE", toKey(id), job.done, job.done + BATCH_SIZE - 1]]).catch(() => null);
+      const emails = checkedUpdateChunk(reply, Math.min(BATCH_SIZE, job.total - job.done));
+      if (emails === null) {
+        job = { ...job, status: "waiting", note: "The recipients could not be checked just now. Nothing more was sent. We will try again." };
         break;
       }
       // Nobody who pressed stop here, or left the creator's list.
@@ -358,6 +358,18 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
   } finally {
     await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
   }
+}
+
+/** An unfinished job has exactly this many recipients in its next bounded page. */
+function checkedUpdateChunk(reply: unknown, expected: number): string[] | null {
+  if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0) ||
+      !Number.isSafeInteger(expected) || expected <= 0 || !Array.isArray(reply[0]) || reply[0].length !== expected) return null;
+  const chunk: unknown[] = reply[0];
+  for (let i = 0; i < expected; i++) {
+    const email = chunk[i];
+    if (!Object.hasOwn(chunk, i) || typeof email !== "string" || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return null;
+  }
+  return chunk as string[];
 }
 
 /** Every opt-out and erasure slot must be confirmed before any recipient is admitted. */

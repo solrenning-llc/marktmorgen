@@ -7,13 +7,18 @@
  *                                               a list of CampaignLanding, at most
  *                                               MAX_LANDINGS, one per campaign
  *
+ *   nl:product:landing:<statsId>:<productId>:gone -> set when they were dropped with the page, for
+ *                                               LANDINGS_GONE_SECONDS: a save that began before is refused
+ *
  * The record takes room in the store's data room (lib/store-data.ts) before it
  * is written, one slot per product, so a save that does not fit is refused and
  * the landings stay as they were. It goes with the product's page
  * (dropPage, lib/sales-page-store.ts) and with the store.
  *
- * Whatever is read back is checked again (parseLandings): a tag or words that
- * no longer fit their place are left out, never cut.
+ * What a page shows is checked again (parseLandings): a tag or words that no
+ * longer fit their place are left out, never cut. A save is stricter: it
+ * writes over a record only when every entry in it reads back whole, so an
+ * entry it cannot confirm is never dropped by rewriting the list (Codex G2, #1947).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CAMPAIGN_TAG, type CampaignLanding } from "@/lib/campaign-landing";
@@ -27,6 +32,15 @@ export const MAX_LANDINGS = 10;
 
 const landingKey = (statsId: string, productId: string) => `nl:product:landing:${statsId}:${productId}`;
 const LANDING_SLOT = (productId: string) => `al:${productId}`;
+/** Set in the same step as the landings are dropped with their page: while it is there, no save writes them again. */
+const goneKey = (statsId: string, productId: string) => `${landingKey(statsId, productId)}:gone`;
+
+/**
+ * How long a dropped product's landings stay closed to saves, in seconds: far longer than any request runs, so a save
+ * that read the record before the page was dropped can never write it again (Codex G2, #1947). The product is gone by
+ * then, and nothing saves for it.
+ */
+export const LANDINGS_GONE_SECONDS = 86_400;
 
 /** The longest record a product's landings can make, with room for JSON's quoting. */
 export const MAX_STORED_LANDINGS_BYTES = MAX_LANDINGS * (40 + MAX_HEADLINE + MAX_SUBHEADLINE + MAX_CTA_LABEL) * 6 + 1_024;
@@ -73,6 +87,20 @@ export class LandingsUnreadable extends Error {
   }
 }
 
+/** The page these landings belong to was dropped since the save began: nothing was written. */
+export class LandingsGone extends Error {
+  constructor() {
+    super("This page was deleted, so its landing pages were not saved.");
+  }
+}
+
+/** A drop whose answer was not the one expected, every try: the landings may still be there, and their room stays counted. */
+export class LandingsDropUnconfirmed extends Error {
+  constructor() {
+    super("We could not confirm the landing pages were deleted. They stay counted in the store's room until they are.");
+  }
+}
+
 /** A write whose answer was not the one expected: it may or may not have landed, and no room is given back for it. */
 export class LandingsWriteUnconfirmed extends Error {
   constructor() {
@@ -83,8 +111,10 @@ export class LandingsWriteUnconfirmed extends Error {
 /**
  * The record exactly as kept: its text, or null when the product has none.
  * Only Redis's exact answer counts (one GET: a text or null), and a text
- * must be valid JSON; anything else throws LandingsUnreadable, never "none"
- * (Codex G and J: an empty or broken read let the next save erase the others).
+ * must be a JSON list whose every entry is a whole landing; anything else
+ * throws LandingsUnreadable, never "none" (Codex G and J: an empty or broken
+ * read let the next save erase the others; Codex G2: an entry the lenient
+ * reading left out was erased by the save that rewrote the list).
  */
 async function readRecord(statsId: string, productId: string): Promise<{ raw: string | null; landings: CampaignLanding[] }> {
   const reply: unknown = await redisPipeline([["GET", landingKey(statsId, productId)]]);
@@ -99,7 +129,11 @@ async function readRecord(statsId: string, productId: string): Promise<{ raw: st
     throw new LandingsUnreadable();
   }
   if (!Array.isArray(parsed)) throw new LandingsUnreadable();
-  return { raw, landings: parseLandings(parsed) };
+  // parseLandings leaves out what it cannot confirm (a broken entry, a campaign twice, one past MAX_LANDINGS): any
+  // left out means the save cannot rewrite the list without erasing it.
+  const landings = parseLandings(parsed);
+  if (landings.length !== parsed.length) throw new LandingsUnreadable();
+  return { raw, landings };
 }
 
 /** A product's landings, or none when it has none (or they cannot be read). */
@@ -135,12 +169,13 @@ end`;
 
 /**
  * Writes a product's landings (ARGV[6], "" to delete them) only over the record that was read (ARGV[5], "" for none),
- * and sets its slot to their size in the same step: answers {3, 0} when the record changed since it was read, the
- * data room's own answer otherwise ({1, total} written, {0, total} full and nothing written). Modelled by
- * lib/redis-memory.ts.
+ * and sets its slot to their size in the same step: answers {4, 0} when they were dropped with their page (KEYS[3]
+ * held), {3, 0} when the record changed since it was read, the data room's own answer otherwise ({1, total} written,
+ * {0, total} full and nothing written). Modelled by lib/redis-memory.ts.
  */
-export const WRITE_LANDINGS = `-- marktmorgen:landings-write:v1
+export const WRITE_LANDINGS = `-- marktmorgen:landings-write:v2
 ${LANDINGS_ROOM}
+if redis.call('EXISTS', KEYS[3]) == 1 then return {4, 0} end
 local held = redis.call('GET', KEYS[2])
 if (held or '') ~= ARGV[5] then return {3, 0} end
 local size = ARGV[6] == '' and '0' or ARGV[4]
@@ -149,27 +184,34 @@ if taken[1] ~= 1 then return taken end
 if ARGV[6] == '' then redis.call('DEL', KEYS[2]) else redis.call('SET', KEYS[2], ARGV[6]) end
 return taken`;
 
-/** Deletes a product's landings and sets its slot to nothing in one step, whatever was kept. Modelled by lib/redis-memory.ts. */
-export const DROP_LANDINGS = `-- marktmorgen:landings-drop:v1
+/**
+ * Deletes a product's landings, sets its slot to nothing and marks them gone (KEYS[3], for ARGV[4] seconds) in one
+ * step, whatever was kept: the mark is what refuses a save that read the record before (WRITE_LANDINGS' {4, 0}).
+ * Answers the data room's own answer, {1, total} when done. Modelled by lib/redis-memory.ts.
+ */
+export const DROP_LANDINGS = `-- marktmorgen:landings-drop:v2
 ${LANDINGS_ROOM}
+local taken = landingsRoom(ARGV[1], '1', ARGV[2], ARGV[3], '0')
+if taken[1] ~= 1 then return taken end
 redis.call('DEL', KEYS[2])
-return landingsRoom(ARGV[1], '1', ARGV[2], ARGV[3], '0')`;
+redis.call('SET', KEYS[3], '1', 'EX', ARGV[4])
+return taken`;
 
 /** How many times a change is tried again when another change landed between its read and its write. */
 const WRITE_TRIES = 3;
 
 /**
  * WRITE_LANDINGS' answer, read exactly: a pipeline of that one script answering {state, total}, the state the number
- * 0 (full), 1 (written) or 3 (changed since it was read), the total a whole number of bytes, 0 or more. Anything else
- * (a true for 1, a total missing, negative, fractional or past what a number holds exactly, an extra item) is no
- * receipt: null, and the save is LandingsWriteUnconfirmed (Codex J, #1950).
+ * 0 (full), 1 (written), 3 (changed since it was read) or 4 (dropped with the page), the total a whole number of
+ * bytes, 0 or more. Anything else (a true for 1, a total missing, negative, fractional or past what a number holds
+ * exactly, an extra item) is no receipt: null, and the save is LandingsWriteUnconfirmed (Codex J, #1950).
  */
-function landingsReceipt(reply: unknown): { state: 0 | 1 | 3; total: number } | null {
+function landingsReceipt(reply: unknown): { state: 0 | 1 | 3 | 4; total: number } | null {
   if (!Array.isArray(reply) || reply.length !== 1) return null;
   const answer = reply[0];
   if (!Array.isArray(answer) || answer.length !== 2) return null;
   const [state, total] = answer;
-  if (state !== 0 && state !== 1 && state !== 3) return null;
+  if (state !== 0 && state !== 1 && state !== 3 && state !== 4) return null;
   if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) return null;
   return { state, total };
 }
@@ -177,8 +219,8 @@ function landingsReceipt(reply: unknown): { state: 0 | 1 | 3; total: number } | 
 /**
  * Reads the record, works out the new list, and writes it only over what was read, its room set in the same step
  * (WRITE_LANDINGS); read again and tried again when another change came in between. The answer is checked exactly:
- * written, full (DataRoomError, nothing written) or changed; anything else is LandingsWriteUnconfirmed, and no room is
- * given back for it.
+ * written, full (DataRoomError, nothing written), changed, or dropped with the page (LandingsGone, nothing written,
+ * however many reads ago the save began); anything else is LandingsWriteUnconfirmed, and no room is given back for it.
  */
 async function changeLandings(statsId: string, productId: string, room: DataStore, change: (landings: CampaignLanding[]) => CampaignLanding[] | "full" | "same"): Promise<"saved" | "full" | "same"> {
   const key = dataKey(room);
@@ -189,10 +231,11 @@ async function changeLandings(statsId: string, productId: string, room: DataStor
     if (next === "full" || next === "same") return next;
     const json = next.length ? JSON.stringify(next) : "";
     const now = Date.now();
-    const reply: unknown = await redisPipeline([["EVAL", WRITE_LANDINGS, 2, key, landingKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId), json ? dataBytes([json], 1) : 0, raw ?? "", json]]);
+    const reply: unknown = await redisPipeline([["EVAL", WRITE_LANDINGS, 3, key, landingKey(statsId, productId), goneKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId), json ? dataBytes([json], 1) : 0, raw ?? "", json]]);
     const receipt = landingsReceipt(reply);
     if (!receipt) throw new LandingsWriteUnconfirmed();
     const { state, total } = receipt;
+    if (state === 4) throw new LandingsGone();
     if (state === 3) continue;
     if (state === 1) return "saved";
     const limit = dataRoomFor(room, now / 1000);
@@ -215,10 +258,28 @@ export async function removeLanding(statsId: string, productId: string, campaign
   });
 }
 
-/** Forgets every landing of a product that is gone, and gives back its room. */
+/** DROP_LANDINGS' answer, read exactly: a pipeline of that one script answering {1, total}, the total a whole number of bytes. */
+function dropped(reply: unknown): boolean {
+  if (!Array.isArray(reply) || reply.length !== 1) return false;
+  const answer = reply[0];
+  if (!Array.isArray(answer) || answer.length !== 2) return false;
+  const [state, total] = answer;
+  return state === 1 && typeof total === "number" && Number.isSafeInteger(total) && total >= 0;
+}
+
+/**
+ * Forgets every landing of a product that is gone, gives back its room and closes them to saves, in one step. The
+ * step is the same whatever was kept, so it is tried again when its answer is not the exact one; when no try is
+ * confirmed it throws LandingsDropUnconfirmed: the landings may still be there and their room stays counted, never
+ * said to be gone (Codex G2, #1947).
+ */
 export async function dropLandings(statsId: string | null, productId: string, room: DataStore): Promise<void> {
   const key = dataKey(room);
   if (!statsId || !key || !isRedisConfigured()) return;
-  const now = Date.now();
-  await redisPipeline([["EVAL", DROP_LANDINGS, 2, key, landingKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId)]]);
+  for (let tries = 0; tries < WRITE_TRIES; tries += 1) {
+    const now = Date.now();
+    const reply: unknown = await redisPipeline([["EVAL", DROP_LANDINGS, 3, key, landingKey(statsId, productId), goneKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId), LANDINGS_GONE_SECONDS]]).catch(() => null);
+    if (dropped(reply)) return;
+  }
+  throw new LandingsDropUnconfirmed();
 }

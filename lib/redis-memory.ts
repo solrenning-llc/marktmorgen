@@ -647,8 +647,9 @@ export class MemoryRedis {
           return taken;
         }
         // lib/campaign-landing-store.ts WRITE_LANDINGS and DROP_LANDINGS: a product's landings and their slot in one step.
-        if (key.startsWith("-- marktmorgen:landings-write:v1\n") && args[0] === "2" && args.length === 9) {
-          const [, room, target, limit, month, slot, size, expected, json] = args;
+        if (key.startsWith("-- marktmorgen:landings-write:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, room, target, gone, limit, month, slot, size, expected, json] = args;
+          if (this.run(["EXISTS", gone]) === 1) return [4, 0];
           const held = this.run(["GET", target]);
           if ((typeof held === "string" ? held : "") !== expected) return [3, 0];
           const taken = this.storeData([room, limit, json === "" ? "1" : "0", month, "s", slot, json === "" ? "0" : size]);
@@ -661,10 +662,13 @@ export class MemoryRedis {
           }
           return taken;
         }
-        if (key.startsWith("-- marktmorgen:landings-drop:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, room, target, limit, month, slot] = args;
+        if (key.startsWith("-- marktmorgen:landings-drop:v2\n") && args[0] === "3" && args.length === 8) {
+          const [, room, target, gone, limit, month, slot, seconds] = args;
+          const taken = this.storeData([room, limit, "1", month, "s", slot, "0"]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return taken;
           this.run(["DEL", target]);
-          return this.storeData([room, limit, "1", month, "s", slot, "0"]);
+          this.run(["SET", gone, "1", "EX", seconds]);
+          return taken;
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);

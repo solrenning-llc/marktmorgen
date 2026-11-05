@@ -200,16 +200,42 @@ export async function readVersions(statsId: string | null, productId: string): P
   return out;
 }
 
-/** Forgets the page of a product that is gone, and gives back its room. Returns the picture files it was the one showing, to delete. */
+/**
+ * A page was dropped, but not all it held could be confirmed gone (its campaigns' landings): what is left stays
+ * counted in the store's room. `pictures` are still the files the page was the one showing, released and to delete.
+ */
+export class PageDropIncomplete extends Error {
+  constructor(readonly pictures: string[], readonly kept: unknown) {
+    super("The page was deleted, but some of its records could not be confirmed gone; they stay counted until they are.");
+  }
+}
+
+/**
+ * What a route deletes after dropPage failed: the pictures it released when it got that far (PageDropIncomplete),
+ * none otherwise; and the failure is said in the log, never taken for a page dropped whole (Codex G2, #1947).
+ */
+export function picturesOfFailedDrop(error: unknown): string[] {
+  console.error("a removed page's records could not all be confirmed gone; what is left stays counted in the store's room", error);
+  return error instanceof PageDropIncomplete ? error.pictures : [];
+}
+
+/**
+ * Forgets the page of a product that is gone, and gives back its room. Returns the picture files it was the one
+ * showing, to delete. When its campaigns' landings cannot be confirmed gone, the rest is still done and it throws
+ * PageDropIncomplete with those pictures: never a page said dropped whole while its landings may be kept.
+ */
 export async function dropPage(statsId: string | null, productId: string, room: DataStore): Promise<string[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const held = await readPage(statsId, productId).catch(() => ({ ...EMPTY_PAGE, blocks: [] }));
   const shown = picturePaths(held);
   await redisPipeline([["DEL", pageKey(statsId, productId), versionsKey(statsId, productId)], ...usesCommands(statsId, productId, sectionsOn(held), [])]);
   await giveData(room, [{ slot: PAGE_SLOT(productId), bytes: 0, set: true }, { slot: VERSIONS_SLOT(productId), bytes: 0, set: true }]);
-  // Its campaigns' landings are its page's words: they go with it (lib/campaign-landing-store.ts).
-  await dropLandings(statsId, productId, room);
+  // Its campaigns' landings are its page's words: they go with it (lib/campaign-landing-store.ts). Their room is
+  // given back only by the step that drops them, so one not confirmed stays counted.
+  const landings = await dropLandings(statsId, productId, room).then(() => null, (error: unknown) => ({ error }));
   // A test's counts stay until they expire, counted on their own.
   if (held.test) await noteData(room, [endedTest(Date.now())]);
-  return releasePictures(statsId, productId, shown);
+  const pictures = await releasePictures(statsId, productId, shown);
+  if (landings) throw new PageDropIncomplete(pictures, landings.error);
+  return pictures;
 }

@@ -29,7 +29,7 @@ import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { dropPage } from "@/lib/sales-page-store";
+import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -299,7 +299,7 @@ export async function POST(request: NextRequest) {
         // Its page of blocks, and the reviews of a product nobody can buy any more.
         if (going.page) {
           // And the pictures on that page (lib/sales-page-store.ts).
-          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch(() => [] as string[]);
+          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch(picturesOfFailedDrop);
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).

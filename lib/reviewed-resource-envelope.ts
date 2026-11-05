@@ -18,8 +18,14 @@ function ownData(record: unknown, key: string): unknown {
 /** Read the review once into a plain snapshot so validation and arithmetic use identical data. */
 function snapshot(review: unknown): CustomerWorstCase | null {
   if (!review || typeof review !== 'object' || Array.isArray(review)) return null;
-  const costs = customerCostSnapshot(ownData(review, 'costCeilings'));
+  const costEvidence = ownData(review, 'costCeilings');
+  const costs = customerCostSnapshot(costEvidence);
   if (costs === null) return null;
+  // Validate the original evidence before the plain projection can erase a
+  // liability hidden by Proxy reflection. customerCostSnapshot has already
+  // refused accessors, symbols, extra fields and non-plain prototypes, so this
+  // native clone only distinguishes inspectable data from exotic objects.
+  try { structuredClone(costEvidence); } catch { return null; }
   const fiscal = customerTaxReviewFields(review);
   return {
     ...(fiscal.present ? { taxReview: fiscal.taxReview as CustomerTaxReview, taxContext: fiscal.taxContext as TaxContext } : {}),

@@ -57,7 +57,8 @@ export default async function MovePage({ params, searchParams }: Params) {
   // The price the email named is gone (an option removed, even the last): said, never swapped for another (lib/move-members.ts, openMove).
   const priceGone = Boolean(invite && product?.recurring && namedPriceGone(product, invite.o));
   // What stops the member here, and what happened on the last press: a refused page or too many tries leave the button.
-  const blocking = !invite ? m.notices.expired : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
+  // Moved already (kept), or its state cannot be read: said so, with no button (Revisor 1 on #2685).
+  const blocking = !invite ? m.notices.expired : invite.kept !== 0 ? m.notices.done : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
   // With the price gone there is no button, so never "try again" or "press the button again": only that it is gone.
   // "price" in the address says nothing by itself: only the product does.
   const said = status === "price" ? undefined : m.notices[status as keyof typeof m.notices];

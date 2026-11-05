@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   is("the gift and group picker still leaves it out", givableOptions({ ...product, recurring: null } as never).map((o) => o.id), [plus]);
   await noteKept(store, "ada@example.com", id);
   const keptAgain = await openMove(store, id, ada.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  is("an invitation already kept does not reopen the price off sale", keptAgain.ok ? "opened" : keptAgain.reason, "unavailable");
+  is("an invitation already kept does not reopen the price off sale: it says it was moved (\"done\", Revisor 1 on #2685)", keptAgain.ok ? "opened" : keptAgain.reason, "done");
 
   part("An invitation whose \"kept\" cannot be read is not taken as unused (Codex C2 on #2685)");
   const benRecord = JSON.parse(redis.run(["HGET", `nl:mv:${statsId}`, benField]) as string) as Record<string, unknown>;
@@ -173,6 +173,21 @@ async function main(): Promise<void> {
   const cy = await readInvite(statsId, cyField);
   is("the invitation is kept, so its link opens no second membership", (cy?.kept ?? 0) > 0, true);
   swept = [];
+
+  part("A kept invitation opens nothing more, at any price (Revisor 1 on #2685)");
+  const [deeField] = await inviteMembers(store, "job_inviteoffsale_dee", [{ email: "dee@example.com", productId: id, option: plus, renews }]);
+  if (!deeField) throw new Error("dee not invited");
+  const dee = (await readInvite(statsId, deeField))!;
+  const deeFirst = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  is("the first press opens a checkout at Plus", deeFirst.ok, true);
+  await noteKept(store, "dee@example.com", id);
+  redis.run(["DEL", `nl:mv:open:${statsId}:${deeField}`]);
+  const deeBefore = checkouts.length;
+  const deeAgain = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  is("once kept, a day later, the link opens no second membership", [deeAgain.ok ? "opened" : deeAgain.reason, checkouts.length - deeBefore], ["done", 0]);
+  const deePage = await movePage("inviteoffsale", id, { k: dee.t });
+  is("its page says so, with no button to press", [deePage.includes(moveWords("en").notices.done.title), deePage.includes(moveWords("en").keep)], [true, false]);
+  for (const language of ["es", "fr", "de", "it", "nl", "pt"] as const) is(`said in ${language} too`, moveWords(language).notices.done.title.length > 0, true);
 
   part("The rule itself");
   is("only the named option comes back on sale, nothing else changes", withInvitedOption(product, basic).options.map((o) => [o.id, o.offSale === true]), [[basic, false], [plus, false]]);

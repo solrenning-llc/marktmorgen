@@ -253,10 +253,11 @@ export function decideReply(input: {
 }): Decision {
   const { rule } = input;
   if (rule.mode === "off") return { send: false, why: "off" };
-  if (typeof input.ownAccountId !== "string" || !input.ownAccountId) return { send: false, why: "no_account" };
+  // A blank value (spaces, a tab, a line break) names no account either: it is refused, never trimmed into another id (Codex G2's light).
+  if (typeof input.ownAccountId !== "string" || !input.ownAccountId.trim()) return { send: false, why: "no_account" };
   if (input.personId === input.ownAccountId) return { send: false, why: "own" };
   if (rule.mode === "live" && rule.tested !== ruleFingerprint(rule)) return { send: false, why: "untested" };
-  if (!input.personId || !mayReachPerson({ mode: rule.mode, live: input.live === true && AUTODM_LIVE, personId: input.personId, testerIds: rule.testers })) {
+  if (typeof input.personId !== "string" || !input.personId.trim() || !mayReachPerson({ mode: rule.mode, live: input.live === true && AUTODM_LIVE, personId: input.personId, testerIds: rule.testers })) {
     return { send: false, why: "not_reached" };
   }
   const keyword = matchingKeyword(input.comment, rule.keywords);

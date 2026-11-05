@@ -323,6 +323,11 @@ check("a missing person id or own account id never sends", () => {
   equal(decide({ ownAccountId: "" }), { send: false, why: "no_account" });
   equal(decide({ ownAccountId: undefined as unknown as string }), { send: false, why: "no_account" });
   equal(decide({ ownAccountId: 7 as unknown as string }), { send: false, why: "no_account" });
+  // A blank value names no account and no person: refused, never trimmed into another id (Codex G2's light on #2499).
+  for (const blank of [" ", "\t", "\r\n", "\u00a0 "]) {
+    equal(decide({ rule: rule({ testers: ["chef"] }), comment: "guide", personId: "chef", ownAccountId: blank }), { send: false, why: "no_account" });
+    equal(decide({ personId: blank }), { send: false, why: "not_reached" });
+  }
 });
 
 // The reply's link.

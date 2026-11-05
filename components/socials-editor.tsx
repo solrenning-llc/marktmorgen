@@ -84,7 +84,7 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
   const edited = rows.filter(row => row.typed.trim()).map(({ network, typed }) => [network, typed]);
   const original = socials.map(social => [social.network, typedOf(social)]);
   const changed = JSON.stringify(edited) !== JSON.stringify(original);
-  useLeaveGuard(open && changed && !saving);
+  useLeaveGuard(open && changed);
 
   function add() {
     const network = SOCIAL_NETWORKS.find((n) => !used.has(n)) ?? "website";

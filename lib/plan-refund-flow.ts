@@ -145,7 +145,7 @@ async function takeBackStop(id: string): Promise<boolean> {
   }
 }
 
-type RefundRow = { id: string; amount: number; currency: string; status: string; metadata: { plan_refund?: string } };
+type RefundRow = { id: string; charge: string; amount: number; currency: string; status: string; metadata: { plan_refund?: string } };
 type Found = { kind: "found"; refund: RefundRow; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
 const ownValue = (row: unknown, key: string): unknown => {
   if (!row || typeof row !== "object" || types.isProxy(row) || Array.isArray(row)) return undefined;
@@ -165,8 +165,9 @@ function refundPage(page: unknown): { data: RefundRow[]; more: boolean } | null 
       const slot = Object.getOwnPropertyDescriptor(data, String(i));
       if (!slot || !Object.hasOwn(slot, "value")) return null;
       const row: unknown = slot.value;
-      const id = ownValue(row, "id"), amount = ownValue(row, "amount"), currency = ownValue(row, "currency"), status = ownValue(row, "status"), metadata = ownValue(row, "metadata");
+      const id = ownValue(row, "id"), charge = ownValue(row, "charge"), amount = ownValue(row, "amount"), currency = ownValue(row, "currency"), status = ownValue(row, "status"), metadata = ownValue(row, "metadata");
       if (typeof id !== "string" || !REFUND_ID.test(id) || ids.has(id) ||
+          typeof charge !== "string" || !/^ch_[A-Za-z0-9]{6,128}$/.test(charge) ||
           typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1 ||
           typeof currency !== "string" || !/^[a-z]{3}$/.test(currency) ||
           typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status) ||
@@ -175,7 +176,7 @@ function refundPage(page: unknown): { data: RefundRow[]; more: boolean } | null 
       if ((owner && (!Object.hasOwn(owner, "value") || typeof owner.value !== "string")) || (!owner && "plan_refund" in metadata)) return null;
       ids.add(id);
       // Snapshot only validated data; later projections never observe an unchecked amount.
-      refunds.push({ id, amount, currency, status, metadata: owner ? { plan_refund: owner.value } : {} });
+      refunds.push({ id, charge, amount, currency, status, metadata: owner ? { plan_refund: owner.value } : {} });
     }
     return { data: refunds, more };
   } catch { return null; }
@@ -205,6 +206,7 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
   let first: RefundRow | null = null;
   let currency: string | null = null;
   let total = 0;
+  const observed = new Set<string>();
   for (const part of parts) {
     let listed: Row;
     try {
@@ -215,6 +217,11 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
     }
     const page = refundPage(listed);
     if (!page || page.more) return { kind: "unknown" };
+    // A refund belongs to exactly one charge: contradictory pages cannot repay two debts.
+    for (const r of page.data) {
+      if (r.charge !== part.c || observed.has(r.id)) return { kind: "unknown" };
+      observed.add(r.id);
+    }
     const ours = page.data.filter((r) => r.metadata.plan_refund === sid);
     for (const r of ours) {
       currency ??= r.currency;

@@ -1,4 +1,4 @@
-/** Identified positive-base completion of G2 proof324ac1b2: only application_fee discriminator added; original sixteen assertions retained. */
+/** Identified positive-base completion of G2 proof324ac1b2: only application_fee discriminator added; original sixteen cases and their assertions retained. */
 /** Permanent regression derived from Codex J ad2d3008, plus payment bindings and aggregate diagnostics. */
 import assert from "node:assert/strict";
 import test from "node:test";

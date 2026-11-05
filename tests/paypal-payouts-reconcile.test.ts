@@ -230,6 +230,39 @@ async function main(): Promise<void> {
   const late = JSON.parse(String((rawLate as string[])[1])) as { m?: unknown };
   is("marked for a manual check and not tried", [late.m, posts - p1, batches], [1, 0, 0]);
 
+  part("The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)");
+  {
+    await seed(store);
+    next = "make-then-drop";
+    await payWithPayPal(store);
+    next = "make";
+    const real = redis.pipeline.bind(redis);
+    let hit = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const first = commands[0];
+      if (!hit && first?.[0] === "HSET" && first[1] === OPEN && !String(first[2]).startsWith("?")) {
+        hit = true;
+        // As Codex G's proof: the id's write fails, and any HDEL sent beside it still runs.
+        const removed = await real(commands.filter((c) => c[0] === "HDEL"));
+        return [undefined, ...removed];
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await settlePayPal(store);
+    } finally {
+      redis.pipeline = real;
+    }
+    is("the write of its id failed, the '?' evidence is kept", [hit, await fields()], [true, ["?"]]);
+    is("both still on their way", (await onTheirWay(store)).size, 2);
+    await payWithPayPal(store);
+    is("a press sends no new batch", batches, 1);
+    await age("t", DAY + 60_000);
+    await settlePayPal(store);
+    await settlePayPal(store);
+    is("the next day's try gets the same batch back and settles it, paid once", [batches, await fields(), await paidCents(store)], [1, [], 4500]);
+  }
+
   for (const state of ["down", "refunded"] as const) {
     part(`Before the retry, Stripe's refunds ${state === "down" ? "cannot be read" : "took back every sale"}: nothing is sent (review of Codex G on #2681)`);
     stripeState = "normal";

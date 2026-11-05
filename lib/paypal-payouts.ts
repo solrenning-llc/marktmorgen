@@ -501,20 +501,24 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     const sent = (await readOpen(statsId)).get(field);
     if (!sent || sent.m === 1) return sent ? "manual" : "waiting";
     if (sent.t !== undefined && now - sent.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
+    // The same request may make the batch now, if the first never reached PayPal, so it is sent only while the book
+    // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds that cannot be read: not known,
+    // wait (no try counted). A line no longer owed in full (refunded since, or the affiliate gone or no longer
+    // approved), or a store whose currency changed: it cannot be told whether the first request paid it, so it is
+    // left for the creator's own check and never sent.
+    const book = await readBook(store);
+    if (!book.refundsChecked) return "waiting";
+    const rows = new Map(book.rows.map((row) => [row.affiliate.id, row]));
+    const lines: BatchLine[] = [];
+    for (const line of sent.lines) {
+      const row = rows.get(line.a);
+      if (!row || row.affiliate.status !== "approved" || row.payable < line.c || sent.currency !== store.currency) return needsManualCheck(statsId, field, sent);
+      lines.push({ affiliate: row.affiliate, cents: line.c });
+    }
     // The try is counted before it is made, so a run that stops halfway never tries twice in a day.
     const tried: unknown = await redisPipeline([["HSET", openKey(statsId), field, JSON.stringify({ ...sent, t: now })]]);
     // HSET answers 0 for a field it changed (1 only if it was gone, which the read under the lock just ruled out).
     if (!Array.isArray(tried) || tried.length !== 1 || (tried[0] !== 0 && tried[0] !== 1)) return "waiting";
-    // The same body: what was owed to whom, at the address each affiliate has now. Anyone no longer in the book,
-    // or a store whose currency changed, cannot be sent again as it was: left for the creator's own check.
-    const book = await readBook(store);
-    const people = new Map(book.rows.map((row) => [row.affiliate.id, row.affiliate]));
-    const lines: BatchLine[] = [];
-    for (const line of sent.lines) {
-      const affiliate = people.get(line.a);
-      if (!affiliate || sent.currency !== store.currency) return needsManualCheck(statsId, field, sent);
-      lines.push({ affiliate, cents: line.c });
-    }
     const senderBatchId = field.slice(UNKNOWN_BATCH_PREFIX.length);
     let batch = "";
     try {

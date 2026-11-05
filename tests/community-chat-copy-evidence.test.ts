@@ -52,6 +52,28 @@ async function main(): Promise<void> {
   is("a null room is unknown", await refuses([null]), true);
   is("an object room is unknown", await refuses([{}]), true);
 
+  part("The nested room must contain only own inert rows");
+  const sparse: unknown[] = [];
+  sparse.length = 1;
+  is("a sparse room is unknown", await refuses([sparse]), true);
+  const inherited: unknown[] = [];
+  inherited.length = 1;
+  Object.setPrototypeOf(inherited, Object.assign(Object.create(Array.prototype), { 0: own }));
+  is("an inherited row is unknown", await refuses([inherited]), true);
+  let getterReads = 0;
+  const getter: unknown[] = [];
+  getter.length = 1;
+  Object.defineProperty(getter, "0", { enumerable: true, configurable: true, get: () => { getterReads += 1; return own; } });
+  is("a row getter is rejected before execution", [await refuses([getter]), getterReads], [true, 0]);
+  let proxyReads = 0;
+  const proxied = new Proxy([own], { get(target, key, receiver) { proxyReads += 1; return Reflect.get(target, key, receiver); } });
+  is("a proxied room is rejected before its traps", [await refuses([proxied]), proxyReads], [true, 0]);
+  let outerReads = 0;
+  const outer: unknown[] = [];
+  outer.length = 1;
+  Object.defineProperty(outer, "0", { enumerable: true, configurable: true, get: () => { outerReads += 1; return [own]; } });
+  is("an outer getter is rejected before execution", [await refuses(outer), outerReads], [true, 0]);
+
   part("Every stored row must identify whose words it holds");
   for (const [name, row] of [
     ["non-string row", 7],
@@ -62,6 +84,8 @@ async function main(): Promise<void> {
     ["fractional number", JSON.stringify({ i: 1.5, a: MEMBER, text: "Mine", at: 123 })],
     ["missing author", JSON.stringify({ i: 1, text: "Mine", at: 123 })],
     ["non-string author", JSON.stringify({ i: 1, a: 7, text: "Mine", at: 123 })],
+    ["whitespace author", JSON.stringify({ i: 1, a: " ", text: "Mine", at: 123 })],
+    ["impossible author", JSON.stringify({ i: 1, a: "not-a-member-key", text: "Mine", at: 123 })],
     ["missing text", JSON.stringify({ i: 1, a: MEMBER, at: 123 })],
     ["non-string text", JSON.stringify({ i: 1, a: MEMBER, text: 7, at: 123 })],
     ["missing time", JSON.stringify({ i: 1, a: MEMBER, text: "Mine" })],

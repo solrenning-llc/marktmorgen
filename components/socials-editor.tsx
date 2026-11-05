@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import {
@@ -79,6 +80,11 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
   const [error, setError] = useState("");
   const [bad, setBad] = useState<number[]>([]);
   const used = useMemo(() => new Set(rows.map((r) => r.network)), [rows]);
+  // Empty new rows are left out on save; opening one alone creates no work to lose.
+  const edited = rows.filter(row => row.typed.trim()).map(({ network, typed }) => [network, typed]);
+  const original = socials.map(social => [social.network, typedOf(social)]);
+  const changed = JSON.stringify(edited) !== JSON.stringify(original);
+  useLeaveGuard(open && changed && !saving);
 
   function add() {
     const network = SOCIAL_NETWORKS.find((n) => !used.has(n)) ?? "website";

@@ -35,12 +35,32 @@ test("course structures can be found by type, title and their module preview",()
  assert.deepEqual(matchingLibrary(cards,"teaching","course","certificate quiz").map(card=>card.id),["quizzes"]);
 });
 
-test("a course card only opens an existing selected course; it never creates, converts, saves or preselects one",()=>{
+test("a course card only opens an existing selected course; it never creates, converts or saves one",()=>{
  const card={id:"weekly",kind:"course",label:"Weekly course",hint:"Four modules.",goal:"teaching",preview:["Week 1"]} as unknown as LibraryCard;
  const url=new URL(libraryDestination(card,"store/value","paid/course"),"https://example.test");
  assert.equal(url.pathname,"/studio/course/paid%2Fcourse");
  assert.equal(url.searchParams.get("store"),"store/value");
- assert.equal(url.searchParams.has("template"),false);
+});
+
+test("a course card carries the previewed structure to the course editor",()=>{
+ const card={id:"weekly",kind:"course",label:"Weekly course",hint:"Four modules.",goal:"teaching",preview:["Week 1"]} as unknown as LibraryCard;
+ const url=new URL(libraryDestination(card,"store/value","paid/course"),"https://example.test");
+ assert.equal(url.searchParams.get("template"),"weekly");
+ const page=readFileSync("app/studio/course/[product]/page.tsx","utf8");
+ const editor=readFileSync("components/course-editor.tsx","utf8");
+ const picker=readFileSync("components/course-template-picker.tsx","utf8");
+ assert.match(page,/templateById\(query\.template\)/);
+ assert.match(page,/initialTemplate=/);
+ assert.match(editor,/initialTemplate=/);
+ assert.match(picker,/initialTemplate/);
+});
+
+test("course cards are offered only for a paid course that still accepts a ready structure",()=>{
+ const component=readFileSync("components/template-library.tsx","utf8");
+ const page=readFileSync("app/studio/growth/page.tsx","utf8");
+ assert.match(component,/selected\.newCourse/);
+ assert.match(page,/newCourse:.*templateFits\(product\.course\)\.ok/);
+ assert.match(component,/Choose an untouched paid course above/);
 });
 
 test("the library screen distinguishes an existing paid course from another product before offering the course link",()=>{

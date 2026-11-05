@@ -102,7 +102,7 @@ export class MemoryRedis {
     // Redis checks command arity before looking up or changing any key.
     const minimum = name === "HSET" || name === "ZADD" ? 4
       : name === "DEL" || name === "MGET" ? 2
-      : ["HDEL", "SADD", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
+      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
     if (command.length < minimum || (name === "HSET" && command.length % 2 !== 0)) {
       throw new Error(`ERR wrong number of arguments for '${name.toLowerCase()}' command`);
     }

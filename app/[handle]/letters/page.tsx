@@ -11,6 +11,7 @@ import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { listLetters } from "@/lib/letters";
+import { membersOnly } from "@/lib/letter-rules";
 
 type Params = { params: Promise<{ handle: string }> };
 
@@ -31,6 +32,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 /**
  * The emails a store chose to publish (lib/letter-rules.ts), newest first.
  * Shown only to those who open the address; nothing is published by itself.
+ * Only subjects and dates: an email kept for members says so here, and its
+ * words stay on its own page, behind its door (lib/letter-access.ts).
  */
 export default async function LettersPage({ params }: Params) {
   const store = await load((await params).handle);
@@ -54,6 +57,7 @@ export default async function LettersPage({ params }: Params) {
               </Link>
               <p className="st-muted mt-1 text-sm">
                 <time dateTime={new Date(letter.sentAt).toISOString()}>{w.sentOn(date.format(new Date(letter.sentAt)))}</time>
+                {membersOnly(letter) ? ` · ${w.membersLabel}` : null}
               </p>
             </li>
           ))}

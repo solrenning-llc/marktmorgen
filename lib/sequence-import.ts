@@ -142,8 +142,30 @@ function tagEnd(text: string, from: number): number {
 
 /** One attribute of a tag's text, quoted or not; empty when absent. */
 function attribute(tag: string, name: string): string {
-  const at = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i").exec(tag.length > 4_000 ? tag.slice(0, 4_000) : tag);
-  return at ? (at[2] ?? at[3] ?? at[4] ?? "") : "";
+  const source = tag.slice(0, 4_000);
+  let i = 1;
+  // Skip the element name, then consume each whole attribute and its value.
+  // A whitespace + href inside a quoted title is still that title's value.
+  while (i < source.length && !/[\s/>]/.test(source[i])) i += 1;
+  while (i < source.length) {
+    while (i < source.length && /\s/.test(source[i])) i += 1;
+    if (source[i] === ">" || source[i] === "/" || i >= source.length) break;
+    const start = i;
+    while (i < source.length && !/[\s=/>]/.test(source[i])) i += 1;
+    if (i === start) { i += 1; continue; }
+    const key = source.slice(start, i).toLowerCase();
+    while (i < source.length && /\s/.test(source[i])) i += 1;
+    if (source[i] !== "=") continue;
+    i += 1;
+    while (i < source.length && /\s/.test(source[i])) i += 1;
+    const quote = source[i] === '"' || source[i] === "'" ? source[i++] : null;
+    const valueStart = i;
+    while (i < source.length && (quote ? source[i] !== quote : !/[\s"'>]/.test(source[i]))) i += 1;
+    const value = source.slice(valueStart, i);
+    if (quote && source[i] === quote) i += 1;
+    if (key === name.toLowerCase()) return value;
+  }
+  return "";
 }
 
 type Taken = { variables: string[]; trackers: number; images: number };

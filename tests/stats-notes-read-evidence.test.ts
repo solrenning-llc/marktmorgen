@@ -61,12 +61,20 @@ async function main() {
   is("only the configured read ran", commands.length, 1);
   reset();
   let envelopeTraps = 0;
+  let transportThenReads = 0;
   changeReading(() => new Proxy([[]], {
-    get(target, field, receiver) { envelopeTraps++; return Reflect.get(target, field, receiver); },
+    get(target, field, receiver) {
+      // Promise resolution probes "then" inside the async transport fixture,
+      // before the consumer receives its result. Count that separately.
+      if (field === "then") { transportThenReads++; return undefined; }
+      envelopeTraps++;
+      return Reflect.get(target, field, receiver);
+    },
     getOwnPropertyDescriptor(target, field) { envelopeTraps++; return Reflect.getOwnPropertyDescriptor(target, field); },
   }));
   is("an executable response proxy is unknown", await refusesRead(), true);
-  is("no envelope proxy trap ran", envelopeTraps, 0);
+  is("no consumer envelope proxy trap ran", envelopeTraps, 0);
+  is("the transport's Promise probe is explicitly accounted for", transportThenReads, 1);
 
   part("An incomplete read must never authorize deletion of existing chart notes");
   const corruptions = [

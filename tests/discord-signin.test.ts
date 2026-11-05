@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { beginDiscordSignIn, finishDiscordSignIn, discordSignInOffered, DISCORD_SIGNIN_SCOPES, DISCORD_SIGNIN_APPROVED } from "@/lib/discord-signin";
 import { store } from "./redis-stub";
+import { NextRequest } from "next/server";
+import { POST as startRoute } from "@/app/api/auth/discord/route";
 
 process.env.DISCORD_SIGNIN_CLIENT_ID = "fixture-client";
 process.env.DISCORD_SIGNIN_CLIENT_SECRET = "fixture-secret";
@@ -94,4 +96,25 @@ test("no Discord identity or tokens remain after a completed login",async()=>{
  const b=await start();assert.equal((await finish(b)).ok,true);
  const keys=(store.run(["SCAN","0","MATCH","nl:auth:link:*","COUNT","1000"]) as [string,string[]])[1];
  for(const key of keys){const value=String(store.run(["GET",key]));assert.equal(value.includes(email),false);assert.equal(value.includes("fixture-access"),false);assert.equal(value.includes("123456789012345678"),false);}
+});
+
+test("start route is absent while off and rejects foreign origins before any state",async()=>{
+ delete process.env.TEST_DISCORD_SIGNIN;
+ const real=store.pipeline.bind(store);let work=0;
+ store.pipeline=async cs=>{work+=cs.length;return real(cs);};
+ try {
+  assert.equal((await startRoute(new NextRequest("https://marktmorgen.com/api/auth/discord",{method:"POST"}))).status,404);
+  assert.equal(work,0);
+  process.env.TEST_DISCORD_SIGNIN="1";
+  assert.equal((await startRoute(new NextRequest("https://marktmorgen.com/api/auth/discord",{method:"POST",headers:{origin:"https://other.example.test",host:"marktmorgen.com"}}))).status,403);
+  assert.equal(work,0);
+ } finally {store.pipeline=real;}
+});
+test("twentieth start is admitted; twenty-first and unknown counter cannot write a state",async()=>{
+ const req=()=>new NextRequest("https://marktmorgen.com/api/auth/discord",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded","x-forwarded-for":"203.0.113.100"},body:"handle=my-store"});
+ for(let i=0;i<20;i++){const r=await startRoute(req());assert.equal(r.status,303);assert.ok(r.headers.get("location")?.startsWith("https://discord.com/oauth2/authorize?"));}
+ assert.match((await startRoute(req())).headers.get("location")!,/discord-slow/);
+ const real=store.pipeline.bind(store);let work=0;
+ store.pipeline=async cs=>{work+=cs.length;return[null,null];};
+ try {assert.match((await startRoute(req())).headers.get("location")!,/discord-slow/);assert.equal(work,2);}finally{store.pipeline=real;}
 });

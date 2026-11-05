@@ -25,10 +25,10 @@ is(
 const cases = [
   ["cart-acknowledgment.mjs", "check", "await check.check()"],
   ["contact-acknowledgment.mjs", "toggle", "const original=await toggle.isChecked()"],
-  ["dunning-acknowledgment.mjs", "check", 'await count.selectOption(on?"3":"2")'],
+  ["dunning-acknowledgment.mjs", "count", 'await count.selectOption(on?"3":"2")'],
   ["leave-acknowledgment.mjs", "onField", "await onField.check()"],
   ["nudge-acknowledgment.mjs", "toggle", "await toggle.setChecked(true)"],
-  ["numbers-acknowledgment.mjs", "money", "await label.fill(draft)"],
+  ["numbers-acknowledgment.mjs", "label", "await label.fill(draft)"],
   ["recovery-acknowledgment.mjs", "toggle", "await toggle.setChecked(true)"],
   ["signup-setting-acknowledgment.mjs", "toggle", "const original=await toggle.isChecked()"],
   ["support-setting-acknowledgment.mjs", "toggle", "const original=await toggle.isChecked()"],

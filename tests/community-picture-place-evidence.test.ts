@@ -61,15 +61,16 @@ async function main(): Promise<void> {
   is("an accessor slot cannot open the door", (await take([accessor])).opened, false);
   is("validation does not execute the accessor", getterReads, 0);
 
-  let proxyReads = 0;
+  let proxyPayloadReads = 0;
   const proxy = new Proxy([1], {
     get(target, property, receiver) {
-      proxyReads += 1;
+      // Promise resolution probes `then` before the async caller receives the reply.
+      if (property !== "then") proxyPayloadReads += 1;
       return Reflect.get(target, property, receiver);
     },
   });
   is("a proxy reply cannot open the door", (await take([proxy])).opened, false);
-  is("validation does not execute proxy traps", proxyReads, 0);
+  is("validation does not read proxy payload fields", proxyPayloadReads, 0);
 
   const decorated = [1] as unknown[] & { extra?: number };
   decorated.extra = 0;

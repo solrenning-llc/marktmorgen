@@ -14,6 +14,7 @@
  *   nl:cimg:doors            doors given and not yet used in a post, by when
  */
 import { createHash } from "node:crypto";
+import { isProxy } from "node:util/types";
 import { del, get, head } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { ImageStore } from "@/lib/community-image";
@@ -72,8 +73,20 @@ export async function takePicturePlace(path: string, limit: number): Promise<boo
   if (!folder || !Number.isSafeInteger(limit) || limit <= 0 || !isRedisConfigured()) return false;
   try {
     const reply = await redisPipeline([["INCR", countKey(folder)]]);
-    if (!Array.isArray(reply) || reply.length !== 1) return false;
-    const count = reply[0];
+    if (
+      typeof reply !== "object" ||
+      reply === null ||
+      isProxy(reply) ||
+      !Array.isArray(reply) ||
+      Object.getPrototypeOf(reply) !== Array.prototype ||
+      reply.length !== 1
+    )
+      return false;
+    const keys = Reflect.ownKeys(reply);
+    if (keys.length !== 2 || !keys.includes("0") || !keys.includes("length")) return false;
+    const slot = Object.getOwnPropertyDescriptor(reply, "0");
+    if (!slot || !("value" in slot)) return false;
+    const count = slot.value;
     if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= 0) return false;
     if (count <= limit) return true;
     await redisPipeline([["DECR", countKey(folder)]]);

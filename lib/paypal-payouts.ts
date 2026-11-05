@@ -29,6 +29,7 @@
  * OpenAPI description (payments_payouts_batch_v1).
  */
 import { createHmac } from "node:crypto";
+import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
@@ -327,7 +328,8 @@ export async function payoutUnknownMonth(month: string): Promise<Record<UnknownC
     // One answer, to the one command sent, of exactly three counts (review of Codex G on #2681), each read only as
     // the reply's own data: an inherited slot or a getter is not known and is never run (Codex H2 on #2681).
     const own = (list: unknown, length: number): unknown[] | null => {
-      if (!Array.isArray(list) || list.length !== length) return null;
+      // A Proxy is refused before anything is asked of it, so none of its traps runs (Codex G on #2681).
+      if (types.isProxy(list) || !Array.isArray(list) || list.length !== length) return null;
       const out: unknown[] = [];
       for (let i = 0; i < length; i += 1) {
         const slot = Object.getOwnPropertyDescriptor(list, String(i));

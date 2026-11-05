@@ -42,12 +42,18 @@ const APPLIED = "nl:share:applied";
 /** When step 2 last read each account's refunds, by store key. */
 const READ_UNTIL = "nl:share:read-until";
 
-export type SettleCounts = { fees: number; gaveBack: number; cents: number; stores: number; memberships: number; failed: number; complete: boolean; unknownDisputes: number; unknownDisputeFees: string[] };
+export type SettleCounts = { fees: number; gaveBack: number; cents: number; stores: number; memberships: number; failed: number; complete: boolean; unknownDisputes: number; unknownDisputeFees: string[]; unknownAmounts: number; unknownAmountFees: string[] };
 
 /** A separate diagnostic, never permission to refund from unknown evidence. */
 class UnknownDisputeStatus extends Error {
   constructor(readonly feeId: string) {
     super("Dispute status is unknown");
+  }
+}
+
+class UnknownAmount extends Error {
+  constructor(readonly feeId: string, detail = "Settlement amount is unknown") {
+    super(detail);
   }
 }
 
@@ -57,12 +63,19 @@ function countSettlementFailure(counts: SettleCounts, error: unknown): void {
     counts.unknownDisputes += 1;
     if (!counts.unknownDisputeFees.includes(error.feeId)) counts.unknownDisputeFees.push(error.feeId);
   }
+  if (error instanceof UnknownAmount) {
+    counts.unknownAmounts += 1;
+    if (!counts.unknownAmountFees.includes(error.feeId)) counts.unknownAmountFees.push(error.feeId);
+  }
 }
 
-type Fee = { id: string; account: string; charge: string; amount: number; refunded: number; currency?: string };
+type Fee = { id: string; account: string; charge: string; amount: number | null; refunded: number | null; currency?: string };
 
 const str = (value: unknown) => (typeof value === "string" && value ? value : "");
-const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+const num = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+/** Stripe metadata stores integer amounts and basis points as decimal strings. */
+const metadataInteger = (value: unknown): number | null => typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
+const currency = (value: unknown): string | null => typeof value === "string" && /^[a-z]{3}$/.test(value) ? value : null;
 
 function readFee(raw: Record<string, unknown>): Fee | null {
   const id = str(raw.id);
@@ -74,10 +87,11 @@ function readFee(raw: Record<string, unknown>): Fee | null {
 
 /** What was paid for the goods on a payment made through a checkout: after discounts, without tax or shipping. */
 function goodsOfSession(session: Record<string, unknown>): number | null {
-  const total = session.amount_total;
-  if (typeof total !== "number") return null;
+  const total = num(session.amount_total);
   const details = (session.total_details ?? {}) as { amount_tax?: unknown; amount_shipping?: unknown };
-  return Math.max(0, total - num(details.amount_tax) - num(details.amount_shipping));
+  const tax = num(details.amount_tax), shipping = num(details.amount_shipping);
+  if (total === null || tax === null || shipping === null || tax > total || shipping > total - tax) return null;
+  return total - tax - shipping;
 }
 
 /**
@@ -95,12 +109,10 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
   // Everything below is worked out in the charge's own currency. A fee Stripe
   // reports in another one cannot be compared with it here, so it is left
   // as it is rather than given back by a sum in two currencies.
-  if (fee.currency && str(charge.currency) && fee.currency !== str(charge.currency).toLowerCase()) {
-    console.error(`the share ${fee.id} is in ${fee.currency} and its charge in ${str(charge.currency)}; left for a person`);
-    return null;
-  }
+  if (currency(fee.currency) === null || currency(charge.currency) === null || fee.currency !== charge.currency) throw new UnknownAmount(fee.id, "Settlement currency is unknown");
   const amount = num(charge.amount);
   const refunded = num(charge.amount_refunded);
+  if (amount === null || refunded === null || refunded > amount) throw new UnknownAmount(fee.id);
   let lostDispute = false;
   if (charge.disputed === true) {
     // Charge.dispute is absent at READ_VERSION. Ask the same connected
@@ -136,25 +148,31 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     // inside the trial or once its plan has ended.
     const meta = ((invoice.subscription_details as { metadata?: unknown } | null)?.metadata ?? {}) as Record<string, string>;
     const store = meta.store ? await storeForHandle(meta.store) : null;
-    const written = Number(meta.share_bps) || 0;
-    const owedRate = store ? shareBps(store, num(invoice.created) || nowSeconds, live) : 0;
-    const bps = Math.min(written || owedRate, owedRate);
-    const goods = typeof invoice.total_excluding_tax === "number" ? invoice.total_excluding_tax : num(invoice.subtotal);
+    const written = metadataInteger(meta.share_bps), created = num(invoice.created);
+    const goods = num(invoice.total_excluding_tax === undefined || invoice.total_excluding_tax === null ? invoice.subtotal : invoice.total_excluding_tax);
+    if (!store || written === null || written > 10_000 || created === null || goods === null) throw new UnknownAmount(fee.id);
+    const owedRate = shareBps(store, created, live);
+    if (num(owedRate) === null || owedRate > 10_000) throw new UnknownAmount(fee.id);
+    const bps = Math.min(written, owedRate);
     return owedOn({ bps, base: goods, amount, refunded, lostDispute });
   }
 
   const intent = charge.payment_intent as Record<string, unknown> | string | null;
   const meta = (intent && typeof intent === "object" ? intent.metadata : charge.metadata) as Record<string, string> | null;
   // The rate the sale was made at, written on it when the checkout opened.
-  const bps = Number(meta?.share_bps) || 0;
-  let goods = Number(meta?.share_base) || 0;
-  if (!goods) {
+  const bps = metadataInteger(meta?.share_bps);
+  if (bps === null || bps > 10_000) throw new UnknownAmount(fee.id);
+  let goods = metadataInteger(meta?.share_base);
+  if (goods === null) {
+    // A legacy checkout may omit this metadata. A supplied invalid amount
+    // never falls back or becomes zero; missing data needs the actual session.
+    if (meta?.share_base !== undefined) throw new UnknownAmount(fee.id);
     const intentId = intent && typeof intent === "object" ? str(intent.id) : str(intent);
-    if (!intentId) return null;
+    if (!intentId) throw new UnknownAmount(fee.id);
     const sessions = await onAccount("GET", fee.account, `/checkout/sessions?payment_intent=${encodeURIComponent(intentId)}&limit=1`, undefined, READ_VERSION);
     const session = Array.isArray(sessions.data) ? (sessions.data[0] as Record<string, unknown> | undefined) : undefined;
     const read = session ? goodsOfSession(session) : null;
-    if (read === null) return null;
+    if (read === null) throw new UnknownAmount(fee.id);
     goods = read;
   }
   return owedOn({ bps, base: goods, amount, refunded, lostDispute });
@@ -162,11 +180,13 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
 
 /** Gives back what was taken above what is owed on one fee. Returns the cents given back. */
 export async function settleFee(fee: Fee, nowSeconds: number, live = COMMISSION_LIVE): Promise<number> {
-  if (fee.amount - fee.refunded <= 0) return 0;
-  if (!fee.currency || !/^[a-z]{3}$/.test(fee.currency)) throw new Error("Application fee refund currency is unknown");
-  const owed = await owedOnFee(fee, nowSeconds, live);
-  if (owed === null) return 0;
-  const back = toGiveBack(fee, owed);
+  const amount = num(fee.amount), refunded = num(fee.refunded);
+  if (currency(fee.currency) === null) throw new UnknownAmount(fee.id, "Application fee refund currency is unknown");
+  if (amount === null || refunded === null || refunded > amount) throw new UnknownAmount(fee.id, "Application fee refund amount is not a safe integer");
+  if (amount - refunded <= 0) return 0;
+  const owed = num(await owedOnFee(fee, nowSeconds, live));
+  if (owed === null) throw new UnknownAmount(fee.id);
+  const back = toGiveBack({ amount, refunded }, owed);
   if (back <= 0) return 0;
   if (!Number.isSafeInteger(back)) throw new Error("Application fee refund amount is not a safe integer");
   const receipt = await onPlatform("POST", `/application_fees/${encodeURIComponent(fee.id)}/refunds`, new URLSearchParams({ amount: String(back) }), {
@@ -288,7 +308,9 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
     for (const subscription of rows) {
       const status = str(subscription.status);
       if (status === "canceled" || status === "incomplete_expired") continue;
-      if (num(subscription.application_fee_percent) === target / 100) continue;
+      const written = subscription.application_fee_percent;
+      if (typeof written !== "number" || !Number.isFinite(written) || written < 0 || written > 100) throw new Error("Membership fee percent is unknown");
+      if (written === target / 100) continue;
       const body = new URLSearchParams({ application_fee_percent: percentOf(target), "metadata[share_bps]": String(target) });
       await onAccount("POST", account, `/subscriptions/${encodeURIComponent(str(subscription.id))}`, body);
       counts.memberships += 1;
@@ -305,7 +327,7 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
  * those whose memberships still carry one written earlier.
  */
 export async function settleShares(deadline: number, nowSeconds = Date.now() / 1000, live = COMMISSION_LIVE): Promise<SettleCounts> {
-  const counts: SettleCounts = { fees: 0, gaveBack: 0, cents: 0, stores: 0, memberships: 0, failed: 0, complete: true, unknownDisputes: 0, unknownDisputeFees: [] };
+  const counts: SettleCounts = { fees: 0, gaveBack: 0, cents: 0, stores: 0, memberships: 0, failed: 0, complete: true, unknownDisputes: 0, unknownDisputeFees: [], unknownAmounts: 0, unknownAmountFees: [] };
   try {
     if (!(await settleRecent(nowSeconds, deadline, counts, live))) counts.complete = false;
   } catch (error) {

@@ -10,7 +10,7 @@ const fee={id:'fee_UnknownState0001',account:'acct_Receipt0001',charge:'ch_Unkno
 const row={id:'du_UnknownState0001',object:'dispute',charge:fee.charge,currency:'usd',status:'future_status'};
 const now=1800000000;
 type Diagnostic={unknownDisputes:number;unknownDisputeFees:string[];unknownAmounts:number;unknownAmountFees:string[]};
-async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown;unavailable?:boolean;feePatch?:Record<string,unknown>;chargePatch?:Record<string,unknown>;metadataPatch?:Record<string,unknown>}={}){
+async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown;unavailable?:boolean;feePatch?:Record<string,unknown>;chargePatch?:Record<string,unknown>;metadataPatch?:Record<string,unknown>;sessionPatch?:Record<string,unknown>;sessionListPatch?:Record<string,unknown>}={}){
  redis.clear();process.env.STRIPE_SECRET_KEY='sk_test_fee_refund_only_a_stand_in';
  const calls:{method:string;url:URL}[]=[];
  if(options.historical){
@@ -30,6 +30,7 @@ async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown
   if(url.pathname==='/v1/events')return Response.json({object:'list',has_more:false,data:[{id:'evt_UnknownState0001',data:{object:{application_fee:fee.id}}}]});
   if(url.pathname==='/v1/application_fees/'+fee.id)return Response.json(feeReply);
   if(url.pathname==='/v1/charges/'+fee.charge)return Response.json(chargeReply);
+  if(url.pathname==='/v1/checkout/sessions')return Response.json({object:'list',has_more:false,data:[{amount_total:10000,currency:'usd',total_details:{amount_tax:0,amount_shipping:0},...options.sessionPatch}],...options.sessionListPatch});
   if(url.pathname==='/v1/disputes'){
    if(options.unavailable)throw Error('Synthetic dispute read unavailable');
    return Response.json(options.reply===undefined?{object:'list',has_more:false,data:[row]}:options.reply);
@@ -116,4 +117,28 @@ test('CX-110: explicit zero rate or goods base may authorize a known refund',asy
   assert.equal(calls.filter(c=>c.method==='POST').length,1);
   assert.equal(diagnostic.unknownAmounts,0);assert.deepEqual(diagnostic.unknownAmountFees,[]);
  }
+});
+test('CX-110: a legacy session needs known amounts, matching currency and a complete result',async()=>{
+ const base={chargePatch:{disputed:false},metadataPatch:{share_bps:'0',share_base:undefined}};
+ for(const sessionPatch of [{amount_total:undefined},{amount_total:null},{amount_total:'10000'},{amount_total:-1},{total_details:{amount_tax:undefined,amount_shipping:0}},{total_details:{amount_tax:0,amount_shipping:null}},{currency:undefined},{currency:null},{currency:'eur'}]){
+  const {counts,calls}=await world({...base,sessionPatch}),diagnostic=counts as unknown as Diagnostic;
+  assert.equal(calls.filter(c=>c.method==='POST').length,0,'session '+JSON.stringify(sessionPatch));
+  assert.equal(counts.failed,1);assert.equal(counts.complete,false);assert.equal(diagnostic.unknownAmounts,1);assert.deepEqual(diagnostic.unknownAmountFees,[fee.id]);
+ }
+ for(const sessionListPatch of [{has_more:true},{has_more:undefined},{object:'other'}, {data:[]}]){
+  const {counts,calls}=await world({...base,sessionListPatch}),diagnostic=counts as unknown as Diagnostic;
+  assert.equal(calls.filter(c=>c.method==='POST').length,0);assert.equal(counts.failed,1);assert.equal(diagnostic.unknownAmounts,1);
+ }
+ const {counts,calls}=await world(base),diagnostic=counts as unknown as Diagnostic;
+ assert.equal(counts.failed,0);assert.equal(counts.complete,true);assert.equal(counts.gaveBack,1);assert.equal(diagnostic.unknownAmounts,0);assert.equal(calls.filter(c=>c.method==='POST').length,1);
+});
+test('CX-110: invoice totals, basis points, date and currency must be known',async()=>{
+ const invoice={currency:'usd',created:now-3600,total_excluding_tax:10000,subscription_details:{metadata:{store:'unknown-dispute-owner',share_bps:'625'}}};
+ for(const patch of [{total_excluding_tax:undefined},{total_excluding_tax:null},{total_excluding_tax:'10000'},{total_excluding_tax:-1},{created:undefined},{created:NaN},{created:-1},{currency:undefined},{currency:'eur'},{subscription_details:{metadata:{store:'unknown-dispute-owner'}}}]){
+  const {counts,calls}=await world({historical:true,chargePatch:{disputed:false,invoice:{...invoice,...patch}}}),diagnostic=counts as unknown as Diagnostic;
+  assert.equal(calls.filter(c=>c.method==='POST').length,0,'invoice '+JSON.stringify(patch));
+  assert.equal(counts.failed,2);assert.equal(counts.complete,false);assert.equal(diagnostic.unknownAmounts,2);assert.deepEqual(diagnostic.unknownAmountFees,[fee.id]);
+ }
+ const {counts,calls}=await world({historical:true,chargePatch:{disputed:false,invoice}}),diagnostic=counts as unknown as Diagnostic;
+ assert.equal(counts.failed,0);assert.equal(counts.complete,true);assert.equal(diagnostic.unknownAmounts,0);assert.equal(calls.filter(c=>c.method==='POST').length,2);
 });

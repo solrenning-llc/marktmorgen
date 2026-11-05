@@ -166,3 +166,26 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
   - Item 681 says `Custo: nenhum` while adding a Playwright test/CI work, contrary to unknown cost never being zero.
   - The 14 genuinely new items, fixed AX/MR/VR paragraph, and documentation-only scope had no other finding. No Claude4 branch, product, reservation, or CI was edited.
 - C1-20261105-1919-C4-1 arrived after L's 19h15 claim and directs Claude5 to review only if nobody had announced; it also orders three additional genuinely new integration items beginning at 688. Claude4/Claude1 own the correction and queue placement.
+
+## Retomada 20h12–20h37 (Fortaleza) — bloqueio confirmado e auditoria read-only de imports
+
+- Instruções relidas na ordem pedida: este checkpoint; `CLAUDE.md`; `AGENTS.md`; índice e cinco reservas; seção Codex da caixa; canal integral.
+- Canal validado antes das escritas pelo SHA Git do conteúdo, nunca por leitura parcial/vazia. Primeira publicação da auditoria read-only: commit `062b1e7fb912aff9cbc07b7a7e487ce5e6b77688`, blob `5d8c391266842d3a8e1cecb48fb2a7e3f4d93dab`. Relatório final dos achados: commit `417074e9ec40da12c44fb6902d6105215ae41762`, blob `fc16f9ac2c8dcff6fd9265968d29e3f6c152d0ff`; pré-leitura declarada e calculada `bd7419bab748fa072e026e7cbccc4c1b578fe344` (435558 bytes).
+- Main observado: `0f139490d3fc79045fd370cd9b5478b64e2f69e5`.
+- #2475 continua OPEN/non-mergeable no head EXATO `a430d71ccf466f1a4e504c2ae79a2d07aab469bb`, tree `610292e2`, sem rerun, cancelamento, movimento de head ou merge. Continuam obrigatórios, depois do controlador compartilhado entrar, uma única junção pura com o latest main, preservando `zapier/index.js=0bf91247c35c48de835631603c5816344e099ac7` e `tests/zapier-response.test.ts=1ba1591411648751f9332036cea42e5e468412cf`, seguida de nove checks novos.
+- #2632 foi lido uma vez conforme AV12: OPEN/mergeable no head legítimo `f183d78fd326c404c5a75fd6a3b9328b9fe24c94`; terminou 8 success + product workflow `42117120004` FAILURE. A única falha conclusiva é reservation-check 15/16 porque o lote #2688 reintroduziu a linha já liberada do Codex V para os três scripts. Firefox e WebKit passaram. L não repetiu/cancelou/alterou nada; Claude 1 precisa remover só essa linha em lote documental e Claude 3 integrar o main uma vez, exigindo nove novos.
+- #2686 foi corrigido por Claude 4 no head `021ddc2d18b02e5b8ef292bac727401e6e55dd79`; os dois achados de L foram fechados. Codex Q revisou independentemente e aprovou o conteúdo em `5793452687`; Claude 4 ajustou título/corpo sem mover o head. L não duplicou retorno nem editou ramo alheio.
+- Trabalho padrão CX-123 regra 24, apenas leitura/prova, em `lib/imported-purchases.ts`: arquivo sem reserva, PR aberto ou anúncio concorrente na auditoria. Três achados MÉDIOS reportados ao Claude 1, sem correção/reserva/unidade nova:
+  1. `parse` aceita registro parcial/malformado, substitui ausência por `at=0`/`job=""` e filtra itens ruins; o chamador real `paidCourses` abriu curso com esse registro.
+  2. `grantImported`/`takeGiven` aceitam resposta parcial e texto `"1"` como sucesso, dando confirmação/contagem não comprovada.
+  3. `forgetImportedPerson` aceita uma de duas respostas como trabalho concluído, podendo deixar dado de compra ou marcador do comprador.
+- Prova durável: ramo `codex/l-imported-purchases-read-proof`, commit `875d73a704fb319cc085d09c87235654c53da161`, tree `f959143211d1fe4aad2f1dc05f3eb16843cfb241`, pai main exato `0f139490d3fc79045fd370cd9b5478b64e2f69e5`. Resultado: 5 controles verdes, 9 falhas causais diretas e 1 falha causal no chamador real; ESLint focado 0/0 e `git diff --check` verde. Sem Redis nativo, navegador ou fornecedor real; nenhuma exploração remota alegada.
+- Nenhum quinto produto foi aberto. A auditoria é prova read-only, aguardando dono do Claude 1. Três produtos próprios continuam merged; #2475 é a única unidade própria aberta.
+
+### Próxima retomada
+
+1. Ler este checkpoint primeiro e depois as fontes obrigatórias/canal fresco com SHA Git calculado.
+2. Vigiar #2632 apenas por novidade dirigida e no mínimo 60 s entre leituras. Não tocar em #2475 até #2632 ter nove success e merge normal.
+3. Quando #2632 entrar, integrar latest main uma única vez no #2475, provar todos os paths do main intactos e os dois blobs próprios exatos, promover sem force/expected SHA e exigir nove checks novos antes de merge.
+4. Aguardar atribuição dos achados de `lib/imported-purchases.ts`; não iniciar correção sem dono e sem auditoria fresca de sobreposição.
+

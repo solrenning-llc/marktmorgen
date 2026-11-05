@@ -13,10 +13,10 @@ async function main() {
     commands.push(...batch);
     return replies.shift() as never;
   };
-  async function attempt(input: unknown[][]) {
+  async function attempt(input: unknown[][], limit = 100) {
     replies = input;
     commands = [];
-    try { return { value: await reportQueue(id), failed: false }; }
+    try { return { value: await reportQueue(id, limit), failed: false }; }
     catch { return { value: null, failed: true }; }
   }
   try {
@@ -40,6 +40,12 @@ async function main() {
     }
     is("a partial batch does not expose a partly confirmed queue", (await attempt([[[post, "1000", comment, "999"]], [1]])).failed, true);
     is("a complete string count remains readable", (await attempt([[[post, "1000"]], ["2"]])).value?.[0].count, 2);
+    is("an unrenderable timestamp never reaches the view", (await attempt([[[post, String(Number.MAX_SAFE_INTEGER)]], [1]])).failed, true);
+    part("The existing queue ceiling applies before a read");
+    for (const limit of [0, -1, 0.5, NaN, Infinity, 501]) {
+      const result = await attempt([[[]]], limit);
+      is(`invalid limit ${String(limit)} spends no command`, [result.failed, commands.length], [true, 0]);
+    }
   } finally { redis.pipeline = original; }
   done();
 }

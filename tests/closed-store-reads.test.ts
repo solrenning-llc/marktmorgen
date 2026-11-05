@@ -477,7 +477,7 @@ async function main(): Promise<void> {
   is("counted, with the members a list given up on still owes", now && [now.stopped, now.stuck, now.unreadKept, now.owedKept], [1, 1, 1, 1]);
   await real([["HDEL", PRUNE_KEPT_KEY, `nl:x:list|${dee}`, `marks|${dee}`]]);
   const line = closedDataLine(now);
-  is("in the owner's words, with no store and no person", [line.includes("1 sem novas tentativas"), line.includes("example.com"), line.includes("#")], [true, false, false]);
+  is("in the owner's words, with no store and no person", [line.includes("1 sem novas tentativas"), /[^\s@]+@[^\s@]+/.test(line), line.includes("#")], [true, false, false]);
   is("unknown is said as unknown", closedDataLine(null).includes("desconhecido"), true);
   await real([["HDEL", "nl:closed:walk", "tries:#" + "b".repeat(32), "left:#" + "c".repeat(32), "unread:nl:x:list"]]);
   });

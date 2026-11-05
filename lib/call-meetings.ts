@@ -35,7 +35,7 @@ import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
 import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
-import { readMoves } from "@/lib/call-records";
+import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
 import { MEET_STORES, callRefunded, dropScope, dueScopes, retryRecord } from "@/lib/meet-links";
 import { type PaidCall, isCallProduct, paidCalls, tellNewLink } from "@/lib/calls";
@@ -229,6 +229,13 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         const details = (session.customer_details ?? {}) as { email?: unknown };
         if (Number.isFinite(start) && (await callRefunded(store, { session: session.id, product: meta.product ?? "", start, email: typeof details.email === "string" ? details.email : null }))) {
           handled += 1;
+        }
+        // A call refunded in full leaves the private calendar feed (lib/calls.ts, callFromRow, drops a payment
+        // refunded in full): marked, its file is made again at the app's next check, not a day later, with or
+        // without a meeting room (inbox C4-18, M3). A lost dispute is not marked: the feed reads the payment, which a
+        // lost dispute does not show as refunded, so the booking stays there until lib/calls.ts reads it.
+        if (refund.object !== "dispute") {
+          await markBookingsChanged(callsId).catch((error: unknown) => console.error("marking the bookings changed failed", error));
         }
         // A team booking refunded in full gives its hosts their time back, on every store.
         const hosts = (meta.hosts ?? "").split(",").filter(isHostId);

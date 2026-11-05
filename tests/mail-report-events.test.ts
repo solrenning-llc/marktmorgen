@@ -15,6 +15,7 @@ import { readSesEvent } from "@/lib/sns";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import * as callbackCosts from "./plan-cost-registry";
+import * as reportCheckpoint from "@/lib/mail-report";
 
 const SECRET = Buffer.from("mail-report-events-test-secret");
 const STORE = "0123456789abcdef0123456789abcdef";
@@ -123,6 +124,22 @@ async function nativeCanonicalCounters() {
 async function main() {
   redis.clear();
   process.env.RESEND_WEBHOOK_SECRET = `whsec_${SECRET.toString("base64")}`;
+  part("CX-112: missing reviewed admission cannot spend on a report");
+  is("the production report admission is explicitly unknown", (reportCheckpoint as unknown as { CURRENT_MAIL_REPORT_ADMISSION?: unknown }).CURRENT_MAIL_REPORT_ADMISSION, null);
+  const checkpointPipeline = redis.pipeline.bind(redis);
+  const checkpointCommands: (string | number)[][] = [];
+  redis.pipeline = async commands => { checkpointCommands.push(...commands); return checkpointPipeline(commands); };
+  try {
+    for (const outcome of ["delivered", "permanent-bounce", "temporary-bounce", "complained"] as const) {
+      is(`an unreviewed ${outcome} cannot record a report`, await noteMailReportEvent(STORE, CAMPAIGN, outcome, 1, `ses:unreviewed-${outcome}`, Date.now()), false);
+    }
+    is("a direct report writer without admission makes zero Redis requests", checkpointCommands, []);
+    await mailReportDay(STORE, CAMPAIGN);
+    is("an unreviewed report reader also makes zero Redis requests", checkpointCommands, []);
+  } finally {
+    redis.pipeline = checkpointPipeline;
+    redis.clear();
+  }
   is("an email with no recorded provider outcome is unavailable", await mailReportDay(STORE, CAMPAIGN), null);
 
   part("One shared email identity goes to the providers");

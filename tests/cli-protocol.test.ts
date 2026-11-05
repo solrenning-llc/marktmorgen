@@ -46,6 +46,10 @@ async function main() {
     ["bad content", (id) => ({ ...success(id), result: { content: {} } })],
     ["nonstring text", (id) => ({ ...success(id), result: { content: [{ type: "text", text: 5 }] } })],
     ["nonboolean error status", (id) => ({ ...success(id), result: { content: [], isError: "false" } })],
+    ["misspelled content type (Codex G)", (id) => ({ ...success(id), result: { content: [{ type: "txet", text: "unconfirmed" }] } })],
+    ["incomplete image content (Codex G)", (id) => ({ ...success(id), result: { content: [{ type: "image" }] } })],
+    ["partial text before an unknown content type (Codex G)", (id) => ({ ...success(id), result: { content: [{ type: "text", text: "partial" }, { type: "not_a_content_type" }] } })],
+    ["valid nontext content is explicitly unsupported by this text CLI", (id) => ({ ...success(id), result: { content: [{ type: "image", data: "eA==", mimeType: "image/png" }] } })],
   ];
   for (const [label, body] of cases) {
     const r = await invoke(body);

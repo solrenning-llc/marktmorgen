@@ -86,6 +86,12 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
     heldStores: null, heldStoresPeak: null,
   };
   if (month === null) return report;
+  // Validate the original graph through the shared accounting boundary before
+  // any copy, including inspection of the independent held-store observation.
+  // The detached data must be captured before that observation can run traps.
+  const mix = commercialProfitMix(input);
+  const encoded = mix.reason === "unknown" ? null : canonicalFinancialSnapshot(input);
+  const data = encoded === null ? null : JSON.parse(encoded) as CommercialProfitMixInput | null;
   // Aggregate observation is independent of financial reconciliation. Never
   // execute supplied getters or copy a store identifier/provenance into output.
   const aggregate = canonicalFinancialSnapshot(held);
@@ -95,14 +101,10 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
       Number.isSafeInteger(observed.peak) && observed.peak >= observed.count) {
     report.heldStores = observed.count; report.heldStoresPeak = observed.peak;
   }
-  const encoded = canonicalFinancialSnapshot(input);
-  if (encoded === null) return report;
-  const data = JSON.parse(encoded) as CommercialProfitMixInput | null;
   if (!data || typeof data !== "object" || Array.isArray(data)) return report;
   if (data.basis !== "reconciled_actual" || data.interval !== "month" || data.period !== month) {
     report.reason = "wrong_period_or_basis"; return report;
   }
-  const mix = commercialProfitMix(data);
   if (mix.reason === "fixed_cost_allocation_mismatch") {
     report.reason = "fixed_cost_allocation_mismatch"; return report;
   }

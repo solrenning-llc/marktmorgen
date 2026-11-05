@@ -30,8 +30,7 @@ function fixture(): CommercialProfitMixInput {
 }
 
 test("a complete reconciled month has one deterministic private owner presentation", () => {
-  const input = fixture() as CommercialProfitMixInput & { privateEmail?: string };
-  input.privateEmail = "synthetic-person@example.com";
+  const input = fixture();
   const held = { month: "2026-10", count: 2, peak: 5, privateEmail: "held-person@example.com" };
   const presentation = companyMonthlyMarginPresentation(input, NOW, held);
   assert.deepEqual(presentation, {

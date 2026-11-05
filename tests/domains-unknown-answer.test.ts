@@ -7,7 +7,7 @@
  * domainStatus says so (null, "try again"), never "not live". A real verdict
  * that the records are wrong still says so. Synthetic only.
  */
-import { domainKey, domainStatus } from "@/lib/domains";
+import { domainCheckup, domainKey, domainStatus } from "@/lib/domains";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -19,8 +19,10 @@ let project: Answer = { status: 200, body: "{}" };
 let config: Answer = { status: 200, body: "{}" };
 const ok = (v: unknown): Answer => ({ status: 200, body: JSON.stringify(v) });
 
+const asked: string[] = [];
 globalThis.fetch = (async (input: RequestInfo | URL) => {
   const url = new URL(String(input));
+  asked.push(url.pathname);
   const answer = url.pathname.startsWith("/v6/domains/") ? config : url.pathname === `/v9/projects/prj_test123/domains/${NAME}` ? project : ok({ id: "prj_test123" });
   return new Response(answer.body, { status: answer.status, headers: { "Content-Type": "application/json" } });
 }) as typeof fetch;
@@ -55,6 +57,13 @@ async function main(): Promise<void> {
   is("the records' answer without 'misconfigured'", live(await domainStatus(NAME, store)), "unknown");
   config = { status: 200, body: "" };
   is("the records' answer empty", live(await domainStatus(NAME, store)), "unknown");
+
+  part("A domain Vercel does not have: the status asks once; only the checkup tells 'gone' (review of Codex P on #2682)");
+  project = { status: 404, body: JSON.stringify({ error: { code: "not_found" } }) };
+  asked.length = 0;
+  is("the status: not known, from one request", [live(await domainStatus(NAME, store)), asked.length], ["unknown", 1]);
+  asked.length = 0;
+  is("the checkup: gone, after asking whether the project is there", [await domainCheckup(NAME, store), asked.length], ["gone", 2]);
   done();
 }
 

@@ -37,6 +37,10 @@ Run from the Z evidence branch:
 node tests/z2690-run.mjs /path/to/d7fd-checkout z2690-return.proof.ts
 ```
 
+## New head observed while publishing
+
+The author moved to `978f48b03deb0190d2ecccd92f351d0cb24bb780`, parent `2c9bce6de1eb54c181c7bfd90f7c7961cf119b54`. Its delta changes only the move page, move words, move-members and move tests; catalog, membership-numbers, option route and store blobs are byte-identical to d7fd. The same eight-case derived proof was rerun on978f:7pass/1fail, with the same40,001-byte bounded read and false200 on `[null,0,0]`. This does not review the invite delta or update the d7fd-only linked/type/registry results into a general978f certification. The posted focal finding can therefore anchor978f while preserving the separate parent reviewers.
+
 ## Checks and limits
 
 Corrective author/linked tests: option-sale-toggle62, membership-numbers18, option-off-sale22, option-member-count27, plan-options24, price-options27 and cost-registry24 all pass (204 checks). Data-registry is **6/7**, failing on the parent's new unregistered `nl:mv:open:@lib/move-members.ts` family. This was reported separately to C2/T/C4; it is outside this focal review, and the linked suite is not claimed wholly green. An initial batch misspelled `option-member-count.test.ts` as `option-members.test.ts`; its bundler failure was corrected by running the actual file, without changing tests.

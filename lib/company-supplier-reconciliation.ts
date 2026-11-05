@@ -71,6 +71,40 @@ function add(total: number, value: number): number | null {
   return next <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(next) : null;
 }
 
+function hasDuplicateObjectMembers(serialized: string): boolean {
+  const stack: Array<Set<string> | null> = [];
+  for (let index = 0; index < serialized.length; index += 1) {
+    const character = serialized[index];
+    if (character === "{") { stack.push(new Set()); continue; }
+    if (character === "[") { stack.push(null); continue; }
+    if (character === "}" || character === "]") {
+      const expectedObject = character === "}";
+      const context = stack.pop();
+      if (context === undefined || (expectedObject ? context === null : context !== null)) return true;
+      continue;
+    }
+    if (character !== '"') continue;
+    const start = index;
+    let escaped = false;
+    for (index += 1; index < serialized.length; index += 1) {
+      const current = serialized[index];
+      if (escaped) { escaped = false; continue; }
+      if (current === "\\") { escaped = true; continue; }
+      if (current === '"') break;
+    }
+    if (index >= serialized.length) return true;
+    let after = index + 1;
+    while (/\s/.test(serialized[after] ?? "")) after += 1;
+    const context = stack.at(-1);
+    if (serialized[after] !== ":" || !(context instanceof Set)) continue;
+    let key: unknown;
+    try { key = JSON.parse(serialized.slice(start, index + 1)); } catch { return true; }
+    if (typeof key !== "string" || context.has(key)) return true;
+    context.add(key);
+  }
+  return stack.length !== 0;
+}
+
 /**
  * Compares one declared complete monthly packet. It never reads a provider,
  * authenticates an invoice or treats a missing packet as zero.
@@ -78,6 +112,7 @@ function add(total: number, value: number): number | null {
 export function reconcileSupplierInvoiceEvidence(input: unknown): SupplierInvoiceReconciliation {
   if (typeof input !== "string" || input.length > SUPPLIER_INVOICE_MAX_CHARACTERS) return unknown();
   try {
+    if (hasDuplicateObjectMembers(input)) return unknown();
     const root: unknown = JSON.parse(input);
     if (!exact(root, ROOT_FIELDS) || root.schema !== 1 || root.complete !== true || root.currency !== "USD") return unknown();
     if (typeof root.period !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(root.period)) return unknown();

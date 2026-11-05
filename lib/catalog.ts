@@ -202,7 +202,8 @@ export type Product = {
   keys: KeySetup | null;
   /**
    * Whether a PDF it delivers is stamped with the buyer's email on every
-   * page when it is downloaded (lib/pdf-stamp.ts).
+   * page when it is downloaded, and an EPUB marked with it inside the book
+   * (lib/pdf-stamp.ts).
    */
   stamp: boolean;
   /**
@@ -771,6 +772,12 @@ export async function readDelivery(
   if (product.id === id) return { product, option: null };
   const option = product.options.find((entry) => entry.id === id);
   return option ? { product, option } : null;
+}
+
+/** The file a delivery holds: the option's own when the id named an option, else the product's. */
+export function deliveredFile(found: { product: Listing; option: ProductOption | null } | null): ProductFile | null {
+  if (!found) return null;
+  return (found.option ? found.option.file : found.product.file) ?? null;
 }
 
 /**

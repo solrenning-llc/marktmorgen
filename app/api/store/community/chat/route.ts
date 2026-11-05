@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { fromAnotherSite } from "@/lib/studio-route";
+import { fromAnotherSite, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { CREATOR, readMembers, within } from "@/lib/community";
@@ -99,13 +100,15 @@ export async function POST(request: NextRequest) {
     const name = owner ? store.name : viewer.member?.n || "A member";
     const said = await say(id, config.chat, key, owner, text(body.text, MAX_CHAT_TEXT), name);
     if (!said.ok) {
-      return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : 400 });
+      return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : said.reason === "unknown" ? 503 : 400 });
     }
     return Response.json({ ok: true, message: said.message, name });
   }
 
   // Taking something out, and emptying the room: the creator's alone.
   if (!owner) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
+  // Neither comes back: a session let in without its second step waits (lib/two-step.ts).
+  if (await lockedFor(request, "community", action)) return refusedJson("locked");
   if (action === "unsay") {
     const number = Number(body.number);
     if (!Number.isInteger(number) || number <= 0) return Response.json({ ok: false, error: "bad" }, { status: 400 });

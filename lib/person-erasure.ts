@@ -87,12 +87,17 @@ import { forgetInboxPerson } from "@/lib/inbox";
 import { forgetDiscordPerson } from "@/lib/discord-access";
 import { forgetSyncPerson } from "@/lib/email-sync";
 import { forgetLedgerCopy } from "@/lib/segments";
+import { forgetReadingsPerson } from "@/lib/store-readings";
+import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
+import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
 import { forgetRequestsPerson } from "@/lib/payment-request-store";
 import { forgetAgreementsPerson } from "@/lib/agreement-store";
+import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
+import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
 
 
 /**
@@ -113,10 +118,12 @@ export type ErasureNote = "discord-roles" | "email-platform";
  * links, their place in a sequence).
  */
 export const ERASERS: Eraser[] = [
+  { module: "lib/order-confirmation-outbox.ts", run: (s) => forgetOrderConfirmationMail(s.statsId, s.email) },
+  { module: "lib/shipment-mail-outbox.ts", run: (s) => forgetShipmentMail(s.statsId, s.email) },
   { module: "lib/flows.ts", run: async (s) => (await forgetWorkflowPerson(s.store, s.email)).flows },
   { module: "lib/mail-clicks.ts", run: (s) => forgetClicksPerson(s.listId, s.email) },
   { module: "lib/mail-health.ts", run: (s) => forgetHealthPerson(s.store, s.email) },
-  { module: "lib/crm.ts", run: (s) => forgetCrmPerson(s.statsId, s.person, s.email) },
+  { module: "lib/crm.ts", run: (s) => forgetCrmPerson(s.statsId, s.person, s.email, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
@@ -176,6 +183,10 @@ export const ERASERS: Eraser[] = [
     },
   },
   { module: "lib/segments.ts", run: (s) => forgetLedgerCopy(s.statsId) },
+  // The studio's kept reading of the sales names the biggest buyers by address (inbox C4-48): it goes, and is read again.
+  { module: "lib/store-readings.ts", run: (s) => forgetReadingsPerson(s.statsId) },
+  // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
+  { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
   {
     module: "lib/reviews.ts",
@@ -186,6 +197,8 @@ export const ERASERS: Eraser[] = [
       return done.records;
     },
   },
+  // The month's summary of what customers say quotes their reviews (rule 28): it goes after them, and a reading under way is not kept.
+  { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
   { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },

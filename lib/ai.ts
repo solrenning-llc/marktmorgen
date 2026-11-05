@@ -43,7 +43,7 @@ import {
 } from "@/lib/ai-rules";
 
 import { type PageBlock, type SalesPage, emptyBlock, parsePage } from "@/lib/sales-page";
-import { MAX_TRANSLATE_PARTS, pageWords, translateParts, withWords } from "@/lib/page-translate";
+import { MAX_TRANSLATE_PARTS, keepEveryBlock, pageWords, translateParts, withWords } from "@/lib/page-translate";
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import { type DraftedQuestion, MAX_QUIZ_SOURCE, readDrafted, shuffleAnswers } from "@/lib/quiz-draft";
 import { type DraftedStep, readDraftedSteps } from "@/lib/sequence-draft";
@@ -404,7 +404,11 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
  * the page comes back for the editor, and its rules (lib/sales-page.ts,
  * parsePage) hold for it as for any other.
  */
-export async function translatePage(store: Store, input: { page: SalesPage; language: string }, now = Date.now()): Promise<AiResult<SalesPage> | { ok: false; reason: "long" }> {
+export async function translatePage(
+  store: Store,
+  input: { page: SalesPage; language: string },
+  now = Date.now(),
+): Promise<AiResult<{ page: SalesPage; untranslated: number }> | { ok: false; reason: "long" }> {
   const words = pageWords(input.page);
   if (words.length === 0) return { ok: false, reason: "notes" };
   const parts = translateParts(words);
@@ -433,7 +437,8 @@ export async function translatePage(store: Store, input: { page: SalesPage; lang
         }),
       );
       if (answers.some((a) => a === null)) return null;
-      return parsePage(withWords(input.page, answers.flat() as string[]));
+      // A block kept whole that a longer translation would refuse stays as it was, counted (keepEveryBlock).
+      return keepEveryBlock(input.page, withWords(input.page, answers.flat() as string[]));
     },
     parts.length,
   );

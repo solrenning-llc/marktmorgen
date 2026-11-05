@@ -6,7 +6,7 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { SITE_URL } from "@/lib/site-url";
 import { storeKey } from "@/lib/learn";
-import { CERT_ID_PATTERN, type Certificate, linkedInAddUrl, linkedInShareUrl, readCertificate } from "@/lib/certificate";
+import { CERT_ID_PATTERN, type Certificate, linkedInAddUrl, linkedInShareUrl, readCertificate, standingOf } from "@/lib/certificate";
 import { readCourse } from "@/lib/course";
 import { CertificateActions } from "@/components/certificate-actions";
 import { readCourseListing } from "@/lib/catalog";
@@ -93,6 +93,8 @@ export default async function CertificatePage({ params, searchParams }: Params) 
   const said = speech(store);
   const w = coursesWords(store.language);
   const withdrawn = certificate.withdrawnAt > 0;
+  // A certificate past its validity (639 [GL7](32)) says so, and is still the record of what it certified.
+  const expired = !sample && standingOf(certificate, Math.floor(new Date().getTime() / 1000)) === "expired";
   const url = `${SITE_URL}/@${store.handle}/certificate/${certificate.id}`;
   const shortUrl = url.replace(/^https?:\/\//, "");
   const issued = said.date(certificate.issuedAt * 1000);
@@ -115,13 +117,21 @@ export default async function CertificatePage({ params, searchParams }: Params) 
               <p className="font-bold">{w.withdrawnOn(said.date(certificate.withdrawnAt * 1000))}</p>
               <p className="mt-1">{w.withdrawnBody(certificate.creator)}</p>
             </div>
+          ) : expired ? (
+            <div className="rounded-2xl px-5 py-4 text-sm" style={{ background: "var(--st-item)", color: "var(--st-text)" }} role="status">
+              <p className="font-bold">{w.expiredOn(said.date((certificate.validUntil ?? 0) * 1000))}</p>
+              <p className="mt-1">{w.onRecord(store.name, issued)} {w.expiredBody(certificate.creator)}</p>
+            </div>
           ) : (
             <div className="rounded-2xl px-5 py-4 text-sm" style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }} role="status">
               <p className="font-bold">
                 <span aria-hidden="true">{"✓ "}</span>
                 {query.issued === "1" ? w.certReady : w.certGenuine}
               </p>
-              <p className="mt-1">{w.onRecord(store.name, issued)}</p>
+              <p className="mt-1">
+                {w.onRecord(store.name, issued)}
+                {certificate.validUntil ? ` ${w.validUntil(said.date(certificate.validUntil * 1000))}` : ""}
+              </p>
             </div>
           )}
           {sample || withdrawn ? null : (

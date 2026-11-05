@@ -348,6 +348,21 @@ function BlockView({ block }: { block: Block }) {
         </section>
       );
 
+    case "terms":
+      return (
+        <section className="rounded-[var(--r-lg)] border border-line bg-white p-6 sm:p-8" aria-labelledby={sectionId(block.title)}>
+          <h2 id={sectionId(block.title)} className="t-h3 text-ink">{block.title}</h2>
+          <dl className="mt-5 grid gap-4">
+            {block.items.map((item) => (
+              <div key={item.term}>
+                <dt className="font-semibold text-ink">{item.term}</dt>
+                <dd className="mt-1 text-[0.9375rem] text-ink-soft [overflow-wrap:anywhere]">{item.meaning}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      );
+
     case "storecard":
       return (
         <section className="" aria-labelledby={sectionId(block.title)}>

@@ -16,7 +16,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
-let mode: "caps" | "short" = "caps";
+let mode: "caps" | "short" | "longer" | "same" = "caps";
 const asked: { system: string; model: string; strings: string[] }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -24,7 +24,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = JSON.parse(String(init?.body)) as { system: string; model: string; messages: { content: string }[] };
   const strings = JSON.parse(body.messages[0].content) as string[];
   asked.push({ system: body.system, model: body.model, strings });
-  const t = mode === "caps" ? strings.map((s) => s.toUpperCase()) : strings.slice(1);
+  const t =
+    mode === "caps" ? strings.map((s) => s.toUpperCase())
+    : mode === "longer" ? strings.map((s) => `${s} (translated)`)
+    : mode === "same" ? strings.map(() => "EMPIEZA HOY")
+    : strings.slice(1);
   return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ t }) }] }));
 }) as typeof fetch;
 
@@ -84,7 +88,7 @@ async function main(): Promise<void> {
   const store = (await storeForEmail("owner@example.com"))!;
   const result = await translatePage(store, { page, language: "Spanish" });
   is("by the smaller model, told the language and to add nothing", [asked[0].model, asked[0].system.includes("into Spanish"), asked[0].system.includes("Add nothing and leave nothing out")], [answerModel(), true, true]);
-  is("the page back in the new words", result.ok ? [(result.value.blocks[0] as { headline: string }).headline, result.value.seoDescription] : null, ["BAKE BREAD ON SUNDAY", "BREAD FOR THE WEEKEND"]);
+  is("the page back in the new words", result.ok ? [(result.value.page.blocks[0] as { headline: string }).headline, result.value.page.seoDescription] : null, ["BAKE BREAD ON SUNDAY", "BREAD FOR THE WEEKEND"]);
   is("one of the month's jobs for a short page", result.ok ? result.left : null, 39);
 
   const longPage = parsePage({ blocks: Array.from({ length: 3 }, (_, i) => ({ id: `text000${i}`, kind: "text", heading: "", body: "word ".repeat(900) })) });
@@ -105,6 +109,42 @@ async function main(): Promise<void> {
   is("a page too long, before the model is asked", [refused.ok ? null : refused.reason, asked.length], ["long", 0]);
   const empty = await translatePage(store, { page: parsePage({ blocks: [] }), language: "Dutch" });
   is("a page with no words", empty.ok ? null : empty.reason, "notes");
+
+  part("A block kept whole, and the second version (inbox C4-17)");
+  const booking = { id: "book0001", kind: "booking", product: "c".repeat(10), heading: "x".repeat(95) };
+  const kept = parsePage({ blocks: [booking, { id: "text0001", kind: "text", heading: "Why talk", body: "Twenty minutes." }] });
+  mode = "longer";
+  const longer = await translatePage(store, { page: kept, language: "German" });
+  is(
+    "a heading the translation makes too long: the block stays as it was, counted, and the rest is translated",
+    longer.ok ? [longer.value.untranslated, longer.value.page.blocks.map((b) => b.kind), longer.value.page.blocks[0], (longer.value.page.blocks[1] as { heading: string }).heading] : null,
+    [1, ["booking", "text"], kept.blocks[0], "Why talk (translated)"],
+  );
+  const withB = parsePage({
+    blocks: [{ id: "hero0001", kind: "hero", headline: "Start today", sub: "", media: "none", video: null }],
+    variant: { id: "", blocks: [{ id: "hero0001", kind: "hero", headline: "Begin today", sub: "", media: "none", video: null }] },
+  });
+  is("a page with a second version to start with", withB.variant !== null, true);
+  mode = "same";
+  const same = await translatePage(store, { page: withB, language: "Spanish" });
+  is(
+    "a second version the translation makes the same as the first is dropped, never kept whole in the old language",
+    same.ok ? [same.value.page.variant, (same.value.page.blocks[0] as { headline: string }).headline, same.value.untranslated] : null,
+    [null, "EMPIEZA HOY", 0],
+  );
+  const bWithBooking = parsePage({
+    blocks: [{ id: "text0001", kind: "text", heading: "Why", body: "One." }],
+    variant: { id: "", blocks: [{ id: "text0001", kind: "text", heading: "Why not", body: "Two." }, booking] },
+  });
+  mode = "longer";
+  const second = await translatePage(store, { page: bWithBooking, language: "German" });
+  const b = second.ok ? second.value.page.variant : null;
+  is(
+    "in the second version, its own words translated and only the refused block as it was",
+    b ? [(b.blocks[0] as { heading: string }).heading, b.blocks[1], second.ok ? second.value.untranslated : null] : null,
+    ["Why not (translated)", bWithBooking.variant?.blocks[1], 1],
+  );
+  mode = "caps";
   done();
 }
 

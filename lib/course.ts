@@ -103,6 +103,19 @@ export type Course = {
    */
   shelf?: string[];
   /**
+   * How long a certificate issued from now on stays valid, in months
+   * (639 [GL7](32)), for a training that has to be renewed; absent is for
+   * good, as for every course before it. Fixed on each certificate when it
+   * is issued, so changing it later never changes one already given.
+   */
+  certificateMonths?: number;
+  /**
+   * Whether each lesson video shows the signed-in student's email and the
+   * day they joined over it (602 [WP1], lib/video-stamp.ts). Off until the
+   * creator switches it on; left out of courses saved before it existed.
+   */
+  stampVideo?: boolean;
+  /**
    * The day the course begins, in seconds, or null for a course with no
    * fixed start. This is the one thing that decides whether a course is a
    * cohort or not, and it changes nothing else about it.
@@ -179,6 +192,15 @@ function parseModule(raw: unknown): CourseModule | null {
   };
 }
 
+/** The longest a certificate may stay valid: ten years. */
+export const MAX_CERTIFICATE_MONTHS = 120;
+
+/** A validity as typed or kept: a whole number of months from 1 to 120, or null. */
+export function readCertificateMonths(raw: unknown): number | null {
+  const n = typeof raw === "string" && raw.trim() ? Number(raw.trim()) : raw;
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= MAX_CERTIFICATE_MONTHS ? n : null;
+}
+
 export function parseCourse(raw: unknown): Course | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -190,7 +212,8 @@ export function parseCourse(raw: unknown): Course | null {
     const startsAt =
       typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
     const shelf = readShelf(value.shelf);
-    return { id: value.id, modules, certificate: value.certificate === true, startsAt, ...(shelf.length ? { shelf } : {}) };
+    const months = readCertificateMonths(value.certificateMonths);
+    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}) };
   } catch {
     return null;
   }
@@ -285,13 +308,15 @@ export type CourseEdit =
   | { op: "certificate"; on: boolean }
   /** The "More from" shelf (628 [HN4](b)): product ids, the course's own product left out. */
   | { op: "shelf"; products: unknown; courseProductId: string }
+  /** How long certificates issued from now on stay valid: 1 to 120 months, or null for good. */
+  | { op: "certificate-months"; months: unknown }
   | { op: "start"; at: unknown }
   /** Several modules at once, each with its lessons by title: an outline taken from the writing help (lib/ai.ts). */
   | { op: "outline"; modules: { title: unknown; lessons: unknown[] }[] };
 
 export type EditResult =
   | { ok: true; course: Course; removed: ProductFile[]; addedId?: string }
-  | { ok: false; reason: "unknown" | "too_many" | "not_empty" | "drip" | "files" | "video_type" | "start" };
+  | { ok: false; reason: "unknown" | "too_many" | "not_empty" | "drip" | "files" | "video_type" | "start" | "months" };
 
 function mapLesson(course: Course, lessonId: string, change: (lesson: Lesson) => Lesson): Course | null {
   let found = false;
@@ -486,6 +511,16 @@ export function editCourse(course: Course, edit: CourseEdit): EditResult {
       const { shelf: _was, ...rest } = course;
       void _was;
       return { ok: true, course: shelf.length ? { ...rest, shelf } : rest, removed: [] };
+    }
+    case "certificate-months": {
+      if (edit.months === null || edit.months === 0 || edit.months === "") {
+        const rest = { ...course };
+        delete rest.certificateMonths;
+        return { ok: true, course: rest, removed: [] };
+      }
+      const months = readCertificateMonths(edit.months);
+      if (!months) return { ok: false, reason: "months" };
+      return { ok: true, course: { ...course, certificateMonths: months }, removed: [] };
     }
     case "start": {
       if (edit.at === null) return { ok: true, course: { ...course, startsAt: null }, removed: [] };

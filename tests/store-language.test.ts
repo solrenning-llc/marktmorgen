@@ -84,10 +84,10 @@ const SAME: Record<string, Record<string, string[]>> = {
   // Words the languages share with English: video, quiz, module, downloads, bytes.
   courses: {
     es: ["video", "bytes"],
-    fr: ["module", "quiz"],
-    de: ["quiz", "downloads"],
+    fr: ["module", "quiz", "codeBlock"],
+    de: ["quiz", "downloads", "codeBlock"],
     it: ["video", "quiz"],
-    nl: ["module", "video", "quiz", "crumb", "openSite", "downloads", "bytes"],
+    nl: ["module", "video", "quiz", "crumb", "openSite", "downloads", "bytes", "codeBlock"],
     pt: ["bytes"],
   },
   membership: { fr: ["fromName"], nl: ["fromName"], pt: ["fromName"] },
@@ -106,7 +106,7 @@ const SAME: Record<string, Record<string, string[]>> = {
   // "{price} {every}": the price and the words for how often, each already in the language.
   // "Bonus 7": Spanish says bonus too.
   // "Pages" is the French word for the menu of a store's own pages too.
-  "page blocks": { es: ["bonusN"], fr: ["pagesMenu"], de: ["socialWebsite"], it: ["socialEmail"], nl: ["socialWebsite"] },
+  "page blocks": { es: ["bonusN"], fr: ["pagesMenu"], de: ["socialWebsite"], it: ["socialEmail", "videoWindowMark"], nl: ["socialWebsite", "videoWindowMark"] },
   // "Audience" is the French word too.
   "media kit": { fr: ["audienceTitle"] },
   // "Total" is the word in these languages too.

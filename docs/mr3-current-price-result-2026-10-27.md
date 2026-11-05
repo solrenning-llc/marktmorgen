@@ -1,5 +1,57 @@
 # MR3 — Resultado atual e histórico dos preços preservados
 
+## Estado atual — 04/11/2026
+
+Item 466 [MR3], passo 10 da AV1. Conferência documental do main `4c9d37faa755eaa9a4b95f114552c4736dfef37a`. Estado: em andamento; o lucro integral permanece desconhecido e a base mínima integral não estabelecida. Os relatórios anteriores estão preservados na seção histórica abaixo; seus resultados e descrições do código não são o resultado atual.
+
+### Critério atual e evidência necessária
+
+A regra LC e a política TX de [AGENTS.md](../AGENTS.md) prevalecem: considerar cada cliente usando 100% dos recursos e limites, no pior mês, inclusive as janelas mensais do anual, com a interpretação jurídica correta e as fontes oficiais aplicáveis. A regra LC registra IRPF sobre o lucro anual e IOF sobre o valor efetivamente remetido ao Brasil, com imposto do comprador por fora do preço; este relatório não repete uma conferência jurídica nem transforma esse registro em prova do enquadramento real. Qualquer cálculo ao dono deve ser feito fora do piso tributário histórico, sem apresentar dimensionamento antigo como lucro atual.
+
+O código já usa `GATE_READING_ID=most-correct` e `gateReading()=most-correct` em [lib/tax-gate.ts](../lib/tax-gate.ts). O seletor identifica a política, não é prova de enquadramento ou de custo fiscal zero. A revisão exige livros anuais completos e vinculados, operações de câmbio, taxas máximas e componentes aplicáveis no modelo real de [lib/reviewed-receiving.ts](../lib/reviewed-receiving.ts) e [lib/customer-tax-review.ts](../lib/customer-tax-review.ts). Sem essa evidência, o calculador retorna desconhecido; não se reaproveitam os números dos modelos históricos em `tests/historical-receiving-model.ts` como resultado atual.
+
+O e-mail segue a regra LC: preço real da Amazon SES com as proteções do 309 [EM1], reserva Resend limitada à cota paga e excedente aguardando na fila Amazon. Prova de envio real e cobertura dessas proteções ainda precisam estar incorporadas e verificadas antes de usar o preço menor no cálculo. Este documento não antecipa o resultado dos PRs em andamento nem muda PER_EMAIL.
+
+### Preços preservados e resultado atual
+
+Fonte dos preços: [lib/plan.ts](../lib/plan.ts), em centavos. A tabela informa o preço contratado, não uma receita livre de taxas nem uma estimativa de lucro. “Desconhecido” não significa zero nem prejuízo calculado.
+
+| Contrato | Preço preservado | Lucro integral no pior caso | Base mínima integral |
+| --- | --- | --- | --- |
+| creator_month | US$ 69,00 | Desconhecido | Não estabelecida |
+| creator_year | US$ 690,00 | Desconhecido | Não estabelecida |
+| pro_month | US$ 449,00 | Desconhecido | Não estabelecida |
+| pro_year | US$ 4.490,00 | Desconhecido | Não estabelecida |
+| scale_month | US$ 999,00 | Desconhecido | Não estabelecida |
+| scale_year | US$ 9.990,00 | Desconhecido | Não estabelecida |
+
+`creator` corresponde ao Store; `pro`, ao Studio; `scale`, ao Scale. O assistente continua US$ 69 por mês e 700 respostas; não existe contrato anual do assistente nesta análise. Seu resultado integral também é desconhecido sem a evidência própria. Legendas e demais complementos continuam sujeitos ao cálculo individual completo, sem subsídio da comissão, de outro cliente ou da Hazelsong.
+
+A regra MR exige lucro individual positivo com a folga existente; 60% é a meta do relatório mensal real da empresa, não um piso de venda por cliente. Todos os custos fixos da LLC pertencem integralmente ao Marktmorgen (FX275). A ausência de custos, câmbio, retenção ou exposições financiadas completos impede afirmar uma base mínima finita; custo desconhecido nunca é zero e cota grátis não é teto pago.
+
+### Estado conferido e lacunas
+
+| Parte | Estado nesta conferência |
+| --- | --- |
+| Abertura e venda | `OPENING_REQUESTED=false`; `PLANS_ON_SALE=false` e `ASSISTANT_ON_SALE=false`. Nenhuma compra de plano habilitada. |
+| Revisão comercial | `CURRENT_COMMERCIAL_MARGIN_REVIEW=null`. Um relatório documental ou teste sintético não preenche essa revisão. |
+| Custos fixos | `CURRENT_LLC_FIXED_COST_CEILINGS` contém custos desconhecidos; não há base mínima integral comprovada. |
+| Plataforma Stripe | `CURRENT_STRIPE_PLATFORM_ELIGIBILITY_REVIEW=null`; `stripePlatformEligibilityReady` permanece condição da abertura. Conta e elegibilidade reais não comprovadas. |
+| Tratamento por jurisdição | `DEEMED_SUPPLIER_RECORDS=[]`; o seletor tributário sozinho não constrói cobrança nem recusa por jurisdição. |
+| Consultas e hospedagem | `CONSULTATION_ANSWERS=[]`; nem consulta tributária nem hospedagem europeia são condições adicionais de `taxGateValid`. A configuração válida não dispensa as demais provas. |
+| Relatório mensal da empresa | `CURRENT_COMMERCIAL_PROFIT_MIX_INPUT=null`. A calculadora não representa contabilidade reconciliada; ingestão, agendamento e apresentação automática vêm após a abertura, pela AV1. |
+
+Verificado: preços preservados, seletor tributário atual, evidência explícita exigida pelo calculador real e estados acima. Não verificado: livros/fatos fiscais reais, fatura integral, cobertura e reservas completas, conta Stripe elegível, lucro integral, base mínima ou relatório mensal real entregue. Não há cálculo novo de lucro nesta atualização. A engenharia restante segue a fila; ausência de dados não autoriza preencher custos com zero.
+
+Benefício: o dono deixa de receber uma leitura substituída como resultado atual ao decidir sobre abertura e rentabilidade. Conferência: o teste de MR3 compara os seis preços e o seletor com os módulos reais, recusa lucro sem evidência e exige a separação do histórico. O retorno esperado é evitar decisões de receita baseadas em números antigos; nenhuma receita ou economia realizada é afirmada.
+
+Nenhuma trava foi alterada; preços, limites, comissão, flags, reservas e revisões permanecem. Sem nova operação, chave, retenção, conta, termo, pagamento ou contato externo. Custos de CI e desenvolvimento são desconhecidos, nunca zero. Acessibilidade: títulos e tabelas com cabeçalhos, sem interface alterada, 0 → 0 passos e decisões; sem teste humano ou certificação. Não é entrega funcional nem incrementa o contador 254.
+
+## Histórico integral — relatórios anteriores a 04/11/2026
+
+O conteúdo abaixo permanece integralmente como registro das respectivas datas. As expressões “vigente”, “atual” e “vinculante” dentro desse histórico descrevem o entendimento registrado à época e são substituídas pelo estado acima onde houver conflito.
+
+
 ## Atualização vigente — 30/10/2026, 23:25:10 Fortaleza
 
 Item 466 [MR3], passo 10 da AV1. Foto documental do main `9a67c82fd512f86a4296a247ca987052db7c766a`. Nenhum preço, limite, comissão, tarifa, tributo, revisão ou controle de abertura muda. O relatório de 27/10 está preservado abaixo como histórico: suas afirmações de que SR2 ainda não estava incorporado e sobre consultas/hospedagem europeia não descrevem mais o código atual.

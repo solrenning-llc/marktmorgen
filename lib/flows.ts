@@ -644,7 +644,7 @@ export function runGoneBy(flow: Pick<Flow, "steps">, nowSeconds: number): number
 }
 
 /** What came of an action for one person, for the run's history (lib/flow-runs.ts). */
-type Acted = { email: string; state: "confirmed" | "failed" | "deferred" | "uncertain"; note: string; /** Confirmed, and something was actually changed (not "already had it"): what the "actions done" count counts. */ changed?: boolean; /** Why it waits, for a deferred one (lib/flow-retry.ts). */ wait?: WaitReason };
+type Acted = { email: string; state: "confirmed" | "failed" | "deferred" | "uncertain" | "superseded"; note: string; /** Confirmed, and something was actually changed (not "already had it"): what the "actions done" count counts. */ changed?: boolean; /** Why it waits, for a deferred one (lib/flow-retry.ts). */ wait?: WaitReason };
 const each = (emails: string[], state: Acted["state"], note: string): Acted[] => emails.map((email) => ({ email, state, note }));
 
 /**
@@ -810,12 +810,14 @@ async function actOnPeople(
   }
   if (action.do === "note") {
     // Read when needed: the buyer's page reads the sequences too (lib/buyer-profile.ts), so not at the top.
-    const { addPersonNote } = await import("@/lib/buyer-profile");
+    const { addPersonNote, addRunNote } = await import("@/lib/buyer-profile");
     const out: Acted[] = [];
     for (const email of emails) {
       try {
-        const kept = await addPersonNote(statsId, personKey(statsId, email), "sequence", `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`, store);
-        out.push(kept ? { email, state: "confirmed", changed: true, note: "Note written on their page." } : { email, state: "failed", note: "The note could not be written." });
+        const words = `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`;
+        // Under this run's own take, checked in the note's own write: a run taken over writes nothing (C3-141).
+        const kept = at.lease ? await addRunNote(statsId, personKey(statsId, email), "sequence", words, store, { key: LEASE, ...at.lease(email) }) : (await addPersonNote(statsId, personKey(statsId, email), "sequence", words, store)) ? "written" : null;
+        out.push(kept === "superseded" ? { email, state: "superseded", note: "Taken over by a later run." } : kept ? { email, state: "confirmed", changed: true, note: "Note written on their page." } : { email, state: "failed", note: "The note could not be written." });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: "The note was not written: the store's data room is full." });
@@ -883,7 +885,7 @@ async function actOnDeals(
   statsId: string,
   action: Extract<FlowAction, { do: "deal" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number },
+  at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => { member: string; score: number } },
   held: Held | null,
 ): Promise<Acted[]> {
   const pipelines = await readPipelines(statsId);
@@ -994,7 +996,14 @@ async function actOnDeals(
         : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
     }
     try {
-      const outcome = before === null ? ((await writeDeal(statsId, deal, store)) ? "saved" : "full") : await writeDealOver(statsId, deal, before, store);
+      // Under this run's own take, checked in the deal's own write: a run taken over writes nothing (C3-141).
+      const take = at.lease ? { key: LEASE, ...at.lease(email) } : undefined;
+      const made = before === null ? (take ? await writeDeal(statsId, deal, store, undefined, take) : await writeDeal(statsId, deal, store)) : null;
+      const outcome = before === null ? (made === "superseded" ? "superseded" : made ? "saved" : "full") : await writeDealOver(statsId, deal, before, store, take);
+      if (outcome === "superseded") {
+        out.push({ email, state: "superseded", note: "Taken over by a later run." });
+        continue;
+      }
       if (outcome === "changed") {
         out.push({ email, state: "failed", note: CHANGED_ON_BOARD });
         continue;
@@ -1292,8 +1301,9 @@ export async function sendDueSteps(
     const to = afterIndex(flow.steps, index);
     const queueNext = (people: string[]): (string | number)[][] =>
       to < 0 ? [] : people.map((email) => ["ZADD", QUEUE, now + flow.steps[to].delayHours * 3600, `${listId}|${handle}|${flowId}|${to}|${email}`]);
+    // Never someone a later run took over (C3-141): they are left out before this, and never settled here.
     const settled = (people: Acted[], stay: Set<string>): Settled[] =>
-      people.map((p) => (stay.has(p.email) || p.state === "deferred" ? { ...p, to: p.state === "deferred" ? index : to } : { ...p, to: -1, status: "ended" as const, note: `${p.note} Taken out by another workflow, so nothing after this step is sent.` }));
+      people.flatMap((p) => (p.state === "superseded" ? [] : [{ ...p, state: p.state }])).map((p) => (stay.has(p.email) || p.state === "deferred" ? { ...p, to: p.state === "deferred" ? index : to } : { ...p, to: -1, status: "ended" as const, note: `${p.note} Taken out by another workflow, so nothing after this step is sent.` }));
     // The next step is queued before the attempt is cleared. If clearing then
     // fails, the attempt stays open and the next step holds the run rather
     // than letting anything happen twice; if queueing fails, the run is held here.
@@ -1302,10 +1312,13 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, lease: (email) => ({ member: `${group}|${email}`, score }) }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const acted = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, lease: (email) => ({ member: `${group}|${email}`, score }) }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        // Someone a later run took over is that run's: nothing is noted, queued or settled for them here (C3-141).
+        const superseded = new Set(acted.filter((o) => o.state === "superseded").map((o) => o.email));
+        const outcomes = acted.filter((o) => o.state !== "superseded");
         // Anybody act did not answer for has no known outcome.
-        const answered = new Set(outcomes.map((o) => o.email));
-        const all = [...outcomes, ...each(going.filter((e) => !answered.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];
+        const answered = new Set(acted.map((o) => o.email));
+        const all = [...outcomes, ...each(going.filter((e) => !answered.has(e) && !superseded.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];
         const confirmed = all.filter((o) => o.state === "confirmed" && o.changed).map((o) => o.email);
         // A failed action is written down and the run goes on: one missing deal does not stop the emails after it.
         const onwards = all.filter((o) => o.state === "confirmed" || o.state === "failed").map((o) => o.email);

@@ -579,7 +579,8 @@ function changedLength(answer: unknown): number | null | undefined {
 }
 
 /** Move only the exact snapshot reviewed; never resurrect a deleted opportunity. */
-export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v2
+export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v3
+if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[4]) or "-1") ~= tonumber(ARGV[5]) then return 3 end
 local current = redis.call("HGET", KEYS[1], ARGV[1])
 if not current then return 0 end
 if current ~= ARGV[2] then return {-1, string.len(current)} end
@@ -676,7 +677,8 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
  * there: one deleted since it was read (by its person's deletion, or by
  * someone else) answers 2 and is never written back.
  */
-export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v2
+export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v3
+if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[5]) or "-1") ~= tonumber(ARGV[6]) then return 3 end
 local there = redis.call("HEXISTS", KEYS[1], ARGV[1])
 if there == 0 and ARGV[4] == "edit" then return 2 end
 if there == 0 and redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
@@ -694,9 +696,16 @@ export const dealBytes = (deal: Deal) => dataBytes([deal.id, JSON.stringify(deal
  * written only if it is still there: "gone" when it was deleted since it was
  * read, with its room given back, so a deleted person's deal never comes back.
  */
+/**
+ * A workflow run's own take of its lease (lib/flows.ts): a deal or a note it writes is written only while the lease
+ * holds that exact score, in the same script, and answers "superseded" otherwise (Codex G2 on #2287, C3-141).
+ */
+export type RunTake = { key: string; member: string; score: number };
+
 export async function writeDeal(statsId: string, deal: Deal, room: DataStore): Promise<boolean>;
 export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit: "edit"): Promise<boolean | "gone">;
-export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit"): Promise<boolean | "gone"> {
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit: undefined, take: RunTake): Promise<boolean | "superseded">;
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit", take?: RunTake): Promise<boolean | "gone" | "superseded"> {
   let preflight: unknown;
   try {
     preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
@@ -707,11 +716,12 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore, ed
   if (preflight[0] === 0 && preflight[1] >= MAX_DEALS) return false;
   await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
   try {
-    const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? ""]]);
-    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1 && !(edit && saved[0] === 2))) throw new CrmDealWriteUnconfirmed();
-    // Full after all, or deleted since it was read: the deal's room goes back.
+    const keys = take ? [dealsKey(statsId), take.key] : [dealsKey(statsId)];
+    const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, keys.length, ...keys, deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? "", ...(take ? [take.member, String(take.score)] : [])]]);
+    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1 && !(edit && saved[0] === 2) && !(take && saved[0] === 3))) throw new CrmDealWriteUnconfirmed();
+    // Full after all, deleted since it was read, or the run taken over: the deal's room goes back.
     if (saved[0] !== 1) await giveData(room, [{ slot: dealSlot(deal.id), bytes: 0, set: true }]);
-    return saved[0] === 2 ? "gone" : saved[0] === 1;
+    return saved[0] === 3 ? "superseded" : saved[0] === 2 ? "gone" : saved[0] === 1;
   } catch { throw new CrmDealWriteUnconfirmed(); }
 }
 
@@ -738,16 +748,23 @@ export async function readDealExact(statsId: string, id: string, stages: readonl
  * over what the creator did on the board meanwhile. Its room is taken first,
  * and put back as it was when nothing was written.
  */
-export async function writeDealOver(statsId: string, deal: Deal, before: string, room: DataStore): Promise<"saved" | "changed"> {
+export async function writeDealOver(statsId: string, deal: Deal, before: string, room: DataStore, take?: RunTake): Promise<"saved" | "changed" | "superseded"> {
   await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
   let saved: unknown;
   try {
-    saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, before, JSON.stringify(deal)]]);
+    const keys = take ? [dealsKey(statsId), take.key] : [dealsKey(statsId)];
+    saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, keys.length, ...keys, deal.id, before, JSON.stringify(deal), ...(take ? [take.member, String(take.score)] : [])]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
   const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
   const lost = changedLength(answer);
-  if (answer !== 1 && answer !== 0 && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
+  if (answer !== 1 && answer !== 0 && !(take && answer === 3) && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
   if (answer === 1) return "saved";
+  // The run was taken over: nothing written, the room as the record kept there now weighs is unknown here, so it is
+  // put back as the record read (more counted, never less, than kept).
+  if (answer === 3) {
+    await giveData(room, [{ slot: dealSlot(deal.id), bytes: dataBytesOfLength(utf8Length(deal.id) + utf8Length(before), 1), set: true }]);
+    return "superseded";
+  }
   // Nothing written: its room put back to what the record kept there now weighs (the board's own write sized it to
   // that), as the script measured it in the same step, or none when it is gone. So a record the board made bigger is
   // never counted at its old size, and no second read can fail in between.

@@ -113,6 +113,17 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/buyer-profile.ts ADD_RUN_NOTE: a run's note, only while the run holds its take at its exact score.
+        if (key.startsWith("-- marktmorgen:person-run-note:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, notes, who, lease, id, json, seconds, member, score, person] = args;
+          const held = this.run(["ZSCORE", lease, member]);
+          if (held === null || Number(held) !== Number(score)) return 3;
+          this.run(["HSET", notes, id, json]);
+          this.run(["EXPIRE", notes, seconds]);
+          this.run(["SADD", who, person]);
+          this.run(["EXPIRE", who, seconds]);
+          return 1;
+        }
         // CX-67: existing exposure reservation used by held-store company work.
         if (key.includes("local receiptField='case:'..ARGV[3]..':'..ARGV[4]") && args[0] === "1" && args.length === 9) {
           const [, ledger, review, binding, scope, id, rawCharge, rawLimit, rawFunded] = args;
@@ -412,7 +423,12 @@ export class MemoryRedis {
           return 1;
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
-        if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
+        if (key.startsWith("-- marktmorgen:crm-deal-move:v3\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+          if (args[0] === "2") {
+            const held = this.run(["ZSCORE", args[2], args[6]]);
+            if (held === null || Number(held) !== Number(args[7])) return 3;
+            return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5]]);
+          }
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
@@ -449,7 +465,12 @@ export class MemoryRedis {
           this.data.set(target, args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
+        if (key.startsWith("-- marktmorgen:crm-deal-save:v3\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
+          if (args[0] === "2") {
+            const held = this.run(["ZSCORE", args[2], args[7]]);
+            if (held === null || Number(held) !== Number(args[8])) return 3;
+            return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5], args[6]]);
+          }
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);

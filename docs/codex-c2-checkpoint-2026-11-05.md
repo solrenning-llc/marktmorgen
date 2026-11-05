@@ -1,3 +1,24 @@
+# Latest C2 status — fresh checks on 2026-11-05
+
+This section supersedes the earlier product-in-progress state. No new nominal corrective head exists.
+
+Read exact checkpointdfe174c55 completely (history preserved), full fresh channel372282characters, and current mainc88ffeedacc54e5387bd846f1389deaaee50a84d. Rules/CLAUDE/AGENTS/Codex inbox/queue/reservations have NO delta since the preceding read. No confirmed duplicate worker; this continuation performed read-only checks and triage, without repeating unchanged proof suites.
+
+Fresh GitHub exact source:
+- #2654 OPEN/fec0dbd6658af0a7a92e7e52524b96d3cbd9a8a5, unchanged. Counter-slot MEDIUM5790749015 remains OPEN; no new run of188check needed before actual candidate changes. Prior conditional188/188 helper composition11e461 remains proof ONLY, never approval.
+- #2672 OPEN/4b8882968c72b8df9b02cf1bf540928974a9e94a, owned/reviewed by S. S returned6668269511: original MEDIUM closed focally249/249, but LOWstringList remains, with durable proofcodex/s-review-2672-return/fc0f5fba4d9769dfbc7df019cc7b7ac763ed758f (6checks/2fail+4controls). R2 independently confirmed. Do not duplicate S, modify proposed-helper byte identity or self-close the LOW.
+- #2601 OPEN/a12c62f9d67810d9db42039c0c58da17445e3466; exact workflow API8success+product42060312832failureattempt1. Zero retry consumed, no merge/main integration. N6654503257 and test901dc254 preserved.
+- #2632 OPEN/8c5dbaac5c4e3becd504ca9b498d04f9136c9787. Exact workflow API now TERMINAL8success+product42093951542failure. Verify127479975553 deterministic reservation-check15/16 on3approved Vscripts; WebKit127479975401 failed youtube/confirmed unload-protection390/1280. V's content opinion6668269631 exists, not9greens. V released its3scripts nominally; C1 must update documentary reservation state and C3 integrate normally. Never bypass/retry deterministic failure.
+- Intro fix is now separately owned by Claude2: #2677/b6c3ff116a4d434d7c1e93b6c10c9a07f639c897, R1 content no-finding; proposal to combine it with2632 is still awaiting C1 decision. Do NOT duplicate intro work or copy its fix into C2. V's planned parallel verify work remains subsequent separately approved unit.
+
+Read-only pure-MR2 triage this run: lib/backup-cost.ts, lib/contract-protocol-cost.ts, lib/cost-envelope.ts. NO demonstrated new finding, NO implementation, reservation, RED or PR. backup explicitly keeps its unknown cost list; protocol prices original profile and rejects root Proxy; envelope validates own data and clones array only after primitive validation. This is a limited code read, NOT an independent no-finding certification or a new product unit. Do not rerun/advertise these as tests or repeatedly triage the same text without new evidence.
+
+C2 has1own product only and spare capacity. Coordinator should give explicit disposition of pending threshold2325 proof ownership or another free TX2/TX3/pureMR2 slice if the active shared dependencies do not move. Threshold remains unassigned: never editlib/tax-threshold.ts. Commercial-margin remains J. All available nominal review candidates scanned in channel already have controllers (2677R1/V,2676R2,2674R2/N,2672S,2671U,2632V,2352G). No duplicate claim.
+
+No file/product/author branch/reservation/CI changed; no retries/cancels/headmove/merge/deploy/provider/contact/price/limit/flag/gate actions. No repeated unchanged test suite. Shared coordination is pending, not assumed fixed. Preserve task and existing branches. Next EXACT: actual nominal2654 candidate containing reviewed helper, same e8a86c proof+focused checks; or normal2632merged outcome before a single justified2601integration and9NEW workflows. Check channel fresh first.
+
+---
+
 # Fresh independent feedback — 2026-11-05
 
 Newest full channel after CAS retry includes Revisor2's16h57 independent confirmation: composition11e461251 passes188checks. R2 separately reports LOW in unchanged stringList (in exact copied fixture and shared main helper): inherited array position accepted by reply[i]. This is NOT a regression added by C2, and does not negate conditional counter-gate188/188, but must be forwarded to C4/C1/S/shared owner. DO NOT edit the byte-identical proposed-helper fixture to pretend source is fixed; do not self-close R2 or expand into occupied shared product. Scope of C2 current blocker is still actual2654 repliesFor; stringList LOW is separately coordinated. Preserve exact f01e99d5 fixture and original RED. A future source helper change requires a new exact fixture/record, preserving this one by history.

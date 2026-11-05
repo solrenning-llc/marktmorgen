@@ -63,11 +63,11 @@ export default async function ClosingRefundsPage({ searchParams }: Params) {
         </nav>
         <h1 className="t-h2 mt-3">Refund the time your members paid for after your store closes</h1>
         {!closingRead.ok ? (
-          <p className="mt-4 max-w-2xl text-ink-soft">We could not check whether your store is closing just now, so no refunds are shown. Please reload this page in a minute to try again. If your store is closing, the refunds your members are owed are still made for you on its closing day, as far as your Stripe balance covers them.</p>
+          <p className="mt-4 max-w-2xl text-ink-soft">{`We could not check whether your store is closing just now, so no refunds are shown. Please reload this page in a minute to try again. If your store is closing, we try to make the refunds this page lists on its closing day, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this page's list, refund them yourself in Stripe.`}</p>
         ) : !closing ? (
           <p className="mt-4 max-w-2xl text-ink-soft">Your store is not closing, so there is nothing to refund here.</p>
         ) : !summaryRead?.ok ? (
-          <p className="mt-4 max-w-2xl text-ink-soft">{`We could not read your members' payments just now, so no refunds are shown. Please reload this page in a minute to try again. Your store still closes on ${dayWords(closing.day)}. If you do nothing, the refunds your members are owed are made for you on that day, as far as your Stripe balance covers them.`}</p>
+          <p className="mt-4 max-w-2xl text-ink-soft">{`We could not read your members' payments just now, so no refunds are shown. Please reload this page in a minute to try again. Your store is set to close on ${dayWords(closing.day)}. On that day, we try to make the refunds this page lists, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this page's list, refund them yourself in Stripe.`}</p>
         ) : !rows.length ? (
           <p className="mt-4 max-w-2xl text-ink-soft">{`No member has paid for time after ${dayWords(closing.day)}, the day your store closes, that is still to be refunded.`}</p>
         ) : (

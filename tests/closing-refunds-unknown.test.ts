@@ -74,6 +74,10 @@ const NOT_CLOSING = "Your store is not closing, so there is nothing to refund he
 const CLOSING_UNKNOWN = "We could not check whether your store is closing just now, so no refunds are shown. Please reload this page in a minute to try again.";
 const PAYMENTS_UNKNOWN = "We could not read your members&#x27; payments just now, so no refunds are shown. Please reload this page in a minute to try again.";
 const BUTTON = "Go back without refunding";
+/** As React writes text into the markup. */
+const html = (text: string) => text.replace(/'/g, "&#x27;");
+/** Promises the code does not keep (audit of #2554): members past the call budget or whose hold failed are never refunded by it. */
+const OVERPROMISE = ["are owed are made for you", "are still made for you", "as far as your Stripe balance covers them"];
 
 async function main() {
   const { world: w, cleanup } = await world();
@@ -98,9 +102,10 @@ async function main() {
     failOn = "";
     is("never says the store is not closing", unknownClosing.includes(NOT_CLOSING), false);
     is("says it could not check, and to try again in a minute", unknownClosing.includes(CLOSING_UNKNOWN), true);
-    is("says what still holds: the closing day's refunds, as far as the balance covers them", unknownClosing.includes("If your store is closing, the refunds your members are owed are still made for you on its closing day, as far as your Stripe balance covers them."), true);
+    is("says only what is done: the listed refunds are tried on the closing day, may fail, and anyone unlisted is the creator's to refund", unknownClosing.includes(html("If your store is closing, we try to make the refunds this page lists on its closing day, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this page's list, refund them yourself in Stripe.")), true);
     is("never says no member paid for time after it", unknownClosing.includes("No member has paid"), false);
     is("no refund button", unknownClosing.includes(BUTTON), false);
+    is("no promise that every refund owed is made", OVERPROMISE.some((p) => unknownClosing.includes(p)), false);
 
     part("The store is not closing (read, nothing found)");
     w.redis.clear();
@@ -119,8 +124,9 @@ async function main() {
     is("never says no member paid for time after the closing day", unknownPayments.includes("No member has paid"), false);
     is("never says the store is not closing", unknownPayments.includes(NOT_CLOSING), false);
     is("says it could not read the payments, and to try again in a minute", unknownPayments.includes(PAYMENTS_UNKNOWN), true);
-    is("says what still holds: the closing day, and its refunds as far as the balance covers them", unknownPayments.includes(`Your store still closes on ${day}. If you do nothing, the refunds your members are owed are made for you on that day, as far as your Stripe balance covers them.`), true);
+    is("says only what is done: the day, the listed refunds tried then, may fail, and anyone unlisted is the creator's to refund", unknownPayments.includes(html(`Your store is set to close on ${day}. On that day, we try to make the refunds this page lists, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this page's list, refund them yourself in Stripe.`)), true);
     is("no refund button", unknownPayments.includes(BUTTON), false);
+    is("no promise that every refund owed is made", OVERPROMISE.some((p) => unknownPayments.includes(p)), false);
 
     part("Closing, payments read, none owed");
     w.redis.clear();

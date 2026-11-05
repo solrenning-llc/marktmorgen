@@ -42,10 +42,10 @@ export function writtenDates(text: string, where: string): DatedFact[] {
 
 /** Facts needing review: stale, invalid or future dates, or an unknown clock/window, oldest first. */
 export function overdue(facts: DatedFact[], now = Date.now(), days = REVIEW_DAYS): DatedFact[] {
-  const windowMs = days * 86_400_000;
-  const knownClock = Number.isFinite(new Date(now).getTime());
-  const knownWindow = Number.isSafeInteger(days) && days >= 0 && Number.isSafeInteger(windowMs);
-  const limit = now - windowMs;
+  const windowMs = Number.isSafeInteger(days) && days >= 0 ? days * 86_400_000 : NaN;
+  const knownClock = Number.isFinite(now) && Number.isFinite(new Date(now).getTime());
+  const knownWindow = Number.isSafeInteger(windowMs);
+  const limit = knownClock && knownWindow ? now - windowMs : NaN;
   return facts
     .filter((fact) => {
       if (!knownClock || !knownWindow) return true;

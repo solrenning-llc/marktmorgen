@@ -439,6 +439,48 @@ async function main(): Promise<void> {
   is("no session is refused", [nobody.status, nobody.body.error], [401, "signed_out"]);
   is("nothing written by any of them", await dealCount(statsId), 11);
 
+
+  part("Codex J: a pipeline write must be fenced after its lease expires");
+  const leaseStore = await paidStore("jhublease");
+  const leaseId = leaseStore.store.statsId!;
+  await importHubSpotDeals(leaseStore.store, {header:HEADER, rows:[row("jold", "Old deal", "Offer sent", "Sales")]}, {write:true});
+  const [leasePipe] = await readPipelines(leaseId);
+  const leaseOffer = leasePipe.stages.find(s=>s.name==="Offer sent")!;
+  const leaseTalk = leasePipe.stages.find(s=>s.name==="Talking")!;
+  let leaseRaced=false;
+  let leaseImported:HubSpotImportResult|null=null;
+  try{
+    redis.pipeline=async commands=>{
+      if(!leaseRaced && commands.some(c=>c[0]==="EVAL" && String(c[1]).includes("crm-pipelines-save"))){
+        leaseRaced=true;
+        redis.advance(61_000);
+        leaseImported=await importHubSpotDeals(leaseStore.store,{header:HEADER, rows:[row("jnew", "Fresh deal", "Offer sent", "Sales")]},{write:true});
+      }
+      return original(commands);
+    };
+    await savePipelineChange(leaseId,{pipeline:{...leasePipe,stages:leasePipe.stages.filter(s=>s.id!==leaseOffer.id)}},{[leaseOffer.id]:leaseTalk.id},2,leaseStore.store).catch(error=>console.log("Old writer refused",error.name));
+  }finally{redis.pipeline=original;}
+  const leasePipes=await readPipelines(leaseId);
+  const leaseRaw=(await redis.pipeline([["HGET", "nl:crm:deals:"+leaseId,hubSpotDealId("jnew")]]))[0];
+  console.log("Codex J lease reproduction",JSON.stringify({raced:leaseRaced,imported:leaseImported,pipelines:leasePipes,raw:leaseRaw}));
+  is("lease race was exercised and no newly imported deal is orphaned",[leaseRaced,(await readOpportunityReview(leaseId)).available],[true,true]);
+
+
+  part("Codex J: exhausted row quota must precede per-deal paid room commands");
+  const exhausted = await paidStore("jhubcost");
+  await takeImportRows(exhausted.store,IMPORT_ALLOWANCES.creator.rows);
+  const observed:(string|number)[][]=[];
+  let refusedCost:{status:number;body:any};
+  try{
+    redis.pipeline=async commands=>{observed.push(...commands.map(c=>[...c]));return original(commands);};
+    refusedCost=await call({action:"save",header:HEADER,currency:"usd",rows:Array.from({length:1000},(_,i)=>row(String(i+1),"Deal "+i,"New","Sales"))},exhausted.session);
+  }finally{redis.pipeline=original;}
+  const slotCounts=observed.filter(c=>c[0]==="EVAL" && String(c[1]).includes("marktmorgen:store-data:v1")).map(c=>(c.length-7)/3);
+  const billedLowerBound=observed.length+slotCounts.reduce((n,slots)=>n+3+2*slots,0);
+  const exhaustedRows=(await original([["GET",`nl:imports:rows:${exhausted.store.sid}:${windowId(exhausted.store,Date.now())}`]]))[0];
+  console.log("Codex J exhausted quota reproduction",JSON.stringify({status:refusedCost.status,error:refusedCost.body.error,wire:observed.length,slotCounts,billedLowerBound,rows:exhaustedRows}));
+  is("refused file consumes no per-deal data-room writes after rows were already exhausted",[refusedCost.status,slotCounts.every(n=>n===0)],[429,true]);
+
   done();
 }
 

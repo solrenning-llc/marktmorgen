@@ -10,7 +10,7 @@ const now=1800000000;
 const fee={id:'fee_HistoryRead0001',account:'acct_Receipt0001',charge:'ch_HistoryRead0001',amount:625,amount_refunded:0,currency:'usd'};
 const event={id:'evt_HistoryRead0001',data:{object:{application_fee:fee.id}}};
 const page=(data:unknown[]=[],has_more=false)=>({object:'list',has_more,data});
-async function world(options:{events?:unknown;pages?:(number:number)=>unknown;indexes?:unknown[];cursor?:unknown[];feePatch?:Record<string,unknown>;chargePatch?:Record<string,unknown>}={}){
+async function world(options:{events?:unknown;pages?:(number:number)=>unknown;indexes?:unknown[];cursor?:unknown[];feePatch?:Record<string,unknown>;feeReply?:unknown;chargePatch?:Record<string,unknown>;chargeFails?:boolean}={}){
  redis.clear();process.env.STRIPE_SECRET_KEY='sk_test_fee_refund_only_a_stand_in';
  const owner='historical-read-owner@example.test';
  assert.equal((await claimHandle(owner,'historyread','Synthetic shop','')).ok,true);
@@ -30,8 +30,8 @@ async function world(options:{events?:unknown;pages?:(number:number)=>unknown;in
    const url=new URL(String(input)),method=init?.method??'GET';calls.push({method,path:url.pathname});assert.equal(url.origin,'https://api.stripe.com');
    if(url.pathname==='/v1/application_fees')return Response.json(page());
    if(url.pathname==='/v1/events'){eventPages++;return Response.json(options.pages?options.pages(eventPages):options.events===undefined?page([event]):options.events);}
-   if(url.pathname==='/v1/application_fees/'+fee.id)return Response.json(feeReply);
-   if(url.pathname==='/v1/charges/'+fee.charge)return Response.json({id:fee.charge,application_fee:fee.id,currency:'usd',amount:10000,amount_refunded:10000,disputed:false,payment_intent:{id:'pi_HistoryRead0001',metadata:{share_bps:'625',share_base:'10000'}},...options.chargePatch});
+   if(url.pathname==='/v1/application_fees/'+fee.id)return Response.json(Object.hasOwn(options,'feeReply')?options.feeReply:feeReply);
+   if(url.pathname==='/v1/charges/'+fee.charge)return options.chargeFails?Response.json({error:{message:'Synthetic outage'}},{status:500}):Response.json({id:fee.charge,application_fee:fee.id,currency:'usd',amount:10000,amount_refunded:10000,disputed:false,payment_intent:{id:'pi_HistoryRead0001',metadata:{share_bps:'625',share_base:'10000'}},...options.chargePatch});
    if(method==='POST'&&url.pathname==='/v1/application_fees/'+fee.id+'/refunds'){
     const amount=Number(new URLSearchParams(String(init?.body)).get('amount'));feeReply.amount_refunded=Number(feeReply.amount_refunded)+amount;
     return Response.json({object:'fee_refund',id:'fr_HistoryRead0001',fee:fee.id,amount,currency:'usd'});
@@ -82,4 +82,11 @@ test('an application fee from a different account is refused and stays retryable
 });
 test('an event with an explicitly absent application fee is an ordinary zero',async()=>{
  const r=await world({events:page([{...event,data:{object:{application_fee:null}}}])});assert.equal(r.counts.complete,true);assert.equal(r.counts.failed,0);assert.equal(r.saved,String(now));assert.equal(r.calls.filter(c=>c.method==='POST').length,0);
+});
+test('C4: failed charge evidence stays incomplete without advancing the historical cursor',async()=>{
+ const r=await world({events:page([{...event,data:{object:{charge:fee.charge}}}]),chargeFails:true});
+ assert.equal(r.counts.complete,false);assert.equal(r.counts.failed,1);assert.equal(r.saved,null);assert.equal(r.calls.filter(c=>c.method==='POST').length,0);
+});
+test('C4: malformed application fee evidence cannot advance the historical cursor',async()=>{
+ const r=await world({feeReply:{}});assert.equal(r.counts.complete,false);assert.equal(r.counts.failed,1);assert.equal(r.counts.unknownAmounts,1);assert.equal(r.saved,null);assert.equal(r.calls.filter(c=>c.method==='POST').length,0);
 });

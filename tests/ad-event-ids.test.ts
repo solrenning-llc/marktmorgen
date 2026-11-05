@@ -15,14 +15,23 @@
  *     checkout's or the invoice's own, in their bodies or their addresses;
  *   - the thanks page gives the pixels that same id, for Stripe and PayPal
  *     alike, so each platform still counts the browser's event and the
- *     server's as one, and the pixels' component sends the checkout's own id
- *     only to this site's own server.
+ *     server's as one;
+ *   - in a stand-in browser, the real StorePixels component: all six
+ *     platforms (Meta, Google, TikTok, Pinterest, X, Reddit) get the derived
+ *     id and never the order's own, in any call or on the page's address,
+ *     which is cleared of every key (session_id, paypal, token, pkg, move)
+ *     before any script starts; nothing starts when it cannot be cleared; a
+ *     reload or a step back puts the key back from this tab's storage so the
+ *     page still shows the order; a purchase sent under the old id is not
+ *     sent again; the checkout's own id goes only to this site's server.
  */
+import * as React from "react";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
 import * as ads from "@/lib/ad-events";
-import { NO_PIXELS } from "@/lib/pixels";
+import { NO_PIXELS, type Pixels } from "@/lib/pixels";
+import { StorePixels } from "@/components/store-pixels";
 import { claimHandle, ensureStatsId, setAdsServer, setPixels, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -72,6 +81,121 @@ function request(cookies: Record<string, string>) {
     cookies: { get: (name: string) => (name in cookies ? { value: cookies[name] } : undefined) },
   };
 }
+
+type Browser = { seen: { src: string; page: string }[]; posted: { url: string; body: string }[]; replaced: string[]; local: Map<string, string> };
+
+/**
+ * A stand-in browser at `href` (the shape of tests/review-2557-page-url.test.ts):
+ * the address, history, storage, the document the scripts are added to and
+ * fetch. `session` null is a browser whose tab storage throws.
+ */
+function browserAt(href: string, opts: { session?: Map<string, string> | null; navigation?: string; replaceThrows?: boolean } = {}): Browser {
+  const b: Browser = { seen: [], posted: [], replaced: [], local: new Map() };
+  const location = new URL(href) as unknown as URL & { replace(u: string): void };
+  location.replace = (u: string) => void b.replaced.push(u);
+  const g = globalThis as unknown as Record<string, unknown>;
+  for (const name of ["fbq", "_fbq", "gtag", "dataLayer", "ttq", "TiktokAnalyticsObject", "pintrk", "twq", "rdt"]) delete g[name];
+  g.location = location;
+  g.history = {
+    state: null,
+    replaceState: (_s: unknown, _t: string, url: string) => {
+      if (opts.replaceThrows) throw new Error("SecurityError");
+      location.href = new URL(url, location.href).href;
+    },
+  };
+  const storage = (m: Map<string, string>) => ({
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+  });
+  g.localStorage = storage(b.local);
+  const session = opts.session === undefined ? new Map<string, string>() : opts.session;
+  Object.defineProperty(g, "sessionStorage", {
+    configurable: true,
+    get: () => {
+      if (!session) throw new Error("SecurityError");
+      return storage(session);
+    },
+  });
+  Object.defineProperty(g, "performance", {
+    configurable: true,
+    writable: true,
+    value: { getEntriesByType: (t: string) => (t === "navigation" && opts.navigation ? [{ type: opts.navigation }] : []), now: () => 0 },
+  });
+  Object.defineProperty(g, "navigator", { value: { globalPrivacyControl: false }, configurable: true, writable: true });
+  g.document = {
+    cookie: "",
+    readyState: "complete",
+    createElement: () => ({}),
+    head: { appendChild: (tag: { src?: string }) => b.seen.push({ src: String(tag.src), page: location.href }) },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  g.window = g;
+  g.addEventListener = () => {};
+  g.removeEventListener = () => {};
+  g.fetch = (async (url: string, init?: RequestInit) => {
+    b.posted.push({ url: String(url), body: String(init?.body) });
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+  return b;
+}
+
+/** The real component, once, with its effects run in place and the pixels allowed. */
+function runPixels(props: Parameters<typeof StorePixels>[0]) {
+  const internals = (React as unknown as Record<string, { H: unknown }>).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const before = internals.H;
+  internals.H = {
+    useState: () => ["on", () => {}],
+    useEffect: (effect: () => unknown) => void effect(),
+    useLayoutEffect: (effect: () => unknown) => void effect(),
+    useRef: (v: unknown) => ({ current: v }),
+    useCallback: (f: unknown) => f,
+    useMemo: (f: () => unknown) => f(),
+    useContext: () => null,
+  };
+  try {
+    StorePixels(props);
+  } finally {
+    internals.H = before;
+  }
+}
+
+/** Every call each platform's queue holds, as text, by platform. */
+function queued(): Record<string, string[]> {
+  const g = globalThis as unknown as Record<string, ({ queue?: unknown[]; callQueue?: unknown[] } & unknown[]) | undefined>;
+  const text = (calls: unknown) => (Array.isArray(calls) ? calls.map((c) => JSON.stringify(Array.isArray(c) ? c : Object.values(c as object))) : []);
+  return {
+    meta: text(g.fbq?.queue),
+    google: text(g.dataLayer),
+    tiktok: text(g.ttq ? [...g.ttq] : []),
+    pinterest: text(g.pintrk?.queue),
+    x: text(g.twq?.queue),
+    reddit: text(g.rdt?.callQueue),
+  };
+}
+
+let pixelSeq = 0;
+/** All six pixels, with ids no other run of the component used (each pixel starts once per page). */
+function sixPixels(): Pixels {
+  pixelSeq += 1;
+  const n = String(pixelSeq);
+  return {
+    ...NO_PIXELS,
+    meta: `12345678901234${n}`.slice(-15),
+    google: `G-AB12CD34E${n}`,
+    tiktok: `C4ABCDEFGH123456789${n}`.slice(-20),
+    pinterest: `261234567890${n}`.slice(-13),
+    x: `a1b2${n}`,
+    xEvents: { purchase: "p9q8r", lead: "l7m6n" },
+    reddit: `a2_abc12${n}`,
+    redditMatchingOff: true,
+  };
+}
+
+const purchase = (id: string, order?: string) => ({ type: "purchase" as const, id: adEventId(id), ...(order ? { order } : {}), value: 49, currency: "usd", productId: "club000001", title: "Club" });
+const props = (pixels: Pixels, event: ReturnType<typeof purchase> | null) => ({ handle: "harbor", storeName: "Harbor Kitchen", pixels, names: "Meta and Google", askFirst: false, event });
+const here = () => (globalThis as unknown as { location: URL }).location;
 
 /** Every field of a sent event named like an id, wherever it sits. */
 function idsIn(body: string): string[] {
@@ -172,7 +296,6 @@ async function main(): Promise<void> {
 
   part("The thanks page and the pixels");
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
-  const pixels = readFileSync("components/store-pixels.tsx", "utf8");
   const purchases = thanks.match(/type: "purchase",[\s\S]{0,40}?id: [^,]+,/g) ?? [];
   is("six purchase events on the thanks page", purchases.length, 6);
   is(
@@ -181,9 +304,76 @@ async function main(): Promise<void> {
     [true, true, true, true, true, true],
   );
   is("and the checkout's own id only as the order for this site's own server", (thanks.match(/order: sessionId,/g) ?? []).length, 5);
-  is("which is the only thing the component sends there", /body: JSON\.stringify\(\{ h: handle, s: event\.order \}\)/.test(pixels), true);
-  is("and only when the page gave it one", /if \(event\.order\)\s*\{?\s*fetch\("\/api\/store\/ads-event"/.test(pixels), true);
-  is("no purchase reaches a pixel without its derived id", /event\?\.type === "purchase" && event\.id && once\(/.test(pixels), true);
+
+  part("The pixels in a browser: a Stripe thanks page");
+  const onStripe = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}&upsell=no#top`);
+  runPixels(props(sixPixels(), purchase(SESSION, SESSION)));
+  const calls = queued();
+  is("the six platforms' scripts started", onStripe.seen.length, 6);
+  is("none on an address naming the checkout", onStripe.seen.filter((s) => s.page.includes(SESSION)).length, 0);
+  is("the address keeps everything else", here().href, "https://marktmorgen.com/@harbor/thanks?upsell=no#top");
+  is(
+    "each platform queued the purchase with the derived id",
+    Object.fromEntries(Object.entries(calls).map(([p, list]) => [p, list.some((c) => c.includes(adEventId(SESSION)))])),
+    { meta: true, google: true, tiktok: true, pinterest: true, x: true, reddit: true },
+  );
+  is("no call to any platform names the checkout", Object.entries(calls).filter(([, list]) => list.some((c) => c.includes(SESSION))).map(([p]) => p), []);
+  is("the checkout's own id goes only to this site's server", onStripe.posted, [{ url: "/api/store/ads-event", body: JSON.stringify({ h: "harbor", s: SESSION }) }]);
+  is("kept for this tab, under this page", (globalThis as unknown as { sessionStorage: Storage }).sessionStorage.getItem("nl_px_keys:/@harbor/thanks"), JSON.stringify([["session_id", SESSION]]));
+
+  part("The pixels in a browser: a PayPal thanks page");
+  const paypal = browserAt(`https://marktmorgen.com/@harbor/thanks?paypal=${PAYPAL}`);
+  runPixels(props(sixPixels(), purchase(PAYPAL)));
+  is("none on an address naming the order", [paypal.seen.length, paypal.seen.filter((s) => s.page.includes(PAYPAL)).length], [6, 0]);
+  is("no call to any platform names it", Object.entries(queued()).filter(([, list]) => list.some((c) => c.includes(PAYPAL))).map(([p]) => p), []);
+  is("and nothing is asked of this site's server for it", paypal.posted, []);
+
+  part("The other keys on a store's pages");
+  for (const [name, value] of [["token", "f".repeat(48)], ["pkg", "pk_" + "a".repeat(30)], ["move", SESSION]] as const) {
+    const page = browserAt(`https://marktmorgen.com/@harbor/free?${name}=${value}&status=sent`);
+    runPixels(props(sixPixels(), null));
+    is(`?${name}= is cleared before any script starts`, [page.seen.length, page.seen.filter((s) => s.page.includes(value)).length, here().search], [6, 0, "?status=sent"]);
+  }
+
+  part("When the address cannot be cleared");
+  const stuck = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`, { replaceThrows: true });
+  runPixels(props(sixPixels(), purchase(SESSION, SESSION)));
+  is("no script starts and nothing is sent", [stuck.seen.length, stuck.posted.length], [0, 0]);
+
+  part("Without this tab's storage");
+  const bare = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`, { session: null });
+  runPixels(props(sixPixels(), purchase(SESSION, SESSION)));
+  is("the address is still cleared and the scripts start", [bare.seen.length, bare.seen.filter((s) => s.page.includes(SESSION)).length], [6, 0]);
+
+  part("A reload, or a step back, after the address was cleared");
+  const kept = new Map([["nl_px_keys:/@harbor/thanks", JSON.stringify([["session_id", SESSION]])]]);
+  const reload = browserAt("https://marktmorgen.com/@harbor/thanks?upsell=no", { session: kept, navigation: "reload" });
+  runPixels(props(sixPixels(), null));
+  is("goes back to the address with the key, so the page shows the order again", reload.replaced, [`https://marktmorgen.com/@harbor/thanks?upsell=no&session_id=${SESSION}`]);
+  is("and starts no script on the way", reload.seen.length, 0);
+  const back = browserAt("https://marktmorgen.com/@harbor/thanks", { session: new Map(kept), navigation: "back_forward" });
+  runPixels(props(sixPixels(), null));
+  is("the same after a step back", back.replaced, [`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`]);
+  const fresh = browserAt("https://marktmorgen.com/@harbor/thanks", { session: new Map(kept), navigation: "navigate" });
+  runPixels(props(sixPixels(), null));
+  is("but a page opened afresh without a key stays as it is", [fresh.replaced, fresh.seen.length], [[], 6]);
+  const other = browserAt("https://marktmorgen.com/@harbor/tip", { session: new Map(kept), navigation: "reload" });
+  runPixels(props(sixPixels(), null));
+  is("and another page's key is never put on this one", other.replaced, []);
+
+  part("A purchase sent before ids were derived");
+  const before = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`);
+  before.local.set(`nl_px_sent:${SESSION}`, "1");
+  runPixels(props(sixPixels(), purchase(SESSION, SESSION)));
+  is("a Stripe one is not sent again under the new id", [Object.values(queued()).flat().filter((c) => c.includes(adEventId(SESSION))).length, before.posted.length], [0, 0]);
+  const beforePp = browserAt(`https://marktmorgen.com/@harbor/thanks?paypal=${PAYPAL}`);
+  beforePp.local.set(`nl_px_sent:${PAYPAL}`, "1");
+  runPixels(props(sixPixels(), purchase(PAYPAL)));
+  is("nor a PayPal one", Object.values(queued()).flat().filter((c) => c.includes(adEventId(PAYPAL))).length, 0);
+  const twice = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}x`);
+  twice.local.set(`nl_px_sent:${adEventId(SESSION + "x")}`, "1");
+  runPixels(props(sixPixels(), purchase(SESSION + "x", SESSION + "x")));
+  is("nor one already sent under the new id", Object.values(queued()).flat().filter((c) => c.includes(adEventId(SESSION + "x"))).length, 0);
   done();
 }
 

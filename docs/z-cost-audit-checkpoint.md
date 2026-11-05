@@ -1,3 +1,18 @@
+# Atualização vigente — chat, #2709 e retorno nominal #2690
+
+SUPERSEDE contagem antiga: CINCO unidades próprias (#2602, #2615 e SEM PR reports/assistant/chat). #2484 jáMERGED0f139490d3fc79045fd370cd9b5478b64e2f69e5, normal/expected-head, APItrue, G+9exatos; #2606/2614 tambémmerged. Não sexta. Retentativas2484verify127130387972 e2615verify127143841589/mac127144213372 CONSUMIDAS, nunca repetir. #2615 continua8success+productcancelled apósretry, headinalterado; C1/Vavisados78ea87a9.
+
+Chat (quinta vaga após2484): reserva canal78ea87a90d9edc15c69464201a2df36be6bee202 ANTEScódigo,164PRs/0erros auditados semsobreposição, todasreservas/main/canal lidos. SEM PR codex/z-chat-counter-admission/head1ad267f106319c48c974522b4e32747d397669b8/tree771832d37fd8a70415987923cb352b35f9bd8795. REDb9f9677b8ebb1afca2c58e26fd34975d48fafe5b emramo-red:28/16falhas→MESMOS28/28. Somente2linhas rota chat-summary/route.ts28 mudampara withinEssentialLimit;2testes+aliaspróprio. 8ligados270(58+10+24+7+12+58+33+68), total298green. ScopedTSC/lint0/scanner3805/0/diff/treeiguais. AntesPOST113B+SET187B apóscounterunknown; depois0/0. Doiscomandos/10hora/TTL3600/chavesinalterados; lostACK realconsumido,nãoestorna;toggle/remover/auth/invalidURLpreservados. Upstreamauth/cota ésintético, nãopagamentomensalzerocomprovado. Reportado f4e784b494037f2abb4e93d0100e9e20df1a7608. Chat+reports+assistant+2602WIP esperam2632legítimoMERGED para mainUMAvez+dirigidos/tipos/lint/scanner/diff/PR/revisão/9NOVOS. Nenhumdocreservas.
+
+Revisão2709 concluída: anúncio/reserva2379cfcd01981bf6308cccf0ef8f659faa0afde6, nohead873a914e739d14a3e1deacbe85241ec5b6cbefac; comentáriosvazios ecanalsemcontrolador quandoassumida. Parecer5793527209 COM2LEVES LATENTES/semnovoGRAVE/MÉDIO/sem liberaçãoincondicional: store-forget-retry148–149 novoHLEN:3→4reads/0writes semregistrocostexplicit; storage/pertry sãooutrafronteira. Transporte rejeitadopropaga emvez de null/unknown. Herdados(primeiroampliado), SEMcallerprodutivo emapp/lib; nãoprejuízoUSDrealalegado. Qdispõe/corrigenoMESMOPR→retornofocal. C4#2672continuacontroleslots/proxy, nãodupliquei.
+Prova codex/z-review-2709-read-evidence@ec623debd723d03493dee69ca2e8d811f4aee2d3/tree9ad33ca557dd88e7398e2550cee36baefd411516; docs/reviews/z-2709-read-evidence.md+tests/z2709-month-read.proof.ts+z2709-run.mjs. SAME11:antes4pass7fail→head9pass2latentes. Finalauthorblobe25bb00ecbyteidêntico noRED98055e85 falhacentral, head6/6+SG2125+registries24+7verdes; tipos/lint0/scannerFINALapósstage3806/0/diff/treeigual. Canalresultado a9f091c51c13445f2bebb21400b68a91b2b530d9. Nenhumramo/produto/CI/reservaQalterado.
+
+Novidade2690: Claude2/20h17 publicou d7fd2f0eeb86497d74e36a5d6b3d544e9db35484, base2685/4808934e0e7fcea4e4b1dba0325b8c0e449b9a70; dizfecharZcomrunWriteslen/GETRANGE40k+invitedteto, RED1c8f1aa0(58/5). PróximoLERpedidonominal e retornar SÓ2vetoresZ; C4segunda/Tprimeira atuais, não duplicarrevisãointegral. Prova0da6bd60/review5793340510sób162preservados; nenhumcleanNOVOhead. Nãoeditarautor.
+
+Vigiaantiga50728encerrou prazo(exit0). 27243foireligada(fl ock60s,inboxCodex+merge2632/2679), runtime mudoucwdpara/workspace/scratch/b6cdbc49dd28 eapagoustore; dadosownantigos em/workspace/scratch/b63eb70a66abcontinuam. Após fl ockimpedirduplicatas, sessãoATUAL36793 rodando/tmp/z-main-watch.sh. NãoCIpollingemrodadas. Não inferir concorrente porcheckpointrecente. Fonte/provas remoto; nunca refazer. CheckpointattemptanteriorerrointernoGitHub, este delta preservadolocalpararetentar. Publicar<=30min e PONTOexatocanalantesencerrar.
+
+---
+
 # Atualização vigente — 05/11/2026, após revisão #2690 e merge #2484
 
 Esta seção supera os estados antigos abaixo, preservando todos os REDs e retentativas.

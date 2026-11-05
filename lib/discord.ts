@@ -137,12 +137,15 @@ function readRole(raw: unknown): DiscordRole | null {
   // Its place decides whether the bot can give it: one that is not Discord's whole number is not known, never
   // place 0 (which would sit below the bot and be offered) (CX-123 rule 24).
   if (typeof role.position !== "number" || !Number.isSafeInteger(role.position) || role.position < 0) return null;
+  // A managed role (a bot's or an integration's) can never be given by hand: only Discord's own true or false says
+  // which it is; anything else is not known and the role is not offered (review of Codex J on #2684).
+  if (typeof role.managed !== "boolean") return null;
   return {
     id: role.id,
     name: typeof role.name === "string" ? role.name.slice(0, 100) : "",
     color: typeof role.color === "number" && Number.isSafeInteger(role.color) && role.color >= 0 ? role.color : 0,
     position: role.position,
-    managed: role.managed === true,
+    managed: role.managed,
   };
 }
 

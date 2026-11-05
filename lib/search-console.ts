@@ -162,7 +162,9 @@ export function readRows(json: unknown): SearchRow[] {
     .map((row) => {
       const r = (row ?? {}) as { keys?: unknown; clicks?: unknown; impressions?: unknown; position?: unknown };
       if (!count(r.clicks) || !count(r.impressions) || !count(r.position)) throw new Error("A Search Console row could not be read");
-      const query = Array.isArray(r.keys) && typeof r.keys[0] === "string" ? r.keys[0].slice(0, 200) : "";
+      // Its search is the first of its keys, as text (asked by query); one without it is not known (review of Codex J).
+      if (!Array.isArray(r.keys) || typeof r.keys[0] !== "string") throw new Error("A Search Console row came without its search");
+      const query = r.keys[0].slice(0, 200);
       return { query, clicks: r.clicks as number, impressions: r.impressions as number, position: Math.round((r.position as number) * 10) / 10 };
     })
     .filter((r) => r.query && r.impressions > 0)

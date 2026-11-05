@@ -54,3 +54,15 @@ Always fetch_file only for current blob SHA, then fetch_blob for FULL content, c
 Own earlier accidental truncation d95690d6 was recovered exactly in channel archive docs-arquivo/recovery-n-before-d95690d6.md, manifest alongside, recovery commit1aeeaf30b4bd60f5a726426b7acb21b797884764. Lost prefix blob3d64acfdbeb0e07e6ea4a7db4b8ef2052a53f4a0, parent0a22fdbd217d7dda4e16031c5c396eba66f7d29d. Active suffix bytes preserved. Chronology is recovered prefix plus active messages; do not claim unarchived active file has whole chronology or redo restoration. Noticef41743eb durably explains it.
 
 All test data synthetic. No price/visible limit/commission/flag/gate/account/payment/terms/vendor key/contact change; no personal data. Unknown cost remains unknown. Keep own RED/WIP/proofs on GitHub within30min and post exact checkpoint before ending.
+
+
+## Retomada 05/11/2026 05h45 UTC
+
+- O checkpoint anterior `387bfd50486e3d1e61d472f371b4b682623667b0` foi lido primeiro e todos os heads/REDs foram preservados.
+- #2389 continua em `39a30ad26b9b2188630b68bda557ccc1fb6eecac`: oito agregadores exatos verdes; `product-checks` ainda em fila. P/M continuam aplicáveis aos dois blobs byte-idênticos. Não repetir job antigo.
+- #2451 continua em `59cf23cec1ca879f2380f7b90ad2708ecb0c40b2`: L sem achado e nove agregadores exatos verdes. Bloqueio documental permanece: #2561 (`521f52d80132bdc37e1c2aba9afada7cf096ffbb`) ainda aberto; não tocar #2441/#2561.
+- #2544 continua em `86ab109c7e1ce955fdfd1af77ad5b6cc9a68d476`: G sem achado; nove agregadores finais ainda aguardam capacidade.
+- #2555 continua em `9dcaf9ae42f197e4bc105242aeb966f5c64ae4b8`: I2 aprovou o head exato em `5780064746`; dois agregadores exatos verdes e os demais aguardam. Não duplicar I2.
+- #2558 avançou, no mesmo PR, para `c75c71dcdbf1aaee96b14ad3a2f4b2cb03dddc5f`, tree `b4144d43a4fe662bad0b0d7630c95e8164cff2c2`. H2 havia provado um MÉDIO em autoridade protocol-relative com userinfo. RED permanente próprio `77a8335500fb612e620b6198c085d9b25e18eea1`: 41/4. GREEN: 41/41 + grupos 38+10+12+41, tipos strict da fonte, lint, scanner 3620/0 e diff; tipos globais continuam bloqueados apenas pelos LayoutProps ausentes no main. H2 recebeu pedido de retorno no novo head; nove agregadores novos estão pendentes. Comentário #2558 `6650652452`; canal `7bf30217487db45b4fbc268fee12fe5ac8c75048`.
+- Revisão de leitura pedida pelo A3 na fonte separada `8651d2d674a936d79578a741ab3883b893072add`: sem achado nos três conflitos físicos; 149 verificações fixture/ligadas verdes, 13 nativas corretamente SKIP por ausência de Redis neste host. Parecer no canal `070103acab507f9a470f7eb3e0965d6d89cdb61d`; nenhum ramo/PR A3 foi alterado.
+- Continuam cinco unidades próprias; não abrir sexta. SG2(27) segments e SG2(30) winback continuam sobrepostos a #2270/#1969 e não devem ser editados sem coordenação.

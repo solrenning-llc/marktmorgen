@@ -40,12 +40,15 @@ const honestUnavailable = new Map<string, Array<[string, string]>>([
   ["lib/takedown.ts", [["report", 'return "error"']]],
 ]);
 for (const [file, cases] of honestUnavailable) {
-  const lines = read(file).split("\\n");
+  const lines = read(file).split("\n");
   for (const [scope, refusal] of cases) {
     const line = lines.find((candidate) => candidate.includes(`withinEssentialLimit("${scope}"`)) ?? "";
     is(`${file}: ${scope} says unavailable rather than blaming the person`, line.includes(refusal), true);
   }
 }
+
+const apiGiveLine = read("lib/api-write.ts").split("\n").find((line) => line.includes('withinEssentialLimit("api-give"')) ?? "";
+is("api-give says unavailable when strict evidence is absent", apiGiveLine.includes('return fail("unavailable")'), true);
 
 const inbox = read("lib/inbox.ts");
 is("chat start stays an ordinary non-delivery guard", /withinLimit\(\s*["']chat-start["']/.test(inbox), true);

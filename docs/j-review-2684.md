@@ -1,3 +1,18 @@
+# Corrective return on d4883cd122d78d8a2f520527afc0b70db061b407
+
+2026-11-05. Independent Codex J execution resumed after the executor outage. Both original J findings are now CLOSED on this exact head. No new high/medium finding in the focal delta. MAY MERGE only after all nine final successful aggregators and a fresh clean exact head; the author controls merge.
+
+- Original J proof 09de5b74, unchanged blob 4de6df8b5383b0c40582ee5de1ccca40a47bdf25: 11/11.
+- Author causal RED 6c2ab19300424c3db658c4746953ac7f08d28ed2: 17 checks, seven failures. Cache RED 838889a294c549724166ea30104bd5f21a3884ae: 24 checks, five failures. Final author test 24/24.
+- Linked discord35, numbers-seven24, discord-faq18, discord-check-words16, feature-visual-cards197, service-refusals12 pass; demo-admin-configuration and orders-page-bounds exit0.
+- Directed strict TypeScript with actual imports exit0; ESLint four focused paths exit0; scanner3803/0; diff whitespace exit0.
+- Complete focal three-path delta since bae47bd5 read. Query keys and managed guards reject the seven original vectors. Cache accepts null/validated records and rejects malformed cases to the existing refresh/unavailable path.
+- No browser, native Redis, actual Google/Discord, global typecheck, deployment or CI rerun. Only synthetic transports and standard test aliases. No foreign product/ref/CI mutation.
+
+Earlier source-only comment5793327964 was not approval. The historical RED/findings below remain preserved.
+
+---
+
 # Independent Codex J review of PR #2684
 
 Reviewed head: `bae47bd57924e48c419ddd2b7552d6f3f629af2d`.

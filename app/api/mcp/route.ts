@@ -2,8 +2,9 @@ import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { proposeDescription, proposeSummary, proposeTitle } from "@/lib/agent-propose";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
-import { BUNDLE_CHOICES_MOST, IMPORTS_MOST, PAGE_READING_MOST, PAGE_TEST_MOST, PAGE_VERSIONS_MOST, PRODUCT_TEXT_MOST, SALES_PAGE_MOST, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
+import { BUNDLE_CHOICES_MOST, COURSE_OUTLINE_MOST, IMPORTS_MOST, LESSON_MOST, SAVED_BLOCKS_MOST, PAGE_READING_MOST, PAGE_TEST_MOST, PAGE_VERSIONS_MOST, PRODUCT_TEXT_MOST, SALES_PAGE_MOST, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
 import { metered } from "@/lib/read-meter";
+import { CourseTooLarge, READ_COURSE_WITHIN_CALLS } from "@/lib/course";
 import { apiNumbers } from "@/lib/api-numbers";
 import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
@@ -132,14 +133,15 @@ export async function POST(request: Request) {
     const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
     // A tool of the creator's own records (631 [AA1]): set aside at its most before it reads anything, metered as it
     // reads, and settled at what it read and sends before it is sent (Codex G2 on #1933). Not read, nothing is shown.
-    const paid = async (most: ReadWork, read: () => Promise<unknown>, unavailable: string | (() => string)) => {
+    const paid = async (most: ReadWork, read: () => Promise<unknown>, unavailable: string | (() => string), scriptCalls = 0) => {
       const held = apiReadUnits(most);
       const settle = await hold(held);
       if (settle instanceof Response) return refusedWith(settle);
       // Every database call the tool makes is counted (lib/read-meter.ts): commands, trips and the bytes answered.
       const { value, meter } = await metered(read);
       const out = value === null || value === undefined ? said({ error: typeof unavailable === "function" ? unavailable() : unavailable }, true) : said(value);
-      const work = { commands: meter.commands, bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: meter.trips };
+      // A script's own calls are billed one by one beside it: counted for each script the tool ran.
+      const work = { commands: meter.commands + (meter.commands > 0 ? scriptCalls : 0), bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: meter.trips };
       const refused = await settle(settledUnits(work, held));
       return refused ? refusedWith(refused) : result(id, out);
     };
@@ -191,8 +193,17 @@ export async function POST(request: Request) {
     if (params.name === "get_course_outline" || params.name === "get_lesson") {
       const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
       const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
-      const found = !product ? null : params.name === "get_lesson" ? (lesson ? await readLessonTool(store, product, lesson) : null) : await readCourseTool(store, product);
-      return result(id, found ? said(found) : said({ error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." }, true));
+      let refusal = params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids.";
+      return paid(params.name === "get_lesson" ? LESSON_MOST : COURSE_OUTLINE_MOST, async () => {
+        try {
+          return !product ? null : params.name === "get_lesson" ? (lesson ? await readLessonTool(store, product, lesson) : null) : await readCourseTool(store, product);
+        } catch (error) {
+          // A course too large to read at once is said so, and nothing of it was read.
+          if (!(error instanceof CourseTooLarge)) throw error;
+          refusal = error.message;
+          return null;
+        }
+      }, () => refusal, READ_COURSE_WITHIN_CALLS);
     }
     if (params.name === "get_page_test" || params.name === "get_page_reading") {
       const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
@@ -217,7 +228,7 @@ export async function POST(request: Request) {
         return found.found ? found.value : null;
       }, () => refusal);
     }
-    if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
+    if (params.name === "list_saved_blocks") return paid(SAVED_BLOCKS_MOST, () => savedBlocksTool(store), "Your saved sections could not be read just now. Try again in a moment.");
     if (params.name === "list_bundle_choices") return paid(BUNDLE_CHOICES_MOST, () => bundleChoicesTool(store, params.arguments ?? {}), "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment.");
     if (params.name === "get_imports") return paid(IMPORTS_MOST, () => importsTool(store), "Your imports could not be read just now. This is not an empty history; try again in a moment.");
     if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));

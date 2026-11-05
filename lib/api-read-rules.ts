@@ -34,6 +34,11 @@ import { MAX_PAGE_BYTES, MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
 import { AB_RECORD_BYTES, MAX_VERSIONS } from "@/lib/sales-page-store";
 import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
 import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
+import { COURSE_READ_MOST_BYTES, MAX_BODY_LENGTH, READ_COURSE_WITHIN_CALLS } from "@/lib/course";
+import { MAX_QUESTIONS } from "@/lib/quiz";
+import { MAX_TASK_PROMPT } from "@/lib/assignment-rules";
+import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
+import { SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
@@ -471,3 +476,16 @@ export const PAGE_TEST_MOST: ReadWork = { commands: 3, bytes: LISTING_BYTES + PA
 export const PAGE_READING_MOST: ReadWork = { commands: 3, bytes: LISTING_BYTES + PAGE_READ_BYTES + readAtMost(DEPTH_RECORD_BYTES), sent: 64_000, stripePages: 0, roundTrips: 2 };
 /** get_page_versions at its most: the listing, then the MAX_VERSIONS versions kept, each a page at its most. */
 export const PAGE_VERSIONS_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + MAX_VERSIONS * PAGE_READ_BYTES, sent: PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };
+/** A course's record read by an agent, at its most (lib/course.ts, COURSE_READ_MOST_BYTES), a JSON text escaped once more. */
+export const COURSE_READ_BYTES = 2 * COURSE_READ_MOST_BYTES;
+/** get_course_outline at its most: the listing, then the course read within its bound (an EVAL and the two calls inside). */
+export const COURSE_OUTLINE_MOST: ReadWork = { commands: 2 + READ_COURSE_WITHIN_CALLS, bytes: LISTING_BYTES + COURSE_READ_BYTES, sent: COURSE_READ_BYTES, stripePages: 0, roundTrips: 2 };
+/**
+ * get_lesson at its most: as the outline, then the lesson's text (MAX_BODY_LENGTH characters), quiz (MAX_QUESTIONS
+ * questions of a 300-character question, six 160-character choices and a 600-character explanation) and task
+ * (MAX_TASK_PROMPT characters) side by side.
+ */
+export const LESSON_TEXT_BYTES = readAtMost(MAX_BODY_LENGTH) + readAtMost(MAX_QUESTIONS * (300 + 6 * 160 + 600)) + readAtMost(MAX_TASK_PROMPT);
+export const LESSON_MOST: ReadWork = { commands: 5 + READ_COURSE_WITHIN_CALLS, bytes: LISTING_BYTES + COURSE_READ_BYTES + LESSON_TEXT_BYTES, sent: LESSON_TEXT_BYTES + 4_096, stripePages: 0, roundTrips: 3 };
+/** list_saved_blocks at its most: every saved section of a store, never more than the largest plan keeps, each MAX_SECTION_BYTES, escaped once more. */
+export const SAVED_BLOCKS_MOST: ReadWork = { commands: 1, bytes: 2 * Math.max(...Object.values(SHARE_LIMITS).map((l) => l.savedBlocks)) * MAX_SECTION_BYTES, sent: 2 * Math.max(...Object.values(SHARE_LIMITS).map((l) => l.savedBlocks)) * MAX_SECTION_BYTES, stripePages: 0, roundTrips: 1 };

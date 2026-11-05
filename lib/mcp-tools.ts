@@ -24,7 +24,7 @@ import { type Live, type RangeData, type StatsData, type Today, KEPT_DAYS, LIVE_
 import { readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { readAbout } from "@/lib/product-about";
-import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
+import { type Course, findLesson, readBody, readCourseWithin } from "@/lib/course";
 import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
 import { readPage, readVersions } from "@/lib/sales-page-store";
@@ -576,14 +576,14 @@ export function courseOutlineTool(productId: string, title: string, course: Cour
 /** The course of one of this store's products, or null. */
 export async function readCourseTool(store: Store, id: string) {
   const listing = await readListing(store, id);
-  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  const course = listing?.course ? await readCourseWithin(listing.course.id) : null;
   return listing && course ? courseOutlineTool(listing.id, listing.title, course) : null;
 }
 
 /** One lesson's text, its quiz with the right answers and its task, as the studio edits them; null when there is no such lesson. */
 export async function readLessonTool(store: Store, id: string, lessonId: string) {
   const listing = await readListing(store, id);
-  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  const course = listing?.course ? await readCourseWithin(listing.course.id) : null;
   const found = course ? findLesson(course, lessonId) : null;
   if (!listing || !course || !found) return null;
   const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);

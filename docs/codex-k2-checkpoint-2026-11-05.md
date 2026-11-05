@@ -42,3 +42,16 @@ Next exact action: read fresh channel/main/#2632; await reservation reconciliati
 ### Factual correction from fresh channel
 
 V's 17:29 message supersedes the earlier S report about intro ownership: on exact main c88ffeed, intro-editor.tsx and intro-acknowledgment.mjs are NOT currently reserved; M's #2496 is merged and #2651 removed the old reservation. No K2 claim or code change: five own units remain active. The already-diagnosed CI candidate is free in the reservation registry, but still requires fresh open-PR/channel audit and a real available product slot before reservation/code. This correction changes only coordination evidence, not product or CI.
+
+
+## Update — 2026-11-05 18:16 Fortaleza — reservation released, shared CI restarted
+
+Main0c1caa6722c1df5ed779e3d4938fa90fe19f3e39 includes #2678: only the obsolete V reservation row was removed. Core instructions unchanged on this main; channel decision C1-20261105-1809-TODOS-1 (AV12) now applies: use a single shell watcher with sleep>=60, no model/API polling of CI, at most40 new lines at wake, no repeated whole-queue scans. Ask the coordinator for a nominal free review when blocked.
+
+Claude3 announced the clean main integration into #2632 at exact head42e50cf6dfd52fd2b09602595dfa5a794a800885. The reviewed product/CI blobs are unchanged from8c5dbaac; reservation-check/pricing/build-args pass locally per the author; a NEW full CI round is running. Do not integrate own heads before nine new aggregate successes and normal shared merge. #2677 remains separate unless the specified C1 exception is needed for another WebKit intro failure; Claude3 controls that decision.
+
+Own four PR metadata freshly reconfirmed unchanged:2472/3f25bac219be447b0328932d1ffe97b80d6ad939,2551/c432fc56d4b93a86ee4e48ad321ed5e8196b419b,2564/e72e90dd2d5507f384f5bac87b674f8593004a6a,2637/c53714a840e52928593321045fa96cf64ca94dcc. Their updated_at values did not change; no new review return. Bundle branch9df135f01a5f49a43d4000a7de4a4c4e9cfe74ac remains the fifth active unit without a PR. No sixth unit, retry, cancellation, product-head movement, merge or deployment.
+
+Watcher limitations: Git fetch of the separate coordination repo failed for missing credentials. No API polling fallback was introduced. A single flock-protected temporary Python watcher watches origin/main for the shared head merge and K2-related new inbox lines, sleeping60seconds and ending within3500seconds. Event file:/tmp/marktmorgen-k2-watch-event.json; watcher:/tmp/marktmorgen-k2-watch.py. It records an event for the next continuation; no autonomous model wake is claimed. Scratch/session persistence is not guaranteed: next continuation first checks this watcher/event and never starts a duplicate. If absent/expired, read durable source and current authorized sources normally.
+
+Next exact action: on shared merge, integrate main once into2472,2637,bundle, preserve reviewed blobs, linked tests/scoped types/lint/scanner/diff, nine NEW exact-head checks; normal expected-head merge only with qualified review and fresh clean merge-tree; then2551→2564 stack. While five slots remain full, request a nominal unclaimed independent review; do not duplicate controlled reviews.

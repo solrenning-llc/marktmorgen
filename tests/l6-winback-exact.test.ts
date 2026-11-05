@@ -100,7 +100,7 @@ async function main(): Promise<void> {
   await setWinBack(OWNER, { percent: 25, months: 2, days: 7, coupon: "co_Back0001", address: "1 Main St, Portland, OR 97201" });
   const store = (await storeForEmail(OWNER))!;
   const meta = { store: "lsixback", product: club.product.id };
-  const people = ["ann", "bob", "cat", "dan", "eve"];
+  const people = ["ann", "bob", "cat", "dan", "eve", "fox"];
   for (const name of people) {
     const id = `cus_${name[0].toUpperCase()}${name.slice(1)}0000001`.slice(0, 18);
     customers.set(id, `${name}@example.com`);
@@ -121,6 +121,14 @@ async function main(): Promise<void> {
   subsBody.set(cus("bob"), { object: "list", data: [], has_more: false });
   await sendWinBacks(Date.now() + 30_000, now);
   is("the claim taken on an unknown reading was let go: the next whole reading writes to Bob, once", sentTo(), ["bob@example.com"]);
+
+  part("A partial membership row never proves that the member has not come back");
+  ended("sub_Fox0000001", cus("fox"), 8, meta);
+  // Stripe says this is an active membership, but the partial row omitted its metadata. That cannot prove it belongs
+  // to another product, so the offer must wait for a whole row rather than treating the missing product as a fact.
+  subsBody.set(cus("fox"), { object: "list", data: [{ id: "sub_FoxLive0001", status: "active" }], has_more: false });
+  await sendWinBacks(Date.now() + 30_000, now);
+  is("an active row with missing metadata is unknown, never 'has not come back'", sentTo().includes("fox@example.com"), false);
 
   part("Is the mark ours? Only an exact OK says yes");
   ended("sub_Cat0000001", cus("cat"), 8, meta);

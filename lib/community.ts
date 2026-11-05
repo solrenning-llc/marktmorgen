@@ -1029,20 +1029,49 @@ export async function report(id: string, target: ReportTarget, who: string, room
   return "added";
 }
 
-export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number };
+export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number | null };
+
+/** A failed moderation read is never evidence that nobody reported anything. */
+export class ReportQueueReadError extends Error {
+  constructor() {
+    super("The community report queue could not be read completely.");
+    this.name = "ReportQueueReadError";
+  }
+}
+
+function reportInteger(raw: unknown): number | null {
+  if (typeof raw !== "number" && (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw))) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
 
 /** The creator's moderation queue, newest report first. */
 export async function reportQueue(id: string, limit = 100): Promise<QueuedReport[]> {
-  const [raw] = await redisPipeline([["ZREVRANGEBYSCORE", reportsKey(id), "+inf", "-inf", "WITHSCORES", "LIMIT", 0, limit]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_REPORT_QUEUE) throw new ReportQueueReadError();
+  const reply = await redisPipeline([["ZREVRANGEBYSCORE", reportsKey(id), "+inf", "-inf", "WITHSCORES", "LIMIT", 0, limit]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new ReportQueueReadError();
+  const flat: unknown = reply[0];
+  if (!Array.isArray(flat) || flat.length % 2 !== 0 || flat.length > limit * 2) throw new ReportQueueReadError();
   const rows: { key: string; at: number; target: ReportTarget }[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i + 1 < flat.length; i += 2) {
-    const target = parseTarget(flat[i]);
-    if (target) rows.push({ key: flat[i], at: Math.floor(Number(flat[i + 1]) / 1000), target });
+    const key: unknown = flat[i];
+    const target = typeof key === "string" ? parseTarget(key) : null;
+    const score = reportInteger(flat[i + 1]);
+    if (typeof key !== "string" || !target || score === null || score > 8_640_000_000_000_000 || seen.has(key)) throw new ReportQueueReadError();
+    seen.add(key);
+    rows.push({ key, at: Math.floor(score / 1000), target });
   }
   if (!rows.length) return [];
   const counts = await redisPipeline(rows.map((r) => ["SCARD", reportersKey(id, r.key)]));
-  return rows.map((r, i) => ({ ...r, count: Math.max(1, Number(counts[i]) || 0) }));
+  if (!Array.isArray(counts) || counts.length !== rows.length) throw new ReportQueueReadError();
+  return rows.map((r, i) => {
+    const count = reportInteger(counts[i]);
+    if (count === null) throw new ReportQueueReadError();
+    // Reporter sets expire after 90 days; their absence does not say how
+    // many people originally reported an item that still waits in the queue.
+    return { ...r, count: count === 0 ? null : count };
+  });
 }
 
 /** Takes an item off the queue without touching it: the creator saw nothing wrong. */

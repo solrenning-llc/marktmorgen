@@ -74,7 +74,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   const id = store.community?.id ?? null;
   const config = id ? await readConfig(id) : null;
 
-  let queue: QueueRow[] = [];
+  let queue: QueueRow[] | null = [];
   let members: StudioMember[] = [];
   let totals = { members: 0, listed: 0, posts: 0, reach: 0 };
   let rewards: Reward[] = [];
@@ -137,7 +137,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     over = past.events.map((e, i) => shape(e, soon.length + i));
 
     const [reports, first, listed, posts, reach] = await Promise.all([
-      reportQueue(id, 100),
+      reportQueue(id, 100).catch(() => null),
       memberPage(id, "0", 1000),
       directorySize(id),
       postCount(id),
@@ -170,7 +170,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     totals = { members: first.total, listed, posts, reach };
 
     const rows = await Promise.all(
-      reports.map(async (r) => {
+      (reports ?? []).map(async (r) => {
         const post = await readPost(id, r.target.post);
         if (!post) return null;
         const comment = r.target.kind === "comment" ? await readComment(id, post.id, r.target.comment) : null;
@@ -180,7 +180,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     );
     const found = rows.filter((x): x is NonNullable<typeof x> => x !== null);
     const names = await readMembers(id, found.map((x) => x.author));
-    queue = found.map(({ r, post, comment, author }) => ({
+    queue = reports === null ? null : found.map(({ r, post, comment, author }) => ({
       key: r.key,
       kind: r.target.kind,
       count: r.count,

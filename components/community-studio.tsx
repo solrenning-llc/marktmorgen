@@ -32,7 +32,7 @@ import { startersAddedWords, startersToAdd } from "@/lib/community-starter";
 export type QueueRow = {
   key: string;
   kind: "post" | "comment";
-  count: number;
+  count: number | null;
   at: number;
   text: string;
   author: string;
@@ -122,7 +122,7 @@ export function CommunityStudio({
   on: boolean;
   config: CommunityConfig | null;
   products: ProductChoice[];
-  queue: QueueRow[];
+  queue: QueueRow[] | null;
   members: StudioMember[];
   totals: { members: number; listed: number; posts: number; reach: number };
   canEmail: boolean;
@@ -1037,7 +1037,7 @@ function Queue({
   problem,
   isOwner,
 }: {
-  queue: QueueRow[];
+  queue: QueueRow[] | null;
   busy: string | null;
   run: Runner;
   problem: Problem;
@@ -1047,14 +1047,16 @@ function Queue({
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-queue-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="cm-queue-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Reported</h2>
-        <span className={`tag ${queue.length ? "tag-brand" : ""}`}>{queue.length ? `${queue.length} waiting` : "Nothing waiting"}</span>
+        <span className={`tag ${queue?.length ? "tag-brand" : ""}`}>{queue === null ? "Not loaded" : queue.length ? `${queue.length} waiting` : "Nothing waiting"}</span>
       </div>
       <p className="mt-2 text-ink-soft">
         {isOwner
           ? "Posts and comments members reported. Nobody is told who reported what. You can also hide, delete or mute from the ⋯ menu on any post."
           : "Posts and comments members reported. Nobody is told who reported what."}
       </p>
-      {queue.length === 0 ? (
+      {queue === null ? (
+        <p role="status" className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">Reports could not be loaded. Reload this page to check them.</p>
+      ) : queue.length === 0 ? (
         <p className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">No reports. When a member reports something, it waits here.</p>
       ) : (
         <ul className="mt-4 space-y-3">
@@ -1064,7 +1066,7 @@ function Queue({
                 <span className="font-semibold text-ink">{row.kind === "post" ? "Post" : "Comment"}</span>
                 {` by ${row.author}`}
                 {row.authorEmail ? <span className="break-all">{` (${row.authorEmail})`}</span> : null}
-                {` · reported ${row.count === 1 ? "once" : `${row.count} times`}, last on ${day(row.at)}`}
+                {` · ${row.count === null ? "reported; reporter count is no longer available" : `reported ${row.count === 1 ? "once" : `${row.count} times`}`}, last on ${day(row.at)}`}
                 {row.hidden ? " · already hidden" : ""}
               </p>
               <p className="mt-2 break-words text-ink">{row.text}</p>

@@ -7,7 +7,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, storeForEmail } from "@/lib/store";
 import { finishClosed } from "@/lib/plan-closing";
-import { DUE_KEY, WALK_GAP_MS, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { WALK_GAP_MS, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -141,8 +141,11 @@ async function main(): Promise<void> {
     });
     // After the walk read every page, before its finish: a visitor joins the still-live store's list.
     const leads = `nl:store:leads:${eveStore.statsId}`;
+    // A visitor can only join a store that is still on the air (its record there); the fix keeps it off the air before its walk.
+    let liveDuringWalk = false;
     failing((c) => c[0] === "HSET" && c[1] === "nl:closed:walk" && c.includes("finish"), async (c) => {
-      await real([["HSET", leads, "visitor@example.com", JSON.stringify({ e: "visitor@example.com", t: "tok" })]]);
+      liveDuringWalk = (await storeForEmail(eve)) !== null;
+      if (liveDuringWalk) await real([["HSET", leads, "visitor@example.com", JSON.stringify({ e: "visitor@example.com", t: "tok" })]]);
       return (await real([c]))[0];
     });
     await days(1);
@@ -150,6 +153,7 @@ async function main(): Promise<void> {
     const kept = (await real([["EXISTS", leads]]))[0];
     console.log(`  record ${(await storeForEmail(eve))?.handle ?? "gone"}, closing says erased ${erased}, a visitor's address kept ${kept === 1}`);
     is("never 'erased' while a person's record written for it is kept", erased && kept === 1, false);
+    is("and the store is off the air for its whole walk", liveDuringWalk, false);
   });
 
   done();

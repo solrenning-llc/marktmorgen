@@ -15,7 +15,8 @@ import { claimHandle, storeForEmail, storeRef } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { finishClosed, renewalsAskToday, renewalsLate, renewalsMayClose, RENEWAL_LATE_GAP_DAYS, RENEWAL_TRY_DAYS } from "@/lib/plan-closing";
-import { type Batched, DUE_KEY, FOLLOWERS, PAGE_TRIES, PARKED_GAP_MS, PREPARE_TRIES, WALK_GAP_MS, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { COMMAND, PREPARE_COMMANDS } from "./plan-cost-registry";
+import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -313,6 +314,105 @@ async function main(): Promise<void> {
   const late = day + RENEWAL_TRY_DAYS * DAY;
   is("past them: asked once a week", [renewalsLate(late, day), renewalsAskToday(late, day, late - DAY), renewalsAskToday(late, day, late - RENEWAL_LATE_GAP_DAYS * DAY)], [true, false, true]);
   is("and it closes only when every member is held and none is left to hold", [renewalsMayClose(true, true, 0), renewalsMayClose(true, false, 0), renewalsMayClose(true, true, 1)], [true, false, false]);
+  });
+
+  await section("Second review, G: a store whose record cannot be deleted sits its walk out, on the air; what a visitor writes then is deleted by the walk that takes it", async () => {
+  await walkedOut([], 2);
+  later();
+  const kim = await closing("kimlive");
+  const kimStore = (await storeForEmail(kim))!;
+  const leads = `nl:store:leads:${kimStore.statsId}`;
+  // The record's DEL fails in its first step and again before its walk: it is not walked, and stays on the air.
+  const del = failing((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:store:owner:"), timeout, 2);
+  const first = await quietly(() => run().catch(() => null));
+  is("its record could not be deleted twice: it sat the walk out, left, never erased", [del.used, (await storeForEmail(kim))?.handle, first?.left, (await stateOfRef(kim)).erased ?? null], [2, "kimlive", 1, null]);
+  // A visitor joins the store, still on the air.
+  await real([["HSET", leads, "visitor@example.com", JSON.stringify({ e: "visitor@example.com", t: "tok" })]]);
+  await walkedOut([kim], 2);
+  is("the next walk deletes its record first, then the visitor's address with the rest, and only then says erased", [await storeForEmail(kim), (await real([["EXISTS", leads]]))[0], (await stateOfRef(kim)).erased !== undefined], [null, 0, true]);
+  });
+
+  await section("Second review, G: a visitor who joins while its walk runs: the store is off the air for the whole walk", async () => {
+  await walkedOut([], 2);
+  later();
+  const lia = await closing("lialive");
+  const liaStore = (await storeForEmail(lia))!;
+  const leads = `nl:store:leads:${liaStore.statsId}`;
+  // Its first step's DEL of the record times out once; the batch was written before it.
+  failing((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:store:owner:"), timeout);
+  // After the walk read its pages, before its finish: a visitor joins the store if it is still on the air.
+  let live = false;
+  failing((c) => c[0] === "HSET" && c[1] === "nl:closed:walk" && c.includes("finish"), async (c) => {
+    live = (await storeForEmail(lia)) !== null;
+    if (live) await real([["HSET", leads, "visitor@example.com", JSON.stringify({ e: "visitor@example.com", t: "tok" })]]);
+    return (await real([c]))[0];
+  });
+  later();
+  let report = await quietly(() => run().catch(() => ({ done: false })));
+  for (let i = 0; i < 5 && !report.done; i += 1) report = await quietly(() => run().catch(() => ({ done: false })));
+  is("its record is deleted before the walk: off the air, no visitor, erased with nothing of it kept", [live, (await real([["EXISTS", leads]]))[0], (await stateOfRef(lia)).erased !== undefined, await storeForEmail(lia)], [false, 0, true, null]);
+  });
+
+  await section("Second review, D: its owner opens a store again under the same key during its walk; what that key alone names is the new store's", async () => {
+  await walkedOut([], 2);
+  later();
+  const lou = await closing("louold");
+  // At the walk's first page the owner opens a store again (EC1), and pauses it: nl:pause:<key> is the new store's.
+  failing((c) => c[0] === "SCAN", async (c) => {
+    await claimHandle(lou, "lounew", "lou new studio", "");
+    await real([["SET", `nl:pause:${lou}`, "{\"until\":1}"], ["ZADD", "nl:plan:ended", 1, lou]]);
+    return (await real([c]))[0];
+  });
+  await walkedOut([lou], 3);
+  is("the closed store is finished once, the new one untouched: its pause and its place in the company's lists kept", [(await stateOfRef(lou)).erased !== undefined, (await real([["HEXISTS", "nl:closed:batch", lou]]))[0], (await storeForEmail(lou))?.handle, (await real([["EXISTS", `nl:pause:${lou}`]]))[0], (await real([["ZSCORE", "nl:plan:ended", lou]]))[0] !== null], [true, 0, "lounew", 1, true]);
+  });
+
+  await section("Second review, E: a list of the company's that cannot be read is passed over without holding any store, and kept for the owner's report", async () => {
+  await walkedOut([], 2);
+  later();
+  await real([["ZADD", "nl:call:remindq", 1, "someone-elses-call"]]);
+  const mia = await closing("miaidx");
+  failing((c) => c[0] === "TYPE" && c[1] === "nl:call:remindq", () => "not-a-kind", 1_000);
+  const reports: { done: boolean; unread: number }[] = [];
+  later();
+  for (let i = 0; i < PAGE_TRIES + 2; i += 1) reports.push(await quietly(() => run().catch(() => ({ done: false, unread: -1 }))));
+  const walkHash = (await real([["HGETALL", "nl:closed:walk"]]))[0] as string[];
+  is("after PAGE_TRIES runs the list is passed over: the store finished, the list kept in the walk's hash and said", [(await stateOfRef(mia)).erased !== undefined, walkHash.includes("unread:nl:call:remindq"), reports.find((r) => r.done)?.unread], [true, true, 1]);
+  rules = [];
+  await walkedOut([], 2);
+  later();
+  await closing("nedidx");
+  await walkedOut([], 1);
+  is("once a later walk reads it, it is no longer said", ((await real([["HGETALL", "nl:closed:walk"]]))[0] as string[]).includes("unread:nl:call:remindq"), false);
+  });
+
+  await section("Second review, 6: every retry has a ceiling by count, and what it can cost is bounded", async () => {
+  await walkedOut([], 2);
+  later();
+  const ola = await closing("olastop");
+  const olaStore = (await storeForEmail(ola))!;
+  await real([["HSET", "nl:closed:walk", `tries:${ola}`, PREPARE_TRIES + PARKED_TRIES - 1]]);
+  failing((c) => c[0] === "GET" && c[1] === `nl:team:${olaStore.sid}`, timeout, 1_000);
+  const last = await quietly(run);
+  const after = await quietly(run);
+  is("after its last weekly try it is stopped: kept in line, never due by itself, its record kept, said on every run", [last.failed, last.stopped, Number(await dueScore(ola)), (await storeForEmail(ola))?.handle, after.stopped], [1, 1, STOPPED_AT, "olastop", 1]);
+  await real([["ZREM", DUE_KEY, ola], ["HDEL", "nl:closed:walk", `tries:${ola}`]]);
+  rules = [];
+  // A store left LEFT_WALKS times sits every walk out: never walked or counted again by itself, said as stuck.
+  const sid = "a".repeat(32);
+  const pia = { ref: `#${sid}`, email: "", sid, statsId: null, name: "", handle: "", handles: [], marks: [sid], endedAt: 0, at: 0 };
+  await real([["HSET", "nl:closed:batch", pia.ref, JSON.stringify(pia)], ["HSET", "nl:closed:walk", `left:${pia.ref}`, LEFT_WALKS], ["SET", `nl:api:keys:${sid}`, "{}"]]);
+  later();
+  const quiet = await quietly(run);
+  is("a stuck store alone starts no walk, and is said", [quiet.started, quiet.stuck], [false, 1]);
+  later();
+  await closing("qinew");
+  await walkedOut([], 1);
+  is("in a walk others started it sits out: its key kept, its count not raised", [(await real([["EXISTS", `nl:api:keys:${sid}`]]))[0], (await real([["HGET", "nl:closed:walk", `left:${pia.ref}`]]))[0]], [1, String(LEFT_WALKS)]);
+  await real([["HDEL", "nl:closed:batch", pia.ref], ["HDEL", "nl:closed:walk", `left:${pia.ref}`, `out:${pia.ref}`], ["DEL", `nl:api:keys:${sid}`]]);
+  const worst = retryCommandsAtMost(PREPARE_COMMANDS);
+  console.log(`  a failing closed store's retries at the most: ${worst} commands, $${(worst * COMMAND).toFixed(4)}`);
+  is("what a failing closed store's retries can cost is a finite count of commands, under three cents", [Number.isSafeInteger(worst), worst * COMMAND < 0.03], [true, true]);
   });
 
   done();

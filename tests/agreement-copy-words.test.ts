@@ -3,7 +3,8 @@
  * emailed (Codex U, 5 November 2026; C4-20261105-1930-C2-1). The page is
  * reopened later without the sign route's result, and sendSignedCopies can
  * fail (a refused sender, a spent quota), so the sentence must be true either
- * way: a copy is sent by email, and the signer can keep one now with the
+ * way: we try to send a copy by email and it may not arrive, and the signer
+ * can keep one now with the
  * page's own print button, which is always shown once signed. Nothing about
  * signing, its record, its validity or the consent changes.
  *
@@ -38,6 +39,40 @@ const receivesAsPromise: Record<string, RegExp> = {
   nl: /\bkrijgt u een kopie\b|\bontvangt u een kopie\b/i,
   pt: /\brecebe uma c[óo]pia\b|\breceber[áa] uma c[óo]pia\b/i,
 };
+
+/**
+ * "A copy is sent" in the present, as if it always arrived (Codex U on #2705, proof
+ * codex/u-review-2705-present-claim-proof@3a375a83): sendSignedCopies can come back with no copy sent, so the
+ * sentence says it is an attempt that may not arrive, never a plain present-tense fact.
+ */
+const sentUnqualified: Record<string, RegExp> = {
+  en: /a copy is sent by email/i,
+  es: /se envía una copia por email/i,
+  fr: /une copie est envoyée par e-mail/i,
+  de: /(?:eine kopie wird|wird eine kopie) per e-mail .* geschickt/i,
+  it: /una copia viene inviata via email/i,
+  nl: /(?:er wordt een kopie|wordt een kopie) per e-mail .*gestuurd/i,
+  pt: /é enviada uma cópia por email/i,
+};
+/** The attempt, and that it may not arrive, in each language. */
+const triesAndMayFail: Record<string, [RegExp, RegExp]> = {
+  en: [/\bwe try to send a copy\b/i, /\bmay not arrive\b/i],
+  es: [/\bintentamos enviar una copia\b/i, /\bpuede no llegar\b/i],
+  fr: [/\bnous essayons d'envoyer une copie\b/i, /\bpeut ne pas arriver\b/i],
+  de: [/\bversuchen wir, eine kopie\b|\bwir versuchen, eine kopie\b/i, /\bkommt vielleicht nicht an\b/i],
+  it: [/\bproviamo a inviare una copia\b/i, /\bpotrebbe non arrivare\b/i],
+  nl: [/\b(?:we|wij) proberen een kopie\b|\bproberen (?:we|wij) een kopie\b/i, /\bkomt mogelijk niet aan\b/i],
+  pt: [/\btentamos enviar uma c[óo]pia\b/i, /\bpode não chegar\b/i],
+};
+
+part("Never a copy sent as a plain fact, past or present: an attempt that may not arrive (Codex U)");
+for (const language of LANGUAGE_CODES) {
+  const w = agreementWords(language);
+  for (const [where, said] of [["signed", w.signedBody("Sample Signer", "Sample date")], ["before", w.before("Sample Store")]] as const) {
+    is(`${language} ${where}: no unqualified "a copy is sent"`, sentUnqualified[language].test(said), false);
+    is(`${language} ${where}: says we try to send one and it may not arrive`, triesAndMayFail[language].map((re) => re.test(said)), [true, true]);
+  }
+}
 
 part("The signed sentence, in every language");
 for (const language of LANGUAGE_CODES) {

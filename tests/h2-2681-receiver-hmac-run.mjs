@@ -14,10 +14,12 @@ try {
   const bundle = join(output, 'proof.cjs');
   await build({ stdin: { contents: source + `
 import { strict as h2Assert } from 'node:assert';
+import { createHmac as h2CreateHmac } from 'node:crypto';
+import { deriveKey as h2DeriveKey } from '@/lib/secret-box';
 const h2Address = 'synthetic@example.test';
 process.env.NIMBUS_DATA_KEY = 'synthetic-h2-root-one-'.repeat(3);
 process.env.STRIPE_SECRET_KEY = 'synthetic-h2-fallback';
-const h2Expected = createHmac('sha256', deriveKey('paypal-payout-receiver/v1')!).update(h2Address).digest('hex');
+const h2Expected = h2CreateHmac('sha256', h2DeriveKey('paypal-payout-receiver/v1')!).update(h2Address).digest('hex');
 const h2First = receiverPrint(h2Address);
 h2Assert.equal(h2First, h2Expected);
 h2Assert.match(h2First, /^[0-9a-f]{64}$/);

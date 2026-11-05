@@ -1,6 +1,6 @@
 /** Actual blog reader and RSS route: unreadable metadata is not confirmed published content. */
 import { claimHandle, ensureStatsId, setPostCount, storeForEmail } from "@/lib/store";
-import { publishedPosts, savePost } from "@/lib/store-blog";
+import { publishedPosts, readPost, savePost } from "@/lib/store-blog";
 import { GET as feed } from "@/app/[handle]/blog/feed.xml/route";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -35,6 +35,14 @@ async function main(): Promise<void> {
   is("accepted metadata cannot throw at the actual page date projection", safeDate, true);
   await redis.pipeline([["HSET", key, id, String(raw)]]);
   is("restoring valid metadata preserves the actual stored post", (await publishedPosts(store.statsId, 1)).posts[0]?.id, id);
+  part("A record read under one id cannot authorize overwriting another confirmed post");
+  const otherId = "abcde67890";
+  const other = await savePost(store.statsId, null, { title: "Other confirmed post", body: "Other content stays.", product: null, draft: false }, () => otherId, ROOM);
+  is("the other confirmed post exists", other.ok, true);
+  await redis.pipeline([["HSET", key, id, JSON.stringify({ ...valid, id: otherId })]]);
+  const changed = await savePost(store.statsId, id, { title: "Change only the requested post", body: "Replacement for the requested id.", product: null, draft: false }, () => { throw Error("updating must not allocate a new id"); }, ROOM);
+  is("mismatched stored identity refuses the update", changed.ok, false);
+  is("the other confirmed post is never overwritten", (await readPost(store.statsId, otherId))?.body, "Other content stays.");
   done();
 }
 void main().catch(error => { console.error(error); process.exit(1); });

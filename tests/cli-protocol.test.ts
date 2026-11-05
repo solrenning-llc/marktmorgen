@@ -61,10 +61,14 @@ async function main() {
   is("a valid list still prints the tool", [listed.code, listed.out], [0, "get_store\n  Read the store.\n"]);
   const empty = await invoke((id) => ({ jsonrpc: "2.0", id, result: { tools: [] } }), 200, "tools");
   is("an explicitly empty list is valid", [empty.code, empty.out], [0, ""]);
+  const optional = await invoke((id) => ({ jsonrpc: "2.0", id, result: { tools: [{ name: "get_store", inputSchema: { type: "object" } }] } }), 200, "tools");
+  is("an optional description and empty schema stay valid without undefined output", [optional.code, optional.out], [0, "get_store\n  \n"]);
   for (const result of [{}, { tools: null }, { tools: {} }, { tools: [tool, null] }, { tools: [tool, { name: 5 }] }]) {
     const r = await invoke((id) => ({ jsonrpc: "2.0", id, result }), 200, "tools");
     is("malformed list is not reported as empty or partly successful", [r.code, r.out, r.err.length > 0, r.calls], [2, "", true, 1]);
   }
+  const malformedText = await invoke((id) => ({ ...success(id), result: { content: [{ type: "text", text: "A partial result" }, null] } }));
+  is("the entire tool result is checked before output", [malformedText.code, malformedText.out], [2, ""]);
   done();
 }
 void main();

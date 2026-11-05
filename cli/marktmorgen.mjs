@@ -88,22 +88,48 @@ export function parseArguments(args) {
 }
 
 let nextId = 1;
+const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const unconfirmed = () => ({ error: "The server did not confirm this request. Nothing was retried." });
 
-/** One JSON-RPC call to the MCP server. */
+/**
+ * One JSON-RPC call to the MCP server. A successful HTTP status and a matching
+ * response are both required before reporting success. JSON-RPC 2.0 section 5:
+ * https://www.jsonrpc.org/specification (read November 4, 2026).
+ * No retry: an unconfirmed result does not prove that the server did no work.
+ */
 async function call(fetchImpl, url, key, method, params) {
+  const id = nextId++;
   const response = await fetchImpl(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${key}`, "User-Agent": USER_AGENT },
-    body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
   });
+  if (!response.ok) return { error: `The server answered HTTP ${response.status}. The result was not confirmed; nothing was retried.` };
   let body;
   try {
     body = await response.json();
   } catch {
     return { error: `The server answered ${response.status} without JSON.` };
   }
-  if (body && body.error) return { error: typeof body.error.message === "string" ? body.error.message : "The server refused the request." };
-  return { result: body ? body.result : undefined };
+  if (!object(body) || !Object.hasOwn(body, "jsonrpc") || body.jsonrpc !== "2.0" || !Object.hasOwn(body, "id") || body.id !== id ||
+      Object.hasOwn(body, "result") === Object.hasOwn(body, "error")) return unconfirmed();
+  if (Object.hasOwn(body, "error")) {
+    if (!object(body.error) || !Object.hasOwn(body.error, "code") || !Object.hasOwn(body.error, "message") ||
+        !Number.isInteger(body.error.code) || typeof body.error.message !== "string") return unconfirmed();
+    return { error: body.error.message || "The server refused the request." };
+  }
+  if (!object(body.result)) return unconfirmed();
+  if (method === "tools/list") {
+    if (!Array.isArray(body.result.tools) || !body.result.tools.every((tool) =>
+      object(tool) && typeof tool.name === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(tool.name) &&
+      (tool.description === undefined || typeof tool.description === "string") && object(tool.inputSchema) &&
+      tool.inputSchema.type === "object" && (tool.inputSchema.properties === undefined || object(tool.inputSchema.properties)))) return unconfirmed();
+  } else {
+    if (!Array.isArray(body.result.content) || !body.result.content.every((item) =>
+      object(item) && typeof item.type === "string" && (item.type !== "text" || typeof item.text === "string")) ||
+      (Object.hasOwn(body.result, "isError") && typeof body.result.isError !== "boolean")) return unconfirmed();
+  }
+  return { result: body.result };
 }
 
 /**
@@ -144,7 +170,7 @@ export async function run(argv, { env = {}, fetchImpl = globalThis.fetch, write 
       const tools = Array.isArray(listed.result?.tools) ? listed.result.tools : [];
       for (const tool of tools) {
         const takes = Object.keys(tool.inputSchema?.properties ?? {}).map((name) => ` [--${name}]`).join("");
-        write(`${tool.name}${takes}\n  ${tool.description}\n`);
+        write(`${tool.name}${takes}\n  ${tool.description ?? ""}\n`);
       }
       return 0;
     }

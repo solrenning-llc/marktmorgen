@@ -17,9 +17,17 @@ const entry=[
  'window.renderEditors=(fill,onFill)=>{const common={handle:"synthetic-store",products:[{id:"abc123",title:"Synthetic course"}],fill,onFill};root.render(React.createElement("div",null,React.createElement(BuyButtonEditor,common),React.createElement(CheckoutScriptEditor,{...common,sites:[],signup:false})));};'
 ].join('\n');
 const bundle=await build({stdin:{contents:entry,loader:'tsx',resolveDir:root},bundle:true,platform:'browser',write:false,alias:{'@':root},define:{'process.env.NODE_ENV':JSON.stringify('production')},logLevel:'error',plugins:[{name:'review-link-shell',setup(b){b.onResolve({filter:/^next\/link$/},()=>({path:'link',namespace:'review'}));b.onLoad({filter:/.*/,namespace:'review'},()=>({contents:'import React from "react";export default function Link({children,...props}){return React.createElement("a",props,children)}',loader:'js',resolveDir:root}));}}]});
+// Same installed-browser selection as tests/e2e/agreements.mjs; never download a browser.
+async function launch() {
+ const options={headless:true,args:['--no-sandbox']};
+ if(process.env.CHROMIUM)return chromium.launch({...options,executablePath:process.env.CHROMIUM});
+ try{return await chromium.launch(options);}catch(first){
+  try{return await chromium.launch({...options,channel:'chrome'});}catch{throw first;}
+ }
+}
 let browser;
 try {
- browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+ browser=await launch();
  const page=await browser.newPage();let requests=0;const errors=[];
  await page.route('**/*',route=>{requests++;return route.abort();});
  page.on('pageerror',error=>errors.push(error.message));

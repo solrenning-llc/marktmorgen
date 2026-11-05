@@ -6,6 +6,7 @@ import { isDemoCheckoutConfigured } from "@/lib/demo-store";
 import { type Check, verifyCartShipping, verifyPackages, verifyTaxDocuments, verifyTiers } from "@/lib/verify-stripe";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { SITE_URL } from "@/lib/site-url";
+import { STATUS_CHECKS, statusRunCommands } from "@/lib/status-page";
 
 // A run takes about half a minute, most of it Stripe charging and updating
 // test subscriptions; room is left so a slow day at Stripe is not cut off.
@@ -41,7 +42,9 @@ export async function GET(request: NextRequest) {
     console.log(`stripe-check ${ok ? "pass" : "FAIL"}: ${checks.map((c) => `${c.ok ? "PASS" : "FAIL"} ${c.check} (${c.detail})`).join(" | ")}`);
     const [previous] = await redisPipeline([["GET", LAST]]);
     const failedBefore = typeof previous === "string" && previous.includes('"ok":false');
-    await redisPipeline([["SET", LAST, JSON.stringify({ at: Date.now(), ok, checks }), "EX", 30 * 86_400]]);
+    // The run is also kept for the public status page (lib/status-page.ts): its time and result only.
+    const at = Date.now();
+    await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks }), "EX", 30 * 86_400], ...statusRunCommands(STATUS_CHECKS[1].key, at, ok)]);
     if ((!ok || failedBefore) && isSenderConfigured()) {
       await sendEmail({ meter: { by: "company" },
         from: NIMBUS_FROM,

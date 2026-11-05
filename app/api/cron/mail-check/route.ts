@@ -5,6 +5,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Check, verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { timed, withCutoff } from "@/lib/fetch-timeout";
+import { STATUS_CHECKS, statusRunCommands } from "@/lib/status-page";
 
 // The senders announce a bounce within seconds and a spam report within a
 // minute or so; the run waits up to a hundred seconds for both.
@@ -73,7 +74,9 @@ export async function GET(request: NextRequest) {
             (prior as { ok?: unknown }).ok === false;
         } catch { /* Malformed history is not proof of an earlier failure. */ }
       }
-      await redisPipeline([["SET", LAST, JSON.stringify({ at: Date.now(), ok, checks, usage }), "EX", 30 * 86_400]]);
+      // The run is also kept for the public status page (lib/status-page.ts): its time and result only.
+      const at = Date.now();
+      await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks, usage }), "EX", 30 * 86_400], ...statusRunCommands(STATUS_CHECKS[0].key, at, ok)]);
       if (!ok || failedBefore) {
         await sendEmail({ meter: { by: "company" },
           from: NIMBUS_FROM,

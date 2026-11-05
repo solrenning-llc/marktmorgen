@@ -20,8 +20,11 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
 
   // Descendant hits belong to the focused button; they must not be false failures.
   const clear=await context.newPage();
+  await clear.setViewportSize({width:390,height:320});
   await clear.setContent(`<style>${style}</style>${buttons}`);
+  await clear.evaluate(()=>{window.__fixtureScrolled=false;addEventListener("scroll",()=>{if(scrollY>0)window.__fixtureScrolled=true;},{passive:true});});
   await checkPublicKeyboardCycle({page:clear,path:"synthetic-clear-thirteen-targets",is});
+  assert.ok(await clear.evaluate(()=>window.__fixtureScrolled),"native keyboard traversal scrolls the short viewport");
   await clear.close();
 
   // The center of a wrapped link's union box can fall between its painted lines.

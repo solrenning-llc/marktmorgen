@@ -1,4 +1,4 @@
-/** Native target reachability on settled public pages; not a complete keyboard audit. */
+/** Native target reachability and fragment-center hit tests; not a complete keyboard audit. */
 export async function checkPublicKeyboardCycle({page,path,is}) {
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  const state=await page.evaluateHandle(()=>{
@@ -42,6 +42,28 @@ export async function checkPublicKeyboardCycle({page,path,is}) {
    const outlined=style.outlineStyle==="solid"&&parseFloat(style.outlineWidth)>=3&&style.outlineColor!=="transparent"&&!style.outlineColor.replaceAll(" ","").endsWith(",0)");
    return {outside:false,key:nodes.indexOf(node),visible:radio?outlined:node.matches(":focus-visible"),focusVisible:node.matches(":focus-visible"),outlined,outlineWidth:style.outlineWidth,outlineStyle:style.outlineStyle,outlineColor:style.outlineColor,width:box.width,height:box.height,checked:node instanceof HTMLInputElement?node.checked:null};
   });
+  let focusChecks=0;
+  const checkUnobscured=async key=>{
+   const target=await state.evaluateHandle(({nodes},key)=>nodes[key],key);
+   try {
+    // Native focus can scroll smoothly. Observe the captured focused target;
+    // never assign focus, scroll it by script, or retry a keyboard action.
+    await page.waitForFunction(node=>{
+     if(!document.hasFocus()||document.activeElement!==node)return false;
+     const rects=[...node.getClientRects()].filter(rect=>rect.width>0&&rect.height>0);
+     return rects.length>0&&rects.every(rect=>{
+      const x=rect.left+rect.width/2,y=rect.top+rect.height/2;
+      if(x<0||x>=innerWidth||y<0||y>=innerHeight)return false;
+      const hit=document.elementFromPoint(x,y);
+      return Boolean(hit&&(hit===node||node.contains(hit)));
+     });
+    },target,{timeout:3000});
+    focusChecks++;
+   } catch(error) {
+    console.log("AX2_KEYBOARD_OBSCURED:"+JSON.stringify({path,key,actual:await read()}));
+    throw new Error("Keyboard focus obscured on "+path+" at target "+key,{cause:error});
+   } finally {await target.dispose();}
+  };
   const radioReports=[],testedGroups=new Set();
   const checkRadios=async current=>{
    const groupIndex=snapshot.groups.findIndex(group=>group.includes(current.key));
@@ -67,6 +89,7 @@ export async function checkPublicKeyboardCycle({page,path,is}) {
     const actual=await read();
     is("native radio arrow reaches next option "+path,actual.key,target);
     is("native radio arrow checks focused visible option "+path,actual.checked&&actual.visible&&actual.width>0&&actual.height>0,true);
+    await checkUnobscured(actual.key);
     reached.push(actual.key);
    }
    const restored=await read();
@@ -85,6 +108,7 @@ export async function checkPublicKeyboardCycle({page,path,is}) {
     if(current.key!==null){
      is("keyboard focus belongs to settled sequential targets "+path,expected.includes(current.key),true);
      is("native keyboard focus is visible "+path,current.visible&&current.width>0&&current.height>0,true);
+     await checkUnobscured(current.key);
      if(visited.has(current.key)){innerLoop=true;break;}
      visited.add(current.key);
      await checkRadios(current);
@@ -99,7 +123,7 @@ export async function checkPublicKeyboardCycle({page,path,is}) {
    reports.push({direction,expected:expected.length,reached:visited.size,leftDocument,innerLoop,missing});
   }
   is("native keyboard verifies every captured radio group "+path,testedGroups.size,snapshot.groups.length);
-  console.log("AX2_KEYBOARD_CYCLE:"+JSON.stringify({path,reports,radioReports,scope:"Native target reachability in this settled state only. Browser-chrome exit, semantic order, other disclosure states, menus, dialogs, real devices and conformance remain unverified."}));
+  console.log("AX2_KEYBOARD_CYCLE:"+JSON.stringify({path,reports,radioReports,focusChecks,scope:"Native target reachability and fragment-center hit tests in this settled state only. Pointer-transparent overlays, contrast, full visual obstruction, browser-chrome exit, semantic order, other disclosure states, menus, dialogs, real devices and conformance remain unverified."}));
   if(reports.some(report=>report.innerLoop||report.missing.length))throw Error("Native keyboard reachability failed for "+path);
  }finally{await state.dispose();}
 }

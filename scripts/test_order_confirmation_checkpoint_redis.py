@@ -231,3 +231,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Keep the priced live legacy receipt inside this existing CI entry point.
+    # Its exact command budget is stricter than the protected-source ceiling.
+    from test_legacy_order_accounting_redis import main as legacy_cost_main
+    legacy_cost_main()

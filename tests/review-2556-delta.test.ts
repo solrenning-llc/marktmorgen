@@ -65,6 +65,11 @@ async function main(): Promise<void> {
   const c = await cancelReset(LOST, "studio");
   restore();
   advance(1000);
+  // The mark (endLocked) and a session's opening are both read from the real clock, and advance() moves only
+  // the in-memory Redis's: a session opened in the same millisecond as the mark is not "opened after" it, and
+  // stays locked, which is the safe side. Wait for the real clock to move so this one is opened after it.
+  const markedBy = Date.now();
+  while (Date.now() <= markedBy) await new Promise((resolve) => setTimeout(resolve, 1));
   const second = await enterLocked(await holdSignIn(LOST));
   if (!second) throw new Error("not let in 2");
   const t8 = Date.now() + (RESET_DAYS + 1) * DAY;

@@ -43,7 +43,7 @@ It does not say that Marktmorgen is secure.
 | MM-SA-27 | Info | The video watch-depth listener accepts any origin that looks like YouTube or Vimeo (`evilvimeo.com`); it adds nothing the public beacon does not already allow | Listed |
 | MM-SA-28 | Info | `safeFetch` forwards the caller's headers when a GET is redirected to another host; no caller sends a secret on a redirecting GET today | Listed: rule below |
 | MM-SA-29 | Info | A sold file over 20 MB kept in Vercel Blob is not forced to download (`saveAs` ignored), on another origin without our cookies; the door is closed in production | Listed |
-| MM-SA-30 | Info | A draft product's title and price are visible to whoever knows its 40-bit id (sample certificate, cart GET, preview lessons) | The sample certificate (page, tab title and PDF), the course's front door, its preview lessons and their downloads: in `claude4/sg1-mm-sa-30` (test fails before). The cart's GET: with Claude 2, 513 [PF1] holds the route (reproduced) |
+| MM-SA-30 | Info | A draft product's title and price are visible to whoever knows its 40-bit id (sample certificate, cart GET, preview lessons) | The sample certificate (page, tab title and PDF), the course's front door, its lessons and their downloads, a call's booking page, the reviews page, a podcast's page and the free page's notice: in `claude4/sg1-mm-sa-30`, each answering a draft as an id that does not exist (test fails before). A published sample PDF stays at the CDN up to five minutes after going back to draft. The cart's GET: with Claude 2, 513 [PF1] holds the route (reproduced) |
 
 Also noted, no path found: a 60 s lock in `lib/review-ai-summary.ts` released
 without checking its owner (studio only, bounded by the month's AI jobs); the

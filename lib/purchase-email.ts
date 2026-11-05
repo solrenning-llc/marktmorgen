@@ -37,7 +37,7 @@
 import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from "@/lib/closing-buyers-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
-import { ADMITTED_FIELD, settleAdmitted } from "@/lib/order-admission";
+import { ADMITTED_FIELD } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
@@ -536,8 +536,10 @@ async function accountPaidCheckout(store: Store, session: SessionRecord, items: 
   // same explicit zero as isSettled for a fully discounted checkout.
   const paid = session.amount_total;
   if (!Number.isSafeInteger(paid) || Number(paid) < 0) return;
-  await countOrder(store, `checkout:${session.id}`, Number(paid), Date.now(),
-    () => settleAdmitted(store, session.metadata?.[ADMITTED_FIELD], 1, items));
+  const createdAtMs = typeof session.created === "number" && Number.isSafeInteger(session.created) ? session.created * 1000 : NaN;
+  await countOrder(store, `checkout:${session.id}`, Number(paid), Date.now(), {
+    hour: session.metadata?.[ADMITTED_FIELD], items, createdAtMs,
+  });
 }
 
 /**

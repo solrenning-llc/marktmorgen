@@ -311,11 +311,20 @@ export async function keyCounts(store: Store, product: Listing): Promise<KeyCoun
   return { left: Number(left) || 0, issued: Number(issued) || 0, revoked: list.revoked, waiting: Number(waiting) || 0 };
 }
 
-/** Whether a product that hands out keys from a pool has none left to give. */
+/**
+ * Whether a product that hands out keys from a pool has none left to give.
+ * The count is read only in its exact shape, one whole number; any other
+ * answer, or no Redis to ask, throws, so a caller that sells on it never
+ * takes "unknown" for "some left" (CX-123, rule 24; SG2, findings 11 and 12).
+ */
 export async function outOfKeys(store: Store, product: Listing): Promise<boolean> {
-  if (activeKeys(product)?.source !== "pool" || !store.statsId || !isRedisConfigured()) return false;
-  const [left] = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  return Number(left) === 0;
+  if (activeKeys(product)?.source !== "pool") return false;
+  if (!store.statsId || !isRedisConfigured()) throw new Error("Key count unavailable");
+  const receipt = await redisPipeline([["LLEN", poolKey(store, product)]]);
+  if (!Array.isArray(receipt) || receipt.length !== 1 || !Object.hasOwn(receipt, 0)) throw new Error("Key count unavailable");
+  const left: unknown = receipt[0];
+  if (typeof left !== "number" || !Number.isSafeInteger(left) || left < 0) throw new Error("Key count unavailable");
+  return left === 0;
 }
 
 export type UploadResult = {

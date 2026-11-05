@@ -21,8 +21,7 @@
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import type { Product, Store } from "@/lib/store";
-import { KIND, idsOfKind, readListings } from "@/lib/catalog";
-import { soonState } from "@/lib/preorders";
+import { KIND, readListings } from "@/lib/catalog";
 import { BUMP_KEYS, MIN_BUNDLE_ITEMS, bundleMeta, deliverableItems } from "@/lib/bundle-rules";
 import { type SaleCandidate, saleOff, salePrice } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
@@ -33,7 +32,7 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { isHouseStore } from "@/lib/house-store";
-import { CART_OFFER_META, MAX_CART, cartable, dealOff } from "@/lib/cart-rules";
+import { CART_OFFER_META, MAX_CART, dealOff } from "@/lib/cart-rules";
 import { RECOVERY_OPEN_SECONDS, applyRecovery, recoveryOn, refusedRecovery, withoutRecovery } from "@/lib/recovery-setting";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
@@ -76,21 +75,6 @@ export function cartPrice(store: Pick<Store, "sale" | "fair">, product: SaleCand
   const fair = fairOff(store.fair, product, country);
   const off = Math.max(sale, fair);
   return { cents: salePrice(product.priceCents, off), off };
-}
-
-/**
- * The products a ready cart link may hold (624 [SZ8](23)), for the studio's
- * link builder: what the cart route takes today, listed and paid, sold once
- * at one price, not coming soon. A read that fails lists nothing.
- */
-export async function cartLinkProducts(store: Store): Promise<{ id: string; title: string }[]> {
-  try {
-    const coming = await soonState(store).catch(() => ({ soon: new Set<string>() }));
-    const listed = await readListings(store, idsOfKind(store, "paid"));
-    return listed.filter((p) => cartable(p) && !coming.soon.has(p.id)).map((p) => ({ id: p.id, title: p.title }));
-  } catch {
-    return [];
-  }
 }
 
 /** Opens one checkout for every product in a cart, in its order. The caller has checked each can go in one. */

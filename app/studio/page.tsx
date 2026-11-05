@@ -25,7 +25,8 @@ import { SaleEditor } from "@/components/sale-editor";
 import { FairPriceEditor } from "@/components/fair-price-editor";
 import { CartDealEditor } from "@/components/cart-deal-editor";
 import { CartLinkBuilder } from "@/components/cart-link-builder";
-import { cartLinkProducts, offersCart } from "@/lib/cart-checkout";
+import { offersCart } from "@/lib/cart-checkout";
+import { CART_LINK_CHOICES, cartLinkCandidates, cartLinkProducts } from "@/lib/cart-link-products";
 import { allCountries, countryName } from "@/lib/fair-price";
 import { TierEditor } from "@/components/tier-editor";
 import { canTier } from "@/lib/tier-rules";
@@ -1838,7 +1839,7 @@ export default async function StudioPage({
 
                 <CartDealEditor initial={store.cartDeal} currency={store.currency} offered={offersCart(store)} />
 
-                {offersCart(store) ? <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await cartLinkProducts(store)} /> : null}
+                {offersCart(store) ? <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await cartLinkProducts(store)} more={cartLinkCandidates(store).length > CART_LINK_CHOICES ? CART_LINK_CHOICES : 0} /> : null}
 
                 {await (async () => {
                   const tiers = await tierCandidates(store);

@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   const list = readFileSync("components/short-links.tsx", "utf8");
   is("the list says where it goes and keeps it as its own choice", list.includes("a ready cart of ${t.ids.length} products") && list.includes('link.target.kind === "cart" ? <option value={targetValue(link.target)}>'), true);
   const builder = readFileSync("components/cart-link-builder.tsx", "utf8");
-  is("the builder offers a short link with a labeled name and place", builder.includes('htmlFor="cart-link-post"') && builder.includes('htmlFor="cart-link-place"') && builder.includes('{ kind: "cart", ids: picked, code: typed }'), true);
+  is("the builder offers a short link with a labeled name and place", builder.includes('htmlFor="cart-link-post"') && builder.includes('htmlFor="cart-link-place"') && builder.includes('{ kind: "cart", ids: ask.ids, code: ask.code }') && builder.includes("ids: [...picked], code: code.trim().toUpperCase()"), true);
   is("and says the result in a status, or why not in an alert", builder.includes('role="status"') && builder.includes('role="alert"'), true);
   done();
 }

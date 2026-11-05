@@ -138,6 +138,14 @@ function parseCertificate(raw: unknown): Certificate | null {
     const value = JSON.parse(raw) as Partial<Certificate>;
     if (typeof value.id !== "string" || !CERT_ID_PATTERN.test(value.id)) return null;
     if (typeof value.name !== "string" || typeof value.title !== "string" || typeof value.store !== "string") return null;
+    // Status is evidence, not a default. Only absence of expiration means
+    // a legacy permanent certificate; malformed dates must never make one
+    // standing again. Bound dates to what JavaScript can actually display.
+    const seconds = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= 8_640_000_000_000;
+    if (!Object.hasOwn(value, "issuedAt") || !seconds(value.issuedAt)) return null;
+    if (!Object.hasOwn(value, "withdrawnAt") || !seconds(value.withdrawnAt)) return null;
+    const hasExpiration = Object.hasOwn(value, "validUntil");
+    if (hasExpiration && (!seconds(value.validUntil) || value.validUntil === 0)) return null;
     return {
       id: value.id,
       store: value.store,
@@ -147,9 +155,9 @@ function parseCertificate(raw: unknown): Certificate | null {
       title: value.title,
       creator: typeof value.creator === "string" ? value.creator : "",
       email: typeof value.email === "string" ? value.email : "",
-      issuedAt: typeof value.issuedAt === "number" ? value.issuedAt : 0,
-      withdrawnAt: typeof value.withdrawnAt === "number" ? value.withdrawnAt : 0,
-      ...(typeof value.validUntil === "number" && value.validUntil > 0 ? { validUntil: value.validUntil } : {}),
+      issuedAt: value.issuedAt,
+      withdrawnAt: value.withdrawnAt,
+      ...(hasExpiration ? { validUntil: value.validUntil } : {}),
     };
   } catch {
     return null;

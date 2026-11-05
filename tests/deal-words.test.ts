@@ -215,6 +215,11 @@ is("any other remise is a discount and is refused (C3-107)", ["Profitez de la re
 const monetary = ["Profitez de la remise de la boutique.", "La remise de la totalité du prix est disponible.", "Profitez de la remise de votre abonnement.", "Profitez de la remise du prix.", "La remise des droits est disponible."];
 const pottery = "Cours de poterie. Le prix est affiché sur la page.";
 is("a remise of the shop, the price, a subscription or rights is refused (Codex H)", monetary.filter((reply) => heldToFacts(reply, pottery) || !DEAL_WORDS.test(reply) || neutralLine(reply, pottery) === reply), []);
+// Codex H2 on #2220: only a written elision (an apostrophe, straight or curly) brings in the thing handed over;
+// "de lcertificat" or "de l certificat" with a lower price is a discount, refused by all three gates.
+const malformed = ["La remise de lcertificat réduit le prix.", "La remise de l certificat réduit le prix."];
+is("a remise before a malformed elision is refused by the facts, the deal words and the reminder (Codex H2)", malformed.filter((reply) => heldToFacts(reply, pottery) || !DEAL_WORDS.test(reply) || neutralLine(reply, pottery) === reply), []);
+is("while a written elision, straight or curly, still passes", ["La remise de l'attestation suit le cours.", "La remise de l’attestation suit le cours."].filter((reply) => !heldToFacts(reply, pottery)), []);
 is("while handing over a certificate, diplomas, a key or an order still passes", ["La remise de votre certificat se fait en ligne.", "La remise des diplômes est en juin.", "La remise en main propre est possible.", "La remise de l'attestation suit le cours.", "La remise des clés se fait sur place.", "La remise de votre commande est rapide."].filter((reply) => !heldToFacts(reply, course)), []);
 is("while the deal words are still caught", caught([
   "promoção", "promo", "promocional", "promoción", "código promocional", "promo code",

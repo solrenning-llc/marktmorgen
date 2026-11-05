@@ -272,10 +272,21 @@ const GUARANTEE_WORDS_NL =
  */
 const HANDED_OVER =
   "(?:certificats?|dipl[oô]mes?|attestations?|cl[eé]s?|clefs?|colis|commandes?|livrables?|documents?|badges?|fichiers?|travaux|copies?|devoirs?)";
-const REMISE_AS_DISCOUNT =
-  "(?<!dates? de )remises?(?! (?:en mains? propres?|en forme|(?:du |de la |de l(?:['’] |['’]| )?|des |de )(?:(?:votre|vos|ton|ta|tes|son|sa|ses|leur|leurs|notre|nos) )?" +
+/**
+ * "remise" as a discount, unless a handing over follows. The elision before
+ * the thing handed over is the written one (an apostrophe, straight or curly,
+ * then at most a space): "de lcertificat" or "de l certificat" is not one
+ * (Codex H2 on #2220). The joined reading (joinedText) takes the apostrophe
+ * out of "de l'attestation", so there, and only there, "de l" may be followed
+ * at once by the thing handed over; the folded reading, which keeps the
+ * apostrophe, still finds the malformed forms.
+ */
+const remiseAsDiscount = (elision: string) =>
+  "(?<!dates? de )remises?(?! (?:en mains? propres?|en forme|(?:du |de la |" + elision + "|des |de )(?:(?:votre|vos|ton|ta|tes|son|sa|ses|leur|leurs|notre|nos) )?" +
   HANDED_OVER +
   ")(?!\\p{L}))";
+const REMISE_AS_DISCOUNT = remiseAsDiscount("de l['’](?: )?");
+const REMISE_AS_DISCOUNT_JOINED = remiseAsDiscount("de l(?:['’](?: )?)?");
 const DEAL_TERMS = [
   // English
   "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|u?v\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
@@ -334,10 +345,13 @@ function anchorOf(term: string): string {
  * a term with no anchor is always checked, so the shortcut can only cost
  * time, never let a deal word pass).
  */
-type DealTerm = { find: RegExp; open: boolean; compound: boolean; anchor: string | RegExp };
+type DealTerm = { find: RegExp; open: boolean; compound: boolean; anchor: string | RegExp; joinedFind?: RegExp };
+const termFind = (term: string) => new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu");
 const DEAL_TERM_RULES: DealTerm[] = [
   ...DEAL_TERMS.map((term) => ({
-    find: new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu"),
+    find: termFind(term),
+    // Read in the joined readings, where an elision's apostrophe is gone (REMISE_AS_DISCOUNT_JOINED).
+    ...(term === REMISE_AS_DISCOUNT ? { joinedFind: termFind(REMISE_AS_DISCOUNT_JOINED) } : {}),
     open: /\\p\{L\}[*+]/.test(term),
     compound: term.startsWith("\\p{L}") || COMPOUND_STEMS.has(term),
     anchor: anchorOf(term).length >= 2 ? anchorOf(term) : /[^]/,
@@ -509,12 +523,12 @@ class Readings {
 const STROKES = ["l", "i"] as const;
 /** How often a term is found in each reading: a compound stem with its visible hyphens joined. */
 const visibleCount = (term: DealTerm, r: Readings) => countIn(term.find, term.compound ? r.plainH : r.plain);
-const foundCount = (term: DealTerm, r: Readings) => Math.max(countIn(term.find, term.compound ? r.foldedH : r.folded), countIn(term.find, r.joined));
+const foundCount = (term: DealTerm, r: Readings) => Math.max(countIn(term.find, term.compound ? r.foldedH : r.folded), countIn(term.joinedFind ?? term.find, r.joined));
 const lookalikeCount = (term: DealTerm, r: Readings) =>
-  Math.max(...STROKES.map((s) => Math.max(countIn(term.find, term.compound ? r.skeletonH(s) : r.skeleton(s)), countIn(term.find, r.skeletonJoined(s)))));
+  Math.max(...STROKES.map((s) => Math.max(countIn(term.find, term.compound ? r.skeletonH(s) : r.skeleton(s)), countIn(term.joinedFind ?? term.find, r.skeletonJoined(s)))));
 /** The words a term matched in the folded readings, each as one form. */
 function wordsOf(term: DealTerm, r: Readings): Set<string> {
-  return new Set([...((term.compound ? r.foldedH : r.folded).match(term.find) ?? []), ...(r.joined.match(term.find) ?? [])].map(oneSpace));
+  return new Set([...((term.compound ? r.foldedH : r.folded).match(term.find) ?? []), ...(r.joined.match(term.joinedFind ?? term.find) ?? [])].map(oneSpace));
 }
 
 /** Whether the deal words of a reply are held to the facts: "held", "refused", or "hidden" (found only once a split, a mark or a look-alike is undone). */

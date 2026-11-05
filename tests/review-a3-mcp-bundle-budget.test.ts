@@ -6,6 +6,7 @@ import { makeKey } from '@/lib/api-keys';
 import { addDraftProducts, claimHandle, ensureStatsId, setSubscription, storeForEmail } from '@/lib/store';
 import { paidPeriod } from './billing-period-fixture';
 import { store as redis } from './redis-stub';
+import { startImport } from '@/lib/imports';
 
 test('the real bundle MCP route stays inside the database reads paid by one API request', async () => {
   redis.clear();
@@ -40,4 +41,51 @@ test('the real bundle MCP route stays inside the database reads paid by one API 
     redis.pipeline = original;
     globalThis.fetch = originalFetch;
   }
+});
+
+test('get_imports refuses an unconfirmed index or job response instead of reporting no imports', async t => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('External requests forbidden in review'); };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  redis.clear();
+  const email = 'review-a3-imports@example.com';
+  await claimHandle(email, 'review-a3-imports', 'Synthetic imports review', '');
+  await ensureStatsId(email);
+  await setSubscription(email, { customerId: 'cus_A3ImportsReview', subscriptionId: 'sub_A3ImportsReview', active: true, tier: 'pro', cycle: 'month', period: paidPeriod() });
+  const store = (await storeForEmail(email))!;
+  const made = await startImport(store, email, 'contacts', { expected: 1, file: 'private-review.csv', agreed: true });
+  assert.equal(made.ok, true);
+  if (!made.ok) return;
+  const key = await makeKey(store.sid, 'Synthetic imports review');
+  assert.equal(key.ok, true);
+  if (!key.ok) return;
+  const call = async () => {
+    const response = await POST(new Request('https://marktmorgen.com/api/mcp', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key.key}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_imports', arguments: {} } })
+    }));
+    return (await response.json()).result;
+  };
+  const control = await call();
+  assert.equal(control.isError, false);
+  assert.deepEqual(JSON.parse(control.content[0].text).imports.map((j: {id: string}) => j.id), [made.job.id]);
+  for (const boundary of ['index', 'job']) await t.test(boundary, async () => {
+    const original = redis.pipeline.bind(redis);
+    let intercepted = false;
+    redis.pipeline = async batch => {
+      if (batch.some(c => boundary === 'index'
+        ? c[0] === 'LRANGE' && String(c[1]) === `nl:imports:list:${store.sid}`
+        : c[0] === 'GET' && String(c[1]) === `nl:import:${made.job.id}`)) {
+        intercepted = true;
+        return [];
+      }
+      return original(batch);
+    };
+    try {
+      const result = await call();
+      assert.equal(intercepted, true, 'the actual transport boundary was exercised');
+      console.log(JSON.stringify({ boundary, response: result }));
+      assert.equal(result.isError, true, 'an unconfirmed read must not confirm an empty import history');
+    } finally { redis.pipeline = original; }
+  });
 });

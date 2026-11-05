@@ -13,11 +13,17 @@ export const CONTRACT_ADMISSION_COVERAGE={checkout:true,planSwitch:true,pauseRes
 /** AV3: disabled optional facilities do not certify coverage or block unrelated
  * core lifecycle work. Every core contract obligation remains mandatory. */
 export const CORE_CONTRACT_ADMISSION_KEYS=['checkout','planSwitch','resourceAllocations','renewals','settlementAndReserveReconciliation'] as const;
+function parseOwnFinancialJson<T>(encoded:string):T|null{
+ try{
+  return JSON.parse(encoded,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)
+   ?Object.create(null,Object.getOwnPropertyDescriptors(value)):value) as T;
+ }catch{return null;}
+}
 export function contractLifecycleReady(coverage:unknown=CONTRACT_ADMISSION_COVERAGE,planBreaksEnabled:unknown=PLAN_BREAKS_ENABLED):boolean{
  if(typeof planBreaksEnabled!=='boolean')return false;
  const encoded=canonicalFinancialSnapshot(coverage);
  if(encoded===null)return false;
- const value=JSON.parse(encoded) as Record<string,unknown>|null;
+ const value=parseOwnFinancialJson<Record<string,unknown>|null>(encoded);
  const keys=[...CORE_CONTRACT_ADMISSION_KEYS,'pauseRestart'];
  if(!value||Array.isArray(value)||typeof value!=='object'||Object.keys(value).length!==keys.length||
   !keys.every(key=>Object.hasOwn(value,key)&&typeof value[key]==='boolean'))return false;
@@ -94,7 +100,7 @@ export function canonicalFinancialSnapshot(value:unknown):string|null {
    const parts:string[]=[];for(const key of (keys as string[]).sort()){const d=descriptors.get(key);if(!d||!Object.hasOwn(d,'value')){active.delete(v);return null;}const part=encode(d.value,depth+1);if(part===null){active.delete(v);return null;}parts.push(JSON.stringify(key)+':'+part);}result='{'+parts.join(',')+'}';
   }
   active.delete(v);
-  if(contextKind!==null&&result!==null&&(result.length>1024*1024||customerTaxContractContextState(JSON.parse(result))!==contextKind))return null;
+  if(contextKind!==null&&result!==null&&(result.length>1024*1024||customerTaxContractContextState(parseOwnFinancialJson(result))!==contextKind))return null;
   return result;
  }
  try{const result=encode(value,0);return result!==null&&new TextEncoder().encode(result).length<=1024*1024?result:null;}catch{return null;}
@@ -133,12 +139,13 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,now))return null;
  const encoded=canonicalFinancialSnapshot({policy,context});
  if(!encoded)return null;
- const captured=JSON.parse(encoded) as {policy:ContractFundingPolicy|null;context:ContractFundingContext};
+ const captured=parseOwnFinancialJson<{policy:ContractFundingPolicy|null;context:ContractFundingContext}>(encoded);
+ if(!captured)return null;
  const p=captured.policy;context=captured.context;
  if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,now))return null;
  const reviewEncoded=canonicalFinancialSnapshot(context.review);
  if(!reviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
- const review=JSON.parse(reviewEncoded) as CommercialMarginReview|null;
+ const review=parseOwnFinancialJson<CommercialMarginReview|null>(reviewEncoded);
  if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
  const boundDisputesField=Object.getOwnPropertyDescriptor(review,'planPaymentDisputes');
  if(!boundDisputesField||!Object.hasOwn(boundDisputesField,'value')||!boundDisputesField.enumerable)return null;

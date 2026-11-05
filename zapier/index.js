@@ -49,7 +49,7 @@ const explain = (response, z) => {
 /** An unknown write result must not be reported as success or retried here. */
 const unconfirmed = (z) => {
   throw new z.errors.Error(
-    "Marktmorgen could not confirm this operation. Check the store's Webhooks before trying again.",
+    "Marktmorgen could not confirm this operation. Check its status in your store before trying again.",
     "unconfirmed_response",
     502,
   );
@@ -234,7 +234,7 @@ const hookTrigger = (spec) => ({
     performUnsubscribe: async (z, bundle) => {
       const id = bundle.subscribeData && bundle.subscribeData.id;
       const response = await z.request({ url: `${API}/hooks`, method: "DELETE", body: { id } });
-      return hookResult(response, z, (data) => typeof id === "string" && data.id === id && data.status === "removed");
+      return hookResult(response, z, (data) => typeof id === "string" && /^we_[0-9a-f]{16}$/.test(id) && data.id === id && data.status === "removed");
     },
     perform: async (z, bundle) => {
       const body = bundle.cleanedRequest;

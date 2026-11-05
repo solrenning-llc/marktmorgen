@@ -64,3 +64,17 @@ test("AA: unknown recipient queue must not be discarded as completed",async()=>{
  const r=await setup();redis.pipeline=async cs=>cs.some(c=>c[0]==="LRANGE"&&c[1]===`nl:upd:job:${r.job.id}:to`)?[]:r.original(cs);
  try{const out=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);assert.deepEqual({status:out?.status,done:out?.done,sent:out?.sent,remaining:redis.run(["LRANGE",`nl:upd:job:${r.job.id}:to`,0,-1])},{status:"waiting",done:0,sent:0,remaining:[person]});assert.equal(r.batches.length,0);}finally{redis.pipeline=r.original;}
 });
+
+
+test("Q: a waiting job renews its recipient list with its own lifetime",async()=>{
+ const r=await setup();const recipients=`nl:upd:job:${r.job.id}:to`;redis.advance(59*86_400_000);
+ redis.pipeline=async cs=>{if(cs.some(c=>c[0]==="HEXISTS"&&c[1]===`nl:erased:${r.shop.listId}`))throw new Error("synthetic pause before recipient proof");return r.original(cs);};
+ try{
+  const held=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
+  assert.deepEqual([held?.status,held?.done,held?.sent,r.batches.length],["waiting",0,0,0]);
+  assert.ok(Number(redis.run(["TTL",recipients]))>59*86_400,"the recipient list follows the renewed job lifetime");
+  redis.pipeline=r.original;redis.advance(2*86_400_000);
+  const recovered=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
+  assert.deepEqual([recovered?.status,recovered?.done,recovered?.sent,r.batches.flat().length],["sent",1,1,1]);
+ }finally{redis.pipeline=r.original;}
+});

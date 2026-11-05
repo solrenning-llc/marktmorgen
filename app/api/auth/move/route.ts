@@ -15,7 +15,7 @@ import {
 } from "@/lib/auth";
 import { moveAccount, storeForEmail } from "@/lib/store";
 import { moveMemberships } from "@/lib/team";
-import { discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
+import { MoveSplitError, discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
 import { repairMove } from "@/lib/move-repair";
 import { movePhoneDevices } from "@/lib/phone-alerts";
@@ -137,6 +137,8 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     appMoved = true;
   } catch (error) {
     console.error("moving the ways in refused", error);
+    // Passkeys that could not be put back cleanly: the move is kept marked until it is repaired.
+    if (error instanceof MoveSplitError) broke();
     await undo();
     return away("/signin?status=move-has-login");
   }

@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
-import { inviteEmail, inviteMembers, noteKept, openMove, priceWords, readInvite } from "@/lib/move-members";
+import { forgetInvitesPerson, inviteEmail, inviteMembers, noteKept, openMove, priceWords, readInvite } from "@/lib/move-members";
 import { createCheckout } from "@/lib/store-checkout";
 import { namedPriceOffered, sellableOptions, withInvitedOption } from "@/lib/product-option";
 import { givableOptions } from "@/lib/gift-rules";
@@ -33,7 +33,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   if (path === "/checkout/sessions" && (init?.method ?? "GET") === "POST") {
     checkouts.push(new URLSearchParams(String(init?.body)));
-    return new Response(JSON.stringify({ id: `cs_test_${"m".repeat(20)}${checkouts.length}`, url: "https://checkout.stripe.com/c/pay/test" }));
+    return new Response(JSON.stringify({ id: `cs_test_${"m".repeat(20)}${checkouts.length}`, url: `https://checkout.stripe.com/c/pay/test${checkouts.length}` }));
   }
   if ((init?.method ?? "GET") === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
@@ -137,6 +137,26 @@ async function main(): Promise<void> {
     is(`kept ${JSON.stringify(odd)}: the price off sale is not opened`, [tried.ok, checkouts.length - before], [false, 0]);
   }
   redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify(benRecord)]);
+
+  part("Such an invitation is still the person's: copied and erased (Revisor 1 on #2685)");
+  redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify({ ...benRecord, kept: "x" })]);
+  const odd = await readInvite(statsId, benField);
+  is("it is read, with its state said to be unknown and taken as used", [odd?.e, odd?.keptUnknown, (odd?.kept ?? 0) !== 0], ["ben@example.com", true, true]);
+  is("no email is written for it", await inviteEmail(store, benField), null);
+  is("erasing the person deletes it, its link and its reminder", [await forgetInvitesPerson(store, [id], "ben@example.com"), redis.run(["HEXISTS", `nl:mv:${statsId}`, benField]), redis.run(["EXISTS", `nl:mv:link:${ben.t}`])], [1, 0, 0]);
+  redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify(benRecord)]);
+  redis.run(["SET", `nl:mv:link:${ben.t}`, JSON.stringify({ s: statsId, f: benField }), "EX", 30 * DAY]);
+
+  part("One invitation opens one checkout, however often it is pressed (Claude 4 on #2690)");
+  const opens = checkouts.length;
+  const [first, second] = await Promise.all([
+    openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT),
+    openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT),
+  ]);
+  const third = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  is("two at once and one after: Stripe is asked once", checkouts.length - opens, 1);
+  const urls = [first, second, third].flatMap((o) => (o.ok ? [o.url] : []));
+  is("whoever gets a page gets that same checkout", [urls.length >= 2, new Set(urls).size], [true, 1]);
 
   part("The rule itself");
   is("only the named option comes back on sale, nothing else changes", withInvitedOption(product, basic).options.map((o) => [o.id, o.offSale === true]), [[basic, false], [plus, false]]);

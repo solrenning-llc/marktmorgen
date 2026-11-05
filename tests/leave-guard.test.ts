@@ -11,6 +11,7 @@ async function main(): Promise<void> {
   for (const [file, line] of [
     ["components/page-editor.tsx", "useLeaveGuard(dirty && !busy);"],
     ["components/funnel-editor.tsx", "useLeaveGuard(dirty && !busy);"],
+    ["components/page-order-editor.tsx", "useLeaveGuard(changed && !saving);"],
   ]) {
     is(file, readFileSync(file, "utf8").includes(line), true);
   }

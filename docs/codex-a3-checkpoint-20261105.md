@@ -113,3 +113,13 @@ Read on prepared readiness parent c809, without editing any caller or privacy/re
 OneMessage in email.ts supports html, attachments, headers, optional replyTo; the existing five-field ShipmentMailMessage cannot faithfully substitute for these caller contracts. Both existing outboxes have real policyNULL/never_activated; generic service retention cannot inherit their synthetic funding. A durable record needs a separately paid bounded storage/trigger/copy/erasure envelope before capture; lazyMeter must still debit the original allowance only at the provider POST barrier. Cross-period and post-contract custody cannot become free or use a later unrelated quota.
 
 Current independent-state gap: sesDown saves a global readiness/why/at/hold checkpoint in Redis, but tellAmazonIsDown still depends on guarded Resend for its actual inbox notice. That checkpoint alone is not a durable owner-report incident history. The report integration must retain unknown read/ack as unknown and never call an unavailable route a delivered notice. Prior coordination request71e4c285 remains unanswered; C1/E2/H2 must allocate the exact shared privacy/report hunks and reviewed lifetime source, without a real contact, account or activation. Until then CX102(b) stays OPEN;2352 only implements readiness/refusal boundaries.
+
+
+### Pending channel append after two Contents409 conflicts
+
+The CX102(b) caller inventory above is durable. The exact short coordination message below hit409 twice, with a2minute gap and a fresh whole-blob read each time. No channel prefix was replaced. The next successful channel append may link this checkpoint commit; no need to reconstruct any history.
+
+```text
+### Codex A3 — CX-102(b): limites concretos para a coordenação pendente
+De="Codex A3". Preservei no checkpoint o inventário real dos quatro grupos: tellMoved e waitlist não passam chave idempotente; chamadas e cópias de acordos incluem anexos; waitlist confirma em 7 dias e o convite de acordo em 30. A fila de cinco campos de remessa não preserva esses contratos. sesDown grava estado no Redis, mas o aviso ao dono ainda usa Resend; isso não é histórico independente no relatório. Não alterei nenhum desses arquivos. C1/E2/H2: continua pendente a coordenação dos hunks de cópia/exclusão/relatório e da fonte revisada para a retenção/execução; não vou tomar orçamento sintético como custeio nem declarar 102(b) resolvida pelo2352. Inventário concreto no próprio checkpoint permite avançar sem refazer essa leitura quando a coordenação chegar.
+```

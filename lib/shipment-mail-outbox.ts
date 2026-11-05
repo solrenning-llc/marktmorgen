@@ -283,7 +283,10 @@ if r.originKind~=nil and r.originKind~='single_digital' then return {'unknown'} 
 -- Retention-only digital origins have no proved access/dispatch stage.
 if r.originKind=='single_digital' and op~='claim' and op~='defer' then return {'unknown'} end
 if source ~= r.sourceValue then return {'unknown'} end
-if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then return {'held',raw} end
+if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then
+ redis.call('ZREM',KEYS[3],r.id)
+ return {'held',raw}
+end
 local good,p=pcall(cjson.decode,ARGV[6])
 if not good or type(p)~='table' then return {'unknown'} end
 if r.originKind=='single_digital' then
@@ -293,7 +296,10 @@ if r.originKind=='single_digital' then
 end
 local supported = r.reviewId==p.reviewId
 if type(p.continuedReviewIds)=='table' then for _,id in ipairs(p.continuedReviewIds) do if id==r.reviewId then supported=true end end end
-if not supported then return {'unknown'} end
+if not supported then
+ redis.call('ZREM',KEYS[3],r.id)
+ return {'unknown'}
+end
 if op == 'claim' then
  if r.state~='queued' and not (r.state=='preparing' and r.leaseUntil<=now) then return {'held',raw} end
  if r.next>now then return {'held',raw} end

@@ -13,7 +13,8 @@
  *
  * Synthetic only.
  */
-import { readRows } from "@/lib/search-console";
+import { readRows, storeSearches } from "@/lib/search-console";
+import { store as redis } from "./redis-stub";
 import { serverRoles } from "@/lib/discord";
 import { done, is, part } from "./check";
 
@@ -23,6 +24,9 @@ let roles: unknown = [];
 let memberStatus = 200;
 
 process.env.DISCORD_BOT_TOKEN = "test-bot-token";
+process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
+process.env.GOOGLE_OAUTH_CLIENT_ID = "client-id.apps.googleusercontent.com";
+process.env.GOOGLE_OAUTH_CLIENT_SECRET = "client-secret-for-tests";
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
@@ -54,6 +58,19 @@ async function main(): Promise<void> {
   // Review of Codex J on #2684: a row without its search as text is not "no search".
   for (const keys of [undefined, null, [], [42]]) {
     is(`keys ${JSON.stringify(keys) ?? "missing"}`, throws(() => readRows({ rows: [{ ...(keys === undefined ? {} : { keys }), clicks: 1, impressions: 5, position: 1 }] })), "not known");
+  }
+
+  part("A store's searches kept a day, read back only in their shape (Codex T on #2684)");
+  const shop = { statsId: "gscshape01", handle: "shapes", domain: null } as never;
+  const kept = { from: "2026-10-01", to: "2026-10-28", rows: [{ query: "meal planner", clicks: 3, impressions: 40, position: 7.8 }] };
+  await redis.pipeline([["SET", "nl:gsc:q:gscshape01", JSON.stringify(kept)]]);
+  is("a kept answer is used as it is", await storeSearches(shop), kept);
+  await redis.pipeline([["SET", "nl:gsc:q:gscshape01", "null"]]);
+  is("a kept 'Google did not answer' is used as it is", await storeSearches(shop), null);
+  for (const bad of ["{}", "[]", JSON.stringify({ ...kept, rows: "x" }), JSON.stringify({ ...kept, rows: [{ query: 1 }] }), JSON.stringify({ ...kept, from: 5 })]) {
+    await redis.pipeline([["SET", "nl:gsc:q:gscshape01", bad]]);
+    // Not connected here, so the read again ends at null: never the malformed value.
+    is(`kept ${bad.slice(0, 30)}: never shown as searches`, await storeSearches(shop), null);
   }
 
   part("Discord roles");

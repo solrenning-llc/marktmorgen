@@ -338,6 +338,24 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = real;
     }
+    // Only Redis's own data counts (Codex H2 on #2681, 1d76ab7f): an inherited or getter reply is not known, and
+    // a getter is never run.
+    let visits = 0;
+    const inherited = new Array(1);
+    Object.setPrototypeOf(inherited, { 0: ["1", "2", "3"] });
+    const executable = [["1", "2", "3"]];
+    Object.defineProperty(executable, "0", { get() { visits += 1; return ["1", "2", "3"]; } });
+    const innerGetter: unknown[] = [["1", "2", "3"]];
+    Object.defineProperty(innerGetter[0] as unknown[], "1", { get() { visits += 1; return "2"; } });
+    for (const [what, answer] of [["an inherited reply", inherited], ["a getter reply", executable], ["a getter count", innerGetter]] as const) {
+      redis.pipeline = (async () => answer) as unknown as typeof redis.pipeline;
+      try {
+        is(`${what}: not known`, await payoutUnknownMonth(month()), null);
+      } finally {
+        redis.pipeline = real;
+      }
+    }
+    is("no getter was run", visits, 0);
   }
 
   part("The studio says it, with the way to look in PayPal");

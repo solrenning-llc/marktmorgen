@@ -83,8 +83,14 @@ export async function usedLinkIn(listId: string, campaign: string, emails: strin
   const out = new Set<string>();
   if (!emails.length || !isRedisConfigured()) return out;
   const answers = await redisPipeline(emails.map((email) => ["SISMEMBER", usedKey(listId, email), campaign]));
+  // A missing or malformed answer is not evidence that somebody did not use
+  // the link.  Callers use absence from this set for an `unclicked` branch,
+  // so fail the whole read and let the sequence retry without sending.
+  if (answers.length !== emails.length || answers.some((answer) => answer !== 0 && answer !== 1)) {
+    throw new Error("link use could not be read");
+  }
   emails.forEach((email, i) => {
-    if (Number(answers[i]) === 1) out.add(email);
+    if (answers[i] === 1) out.add(email);
   });
   return out;
 }

@@ -25,12 +25,13 @@ import { types } from "node:util";
 import { UnknownReplyError, countOf } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
+import { aboutExcerpt, cleanAbout } from "@/lib/product-about";
+import { MAX_POST_BODY } from "@/lib/store-blog-rules";
+export { MAX_POST_BODY, postBlocks, type PostBlock } from "@/lib/store-blog-rules";
 import { slugOf } from "@/lib/product-slug";
 
 export const MAX_POSTS = 200;
 export const MAX_POST_TITLE = 120;
-export const MAX_POST_BODY = 20_000;
 export const POSTS_PER_PAGE = 12;
 
 const metaKey = (statsId: string) => `nl:blog:meta:${statsId}`;
@@ -107,29 +108,6 @@ export function postIdFrom(segment: string): string | null {
   return POST_ID.test(tail) && (segment.length === 10 || segment[segment.length - 11] === "-") ? tail : null;
 }
 
-/** A post cut into what the page draws: headings, paragraphs and lists. */
-export type PostBlock = Block | { kind: "heading"; text: string };
-
-export function postBlocks(body: string): PostBlock[] {
-  const out: PostBlock[] = [];
-  let run: string[] = [];
-  const flush = () => {
-    if (run.length) out.push(...aboutBlocks(run.join("\n"), MAX_POST_BODY));
-    run = [];
-  };
-  for (const line of cleanAbout(body, MAX_POST_BODY).split("\n")) {
-    const heading = /^##\s+(.+)$/.exec(line.trim());
-    if (heading) {
-      flush();
-      out.push({ kind: "heading", text: heading[1].trim().slice(0, 140) });
-    } else {
-      run.push(line);
-    }
-  }
-  flush();
-  return out;
-}
-
 function metaOf(id: string, input: { title: string; body: string; draft: boolean }, publishedAt: number, updatedAt: number): PostMeta {
   const plain = input.body.replace(/^##\s+/gm, "");
   const words = plain.split(/\s+/).filter(Boolean).length;
@@ -144,15 +122,15 @@ function parseMeta(raw: unknown): PostMeta | null {
     // Stored visibility and dates are evidence, not values to coerce before publishing.
     // Date's range is narrower than the safe-integer range (these are seconds).
     const date = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000;
-    if (typeof v.draft !== "boolean" || !date(v.publishedAt) || !date(v.updatedAt)) return null;
+    if (typeof v.draft !== "boolean" || !date(v.publishedAt) || !date(v.updatedAt) || typeof v.excerpt !== "string" || typeof v.minutes !== "number" || !Number.isSafeInteger(v.minutes) || v.minutes < 1) return null;
     return {
       id: v.id,
       title: v.title,
-      excerpt: typeof v.excerpt === "string" ? v.excerpt : "",
+      excerpt: v.excerpt,
       draft: v.draft,
       publishedAt: v.publishedAt,
       updatedAt: v.updatedAt,
-      minutes: Math.max(1, Number(v.minutes) || 1),
+      minutes: v.minutes,
     };
   } catch {
     return null;

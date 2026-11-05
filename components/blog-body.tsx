@@ -1,5 +1,5 @@
 import { Line } from "@/components/sales-blocks";
-import { postBlocks } from "@/lib/store-blog";
+import { postBlocks } from "@/lib/store-blog-rules";
 
 /** A blog post's words as the page draws them (lib/store-blog.ts, postBlocks): headings, paragraphs, lists and links. */
 export function PostBody({ body }: { body: string }) {

@@ -341,7 +341,7 @@ elseif op == 'not-posted' then
  r.state='queued'; r.owner=''; r.leaseUntil=0; r.next=now+p.retryMilliseconds
 elseif op == 'not-accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
- r.state='queued'; r.owner=''; r.next=now+p.retryMilliseconds
+ r.state='queued'; r.owner=''; r.leaseUntil=0; r.next=now+p.retryMilliseconds
 elseif op == 'refused' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
  -- Save only non-content outcome evidence, with individual field expiry.
@@ -741,12 +741,22 @@ async function forgetRefused(statsId: string, fingerprint: string | undefined, p
   return rows.length;
 }
 
-async function mutate(op: string, row: Row, expected: string, p: ShipmentMailPolicy | null, runtime: ShipmentMailRuntime, owner = ""): Promise<unknown[] | null> {
+async function mutate(op: string, row: Row, expected: string, p: ShipmentMailPolicy | null, runtime: ShipmentMailRuntime, owner = "", at = (runtime.now ?? Date.now)()): Promise<unknown[] | null> {
   const pipeline = runtime.pipeline ?? redisPipeline;
   try {
-    const reply = ownArray(await pipeline([["EVAL", SHIPMENT_MAIL_SCRIPT, 10, ...keys(row), op, expected, JSON.stringify(row), (runtime.now ?? Date.now)(), SHIPMENT_MAIL_MAX_ROW_BYTES, JSON.stringify(p), owner]]));
+    const reply = ownArray(await pipeline([["EVAL", SHIPMENT_MAIL_SCRIPT, 10, ...keys(row), op, expected, JSON.stringify(row), at, SHIPMENT_MAIL_MAX_ROW_BYTES, JSON.stringify(p), owner]]));
     return reply?.length === 1 ? ownArray(reply[0]) : null;
   } catch { return null; }
+}
+function samePayload(left: Row, right: Row): boolean {
+  return (["id", "statsId", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt"] as const)
+    .every(key => left[key] === right[key]);
+}
+function confirmedQueued(reply: unknown[] | null, previous: Row, at: number, p: ShipmentMailPolicy): boolean {
+  const row = reply?.length === 2 && reply[0] === "queued" ? parseRow(reply[1]) : null;
+  return !!row && samePayload(row, previous) && row.reviewId === previous.reviewId && row.state === "queued" &&
+    row.owner === "" && row.leaseUntil === 0 && row.checks === previous.checks &&
+    row.next === (row.checks >= p.maximumChecks ? 0 : at + p.retryMilliseconds);
 }
 async function read(id: string, pipeline: ShipmentMailPipeline): Promise<{ row: Row; raw: string } | null | "unknown"> {
   try {
@@ -803,9 +813,9 @@ export async function enqueueShipmentMail(input: { statsId: string | null; sessi
     row.bytes = Buffer.byteLength(JSON.stringify(row)) + keys(row).reduce((n, key) => n + Buffer.byteLength(key), 0) * 2 + 8_192;
     if (!parseRow(JSON.stringify(row))) return { ok: false, reason: "unknown" };
     const result = await mutate("enqueue", row, "", p, runtime);
-    if (result?.[0] === "full") return { ok: false, reason: "full" };
-    if (result?.[0] === "legacy") return { ok: true, mail: { state: "not_recorded", delayed: false } };
-    if (result?.[0] !== "queued" && result?.[0] !== "existing") return { ok: false, reason: "unknown" };
+    if (result?.length === 1 && result[0] === "full") return { ok: false, reason: "full" };
+    if (result?.length === 2 && result[0] === "legacy" && typeof result[1] === "string" && readShippedRecord(JSON.parse(result[1]))) return { ok: true, mail: { state: "not_recorded", delayed: false } };
+    if (!result || !((result.length === 2 && result[0] === "queued") || (result.length === 3 && result[0] === "existing"))) return { ok: false, reason: "unknown" };
     const saved = parseRow(result[1]);
     if (!saved || saved.id !== id || saved.statsId !== row.statsId || saved.session !== row.session ||
         (result[0] === "queued" && (saved.fingerprint !== row.fingerprint || saved.sourceValue !== row.sourceValue)) ||
@@ -854,9 +864,11 @@ export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDi
     const found = await read(String(id), pipeline);
     if (!found || found === "unknown") { counts.unknown++; continue; }
     const owner = randomBytes(24).toString("hex");
-    const claim = await mutate("claim", found.row, found.raw, p, runtime, owner);
-    const claimed = claim?.[0] === "preparing" ? parseRow(claim[1]) : null;
-    if (!claimed || claimed.owner !== owner || claimed.id !== id) { counts.unknown++; continue; }
+    const claimAt = now();
+    const claim = await mutate("claim", found.row, found.raw, p, runtime, owner, claimAt);
+    const claimed = claim?.length === 2 && claim[0] === "preparing" ? parseRow(claim[1]) : null;
+    if (!claimed || !samePayload(claimed, found.row) || claimed.state !== "preparing" || claimed.owner !== owner || claimed.id !== id ||
+        claimed.checks !== found.row.checks + 1 || claimed.reviewId !== p.reviewId || claimed.leaseUntil !== claimAt + 60_000 || claimed.next !== claimed.leaseUntil) { counts.unknown++; continue; }
     let raw = String(claim![1]);
     let row = claimed;
     const opened = unseal(row.sealed, context(row.id));
@@ -870,32 +882,40 @@ export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDi
     let barrier = false;
     const beforePost = async () => {
       if (barrier || now() >= deadline || !shipmentMailPolicy(p, now(), false)) return false;
-      const result = await mutate("dispatch", row, raw, p, runtime, owner);
-      const next = result?.[0] === "dispatching" ? parseRow(result[1]) : null;
-      if (!next || next.id !== row.id || next.owner !== owner) return false;
+      const dispatchAt = now();
+      const result = await mutate("dispatch", row, raw, p, runtime, owner, dispatchAt);
+      const next = result?.length === 2 && result[0] === "dispatching" ? parseRow(result[1]) : null;
+      if (!next || !samePayload(next, row) || next.state !== "dispatching" || next.owner !== owner || next.checks !== row.checks ||
+          next.reviewId !== row.reviewId || next.next !== 0 || next.leaseUntil !== dispatchAt + 60_000) return false;
       raw = String(result![1]); row = next;
       if (now() >= deadline || now() >= next.leaseUntil) return false;
       barrier = true; return true;
     };
     let outcome: Awaited<ReturnType<ShipmentMailDispatch>> = "waiting";
     if (message) {
-      try { outcome = await dispatch(message, beforePost, { id: row.id }); } catch { outcome = "unknown"; }
+      try {
+        const result: unknown = await dispatch(message, beforePost, { id: row.id });
+        outcome = result === "accepted" || result === "waiting" || result === "not_accepted" || result === "not_posted" || result === "refused" || result === "unknown" ? result : "unknown";
+      } catch { outcome = "unknown"; }
     }
     if (outcome === "not_posted") {
-      const restored = await mutate("not-posted", row, raw, p, runtime, owner);
-      if (restored?.[0] === "queued") counts.waiting++; else counts.unknown++;
+      const at = now();
+      const restored = await mutate("not-posted", row, raw, p, runtime, owner, at);
+      if (confirmedQueued(restored, row, at, p)) counts.waiting++; else counts.unknown++;
       continue;
     }
     // A provider result without this call's confirmed barrier is never proof.
     if (!barrier) {
-      const deferred = await mutate("defer", row, raw, p, runtime, owner);
-      if (outcome === "waiting" && deferred?.[0] === "queued") counts.waiting++; else counts.unknown++;
+      const at = now();
+      const deferred = await mutate("defer", row, raw, p, runtime, owner, at);
+      if (outcome === "waiting" && confirmedQueued(deferred, row, at, p)) counts.waiting++; else counts.unknown++;
       continue;
     }
     if (outcome === "unknown" || outcome === "waiting") { counts.unknown++; continue; }
-    const result = await mutate(outcome === "accepted" ? "accepted" : outcome === "not_accepted" ? "not-accepted" : "refused", row, raw, p, runtime, owner);
-    if (outcome === "accepted" && result?.[0] === "accepted") counts.accepted++;
-    else if (outcome === "not_accepted" && result?.[0] === "queued") counts.waiting++;
+    const at = now();
+    const result = await mutate(outcome === "accepted" ? "accepted" : outcome === "not_accepted" ? "not-accepted" : "refused", row, raw, p, runtime, owner, at);
+    if (outcome === "accepted" && result?.length === 1 && result[0] === "accepted") counts.accepted++;
+    else if (outcome === "not_accepted" && confirmedQueued(result, row, at, p)) counts.waiting++;
     else counts.unknown++;
   }
   return counts;

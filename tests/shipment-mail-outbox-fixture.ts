@@ -98,7 +98,7 @@ export function shipmentOutboxFixture() {
         else {
           value.state = op === "dispatch" ? "dispatching" : op === "refused" ? "refused" : "queued";
           value.leaseUntil = op === "dispatch" ? now + 60000 : 0;
-          if (op === "not-posted") value.owner = "";
+          if (["not-posted", "not-accepted", "defer"].includes(op)) value.owner = "";
           value.next = value.state === "queued" ? now + policy!.retryMilliseconds : 0;
           const next = JSON.stringify(value); store.run(["SET", k[0], next]);
           if (value.next) store.run(["ZADD", k[2], value.next, value.id]); else store.run(["ZREM", k[2], value.id]);

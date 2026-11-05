@@ -142,6 +142,14 @@ def evidence(redis):
         check("no-POST never releases its pending hold", redis.command("HMGET", keys[5], "items", "bytes"), held_before)
         check("no-POST cannot turn its source into terminal retention", redis.command("TTL", keys[1]), -1)
 
+        retried = apply("claim", row, keys, redis.command("GET", keys[0]), now + policy["retryMilliseconds"])
+        dispatched = apply("dispatch", row, keys, retried[1], now + policy["retryMilliseconds"])
+        not_accepted = apply("not-accepted", row, keys, dispatched[1], now + policy["retryMilliseconds"])
+        waiting = json.loads(not_accepted[1])
+        check("known non-acceptance clears the completed dispatch lease", waiting["leaseUntil"], 0)
+        check("known non-acceptance preserves its consumed checks", waiting["checks"], 2)
+        check("known non-acceptance keeps the existing retry interval", waiting["next"], now + 2 * policy["retryMilliseconds"])
+
         # Fenced and unsupported rows currently stay at the front of the same
         # bounded 25-member read. Their evidence must survive but must not keep
         # excluding later eligible work from every worker visit.

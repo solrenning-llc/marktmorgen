@@ -1,4 +1,4 @@
-import { bodyHtml, bodyText } from "@/lib/mail-body";
+import { bodyHtml, bodyText, parseMailBlocks } from "@/lib/mail-body";
 import { done, is, part } from "./check";
 
 const button = "[Read the guide](https://example.com/guide)";
@@ -50,4 +50,15 @@ is("one tagged destination is kept", [targets, html.includes('href="https://exam
 is("the creator's label is kept", html.includes(">Read the guide</a>"), true);
 is("plain-text content is unchanged", bodyText(button), "Read the guide: https://example.com/guide");
 is("creator HTML is still escaped", bodyHtml("[<Guide>](https://example.com)", undefined, "#999999").includes(">&lt;Guide&gt;</a>"), true);
+part("Buttons typed in the email editor need a readable name");
+for (const label of [" ", "   ", "\t", "\u00a0"]) {
+  const input = `[${label}](https://example.com/guide)`;
+  const html = bodyHtml(input);
+  is(`blank label ${JSON.stringify(label)} stays a text block`, parseMailBlocks(input)[0].kind, "text");
+  is(`blank label ${JSON.stringify(label)} has a URL as its link name`, html.includes(">https://example.com/guide</a>"), true);
+  is(`blank label ${JSON.stringify(label)} is never an unnamed button`, />\s*<\/a>/.test(html), false);
+  is(`blank label ${JSON.stringify(label)} keeps its source in plain text`, bodyText(input), input);
+}
+is("a real label with surrounding whitespace remains a button", parseMailBlocks("[ Read the guide ](https://example.com/guide)"), [{ kind: "button", label: "Read the guide", href: "https://example.com/guide" }]);
+is("a non-Latin label remains a named button", bodyHtml("[読む](https://example.com/guide)").includes(">読む</a>"), true);
 done();

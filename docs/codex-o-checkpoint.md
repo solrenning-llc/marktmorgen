@@ -1,4 +1,4 @@
-# Codex O continuation checkpoint — 05/11/2026 14h55 Fortaleza
+# Codex O continuation checkpoint — 05/11/2026 17h15 UTC
 
 ## Rules in force
 
@@ -21,14 +21,14 @@ CX-120/122/123/126. Product PRs never edit reservation documents; new reservatio
 - J's first MEDIUM proof `9422e4cc8e34ae0cbd86d86717c04ab44d5d18e5` is closed (8/8 unchanged).
 - J's second MEDIUM review `5788655968`, proof `e33f4070a69c1a9ceaa7feacab1355a7a2fe559a`, exposed duplicate author keys. Durable test-only RED `fa5b54093c06190cac0e5f90e47760116cbe50d9`: own32/30.
 - Final reader scans and decodes top-level JSON keys before `JSON.parse` and rejects every repeated key before last-value normalization. Own32/32; new J proof unchanged4/4; linked245/245; typegen/full TSC/lint/scanner3738/0/diff green. One read/one command/zero retry.
-- Focal return requested from J in the channel. Current exact-head CI was 1 success and eight active/queued at last check. Preserve head. Merge only after J says no finding and all nine exact aggregators succeed.
+- J focal review `5788851917`: SEM ACHADO / PODE ENTRAR on this exact head. Exact-head CI at 17h15 UTC: seven aggregators success; product-checks run `42070004847` active; real-readers run `42070004925` active after its single isolated retry. The first macOS reader job failed only with V8 heap OOM at about 2037 MiB while Windows passed; the one allowed job retry is already consumed and must never be repeated. PR status comment `6664277110`. Preserve head while executors are active. Merge only after all nine exact aggregators succeed.
 
 ### #2640 — exact community picture-place acknowledgement
 
 - Branch `codex/o-community-picture-place-evidence`; exact head `54f5481f4dbaec2faab9293f192f2e07ae002080`, tree `0940d7123e420361cc9128b0ff5837d86414567a`, main `a2424fb949ecdd5047c43a6c625eeb5e0c4f8c91` integrated.
 - P MEDIUM review `5788552429`, proof `63a7992287af3da1ca063a05316d0dd3ee219327`. Corrective test-only RED `f5438e851012d181a954f5cd1e7cef8fb06f6a91`: 27/21.
 - Final reader accepts only a non-Proxy ordinary array with exactly own inert slot0 and length before reading a positive safe integer. Own27/27; P proof unchanged4/4; buyer9+closing90; typegen/full TSC/lint/scanner3778/0/diff green. Same one INCR, zero retry; unknown/lost ACK never opens or compensates.
-- Focal return requested from P. Current exact-head CI was 4 success and five active at last check. Preserve head. Merge only after P says no finding and all nine exact aggregators succeed.
+- P focal return is still absent. Exact-head CI at 17h15 UTC: eight aggregators success; product-checks run `42069037730` remains active because browser work continues, but verify job `127392415206` failed only the shared untouched `pricing-optimization.test.ts` stale artifacts (`7642` versus `7643`) owned by open #2632. Do not retry or move the head while the run remains active. After #2632 enters, integrate latest main once while preserving both product/test blobs and require nine new aggregators; P focal return is still required.
 
 ## Test-only blocked unit
 
@@ -41,7 +41,7 @@ Branch `codex/o-community-notice-read-evidence`; durable RED `9071b30c1fb21a1536
 ## Next exact actions
 
 1. Read full channel and exact PR states.
-2. Apply any focal review finding before CI/merge.
-3. If #2629 or #2640 has its focal no-finding review plus nine exact successes, merge normally with expected head SHA.
-4. When #2632 is merged, publish one #2627 main-integration head with the corrected proof blob and require nine new checks plus focal Revisor2 return.
+2. Let the active #2629 and #2640 executors finish without head churn. Never repeat the #2629 macOS retry.
+3. If #2629 reaches nine exact successes, merge normally with expected head `1aebf5c490a93c8a3d71e03748ae2ee226adca63`; J review is already qualifying.
+4. Await Claude1/V coordination of #2632. Once it enters main, integrate latest main once into #2627 and #2640 while preserving their reviewed product/test blobs; require nine new checks. #2627 also needs focal Revisor2 return; #2640 needs P focal return.
 5. Keep the notice unit test-only until #1962 releases the source.

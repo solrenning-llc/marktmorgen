@@ -13,11 +13,12 @@ export async function checkShippingSave({browser,LOCAL,fixture,is}){
   await initial.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
   const summary=initial.getByText("SKU: Synthetic-SKU",{exact:true}).locator("..");
   for(const name of ["Change","Stop shipping it"]){
-   const button=summary.getByRole("button",{name,exact:true});
+   const beforeName=name+" — Loading…";
+   const button=summary.getByRole("button",{name:beforeName,exact:true});
    await button.waitFor({state:"attached"});
    is(name+" is natively unavailable before shipping hydration",await button.isDisabled(),true);
    is(name+" exposes unavailable shipping hydration",await button.getAttribute("aria-disabled"),"true");
-   is(name+" visibly reports shipping preparation",(await button.innerText()).trim(),"Loading…");
+   is(name+" visibly reports shipping preparation",(await button.innerText()).trim(),beforeName);
    await button.dispatchEvent("click");
   }
   is("shipping form stays closed before hydration",await initial.locator("form").count(),0);

@@ -36,6 +36,8 @@ A preparação requer reconciliação por Estado de consumo e alíquota, incluin
 
 Os registros das operações abrangidas devem permitir a conferência fiscal e ser disponibilizados eletronicamente quando exigidos. O manual da Revenue indica **dez anos contados do fim do ano** em que ocorreu a operação. Para valores em outra moeda, ele indica a taxa publicada pelo **Banco Central Europeu** no **último dia** do trimestre; sem publicação nesse dia, usa-se a próxima publicação. Isso não é uma cotação atual nem o custo de conversão/remessa da LLC.
 
+O estudo anterior de [financiamento da retenção fiscal](eu-vat-retention-funding.md) já trata do prazo por coorte e da fórmula de armazenamento. Este recorte acrescenta as fontes datadas e a rotina declaratória condicional; não substitui aquele estudo, não renova suas tarifas e não valida sua implementação.
+
 ## Custo e financiamento ainda desconhecidos
 
 A linha existente **vat-oss-and-local-compliance**, em lib/llc-fixed-costs.ts, conserva teto mensal **desconhecido**, teto anual **desconhecido** e reserva não revisada. Uma fonte pública sobre obrigações não é orçamento, contrato, custo integral ou prova de que qualquer componente custa zero.

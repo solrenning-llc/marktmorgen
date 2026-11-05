@@ -76,7 +76,9 @@ import { MAX_TEAM, LOG_LINES } from "@/lib/team";
 import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, SKIPPED_LINES_PER_DAY, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
 import { MAX_DEVICES } from "@/lib/phone-alerts";
-import { MAX_FEEDS } from "@/lib/calendar-sync";
+import { CALENDAR_POLLS_PER_HOUR, MAX_FEEDS } from "@/lib/calendar-sync";
+import { CALENDAR_FILE_BYTES } from "@/lib/read-ceilings";
+import { READING_COPY_MAX_BYTES } from "@/lib/store-readings";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { CLOSING, FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { CLOSING_DAYS } from "@/lib/plan-closing-rules";
@@ -331,9 +333,21 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cal:busy:@lib/calendar-sync.ts": { what: "A calendar feed's busy times, ten minutes", parts: [capped(MAX_FEEDS * READING_BYTES, "MAX_FEEDS feeds, each its parsed busy times: at most 2,000 of them.", src("lib/calendar-sync.ts", "MAX_FEEDS"), src("lib/ics-parse.ts", "maxIntervals ?? 2000"))] },
   "nl:cal:cfg:@lib/calendar-sync.ts": { what: "The store's calendar feeds", parts: [capped(MAX_FEEDS * 2 * KB, "MAX_FEEDS addresses.", src("lib/calendar-sync.ts", "MAX_FEEDS"))] },
   "nl:cal:err:@lib/calendar-sync.ts": { what: "A feed's last failure", parts: [capped(MAX_FEEDS * KB, "One per feed, six hours.")] },
+  "nl:none@lib/calendar-sync.ts": company("A key that is never written", "Read in place of a list a store does not have."),
   "nl:cal:good:@lib/calendar-sync.ts": { what: "A feed's last good reading", parts: [capped(MAX_FEEDS * READING_BYTES, "One per feed, six hours.", src("lib/calendar-sync.ts", "MAX_FEEDS"))] },
   "nl:cal:lock:@lib/calendar-sync.ts": short("A feed read at a time", "request", 1, 128, REQ("page")),
-  "nl:cal:out:@lib/calendar-sync.ts": { what: "The store's calendar file, five minutes", parts: [capped(512 * KB, "One file a store, of what is booked.")] },
+  // Since 4 November 2026 (C4-4) the last good copy of the store's feed, kept CALENDAR_COPY_SECONDS, at most CALENDAR_MAX_EVENTS events (lib/read-ceilings.ts, CALENDAR_FILE_BYTES).
+  "nl:cal:out:@lib/calendar-sync.ts": { what: "The last good copy of the store's calendar file, forty days", parts: [capped(CALENDAR_FILE_BYTES + KB, "One file a store, of what is booked, at its largest.", src("lib/read-ceilings.ts", "CALENDAR_FILE_BYTES"), src("lib/calendar-sync.ts", "CALENDAR_MAX_EVENTS", "CALENDAR_COPY_SECONDS"))] },
+  "nl:cal:pace:@lib/calendar-sync.ts": { what: "The feed's answers of the last hour, a sliding hour", parts: [capped(CALENDAR_POLLS_PER_HOUR * 2 * 64 + KEY, "The times of at most CALENDAR_POLLS_PER_HOUR answers (and one refused, taken back), a store, an hour.", src("lib/calendar-sync.ts", "CALENDAR_POLLS_PER_HOUR"))] },
+  // C4-33 (a): the feed's answers refused in the hour, counted until the address stops.
+  "nl:cal:refused:@lib/calendar-sync.ts": { what: "The feed's answers refused in the last hour", parts: [capped(KEY, "One count a store, an hour.")] },
+  "nl:cal:builds:@lib/calendar-sync.ts": { what: "The feed's file made again today, and its credits used", parts: [capped(4 * KEY, "Two counts a store a UTC day, kept two days.")] },
+  "nl:cal:chg:@lib/call-records.ts": short("When the store's bookings last changed, by its calls id, forty days; and the day's credits, two days: set at each booking made, moved or let go", "call", 40),
+  // C4-4 (owner's decision of 4 November 2026, C4-18): a store's readings of its numbers, kept a day for the pages that show them, and the day's count.
+  "nl:reading:@lib/store-readings.ts": { what: "A store's last readings of its visits, sales and memberships, a day", parts: [capped(3 * READING_COPY_MAX_BYTES, "Three readings a store, each at most READING_COPY_MAX_BYTES.", src("lib/store-readings.ts", "READING_COPY_MAX_BYTES", "READING_KEEP_SECONDS"))] },
+  "nl:list:try:@lib/store-readings.ts": short("A store with no list: its one try of the day to be given one", "day", 2),
+  "nl:reading:day:@lib/store-readings.ts": { what: "A store's readings of the day, and of them the heavy ones", parts: [capped(4 * KEY, "Two counts a store a UTC day, kept two days.")] },
+  // C4-33 (4): a product update's searches for its buyers, from a count of their own.
   "nl:cal:tok:@lib/calendar-sync.ts": { what: "The store's calendar file's token", parts: [capped(KEY, "One a store.")] },
   "nl:meet:rf:@lib/call-meetings.ts": short("Refunds already handled for meetings, kept sixty-one days after the last one read", "order", 61, MARK),
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },

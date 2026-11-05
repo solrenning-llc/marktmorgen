@@ -31,7 +31,7 @@
  */
 import { MAX_LESSONS } from "@/lib/course";
 import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
-import { LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
+import { DELIVERY_MAX_BYTES, LOG_SIZE, READ_DELIVERIES_CALLS_EACH, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
 import { MAX_FLOWS } from "@/lib/flow-limits";
 import { MOVE_BYTES, MOVE_KEY_BYTES, moveReads } from "@/lib/call-moves-read";
@@ -370,30 +370,40 @@ export const EMAIL_SENT_BYTES = 1_024;
 export const FLOW_STATS_BYTES = 20 * 1024;
 /** Pages of sales what the emails sold reads when not kept (lib/mail-revenue.ts, PAGES): checkouts and charges side by side. */
 export const MAIL_REVENUE_PAGES = 2 * 10;
-/** What the emails sold, as kept: by campaign (a review ceiling). */
+/**
+ * What the emails sold, as kept (by campaign), counted when it is not kept yet
+ * and is about to be made. Not a ceiling: a kept copy is measured (STRLEN)
+ * before it is read and every reading is settled at the bytes it read or kept
+ * (lib/mcp-tools.ts, emailsTool).
+ */
 export const MAIL_REVENUE_BYTES = 64_000;
 
 /**
  * What get_emails reads, sized first: its broadcasts and its sequences
  * measured by their bytes (one LRANGE and a STRLEN each), then the list's
  * counts, the records, each sequence's counts at the most and what they sold
- * as kept, and every one told back.
+ * at the size it is kept at (`revenueBytes`, measured: 0 when it is not kept),
+ * and every one told back.
  */
-export function emailsWork(s: { broadcasts: number; broadcastBytes: number; flowBytes: number }): ReadWork {
+export function emailsWork(s: { broadcasts: number; broadcastBytes: number; flowBytes: number; revenueBytes: number }): ReadWork {
   return {
     commands: 2 + s.broadcasts + 3 + 1 + 1 + s.broadcasts + MAX_FLOWS + 1,
-    bytes: s.broadcastBytes + s.flowBytes + MAX_FLOWS * FLOW_STATS_BYTES + MAIL_REVENUE_BYTES,
+    bytes: s.broadcastBytes + s.flowBytes + MAX_FLOWS * FLOW_STATS_BYTES + s.revenueBytes,
     sent: (s.broadcasts + MAX_FLOWS) * EMAIL_SENT_BYTES,
     stripePages: 0,
     roundTrips: 2 + 4,
   };
 }
-/** What get_emails looks up before it takes: whether what they sold is kept and how big (STRLEN), and the PayPal sales and refunds it would read (two ZCARD), side by side. */
+/** What get_emails looks up before it sets aside: whether what they sold is kept and how big (STRLEN), and the PayPal sales and refunds it would read (two ZCARD), side by side. */
 export const EMAILS_PROBE_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, stripePages: 0, roundTrips: 1 };
-/** And when what they sold is not kept: every page of sales, the PayPal sales counted first, kept again. */
-export function mailRevenueColdWork(paypalSales: number): ReadWork {
+/**
+ * And when what they sold is not kept: every page of sales, the PayPal sales
+ * counted first, kept again. The copy kept is known only once it is made, so
+ * it is set aside at MAIL_REVENUE_BYTES and settled at its size (`keptBytes`).
+ */
+export function mailRevenueColdWork(paypalSales: number, keptBytes = MAIL_REVENUE_BYTES): ReadWork {
   const paypal = Math.min(paypalSales, 10 * 100);
-  return { commands: 3, bytes: paypal * PAYPAL_PAID_BYTES + MAIL_REVENUE_BYTES, sent: 0, stripePages: MAIL_REVENUE_PAGES, roundTrips: 2 };
+  return { commands: 3, bytes: paypal * PAYPAL_PAID_BYTES + keptBytes, sent: 0, stripePages: MAIL_REVENUE_PAGES, roundTrips: 2 };
 }
 
 // ---------------------------------------------------------------- what buyers bought next
@@ -416,14 +426,65 @@ export function boughtNextWork(pathBytes: number, sent = (Math.ceil(pathBytes / 
 
 // ---------------------------------------------------------------- events and codes
 
-/** A delivery as the store's data registry prices one (4 KB); the events read the newest LOG_SIZE and send RECENT_MESSAGES_MAX (lib/webhooks.ts). */
-export const DELIVERY_BYTES = 4 * 1024;
-export function eventsWork(): ReadWork {
-  return { commands: 1 + LOG_SIZE, bytes: LOG_SIZE * (64 + DELIVERY_BYTES), sent: RECENT_MESSAGES_MAX * DELIVERY_BYTES, stripePages: 0, roundTrips: 2 };
+/** An entry of a store's delivery log (a delivery's id), with room. */
+export const LOG_ENTRY_BYTES = 64;
+
+/**
+ * The size of a reading of the recent events (lib/api-read.ts, recentEvents):
+ * the deliveries in the store's log, the bytes read (the log and each
+ * delivery as kept) and the bytes sent.
+ */
+export type EventsSize = { deliveries: number; bytes: number; sent: number };
+
+/**
+ * The most a reading of the recent events can be: LOG_SIZE deliveries, each
+ * kept at DELIVERY_MAX_BYTES at most (bounded where it is made,
+ * lib/webhooks.ts, emitEvent), and RECENT_MESSAGES_MAX of them sent.
+ */
+export const EVENTS_MOST: EventsSize = {
+  deliveries: LOG_SIZE,
+  bytes: LOG_SIZE * (LOG_ENTRY_BYTES + DELIVERY_MAX_BYTES),
+  sent: RECENT_MESSAGES_MAX * (DELIVERY_MAX_BYTES + 1),
+};
+
+/**
+ * What the recent events do: the store's log read (LRANGE), each delivery in
+ * it measured (STRLEN), then all read in one script (lib/webhooks.ts,
+ * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH)
+ * and the messages of the type asked for sent. Without an argument, its most.
+ */
+export function eventsWork(s: EventsSize = EVENTS_MOST): ReadWork {
+  return { commands: s.deliveries > 0 ? 2 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 3 : 1 };
+}
+
+/**
+ * The measuring alone at its most, set aside before the log is read (Codex
+ * G2, #2192: fifty sizes were looked up before any request beyond the first
+ * was taken): the log and a size for each delivery it can hold. Part of
+ * eventsWork, which the whole reading is settled at (lib/api-read.ts,
+ * recentEvents).
+ */
+export const EVENTS_PROBE_MOST: ReadWork = { commands: 1 + LOG_SIZE, bytes: LOG_SIZE * LOG_ENTRY_BYTES, sent: 0, stripePages: 0, roundTrips: 2 };
+
+/**
+ * The most a reading of the recent events can send, from the sizes looked up
+ * first: the `most` largest deliveries, since a message is never longer than
+ * the delivery it is kept in (escaped once more there), with a comma each.
+ */
+export function eventsSentMost(sizes: readonly number[], most: number): number {
+  return [...sizes].sort((a, b) => b - a).slice(0, Math.max(0, most)).reduce((n, size) => n + size + 1, 0);
 }
 
 /** A discount code as sent; the codes are one page of the creator's Stripe account (lib/discount.ts, MAX_CODES a page). */
 export const CODE_SENT_BYTES = 1_024;
 export function codesWork(): ReadWork {
   return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 1, roundTrips: 0 };
+}
+/** Making a code (POST /api/v1/codes): two calls to the creator's Stripe account (the coupon, then its code), and the code sent. */
+export function codeMakeWork(): ReadWork {
+  return { commands: 0, bytes: 0, sent: CODE_SENT_BYTES, stripePages: 2, roundTrips: 0 };
+}
+/** Switching a code off (DELETE /api/v1/codes): the codes read to find it, the call that switches it off and the codes read again and sent, at their most. */
+export function codeStopWork(): ReadWork {
+  return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 3, roundTrips: 0 };
 }

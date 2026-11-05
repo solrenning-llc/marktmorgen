@@ -29,7 +29,9 @@ const openedKey = (courseId: string, email: string) => `nl:course:${courseId}:op
 
 /** Only a complete, own acknowledgement confirms this invocation took the claim. */
 function confirmedClaim(reply: unknown): boolean {
-  return Array.isArray(reply) && reply.length === 1 && Object.getOwnPropertyDescriptor(reply, "0")?.value === "OK";
+  if (!Array.isArray(reply) || reply.length !== 1) return false;
+  const slot = Object.getOwnPropertyDescriptor(reply, "0");
+  return slot !== undefined && Object.hasOwn(slot, "value") && slot.value === "OK";
 }
 
 /**

@@ -333,8 +333,9 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
 export async function storeImportsRead(store: Store): Promise<ImportJob[] | null> {
   if (!store.sid || !isRedisConfigured()) return null;
   const [ids] = await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]);
-  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
-  const list = (ids as string[]).filter((id) => IMPORT_ID_PATTERN.test(id));
+  // Every entry an import's id before anything is read: one that is not is unknown, never left out of the history (Codex G2, #1933).
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && IMPORT_ID_PATTERN.test(id))) return null;
+  const list = ids as string[];
   if (!list.length) return [];
   const raws: unknown = await redisPipeline(list.map((id) => ["GET", jobKey(id)]));
   if (!Array.isArray(raws) || raws.length !== list.length || raws.some((raw) => raw !== null && typeof raw !== "string")) return null;

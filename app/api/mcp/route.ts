@@ -181,7 +181,10 @@ export async function POST(request: Request) {
       return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
     }
     if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
-    if (params.name === "list_bundle_choices") return result(id, said(await bundleChoicesTool(store, params.arguments ?? {})));
+    if (params.name === "list_bundle_choices") {
+      const choices = await bundleChoicesTool(store, params.arguments ?? {});
+      return result(id, choices ? said(choices) : said({ error: "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment." }, true));
+    }
     if (params.name === "get_imports") {
       const imports = await importsTool(store);
       return result(id, imports ? said(imports) : said({ error: "Your imports could not be read just now. This is not an empty history; try again in a moment." }, true));

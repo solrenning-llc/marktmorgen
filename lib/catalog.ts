@@ -698,6 +698,32 @@ export async function readListings(store: Store, ids?: Iterable<string>): Promis
   return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
 }
 
+/**
+ * The listings of `asked`, as readListings, but only on Redis's exact answers
+ * (the MCP tool list_bundle_choices; Codex G2 on #1933): one text or nothing
+ * for each listing read, and a text that is a listing of that id. Anything
+ * else is null, unknown, never a page with products left out.
+ */
+export async function readListingsExact(store: Store, asked: string[]): Promise<Listing[] | null> {
+  const catalog = store.catalog;
+  if (catalog.inline) return readListings(store, asked);
+  if (asked.length === 0) return [];
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) return null;
+    const raws: unknown = await redisPipeline(missing.map((id) => ["GET", listingKey(catalog.id!, id)]));
+    if (!Array.isArray(raws) || raws.length !== missing.length || raws.some((raw) => raw !== null && typeof raw !== "string")) return null;
+    for (let i = 0; i < missing.length; i += 1) {
+      if (raws[i] === null) continue;
+      const listing = parseListing(parseJson(raws[i]));
+      if (!listing || listing.id !== missing[i]) return null;
+      found.set(missing[i], listing);
+    }
+  }
+  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
+}
+
 /** One listing, or null when the store has no such product (or no id was given). */
 export async function readListing(store: Store, id: string | null | undefined): Promise<Listing | null> {
   if (typeof id !== "string" || !id) return null;

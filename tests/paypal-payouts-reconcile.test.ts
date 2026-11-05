@@ -22,7 +22,7 @@
  * sender_batch_ids as PayPal says it does.
  */
 import { readFileSync } from "node:fs";
-import { connectPayPal, onTheirWay, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { connectPayPal, onTheirWay, payWithPayPal, payoutUnknownMonth, settlePayPal } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -318,6 +318,22 @@ async function main(): Promise<void> {
   is("unknown and manual (settled is counted in the first part)", [c.unknown >= 1, c.manual >= 1], [true, true]);
   const [names] = await redis.pipeline([["HKEYS", `nl:pp:unk:month:${month()}`]]);
   is("only those three counts", (names as string[]).every((n) => ["unknown", "settled", "manual"].includes(n)), true);
+
+  part("The month's counts are read only in their exact envelope (review of Codex G on #2681, LEVE)");
+  {
+    is("one answer of three counts is read", (await payoutUnknownMonth(month())) !== null, true);
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const answer = await real(commands);
+      // An extra reply beside the HMGET's: the envelope is not one answer.
+      return commands[0]?.[0] === "HMGET" ? [...answer, "1"] : answer;
+    }) as typeof redis.pipeline;
+    try {
+      is("two answers to one command: not known", await payoutUnknownMonth(month()), null);
+    } finally {
+      redis.pipeline = real;
+    }
+  }
 
   part("The studio says it, with the way to look in PayPal");
   const panel = readFileSync("components/paypal-payouts.tsx", "utf8");

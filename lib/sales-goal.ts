@@ -41,7 +41,8 @@ export async function setSalesGoal(statsId: string, raw: unknown, currency: stri
   const cents = readGoal(raw);
   if (cents === null || !isRedisConfigured()) return null;
   const since = new Date(now).toISOString().slice(0, 7);
-  await redisPipeline([cents ? ["SET", key(statsId), JSON.stringify({ cents, currency, since })] : ["DEL", key(statsId)]]);
+  const reply = await redisPipeline([cents ? ["SET", key(statsId), JSON.stringify({ cents, currency, since })] : ["DEL", key(statsId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || (cents ? reply[0] !== "OK" : reply[0] !== 0 && reply[0] !== 1)) throw new Error("Goal update could not be confirmed");
   return cents;
 }
 

@@ -93,3 +93,95 @@ test("inconsistent hold-write envelopes never return the opened checkout as conf
   } finally { redis.pipeline = original; }
   assert.equal(opened, 16);
 });
+
+// Codex G2's three races (review of #1730, 5 November 2026; tests/review-g2-cart-stock-races.test.ts) for a product bought on
+// its own, which is a cart of one since unit 3b: a lock that ran out before the provisional hold was written, an opening whose
+// answer was lost, and a hand-over whose writes were answered in part, with Stripe unable to close the checkout.
+test("a product bought on its own never gets two checkouts for its last unit", async () => {
+  const { onAccount } = await import("@/lib/stripe-account");
+  const { stockLeft } = await import("@/lib/stock");
+  process.env.STRIPE_SECRET_KEY = "sk_test_only";
+  const product = parseProduct({ id: "lastone001", title: "Last one", summary: "", priceCents: 100, stock: 1 });
+  assert.ok(product);
+  const creator = { statsId: "d".repeat(32), stripeAccountId: "acct_test_lastone01" } as Store;
+  const active = new Set<string>();
+  let loseReply = false, refuseExpire = false, sequence = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/checkout/sessions" && init?.method === "POST") {
+      const id = `cs_test_lastone${String(++sequence).padStart(8, "0")}`;
+      active.add(id);
+      if (loseReply) { loseReply = false; throw new TypeError("Connection lost after checkout creation"); }
+      return new Response(JSON.stringify({ id, url: `https://checkout.stripe.com/c/pay/${id}` }));
+    }
+    const expire = /^\/v1\/checkout\/sessions\/([^/]+)\/expire$/.exec(url.pathname);
+    if (expire && init?.method === "POST") {
+      if (refuseExpire) throw new TypeError("Expiration unavailable");
+      active.delete(expire[1]);
+      return new Response(JSON.stringify({ id: expire[1], status: "expired" }));
+    }
+    throw new Error(`Unexpected request ${init?.method} ${url.pathname}`);
+  }) as typeof fetch;
+  const open = async () => {
+    const made = await onAccount("POST", creator.stripeAccountId!, "/checkout/sessions", new URLSearchParams({ mode: "payment" }));
+    return { id: String(made.id) };
+  };
+  const reserve = () => withStockHold(creator, product, open);
+  const reset = () => { redis.clear(); active.clear(); loseReply = false; refuseExpire = false; };
+  const original: typeof redis.pipeline = redis.pipeline.bind(redis);
+  try {
+    reset();
+    assert.equal((await reserve()).ok, true);
+    assert.equal((await reserve()).ok, false, "the ordinary second attempt is refused");
+    assert.equal(active.size, 1);
+
+    // 1. Paused right before the provisional write, past the lock's whole term: another buyer takes the lock and the unit.
+    reset();
+    let arrive!: () => void, resume!: () => void, paused = false;
+    const arrived = new Promise<void>(r => { arrive = r; }), resumed = new Promise<void>(r => { resume = r; });
+    redis.pipeline = async commands => {
+      if (!paused && commands.some(c => c[0] === "HSET" && String(c[2]).startsWith("p_"))) { paused = true; arrive(); await resumed; }
+      return original(commands);
+    };
+    const first = reserve();
+    await arrived;
+    redis.advance(10 * 60 * 1000);
+    const second = await reserve();
+    resume();
+    const late = await first;
+    redis.pipeline = original;
+    assert.equal(second.ok, true, "the buyer who took the expired lock gets the unit");
+    assert.equal(late.ok, false, "the stale holder opens nothing");
+    assert.equal(active.size, 1);
+
+    // 2. Stripe made the checkout but its answer was lost: the unit stays held.
+    reset();
+    loseReply = true;
+    await assert.rejects(reserve());
+    assert.equal(active.size, 1);
+    assert.equal(await stockLeft(creator, product), 0);
+    assert.equal((await reserve()).ok, false);
+    assert.equal(active.size, 1);
+
+    // 3. The checkout's own hold answered in part, and Stripe cannot close it: the unit stays held.
+    reset();
+    refuseExpire = true;
+    redis.pipeline = async commands => {
+      if (commands.some(c => c[0] === "HSET" && String(c[2]).startsWith("cs_test_"))) {
+        for (const command of commands) if (command[0] === "HDEL") await original([command]);
+        return commands.map(c => c[0] === "HSET" ? { error: "write refused" } : 1) as never;
+      }
+      return original(commands);
+    };
+    assert.deepEqual(await reserve(), { ok: false, reason: "busy" });
+    redis.pipeline = original;
+    assert.equal(active.size, 1);
+    assert.equal(await stockLeft(creator, product), 0);
+    assert.equal((await reserve()).ok, false);
+    assert.equal(active.size, 1);
+  } finally {
+    redis.pipeline = original;
+    globalThis.fetch = realFetch;
+  }
+});

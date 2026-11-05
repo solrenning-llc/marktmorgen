@@ -1,0 +1,176 @@
+{
+  "observedAt": "2026-11-05T07:37:00Z",
+  "source": "GitHub REST immutable attempt 1 jobs",
+  "notes": [
+    "Only observed step timings; incomplete step duration is null.",
+    "These cancellations are not successful CI, and no provider cost is inferred.",
+    "No workflow changes proposed or made. One isolated retry requested for each of #2360/#2582."
+  ],
+  "jobs": [
+    {
+      "pr": 2360,
+      "run": 41978317436,
+      "id": 127089339711,
+      "head": "92aa2d2408f1786ee587f16221988ca779469359",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "start": "2026-11-05T06:40:51Z",
+      "end": "2026-11-05T07:16:00Z",
+      "seconds": 2109,
+      "steps": [
+        {
+          "name": "Run npm ci",
+          "status": "completed",
+          "result": "success",
+          "seconds": 12
+        },
+        {
+          "name": "Lint",
+          "status": "completed",
+          "result": "success",
+          "seconds": 99
+        },
+        {
+          "name": "Behavior regressions",
+          "status": "completed",
+          "result": "success",
+          "seconds": 732
+        },
+        {
+          "name": "Production build and route types",
+          "status": "completed",
+          "result": "success",
+          "seconds": 128
+        },
+        {
+          "name": "Verify reviewed development dependencies stay outside runtime",
+          "status": "completed",
+          "result": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Agreements signed with a link, in a browser",
+          "status": "completed",
+          "result": "success",
+          "seconds": 167
+        },
+        {
+          "name": "Copying a whole store, in a browser",
+          "status": "completed",
+          "result": "cancelled",
+          "seconds": 963
+        }
+      ]
+    },
+    {
+      "pr": 2582,
+      "run": 41979870810,
+      "id": 127091495165,
+      "head": "d2519d6507d2a8d8cc709249f5521289e983e410",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "start": "2026-11-05T06:42:57Z",
+      "end": "2026-11-05T07:18:16Z",
+      "seconds": 2119,
+      "steps": [
+        {
+          "name": "Run npm ci",
+          "status": "completed",
+          "result": "success",
+          "seconds": 11
+        },
+        {
+          "name": "Lint",
+          "status": "completed",
+          "result": "success",
+          "seconds": 99
+        },
+        {
+          "name": "Behavior regressions",
+          "status": "completed",
+          "result": "success",
+          "seconds": 724
+        },
+        {
+          "name": "Production build and route types",
+          "status": "completed",
+          "result": "success",
+          "seconds": 127
+        },
+        {
+          "name": "Verify reviewed development dependencies stay outside runtime",
+          "status": "completed",
+          "result": "success",
+          "seconds": 1
+        },
+        {
+          "name": "Agreements signed with a link, in a browser",
+          "status": "completed",
+          "result": "success",
+          "seconds": 167
+        },
+        {
+          "name": "Copying a whole store, in a browser",
+          "status": "completed",
+          "result": "cancelled",
+          "seconds": 977
+        }
+      ]
+    },
+    {
+      "pr": 2588,
+      "run": 41982509105,
+      "id": 127099690466,
+      "head": "2f384638151d58ec183cff5301656067ed9674bf",
+      "status": "in_progress",
+      "conclusion": null,
+      "start": "2026-11-05T07:04:56Z",
+      "end": null,
+      "seconds": null,
+      "steps": [
+        {
+          "name": "Run npm ci",
+          "status": "completed",
+          "result": "success",
+          "seconds": 10
+        },
+        {
+          "name": "Lint",
+          "status": "completed",
+          "result": "success",
+          "seconds": 95
+        },
+        {
+          "name": "Behavior regressions",
+          "status": "completed",
+          "result": "success",
+          "seconds": 811
+        },
+        {
+          "name": "Production build and route types",
+          "status": "completed",
+          "result": "success",
+          "seconds": 114
+        },
+        {
+          "name": "Verify reviewed development dependencies stay outside runtime",
+          "status": "completed",
+          "result": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Agreements signed with a link, in a browser",
+          "status": "completed",
+          "result": "success",
+          "seconds": 157
+        },
+        {
+          "name": "Copying a whole store, in a browser",
+          "status": "in_progress",
+          "result": null,
+          "seconds": null
+        }
+      ]
+    }
+  ]
+}

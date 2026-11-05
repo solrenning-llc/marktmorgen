@@ -37,6 +37,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
 
 import { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME, agentScopeOf } from "@/lib/api-key-rules";
 export { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME };
@@ -74,11 +75,21 @@ function parseStored(raw: unknown): Stored | null {
 const clean = (name: unknown) =>
   (typeof name === "string" ? name : "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_KEY_NAME);
 
-/** A store's keys, newest first, as the studio lists them. Never the key itself. */
+/** The store's list of keys, field and value by turns, only in that exact shape (audit SG2, finding 23). */
+async function readList(sid: string): Promise<string[]> {
+  const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
+  const flat = stringList(raw);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's API keys");
+  return flat;
+}
+
+/**
+ * A store's keys, newest first, as the studio lists them. Never the key
+ * itself. A list that cannot be read throws: it is never shown as no keys.
+ */
 export async function listKeys(sid: string): Promise<ApiKey[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
-  const flat = Array.isArray(raw) ? raw : [];
+  const flat = await readList(sid);
   const out: ApiKey[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const stored = parseStored(flat[i + 1]);
@@ -100,7 +111,10 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   const name = clean(rawName);
   if (!name) return { ok: false, reason: "name" };
   const [count] = await redisPipeline([["HLEN", listKey(sid)]]);
-  if (Number(count) >= MAX_KEYS) return { ok: false, reason: "full" };
+  // An unknown count is not room for one more (audit SG2, rule 30).
+  const held = countOf(count);
+  if (held === null) return { ok: false, reason: "unavailable" };
+  if (held >= MAX_KEYS) return { ok: false, reason: "full" };
 
   const key = `${KEY_PREFIX}${randomBytes(20).toString("hex")}`;
   const id = randomBytes(6).toString("hex");
@@ -113,10 +127,11 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   ]);
   // Two tabs pressing "Make a key" at once can both pass the count above.
   // Counted again after writing, and the one just made is taken back if it
-  // went over, so the limit is the limit.
-  if (Number(after) > MAX_KEYS) {
+  // went over, or if the count cannot be read, so the limit is the limit.
+  const afterCount = countOf(after);
+  if (afterCount === null || afterCount > MAX_KEYS) {
     await redisPipeline([["DEL", lookupKey(hash)], ["HDEL", listKey(sid), id]]);
-    return { ok: false, reason: "full" };
+    return { ok: false, reason: afterCount === null ? "unavailable" : "full" };
   }
   return { ok: true, key, made: { id, name, hint: stored.hint, madeAt: stored.madeAt, usedAt: 0, write, agent } };
 }
@@ -139,8 +154,8 @@ export async function revokeKey(sid: string, id: string): Promise<boolean> {
  */
 export async function revokeAllKeys(sid: string): Promise<number> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
-  const flat = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.entries(raw as Record<string, unknown>).flat() : [];
+  // The list is the only way to the lookups (audit SG2, rule 30): unread, nothing is deleted and this fails.
+  const flat = await readList(sid);
   const hashes: string[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const stored = parseStored(flat[i + 1]);

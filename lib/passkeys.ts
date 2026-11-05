@@ -40,7 +40,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { dropSecondStep, normaliseEmail, sessionMark } from "@/lib/auth";
+import { SessionsUnknownError, dropSecondStep, normaliseEmail, sessionMark } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SITE_URL } from "@/lib/site-url";
@@ -447,6 +447,20 @@ export async function scheduleRemoval(email: string, id: string, session: string
     if (before?.telling && now - before.telling.since < TELLING_MS) return "busy" as const;
     const atOf = { ...(before?.atOf ?? {}) };
     const isNew = atOf[id] === undefined;
+    // Logged out under the same lock, the first time it is asked, before anything is set: nothing P opened stays
+    // open past this request (asked again, the owner's own sessions are not logged out again). Sessions that cannot
+    // be read leave nothing set, and the request fails, to be asked again (audit SG2, finding 6): the email that
+    // says they were logged out is never sent for a request that did not log them out.
+    if (isNew) {
+      const dropped = await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session).then(
+        () => true,
+        (error: unknown) => {
+          if (error instanceof SessionsUnknownError) return false;
+          throw error;
+        },
+      );
+      if (!dropped) return "sessions" as const;
+    }
     if (isNew) atOf[id] = now + REMOVAL_DAYS * 86_400_000;
     // A notice marked as going out long ago was never confirmed: this request sends it.
     const tellNow = isNew || !before || now - before.told >= RETELL_MS || !!before.telling;
@@ -454,9 +468,6 @@ export async function scheduleRemoval(email: string, id: string, session: string
     // A new passkey is untold until a delivery is confirmed; one already waiting keeps what it was.
     const untold = [...(before?.untold ?? []), ...(isNew ? [id] : [])];
     await writeDrop(held, address, dropOf(atOf, before?.told ?? 0, { telling: tellNow ? { token, since: now } : undefined, untold }));
-    // Logged out under the same lock, the first time it is asked: nothing P opened stays open past this request
-    // (asked again, the owner's own sessions are not logged out again).
-    if (isNew) await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session);
     // Whether a second step is left that can still keep it: another passkey not set to go, or the app.
     const another = list.some((p) => atOf[p.id] === undefined);
     const waiting = list.filter((p) => atOf[p.id] !== undefined).map((p) => ({ name: p.name, at: atOf[p.id] }));
@@ -464,6 +475,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
   });
   await afterDue(address, gone);
   if (asked === "busy") throw new RemovalBusyError();
+  if (asked === "sessions") throw new SessionsUnknownError("the sessions a passkey set to be removed opened");
   if (!asked) return null;
   if (asked.tellNow) {
     // Owner C3-96 and the reviews of 3467adf6d and 693f44f0b: when each goes, and what to do if it was not them, in plain words.
@@ -551,15 +563,35 @@ async function removeDue(held: Held, address: string, now: number): Promise<Due 
   return { gone: removed, ids: record.ids.filter(due) };
 }
 
+/**
+ * Logs out the sessions these passkeys' marks opened. False, with nothing
+ * changed, when the sessions could not be read (lib/auth.ts
+ * SessionsUnknownError): what follows says so, never that they were.
+ */
+async function dropPasskeySessions(address: string, gone: (mark: string) => boolean, keep?: string): Promise<boolean> {
+  try {
+    await dropSecondStep(address, gone, keep);
+    return true;
+  } catch (error) {
+    if (!(error instanceof SessionsUnknownError)) throw error;
+    console.error("logging out what a removed passkey opened failed", error);
+    return false;
+  }
+}
+
+/** Said when a passkey is gone but the browsers it let in could not be logged out (audit SG2, finding 6). */
+export const PASSKEY_SESSIONS_OPEN = "The browsers that logged in with it could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
+
 /** What follows a removal that waited its days, once the lock is let go: its sessions logged out, the account told. */
 async function afterDue(address: string, due: Due): Promise<void> {
+  let ended = true;
   if (due.ids.length) {
     const marks = due.ids.map((id) => `passkey:${id}`);
-    await dropSecondStep(address, (mark) => marks.includes(mark));
+    ended = await dropPasskeySessions(address, (mark) => marks.includes(mark));
   }
   const gone = due.gone;
   if (!gone.length) return;
-  await tell(address, "Passkeys were removed from your Marktmorgen account", `${gone.map((p) => `“${headerText(p.name, 60)}”`).join(", ")} ${gone.length === 1 ? "was" : "were"} removed from your Marktmorgen account (${address}) after the wait. ${gone.length === 1 ? "It cannot" : "They cannot"} log in anymore. You can add a new passkey in your studio.`);
+  await tell(address, "Passkeys were removed from your Marktmorgen account", `${gone.map((p) => `“${headerText(p.name, 60)}”`).join(", ")} ${gone.length === 1 ? "was" : "were"} removed from your Marktmorgen account (${address}) after the wait. ${gone.length === 1 ? "It cannot" : "They cannot"} log in anymore. ${ended ? "" : `${PASSKEY_SESSIONS_OPEN} `}You can add a new passkey in your studio.`);
 }
 
 /**
@@ -616,9 +648,11 @@ export async function cancelRemoval(email: string, id: string, session: string |
  * second step). Checked again under the lock: a session opened with a
  * passkey that is set to be removed, or gone, removes nothing at once. The
  * sessions the removed passkey opened are logged out; `keep`, the session
- * removing it, only loses its mark.
+ * removing it, only loses its mark. "removed-sessions-open": the passkey is
+ * gone but its sessions could not be read, so they were not logged out, and
+ * the account is told so (audit SG2, finding 6).
  */
-export async function removePasskey(email: string, id: string, keep?: string, now = Date.now()): Promise<"removed" | "unknown" | "second_step"> {
+export async function removePasskey(email: string, id: string, keep?: string, now = Date.now()): Promise<"removed" | "removed-sessions-open" | "unknown" | "second_step"> {
   const address = normaliseEmail(email);
   let due: Due = NONE;
   const answer = await withPasskeys(address, async (held): Promise<Passkey | "unknown" | "second_step"> => {
@@ -637,13 +671,13 @@ export async function removePasskey(email: string, id: string, keep?: string, no
   });
   await afterDue(address, due);
   if (typeof answer === "string") return answer;
-  await dropSecondStep(address, (mark) => mark === `passkey:${id}`, keep);
-  const line = `The passkey called “${headerText(answer.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.`;
+  const ended = await dropPasskeySessions(address, (mark) => mark === `passkey:${id}`, keep);
+  const line = `The passkey called “${headerText(answer.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.${ended ? "" : ` ${PASSKEY_SESSIONS_OPEN}`}`;
   await tell(address, "A passkey was removed from your Marktmorgen account", line);
   // A passkey is one of the ways the owner calls off a login without two-step login (lib/two-step.ts),
   // so its removal is told to the confirmed recovery address too (MM-SA-19).
   await tellRecovery(address, "A passkey was removed from your Marktmorgen account", line);
-  return "removed";
+  return ended ? "removed" : "removed-sessions-open";
 }
 
 /**

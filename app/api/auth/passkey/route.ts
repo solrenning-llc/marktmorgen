@@ -130,7 +130,9 @@ export async function POST(request: NextRequest) {
       }
       // Checked again under the account's lock (lib/passkeys.ts removePasskey).
       const removed = await removePasskey(email, id, session);
-      return removed === "removed" ? Response.json({ ok: true }) : Response.json({ ok: false, error: removed }, { status: ANSWERS[removed] ?? 400 });
+      // Gone either way; sessions that could not be read are said as not logged out (audit SG2, finding 6).
+      if (removed === "removed" || removed === "removed-sessions-open") return Response.json({ ok: true, loggedOut: removed === "removed" });
+      return Response.json({ ok: false, error: removed }, { status: ANSWERS[removed] ?? 400 });
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {

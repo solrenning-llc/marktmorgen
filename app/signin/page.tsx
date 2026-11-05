@@ -16,7 +16,7 @@ import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib
 import { newAddressProblem, normaliseHandle } from "@/lib/store";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
-const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere"]);
+const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown"]);
 function isReturning(params: { [key: string]: string | string[] | undefined }): boolean {
   return params.to === "login" || (typeof params.status === "string" && RETURNING_STATUSES.has(params.status));
 }
@@ -133,6 +133,11 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   "invite-slow": {
     title: "Too many tries",
     body: "Nothing was changed. Wait a little, then open the invitation again.",
+  },
+  // Log out of all devices when the other sessions could not be read (audit SG2, rule 27): never said as done.
+  "out-everywhere-unknown": {
+    title: "Your other devices may still be logged in",
+    body: "This browser is logged out, but we could not log out your other devices just now. Log in again in a moment and choose “Log out of all devices” once more.",
   },
 };
 

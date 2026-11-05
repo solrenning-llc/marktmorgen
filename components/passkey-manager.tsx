@@ -25,7 +25,10 @@ const MESSAGES: Record<string, string> = {
   second_step: "Your account already has a passkey or an authenticator app, so adding another needs a login with one of them. Log in again with your passkey or your app's code, then add it here.",
 };
 
-type Answer = { ok?: boolean; error?: string; options?: unknown; passkeys?: PasskeyRow[]; removeOn?: number };
+type Answer = { ok?: boolean; error?: string; options?: unknown; passkeys?: PasskeyRow[]; removeOn?: number; loggedOut?: boolean };
+
+/** Said inline when a passkey is removed but the browsers it let in could not be logged out (audit SG2, finding 6). */
+export const REMOVED_NOT_LOGGED_OUT = "The passkey is removed, but the browsers that logged in with it could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
 
 const onDay = removalWhen;
 
@@ -209,7 +212,9 @@ export function PasskeyManager({
       return;
     }
     setList((rows) => rows.filter((r) => r.id !== row.id));
-    toast("Passkey removed.");
+    // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+    if (done.loggedOut === false) setError(REMOVED_NOT_LOGGED_OUT);
+    else toast("Passkey removed.");
   }
 
   /** Calls off a removal that waits: any session may, as keeping a passkey takes nothing away. */

@@ -27,7 +27,10 @@ const MESSAGES: Record<string, string> = {
   "backup-wrong": "The code from your recovery address is not right. Type the six digits in the email we sent there.",
 };
 
-type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[] };
+type Answer = { ok?: boolean; error?: string; secret?: string; uri?: string; codes?: string[]; loggedOut?: boolean };
+
+/** Said when the app is off but the browsers it let in could not be logged out (audit SG2, finding 6). */
+export const OFF_NOT_LOGGED_OUT = "Two-step login is off, but the browsers it let in could not be logged out just now. Choose “Log out of all devices” at the bottom of your studio.";
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -252,10 +255,12 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
           onSubmit={(e) => {
             e.preventDefault();
             if (asking === "off") {
-              void run({ action: "off", code }, () => {
+              void run({ action: "off", code }, (answer) => {
                 setOn(false);
                 setAsking(null);
-                toast("Two-step login is off.");
+                // Something to act on stays inline, never in a toast that goes (components/toast.tsx).
+                if (answer.loggedOut === false) setError(OFF_NOT_LOGGED_OUT);
+                else toast("Two-step login is off.");
               });
             } else {
               void run({ action: "codes", code }, (answer) => {

@@ -1043,7 +1043,8 @@ export default async function StudioPage({
   // first time there is a call to put in it, and the busy times are read (from
   // the ten-minute copy, usually) to point out a dated session that clashes.
   if (current && callProducts.length > 0 && may("settings")) await ensureFeedToken(current).catch(() => {});
-  const apiKeys = current && may("export") ? await listKeys(current.sid).catch(() => []) : null;
+  // A list that cannot be read is said as such in the studio, never as no keys (audit SG2, finding 23).
+  const apiKeys = current && may("export") ? await listKeys(current.sid).catch(() => "unread" as const) : null;
   const [calendar, calendarBusyTimes, hooks] = current
     ? await Promise.all([
         callProducts.length > 0 && may("settings") ? calendarView(current).catch(() => null) : Promise.resolve(null),

@@ -43,6 +43,7 @@
  * cannot see a flood that arrives from many machines at once.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { deleteIfHeldOnly } from "@/lib/redis-lock";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
@@ -211,18 +212,29 @@ export async function clearBrokenMove(from: string, to: string): Promise<void> {
   await redisPipeline([["DEL", await brokenKey(from), await brokenKey(to)]]);
 }
 
-/** Whether a move of this address is running now (its mark), not counting a broken one. */
+/** An EXISTS reply read as a mark: only an exact 0 is "not there"; anything else counts as there (audit SG2, finding 22). */
+const markThere = (reply: unknown) => countOf(reply) !== 0;
+
+/**
+ * Whether a move of this address is running now (its mark), not counting a
+ * broken one. Unknown counts as running: every caller then waits (lib/move-repair.ts).
+ */
 export async function moveRunning(email: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const [found] = await redisPipeline([["EXISTS", await movingKey(email)]]);
-  return Number(found) === 1;
+  return markThere(found);
 }
 
-/** Whether this address is in a move: running now, or broken and not yet repaired. */
+/**
+ * Whether this address is in a move: running now, or broken and not yet
+ * repaired. Unknown counts as moving (audit SG2, finding 22): every caller
+ * then refuses what a move forbids (a login without the second step, adding
+ * or turning off a way in), never lets it through.
+ */
 export async function isMoving(email: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const [running, broken] = await redisPipeline([["EXISTS", await movingKey(email)], ["EXISTS", await brokenKey(email)]]);
-  return Number(running) === 1 || Number(broken) === 1;
+  const replies = repliesFor(await redisPipeline([["EXISTS", await movingKey(email)], ["EXISTS", await brokenKey(email)]]), 2);
+  return !replies || markThere(replies[0]) || markThere(replies[1]);
 }
 
 /**
@@ -246,21 +258,37 @@ function stepOf(mark: unknown): string {
 }
 
 /**
+ * Thrown when the sessions to log out could not be read in their exact
+ * shape: nothing was logged out and nothing deleted, so the caller says the
+ * browsers could not be logged out, never that they were (audit SG2, findings 5 and 6).
+ */
+export class SessionsUnknownError extends UnknownReplyError {
+  constructor(what: string) {
+    super(what);
+    this.name = "SessionsUnknownError";
+  }
+}
+
+/**
  * Takes away what a second step that is gone had opened: every session of
  * the account whose mark `gone` matches is logged out, except `keep` (the
  * session making the change), which only loses its mark and stays logged in
  * as an emailed link would leave it. Answers how many were logged out.
  * Called when a passkey is removed ("passkey:<id>") and when the app is
- * turned off ("app" and "recovery").
+ * turned off ("app" and "recovery"). Throws SessionsUnknownError, having
+ * changed nothing, when the sessions or their marks cannot be read.
  */
 export async function dropSecondStep(email: string, gone: (mark: string) => boolean, keep?: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const owned = await sessionsKey(normaliseEmail(email));
   const [members] = await redisPipeline([["SMEMBERS", owned]]);
-  const keys = (Array.isArray(members) ? members : []).filter((key): key is string => typeof key === "string");
+  const keys = stringList(members);
+  if (!keys) throw new SessionsUnknownError("an account's sessions");
   if (!keys.length) return 0;
   const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
-  const read = await redisPipeline(marks.map((mark) => ["GET", mark]));
+  const read = repliesFor(await redisPipeline(marks.map((mark) => ["GET", mark])), marks.length);
+  // One answer for each mark, each a mark or none: anything else is not read as "no mark".
+  if (!read || read.some((mark) => mark !== null && typeof mark !== "string")) throw new SessionsUnknownError("the second steps of an account's sessions");
   const kept = keep && /^[0-9a-f]{64}$/.test(keep) ? await sessionKey(keep) : "";
   const commands: (string | number)[][] = [];
   let ended = 0;
@@ -560,16 +588,16 @@ export async function endSession(id: string | undefined): Promise<void> {
  *
  * This is the answer to a session cookie that walked off on a borrowed laptop:
  * without it, a thirty-day session is thirty days whatever the creator does.
- * Returns how many were closed.
+ * Returns how many were closed, or null when that is not known (nothing read, or a failure).
  */
-export async function endAllSessions(email: string): Promise<number> {
+export async function endAllSessions(email: string): Promise<number | null> {
   if (!isRedisConfigured()) return 0;
   const owned = await sessionsKey(normaliseEmail(email));
   try {
     const [members] = await redisPipeline([["SMEMBERS", owned]]);
-    const keys = Array.isArray(members)
-      ? members.filter((key): key is string => typeof key === "string")
-      : [];
+    // The set is the only way to the sessions (audit SG2, rule 30): unread, it is kept and nothing is deleted.
+    const keys = stringList(members);
+    if (!keys) throw new SessionsUnknownError("an account's sessions");
     const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
     await redisPipeline([
       ...keys.map((key) => ["DEL", key] as (string | number)[]),
@@ -579,7 +607,8 @@ export async function endAllSessions(email: string): Promise<number> {
     return keys.length;
   } catch (error) {
     console.error("sign-out everywhere failed", error);
-    return 0;
+    // Not "none were closed": unknown (audit SG2, rule 30).
+    return null;
   }
 }
 

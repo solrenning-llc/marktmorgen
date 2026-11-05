@@ -126,7 +126,10 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     } else if (appCopy) {
       ok = (await step("forgetting a copy of two-step login", () => discardTwoStep(to))) && ok;
     }
-    ok = (await step("logging out after an undone move", () => endAllSessions(from))) && ok;
+    // Sessions that could not be read are not logged out (audit SG2): the move is then left marked to repair.
+    ok = (await step("logging out after an undone move", async () => {
+      if ((await endAllSessions(from)) === null) throw new Error("the sessions could not be read");
+    })) && ok;
     if (!ok) broke();
   };
   try {

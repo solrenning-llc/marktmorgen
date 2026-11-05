@@ -64,7 +64,8 @@
  *   nl:2fa:lockedset:<hash> the account's locked sessions, to log them out on Cancel
  */
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, dropSecondStep, endSession, isMoving, normaliseEmail, openSession } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SessionsUnknownError, dropSecondStep, endSession, isMoving, normaliseEmail, openSession } from "@/lib/auth";
+import { UnknownReplyError, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
@@ -406,17 +407,36 @@ export async function openLockedSession(email: string, until: number, now = Date
  */
 export async function endRecoveryAccess(email: string): Promise<void> {
   if (!(await endRecoveryLock(email))) return;
-  await endLocked(email);
-  await tell(email, "What your recovery address opened was closed", "Your account was just logged in with your sign-in email, a code or a passkey, so the browsers that got in through your recovery address were logged out.");
+  if (await endLocked(email)) {
+    await tell(email, "What your recovery address opened was closed", "Your account was just logged in with your sign-in email, a code or a passkey, so the browsers that got in through your recovery address were logged out.");
+    return;
+  }
+  await tell(email, "Log out of all devices to close what your recovery address opened", `Your account was just logged in with your sign-in email, a code or a passkey, but the browsers that got in through your recovery address could not be logged out just now. ${STILL_LOCKED}`);
 }
 
-/** Logs out every session opened without the second step. */
-async function endLocked(email: string): Promise<void> {
+/**
+ * Said when the locked sessions could not be read (audit SG2, finding 5):
+ * they stay locked, as their own marks are kept, and the owner can end them.
+ */
+export const STILL_LOCKED = `For now, ${LOCKED_LIST} stay locked for them. Log them out now: choose “Log out of all devices” at the bottom of your studio.`;
+
+/**
+ * Logs out every session opened without the second step. False, with
+ * nothing logged out or deleted, when they could not be read in their exact
+ * shape (audit SG2, finding 5): the set is the only way to them, so it is
+ * kept, and each stays locked by its own mark.
+ */
+async function endLocked(email: string): Promise<boolean> {
   const [members] = await redisPipeline([["SMEMBERS", lockedSetKey(email)]]);
-  const sessions = (Array.isArray(members) ? members : []).filter((m): m is string => typeof m === "string");
+  const sessions = stringList(members);
+  if (!sessions) {
+    console.error("logging out the sessions let in without a second step failed", new UnknownReplyError("the locked sessions"));
+    return false;
+  }
   for (const session of sessions) await endSession(session);
   await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
   // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
+  return true;
 }
 
 /** Calls off a pending request: the owner logged in with a code or a passkey, or pressed Cancel. The locked sessions are logged out. */
@@ -427,14 +447,16 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
     return writeHeld(held, email, { ...record, reset: 0 });
   });
   if (!called) return false;
-  await endLocked(email);
+  const ended = await endLocked(email);
   await endRecoveryLock(email);
+  const canceled =
+    why === "login"
+      ? "Your account was just logged in with a code or a passkey, so the request to turn off two-step login was canceled"
+      : "The request to turn off two-step login was canceled from your studio";
   await tell(
     email,
     "Two-step login stays on for your Marktmorgen account",
-    why === "login"
-      ? "Your account was just logged in with a code or a passkey, so the request to turn off two-step login was canceled, and the browsers let in without it were logged out."
-      : "The request to turn off two-step login was canceled from your studio, and the browsers let in without it were logged out.",
+    ended ? `${canceled}, and the browsers let in without it were logged out.` : `${canceled}, but the browsers let in without it could not be logged out just now. ${STILL_LOCKED}`,
   );
   return true;
 }
@@ -455,10 +477,25 @@ export async function resetIfDue(email: string, now = Date.now()): Promise<boole
     return (await deleteHeld(held, [recordKey(email), lockedSetKey(email)])) ? kept : null;
   });
   if (backup === null) return false;
-  // What the app opened goes with it (lib/auth.ts dropSecondStep).
-  await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
+  // What the app opened goes with it (lib/auth.ts dropSecondStep). Sessions that could not be read keep only marks
+  // that hold nothing once the app is off (lib/second-step-gate.ts), and the account is told all the same.
+  await dropAppSessions(email);
   await tell(email, "Two-step login is off for your Marktmorgen account", `Two-step login was turned off ${RESET_DAYS} days after you got in without it, and nothing in your studio is locked any more. You can turn it on again in your studio, with a new app setup and new recovery codes.`, backup);
   return true;
+}
+
+/**
+ * Logs out what the app opened, once it is off. Sessions that could not be
+ * read (lib/auth.ts SessionsUnknownError) are logged as such and not said as
+ * logged out; the notices that follow say only that the app is off.
+ */
+async function dropAppSessions(email: string): Promise<void> {
+  try {
+    await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
+  } catch (error) {
+    if (!(error instanceof SessionsUnknownError)) throw error;
+    console.error("logging out what the app opened failed", error);
+  }
 }
 
 export async function twoStepOn(email: string): Promise<boolean> {
@@ -603,8 +640,8 @@ export async function spendRescue(token: string): Promise<string | null> {
   // Never for an address in a move, or left by one that broke (lib/auth.ts isMoving): its two-step login stays.
   const off = await withTwoStep(address, async (held) => !(await isMoving(address)) && (await twoStepOn(address)) && deleteHeld(held, [recordKey(address)]));
   if (!off) return null;
-  // What the app opened goes with it (lib/auth.ts dropSecondStep).
-  await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
+  // What the app opened goes with it (lib/auth.ts dropSecondStep), as in resetIfDue.
+  await dropAppSessions(email);
   await tell(email, "Two-step login is off for your Marktmorgen account", "Two-step login was turned off with a link sent to your recovery address, and your account was logged in. Turn it on again in your studio, with your phone, to get new recovery codes.");
   return email;
 }

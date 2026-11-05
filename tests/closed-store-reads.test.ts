@@ -16,7 +16,7 @@ import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { finishClosed, renewalsAskToday, renewalsLate, renewalsMayClose, RENEWAL_LATE_GAP_DAYS, RENEWAL_TRY_DAYS } from "@/lib/plan-closing";
 import { COMMAND, PREPARE_COMMANDS } from "./plan-cost-registry";
-import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PRUNE_KEY, UNREAD_TRIES, closedDataLine, closedDataNow, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -231,6 +231,15 @@ async function main(): Promise<void> {
     is("pages that never end are not all stopped", await outcome(stopRenewals(seller, Date.now() + 10_000)), "not done, 0 stopped");
     answer(() => ({ object: "search_result", data: [{ id: "sub_1", status: "active" }], has_more: false, next_page: null }), { id: "sub_1", status: "active" });
     is("a cancel Stripe answers without ending it is not counted stopped", await outcome(stopRenewals(seller, Date.now() + 10_000)), "not done, 0 stopped");
+    const unfiltered = { ...seller, handle: "gusopen", previousHandles: [], releasedHandles: [] };
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      const statusAsked = /status:/.test(url.searchParams.get("query") ?? "");
+      const n = Number((url.searchParams.get("page") ?? "p0").slice(1)) || 0;
+      return Response.json(statusAsked ? { object: "search_result", data: [], has_more: false, next_page: null } : { object: "search_result", data: [{ id: `sub_old_${n}`, status: "canceled" }], has_more: n < 60, next_page: n < 60 ? `p${n + 1}` : null });
+    }) as typeof fetch;
+    is("more pages with no status asked than a day reads: not all stopped that day", await outcome(stopRenewals(unfiltered, Date.now() + 10_000)), "not done, 0 stopped");
+    is("and the next day reads on from where it stopped, to the end", await outcome(stopRenewals(unfiltered, Date.now() + 10_000)), "done, 0 stopped");
     answer(() => ({ object: "search_result", data: [{ id: "sub_1", status: "active" }, { id: "sub_2", status: "canceled" }], has_more: false, next_page: null }), { id: "sub_1", status: "canceled" });
     is("and the exact answers stop it", await outcome(stopRenewals(seller, Date.now() + 10_000)), "done, 1 stopped");
   } finally {
@@ -413,6 +422,53 @@ async function main(): Promise<void> {
   const worst = retryCommandsAtMost(PREPARE_COMMANDS);
   console.log(`  a failing closed store's retries at the most: ${worst} commands, $${(worst * COMMAND).toFixed(4)}`);
   is("what a failing closed store's retries can cost is a finite count of commands, under three cents", [Number.isSafeInteger(worst), worst * COMMAND < 0.03], [true, true]);
+  });
+
+  await section("Third review, I: a list passed over keeps what it owes the finished store, and is pruned when it reads", async () => {
+  await walkedOut([], 2);
+  later();
+  const ria = await closing("riaowed");
+  const sam = await closing("samowed");
+  const samSid = (await storeForEmail(sam))!.sid;
+  await real([["ZADD", "nl:pause:due", 4102444800, ria, 4102444800, `${samSid}|x`, 1, "someone-elses"]]);
+  const odd = failing((c) => c[0] === "TYPE" && c[1] === "nl:pause:due", () => "not-a-kind", 1_000);
+  later();
+  for (let i = 0; i < PAGE_TRIES + 2; i += 1) await quietly(() => run().catch(() => null));
+  const owed = (await real([["HKEYS", PRUNE_KEY]]))[0] as string[];
+  is("the list passed over: both stores finished, what it owes each kept, the list said", [(await stateOfRef(ria)).erased !== undefined, (await stateOfRef(sam)).erased !== undefined, owed.includes(`nl:pause:due|${ria}`), owed.includes(`nl:pause:due|${sam}`), (await quietly(run)).unread], [true, true, true, true, 1]);
+  // Ria opens a store again under her key before the list reads: her place in it is the new store's.
+  await claimHandle(ria, "rianew", "ria new studio", "");
+  odd.times = odd.used;
+  later();
+  await quietly(run);
+  is("when it reads: the closed store's member pruned, the key a living store holds kept, nothing owed any more", [(await real([["ZSCORE", "nl:pause:due", `${samSid}|x`]]))[0], (await real([["ZSCORE", "nl:pause:due", ria]]))[0] !== null, (await real([["ZSCORE", "nl:pause:due", "someone-elses"]]))[0] !== null, ((await real([["HKEYS", PRUNE_KEY]]))[0] as string[]).length, (await quietly(run)).unread], [null, true, true, 0, 0]);
+  });
+
+  await section("Third review, I: a store is never finished when what a list owes it could not be kept", async () => {
+  await walkedOut([], 2);
+  later();
+  const tia = await closing("tiaowed");
+  await real([["ZADD", "nl:pause:due", 4102444800, tia]]);
+  failing((c) => c[0] === "TYPE" && c[1] === "nl:pause:due", () => "not-a-kind", 1_000);
+  const keep = failing((c) => c[0] === "HSET" && c[1] === PRUNE_KEY, timeout, 1_000);
+  later();
+  for (let i = 0; i < PAGE_TRIES + 3; i += 1) await quietly(() => run().catch(() => null));
+  is("what it is owed cannot be written: the page is read again, the store never finished", [keep.used > 0, (await stateOfRef(tia)).erased ?? null], [true, null]);
+  rules = [];
+  later();
+  for (let i = 0; i < 6; i += 1) await quietly(() => run().catch(() => null));
+  await walkedOut([], 2);
+  is("once it reads, the store is finished and its member is gone", [(await stateOfRef(tia)).erased !== undefined, (await real([["ZSCORE", "nl:pause:due", tia]]))[0]], [true, null]);
+  });
+
+  await section("Third review, 2: the owner's report line counts what is kept, numbers only", async () => {
+  await real([["HSET", "nl:closed:walk", "tries:#" + "b".repeat(32), PREPARE_TRIES + PARKED_TRIES, "left:#" + "c".repeat(32), LEFT_WALKS, "unread:nl:x:list", UNREAD_TRIES]]);
+  const now = await closedDataNow();
+  is("counted", now && [now.stopped, now.stuck, now.unreadKept], [1, 1, 1]);
+  const line = closedDataLine(now);
+  is("in the owner's words, with no store and no person", [line.includes("1 sem novas tentativas"), line.includes("example.com"), line.includes("#")], [true, false, false]);
+  is("unknown is said as unknown", closedDataLine(null).includes("desconhecido"), true);
+  await real([["HDEL", "nl:closed:walk", "tries:#" + "b".repeat(32), "left:#" + "c".repeat(32), "unread:nl:x:list"]]);
   });
 
   done();

@@ -11,6 +11,13 @@ const store = {
 const member = (id: string, extra: Record<string, unknown> = {}) => ({
   id, status: "active", metadata: { store: store.handle }, ...extra,
 });
+const scoredMember = (extra: Record<string, unknown> = {}) => ({
+  id: "sub_scored", status: "past_due", currency: "usd", start_date: 1_700_000_000, cancel_at_period_end: true,
+  customer: { id: "cus_scored", email: "member@example.com" },
+  metadata: { store: store.handle, product: "synthetic-product" },
+  items: { data: [{ quantity: 1, current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] },
+  ...extra,
+});
 const page = (data: unknown, has_more: unknown = false) => ({ object: "list", data, has_more });
 let replies: unknown[] = [];
 let paths: string[] = [];
@@ -52,6 +59,21 @@ async function main() {
     is(name + ": no successful cache", await redis.pipeline([["GET", `nl:health:${store.statsId}`]]), [null]);
     is(name + ": no extra provider read", paths.length, 1);
   }
+  part("Owned running members need complete reporting evidence");
+  for (const [name, row] of [
+    ["missing expanded customer", scoredMember({ customer: undefined })],
+    ["missing unit amount", scoredMember({ items: { data: [{ quantity: 1, current_period_end: 1_900_000_000, price: { recurring: { interval: "month", interval_count: 1 } } }] } })],
+    ["missing subscription currency", scoredMember({ currency: undefined })],
+  ] as [string, unknown][]) {
+    reset([page([row])]);
+    let refused = false;
+    try { await memberHealth(store, true, 1_800_000_000_000); } catch { refused = true; }
+    is(name + ": incomplete owned row cannot certify a complete report", refused, true);
+    is(name + ": incomplete owned row is not cached as success", await redis.pipeline([["GET", `nl:health:${store.statsId}`]]), [null]);
+  }
+  reset([page([scoredMember()])]);
+  const scored = await memberHealth(store, true, 1_800_000_000_000);
+  is("fully evidenced owned row stays complete", [scored?.complete, scored?.members.length, scored?.members[0]?.monthly, scored?.atRisk], [true, 1, 2000, 2000]);
   part("Confirmed empty, filtered and paginated controls");
   reset([page([])]);
   is("explicit empty list confirms absence", await runningMembers(store), { rows: [], complete: true });

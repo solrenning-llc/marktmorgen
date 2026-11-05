@@ -4,8 +4,6 @@ import test from "node:test";
 import { sendReviewRequests } from "@/lib/review-requests";
 import { ASK_DUE_KEY, askMember, scheduleReviewAsk } from "@/lib/review-ask";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setReviewAsk, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
-import { usedThisMonth } from "@/lib/mail";
-import { windowId } from "@/lib/allowance-window";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 

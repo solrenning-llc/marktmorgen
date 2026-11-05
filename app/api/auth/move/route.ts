@@ -147,6 +147,8 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
   }
 
   let sessionId: string;
+  // Whether every session both addresses had open was closed; never said as closed when it could not be read.
+  let closed = true;
   try {
     const result = await moveAccount(from, to);
     if (!result.ok) {
@@ -163,9 +165,11 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
     await movePhoneDevices(from, to).catch((error) => console.error("moving phone devices failed", error));
-    await endAllSessions(from);
+    // Sessions that could not be read are not closed (lib/auth.ts endAllSessions answers null; review of #2556):
+    // the move stands, as the store and its ways in are all at `to`, and the studio says so, not "every session closed".
+    closed = (await endAllSessions(from)) !== null;
     // And whatever the new address had open before: nothing opened there earlier stays open into this account.
-    await endAllSessions(to);
+    closed = (await endAllSessions(to)) !== null && closed;
     sessionId = await openSession(to);
     // Passkeys set to be removed moved with the rest (lib/passkeys.ts movePasskeys); a removal whose days are over is applied at every login.
     await pendingRemoval(to).catch((error) => console.error("applying a passkey removal failed", error));
@@ -183,7 +187,7 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     return away("/signin?status=move-error");
   }
 
-  const response = away("/studio?address=moved");
+  const response = away(closed ? "/studio?address=moved" : "/studio?address=moved-sessions-open");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));
   return response;
 }

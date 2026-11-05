@@ -423,10 +423,13 @@ export class MemoryRedis {
           return 1;
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
-        if (key.startsWith("-- marktmorgen:crm-deal-move:v3\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+        if (key.startsWith("-- marktmorgen:crm-deal-move:v4\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
           if (args[0] === "2") {
             const held = this.run(["ZSCORE", args[2], args[6]]);
-            if (held === null || Number(held) !== Number(args[7])) return 3;
+            if (held === null || Number(held) !== Number(args[7])) {
+              const kept = this.run(["HGET", args[1], args[3]]);
+              return typeof kept === "string" ? [3, new TextEncoder().encode(kept).length] : [3];
+            }
             return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5]]);
           }
           const target = args[1];
@@ -465,10 +468,13 @@ export class MemoryRedis {
           this.data.set(target, args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-save:v3\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
+        if (key.startsWith("-- marktmorgen:crm-deal-save:v4\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
           if (args[0] === "2") {
             const held = this.run(["ZSCORE", args[2], args[7]]);
-            if (held === null || Number(held) !== Number(args[8])) return 3;
+            if (held === null || Number(held) !== Number(args[8])) {
+              const kept = this.run(["HGET", args[1], args[3]]);
+              return typeof kept === "string" ? [3, new TextEncoder().encode(kept).length] : [3];
+            }
             return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5], args[6]]);
           }
           const target = args[1];

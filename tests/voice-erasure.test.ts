@@ -28,7 +28,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { OWNER, makeWorld, seedPerson } from "./erasure-world";
 import { ROOM } from "./data-room";
-import { MIN_TEXTS, gatherVoice, makeVoice, readVoice } from "@/lib/customer-voice";
+import { LOCK_SECONDS, MIN_TEXTS, gatherVoice, makeVoice, readVoice } from "@/lib/customer-voice";
 import { erasePerson } from "@/lib/person-erasure";
 import { keepAnswer } from "@/lib/answers";
 import { saveReview } from "@/lib/reviews";
@@ -206,6 +206,10 @@ async function main(): Promise<void> {
   const said = (key: string) => (words.match(new RegExp(`\\n  ${key}: "([^"]*)"`)) ?? [])[1] ?? "";
   is("so the failed message never says nothing was counted, and the changed one says it was", [/nothing was counted/i.test(said("failed")), /counted as one of this month's AI jobs/.test(said("changed"))], [false, true]);
   is("the cancellation words' sentence says nothing kept with them says who wrote them", words.includes("nothing kept with it says who wrote it"), true);
+
+  part("The request ends before its lock does, so a second reading cannot start and be charged while the first still runs");
+  const route = (await import("@/app/api/store/voice/route")) as { maxDuration?: number };
+  is("the voice route declares a time limit below the reading's lock", typeof route.maxDuration === "number" && route.maxDuration > 0 && route.maxDuration < LOCK_SECONDS, true);
 
   done();
 }

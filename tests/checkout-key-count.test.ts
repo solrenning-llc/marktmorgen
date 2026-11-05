@@ -12,6 +12,7 @@ import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { DEFAULT_KEYS } from "@/lib/key-setup";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
+import { POST as cartRoute } from "@/app/api/store/cart/route";
 import { withConsent } from "./digital-consent-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -91,6 +92,20 @@ async function main(): Promise<void> {
     answer = "real";
     return [response.headers.get("location"), sessions.length - before];
   };
+  const openCart = async (as: Answer) => {
+    answer = as;
+    const before = sessions.length;
+    const f = new FormData();
+    f.set("handle", "keycountshop");
+    f.set("id", app.product.id);
+    const response = await cartRoute(new NextRequest("https://marktmorgen.com/api/store/cart", {
+      method: "POST",
+      body: withConsent(f),
+      headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com" },
+    }));
+    answer = "real";
+    return [response.headers.get("location"), sessions.length - before];
+  };
 
   part("A count that was read decides as before");
   is("an empty pool: sold out, Stripe never reached", await open("real"), ["https://marktmorgen.com/@keycountshop?status=soldout", 0]);
@@ -104,6 +119,14 @@ async function main(): Promise<void> {
   }
   is("an accessor-backed slot is unknown: the plain error, Stripe never reached", await open("accessor"), ["https://marktmorgen.com/@keycountshop?status=error", 0]);
   is("an accessor-backed Redis slot is never executed", accessorReads, 0);
+
+  part("The cart checkout uses the same fail-closed key evidence (Revisor 2; SG2, finding 12)");
+  // The cart's own error, as in PF1 (#1730/#1732): back to the cart to try again, nothing charged.
+  is("a key left, in a cart: on to Stripe", await openCart("real"), ["https://checkout.stripe.com/c/pay/test", 1]);
+  for (const as of ["throws", "text", "extra", "accessor"] as const) {
+    is(`a cart whose pool's count ${as === "throws" ? "fails to load" : `answers ${as}`}: the cart's error, Stripe never reached`, await openCart(as), ["https://marktmorgen.com/@keycountshop?cart=error#cart", 0]);
+  }
+  is("an accessor-backed Redis slot is never executed, in a cart either", accessorReads, 0);
 
   done();
 }

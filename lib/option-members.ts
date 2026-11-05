@@ -8,9 +8,21 @@
 export type OptionMembers = Readonly<Record<string, number | null>>;
 
 export function readOptionMembers(raw: unknown): OptionMembers | null {
+  return readCounts(raw, "members");
+}
+
+/**
+ * The studio's reading of how many invitations to move here, not yet kept, name each price option (642 [WG2];
+ * action "invited"), read exactly as readOptionMembers reads the members.
+ */
+export function readOptionInvited(raw: unknown): OptionMembers | null {
+  return readCounts(raw, "invited");
+}
+
+function readCounts(raw: unknown, field: "members" | "invited"): OptionMembers | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const ok = Object.getOwnPropertyDescriptor(raw, "ok");
-  const members = Object.getOwnPropertyDescriptor(raw, "members");
+  const members = Object.getOwnPropertyDescriptor(raw, field);
   if (!ok || !Object.hasOwn(ok, "value") || ok.value !== true || !members || !Object.hasOwn(members, "value")) return null;
   const table: unknown = members.value;
   if (typeof table !== "object" || table === null || Array.isArray(table)) return null;

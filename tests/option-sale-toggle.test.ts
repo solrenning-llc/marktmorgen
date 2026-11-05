@@ -24,7 +24,8 @@ import { readProduct } from "@/lib/catalog";
 import { sellableOptions } from "@/lib/product-option";
 import { membershipCacheKey, numbersFrom, type Sub } from "@/lib/membership-numbers";
 import { POST } from "@/app/api/store/option/route";
-import { membersOn, readOptionMembers } from "@/lib/option-members";
+import { membersOn, readOptionInvited, readOptionMembers } from "@/lib/option-members";
+import { inviteMembers, noteKept } from "@/lib/move-members";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -89,6 +90,25 @@ async function main(): Promise<void> {
   redis.run(["SET", membershipCacheKey(statsId), JSON.stringify({ ...counted, optionsCounted: undefined })]);
   is("a kept reading from before options were counted: unknown", (await post(session, { action: "count", id: pid }))[1].members, { [basic]: null, [plus]: null });
   is("an id that is no product is a 404", (await post(session, { action: "count", id: basic }))[0], 404);
+
+  part("Invitations to move here that name each price, not yet kept (Revisor 1, C4-20261105-1945-C2-2 (2))");
+  is("none sent: 0 for each, proved by the whole list", await post(session, { action: "invited", id: pid }), [200, { ok: true, invited: { [basic]: 0, [plus]: 0 } }]);
+  const renews = Math.floor(Date.now() / 1000) + 20 * 86_400;
+  const shop = (await storeForEmail(OWNER))!;
+  await inviteMembers(shop, "job_toggle", [
+    { email: "ada@example.com", productId: pid, option: basic, renews },
+    { email: "ben@example.com", productId: pid, option: basic, renews },
+    { email: "cy@example.com", productId: pid, option: basic, renews },
+    { email: "di@example.com", productId: pid, option: plus, renews },
+  ]);
+  await noteKept(shop, "cy@example.com", pid);
+  is("two still on their way to Basic, one to Plus; a kept one is not counted", await post(session, { action: "invited", id: pid }), [200, { ok: true, invited: { [basic]: 2, [plus]: 1 } }]);
+  const invites = `nl:mv:${statsId}`;
+  redis.run(["HSET", invites, "f".repeat(32) + ":broken", "not json"]);
+  is("one invitation that cannot be read: unknown for every price, never 0", (await post(session, { action: "invited", id: pid }))[1].invited, { [basic]: null, [plus]: null });
+  redis.run(["HDEL", invites, "f".repeat(32) + ":broken"]);
+  is("an id that is no product is a 404", (await post(session, { action: "invited", id: basic }))[0], 404);
+  is("the studio reads it strictly too", [readOptionInvited({ ok: true, invited: { a: 2, b: null, c: -1 } }), readOptionInvited({ ok: true, members: { a: 1 } })], [Object.assign(Object.create(null), { a: 2, b: null, c: null }), null]);
   is("Stripe was never called", stripeCalls, 0);
 
   part("The studio reads the count strictly: anything odd is unknown, never 0");
@@ -120,6 +140,8 @@ async function main(): Promise<void> {
   is("it sends the sale action with a boolean", /action: "sale", id: option\.id, onSale: /.test(editor), true);
   is("it asks for the count of the product", /action: "count", id: product\.id/.test(editor), true);
   is("an unknown count links to Memberships instead of saying 0", /href="\/studio\/memberships"/.test(editor), true);
+  is("it asks for the invitations of the product", /action: "invited", id: product\.id/.test(editor), true);
+  is("it says the invitations on their way apart, and an unknown number as unknown", [/invited to move here/.test(editor), /couldn’t count the invitations/.test(editor)], [true, true]);
   const extras = readFileSync("components/checkout-extras.tsx", "utf8");
   is("the plan form asks no payment for a price off sale, and says why", [/required=\{!option\.offSale\}/.test(extras), /option\.offSale \? [^\n]*Off sale/.test(extras)], [true, true]);
   is("an empty payment for a price off sale is left out of what is sent", /filter\(\(option\) => !option\.offSale \|\| \(each\[option\.id\] \?\? ""\)\.trim\(\)\)/.test(extras), true);

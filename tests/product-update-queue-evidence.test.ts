@@ -64,3 +64,35 @@ test("AA: unknown recipient queue must not be discarded as completed",async()=>{
  const r=await setup();redis.pipeline=async cs=>cs.some(c=>c[0]==="LRANGE"&&c[1]===`nl:upd:job:${r.job.id}:to`)?[]:r.original(cs);
  try{const out=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);assert.deepEqual({status:out?.status,done:out?.done,sent:out?.sent,remaining:redis.run(["LRANGE",`nl:upd:job:${r.job.id}:to`,0,-1])},{status:"waiting",done:0,sent:0,remaining:[person]});assert.equal(r.batches.length,0);}finally{redis.pipeline=r.original;}
 });
+
+test("Q: an expired recipient list fails terminally instead of waiting forever",async()=>{
+ const r=await setup();const recipients=`nl:upd:job:${r.job.id}:to`;redis.advance(59*86_400_000);
+ redis.pipeline=async cs=>{if(cs.some(c=>c[0]==="HEXISTS"&&c[1]===`nl:erased:${r.shop.listId}`))throw new Error("synthetic pause before recipient proof");return r.original(cs);};
+ try{
+  const held=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
+  assert.deepEqual([held?.status,held?.done,held?.sent,r.batches.length],["waiting",0,0,0]);
+  redis.advance(2*86_400_000);
+  // Real Redis answers a missing LRANGE with an empty list without recreating
+  // the key; avoid the test double's list helper materialising an empty key.
+  redis.pipeline=async cs=>cs.length===1&&cs[0][0]==="LRANGE"&&cs[0][1]===recipients&&redis.run(["EXISTS",recipients])===0?[[]]:r.original(cs);
+  const expired=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
+  assert.deepEqual({status:expired?.status,done:expired?.done,sent:expired?.sent,mail:r.batches.flat().length,queued:redis.run(["SISMEMBER","nl:updq",r.job.id]),recipients:redis.run(["EXISTS",recipients])},{status:"failed",done:0,sent:0,mail:0,queued:0,recipients:0});
+  assert.match(expired?.note??"",/expired/i);
+ }finally{redis.pipeline=r.original;}
+});
+
+const unknownPresenceReplies: unknown[] = [
+ [], [null], [2], ["0"], [0, 0], Array(1), Object.assign(Object.create({ 0: 0 }), { length: 1 }),
+];
+for (const presence of unknownPresenceReplies) test("Q: unknown recipient-list presence remains retryable: "+JSON.stringify(presence),async()=>{
+ const r=await setup();const recipients=`nl:upd:job:${r.job.id}:to`;
+ redis.pipeline=async cs=>{
+  if(cs.length===1&&cs[0][0]==="LRANGE"&&cs[0][1]===recipients)return [[]];
+  if(cs.length===1&&cs[0][0]==="EXISTS"&&cs[0][1]===recipients)return presence as never;
+  return r.original(cs);
+ };
+ try{
+  const held=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
+  assert.deepEqual({status:held?.status,done:held?.done,sent:held?.sent,mail:r.batches.flat().length,queued:redis.run(["SISMEMBER","nl:updq",r.job.id]),recipients:redis.run(["LRANGE",recipients,0,-1])},{status:"waiting",done:0,sent:0,mail:0,queued:1,recipients:[person]});
+ }finally{redis.pipeline=r.original;}
+});

@@ -307,7 +307,16 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
       const reply = await redisPipeline([["LRANGE", toKey(id), job.done, job.done + BATCH_SIZE - 1]]).catch(() => null);
       const emails = checkedUpdateChunk(reply, Math.min(BATCH_SIZE, job.total - job.done));
       if (emails === null) {
-        job = { ...job, status: "waiting", note: "The recipients could not be checked just now. Nothing more was sent. We will try again." };
+        // An empty LRANGE is also what Redis returns after the bounded
+        // recipient list expires. Only exact, separate proof that the key is
+        // absent makes that terminal; malformed or unavailable evidence
+        // remains retryable and never permits mail.
+        const exists = checkedUpdateListPresence(
+          await redisPipeline([["EXISTS", toKey(id)]]).catch(() => null),
+        );
+        job = exists === false
+          ? { ...job, status: "failed", note: "The recipient list expired. Nothing more was sent." }
+          : { ...job, status: "waiting", note: "The recipients could not be checked just now. Nothing more was sent. We will try again." };
         break;
       }
       // Nobody who pressed stop here, or left the creator's list.
@@ -379,6 +388,14 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
   } finally {
     await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
   }
+}
+
+/** Exact evidence that the bounded recipient list still exists. */
+function checkedUpdateListPresence(reply: unknown): boolean | null {
+  if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0)) return null;
+  if (reply[0] === 1) return true;
+  if (reply[0] === 0) return false;
+  return null;
 }
 
 /** An unfinished job has exactly this many recipients in its next bounded page. */

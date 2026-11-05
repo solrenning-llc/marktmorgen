@@ -66,7 +66,7 @@ export type GoalProgress = {
 
 /** The month `today` is in, against a goal. Null with no goal. */
 export function goalProgress(goal: number, byDay: Record<string, number>, today: string): GoalProgress | null {
-  if (!goal || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
+  if (!Number.isSafeInteger(goal) || goal <= 0 || goal > MAX_GOAL_CENTS || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
   const month = today.slice(0, 7);
   const days = daysIn(month);
   const day = Number(today.slice(8, 10));

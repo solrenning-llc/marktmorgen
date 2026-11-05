@@ -432,11 +432,22 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[4]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, lease, queue, member, score, next] = args;
-          if (this.run(["ZSCORE", lease, member]) === null) return 0;
+        if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, lease, queue, member, score, next, take] = args;
+          const held = this.run(["ZSCORE", lease, member]);
+          if (held === null || Number(held) !== Number(take)) return 0;
           this.run(["ZADD", queue, score, next]);
           return 1;
+        }
+        // lib/flows.ts DROP_OWN_LEASES: each member taken away only while it is held at the take's own score.
+        if (key.startsWith("-- marktmorgen:flow-lease-drop-own:v1\n") && args[0] === "1") {
+          const [, lease, take, ...members] = args;
+          return members.map((member) => {
+            const held = this.run(["ZSCORE", lease, member]);
+            if (held === null || Number(held) !== Number(take)) return 0;
+            this.run(["ZREM", lease, member]);
+            return 1;
+          });
         }
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
           const target = args[1];

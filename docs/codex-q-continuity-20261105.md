@@ -9,10 +9,10 @@ This is an engineering continuity checkpoint, not a merge/deployment or producti
 | [2438](https://github.com/solrenning-llc/marktmorgen/pull/2438) | codex/q-contacts-read-evidence | 0e9a7b52aa2048f2b2b3b289f2ef600e8cab553f | J: SEM ACHADO / PODE ENTRAR, review5779689854. Nine final green checks required; coordinated reservation issue below. |
 | [2448](https://github.com/solrenning-llc/marktmorgen/pull/2448) | codex/q-erasure-store-evidence | e688593dbb7fb26fd5d584d0ea1ad4e62e00e705 | D2: SEM ACHADO / PODE ENTRAR, review5779620544. Nine final green checks required. |
 | [2535](https://github.com/solrenning-llc/marktmorgen/pull/2535) | codex/q-product-update-erasure-evidence | 1be4b3fd41366c11d70b98139ec5da78d8c02815 | AA's queue MEDIUM repaired, return requested in comment6649459112. Await exact-head rereview and nine final green checks. |
-| [2538](https://github.com/solrenning-llc/marktmorgen/pull/2538) | codex/q-review-request-erasure-evidence | 9fa4a700734c81b1b3d9c7e15bcc162396ae974e | Independent review requested, comment6649430431; nine final checks required. |
+| [2538](https://github.com/solrenning-llc/marktmorgen/pull/2538) | codex/q-review-request-erasure-evidence | 9fa4a700734c81b1b3d9c7e15bcc162396ae974e | J: SEM ACHADO / PODE ENTRAR, review5779787934. Nine final green checks required. |
 | [2541](https://github.com/solrenning-llc/marktmorgen/pull/2541) | codex/q-erasure-list-evidence | 0e960adb85e549319ad67076927e957769187534 | J: SEM ACHADO / PODE ENTRAR, review5779764553. Nine final checks required. |
 
-No product was merged in this work period. Latest checks of2438 were nine pending workflows;2448 had nine scope checks queued/in progress. These are NOT nine green aggregators. Never cancel/rerun queued CI or move a head merely to escape the queue.
+No product was merged in this work period. Fresh status on 2026-11-05 at about04:42 UTC:2438 has nine pending/queued workflows;2448,2538 and2541 have nine queued workflows each;2535 has nine pending workflows. These are NOT green aggregators. Never cancel/rerun queued CI or move a head merely to escape the queue.
 
 ##2438 — contact imports and uncertain writes
 
@@ -54,7 +54,7 @@ Original RED88a43976b754821a5595f2e2ce9281cce175ee5c:18/17 failures. AA proof cc
 
 Exact three-slot recipient evidence before claim/mint/reserve/send. Unknown schedules the same pending member at the EXISTING one-hour read retry; confirmed erased buyers are excluded after recovery. No command/key/retention/visible limit/provider addition.
 
-Durable RED9540c3e952c617bc7b67363c7afba3d0774f2913:19/18 failures with valid-send control passing. Same final19/19, related reminder56/elsewhere39/mail-from10/erasure32. Typegen/global TypeScript/lint/scanner3597/0/reservation2/diff pass. Both blobs verified. J announced the exact-head independent review in comment6649484108; do not duplicate.
+Durable RED9540c3e952c617bc7b67363c7afba3d0774f2913:19/18 failures with valid-send control passing. Same final19/19, related reminder56/elsewhere39/mail-from10/erasure32. Typegen/global TypeScript/lint/scanner3597/0/reservation2/diff pass. Both blobs verified. J completed the exact-head independent review in review5779787934: SEM ACHADO / PODE ENTRAR after nine final green checks. Independent proof codex/j-review-2538-recipient-controls/ab9dd8de061ca264ca34dc89b6b68955e72476bc adds six controls for stop/unsubscribed/erased exclusions, permitted legacy/false evidence and inherited-slot rejection. J did not rerun native Redis, global TypeScript or a browser.
 
 Fixture corrections were documented BEFORE changing the fixture: initial synthetic credential was not allowlisted, replaced with the existing allowlisted synthetic transport credential before durable RED. MemoryRedis lacks ZADD XX; five assertions against native Redis7.4.2 proved exact existing-member-only behavior. ONLY that operation is emulated in the isolated test wrapper. Retry score/recovery assertions were retained; RED rerun on old product. Shared MemoryRedis untouched.
 
@@ -67,6 +67,10 @@ RED ba9231a3de6f50bd562def936ffa0de37123322c:17/16 failures, valid-zero/count co
 ## Independent review completed for X
 
 2530 exact head6361723c81dc45b8fb21bc1907b5ee3632de357a: SEM ACHADO / PODE ENTRAR with nine final checks. Review5779725597, details6649386668. Full two-file diff and actual membership gates checked. Original identical testRED12/2 ->GREEN12/12, linked17+9+22. Independent proof codex/q-review-2530-proof/7f6daeea66fd9f28ae0a4d8b25934488d96c8eb9:3/1 ->3/3, unknown status/current pause/past_due grace. Directed lint/scanner/diff; no global TypeScript/browser/real-provider/full download-route/native claim. No author branch/source/reservation changed. Do not repeat this review.
+
+## Independent review completed for T
+
+2543 exact head38fad0463cac27e4cd46e2814597dd6772663f1f: SEM ACHADO / PODE ENTRAR with nine final checks. Review5779979082; channel result commitf69708e8ebe52653fdf878b962143f635db28055. Read both complete changed files plus opening/fee sources. Durable author RED83ea3c021a6c54ee2e0c0749736e98a73e90af5c reproduced4/2 failures (two controls); reviewed head4/4. Seven linked groups added56 passing checks. Next typegen, global TypeScript with incremental disabled, directed lint, scanner3602/0 and diff check passed. Closed metadata uses PREVIEW_LINE without claiming paid checkout/payment routing; synthetic open state preserves the old text. No flag/gate/price/limit/commission/IO/data change. Home-page metadata reserved by K2 is explicitly outside the PR/opinion. No full production build, real browser/search crawler, hosted deployment, external provider or accessibility session was run. T's product branch/reservation/CI remained untouched.
 
 ## Rules and continuation
 
@@ -86,4 +90,4 @@ npm dependencies installed. Scratch runners /tmp/codex-q-run-tests.mjs and per-w
 
 CLI git fetch works; push lacks credentials. Use GitHub connector blobs/trees/commits/expected-head ref updates. Never force another head or edit another branch. For large files, stdout may silently truncate: apply small unique grouped patches to the exact remote baseline in JS, create_blob, compare SHA with local git hash-object. All published blobs/trees above were verified. Metadata/checks may move after this snapshot: re-read own PR state before merging.
 
-Next: return AA on2535 and J on2538, resolve coordinator-owned2438 reservation check, then merge each own product only with its final nine greens. Preserve THREE already qualified may-merge opinions:2438/J,2448/D2,2541/J. No all-clear/production claim while these remain.
+Next: obtain AA's exact-head return on2535, resolve the coordinator-owned2438 reservation check, then merge each own product only with its final nine greens. Preserve FOUR already qualified may-merge opinions:2438/J,2448/D2,2538/J,2541/J. No all-clear/production claim while these remain.

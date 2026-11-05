@@ -59,9 +59,11 @@ async function concurrentRemovals(): Promise<{ total: number; today: number }> {
       return batch.map((command) => String(String(command[1]).includes(":pts:d:") ? today : total));
     }
     if (batch.length === 1 && batch[0]?.[0] === "EVAL") {
-      if (total > 0) total -= 1;
-      if (today > 0) today -= 1;
-      return [[String(total), String(today)]];
+      const tookTotal = total > 0;
+      const tookToday = today > 0;
+      if (tookTotal) total -= 1;
+      if (tookToday) today -= 1;
+      return [[tookTotal ? 1 : 0, tookToday ? 1 : 0]];
     }
     throw new Error("Unexpected community points command");
   }) as typeof redis.pipeline;
@@ -71,6 +73,18 @@ async function concurrentRemovals(): Promise<{ total: number; today: number }> {
       award(COMMUNITY, MEMBER, -1, { sid: "points-copy-evidence" }, NOW),
     ]);
     return { total, today };
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+async function removalRefuses(reply: unknown[]): Promise<boolean> {
+  redis.pipeline = (async () => reply) as typeof redis.pipeline;
+  try {
+    await award(COMMUNITY, MEMBER, -1, { sid: "points-copy-evidence" }, NOW);
+    return false;
+  } catch {
+    return true;
   } finally {
     redis.pipeline = original;
   }
@@ -110,6 +124,17 @@ async function main(): Promise<void> {
   ]).flat();
   is("retained rewards beyond today's configuration limit remain in the copy", Object.keys((await read(retainedRewards)).rewards).length, MAX_REWARDS + 1);
   is("two simultaneous removals cannot make stored points negative", await concurrentRemovals(), { total: 0, today: 0 });
+
+  for (const [name, reply] of [
+    ["missing script reply", []],
+    ["non-list script reply", [1]],
+    ["partial script reply", [[1]]],
+    ["extra script reply", [[1, 0, 0]]],
+    ["coerced script reply", [["1", 0]]],
+    ["impossible script reply", [[2, 0]]],
+  ] as const) {
+    is(`${name} is unknown`, await removalRefuses(reply as unknown as unknown[]), true);
+  }
 
   part("The pipeline envelope is evidence");
   is("a non-list response is unknown", await refuses(null), true);

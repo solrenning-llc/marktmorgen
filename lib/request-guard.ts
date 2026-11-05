@@ -153,16 +153,29 @@ export async function withinEssentialLimit(scope: string, who: string, limit: nu
 
 export async function withinLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {
   if (!isRedisConfigured()) return true;
+  let reply: unknown;
   try {
     const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    const count = counterReply(await redisPipeline([
+    reply = await redisPipeline([
       ["SET", key, "0", "EX", windowSeconds, "NX"],
       ["INCR", key],
-    ]));
-    // A reply that came back in another shape is an unknown count, never room (SG2 17, Claude 1, 05/11/2026).
+    ]);
+  } catch {
+    // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
+    return true;
+  }
+  // A reply that came back in another shape, or that cannot even be looked at, is an unknown count, never room
+  // (SG2 17, Claude 1, 05/11/2026; Codex Q on #2670: reading it is outside the catch above).
+  return countWithin(reply, limit);
+}
+
+/** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
+function countWithin(reply: unknown, limit: number): boolean {
+  try {
+    const count = counterReply(reply);
     return count !== null && count <= limit;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -199,17 +212,18 @@ export async function withinMonth(scope: string, who: string, limit: number, win
   if (!window || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(window)) return false;
   if (!isRedisConfigured()) return true;
   if (!Number.isSafeInteger(limit) || limit <= 0) return false;
+  let reply: unknown;
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    const count = counterReply(await redisPipeline([
+    reply = await redisPipeline([
       ["SET", key, "0", "EX", 32 * 86_400, "NX"],
       ["INCR", key],
-    ]));
-    return count !== null && count <= limit;
+    ]);
   } catch {
     return true;
   }
+  return countWithin(reply, limit);
 }
 
 /**

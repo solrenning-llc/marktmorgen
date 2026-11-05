@@ -26,6 +26,16 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
   return pipeline(commands);
 }) as typeof redis.pipeline;
 
+// Codex Q's case on #2670: a list that came back but throws when its shape is looked at. A revoked proxy cannot
+// be used for it: every promise resolution reads "then" first, so it would reject inside the pipeline itself,
+// which is "Redis could not be asked". This one comes back through the promise ("then" reads as undefined) and
+// throws only when its own properties are inspected.
+const uninspectable = new Proxy([], {
+  getOwnPropertyDescriptor() {
+    throw new Error("this reply cannot be inspected");
+  },
+});
+
 const MALFORMED: [string, unknown][] = [
   ["an empty reply", []],
   ["only the SET's answer", ["OK"]],
@@ -38,6 +48,7 @@ const MALFORMED: [string, unknown][] = [
   ["a fractional count", ["OK", 1.5]],
   ["a negative count", ["OK", -1]],
   ["a reply that is not a list", { result: 1 }],
+  ["a returned list whose shape cannot be inspected", uninspectable],
 ];
 
 async function main(): Promise<void> {

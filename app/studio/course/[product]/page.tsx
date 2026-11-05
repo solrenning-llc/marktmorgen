@@ -17,6 +17,7 @@ import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
 import { canSellProduct } from "@/lib/store-checkout";
 import { passedFor } from "@/lib/quiz";
 import { certificatesFor } from "@/lib/certificate";
+import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseStart,
   CourseEditor,
@@ -235,6 +236,7 @@ export default async function StudioCoursePage({
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <CourseStart productId={product.id} startsAt={course.startsAt} />
             <CertificateSwitch productId={product.id} on={course.certificate} />
+            {course.certificate ? <CertificateValidity productId={product.id} months={course.certificateMonths ?? null} /> : null}
             {course.certificate ? (
               <Link
                 href={`/@${store.handle}/certificate/sample?product=${product.id}`}

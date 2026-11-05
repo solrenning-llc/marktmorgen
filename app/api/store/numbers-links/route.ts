@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { addNumbersLink, removeNumbersLink } from "@/lib/store";
-import { LINK_ID, indexLink, makeLink, unindexLink } from "@/lib/numbers-links";
+import { LINK_ID, indexLink, linkStore, makeLink, unindexLink } from "@/lib/numbers-links";
 import { readVerified, refreshVerified } from "@/lib/verified-numbers";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -18,8 +18,13 @@ export async function POST(request: NextRequest) {
     if (body.action === "remove") {
       const id = typeof body.id === "string" && LINK_ID.test(body.id) ? body.id : "";
       if (!id) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      // The public index is let go only for this store's own link: one in its
+      // record as read for this request, or one the index already names it
+      // for. Another store's id changes nothing and answers as an unknown one
+      // does (the list is filtered by an id it does not hold).
+      const own = (store.numbersLinks ?? []).some((link) => link.id === id) || (Boolean(store.sid) && (await linkStore(id)) === store.sid);
       const done = await removeNumbersLink(ref, id);
-      await unindexLink(id);
+      if (own) await unindexLink(id);
       if (!done.ok) return Response.json({ ok: false, error: done.reason }, { status: 404 });
       return Response.json({ ok: true, id });
     }

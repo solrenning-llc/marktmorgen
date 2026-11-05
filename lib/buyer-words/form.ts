@@ -8,6 +8,11 @@ import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 const S = "\u00a0";
 
 const en = {
+  keepLabel: "Keep my answers on this device until I send them",
+  keepHelp: "They stay in this browser only and are sent nowhere before you press the button. Leave this off on a shared computer.",
+  keepBack: "Your answers kept on this device are back. Check them before you send.",
+  notYet: (when: string) => `This form opens on ${when}.`,
+  ended: "This form is closed and is not taking answers anymore.",
   send: "Send",
   required: "Required",
   choose: "Choose one",
@@ -37,6 +42,11 @@ const en = {
 export type FormWords = typeof en;
 
 const es: FormWords = {
+  keepLabel: "Guardar mis respuestas en este dispositivo hasta que las envíe",
+  keepHelp: "Se quedan solo en este navegador y no se envían a ningún sitio antes de pulsar el botón. No lo actives en un ordenador compartido.",
+  keepBack: "Tus respuestas guardadas en este dispositivo han vuelto. Revísalas antes de enviar.",
+  notYet: (when: string) => `Este formulario se abre el ${when}.`,
+  ended: "Este formulario está cerrado y ya no recibe respuestas.",
   send: "Enviar",
   required: "Obligatorio",
   choose: "Elige una opción",
@@ -62,6 +72,11 @@ const es: FormWords = {
 };
 
 const fr: FormWords = {
+  keepLabel: "Garder mes réponses sur cet appareil jusqu’à ce que je les envoie",
+  keepHelp: "Elles restent dans ce navigateur seulement et ne sont envoyées nulle part avant que vous appuyiez sur le bouton. Laissez cette case vide sur un ordinateur partagé.",
+  keepBack: "Vos réponses gardées sur cet appareil sont revenues. Vérifiez-les avant d’envoyer.",
+  notYet: (when: string) => `Ce formulaire ouvre le ${when}.`,
+  ended: "Ce formulaire est fermé et ne reçoit plus de réponses.",
   send: "Envoyer",
   required: "Obligatoire",
   choose: "Choisissez une option",
@@ -87,6 +102,11 @@ const fr: FormWords = {
 };
 
 const de: FormWords = {
+  keepLabel: "Meine Antworten auf diesem Gerät behalten, bis ich sie sende",
+  keepHelp: "Sie bleiben nur in diesem Browser und werden nirgendwohin gesendet, bevor Sie auf die Schaltfläche drücken. Auf einem gemeinsam genutzten Computer nicht aktivieren.",
+  keepBack: "Ihre auf diesem Gerät behaltenen Antworten sind wieder da. Prüfen Sie sie vor dem Senden.",
+  notYet: (when: string) => `Dieses Formular öffnet am ${when}.`,
+  ended: "Dieses Formular ist geschlossen und nimmt keine Antworten mehr an.",
   send: "Senden",
   required: "Pflichtfeld",
   choose: "Bitte wählen",
@@ -112,6 +132,11 @@ const de: FormWords = {
 };
 
 const it: FormWords = {
+  keepLabel: "Conserva le mie risposte su questo dispositivo finché non le invio",
+  keepHelp: "Restano solo in questo browser e non vengono inviate da nessuna parte prima che tu prema il pulsante. Lascialo spento su un computer condiviso.",
+  keepBack: "Le risposte conservate su questo dispositivo sono tornate. Controllale prima di inviare.",
+  notYet: (when: string) => `Questo modulo apre il ${when}.`,
+  ended: "Questo modulo è chiuso e non accetta più risposte.",
   send: "Invia",
   required: "Obbligatorio",
   choose: "Scegli un'opzione",
@@ -137,6 +162,11 @@ const it: FormWords = {
 };
 
 const nl: FormWords = {
+  keepLabel: "Mijn antwoorden op dit apparaat bewaren tot ik ze verstuur",
+  keepHelp: "Ze blijven alleen in deze browser en worden nergens heen gestuurd voordat je op de knop drukt. Zet dit niet aan op een gedeelde computer.",
+  keepBack: "Je antwoorden die op dit apparaat bewaard waren, zijn terug. Controleer ze voordat je verstuurt.",
+  notYet: (when: string) => `Dit formulier gaat open op ${when}.`,
+  ended: "Dit formulier is gesloten en neemt geen antwoorden meer aan.",
   send: "Versturen",
   required: "Verplicht",
   choose: "Kies er één",
@@ -162,6 +192,11 @@ const nl: FormWords = {
 };
 
 const pt: FormWords = {
+  keepLabel: "Guardar minhas respostas neste aparelho até eu enviá-las",
+  keepHelp: "Elas ficam só neste navegador e não são enviadas a lugar nenhum antes de você apertar o botão. Deixe desligado num computador compartilhado.",
+  keepBack: "Suas respostas guardadas neste aparelho voltaram. Confira antes de enviar.",
+  notYet: (when: string) => `Este formulário abre em ${when}.`,
+  ended: "Este formulário está fechado e não recebe mais respostas.",
   send: "Enviar",
   required: "Obrigatório",
   choose: "Escolha uma opção",

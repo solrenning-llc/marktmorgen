@@ -1,3 +1,41 @@
+# SR — Resposta posterior do Stripe Support (03/11/2026, 13h09 Fortaleza)
+
+Proveniência: e-mail de Stripe Support, assinado pela mesma equipe especializada, recebido em 03/11/2026 às 13h09 (Fortaleza) no fio "Re: Connect platform eligibility for international accounts" do Gmail do dono (conta 090), lido pelo Claude 1 em 03/11/2026 às 17h40, só leitura: nada foi respondido, encaminhado, marcado ou apagado. Responde às quatro perguntas do dono de 02/11/2026, 19h29, e às quatro sobre a participação na receita de 03/11/2026, 00h39. Nenhum identificador de conta é copiado. O próprio Stripe diz que o e-mail não muda nenhuma conta, que não é aconselhamento jurídico e que encerrou o caso (reabre se o dono responder). Não é aprovação de conta, país, endereço ou abertura.
+
+Decisão do dono (03/11/2026, ao pedir este registro): **no ponto do endereço, esta resposta prevalece sobre SR5**; e **a participação na receita do Stripe conta como zero em toda margem**. O restante de SR5, SD1 e SC1 abaixo continua valendo onde esta resposta não diverge; o texto anterior fica como histórico.
+
+## Resumo fiel
+
+**Participação na receita (revenue share) em contas Standard com cobrança direta**
+
+1. A conta brasileira atual da plataforma **não se qualifica**: o programa não existe para contas de plataforma registradas no Brasil. A futura conta americana da LLC poderá ser considerada depois de existir e cumprir todos os requisitos; o Stripe não confirma elegibilidade nem promete aceite.
+2. Requisitos informados: Connect com contas Standard; Checkout ou Payment Element; todo o volume dos países e meios de pagamento suportados processado pelo Stripe; pelo menos US$ 1 milhão de volume anualizado; status de Stripe Partner completo (não provisório) e aprovação na Verification Assessment; conta de plataforma registrada em país suportado. Nenhum número mínimo de contas conectadas. Inscrição por e-mail a partner-support@stripe.com, com análise de cerca de 3 a 4 semanas.
+3. Percentual não publicado e não informado pelo suporte; pagamento mensal, acumulado a partir do mês seguinte ao aceite dos termos do programa; valem os termos escritos do programa, não o e-mail.
+4. A documentação não descreve mudança nas taxas, no painel ou no contrato dos criadores; é uma remuneração paga à plataforma, sem promessa de efeitos além disso.
+
+**As quatro perguntas de 02/11/2026**
+
+1. **Responsabilidade:** na configuração padrão de contas Standard com cobrança direta, a conta conectada responde por reembolsos, contestações, taxas de contestação e saldo negativo; o Stripe tenta primeiro debitar o saldo do criador, não a conta da plataforma. Sem garantia para todos os casos, porque um acordo ou configuração separada pode mudar isso.
+2. **Reembolso pela plataforma:** sim; a plataforma cria o reembolso pela API com a chave secreta da plataforma e o cabeçalho Stripe-Account com o ID da conta do criador, inclusive para cobrança duplicada por engano; o criador vê o reembolso no próprio painel (https://docs.stripe.com/connect/direct-charges).
+3. **Aprovação do Connect:** a conta americana será outra conta Stripe; a expectativa é de configuração própria do Connect e nova análise do perfil da plataforma, sem garantia de que a aprovação de setembro passe para ela. Preparar: site funcionando, descrição do negócio e de como criadores e compradores usam a plataforma, termos de uso e o fluxo de abertura de conta.
+4. **Endereço nos EUA:** o Stripe confere primeiro se o endereço existe e corresponde à empresa; se não corresponder, pede prova. Provas aceitas: contrato de locação assinado, conta de consumo (utility bill), declaração de imposto ou documento governamental da empresa, como os Articles of Incorporation, mostrando o endereço e o nome da empresa ou da pessoa. **Caixa postal e endereço de escritório virtual não são aceitos.** O Stripe não sabe dizer se um contrato de coworking seria aceito e pede para não contar com ele.
+
+## Aplicação vigente
+
+| Ponto | Aplicação a partir de 03/11/2026 |
+| --- | --- |
+| Endereço nos EUA (substitui a linha de SR5 neste ponto) | Endereço comercial real nos EUA, que exista e corresponda à LLC. **Caixa postal e escritório virtual não são aceitos** (antes: escritório virtual "sem aceitação antecipada garantida"). Coworking: não contar com ele. Endereço de registered agent continua não recomendado como endereço de operação. Prova possível: locação assinada, conta de consumo, declaração de imposto ou documento governamental da empresa, com o endereço e o nome. Banco nos EUA no nome exato da LLC continua. |
+| Participação na receita do Stripe | **Conta como zero em toda margem, cálculo, base mínima e relatório** (decisão do dono). Conta brasileira não se qualifica; a americana só depois de existir, com US$ 1 milhão anualizado, status de parceiro e aceite de termos que não foram aceitos. Nenhum agente pede inscrição, aceita termos ou escreve a partner-support@stripe.com. |
+| Reembolsos, contestações e saldo negativo | Responsabilidade da conta conectada na configuração padrão, **sem garantia**: as reservas de reembolso e de contestação de `lib/receiving-costs.ts` e as exposições financiadas continuam integralmente. |
+| Reembolso pela API da plataforma | Possível tecnicamente na cobrança direta, com o cabeçalho Stripe-Account; não autoriza nenhum fluxo novo de reembolso por este registro. |
+| Connect da conta americana | Nova configuração e nova análise esperadas; a aprovação de setembro da conta brasileira não vale como aprovação da americana. Os itens a preparar entram no roteiro 470 [SR4], em "Depende do dono". |
+
+Pendências e limites: nenhuma resposta ao Stripe foi enviada e nenhuma deve ser enviada por agente. Não muda PLANS_ON_SALE, OPENING_REQUESTED, stripePlatformEligibilityReady, tax gate, art. 9a, revisão comercial, preços, limites, comissão nem qualquer trava, e nenhum coeficiente de `lib/receiving-costs.ts`. Os textos de SR5 em AGENTS.md e CLAUDE.md ainda trazem a redação anterior sobre escritório virtual; neste ponto prevalece esta seção.
+
+VR: registro documental de resposta conferida no Gmail do dono; nada novo disponível ao cliente, nenhuma conta aprovada, nenhum lucro certificado.
+
+---
+
 # SR5 — Aplicação vigente da resposta completa relatada (28 October 2026)
 
 Solicitação do dono (28/10/2026, 00h23, horário de Fortaleza),494[SR5], versão final. **Proveniência conferida pelo Claude em28/10/2026 Gmail do dono:** e-maildesupport@stripe.com de27/10/2026,16h47Fortaleza,assinadoGabriel/equipeespecializada,no fio"Re: Connect platform eligibility for international accounts",texto idêntico ao colado pelo dono. Mensagens anteriores da mesma equipe21/10/202619h41 e22/10/202614h15não a contradizem. Esta é a conferência doClaude informada na versão final do dono; não afirmar queCodex a repetiu. Conta não aprovada por este registro.

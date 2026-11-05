@@ -64,6 +64,7 @@ export async function checkOrderAcknowledgment({browser,LOCAL,fixture,is}){
      is("page order exact request "+name,(await seen).postDataJSON(),{order:expected});
      is("page order busy "+name,await section.getAttribute("aria-busy"),"true");
      for(const control of await section.locator("button").all())is("page order all controls lock "+name,await control.isDisabled(),true);
+     if(!reset)await checkOrderDraftProtection({page,is,label:"pending/"+name});
     }finally{release();}
     await page.waitForFunction(()=>document.querySelector("#order")?.getAttribute("aria-busy")==="false");
     if(scenario.confirmed){

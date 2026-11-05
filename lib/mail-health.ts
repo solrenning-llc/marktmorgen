@@ -147,11 +147,11 @@ export async function listHealth(id: string, now = Date.now()): Promise<Health> 
   const exact = (value: unknown, length: number): unknown[] | null => {
     if (!Array.isArray(value)) return null;
     const size = Object.getOwnPropertyDescriptor(value, "length");
-    if (!size || !("value" in size) || size.value !== length) return null;
+    if (!size || !Object.hasOwn(size, "value") || size.value !== length) return null;
     const out: unknown[] = [];
     for (let i = 0; i < length; i += 1) {
       const item = Object.getOwnPropertyDescriptor(value, String(i));
-      if (!item || !("value" in item)) return null;
+      if (!item || !Object.hasOwn(item, "value")) return null;
       out.push(item.value);
     }
     return out;

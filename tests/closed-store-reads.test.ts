@@ -16,7 +16,7 @@ import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { finishClosed, renewalsAskToday, renewalsLate, renewalsMayClose, RENEWAL_LATE_GAP_DAYS, RENEWAL_TRY_DAYS } from "@/lib/plan-closing";
 import { COMMAND, PREPARE_COMMANDS } from "./plan-cost-registry";
-import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PRUNE_KEY, RESCAN_MS, SCAN_RESTARTS, UNREAD_TRIES, closedDataLine, closedDataNow, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PRUNE_KEPT_KEY, PRUNE_KEY, RESCAN_MS, SCAN_RESTARTS, UNREAD_TRIES, closedDataLine, closedDataNow, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -428,6 +428,7 @@ async function main(): Promise<void> {
   await walkedOut([], 2);
   later();
   const ria = await closing("riaowed");
+  const riaSid = (await storeForEmail(ria))!.sid;
   const sam = await closing("samowed");
   const samSid = (await storeForEmail(sam))!.sid;
   await real([["ZADD", "nl:pause:due", 4102444800, ria, 4102444800, `${samSid}|x`, 1, "someone-elses"]]);
@@ -435,7 +436,7 @@ async function main(): Promise<void> {
   later();
   for (let i = 0; i < PAGE_TRIES + 2; i += 1) await quietly(() => run().catch(() => null));
   const owed = (await real([["HKEYS", PRUNE_KEY]]))[0] as string[];
-  is("the list passed over: both stores finished, what it owes each kept, the list said", [(await stateOfRef(ria)).erased !== undefined, (await stateOfRef(sam)).erased !== undefined, owed.includes(`nl:pause:due|${ria}`), owed.includes(`nl:pause:due|${sam}`), (await quietly(run)).unread], [true, true, true, true, 1]);
+  is("the list passed over: both stores finished, what it owes each kept, the list said", [(await stateOfRef(ria)).erased !== undefined, (await stateOfRef(sam)).erased !== undefined, owed.includes(`nl:pause:due|${ria}|${riaSid}`), owed.includes(`nl:pause:due|${sam}|${samSid}`), (await quietly(run)).unread], [true, true, true, true, 1]);
   // Ria opens a store again under her key before the list reads: her place in it is the new store's.
   await claimHandle(ria, "rianew", "ria new studio", "");
   odd.times = odd.used;
@@ -462,10 +463,11 @@ async function main(): Promise<void> {
   });
 
   await section("Third review, 2: the owner's report line counts what is kept, numbers only", async () => {
-  await real([["HSET", "nl:closed:walk", "tries:#" + "b".repeat(32), PREPARE_TRIES + PARKED_TRIES, "left:#" + "c".repeat(32), LEFT_WALKS, "unread:nl:x:list", UNREAD_TRIES], ["HSET", PRUNE_KEY, "nl:x:list|#" + "d".repeat(32), 1, "marks|#" + "d".repeat(32), JSON.stringify(["d".repeat(32)])]]);
+  const dee = `#${"d".repeat(32)}|${"d".repeat(32)}`;
+  await real([["HSET", "nl:closed:walk", "tries:#" + "b".repeat(32), PREPARE_TRIES + PARKED_TRIES, "left:#" + "c".repeat(32), LEFT_WALKS, "unread:nl:x:list", UNREAD_TRIES], ["HSET", PRUNE_KEPT_KEY, `nl:x:list|${dee}`, 1, `marks|${dee}`, JSON.stringify({ marks: ["d".repeat(32)], keyMarks: [] })]]);
   const now = await closedDataNow();
   is("counted, with the members a list given up on still owes", now && [now.stopped, now.stuck, now.unreadKept, now.owedKept], [1, 1, 1, 1]);
-  await real([["HDEL", PRUNE_KEY, "nl:x:list|#" + "d".repeat(32), "marks|#" + "d".repeat(32)]]);
+  await real([["HDEL", PRUNE_KEPT_KEY, `nl:x:list|${dee}`, `marks|${dee}`]]);
   const line = closedDataLine(now);
   is("in the owner's words, with no store and no person", [line.includes("1 sem novas tentativas"), line.includes("example.com"), line.includes("#")], [true, false, false]);
   is("unknown is said as unknown", closedDataLine(null).includes("desconhecido"), true);
@@ -483,8 +485,9 @@ async function main(): Promise<void> {
   const odd = failing((c) => c[0] === "TYPE" && (c[1] === "nl:mail:flowq" || c[1] === "nl:orders:folders:q"), () => "not-a-kind", 1_000);
   later();
   for (let i = 0; i < PAGE_TRIES + 2; i += 1) await quietly(() => run().catch(() => null));
-  const marksKept = (await real([["HGET", PRUNE_KEY, `marks|${uma}`]]))[0] as string | null;
-  is("finished, what both lists owe kept with every id of it, once", [(await stateOfRef(uma)).erased !== undefined, marksKept !== null && (JSON.parse(marksKept) as string[]).includes(umaStore.listId!) && (JSON.parse(marksKept) as string[]).includes(folder)], [true, true]);
+  const marksKept = (await real([["HGET", PRUNE_KEY, `marks|${uma}|${umaStore.sid}`]]))[0] as string | null;
+  const kept = marksKept ? (JSON.parse(marksKept) as { marks: string[]; keyMarks: string[] }) : null;
+  is("finished, what both lists owe kept with every id of it, once, its folder among the ids made from its key", [(await stateOfRef(uma)).erased !== undefined, kept?.marks.includes(umaStore.listId!), kept?.keyMarks.includes(folder)], [true, true, true]);
   odd.times = odd.used;
   later();
   await quietly(run);
@@ -523,6 +526,54 @@ async function main(): Promise<void> {
     globalThis.fetch = before;
     await real([["HDEL", "nl:closed:walk", `scanstuck:${vic.handle}`], ["DEL", work], ["ZREM", DUE_KEY, storeRef(vic)]]);
   }
+  });
+
+  await section("Fifth review, K: a store opened again under the key keeps its folder in a list the walk passed over and pruned later", async () => {
+  await walkedOut([], 2);
+  later();
+  const wes = await closing("wesfolder");
+  const folder = await storeFolder(wes);
+  await real([["SADD", "nl:orders:folders:r", folder, "someone-elses-folder"]]);
+  const odd = failing((c) => c[0] === "TYPE" && c[1] === "nl:orders:folders:r", () => "not-a-kind", 1_000);
+  later();
+  for (let i = 0; i < PAGE_TRIES + 2; i += 1) await quietly(() => run().catch(() => null));
+  is("finished, the folder owed", (await stateOfRef(wes)).erased !== undefined, true);
+  // Its owner opens a store again under the same key: the same folder, now the new store's.
+  await claimHandle(wes, "wesnew", "wes new studio", "");
+  odd.times = odd.used;
+  later();
+  await quietly(run);
+  is("when the list reads, the folder made from the key a living store holds is kept, nothing owed any more", [(await real([["SISMEMBER", "nl:orders:folders:r", folder]]))[0], (await real([["HLEN", PRUNE_KEY]]))[0]], [1, 0]);
+  });
+
+  await section("Fifth review, 3 and 4: two closings of one key keep their own ids; a list given up on moves out of what the gap reads, and is counted", async () => {
+  await walkedOut([], 2);
+  const key = "xen@example.com";
+  const one = "1".repeat(32);
+  const two = "2".repeat(32);
+  await real([
+    ["HSET", "nl:closed:walk", "unread:nl:orders:folders:s", UNREAD_TRIES - 1],
+    ["HSET", PRUNE_KEY, `nl:orders:folders:s|${key}|${one}`, 1, `nl:orders:folders:s|${key}|${two}`, 1],
+    ["HSETNX", PRUNE_KEY, `marks|${key}|${one}`, JSON.stringify({ marks: ["a".repeat(32)], keyMarks: [] })],
+    ["HSETNX", PRUNE_KEY, `marks|${key}|${two}`, JSON.stringify({ marks: ["b".repeat(32)], keyMarks: [] })],
+  ]);
+  is("two closings of one key: each store's ids kept apart, by its sid", ((await real([["HKEYS", PRUNE_KEY]]))[0] as string[]).filter((f) => f.startsWith("marks|")).length, 2);
+  failing((c) => c[0] === "TYPE" && c[1] === "nl:orders:folders:s", () => "not-a-kind", 1_000);
+  later();
+  await quietly(run);
+  const keptNow = await closedDataNow();
+  is("its last try fails: what it owes leaves what the gap reads for the kept hash, and is counted", [(await real([["HLEN", PRUNE_KEY]]))[0], (await real([["HLEN", PRUNE_KEPT_KEY]]))[0], keptNow?.owedKept, keptNow?.unreadKept], [0, 4, 2, 1]);
+  later();
+  const reads: string[] = [];
+  const before = redis.pipeline;
+  redis.pipeline = async (commands: Command[]) => {
+    for (const c of commands) if (c[0] === "HGETALL") reads.push(String(c[1]));
+    return before(commands);
+  };
+  await quietly(run);
+  redis.pipeline = before;
+  is("the gap does not read it any more", reads.includes(PRUNE_KEPT_KEY), false);
+  await real([["DEL", PRUNE_KEPT_KEY], ["HDEL", "nl:closed:walk", "unread:nl:orders:folders:s"]]);
   });
 
   done();

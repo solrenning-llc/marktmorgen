@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { measureKey, recountStep, RECOUNT_VERSION, STATE_KEY, SUM_KEY, IDS_KEY } from "@/lib/data-recount";
 import { dataKey } from "@/lib/store-data";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
@@ -7,6 +7,9 @@ import { store as redis } from "./redis-stub";
 
 type Command = (string | number)[];
 const pipeline = redis.pipeline.bind(redis);
+const clock = Date.now;
+beforeEach(() => { const now = clock(); Date.now = () => now; });
+afterEach(() => { Date.now = clock; redis.pipeline = pipeline; });
 
 async function injected(command: string, reply: unknown[], run: () => Promise<void>) {
   redis.pipeline = async (commands: Command[]) => commands.length === 1 && commands[0][0] === command ? reply : pipeline(commands);

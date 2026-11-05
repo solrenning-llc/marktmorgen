@@ -6,7 +6,7 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { CreatorCardEditor } from "@/components/creator-card-editor";
-import { readCreatorCard } from "@/lib/creator-card";
+import { readCreatorCardForEditing } from "@/lib/creator-card";
 import { contactWords } from "@/lib/buyer-words/contact";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
@@ -35,7 +35,8 @@ export default async function StudioCardPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
-  const card = await readCreatorCard(store.statsId).catch(() => null);
+  // Read for certain, or not at all: an unknown read shows the notice below, never an empty card to save over the real one.
+  const card = await readCreatorCardForEditing(store.statsId).catch(() => null);
   const address = `${SITE_URL.replace(/^https:\/\//, "")}/@${store.handle}/contact`;
   return (
     <div className="min-h-screen bg-paper text-ink">

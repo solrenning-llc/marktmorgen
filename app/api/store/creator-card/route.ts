@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { CARD_REFUSALS, CardSaveUnconfirmed, MAX_CARD_EMAIL, MAX_CARD_NAME, MAX_CARD_NOTE, MAX_CARD_TITLE, dropCreatorCard, readCreatorCard, saveCreatorCard } from "@/lib/creator-card";
+import { CARD_REFUSALS, CardSaveUnconfirmed, CardUnreadable, MAX_CARD_EMAIL, MAX_CARD_NAME, MAX_CARD_NOTE, MAX_CARD_TITLE, dropCreatorCard, readCreatorCardForEditing, saveCreatorCard } from "@/lib/creator-card";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
@@ -23,8 +23,9 @@ export async function GET(request: NextRequest) {
   const store = access.store;
   if (!store) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   try {
-    return Response.json({ ok: true, card: await readCreatorCard(store.statsId) }, { headers: NO_STORE });
+    return Response.json({ ok: true, card: await readCreatorCardForEditing(store.statsId) }, { headers: NO_STORE });
   } catch (error) {
+    if (error instanceof CardUnreadable) return Response.json({ ok: false, error: "unreadable", message: error.message }, { status: 503, headers: NO_STORE });
     console.error("reading the business card failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
@@ -45,11 +46,12 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "remove") {
       await dropCreatorCard(statsId, store);
-      return Response.json({ ok: true, card: await readCreatorCard(statsId) }, { headers: NO_STORE });
+      return Response.json({ ok: true, card: await readCreatorCardForEditing(statsId) }, { headers: NO_STORE });
     }
     return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });
+    if (error instanceof CardUnreadable) return Response.json({ ok: false, error: "unreadable", message: error.message }, { status: 503, headers: NO_STORE });
     if (error instanceof CardSaveUnconfirmed) return Response.json({ ok: false, error: "unconfirmed", message: error.message }, { status: 503 });
     console.error("saving the business card failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

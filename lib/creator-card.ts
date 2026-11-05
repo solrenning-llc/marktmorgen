@@ -163,6 +163,41 @@ export async function readCreatorCard(statsId: string | null): Promise<CreatorCa
   }
 }
 
+/** The card the studio edits could not be read for certain: the editor is not shown, and nothing is written. */
+export class CardUnreadable extends Error {
+  constructor() {
+    super("We could not read your business card just now. Reload the page in a moment; nothing was changed.");
+    this.name = "CardUnreadable";
+  }
+}
+
+/**
+ * The card as the studio edits it (app/studio/card, app/api/store/creator-card):
+ * the empty one only when no card is kept, exactly ([null]). Any other answer,
+ * a record that is too long, does not parse or is not a card throws
+ * CardUnreadable, so an unknown read never becomes an empty card that a save
+ * would write over the real one with (Codex G2 on #1963). The public pages keep
+ * readCreatorCard, where a card that cannot be read is simply off.
+ */
+export async function readCreatorCardForEditing(statsId: string | null): Promise<CreatorCard> {
+  if (!statsId || !isRedisConfigured()) return NO_CARD;
+  const reply: unknown = await redisPipeline([["GET", cardKey(statsId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new CardUnreadable();
+  const [raw] = reply;
+  if (raw === null) return NO_CARD;
+  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_CARD_BYTES) throw new CardUnreadable();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CardUnreadable();
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CardUnreadable();
+  const read = readCard(parsed as Record<string, unknown>);
+  if (!read.ok) throw new CardUnreadable();
+  return read.card;
+}
+
 /** A card save whose answer could not be confirmed: it may or may not have been written. */
 export class CardSaveUnconfirmed extends Error {
   constructor() {

@@ -76,10 +76,11 @@ test("a store far over is named once, not once per file", async () => {
 });
 
 test("nothing is ever blocked, whatever the number says", async () => {
-  // recordDelivery returns nothing and throws nothing: it cannot be the
-  // reason a buyer does not get what they paid for.
+  // recordDelivery throws nothing and only answers whether it counted: it
+  // cannot be the reason a buyer does not get what they paid for (a paid
+  // file goes out whatever it answers, lib/serve-file.ts).
   const huge = await recordDelivery(file("runaway"), 5_000 * GB);
-  assert.equal(huge, undefined);
+  assert.equal(huge, true);
   assert.equal((await deliveredThisMonth("runaway"))?.bytes, 5_800 * GB);
 });
 

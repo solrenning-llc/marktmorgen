@@ -253,6 +253,29 @@ export async function startPitch(
   }
   const email = input.email.trim().toLowerCase();
   if (!isOwnAddress(email, page.hostname)) return { ok: false, reason: "unpublished" };
+  const pageDomain = siteDomain(page.hostname);
+
+  // Asked before the paid window is reserved, so a refusal here reserves nothing: the stop lists for the page's own
+  // domain and the day's count, read only in their exact shape (CX-123 rule 24). A business is "not stopped" only on
+  // an exact 0 from both lists, and the day's count is a whole number, or no key at all (nothing written today: INCR
+  // makes it with the first). Anything else refuses, never "not stopped" or "0 written today".
+  const [sender, pitches, replies] = await Promise.all([
+    readSender(store),
+    listPitches(store),
+    redisPipeline([
+      ["SISMEMBER", key(store.statsId, "stop"), pageDomain],
+      ["GET", key(store.statsId, `day:${dayOf(now)}`)],
+      ["SISMEMBER", STOP_ALL, pageDomain],
+    ]),
+  ]);
+  const answered = repliesFor(replies, 3);
+  const mine = answered ? stopOf(answered[0]) : null;
+  const all = answered ? stopOf(answered[2]) : null;
+  const today = answered ? textCountOf(answered[1]) : null;
+  if (mine === null || all === null || today === null) return { ok: false, reason: "unavailable" };
+  // The country was asked already; a stop is the next thing pitchProblem would refuse for.
+  if (mine || all) return { ok: false, reason: "stopped" };
+
   // New draft work must be funded before even verifying its external page.
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return { ok: false, reason: "unavailable" };
   const reader = options.reader ?? readPage;
@@ -262,31 +285,29 @@ export async function startPitch(
   const address = publishedAddresses(read.html, read.url, new URL(read.url).hostname).find((a) => a.email === email);
   if (!address) return { ok: false, reason: "unpublished" };
   const domain = siteDomain(new URL(read.url).hostname);
-
-  const [sender, pitches, replies] = await Promise.all([
-    readSender(store),
-    listPitches(store),
-    redisPipeline([
-      ["SISMEMBER", key(store.statsId, "stop"), domain],
-      ["GET", key(store.statsId, `day:${dayOf(now)}`)],
-      ["SISMEMBER", STOP_ALL, domain],
-    ]),
-  ]);
-  // Read only in their exact shape (CX-123 rule 24): a business is "not stopped" only on an exact 0 from both lists,
-  // and the day's count is a whole number, or no key at all (nothing written today: INCR makes it with the first).
-  // Anything else refuses before the model is asked, never "not stopped" or "0 written today".
-  const answered = repliesFor(replies, 3);
-  const mine = answered ? stopOf(answered[0]) : null;
-  const all = answered ? stopOf(answered[2]) : null;
-  const today = answered ? textCountOf(answered[1]) : null;
-  if (mine === null || all === null || today === null) return { ok: false, reason: "unavailable" };
+  // A page that sent the reader on to another domain: that domain's stop lists are asked too, in the same exact
+  // shape. One more round trip, only then.
+  let stoppedThere = false;
+  if (domain !== pageDomain) {
+    const there = repliesFor(
+      await redisPipeline([
+        ["SISMEMBER", key(store.statsId, "stop"), domain],
+        ["SISMEMBER", STOP_ALL, domain],
+      ]),
+      2,
+    );
+    const mineThere = there ? stopOf(there[0]) : null;
+    const allThere = there ? stopOf(there[1]) : null;
+    if (mineThere === null || allThere === null) return { ok: false, reason: "unavailable" };
+    stoppedThere = mineThere || allThere;
+  }
   const before = pitches.filter((p) => p.domain === domain && p.status !== "draft");
   const problem = pitchProblem({
     country,
     address,
     isCompany: input.isCompany,
     pageRefuses: refusesProposals(around(pageText(read.html), email)),
-    stopped: mine || all || pitches.some((p) => p.domain === domain && p.status === "stopped"),
+    stopped: stoppedThere || pitches.some((p) => p.domain === domain && p.status === "stopped"),
     lastWrittenAt: before.length ? Math.max(...before.map((p) => p.sentAt || p.createdAt)) : null,
     sentToday: today === "absent" ? 0 : today,
     sender,

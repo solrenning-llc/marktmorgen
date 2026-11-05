@@ -34,22 +34,23 @@ export type CompanyMonthlyMarginPresentation = Readonly<{
 }>;
 
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
 ] as const;
 
 function usd(cents: number): string {
   const amount = BigInt(cents);
   const negative = amount < BigInt(0);
   const absolute = negative ? -amount : amount;
-  return `${negative ? "-" : ""}$${absolute / BigInt(100)}.${String(absolute % BigInt(100)).padStart(2, "0")}`;
+  const whole = String(absolute / BigInt(100)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${negative ? "-" : ""}US$ ${whole},${String(absolute % BigInt(100)).padStart(2, "0")}`;
 }
 
 function percent(bps: number): string {
   const amount = BigInt(bps);
   const negative = amount < BigInt(0);
   const absolute = negative ? -amount : amount;
-  return `${negative ? "-" : ""}${absolute / BigInt(100)}.${String(absolute % BigInt(100)).padStart(2, "0")}%`;
+  return `${negative ? "-" : ""}${absolute / BigInt(100)},${String(absolute % BigInt(100)).padStart(2, "0")}%`;
 }
 
 /** Last complete UTC calendar month, not a rolling 30-day estimate. */
@@ -150,16 +151,16 @@ export function companyMonthlyMarginPresentation(
   const zeroRevenue = report.revenueCents === 0;
   if (zeroRevenue !== (report.netMarginBps === null && report.targetMet === null)) return null;
   const reportId = `company-margin:${report.month}:v1`;
-  const subject = `Marktmorgen company margin — ${monthName} ${year}`;
+  const subject = `Margem da empresa Marktmorgen — ${monthName} de ${year}`;
   const marginLine = report.netMarginBps === null
-    ? `Net margin: not measurable because revenue was ${usd(report.revenueCents)}.`
-    : `Net margin: ${percent(report.netMarginBps)}`;
+    ? `Margem líquida: não mensurável porque a receita foi ${usd(report.revenueCents)}.`
+    : `Margem líquida: ${percent(report.netMarginBps)}`;
   const targetLine = report.targetMet === null
-    ? `Target: ${percent(report.targetBps)} — not measurable because revenue was ${usd(report.revenueCents)}.`
-    : `Target: ${percent(report.targetBps)} — ${report.targetMet ? "met" : "not met"}.`;
+    ? `Meta: ${percent(report.targetBps)} — não mensurável porque a receita foi ${usd(report.revenueCents)}.`
+    : `Meta: ${percent(report.targetBps)} — ${report.targetMet ? "atingida" : "não atingida"}.`;
   const heldLine = report.heldStores === null || report.heldStoresPeak === null
-    ? "Stores held for recovery: unknown (not zero)."
-    : `Stores held for recovery: ${report.heldStores} at month end; monthly peak ${report.heldStoresPeak}.`;
+    ? "Lojas retidas para recuperação: desconhecido (não zero)."
+    : `Lojas retidas para recuperação: ${report.heldStores} no fim do mês; pico mensal ${report.heldStoresPeak}.`;
 
   return Object.freeze({
     schema: 1,
@@ -170,19 +171,19 @@ export function companyMonthlyMarginPresentation(
     subject,
     text: [
       subject,
-      `Report ID: ${reportId}`,
-      "Basis: reconciled actuals for the complete UTC calendar month.",
-      `Revenue: ${usd(report.revenueCents)}`,
-      `Variable costs: ${usd(report.variableCostsCents)}`,
-      `Fixed costs: ${usd(report.fixedCostsCents)}`,
-      `Taxes: ${usd(report.taxesCents)}`,
-      `Refunds: ${usd(report.refundsCents)}`,
-      `Reserves: ${usd(report.reservesCents)}`,
-      `Net profit: ${usd(report.netProfitCents)}`,
+      `ID do relatório: ${reportId}`,
+      "Base: dados reais reconciliados do mês-calendário UTC completo.",
+      `Receita: ${usd(report.revenueCents)}`,
+      `Custos variáveis: ${usd(report.variableCostsCents)}`,
+      `Custos fixos: ${usd(report.fixedCostsCents)}`,
+      `Impostos: ${usd(report.taxesCents)}`,
+      `Reembolsos: ${usd(report.refundsCents)}`,
+      `Reservas: ${usd(report.reservesCents)}`,
+      `Lucro líquido: ${usd(report.netProfitCents)}`,
       marginLine,
       targetLine,
       heldLine,
-      "Informational only: this report does not open sales or change any price, limit, commission, flag or gate.",
+      "Somente informativo: este relatório não abre vendas nem altera preço, limite, comissão, sinalizador ou trava.",
     ].join("\n"),
   });
 }

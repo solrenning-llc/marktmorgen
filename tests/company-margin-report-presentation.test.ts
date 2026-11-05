@@ -40,45 +40,46 @@ test("a complete reconciled month has one deterministic private owner presentati
     month: "2026-10",
     currency: "USD",
     basis: "reconciled_actual",
-    subject: "Marktmorgen company margin — October 2026",
+    subject: "Margem da empresa Marktmorgen — outubro de 2026",
     text: [
-      "Marktmorgen company margin — October 2026",
-      "Report ID: company-margin:2026-10:v1",
-      "Basis: reconciled actuals for the complete UTC calendar month.",
-      "Revenue: $90.00",
-      "Variable costs: $9.00",
-      "Fixed costs: $9.00",
-      "Taxes: $18.00",
-      "Refunds: $4.50",
-      "Reserves: $4.50",
-      "Net profit: $45.00",
-      "Net margin: 50.00%",
-      "Target: 60.00% — not met.",
-      "Stores held for recovery: 2 at month end; monthly peak 5.",
-      "Informational only: this report does not open sales or change any price, limit, commission, flag or gate.",
+      "Margem da empresa Marktmorgen — outubro de 2026",
+      "ID do relatório: company-margin:2026-10:v1",
+      "Base: dados reais reconciliados do mês-calendário UTC completo.",
+      "Receita: US$ 90,00",
+      "Custos variáveis: US$ 9,00",
+      "Custos fixos: US$ 9,00",
+      "Impostos: US$ 18,00",
+      "Reembolsos: US$ 4,50",
+      "Reservas: US$ 4,50",
+      "Lucro líquido: US$ 45,00",
+      "Margem líquida: 50,00%",
+      "Meta: 60,00% — não atingida.",
+      "Lojas retidas para recuperação: 2 no fim do mês; pico mensal 5.",
+      "Somente informativo: este relatório não abre vendas nem altera preço, limite, comissão, sinalizador ou trava.",
     ].join("\n"),
   });
   assert.equal(Object.isFrozen(presentation), true);
   assert.deepEqual(companyMonthlyMarginPresentation(input, NOW, held), presentation);
   assert.doesNotMatch(JSON.stringify(presentation), /example\.com|synthetic-account|evidence|privateEmail|SYNTHETIC/);
-  assert.match(companyMonthlyMarginPresentation(input, NOW)!.text, /Stores held for recovery: unknown \(not zero\)\./);
+  assert.doesNotMatch(presentation!.text, /Report ID|Basis:|Revenue:|Variable costs|Fixed costs|Taxes:|Refunds:|Net profit|Net margin|Target:|Stores held|Informational only/);
+  assert.match(companyMonthlyMarginPresentation(input, NOW)!.text, /Lojas retidas para recuperação: desconhecido \(não zero\)\./);
 });
 
 test("losses, zero revenue and the exact target remain truthful presentation states", () => {
   const lossInput = fixture();
   for (const source of COMMERCIAL_PROFIT_SOURCES) lossInput.sources[source]!.revenueCents = 0;
   const loss = companyMonthlyMarginPresentation(lossInput, NOW);
-  assert.match(loss!.text, /Revenue: \$0\.00/);
-  assert.match(loss!.text, /Net profit: -\$45\.00/);
-  assert.match(loss!.text, /Net margin: not measurable because revenue was \$0\.00\./);
-  assert.match(loss!.text, /Target: 60\.00% — not measurable because revenue was \$0\.00\./);
-  assert.doesNotMatch(loss!.text, /met\./);
+  assert.match(loss!.text, /Receita: US\$ 0,00/);
+  assert.match(loss!.text, /Lucro líquido: -US\$ 45,00/);
+  assert.match(loss!.text, /Margem líquida: não mensurável porque a receita foi US\$ 0,00\./);
+  assert.match(loss!.text, /Meta: 60,00% — não mensurável porque a receita foi US\$ 0,00\./);
+  assert.doesNotMatch(loss!.text, /atingida\./);
 
   const exactTarget = fixture();
   for (const source of COMMERCIAL_PROFIT_SOURCES) exactTarget.sources[source]!.revenueCents = 1_250;
-  assert.match(companyMonthlyMarginPresentation(exactTarget, NOW)!.text, /Net margin: 60\.00%\nTarget: 60\.00% — met\./);
+  assert.match(companyMonthlyMarginPresentation(exactTarget, NOW)!.text, /Margem líquida: 60,00%\nMeta: 60,00% — atingida\./);
   exactTarget.sources.training!.reservesCents = 51;
-  assert.match(companyMonthlyMarginPresentation(exactTarget, NOW)!.text, /Net margin: 59\.99%\nTarget: 60\.00% — not met\./);
+  assert.match(companyMonthlyMarginPresentation(exactTarget, NOW)!.text, /Margem líquida: 59,99%\nMeta: 60,00% — não atingida\./);
   assert.equal(commercialPlansMayOpen(true), false);
 });
 
@@ -104,7 +105,7 @@ test("unknown, malformed or uninspectable accounting never gets a presentation",
 
   let heldReads = 0;
   const unreadableHeld = { month: "2026-10", peak: 5, get count() { heldReads++; return 2; } };
-  assert.match(companyMonthlyMarginPresentation(fixture(), NOW, unreadableHeld)!.text, /held for recovery: unknown \(not zero\)/);
+  assert.match(companyMonthlyMarginPresentation(fixture(), NOW, unreadableHeld)!.text, /retidas para recuperação: desconhecido \(não zero\)/);
   assert.equal(heldReads, 0);
 });
 
@@ -114,6 +115,6 @@ test("the month and idempotency key come only from the complete UTC period", () 
   const november = companyMonthlyMarginPresentation(novemberInput, Date.UTC(2026, 11, 1))!;
   assert.equal(october.reportId, "company-margin:2026-10:v1");
   assert.equal(november.reportId, "company-margin:2026-11:v1");
-  assert.equal(november.subject, "Marktmorgen company margin — November 2026");
+  assert.equal(november.subject, "Margem da empresa Marktmorgen — novembro de 2026");
   assert.notEqual(october.reportId, november.reportId);
 });

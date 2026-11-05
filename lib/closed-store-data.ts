@@ -264,6 +264,8 @@ export async function marksOf(store: Store): Promise<{ marks: string[]; keyMarks
   const found = new Set<string>([...own.filter((id): id is string => typeof id === "string" && id.length >= 6), ...idsIn(JSON.stringify(store), JSON.stringify(listings), JSON.stringify(flows), JSON.stringify(courses))]);
   for (const id of [...courseIds, ...listings.flatMap((l) => (l.podcast ? [l.podcast.id] : [])), ...flows.map((f) => f.id)]) if (id) found.add(id);
   for (const ours of [store.stripeCustomerId, store.subscriptionId]) if (ours) found.delete(ours);
+  // A date or a time (2026-11-05, 2026-11-05T07...) names no store: never a mark (SG2 sixth review).
+  for (const id of found) if (/^\d{4}-\d{2}-\d{2}(T[\d:.]*Z?)?$/.test(id)) found.delete(id);
   if (store.stripeAccountId && (await sharedAccount(store))) found.delete(store.stripeAccountId);
   // The owner's address and the store's addresses are not ids: the walk matches them only where a family says so.
   found.delete(store.email);
@@ -835,6 +837,8 @@ type WalkState = {
   unread: Map<string, number>;
   /** Closing stores whose reading of renewals Stripe refused SCAN_RESTARTS times (by address). */
   scansStuck: number;
+  /** The lists whose given-up rows wait in PRUNE_KEPT_KEY, read with them when the list is pruned again. */
+  keptLists: Set<string>;
   /** When what the company's lists owe was last pruned. */
   prunedAt: number;
   /** Stores put in the batch since the last walk began: a run that stops before beginning one leaves them to the next. */
@@ -855,7 +859,7 @@ function walkStateOf(reply: unknown): WalkState {
   if (!CURSOR.test(cursor)) return refuse("the walk's cursor");
   const phase = fields.get("phase") || "idle";
   if (phase !== "idle" && phase !== "walk" && phase !== "finish") return refuse("the walk's phase");
-  const state: WalkState = { cursor, phase, started: number("started"), pageTries: number("pagetries"), parked: 0, stopped: 0, partial: [], out: [], left: new Map(), unread: new Map(), pending: number("pending") > 0, prunedAt: number("pruned"), scansStuck: 0 };
+  const state: WalkState = { cursor, phase, started: number("started"), pageTries: number("pagetries"), parked: 0, stopped: 0, partial: [], out: [], left: new Map(), unread: new Map(), pending: number("pending") > 0, prunedAt: number("pruned"), scansStuck: 0, keptLists: new Set() };
   for (const [name, raw] of fields) {
     const [kind, ...rest] = name.split(":");
     const ref = rest.join(":");
@@ -870,6 +874,7 @@ function walkStateOf(reply: unknown): WalkState {
     else if (kind === "left") state.left.set(ref, count());
     else if (kind === "unread") state.unread.set(ref, count());
     else if (kind === "scanstuck") state.scansStuck += 1;
+    else if (kind === "kept") state.keptLists.add(ref);
   }
   return state;
 }
@@ -927,44 +932,54 @@ function deletedByItsOwner(ref: string, now: number): Batched | null {
  * what is owed.
  */
 async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
-  const lists = [...state.unread].filter(([, tries]) => tries < UNREAD_TRIES).map(([list]) => list);
-  if (!lists.length) return;
+  // Once a gap; nothing more than this count when nothing is owed.
+  const [size] = await redisPipeline([["HLEN", PRUNE_KEY]]);
+  const triable = [...state.unread].filter(([, tries]) => tries < UNREAD_TRIES).map(([list]) => list);
+  if (!countOf(size, "what the company's lists owe") && !triable.some((list) => state.keptLists.has(list))) return;
   const { rows, marks } = await owedOf(PRUNE_KEY);
+  // Rows of a list given up on: its move to PRUNE_KEPT_KEY stopped half-way (sixth review, 3); moved again, the same way.
+  for (const [list, owing] of [...rows]) {
+    if ((state.unread.get(list) ?? 0) < UNREAD_TRIES) continue;
+    await moveToKept(list, owing, rows, marks, state);
+  }
+  // Every list owed and tried: those marked, and any whose mark is gone (a delete that stopped half-way).
+  const lists = [...new Set([...triable, ...[...rows.keys()].filter((list) => !state.unread.has(list))])];
+  const kept = lists.some((list) => state.keptLists.has(list)) ? await owedOf(PRUNE_KEPT_KEY) : null;
   for (const list of lists) {
     const owing = rows.get(list) ?? [];
+    const keptOwing = state.keptLists.has(list) ? kept?.rows.get(list) ?? [] : [];
     try {
       // Every id of each store, exactly as its walk had them: one missing is unknown, never "only its key".
-      const entries = owing.map((o) => {
-        const ids = marks.get(o.store) ?? refuse("the ids a list owes a store by");
+      const entryOf = (o: Owing, from: Map<string, { marks: string[]; keyMarks: string[] }>) => {
+        const ids = from.get(o.store) ?? refuse("the ids a list owes a store by");
         return { ref: o.ref, email: "", sid: o.sid, statsId: null, name: "", handle: "", handles: [], marks: ids.marks, keyMarks: ids.keyMarks, endedAt: 0, at: 0 };
-      });
+      };
+      // With what the list owed when it was given up on, kept apart (sixth review, 1): let go only once pruned.
+      const entries = [...owing.map((o) => entryOf(o, marks)), ...keptOwing.map((o) => entryOf(o, kept!.marks))];
       await pruneIndex(list, ownersOf(entries), refFree);
       rows.delete(list);
-      for (const o of owing) if (![...rows.values()].flat().some((r) => r.store === o.store)) marks.delete(o.store);
-      // A store's ids go once no list owes it any more.
       const stillOwed = new Set([...rows.values()].flat().map((o) => o.store));
       const done = [...new Set(owing.map((o) => o.store))].filter((store) => !stillOwed.has(store));
+      for (const store of done) marks.delete(store);
+      if (kept && keptOwing.length) {
+        kept.rows.delete(list);
+        const keptStill = new Set([...kept.rows.values()].flat().map((o) => o.store));
+        const keptDone = [...new Set(keptOwing.map((o) => o.store))].filter((store) => !keptStill.has(store));
+        await redisPipeline([["HDEL", PRUNE_KEPT_KEY, ...keptOwing.map((o) => `${list}|${o.store}`), ...keptDone.map((store) => `marks|${store}`)]]);
+      }
       await redisPipeline([
         ...(owing.length ? [["HDEL", PRUNE_KEY, ...owing.map((o) => `${list}|${o.store}`), ...done.map((store) => `marks|${store}`)]] : []),
-        ["HDEL", WALK_KEY, `unread:${list}`],
+        ["HDEL", WALK_KEY, `unread:${list}`, `kept:${list}`],
       ]);
       state.unread.delete(list);
+      state.keptLists.delete(list);
     } catch (error) {
       const [raw] = await redisPipeline([["HINCRBY", WALK_KEY, `unread:${list}`, 1]]);
       const tries = countOf(raw, "a list's tries");
       state.unread.set(list, tries);
       console.error("closed-data: a list of the company's passed over still cannot be read; what it owes is kept, and it is tried again with the next walk", error);
       // Given up on (fifth review, 4): what it owes moves to PRUNE_KEPT_KEY, out of what the gap reads, and is counted.
-      if (tries >= UNREAD_TRIES && owing.length) {
-        const stillOwed = new Set([...rows.entries()].filter(([name]) => name !== list).flatMap(([, o]) => o.map((r) => r.store)));
-        const stores = [...new Set(owing.map((o) => o.store))];
-        await redisPipeline([
-          ["HSET", PRUNE_KEPT_KEY, ...owing.flatMap((o) => [`${list}|${o.store}`, 1]), ...stores.flatMap((store) => [`marks|${store}`, JSON.stringify(marks.get(store) ?? { marks: [], keyMarks: [] })])],
-        ]);
-        await redisPipeline([["HDEL", PRUNE_KEY, ...owing.map((o) => `${list}|${o.store}`), ...stores.filter((store) => !stillOwed.has(store)).map((store) => `marks|${store}`)]]);
-        rows.delete(list);
-        for (const store of stores) if (!stillOwed.has(store)) marks.delete(store);
-      }
+      if (tries >= UNREAD_TRIES && owing.length) await moveToKept(list, owing, rows, marks, state);
     }
   }
   // A store's ids no list owes it by (its rows' write failed after them, and its page was read again): let go. Only
@@ -972,6 +987,24 @@ async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
   const owedStores = new Set([...rows.values()].flat().map((o) => o.store));
   const orphans = [...marks.keys()].filter((store) => !owedStores.has(store));
   if (orphans.length) await redisPipeline([["HDEL", PRUNE_KEY, ...orphans.map((store) => `marks|${store}`)]]);
+}
+
+/**
+ * Moves what a list given up on owes to PRUNE_KEPT_KEY: its mark first (so the
+ * kept rows are read with it if it is pruned again), then the rows and their
+ * ids there, then out of PRUNE_KEY. Each step can be run again: one that stops
+ * half-way leaves rows in PRUNE_KEY for a list given up on, moved again by the
+ * next pruning.
+ */
+async function moveToKept(list: string, owing: Owing[], rows: Map<string, Owing[]>, marks: Map<string, { marks: string[]; keyMarks: string[] }>, state: WalkState): Promise<void> {
+  const others = new Set([...rows.entries()].filter(([name]) => name !== list).flatMap(([, o]) => o.map((r) => r.store)));
+  const stores = [...new Set(owing.map((o) => o.store))];
+  await redisPipeline([["HSET", WALK_KEY, `kept:${list}`, 1]]);
+  state.keptLists.add(list);
+  await redisPipeline([["HSET", PRUNE_KEPT_KEY, ...owing.flatMap((o) => [`${list}|${o.store}`, 1]), ...stores.flatMap((store) => [`marks|${store}`, JSON.stringify(marks.get(store) ?? refuse("the ids a list owes a store by"))])]]);
+  await redisPipeline([["HDEL", PRUNE_KEY, ...owing.map((o) => `${list}|${o.store}`), ...stores.filter((store) => !others.has(store)).map((store) => `marks|${store}`)]]);
+  rows.delete(list);
+  for (const store of stores) if (!others.has(store)) marks.delete(store);
 }
 
 type Owing = { store: string; ref: string; sid: string };
@@ -1034,7 +1067,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   if (phase === "idle") {
     if (now - state.started < WALK_GAP_MS) return { ...report, done: true };
     // What the company's lists passed over owe: tried once a gap, with or without a walk (third review, I).
-    if ([...state.unread.values()].some((tries) => tries < UNREAD_TRIES) && now - state.prunedAt >= WALK_GAP_MS) {
+    if (now - state.prunedAt >= WALK_GAP_MS) {
       await redisPipeline([["HSET", WALK_KEY, "pruned", now]]);
       await prunePending(state, refGuard());
       report.unread = state.unread.size;
@@ -1223,7 +1256,8 @@ export async function closedDataNow(): Promise<ClosedDataNow | null> {
     const stuck = [...state.left.values()].filter((n) => n >= LEFT_WALKS).length;
     const kept = [...state.unread].filter(([, n]) => n >= UNREAD_TRIES).map(([list]) => list);
     // The members the lists given up on still owe (fourth review, 3): each a closed store's member left in a list.
-    const owedKept = kept.length ? [...(await owedOf(PRUNE_KEPT_KEY)).rows.values()].reduce((sum, refs) => sum + refs.length, 0) : 0;
+    // Every row kept, whatever its list's tries now (sixth review, 1).
+    const owedKept = [...(await owedOf(PRUNE_KEPT_KEY)).rows.values()].reduce((sum, refs) => sum + refs.length, 0);
     return { parked: state.parked, stopped: state.stopped, left: state.left.size, stuck, unread: state.unread.size, unreadKept: kept.length, owedKept, scansStuck: state.scansStuck };
   } catch {
     return null;

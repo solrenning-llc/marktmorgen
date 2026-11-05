@@ -2,10 +2,9 @@
  * Independent review of PR #2560 at 1a0982fff (delta fe13f03f2..1a0982fff).
  * Each section is a scenario the delta says cannot happen; each fails at that head.
  */
-import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { claimHandle, storeFolder, storeForEmail } from "@/lib/store";
+import { claimHandle } from "@/lib/store";
 import { finishClosed } from "@/lib/plan-closing";
 import { UNREAD_TRIES, WALK_GAP_MS, closedDataNow, eraseClosed, markDue } from "@/lib/closed-store-data";
 
@@ -60,7 +59,6 @@ async function days(n: number): Promise<number> {
   }
   return walks;
 }
-const closingState = async (ref: string) => JSON.parse(String((await real([["GET", `nl:plan:closing:${createHash("sha256").update(ref).digest("hex").slice(0, 40)}`]]))[0] ?? "{}")) as { erased?: number };
 
 async function section(name: string, work: () => Promise<void>): Promise<void> {
   part(name);

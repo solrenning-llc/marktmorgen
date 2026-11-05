@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
-import {runTestFiles} from './test-runner.mjs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {runTestFiles, runBundle} from './test-runner.mjs';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -87,4 +90,23 @@ test('a process launch failure drains its in-flight build before cleanup and pre
 test('empty inventory does no work', async () => {
   const unexpected = async () => { throw new Error('unexpected work'); };
   assert.equal(await runTestFiles({files: [], compile: unexpected, run: unexpected}), 0);
+});
+
+test('real isolated child processes inherit the supplied environment, flush before advancing and keep nonzero exits', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'runner-proof-'));
+  try {
+    const worker = join(directory, 'worker.cjs'), log = join(directory, 'events.txt');
+    writeFileSync(worker, `require('node:fs').appendFileSync(process.env.RUNNER_PROOF_LOG, process.env.RUNNER_PROOF_LABEL + '\\n'); process.exitCode = Number(process.env.RUNNER_PROOF_STATUS);`);
+    const files = ['first', 'second', 'third'];
+    const failed = await runTestFiles({files, compile: async () => worker,
+      run: async (file: string, bundle: string) => {
+        if (file !== 'first') assert.equal(readFileSync(log, 'utf8'), files.slice(0, files.indexOf(file)).join('\n') + '\n');
+        return runBundle(bundle, {...process.env, RUNNER_PROOF_LOG: log, RUNNER_PROOF_LABEL: file, RUNNER_PROOF_STATUS: file === 'second' ? '7' : '0'});
+      }
+    });
+    assert.equal(failed, 1);
+    assert.equal(readFileSync(log, 'utf8'), 'first\nsecond\nthird\n');
+    writeFileSync(worker, `process.kill(process.pid, 'SIGTERM');`);
+    assert.equal(await runBundle(worker, process.env), 1);
+  } finally { rmSync(directory, {recursive: true, force: true}); }
 });

@@ -1,0 +1,274 @@
+AUTHOR same final file:
+base:102 checks, 74 failing.
+head:102 checks, all passing.
+
+=== boundaries-red ===
+=== g-2717-boundaries.proof.ts ===
+
+Real authenticated API: unknown scan and blocked readings are unavailable, never invented rows/state
+  ok    native control: one real blocked student
+  ok    scan payload null: injection reached
+  FAIL  scan payload null: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED scan payload null {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    scan payload object: injection reached
+  FAIL  scan payload object: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED scan payload object {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    odd hash: injection reached
+  FAIL  odd hash: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED odd hash {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    bad stored row: injection reached
+  FAIL  bad stored row: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED bad stored row {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    blocked list unknown injection reached
+  FAIL  blocked list unknown is unavailable, not blocked=false
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED blocked {"status":200,"body":{"total":1,"data":[{"email":"g2717-student@example.com","lessons_done":0,"lessons_total":0,"started_at":"2026-09-21T14:13:20.000Z","last_seen_at":"2026-09-21T14:13:30.000Z","blocked":false}],"next":null}}
+  ok    native control after faults: row and block still there
+
+Fresh login: complete EXISTS only; the real passkey route refuses an ended session
+  ok    fresh null refuses
+  FAIL  fresh text refuses
+        expected false
+        got      true
+  FAIL  fresh extra refuses
+        expected false
+        got      true
+  ok    fresh missing refuses
+  ok    fresh object refuses
+  ok    fresh two refuses
+  ok    real fresh session is fresh
+  ok    ended session cannot request passkey options
+
+New browser: unknown does not note or email; exact positive path stays reachable
+  FAIL  notice rejects [null,1]
+        expected [0,0]
+        got      [1,1]
+  FAIL  notice rejects [0,"1"]
+        expected [0,0]
+        got      [1,1]
+  FAIL  notice rejects [2,1]
+        expected [0,0]
+        got      [1,1]
+  FAIL  notice rejects [0,1,1]
+        expected [0,0]
+        got      [1,1]
+  ok    notice rejects []
+  FAIL  exact new-browser path sends one synthetic notice
+        expected 1
+        got      0
+
+Erasure: real pass persists on unknown read, then exact retry deletes it
+  ok    real minted pass works
+  FAIL  unknown pass list refuses unfinished
+        expected true
+        got      false
+  ok    unknown read preserved pass for retry
+  FAIL  exact retry removes actual pass
+        expected null
+        got      {"email":"g2717-student@example.com","scope":"all","owner":false}
+
+30 checks, 14 failing.
+
+
+
+=== boundaries-head ===
+=== g-2717-boundaries.proof.ts ===
+
+Real authenticated API: unknown scan and blocked readings are unavailable, never invented rows/state
+  ok    native control: one real blocked student
+  ok    scan payload null: injection reached
+  FAIL  scan payload null: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED scan payload null {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    scan payload object: injection reached
+  FAIL  scan payload object: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED scan payload object {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    odd hash: injection reached
+  FAIL  odd hash: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED odd hash {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    bad stored row: injection reached
+  FAIL  bad stored row: refuses unavailable instead of 200/empty/end
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED bad stored row {"status":200,"body":{"total":1,"data":[],"next":null}}
+  ok    blocked list unknown injection reached
+  FAIL  blocked list unknown is unavailable, not blocked=false
+        expected [502,"unavailable"]
+        got      [200,null]
+OBSERVED blocked {"status":200,"body":{"total":1,"data":[{"email":"g2717-student@example.com","lessons_done":0,"lessons_total":0,"started_at":"2026-09-21T14:13:20.000Z","last_seen_at":"2026-09-21T14:13:30.000Z","blocked":false}],"next":null}}
+  ok    native control after faults: row and block still there
+
+Fresh login: complete EXISTS only; the real passkey route refuses an ended session
+  ok    fresh null refuses
+  ok    fresh text refuses
+  ok    fresh extra refuses
+  ok    fresh missing refuses
+  ok    fresh object refuses
+  ok    fresh two refuses
+  ok    real fresh session is fresh
+  ok    ended session cannot request passkey options
+
+New browser: unknown does not note or email; exact positive path stays reachable
+  ok    notice rejects [null,1]
+  ok    notice rejects [0,"1"]
+  ok    notice rejects [2,1]
+  ok    notice rejects [0,1,1]
+  ok    notice rejects []
+  ok    exact new-browser path sends one synthetic notice
+
+Erasure: real pass persists on unknown read, then exact retry deletes it
+  ok    real minted pass works
+  ok    unknown pass list refuses unfinished
+  ok    unknown read preserved pass for retry
+  ok    exact retry removes actual pass
+
+30 checks, 5 failing.
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-MZEpVA/0.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-MZEpVA/0.cjs:59909:5)
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-MZEpVA/0.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-MZEpVA/0.cjs:59909:5)
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-MZEpVA/0.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-MZEpVA/0.cjs:59909:5)
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-MZEpVA/0.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-MZEpVA/0.cjs:59909:5)
+noting a sign-in failed UnknownReplyError: Redis answered the browsers seen with an account in an unknown shape
+    at noteSignIn (/tmp/g-2717-proof-MZEpVA/0.cjs:18476:63)
+    at async main (/tmp/g-2717-proof-MZEpVA/0.cjs:59909:5)
+
+
+
+=== LINKED ===
+access-revocation.test.ts: 31 checks, all passing.
+booking-block-save.test.ts: 3 checks, all passing.
+call-lengths-editor.test.ts: 31 checks, all passing.
+community-chat-acknowledgment.test.ts: 68 checks, all passing.
+course-finish-claim.test.ts: 70 checks, all passing.
+course-paid-legacy-isolation.test.ts: node:test 1 fail 0
+community-reward-evidence.test.ts: 60 checks, all passing.
+blog-outline-route.test.ts: 7 checks, all passing.
+crm-deal-writes.test.ts: 125 checks, all passing.
+crm-schema-writes.test.ts: 117 checks, all passing.
+buyer-profile.test.ts: 31 checks, all passing.
+certificate-validity.test.ts: 29 checks, all passing.
+form-opportunity.test.ts: 30 checks, all passing.
+forms.test.ts: 19 checks, all passing.
+funnel-ai.test.ts: 41 checks, all passing.
+help-path-counter-admission.test.ts: 20 checks, all passing.
+import-paused.test.ts: 35 checks, all passing.
+integrations-paused.test.ts: 32 checks, all passing.
+letter-members.test.ts: 67 checks, all passing.
+affiliate-bulk.test.ts: 10 checks, all passing.
+member-health.test.ts: 19 checks, all passing.
+host-tools-paused.test.ts: 36 checks, all passing.
+move-members.test.ts: 41 checks, all passing.
+meta-ads.test.ts: 105 checks, all passing.
+assignments.test.ts: 51 checks, all passing.
+lesson-comments.test.ts: 30 checks, all passing.
+meeting-withdrawal-page.test.ts: node:test 1 fail 0
+numbers-seven.test.ts: 24 checks, all passing.
+community-report-queue-view.test.ts: 24 checks, all passing.
+person-copy-world.test.ts: 9 checks, all passing.
+pipeline-access.test.ts: 40 checks, all passing.
+course-triggers.test.ts: 12 checks, all passing.
+crm-pipelines.test.ts: 63 checks, all passing.
+recovery-address.test.ts: 44 checks, all passing.
+faq-from-inbox.test.ts: 35 checks, all passing.
+form-deal.test.ts: 19 checks, all passing.
+form-scoring.test.ts: 49 checks, all passing.
+security-page.test.ts: 41 checks, all passing.
+host-calendar-removal.test.ts: node:test 1 fail 0
+meeting-disabled-withdrawal.test.ts: node:test 1 fail 0
+review-2556-sessions.test.ts: 7 checks, all passing.
+two-step.test.ts: 46 checks, all passing.
+page-funnel.test.ts: 74 checks, all passing.
+zoom-review.test.ts: 25 checks, all passing.
+zoom-arrival.test.ts: 54 checks, all passing.
+studio-demo-rules.test.ts: 65 checks, all passing.
+sg2-unknown-replies.test.ts: 125 checks, all passing.
+switching-faq.test.ts: 15 checks, all passing.
+person-tasks.test.ts: 132 checks, all passing.
+store-copy.test.ts: 32 checks, all passing.
+affiliate-bulk-rate.test.ts: 10 checks, all passing.
+team-two-step-session.test.ts: 30 checks, all passing.
+second-step-gate.test.ts: 201 checks, all passing.
+saved-sections.test.ts: 18 checks, all passing.
+voice-counter-admission.test.ts: 10 checks, all passing.
+sg2-l3-counts.test.ts: 102 checks, all passing.
+sign-in-history-rules.test.ts: 51 checks, all passing.
+bulk-labels.test.ts: 130 checks, all passing.
+call-series-currency-route.test.ts: 16 checks, all passing.
+webhook-test-paused.test.ts: 13 checks, all passing.
+traffic.test.ts: 75 checks, all passing.
+webhook-wait-paused.test.ts: 30 checks, all passing.
+watch.test.ts: 64 checks, all passing.
+affiliate-notice-wired.test.ts: 23 checks, all passing.
+readings-erasure.test.ts: 70 checks, all passing.
+form-schedule.test.ts: 21 checks, all passing.
+demo-store.test.ts: 84 checks, all passing.
+funnel-share.test.ts: 79 checks, all passing.
+api-read-units.test.ts: 54 checks, all passing.
+funnel-types.test.ts: 56 checks, all passing.
+discord.test.ts: 35 checks, all passing.
+review-2556-delta4.test.ts: 3 checks, all passing.
+google-signin.test.ts: 47 checks, all passing.
+crm-deal-conflict.test.ts: 47 checks, all passing.
+assistant-memory-route.test.ts: 27 checks, all passing.
+erasure-request-full.test.ts: 21 checks, all passing.
+order-data.test.ts: 15 checks, all passing.
+course-template-studio.test.ts: 55 checks, all passing.
+creator-card.test.ts: 28 checks, all passing.
+crm-contact-writes.test.ts: 57 checks, all passing.
+form-response-pdf.test.ts: 17 checks, all passing.
+numbers-links-owner.test.ts: 10 checks, all passing.
+opening.test.ts: 21 checks, all passing.
+email-disconnect-idempotent.test.ts: node:test 1 fail 0
+invite-two-step.test.ts: 8 checks, all passing.
+erasure-request-asked.test.ts: 4 checks, all passing.
+product-outline.test.ts: 13 checks, all passing.
+paypal-sales.test.ts: 66 checks, all passing.
+read-ceilings.test.ts: 77 checks, all passing.
+community-points.test.ts: 29 checks, all passing.
+community-starter.test.ts: 12 checks, all passing.
+review-2556-delta2.test.ts: 4 checks, all passing.
+review-ai-summary.test.ts: 82 checks, all passing.
+review-2556-delta3.test.ts: 4 checks, all passing.
+lost-dispute-access.test.ts: 37 checks, all passing.
+creator-card-receipt.test.ts: node:test 6 fail 0
+funnel-copy-account.test.ts: 16 checks, all passing.
+crm.test.ts: 32 checks, all passing.
+handle-prefill.test.ts: 32 checks, all passing.
+feature-visual-cards.test.ts: 197 checks, all passing.
+failure-cleanup-paths.test.ts: 37 checks, all passing.
+assistant-memory-route-read-evidence.test.ts: node:test 4 fail 0
+clickfunnels-import.test.ts: 56 checks, all passing.
+certificate-pdf-ceiling.test.ts: 13 checks, all passing.
+orders-page-bounds.test.ts: node:test 21 fail 0
+letters.test.ts: 21 checks, all passing.
+locked-deletes.test.ts: 115 checks, all passing.
+review-2556-delta.test.ts: 10 checks, all passing.
+community-platform-guide.test.ts: node:test 8 fail 0
+clickfunnels-faq.test.ts: 17 checks, all passing.
+assistant-memory-route-evidence.test.ts: node:test 4 fail 0
+api-key-second-step.test.ts: 187 checks, all passing.
+agreements.test.ts: 59 checks, all passing.
+
+Strict exit0; ESLint FINAL exit0; scanner3804/0; diff0. Types and lint diagnostics:
+

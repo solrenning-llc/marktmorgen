@@ -6,10 +6,12 @@
  * cost to any plan.
  *
  *   - the reply's text: what the person gets, typed by the creator, 1 to
- *     REPLY_MAX_CHARS characters, with no link typed by hand. The link is the
- *     product's own page, added by the code with the rule's count tag
- *     (dmLinkTag), so every click and sale is counted for the post and a
- *     reply can never point somewhere the store does not sell;
+ *     REPLY_MAX_CHARS characters, with no link typed by hand that the
+ *     readers recognize (an address written to dodge them, such as
+ *     "mara . com" or "mara[.]com", can still be typed as words; it is never
+ *     made a link). The one link sent is the product's own page, added by the
+ *     code with the rule's count tag (dmLinkTag), so every click and sale
+ *     through it is counted for the post;
  *   - a post's whole rule (readAutoDmRule): every part checked by unit 1's
  *     readers, the product one the store sells now, and the first problem
  *     named with its field, in the order the studio shows the fields;

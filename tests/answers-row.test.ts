@@ -89,11 +89,11 @@ async function main(): Promise<void> {
   const long = factsFor(noted, product, "A long description. ".repeat(2_000), page);
   is("a page longer than the facts may be still keeps the notes, whole, at the end", [long.length <= MAX_FACTS_CHARS, long.endsWith(NOTES)], [true, true]);
   {
-    // Review of #2177: the page is cut between its parts, never inside one, so no price reaches the model half read.
+    // Review of #2177 and Codex D2's: the page is cut between its parts, never inside one, so no line reaches the model
+    // without the line after it; a part too long for the room is left out whole and the model is told the page goes on.
     const parts = Array.from({ length: 800 }, (_, i) => `Line ${i}: the price is $129.`).join("\n");
     const cut = factsFor(noted, product, parts, page);
-    const pagePart = cut.slice(0, cut.lastIndexOf("\n\nWhat "));
-    is("a long page is cut at the end of a line: its last line whole", [cut.length <= MAX_FACTS_CHARS, /the price is \$129\.$/.test(pagePart.split(PAGE_GOES_ON).join("").trimEnd())], [true, true]);
+    is("a description longer than the room is left out whole, the page said to go on, the notes kept", [cut.length <= MAX_FACTS_CHARS, cut.includes("Line 0:"), cut.includes(PAGE_GOES_ON), cut.endsWith(NOTES)], [true, false, true, true]);
   }
   is("and a short page keeps everything, the notes last", factsFor(noted, product, "", page).endsWith(NOTES) && factsFor(noted, product, "", page).includes("Fast dinners"), true);
 

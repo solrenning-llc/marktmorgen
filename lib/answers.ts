@@ -124,8 +124,8 @@ export function priceWords(product: Listing, currency: string, tiers: readonly s
   return `${money(product.priceCents)}, paid once.${plan ? ` Or in ${planWords(plan, currency)}.` : ""}`;
 }
 
-/** Told after a plain part of the page the length cut ended early, so the model never reads its kept lines as all it says. */
-export const PAGE_GOES_ON = "(The page goes on here; the rest of this part is not repeated.)";
+/** Told where the length cut left a part of the page out whole, so the model never reads what it was given as all the page says. */
+export const PAGE_GOES_ON = "(The page says more here; it is not repeated.)";
 /** Told when a refund promise on the page did not fit, so its absence is never read as "no refunds". */
 export const REFUND_ON_PAGE = "The page also states the creator's refund terms, which are not repeated here.";
 
@@ -135,7 +135,7 @@ export const REFUND_ON_PAGE = "The page also states the creator's refund terms, 
  */
 export function factsFor(store: Store, product: Listing, about: string, page: SalesPage | null): string {
   const parts: Part[] = [];
-  // What a part is decides how the length cut may treat it (see keptParts): the price and the terms are whole or absent.
+  // What a part is decides the order the length cut fills (see keptParts); every part is told whole or left out whole.
   const prose = (text: string) => parts.push({ text, tier: PROSE });
   const whole = (text: string, tier: Tier = TERMS, refund = false) => parts.push({ text, tier, refund });
   whole(`Store: ${store.name}`, FIRST);
@@ -263,12 +263,13 @@ type Part = { text: string; tier: Tier; refund?: boolean };
  *   promises and deadlines, then the other terms), each in the page's order,
  *   and one that does not fit is left out while smaller ones after it may
  *   still be told;
- * - only plain descriptive parts (the summary, the description, a headline,
- *   text, pictures, benefits, what is inside, the creator's story, steps, a
- *   row's columns) fill what is left, in the page's order; the first that
- *   does not fit gives its whole lines that do, followed by PAGE_GOES_ON so
- *   the model knows the page says more (PAGE_GOES_ON alone when not one of
- *   its lines fits), and no plain part after it is told;
+ * - the other parts (the summary, the description, a headline, text,
+ *   pictures, benefits, what is inside, the creator's story, steps, a row's
+ *   columns) fill what is left, in the page's order, and are whole too: any
+ *   of them may hold a promise with its condition on the next line (Codex
+ *   D2's review of #2177), so none is ever cut inside. The first that does
+ *   not fit is left out whole, PAGE_GOES_ON is told in its place so the model
+ *   knows the page says more, and no part of this kind after it is told;
  * - when a refund promise is left out, REFUND_ON_PAGE says the page has refund
  *   terms, so the model says it does not know rather than that there are none.
  */
@@ -297,10 +298,9 @@ function keptParts(parts: Part[], room: number): string {
       used += sep + part.text.length;
       continue;
     }
-    // The whole lines that fit, then the line that says the page goes on (alone, when not one line fits).
-    const cut = part.text.slice(0, Math.max(0, free));
-    const line = cut.lastIndexOf("\n");
-    take.set(i, line > 0 ? `${cut.slice(0, line).trimEnd()}\n${PAGE_GOES_ON}` : PAGE_GOES_ON);
+    // Never cut inside a part: a line kept without the next one can be a promise without its condition (Codex D2).
+    // It is left out whole and the model is told the page goes on; its room is in the reserve, so this always fits.
+    take.set(i, PAGE_GOES_ON);
     break;
   }
   const kept = [...take.entries()].sort((a, b) => a[0] - b[0]).map(([, text]) => text);

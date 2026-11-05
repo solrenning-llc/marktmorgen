@@ -68,7 +68,8 @@ test("MEDIUM 1: a refusal is believed only in full; everything else is not known
     [502, null],
   ] as [number, unknown][])
     assert.equal(shortLinkProblem(status, data), SHORT_UNCONFIRMED, JSON.stringify([status, data]));
-  assert.doesNotMatch(SHORT_UNCONFIRMED, /^The short link was made|try again/i);
+  assert.doesNotMatch(SHORT_UNCONFIRMED, /^The short link was made/i);
+  assert.doesNotMatch(SHORT_UNCONFIRMED, /try again/i);
   assert.match(shortLinkProblem(403, { ok: false, error: "role" }), /Your role/);
   assert.match(shortLinkProblem(429, { ok: false, error: "studio_used" }), /was not made/);
 });

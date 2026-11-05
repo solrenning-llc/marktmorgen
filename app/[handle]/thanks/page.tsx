@@ -193,7 +193,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               <p className="st-muted mt-3">{t.bookBy(longDate(bought.until))}</p>
             ) : null}
             {book ? (
-              <Link href={book} className="btn st-btn btn-lg mt-7">{t.bookFirst}</Link>
+              // A full page load, not Next's client move: the link names the package's token,
+              // and this page's ad scripts would count a history change as a view of it.
+              <a href={book} className="btn st-btn btn-lg mt-7">{t.bookFirst}</a>
             ) : (
               <p className="st-note mt-6 text-sm">{t.noBookingLink}</p>
             )}
@@ -1382,9 +1384,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-2 text-sm leading-relaxed">
               {t.earnHow(store.affiliates.percent, store.name)}
             </p>
-            <Link href={`/@${store.handle}/affiliates?order=${encodeURIComponent(sessionId)}`} className="btn st-btn mt-6">
+            {/* A full page load, not Next's client move: the affiliate page takes the order only
+                in its address, and this page's ad scripts would count a history change as a view of it. */}
+            <a href={`/@${store.handle}/affiliates?order=${encodeURIComponent(sessionId)}`} className="btn st-btn mt-6">
               {t.getMyLink}
-            </Link>
+            </a>
           </section>
         ) : null}
       </main>

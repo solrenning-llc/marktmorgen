@@ -115,13 +115,15 @@ function sentBefore(keys: string[]): boolean {
  * The query parameters on a store's pages that are keys to an order here
  * (506 [SG1], finding E-2): whoever has one opens what it names. The thanks
  * page's checkout (session_id) and PayPal order (paypal), the free page's
- * download token (token), a call package's booking link (pkg) and a call's
- * new-time link (move), and the gift of support's checkout (session_id on
- * /tip). Every ad script reads the page's own address with each event it
- * sends (Meta's `dl`, Google's page_location, TikTok's, Pinterest's, X's and
- * Reddit's page URL), so none of them may still be on it when one starts.
+ * download token (token), a call package's booking link (pkg), a call's
+ * new-time link (move), the gift of support's checkout (session_id on /tip)
+ * and an order handed to the affiliate page (order). Every ad script reads
+ * the page's own address with each event it sends (Meta's `dl`, Google's
+ * page_location, TikTok's, Pinterest's, X's and Reddit's page URL) and the
+ * page it came from (Meta's `rl`, Google's `dr`), so none of them may be on
+ * either when one starts.
  */
-export const KEY_PARAMS = ["session_id", "paypal", "token", "pkg", "move"] as const;
+export const KEY_PARAMS = ["session_id", "paypal", "token", "pkg", "move", "order"] as const;
 
 /** The address without its keys, and the keys taken out, in order. */
 export function withoutKeys(href: string): { href: string; keys: [string, string][] } {
@@ -138,36 +140,77 @@ const keptKeysKey = (path: string) => `nl_px_keys:${path}`;
 
 /** Set once the page is on its way back to its address with a key: nothing starts on the way. */
 let leaving = false;
+/** The keys' values taken out of this page's address, for the marks of purchases sent before ids were derived. */
+let taken: string[] = [];
 
 /**
- * Takes the keys out of the address, with history.replaceState, before any
- * pixel starts, and keeps them in this tab's storage under this page, so a
- * reload or a step back can put them back (restoreKeys). Answers the values
- * taken out, or null when the address still names a key: then no pixel starts.
+ * Whether Next's router has wrapped history.replaceState (an own property of
+ * history, set by the app router's effect: node_modules/next/dist/client/
+ * components/app-router.js). Only then does a write without Next's own state
+ * move the router's address along with the bar's; before it, a write keeps
+ * Next's state, so the router's history entry stays whole.
+ */
+function routerListens(): boolean {
+  return Object.prototype.hasOwnProperty.call(history, "replaceState");
+}
+
+/**
+ * Takes the keys out of the address, with history.replaceState, and keeps
+ * the address as it was, with the address it became, in this tab's storage
+ * under this page, so a reload or a step back to exactly that address can go
+ * back (restoreKeys). Answers the values taken out, or null when the address
+ * still names a key: then no pixel starts.
  */
 function hideKeys(): string[] | null {
   try {
-    const { href, keys } = withoutKeys(location.href);
+    const was = location.href;
+    const { href, keys } = withoutKeys(was);
     if (!keys.length) return [];
     try {
-      sessionStorage.setItem(keptKeysKey(location.pathname), JSON.stringify(keys));
+      sessionStorage.setItem(keptKeysKey(location.pathname), JSON.stringify({ clean: href, was }));
     } catch {
       // Without this tab's storage a reload shows the page as a link without its key does.
     }
-    history.replaceState(history.state, "", href);
-    return withoutKeys(location.href).keys.length ? null : keys.map(([, value]) => value);
+    // A state of null, so Next's router takes the new address as its own and
+    // its next write (a refresh, a server action) does not put the key back.
+    // Before the router listens (its effect runs after this component's on
+    // the first round), the bar is cleared now, keeping Next's state, and the
+    // router is told the same address right after that round.
+    if (routerListens()) history.replaceState(null, "", href);
+    else {
+      history.replaceState(history.state, "", href);
+      setTimeout(() => {
+        if (routerListens() && location.href === href) history.replaceState(null, "", href);
+      }, 0);
+    }
+    if (withoutKeys(location.href).keys.length) return null;
+    const values = keys.map(([, value]) => value);
+    taken = [...taken, ...values];
+    return values;
   } catch {
     return null;
+  }
+}
+
+/** Whether the page this one was opened from, on this site, named a key (document.referrer). */
+function cameWithKey(): boolean {
+  try {
+    if (!document.referrer) return false;
+    const from = new URL(document.referrer);
+    return from.origin === new URL(location.href).origin && withoutKeys(from.href).keys.length > 0;
+  } catch {
+    return true;
   }
 }
 
 /**
  * A reload or a step back to a page whose keys were taken out of the address
  * opens it without them, and the server can only draw the order from its
- * address. So the address with the keys, kept in this tab's storage for this
- * page, is opened instead; that page takes them out again before its pixels
- * start. Only on a reload or a step back: a page opened afresh without a key
- * stays as it is. Answers whether the page is going.
+ * address. So when the address is exactly the one the keys were taken out
+ * of, as kept in this tab's storage for this page, the address as it was is
+ * opened instead; that page takes them out again before its pixels start.
+ * Only on a reload or a step back: a page opened afresh stays as it is.
+ * Answers whether the page is going.
  */
 function restoreKeys(): boolean {
   try {
@@ -175,15 +218,11 @@ function restoreKeys(): boolean {
     const how = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
     if (how !== "reload" && how !== "back_forward") return false;
     const raw = sessionStorage.getItem(keptKeysKey(location.pathname));
-    const keys = raw ? (JSON.parse(raw) as unknown) : null;
-    if (!Array.isArray(keys)) return false;
-    const url = new URL(location.href);
-    for (const pair of keys) {
-      if (!Array.isArray(pair) || typeof pair[1] !== "string" || !(KEY_PARAMS as readonly string[]).includes(pair[0])) continue;
-      url.searchParams.append(pair[0], pair[1]);
-    }
-    if (!withoutKeys(url.href).keys.length) return false;
-    location.replace(url.href);
+    const kept = raw ? (JSON.parse(raw) as { clean?: unknown; was?: unknown } | null) : null;
+    if (!kept || typeof kept.clean !== "string" || typeof kept.was !== "string" || kept.clean !== location.href) return false;
+    const was = new URL(kept.was);
+    if (was.origin !== new URL(location.href).origin || was.pathname !== location.pathname || withoutKeys(was.href).href !== kept.clean) return false;
+    location.replace(was.href);
     return true;
   } catch {
     return false;
@@ -211,6 +250,10 @@ function startMeta(w: PixelWindow, id: string) {
     if (!w._fbq) w._fbq = n;
     script("https://connect.facebook.net/en_US/fbevents.js");
   }
+  // Meta's automatic configuration reports the buttons clicked with where
+  // they lead, and a store's links can name an order (a download's
+  // session_id): off for this pixel, set before its init.
+  w.fbq("set", "autoConfig", false, id);
   w.fbq("init", id);
   w.fbq("track", "PageView");
 }
@@ -372,8 +415,12 @@ export function StorePixels({
 
   // Back to the address with its keys after a reload, whatever the choice:
   // turning the pixels off reloads the page, which must still show the order.
+  // And out of the address at once, whatever the choice, so a page opened
+  // from this one is not told the key as where it came from.
   useEffect(() => {
+    taken = [];
     leaving = restoreKeys();
+    if (!leaving) hideKeys();
   }, []);
 
   useEffect(() => {
@@ -391,9 +438,10 @@ export function StorePixels({
 
   useEffect(() => {
     if (state !== "on" || leaving) return;
-    // Never a pixel while the address names an order: its keys go first.
-    const hidden = hideKeys();
-    if (hidden === null) return;
+    // Never a pixel while the address names an order: its keys go first. Nor
+    // on a page opened from an address on this site that named one, which
+    // every script would send as where the visitor came from.
+    if (hideKeys() === null || cameWithKey()) return;
     const w = window as PixelWindow;
     const start =(kind: string, id: string | null, run: (w: PixelWindow, id: string) => void) => {
       if (!id || started.has(`${kind}:${id}`)) return;
@@ -411,7 +459,7 @@ export function StorePixels({
 
     // Before ids were derived, a purchase was marked sent under the order's own
     // id (the checkout's, or PayPal's from the address): sent then, not again.
-    const marked = event?.type === "purchase" ? [event.order ?? "", ...hidden].filter(Boolean).map((v) => `nl_px_sent:${v}`) : [];
+    const marked = event?.type === "purchase" ? [event.order ?? "", ...taken].filter(Boolean).map((v) => `nl_px_sent:${v}`) : [];
     if (event?.type === "purchase" && event.id && !sentBefore(marked) && once(`nl_px_sent:${event.id}`)) {
       track(w, pixels, event, restricted);
       // The same purchase from our server now, where the creator set it up

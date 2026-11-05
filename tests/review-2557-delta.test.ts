@@ -112,15 +112,24 @@ const props = (event: Parameters<typeof StorePixels>[0]["event"] = null) => ({ h
 
 async function main(): Promise<void> {
   part("1. The store's front page, reached by a plain link from a thanks page whose pixels never started");
+  // Adjusted with the fix: a page cannot change its document.referrer, so the fix starts no script on
+  // such a page (the thanks page now clears its key on mount, so only a click made before that is left).
+  // "Would start" is checked on the same page reached from a referrer without a key.
+  const clean = browserAt("https://marktmorgen.com/@harbor", { referrer: "https://marktmorgen.com/@harbor/thanks" });
+  runPixels(props());
+  is("the scripts would start", clean.seen.length > 0, true);
   const front = browserAt("https://marktmorgen.com/@harbor", { referrer: `https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}` });
   runPixels(props());
-  is("the scripts would start", front.seen.length > 0, true);
   is("no script starts while the page's referrer names the checkout", front.seen.filter((s) => s.referrer.includes(SESSION)).map((s) => new URL(s.src).hostname), []);
 
   part("2. Links on the thanks page to other pages of this site");
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
-  const keyed = (thanks.match(/href=\{`\/@\$\{store\.handle\}\/[^`]*\?[^`]*\$\{encodeURIComponent\(sessionId\)\}[^`]*`\}/g) ?? []).filter((h) => !h.includes("/api/"));
+  // Adjusted with the fix (coordinator's decision): the affiliate page takes the order only in its
+  // address, so its link stays, as a plain <a> whose full page load unloads this page's scripts.
+  // What must not exist is a Next <Link>, moved with pushState past the pixels already loaded.
+  const keyed = (thanks.match(/<Link\s+href=\{`\/@\$\{store\.handle\}\/[^`]*\?[^`]*\$\{encodeURIComponent\(sessionId\)\}[^`]*`\}/g) ?? []).filter((h) => !h.includes("/api/"));
   is("none carries the checkout's id (Next moves there with pushState, past pixels already loaded)", keyed, []);
+  is("nor the package's token", /<Link\s+href=\{book\}/.test(thanks), false);
 
   part("3. A reload of another address on the same path");
   const kept = new Map([["nl_px_keys:/@harbor/free", JSON.stringify([["token", TOKEN]])]]);

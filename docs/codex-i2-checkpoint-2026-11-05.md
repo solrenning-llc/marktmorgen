@@ -1,4 +1,4 @@
-# Codex I2 continuity checkpoint — 2026-11-05 05:07 UTC
+# Codex I2 continuity checkpoint — 2026-11-05 05:18 UTC
 
 Use GitHub as the source of truth. Preserve all existing Codex I/I2 commits; do not recreate units. Portuguese for owner/channel, English for code/commits/PRs. No commercial rates, limits, gates, flags, real accounts, payments or external contacts. No direct main push, bypass, foreign branch edits or manual active-CI cancellation.
 
@@ -15,7 +15,7 @@ Use GitHub as the source of truth. Preserve all existing Codex I/I2 commits; do 
 - #2537 is OPEN, exact head **22549a3be7e8a04737d5a8d8172503a17e7a0112**, tree092935a7981289e2cfe5574a7fb7ab643d9b8439, branch codex/i2-resend-command-observer-proof.
   - Test-only, two Python scripts; reuses existing atomic measured_command. Full native Redis fallback suite including64 concurrent/ACK-loss/clock cases passes, also with20 injected external INFO-boundary PINGs. Internal Lua commands remain counted. No production/workflow/TS changes.
   - RED2611eb1be70a1a0278a15104da138aa1db020b6a (initial4b75b00c). A3 qualifying review5779652620 on exact2254: SEM ACHADO/PODE ENTRAR with nine checks. Only one review needed.
-  - Latest CI snapshot: accessibility-real-readers success; seven other aggregates queued; product aggregate not yet created; ten pending jobs, zero failures. Merge own normally only when ALL NINE exact-head aggregates succeed. Do not routine-rebase/cancel/rerun unchanged jobs.
+  - Latest CI snapshot at05:17UTC: six aggregates success; buyer aggregate in_progress, signup aggregate queued; verify in_progress and product aggregate not yet created. Three pending jobs, zero failures. Merge own normally only when ALL NINE exact-head aggregates succeed. Do not routine-rebase/cancel/rerun unchanged jobs.
 - #2513 historical settlement is CLOSED as superseded, all substantive history preserved in2360. Head5f89c94f3e4d1f15fe2d94656fc38993d5a9fdc1. Reservation#2470 left for Claude1/CX126. Claude1/V were asked to cancel ONLY obsolete runs of this closed own head; I2 has not cancelled them.
 
 ## Assigned next product currently blocked
@@ -36,6 +36,13 @@ Read-only original D proof beda719c was preserved byte-identically as tests/revi
 - #1929 supplemental unknown book GET/SET proof fbb9352c7a223e724b24a5f728898f3c85499cf2; G owns full review, do not duplicate.
 - #2340 current c4ad1dd6 is now with Codex G. I2 only approved older RGB-parser delta; do not extrapolate.
 - #2553 is with H2; #2558 is with H2; #2550 is with P. #2460 already approved by L, #2489 by S, #2508 blocked by G. Do not duplicate.
+
+## Additional reviews completed after the first checkpoint
+
+- #2552 C3, exact **125bfb71fe75a6c1e9e6ac93ff7a808f20965702**: **SEM ACHADO/PODE ENTRAR** with nine, formal5780167284. Full two-file wording-only diff. Final author test against predecessor7ca33ce58:58/1 ->58/58. Own real-reader proof **codex/i2-review-2552-refusal-proof/9f6b7ec5703fc9af5a328805288514ecbc90cd32**, treec1dc43eaeb17cfd06052735392cb57248eb2eaa8:3/1 ->3/3. Hold occurs before IO; measured refusal reads only LRANGE+STRLEN and retains measuring, no payload GET/EVAL. Initial refusal reads nothing; different503 response preserved. Total216 including linked event/API unit suites, strict scoped types/imports, lint/scanner3592/0/reservation/diff pass. REST author test, direct reader own proof; no native Redis/provider/browser/fullCI certification. No C3 changes.
+- #2528 C4, exact **76a957b5b0184f12a0491254fd8dadf44c255343**: **SEM ACHADO/PODE ENTRAR** with nine, formal5780198469; doc cleanup/merge stays author/Claude1 underCX126. This is the final E11 delta after R1's6e7843b5 observation. Compared actual PR merge-base8e22, because intervening history integrates main: exactly two rows removed, every other byte/header retained, finalblob4f07105bae8147cc63b2a12dafb9954023e1c76e. Both #2114/08baaac6 and #2150/afb7b521 verified MERGED and ancestors using checked subprocess exit codes. LIGHT body says one row though final correctly removes two. No behavioral RED/types/browser applicable or claimed for docs-only deletions. No C4 reservation/product/branch edited; no other reservation overridden.
+- Did not duplicate #2492/#2505 (J already approved), #2469 (existing review), #2486 (L5779951132), #2508 (G blocked), #2553/#2558 (H2), #2557/#2560 (R1/external reviews active). #2536 AA is explicitly draft/incomplete/disabled and not ready for review.
+- Latest channel review publication: c9d71fb374145529ed0509128f6a5b1a2fc2de36. Current #2516 and #2270 heads remain unchanged/open as above. Inbox still throughCX125 plus channelCX126/127. Latest watcher session3246 is a six-minute cycle launched05:17; relaunch when it ends.
 
 ## Operational rules and tools
 

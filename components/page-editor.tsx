@@ -148,7 +148,8 @@ import {
 // Started provider attempts stay counted even when their reply is unusable (lib/ai.ts).
 const HEADLINE_UNCONFIRMED_NOTE = "A replacement headline was not confirmed. Your current draft was kept. Started attempts count toward your monthly writing allowance. Check your allowance before trying again.";
 
-const MESSAGES: Record<string, string> = {
+/** What the editor says when the page could not be saved, by the refusal's code (exported for its test). */
+export const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   too_many: `A page can have up to ${MAX_BLOCKS} blocks.`,
   hero_first: "The hero can only be the first block: it carries the page's main headline.",
@@ -191,7 +192,7 @@ function fromLocalField(value: string): number {
 const MIN_DEPTH_VISITORS = 30;
 
 // A booking block (552 [BB1]) is not in the gallery yet, so its name is given here.
-const kindLabel = (kind: BlockKind) => (kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
+export const kindLabel = (kind: BlockKind) => (kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
 
 export type EditorProduct = {
   id: string;
@@ -635,6 +636,20 @@ export function PageEditor({
     },
     [],
   );
+  // The screen turned wide while a place waits for a block: a press that came before the screen was measured, or a
+  // window made wider. The picker under the blocks is no longer drawn there, so the column beside them shows the
+  // blocks to add rather than the page, and the focus, when it went with the picker, goes to its search. Only on that
+  // turn, so "Preview" pressed while a place waits is kept.
+  const wasBeside = useRef(false);
+  useEffect(() => {
+    const turned = sideBySide && !wasBeside.current;
+    wasBeside.current = sideBySide;
+    if (!turned || picking === null) return;
+    showSidePanel("add");
+    if (document.activeElement && document.activeElement !== document.body) return;
+    stopFocusMenu.current?.();
+    stopFocusMenu.current = focusWhenDrawn(() => document.getElementById("menu-block-find"), browserFrames());
+  }, [sideBySide, picking, showSidePanel]);
 
   /** "Add here" at a place: the card chosen goes there, or the place waits for a card (in the side menu, or the gallery opened here). */
   function addHere(at: number) {
@@ -3056,15 +3071,38 @@ function RowEditor({
             </p>
           </div>
         );
-      case "video": {
+      case "video":
+      case "video-window": {
         const text = typed.get(element) ?? videoAddress(element.video);
         const recognised = readVideo(text);
+        const inWindow = element.kind === "video-window";
+        // In a window, the button's words come first: they are what the part still needs when it is added.
+        const addressId = inWindow ? `${id}-v` : `${id}-a`;
         return (
           <div className="space-y-3">
+            {inWindow ? (
+              <div>
+                {label(`${id}-a`, "Button words", counter(element.label, MAX_CTA_LABEL))}
+                <input
+                  id={`${id}-a`}
+                  className="field"
+                  maxLength={MAX_CTA_LABEL}
+                  value={element.label}
+                  placeholder="Watch the walkthrough"
+                  aria-describedby={problem ? `${id}-bh ${problemId}` : `${id}-bh`}
+                  aria-invalid={problem ? true : undefined}
+                  onChange={(e) => replace(element, { ...element, label: e.target.value })}
+                />
+                <p id={`${id}-bh`} className="mt-1 text-xs text-ink-soft">
+                  What the button says. The page adds a word saying it is a video, in the page&apos;s language, after your words, and the video opens in a window over the page when a visitor presses it.
+                </p>
+                {shown}
+              </div>
+            ) : null}
             <div>
-              {label(`${id}-a`, "Video address")}
+              {label(addressId, "Video address")}
               <input
-                id={`${id}-a`}
+                id={addressId}
                 className="field"
                 inputMode="url"
                 value={text}
@@ -3082,14 +3120,18 @@ function RowEditor({
               />
               <p id={`${id}-vh`} className={`mt-1 text-xs ${recognised ? "text-ink-soft" : "font-semibold text-danger"}`}>
                 {recognised
-                  ? `${PROVIDER_NAMES[recognised.provider]} video recognized. It loads only when a visitor presses play.`
+                  ? `${PROVIDER_NAMES[recognised.provider]} video recognized. It loads only when a visitor ${inWindow ? "presses the button" : "presses play"}.`
                   : `Not a video we can play. Paste a link from YouTube, Vimeo or Loom. Until then the page keeps the ${PROVIDER_NAMES[element.video.provider]} video it had.`}
               </p>
             </div>
             <div>
               {label(`${id}-t`, "Video title (optional)", counter(element.title, MAX_HEADING))}
               <input id={`${id}-t`} className="field" maxLength={MAX_HEADING} value={element.title} aria-describedby={`${id}-th`} onChange={(e) => replace(element, { ...element, title: e.target.value })} />
-              <p id={`${id}-th`} className="mt-1 text-xs text-ink-soft">Read out to people using a screen reader before the video plays. Left empty, the product&apos;s name is used.</p>
+              <p id={`${id}-th`} className="mt-1 text-xs text-ink-soft">
+                {inWindow
+                  ? "The window's title, read out to people using a screen reader when it opens. Left empty, the button's words are used."
+                  : "Read out to people using a screen reader before the video plays. Left empty, the product's name is used."}
+              </p>
             </div>
           </div>
         );
@@ -3102,12 +3144,13 @@ function RowEditor({
     const kind = addKind[column] ?? "heading";
     const why = addRefusal(columns, column, sending);
     const typedVideo = addVideo[column] ?? "";
-    const video = kind === "video" ? readVideo(typedVideo) : null;
+    const byAddress = kind === "video" || kind === "video-window";
+    const video = byAddress ? readVideo(typedVideo) : null;
     const reason = why
       ? ROW_EDIT_WHY[why]
       : kind === "image" && pictureRoom - sending.reduce((n, count) => n + count, 0) <= 0
         ? `This page already shows ${MAX_PAGE_PICTURES} pictures, the most a page shows. Remove one first.`
-        : kind === "video" && !video
+        : byAddress && !video
           ? "Paste the video's address first: a link from YouTube, Vimeo or Loom."
           : "";
     const reasonId = `${id}-why`;
@@ -3116,8 +3159,8 @@ function RowEditor({
         setSaid(reason);
         return;
       }
-      if (kind === "video" && video) {
-        add(column, { kind: "video", video, title: "" });
+      if (byAddress && video) {
+        add(column, kind === "video-window" ? { kind: "video-window", video, title: "", label: "" } : { kind: "video", video, title: "" });
         setAddVideo((all) => all.map((v, i) => (i === column ? "" : v)));
         return;
       }
@@ -3127,8 +3170,8 @@ function RowEditor({
     return (
       <div className="mt-3 space-y-2 rounded-xl bg-white p-3 ring-1 ring-line">
         <div className="flex flex-wrap items-end gap-2">
-          {/* Never narrower than its longest choice ("Smaller heading"): in a narrow column the Add button goes below it instead. */}
-          <div className="min-w-[min(13rem,100%)] flex-1">
+          {/* Never narrower than its longest choice ("Video in a window"): in a narrow column the Add button goes below it instead. */}
+          <div className="min-w-[min(14rem,100%)] flex-1">
             <label htmlFor={id} className="field-label">{`Add to column ${column + 1}`}</label>
             <select id={id} className="field" value={kind} aria-describedby={reasonId} onChange={(e) => setAddKind((all) => all.map((k, i) => (i === column ? (e.target.value as RowElementKind) : k)))}>
               {ROW_ELEMENT_KINDS.map((k) => (
@@ -3145,7 +3188,7 @@ function RowEditor({
             </button>
           )}
         </div>
-        {kind === "video" && !why ? (
+        {byAddress && !why ? (
           <div>
             <label htmlFor={`${id}-v`} className="field-label">
               Video address

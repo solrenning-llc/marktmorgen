@@ -40,13 +40,17 @@ export function writtenDates(text: string, where: string): DatedFact[] {
   });
 }
 
-/** The facts read more than `days` ago, or with a date that is not a real day, oldest first. */
+/** Facts needing review: stale, invalid or future dates, or an unknown clock/window, oldest first. */
 export function overdue(facts: DatedFact[], now = Date.now(), days = REVIEW_DAYS): DatedFact[] {
-  const limit = now - days * 86_400_000;
+  const windowMs = Number.isSafeInteger(days) && days >= 0 ? days * 86_400_000 : NaN;
+  const knownClock = Number.isFinite(now) && Number.isFinite(new Date(now).getTime());
+  const knownWindow = Number.isSafeInteger(windowMs);
+  const limit = knownClock && knownWindow ? now - windowMs : NaN;
   return facts
     .filter((fact) => {
+      if (!knownClock || !knownWindow) return true;
       const at = Date.parse(`${fact.readOn}T00:00:00Z`);
-      return !Number.isFinite(at) || new Date(at).toISOString().slice(0, 10) !== fact.readOn || at < limit;
+      return !Number.isFinite(at) || new Date(at).toISOString().slice(0, 10) !== fact.readOn || at < limit || at > now;
     })
     .sort((a, b) => a.readOn.localeCompare(b.readOn));
 }

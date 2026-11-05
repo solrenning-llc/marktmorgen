@@ -10,9 +10,14 @@
  * year is voided; declined, the month's invoice is voided and the year
  * retried as before; applied with the month not paid yet, the year waits;
  * a year paid meanwhile has the month refunded, never kept twice; someone
- * else's membership is refused.
+ * else's membership is refused. Third review (4 November 2026): the
+ * membership's record travels in the move itself, which Stripe accepts only
+ * from API version 2026-05-27.dahlia (the stand-in refuses it below that, and
+ * keeps it pending until the month is paid, as Stripe does); another change
+ * holding the lock answers "busy".
  */
-import { FALLBACK_BOTH_KEY, FALLBACK_CHECK_KEY, FALLBACK_STRIPE_VERSION, FALLBACK_VOID_KEY, fallbackBody, moveToMonthly } from "@/lib/yearly-fallback";
+import { FALLBACK_BOTH_KEY, FALLBACK_CHECK_KEY, FALLBACK_STRIPE_VERSION, FALLBACK_VOID_KEY, fallbackBody, fallbackLockKey, moveToMonthly } from "@/lib/yearly-fallback";
+import { LockBusyError } from "@/lib/redis-lock";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setProductYearly, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
@@ -28,6 +33,16 @@ type Outcome = "paid" | "declined" | "voidFails" | "voidFailsPaid" | "applied-op
 let outcome: Outcome = "paid";
 /** What each read of the yearly invoice says, in order; "open" once they run out. */
 let invoiceReads: string[] = [];
+
+/**
+ * The first API version at which Stripe takes `metadata` with `payment_behavior=pending_if_incomplete`, keeps it in
+ * `pending_update.metadata` and merges it into the subscription only when the pending update applies; before it, the
+ * request was refused (docs.stripe.com/changelog/dahlia/2026-05-27/pending-subscription-update-metadata, read
+ * 4 November 2026). Versions compare by their date.
+ */
+const PENDING_METADATA_FROM = "2026-05-27.dahlia";
+const versionDate = (version: string | null) => (version ?? "").slice(0, 10);
+const metadataOf = (body: URLSearchParams) => Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v]));
 
 const subscription = () => ({
   id: "sub_Year00000001",
@@ -62,12 +77,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "POST" && path === "/prices") return json({ id: "price_Month00001" });
   if (method === "POST" && path === "/invoices/in_Year00000001") return json({ id: "in_Year00000001" });
   if (method === "POST" && path === "/subscriptions/sub_Year00000001") {
+    const metadata = metadataOf(body);
+    // As Stripe: metadata on a change made only if paid is refused before 2026-05-27.dahlia; from it, kept on the
+    // pending update and merged into the subscription only once the change applies.
+    if (Object.keys(metadata).length && body.get("payment_behavior") === "pending_if_incomplete" && versionDate(headers.get("Stripe-Version")) < versionDate(PENDING_METADATA_FROM)) {
+      return json({ error: { type: "invalid_request_error", message: "Received unknown parameter: metadata" } }, 400);
+    }
     if (outcome === "timeout") throw new TypeError("fetch failed");
     if (outcome === "stripe-500") return json({ error: { type: "api_error", message: "down" } }, 500);
     if (outcome === "refused-400") return json({ error: { type: "invalid_request_error", message: "no" } }, 400);
-    if (outcome === "declined") return json({ id: "sub_Year00000001", pending_update: { expires_at: 1 }, latest_invoice: { id: "in_Month0000001", status: "open" } });
-    if (outcome === "applied-open") return json({ id: "sub_Year00000001", pending_update: null, latest_invoice: { id: "in_Month0000001", status: "open", amount_paid: 0, currency: "usd" } });
-    return json({ id: "sub_Year00000001", pending_update: null, latest_invoice: { id: "in_Month0000001", status: "paid", amount_paid: 2000, currency: "usd" } });
+    const kept = subscription().metadata;
+    if (outcome === "declined") return json({ id: "sub_Year00000001", metadata: kept, pending_update: { expires_at: 1, metadata }, latest_invoice: { id: "in_Month0000001", status: "open" } });
+    if (outcome === "applied-open") return json({ id: "sub_Year00000001", metadata: { ...kept, ...metadata }, pending_update: null, latest_invoice: { id: "in_Month0000001", status: "open", amount_paid: 0, currency: "usd" } });
+    return json({ id: "sub_Year00000001", metadata: { ...kept, ...metadata }, pending_update: null, latest_invoice: { id: "in_Month0000001", status: "paid", amount_paid: 2000, currency: "usd" } });
   }
   if (method === "POST" && path === "/invoices/in_Month0000001/void") return json({ id: "in_Month0000001", status: "void" });
   if (method === "POST" && path === "/invoices/in_Year00000001/void") {
@@ -103,9 +125,14 @@ async function main(): Promise<void> {
   part("The move, as Stripe is sent it");
   const sent = fallbackBody("si_Year0000001", "price_Month00001", "in_Year00000001");
   is(
-    "the product's monthly price from now, no proration (the year was never paid), made only if the month is paid",
-    [sent.get("items[0][price]"), sent.get("billing_cycle_anchor"), sent.get("proration_behavior"), sent.get("payment_behavior"), sent.get("metadata[monthly_replaced]")],
-    ["price_Month00001", "now", "none", "pending_if_incomplete", "in_Year00000001"],
+    "the product's monthly price from now, no proration (the year was never paid), made only if the month is paid, with the membership's record in the same call",
+    [sent.get("items[0][price]"), sent.get("billing_cycle_anchor"), sent.get("proration_behavior"), sent.get("payment_behavior"), metadataOf(sent)],
+    ["price_Month00001", "now", "none", "pending_if_incomplete", { every: "month", monthly_from: "year", monthly_replaced: "in_Year00000001" }],
+  );
+  is(
+    "the pinned API version is one that takes metadata on a change made only if paid (2026-05-27.dahlia or later)",
+    [/^\d{4}-\d{2}-\d{2}\.[a-z]+$/.test(FALLBACK_STRIPE_VERSION), versionDate(FALLBACK_STRIPE_VERSION) >= versionDate(PENDING_METADATA_FROM)],
+    [true, true],
   );
 
   part("Paid");
@@ -119,6 +146,11 @@ async function main(): Promise<void> {
     ["/subscriptions/sub_Year00000001", "/invoices/in_Year00000001", "/invoices/in_Year00000001"],
   );
   const update = calls.find((c) => c.path === "/subscriptions/sub_Year00000001" && c.method === "POST");
+  is(
+    "every call of the move goes at the pinned version, the move itself with its record",
+    [calls.filter((c) => c.path !== "/prices").map((c) => c.version), metadataOf(update!.body).every],
+    [calls.filter((c) => c.path !== "/prices").map(() => FALLBACK_STRIPE_VERSION), "month"],
+  );
   is("at a pinned API version, never the account's default, as every call here", [update?.version, calls.filter((c) => c.path !== "/prices").every((c) => c.version === FALLBACK_STRIPE_VERSION)], [FALLBACK_STRIPE_VERSION, true]);
 
   part("Declined, then tried again with another card");
@@ -196,6 +228,12 @@ async function main(): Promise<void> {
     [meanwhile.ok ? "moved" : meanwhile.reason, posts()],
     ["fallback", ["/invoices/in_Year00000001:auto_advance=false"]],
   );
+  await clear();
+  await redisPipeline([["SET", fallbackLockKey("sub_Year00000001"), "another-change", "EX", 60]]);
+  const held = await move();
+  await redisPipeline([["DEL", fallbackLockKey("sub_Year00000001")]]);
+  is("another change to the membership holding the lock: busy, never an error, and nothing sent", [held.ok ? "moved" : held.reason, calls.length], ["busy", 0]);
+  is("the lock's error carries its own name as well", [new LockBusyError().name, new LockBusyError() instanceof Error], ["LockBusyError", true]);
   is("a malformed id: refused without a call", [(await moveToMonthly(store, "cus_Dana000001", "sub_x", "in_Year00000001")).ok, (await moveToMonthly(store, "cus_Dana000001", "sub_Year00000001", "nope")).ok], [false, false]);
 }
 

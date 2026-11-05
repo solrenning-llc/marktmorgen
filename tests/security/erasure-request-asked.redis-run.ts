@@ -64,14 +64,20 @@ async function main(): Promise<void> {
 
   // One hour of the deletion form: three asks per address (its hourly limit), from connections
   // that each stay under theirs. That alone is more than what the confirmations left of the month.
-  let links = 0;
   for (let i = 0; i < 40; i += 1) {
     for (let t = 0; t < 3; t += 1) {
-      const from = sent.length;
       await requestErasureLink({ email: `x${i}@catchall.example`, ip: `203.0.113.${i * 3 + t}`, origin: "https://marktmorgen.com", handle: "erase-asked" });
-      if (sent.length > from) links += 1;
     }
   }
+  // Each link goes after its answer (lib/erasure-request.ts, afterAnswer): count them once the sending has settled.
+  const deletionLinks = () => sent.filter((m) => /^x\d+@catchall\.example$/.test(String(m.to)) && String(m.text ?? "").includes("/privacy/delete?token=")).length;
+  for (let last = -1, quiet = 0; quiet < 20; ) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const now = deletionLinks();
+    quiet = now === last ? quiet + 1 : 0;
+    last = now;
+  }
+  const links = deletionLinks();
   check("the sign-ups and one hour of deletion asks would be more than the month's figure", confirmations + 120 > figure, true);
   check("the deletion links took some of the store's access emails", links > 0, true);
   check("but, with the confirmations, no more than a visitor's share", confirmations + links <= askedCeiling(figure), true);

@@ -173,8 +173,16 @@ async function main(): Promise<void> {
   const erased = await personRoute(new NextRequest("https://marktmorgen.com/api/store/person", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "erase", token: "x".repeat(40), confirm: "DELETE" }) }));
   is("the erase route itself refuses it, before anything is read or deleted", ((await erased.json()) as { error?: string }).error, "locked");
   const { POST: passkeyRoute } = await import("@/app/api/auth/passkey/route");
+  const { listPasskeys } = await import("@/lib/passkeys");
+  const pkList = `nl:pk:${createHash("sha256").update(`nimbus-passkeys:${LOST}`).digest("hex").slice(0, 40)}`;
+  await redis.pipeline([
+    ["SET", pkList, JSON.stringify([{ id: "a-passkey", publicKey: "pk", counter: 0, transports: [], name: "Phone", createdAt: "", lastUsedAt: "", synced: true }])],
+    ["SET", `nl:pk:cred:${createHash("sha256").update("nimbus-passkey-id:a-passkey").digest("hex").slice(0, 40)}`, LOST],
+  ]);
   const removedKey = await passkeyRoute(new NextRequest("https://marktmorgen.com/api/auth/passkey", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "remove", id: "a-passkey" }) }));
-  is("and a passkey cannot be taken away from the owner either", [removedKey.status, ((await removedKey.json()) as { error?: string }).error], [403, "locked"]);
+  // Not at once: a locked session may only ask for a removal that waits as long as its lock (tests/second-step-gate.test.ts).
+  const removedAnswer = (await removedKey.json()) as { ok?: boolean; removeOn?: number };
+  is("and the owner's passkey is not taken away at once: the removal only waits", [removedKey.status, typeof removedAnswer.removeOn === "number", (await listPasskeys(LOST)).map((p) => p.id)], [200, true, ["a-passkey"]]);
   const { POST: twoStepRoute } = await import("@/app/api/auth/two-step/route");
   const tried = await twoStepRoute(new NextRequest("https://marktmorgen.com/api/auth/two-step", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "cancel" }) }));
   is("two-step login cannot be changed from it", [tried.status, ((await tried.json()) as { error?: string }).error], [403, "locked"]);

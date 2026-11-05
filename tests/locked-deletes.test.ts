@@ -28,7 +28,8 @@
  *   - notes, tasks, deals, pitches, segments and drafts deleted, a buyer's
  *     review photo taken off;
  *   - no passkey request from a locked session, not even a list, spends the
- *     owner's hourly changes.
+ *     owner's hourly changes; a removal only waits (lib/passkeys.ts
+ *     scheduleRemoval), on a count of its own.
  *
  * Where a route deletes a file, the check also reads the file back after the
  * refusal, and the inventory holds every such route to one of those reads.
@@ -385,7 +386,7 @@ async function main(): Promise<void> {
     new NextRequest(`${ORIGIN}/api/auth/passkey`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "remove", id: "a-passkey" }) });
   // More than the hour's 30 changes (CHANGES_PER_HOUR in the route).
   for (let i = 0; i < 31; i += 1) await passkey(passkeyRequest(locked));
-  is("the locked session is told locked, every time", await answer(await passkey(passkeyRequest(locked))), LOCKED);
+  is("the locked session removes nothing at once: it may only ask for a wait, on a count of its own", await answer(await passkey(passkeyRequest(locked))), [429, "rate_limited"]);
   is("and the owner's own change is not refused for the hour", (await answer(await passkey(passkeyRequest(full))))[1] !== "rate_limited", true);
   const listRequest = (session: string) =>
     new NextRequest(`${ORIGIN}/api/auth/passkey`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "list" }) });
@@ -418,6 +419,7 @@ async function main(): Promise<void> {
     "api-keys": ["need:export"],
     "answers": ["act:page:clear"],
     "assistant": ["not:a buyer deleting their own conversation with the assistant"],
+    "assistant-memory": ["need:settings"],
     "assistant-settings": ["act:page:clear"],
     "blog": ["act:page:delete"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
@@ -431,6 +433,7 @@ async function main(): Promise<void> {
     "course": ["act:products:lesson-remove", "act:products:module-remove", "act:products:media-remove", "act:products:task-remove", "act:products:quiz-remove", "act:products:withdraw", "act:products:cm-delete", "lockedFor"],
     "course/comment": ["lockedFor"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
+    "creator-card": ["need:settings"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
     "discord": ["need:settings"],
     "file/attach": ["act:products:detach", "lockedFor"],
@@ -524,6 +527,7 @@ async function main(): Promise<void> {
     "assistant": "not:a buyer's own conversation with the store's assistant",
     "blog": { delete: "act:page" },
     "bundle": { clear: "act:products", create: "open:adds", save: "open:edits" },
+    "assistant-memory": "need:settings",
     "calendar": "need:settings",
     "community": {
       comment: "open:adds", delete: "lockedFor", "delete-comment": "lockedFor", edit: "open:edits", "edit-comment": "open:edits",
@@ -550,6 +554,7 @@ async function main(): Promise<void> {
       template: "open:adds", withdraw: "act:products",
     },
     "course/comment": { delete: "lockedFor", hide: "open:reversible", show: "open:reversible" },
+    "creator-card": "need:settings",
     "crm": {
       deal: "open:edits", fields: "lockedFor", pipeline: "open:edits", stages: "open:edits", undeal: "act:orders", value: "open:edits",
       unpipeline: "act:orders",
@@ -595,7 +600,7 @@ async function main(): Promise<void> {
     "spend": { add: "open:adds", remove: "act:stats" },
     "stores": { delete: "need:delete", select: "open:a person choosing which of their own stores the studio shows" },
     "stream/captions": { add: "open:adds", auto: "need:billing", quote: "open:reads", remove: "act:products" },
-    "team": { invite: "need:team", leave: "open:a member leaving a team they were invited to, which deletes nothing of the store", remove: "need:team", revoke: "need:team", role: "need:team" },
+    "team": { invite: "need:team", leave: "open:a member leaving a team they were invited to, which deletes nothing of the store", remove: "need:team", revoke: "need:team", role: "need:team", "two-step": "need:team" },
     "waitlist": { launch: "act:products", soon: "open:takes the mark off and emails nobody on the waitlist; paid pre-orders get the fixed delivery email" },
     "webhooks": "need:settings",
     "course/task": "not:a student replacing or taking back their own handed-in work",

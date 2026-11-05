@@ -3,7 +3,7 @@
 import { MAX_PLACE_LINE, MAX_PLACE_LINES, placeLine } from "@/lib/call-place";
 import { useState, useId } from "react";
 import { useStoreCurrency } from "@/components/store-currency";
-import { type LengthsProblem, MAX_CALL_LENGTHS, lengthsProblemWords } from "@/lib/call-lengths";
+import { MAX_CALL_LENGTHS, lengthsRefusal, problemOnPrice } from "@/lib/call-lengths";
 import { type Currency, priceExample, rangeWords, toMajor } from "@/lib/money";
 import { UrlField } from "@/components/url-field";
 import { roomOnLeave } from "@/lib/url-check";
@@ -35,7 +35,7 @@ import {
 } from "@/lib/call-setup";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
-const MESSAGES: Record<string, string> = {
+export const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   minutes: "Pick how long a call lasts.",
   tz: "Pick your time zone.",
@@ -396,16 +396,13 @@ function sessionWhen(start: number, tz: string): string {
   }).format(new Date(start));
 }
 
-const SHORTER_LENGTH = "Each other length has to be longer than the call's own length. Pick a longer one, or make the call's own length shorter.";
-const OWN_PRICE = "This product's price is outside what your store's currency allows for a call. Change the product's price first, then add the other lengths.";
-
 /**
  * Other lengths a one-to-one call may offer, each with its price (637 [GL5],
  * lib/call-lengths.ts). The call's own length, at this product's price, is
  * always the first; each other one is longer, so the price on the store is
  * the call's own. Optional: none keeps the call exactly as it is.
  */
-function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorId }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string; wrong: { id: string; problem: string } | null; clearWrong: () => void; errorId: string }) {
+export function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorId }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string; wrong: { id: string; problem: string } | null; clearWrong: () => void; errorId: string }) {
   const longer = CALL_LENGTHS.filter((m) => m > draft.minutes);
   const unused = longer.filter((m) => !draft.extra.some((row) => row.minutes === m));
   // A line the server marked is unmarked once the creator changes or removes it; the others keep their marks (3.3.1).
@@ -425,8 +422,9 @@ function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorI
         // Not longer than the call's own length any more (its length was changed above): said on the row, kept until the creator decides.
         const notLonger = row.minutes <= draft.minutes;
         const flagged = wrong?.id === row.id;
-        // Only the field the server's problem is about is marked: a price problem on the price, any other on the length (3.3.1).
-        const priceWrong = flagged && wrong?.problem === "price";
+        // Only the field the server's problem is about is marked: a price out of range or below a shorter length's on the
+        // price, any other on the length (3.3.1).
+        const priceWrong = flagged && problemOnPrice(wrong?.problem ?? "");
         const lengthWrong = flagged && !priceWrong;
         const marked = notLonger || lengthWrong;
         // The message the server sent is said on the field it is about, not only above the save button (3.3.1).
@@ -465,11 +463,14 @@ function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorI
           >
             {`Remove ${row.minutes} minutes`}
           </button>
-          {notLonger ? (
-            <p id={`length-short-${id}-${row.id}`} className="field-hint font-semibold text-ink sm:col-span-3">
-              {`${row.minutes} minutes is not longer than the call's own length of ${draft.minutes} minutes. Pick a longer one, or remove it.`}
-            </p>
-          ) : null}
+          {/* Always in the page, so the line said when the call's own length grows past this one is announced (4.1.3). */}
+          <div role="status" className="sm:col-span-3">
+            {notLonger ? (
+              <p id={`length-short-${id}-${row.id}`} className="field-hint font-semibold text-ink">
+                {`${row.minutes} minutes is not longer than the call's own length of ${draft.minutes} minutes. Pick a longer one, or remove it.`}
+              </p>
+            ) : null}
+          </div>
         </div>
         );
       })}
@@ -535,13 +536,13 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
       }
       // The other lengths (lib/call-lengths.ts): what is wrong with them, in the rules' own words.
       if (data.error === "lengths" && data.problem) {
-        // Line 0 is the call's own length at this product's price, which is not typed here.
-        if (data.index === 0 && data.problem === "price") setError(OWN_PRICE);
-        else setError(data.problem === "shorter" ? SHORTER_LENGTH : lengthsProblemWords(data.problem as LengthsProblem, currency, data.minutes));
+        // Line 0 is the call's own length at this product's price, which is not typed here (lengthsRefusal).
+        const said = lengthsRefusal({ problem: data.problem, index: data.index, minutes: data.minutes }, currency);
+        setError(said.message);
         // The server counts lines from the call's own length (0); the editor's rows start at 1.
         // The rows are read from the draft this save sent, so a row removed while it was on its way never moves the mark onto another.
-        const sentRow = typeof data.index === "number" && data.index > 0 ? draft.extra[data.index - 1] : undefined;
-        setWrongLength(sentRow ? { id: sentRow.id, problem: data.problem } : null);
+        const sentRow = said.row !== null ? draft.extra[said.row - 1] : undefined;
+        setWrongLength(sentRow ? { id: sentRow.id, problem: said.problem } : null);
         return;
       }
       setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);

@@ -6,7 +6,8 @@
  * start and the session's record, so the words are what the code does:
  *   - held_until_start: the creator moved it inside the cancellation
  *     deadline; the card is only reserved now, charged when the session
- *     starts, and canceling before then costs nothing.
+ *     starts, and canceling before then costs nothing;
+ *     a charge that fails then is owed on a link for OWED_PAY_DAYS.
  *   - planned: paid as before for the new time.
  *   - kept: it was charged already (at or after its deadline, or at once
  *     inside it) and that charge stays, whoever moved it;
@@ -18,10 +19,13 @@
  *   - pay_by_link: its payment failed and waits on the buyer: the link
  *     works until `until`, unpaid by then it is canceled, nothing charged.
  * `date` arrives written in the store's language; `hours` is the deadline
- * promised when booking (0 for none). The buyer is never named to the
- * creator. Browser-safe.
+ * promised when booking (0 for none), never the 0 that failedCharge, payBy
+ * and failedChargeWords take for a session the creator moved inside its
+ * deadline (C2-94): held_until_start and charged_now name the deadline, so
+ * seriesMoveMessage refuses them without one of SERIES_DEADLINES. The buyer
+ * is never named to the creator. Browser-safe.
  */
-import type { MoveCase } from "@/lib/call-series-billing";
+import { type MoveCase, OWED_PAY_DAYS, SERIES_DEADLINES } from "@/lib/call-series-billing";
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 
 export type MoveBy = "creator" | "buyer";
@@ -40,7 +44,7 @@ const N = " ";
 
 const en: SeriesMoveWords = {
   buyer: {
-    held_until_start: ({ date, store, hours }) => [`${store} moved your session to ${date}.`, `That is less than ${hours} hours away, so your card is only reserved now.`, "It is charged when the session starts.", "Cancel any time before then and you pay nothing for it."],
+    held_until_start: ({ date, store, hours }) => [`${store} moved your session to ${date}.`, `That is less than ${hours} hours away, so your card is only reserved now.`, "It is charged when the session starts.", "Cancel any time before then and you pay nothing for it.", `If that charge fails, we email you a link to pay it within ${OWED_PAY_DAYS} days.`],
     planned: ({ date, store, hours, by }) => [by === "buyer" ? `You moved your session to ${date}.` : `${store} moved your session to ${date}.`, hours ? `Cancel at least ${hours} hours before it starts and you pay nothing for it.` : "Cancel any time before it starts and you pay nothing for it."],
     kept: ({ date, store, by }) => [by === "buyer" ? `You moved your session to ${date}.` : `${store} moved your session to ${date}.`, "This session was already charged.", "That charge stays, so it is not refunded if you cancel.", `If ${store} cancels it, you get your money back.`],
     charged_now: ({ date, hours }) => [`You moved your session to ${date}.`, `That is less than ${hours} hours away, so it is charged now.`, "It is not refunded if you cancel."],
@@ -48,7 +52,7 @@ const en: SeriesMoveWords = {
     pay_by_link: (i) => [en.buyer.planned(i)[0], "Your payment for it has not gone through yet.", `Pay with the link by ${i.until}.`, "If it is not paid by then, the session is canceled and you are not charged."],
   },
   creator: {
-    held_until_start: ({ date, hours }) => [`You moved the session to ${date}.`, `That is inside your ${hours}-hour cancellation deadline, so the buyer's card is only reserved.`, "It is charged when the session starts.", "If the buyer cancels before then, the reservation is released and nothing is charged."],
+    held_until_start: ({ date, hours }) => [`You moved the session to ${date}.`, `That is inside your ${hours}-hour cancellation deadline, so the buyer's card is only reserved.`, "It is charged when the session starts.", "If the buyer cancels before then, the reservation is released and nothing is charged.", `If that charge fails, the buyer gets a link to pay it within ${OWED_PAY_DAYS} days.`],
     planned: ({ date, by }) => [by === "buyer" ? `The buyer moved the session to ${date}.` : `You moved the session to ${date}.`, "Its payment follows your usual rules for the new time."],
     kept: ({ date, by }) => [by === "buyer" ? `The buyer moved the session to ${date}.` : `You moved the session to ${date}.`, "It was already charged, and that charge stays.", "If you cancel it, the buyer gets a full refund."],
     charged_now: ({ date, hours }) => [`The buyer moved the session to ${date}.`, `That is inside your ${hours}-hour cancellation deadline, so the buyer is being charged now.`, "It is not refunded if the buyer cancels."],
@@ -59,7 +63,7 @@ const en: SeriesMoveWords = {
 
 const es: SeriesMoveWords = {
   buyer: {
-    held_until_start: ({ date, store, hours }) => [`${store} movió tu sesión al nuevo horario: ${date}.`, `Faltan menos de ${hours}${N}horas, así que por ahora solo se reserva el importe en tu tarjeta.`, "Se cobra cuando empieza la sesión.", "Si cancelas antes, no pagas nada."],
+    held_until_start: ({ date, store, hours }) => [`${store} movió tu sesión al nuevo horario: ${date}.`, `Faltan menos de ${hours}${N}horas, así que por ahora solo se reserva el importe en tu tarjeta.`, "Se cobra cuando empieza la sesión.", "Si cancelas antes, no pagas nada.", `Si ese cobro falla, te enviamos un enlace para pagarlo en un plazo de ${OWED_PAY_DAYS}${N}días.`],
     planned: ({ date, store, hours, by }) => [by === "buyer" ? `Moviste tu sesión al nuevo horario: ${date}.` : `${store} movió tu sesión al nuevo horario: ${date}.`, hours ? `Cancela al menos ${hours}${N}horas antes de que empiece y no pagas nada.` : "Cancela en cualquier momento antes de que empiece y no pagas nada."],
     kept: ({ date, store, by }) => [by === "buyer" ? `Moviste tu sesión al nuevo horario: ${date}.` : `${store} movió tu sesión al nuevo horario: ${date}.`, "Esta sesión ya se cobró.", "Ese cobro se mantiene, así que no se reembolsa si cancelas.", `Si ${store} la cancela, te devuelve el dinero.`],
     charged_now: ({ date, hours }) => [`Moviste tu sesión al nuevo horario: ${date}.`, `Faltan menos de ${hours}${N}horas, así que se cobra ahora.`, "No se reembolsa si cancelas."],
@@ -67,7 +71,7 @@ const es: SeriesMoveWords = {
     pay_by_link: (i) => [es.buyer.planned(i)[0], "Tu pago de esta sesión aún no se ha completado.", `Paga con el enlace a más tardar ${i.until}.`, "Si no se paga para entonces, la sesión se cancela y no se te cobra nada."],
   },
   creator: {
-    held_until_start: ({ date, hours }) => [`Moviste la sesión al nuevo horario: ${date}.`, `Queda dentro de tu plazo de ${hours}${N}horas, así que la tarjeta del comprador solo queda reservada.`, "Se cobra cuando empieza la sesión.", "Si el comprador cancela antes, la reserva se libera y no se cobra nada."],
+    held_until_start: ({ date, hours }) => [`Moviste la sesión al nuevo horario: ${date}.`, `Queda dentro de tu plazo de ${hours}${N}horas, así que la tarjeta del comprador solo queda reservada.`, "Se cobra cuando empieza la sesión.", "Si el comprador cancela antes, la reserva se libera y no se cobra nada.", `Si ese cobro falla, el comprador recibe un enlace para pagarlo en un plazo de ${OWED_PAY_DAYS}${N}días.`],
     planned: ({ date, by }) => [by === "buyer" ? `El comprador movió la sesión al nuevo horario: ${date}.` : `Moviste la sesión al nuevo horario: ${date}.`, "Su pago sigue tus reglas habituales para la nueva hora."],
     kept: ({ date, by }) => [by === "buyer" ? `El comprador movió la sesión al nuevo horario: ${date}.` : `Moviste la sesión al nuevo horario: ${date}.`, "Ya se cobró, y ese cobro se mantiene.", "Si la cancelas, el comprador recibe un reembolso completo."],
     charged_now: ({ date, hours }) => [`El comprador movió la sesión al nuevo horario: ${date}.`, `Queda dentro de tu plazo de ${hours}${N}horas, así que se está cobrando al comprador ahora.`, "No se reembolsa si el comprador cancela."],
@@ -78,7 +82,7 @@ const es: SeriesMoveWords = {
 
 const fr: SeriesMoveWords = {
   buyer: {
-    held_until_start: ({ date, store, hours }) => [`${store} a déplacé votre séance au ${date}.`, `Il reste moins de ${hours}${N}heures, donc le montant est seulement réservé sur votre carte.`, "Il est débité au début de la séance.", "Annulez avant ce moment et vous ne payez rien."],
+    held_until_start: ({ date, store, hours }) => [`${store} a déplacé votre séance au ${date}.`, `Il reste moins de ${hours}${N}heures, donc le montant est seulement réservé sur votre carte.`, "Il est débité au début de la séance.", "Annulez avant ce moment et vous ne payez rien.", `Si ce débit échoue, nous vous envoyons un lien pour le payer sous ${OWED_PAY_DAYS}${N}jours.`],
     planned: ({ date, store, hours, by }) => [by === "buyer" ? `Vous avez déplacé votre séance au ${date}.` : `${store} a déplacé votre séance au ${date}.`, hours ? `Annulez au moins ${hours}${N}heures avant le début et vous ne payez rien.` : "Annulez à tout moment avant le début et vous ne payez rien."],
     kept: ({ date, store, by }) => [by === "buyer" ? `Vous avez déplacé votre séance au ${date}.` : `${store} a déplacé votre séance au ${date}.`, "Cette séance a déjà été débitée.", "Ce débit reste acquis, donc il n'est pas remboursé si vous annulez.", `Si ${store} l'annule, vous êtes remboursé.`],
     charged_now: ({ date, hours }) => [`Vous avez déplacé votre séance au ${date}.`, `Il reste moins de ${hours}${N}heures, donc elle est débitée maintenant.`, "Elle n'est pas remboursée si vous annulez."],
@@ -86,7 +90,7 @@ const fr: SeriesMoveWords = {
     pay_by_link: (i) => [fr.buyer.planned(i)[0], "Votre paiement pour cette séance n'a pas encore abouti.", `Payez avec le lien au plus tard ${i.until}.`, "Sinon, la séance est annulée et rien ne vous est débité."],
   },
   creator: {
-    held_until_start: ({ date, hours }) => [`Vous avez déplacé la séance au ${date}.`, `C'est dans votre délai d'annulation de ${hours}${N}heures, donc la carte de l'acheteur est seulement réservée.`, "Elle est débitée au début de la séance.", "Si l'acheteur annule avant, la réservation est libérée et rien n'est débité."],
+    held_until_start: ({ date, hours }) => [`Vous avez déplacé la séance au ${date}.`, `C'est dans votre délai d'annulation de ${hours}${N}heures, donc la carte de l'acheteur est seulement réservée.`, "Elle est débitée au début de la séance.", "Si l'acheteur annule avant, la réservation est libérée et rien n'est débité.", `Si ce débit échoue, l'acheteur reçoit un lien pour le payer sous ${OWED_PAY_DAYS}${N}jours.`],
     planned: ({ date, by }) => [by === "buyer" ? `L'acheteur a déplacé la séance au ${date}.` : `Vous avez déplacé la séance au ${date}.`, "Son paiement suit vos règles habituelles pour le nouvel horaire."],
     kept: ({ date, by }) => [by === "buyer" ? `L'acheteur a déplacé la séance au ${date}.` : `Vous avez déplacé la séance au ${date}.`, "Elle a déjà été débitée, et ce débit reste acquis.", "Si vous l'annulez, l'acheteur est remboursé en totalité."],
     charged_now: ({ date, hours }) => [`L'acheteur a déplacé la séance au ${date}.`, `C'est dans votre délai d'annulation de ${hours}${N}heures, donc l'acheteur est débité maintenant.`, "Ce n'est pas remboursé si l'acheteur annule."],
@@ -97,7 +101,7 @@ const fr: SeriesMoveWords = {
 
 const de: SeriesMoveWords = {
   buyer: {
-    held_until_start: ({ date, store, hours }) => [`${store} hat Ihren Termin auf ${date} verschoben.`, `Bis dahin sind es weniger als ${hours}${N}Stunden, daher wird der Betrag auf Ihrer Karte nur reserviert.`, "Er wird abgebucht, wenn der Termin beginnt.", "Wenn Sie vorher stornieren, zahlen Sie nichts."],
+    held_until_start: ({ date, store, hours }) => [`${store} hat Ihren Termin auf ${date} verschoben.`, `Bis dahin sind es weniger als ${hours}${N}Stunden, daher wird der Betrag auf Ihrer Karte nur reserviert.`, "Er wird abgebucht, wenn der Termin beginnt.", "Wenn Sie vorher stornieren, zahlen Sie nichts.", `Schlägt die Abbuchung fehl, senden wir Ihnen einen Link, um sie binnen ${OWED_PAY_DAYS}${N}Tagen zu bezahlen.`],
     planned: ({ date, store, hours, by }) => [by === "buyer" ? `Sie haben Ihren Termin auf ${date} verschoben.` : `${store} hat Ihren Termin auf ${date} verschoben.`, hours ? `Stornieren Sie mindestens ${hours}${N}Stunden vor Beginn, und Sie zahlen nichts.` : "Stornieren Sie jederzeit vor Beginn, und Sie zahlen nichts."],
     kept: ({ date, store, by }) => [by === "buyer" ? `Sie haben Ihren Termin auf ${date} verschoben.` : `${store} hat Ihren Termin auf ${date} verschoben.`, "Dieser Termin wurde bereits abgebucht.", "Diese Abbuchung bleibt bestehen und wird bei einer Stornierung nicht erstattet.", `Wenn ${store} ihn absagt, bekommen Sie Ihr Geld zurück.`],
     charged_now: ({ date, hours }) => [`Sie haben Ihren Termin auf ${date} verschoben.`, `Bis dahin sind es weniger als ${hours}${N}Stunden, daher wird jetzt abgebucht.`, "Bei einer Stornierung wird nichts erstattet."],
@@ -105,7 +109,7 @@ const de: SeriesMoveWords = {
     pay_by_link: (i) => [de.buyer.planned(i)[0], "Ihre Zahlung für diesen Termin ist noch nicht durchgegangen.", `Zahlen Sie über den Link bis ${i.until}.`, "Sonst wird der Termin abgesagt, und Ihnen wird nichts berechnet."],
   },
   creator: {
-    held_until_start: ({ date, hours }) => [`Sie haben den Termin auf ${date} verschoben.`, `Er liegt innerhalb Ihrer Stornofrist von ${hours}${N}Stunden, daher wird die Karte des Käufers nur reserviert.`, "Abgebucht wird, wenn der Termin beginnt.", "Storniert der Käufer vorher, wird die Reservierung freigegeben und nichts abgebucht."],
+    held_until_start: ({ date, hours }) => [`Sie haben den Termin auf ${date} verschoben.`, `Er liegt innerhalb Ihrer Stornofrist von ${hours}${N}Stunden, daher wird die Karte des Käufers nur reserviert.`, "Abgebucht wird, wenn der Termin beginnt.", "Storniert der Käufer vorher, wird die Reservierung freigegeben und nichts abgebucht.", `Schlägt die Abbuchung fehl, erhält der Käufer einen Link, um sie binnen ${OWED_PAY_DAYS}${N}Tagen zu bezahlen.`],
     planned: ({ date, by }) => [by === "buyer" ? `Der Käufer hat den Termin auf ${date} verschoben.` : `Sie haben den Termin auf ${date} verschoben.`, "Die Zahlung folgt für die neue Zeit Ihren üblichen Regeln."],
     kept: ({ date, by }) => [by === "buyer" ? `Der Käufer hat den Termin auf ${date} verschoben.` : `Sie haben den Termin auf ${date} verschoben.`, "Er wurde bereits abgebucht, und diese Abbuchung bleibt bestehen.", "Wenn Sie ihn absagen, bekommt der Käufer alles erstattet."],
     charged_now: ({ date, hours }) => [`Der Käufer hat den Termin auf ${date} verschoben.`, `Er liegt innerhalb Ihrer Stornofrist von ${hours}${N}Stunden, daher wird der Käufer jetzt belastet.`, "Storniert der Käufer, wird nichts erstattet."],
@@ -116,7 +120,7 @@ const de: SeriesMoveWords = {
 
 const it: SeriesMoveWords = {
   buyer: {
-    held_until_start: ({ date, store, hours }) => [`${store} ha spostato la tua sessione a ${date}.`, `Mancano meno di ${hours}${N}ore, quindi per ora l'importo è solo riservato sulla tua carta.`, "Viene addebitato quando la sessione inizia.", "Se annulli prima, non paghi nulla."],
+    held_until_start: ({ date, store, hours }) => [`${store} ha spostato la tua sessione a ${date}.`, `Mancano meno di ${hours}${N}ore, quindi per ora l'importo è solo riservato sulla tua carta.`, "Viene addebitato quando la sessione inizia.", "Se annulli prima, non paghi nulla.", `Se l'addebito non va a buon fine, ti inviamo un link per pagarlo entro ${OWED_PAY_DAYS}${N}giorni.`],
     planned: ({ date, store, hours, by }) => [by === "buyer" ? `Hai spostato la tua sessione a ${date}.` : `${store} ha spostato la tua sessione a ${date}.`, hours ? `Annulla almeno ${hours}${N}ore prima dell'inizio e non paghi nulla.` : "Annulla in qualsiasi momento prima dell'inizio e non paghi nulla."],
     kept: ({ date, store, by }) => [by === "buyer" ? `Hai spostato la tua sessione a ${date}.` : `${store} ha spostato la tua sessione a ${date}.`, "Questa sessione è già stata addebitata.", "L'addebito resta, quindi non viene rimborsato se annulli.", `Se ${store} la annulla, ti restituisce i soldi.`],
     charged_now: ({ date, hours }) => [`Hai spostato la tua sessione a ${date}.`, `Mancano meno di ${hours}${N}ore, quindi viene addebitata ora.`, "Non viene rimborsata se annulli."],
@@ -124,7 +128,7 @@ const it: SeriesMoveWords = {
     pay_by_link: (i) => [it.buyer.planned(i)[0], "Il tuo pagamento per questa sessione non è ancora andato a buon fine.", `Paga con il link entro ${i.until}.`, "Altrimenti la sessione viene annullata e non ti viene addebitato nulla."],
   },
   creator: {
-    held_until_start: ({ date, hours }) => [`Hai spostato la sessione a ${date}.`, `Rientra nel tuo termine di cancellazione di ${hours}${N}ore, quindi la carta dell'acquirente è solo riservata.`, "Viene addebitata quando la sessione inizia.", "Se l'acquirente annulla prima, la riserva viene liberata e non si addebita nulla."],
+    held_until_start: ({ date, hours }) => [`Hai spostato la sessione a ${date}.`, `Rientra nel tuo termine di cancellazione di ${hours}${N}ore, quindi la carta dell'acquirente è solo riservata.`, "Viene addebitata quando la sessione inizia.", "Se l'acquirente annulla prima, la riserva viene liberata e non si addebita nulla.", `Se l'addebito non va a buon fine, l'acquirente riceve un link per pagarlo entro ${OWED_PAY_DAYS}${N}giorni.`],
     planned: ({ date, by }) => [by === "buyer" ? `L'acquirente ha spostato la sessione a ${date}.` : `Hai spostato la sessione a ${date}.`, "Il pagamento segue le tue regole abituali per il nuovo orario."],
     kept: ({ date, by }) => [by === "buyer" ? `L'acquirente ha spostato la sessione a ${date}.` : `Hai spostato la sessione a ${date}.`, "È già stata addebitata, e l'addebito resta.", "Se la annulli, l'acquirente riceve un rimborso completo."],
     charged_now: ({ date, hours }) => [`L'acquirente ha spostato la sessione a ${date}.`, `Rientra nel tuo termine di cancellazione di ${hours}${N}ore, quindi l'acquirente viene addebitato ora.`, "Non viene rimborsata se l'acquirente annulla."],
@@ -135,7 +139,7 @@ const it: SeriesMoveWords = {
 
 const nl: SeriesMoveWords = {
   buyer: {
-    held_until_start: ({ date, store, hours }) => [`${store} heeft je sessie verplaatst naar ${date}.`, `Dat is over minder dan ${hours}${N}uur, dus het bedrag wordt nu alleen op je kaart gereserveerd.`, "Het wordt afgeschreven als de sessie begint.", "Annuleer je eerder, dan betaal je niets."],
+    held_until_start: ({ date, store, hours }) => [`${store} heeft je sessie verplaatst naar ${date}.`, `Dat is over minder dan ${hours}${N}uur, dus het bedrag wordt nu alleen op je kaart gereserveerd.`, "Het wordt afgeschreven als de sessie begint.", "Annuleer je eerder, dan betaal je niets.", `Mislukt die afschrijving, dan sturen we je een link om binnen ${OWED_PAY_DAYS}${N}dagen te betalen.`],
     planned: ({ date, store, hours, by }) => [by === "buyer" ? `Je hebt je sessie verplaatst naar ${date}.` : `${store} heeft je sessie verplaatst naar ${date}.`, hours ? `Annuleer minstens ${hours}${N}uur voor het begin en je betaalt niets.` : "Annuleer op elk moment voor het begin en je betaalt niets."],
     kept: ({ date, store, by }) => [by === "buyer" ? `Je hebt je sessie verplaatst naar ${date}.` : `${store} heeft je sessie verplaatst naar ${date}.`, "Deze sessie is al afgeschreven.", "Die betaling blijft staan, dus je krijgt niets terug als je annuleert.", `Annuleert ${store} haar, dan krijg je je geld terug.`],
     charged_now: ({ date, hours }) => [`Je hebt je sessie verplaatst naar ${date}.`, `Dat is over minder dan ${hours}${N}uur, dus het wordt nu afgeschreven.`, "Je krijgt niets terug als je annuleert."],
@@ -143,7 +147,7 @@ const nl: SeriesMoveWords = {
     pay_by_link: (i) => [nl.buyer.planned(i)[0], "Je betaling voor deze sessie is nog niet gelukt.", `Betaal met de link uiterlijk ${i.until}.`, "Anders wordt de sessie geannuleerd en betaal je niets."],
   },
   creator: {
-    held_until_start: ({ date, hours }) => [`Je hebt de sessie verplaatst naar ${date}.`, `Dat valt binnen je annuleringstermijn van ${hours}${N}uur, dus de kaart van de koper wordt alleen gereserveerd.`, "Het wordt afgeschreven als de sessie begint.", "Annuleert de koper eerder, dan vervalt de reservering en wordt er niets afgeschreven."],
+    held_until_start: ({ date, hours }) => [`Je hebt de sessie verplaatst naar ${date}.`, `Dat valt binnen je annuleringstermijn van ${hours}${N}uur, dus de kaart van de koper wordt alleen gereserveerd.`, "Het wordt afgeschreven als de sessie begint.", "Annuleert de koper eerder, dan vervalt de reservering en wordt er niets afgeschreven.", `Mislukt die afschrijving, dan krijgt de koper een link om binnen ${OWED_PAY_DAYS}${N}dagen te betalen.`],
     planned: ({ date, by }) => [by === "buyer" ? `De koper heeft de sessie verplaatst naar ${date}.` : `Je hebt de sessie verplaatst naar ${date}.`, "De betaling volgt je gewone regels voor de nieuwe tijd."],
     kept: ({ date, by }) => [by === "buyer" ? `De koper heeft de sessie verplaatst naar ${date}.` : `Je hebt de sessie verplaatst naar ${date}.`, "Ze is al afgeschreven, en die betaling blijft staan.", "Annuleer je haar, dan krijgt de koper alles terug."],
     charged_now: ({ date, hours }) => [`De koper heeft de sessie verplaatst naar ${date}.`, `Dat valt binnen je annuleringstermijn van ${hours}${N}uur, dus de koper wordt nu belast.`, "De koper krijgt niets terug bij annuleren."],
@@ -154,7 +158,7 @@ const nl: SeriesMoveWords = {
 
 const pt: SeriesMoveWords = {
   buyer: {
-    held_until_start: ({ date, store, hours }) => [`${store} mudou a sua sessão para ${date}.`, `Faltam menos de ${hours}${N}horas, por isso o valor fica só reservado no seu cartão.`, "É cobrado quando a sessão começa.", "Se cancelar antes, não paga nada."],
+    held_until_start: ({ date, store, hours }) => [`${store} mudou a sua sessão para ${date}.`, `Faltam menos de ${hours}${N}horas, por isso o valor fica só reservado no seu cartão.`, "É cobrado quando a sessão começa.", "Se cancelar antes, não paga nada.", `Se essa cobrança falhar, enviamos-lhe um link para a pagar no prazo de ${OWED_PAY_DAYS}${N}dias.`],
     planned: ({ date, store, hours, by }) => [by === "buyer" ? `Mudou a sua sessão para ${date}.` : `${store} mudou a sua sessão para ${date}.`, hours ? `Cancele pelo menos ${hours}${N}horas antes do início e não paga nada.` : "Cancele a qualquer momento antes do início e não paga nada."],
     kept: ({ date, store, by }) => [by === "buyer" ? `Mudou a sua sessão para ${date}.` : `${store} mudou a sua sessão para ${date}.`, "Esta sessão já foi cobrada.", "Essa cobrança mantém-se, por isso não é reembolsada se cancelar.", `Se ${store} a cancelar, recebe o seu dinheiro de volta.`],
     charged_now: ({ date, hours }) => [`Mudou a sua sessão para ${date}.`, `Faltam menos de ${hours}${N}horas, por isso é cobrada agora.`, "Não é reembolsada se cancelar."],
@@ -162,7 +166,7 @@ const pt: SeriesMoveWords = {
     pay_by_link: (i) => [pt.buyer.planned(i)[0], "O seu pagamento desta sessão ainda não foi concluído.", `Pague com o link até ${i.until}.`, "Caso contrário, a sessão é cancelada e não lhe é cobrado nada."],
   },
   creator: {
-    held_until_start: ({ date, hours }) => [`Mudou a sessão para ${date}.`, `Fica dentro do seu prazo de cancelamento de ${hours}${N}horas, por isso o cartão do comprador fica só reservado.`, "É cobrada quando a sessão começa.", "Se o comprador cancelar antes, a reserva é libertada e nada é cobrado."],
+    held_until_start: ({ date, hours }) => [`Mudou a sessão para ${date}.`, `Fica dentro do seu prazo de cancelamento de ${hours}${N}horas, por isso o cartão do comprador fica só reservado.`, "É cobrada quando a sessão começa.", "Se o comprador cancelar antes, a reserva é libertada e nada é cobrado.", `Se essa cobrança falhar, o comprador recebe um link para a pagar no prazo de ${OWED_PAY_DAYS}${N}dias.`],
     planned: ({ date, by }) => [by === "buyer" ? `O comprador mudou a sessão para ${date}.` : `Mudou a sessão para ${date}.`, "O pagamento segue as suas regras habituais para o novo horário."],
     kept: ({ date, by }) => [by === "buyer" ? `O comprador mudou a sessão para ${date}.` : `Mudou a sessão para ${date}.`, "Já foi cobrada, e essa cobrança mantém-se.", "Se a cancelar, o comprador recebe o reembolso total."],
     charged_now: ({ date, hours }) => [`O comprador mudou a sessão para ${date}.`, `Fica dentro do seu prazo de cancelamento de ${hours}${N}horas, por isso o comprador está a ser cobrado agora.`, "Não é reembolsada se o comprador cancelar."],
@@ -175,5 +179,7 @@ export const SERIES_MOVE_WORDS: Record<LanguageCode, SeriesMoveWords> = { en, es
 
 /** The payment part of a moved session's message, for the buyer or the creator, in the store's language (English when unknown). */
 export function seriesMoveMessage(language: unknown, to: "buyer" | "creator", which: MoveCase, input: MoveInput): string {
+  // Never "less than 0 hours away": these two say the deadline promised at booking, which only moveCase's cases with one reach.
+  if ((which === "held_until_start" || which === "charged_now") && !(SERIES_DEADLINES as readonly number[]).includes(input.hours)) throw new Error(`series move words: ${which} needs the deadline promised at booking, not ${input.hours} hours`);
   return SERIES_MOVE_WORDS[parseLanguage(language)][to][which](input).join(" ");
 }

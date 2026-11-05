@@ -9,7 +9,7 @@ import { WaitlistPanel } from "@/components/waitlist-panel";
 import type { PreorderView } from "@/lib/preorders";
 import { hasContent, preorderProblem } from "@/lib/preorder-rules";
 import type { WaitlistView } from "@/lib/waitlist";
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { UrlField } from "@/components/url-field";
 import { useRouter } from "next/navigation";
@@ -57,6 +57,7 @@ import {
   MAX_OPTION_DETAIL_LENGTH,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  handsOver,
   optionDelivers,
 } from "@/lib/product-option";
 import { activePlan } from "@/lib/product-extras";
@@ -885,6 +886,20 @@ function OptionsBlock({
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  // WCAG 2.4.3 and 4.1.3: "Remove" gives way to its confirmation, so focus
+  // moves to what it says (read out at once), and back to "Remove" on "Keep it".
+  const removeSaid = useRef<HTMLParagraphElement>(null);
+  const removeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const refocusRemove = useRef<string | null>(null);
+  useEffect(() => {
+    if (removingId) {
+      removeSaid.current?.focus();
+      return;
+    }
+    const back = refocusRemove.current;
+    refocusRemove.current = null;
+    if (back) removeButtons.current.get(back)?.focus();
+  }, [removingId]);
   const [label, setLabel] = useState("");
   const [price, setPrice] = useState("");
   const [details, setDetails] = useState("");
@@ -1245,6 +1260,10 @@ function OptionsBlock({
                   {removingId === option.id ? null : (
                     <button
                       type="button"
+                      ref={(button) => {
+                        if (button) removeButtons.current.set(option.id, button);
+                        else removeButtons.current.delete(option.id);
+                      }}
                       onClick={() => {
                         setRemovingId(option.id);
                         setError(null);
@@ -1276,7 +1295,7 @@ function OptionsBlock({
 
                 {removingId === option.id ? (
                   <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">
-                    <p className="text-sm text-ink-soft">
+                    <p ref={removeSaid} tabIndex={-1} className="text-sm text-ink-soft">
                       Remove <strong className="text-ink">{option.label}</strong>
                       {`. ${optionRemovalWords(
                         { hasFile: Boolean(option.file), delivers: Boolean(option.file || option.link), extra: Boolean(product.course || product.podcast) },
@@ -1288,6 +1307,10 @@ function OptionsBlock({
                           // What sells it with no option left (lib/store-checkout.ts, canSellProduct).
                           missing: product.course ? (product.course.lessons > 0 ? null : "lesson") : product.podcast ? (product.podcast.episodes > 0 ? null : "episode") : activeShipping(product) || product.file || product.link ? null : "delivery",
                           ownDelivery: Boolean(product.file || product.link),
+                          // Whether it can be bought, with and without this option, by the checkout's own rule (lib/product-option.ts, handsOver).
+                          sellsBefore: handsOver(product),
+                          sellsAfter: handsOver({ ...product, options: product.options.filter((o) => o.id !== option.id) }),
+                          payments: product.recurring?.payments ?? 0,
                           // What the checkout would offer without this option (lib/store-checkout.ts): read, never assumed from what is stored.
                           introKept: activeIntro({ ...product, options: product.options.filter((o) => o.id !== option.id) }, tiers) !== null,
                           yearlyKept: activeYearly({ ...product, options: product.options.filter((o) => o.id !== option.id) }, tiers) !== null,
@@ -1314,7 +1337,10 @@ function OptionsBlock({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setRemovingId(null)}
+                        onClick={() => {
+                          refocusRemove.current = option.id;
+                          setRemovingId(null);
+                        }}
                         className="btn btn-secondary btn-sm"
                       >
                         Keep it

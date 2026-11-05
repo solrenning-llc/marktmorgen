@@ -738,6 +738,12 @@
       "parameters": []
     },
     {
+      "source": "app/help/buyers/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/buyers",
+      "parameters": []
+    },
+    {
       "source": "app/help/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help",
@@ -1234,6 +1240,7 @@
     "components/ai-posts.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
+    "components/app-code-invite.tsx",
     "components/ask-box.tsx",
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",
@@ -1295,6 +1302,7 @@
     "components/customer-voice.tsx",
     "components/daily-cashflow.tsx",
     "components/deal-agenda.tsx",
+    "components/deal-channels-table.tsx",
     "components/deals-board.tsx",
     "components/deals-unavailable.tsx",
     "components/demo-notes.tsx",
@@ -1362,10 +1370,13 @@
     "components/lesson-quiz.tsx",
     "components/lesson-task.tsx",
     "components/lesson-text.tsx",
+    "components/letter-publish-control.tsx",
     "components/licence-key-box.tsx",
     "components/licence-key-editor.tsx",
     "components/link-editor.tsx",
     "components/link-picture.tsx",
+    "components/link-request-form.tsx",
+    "components/local-clock.tsx",
     "components/local-day.tsx",
     "components/logo.tsx",
     "components/look-editor.tsx",
@@ -1388,6 +1399,9 @@
     "components/numbers-notes.tsx",
     "components/offer-planning.tsx",
     "components/old-addresses.tsx",
+    "components/older-purchases.tsx",
+    "components/orders-bundle.tsx",
+    "components/orders-shared.tsx",
     "components/outreach-studio.tsx",
     "components/package-editor.tsx",
     "components/page-answers.tsx",
@@ -1433,6 +1447,7 @@
     "components/podcast-editor.tsx",
     "components/podcast-toggle.tsx",
     "components/post-cover.tsx",
+    "components/preview-frame.tsx",
     "components/pricing-cycle-controls.tsx",
     "components/pricing-cycle.tsx",
     "components/pricing-value.tsx",
@@ -1442,6 +1457,7 @@
     "components/product-image-editor.tsx",
     "components/product-update-box.tsx",
     "components/promotion-planner.tsx",
+    "components/purchase-card.tsx",
     "components/quiz-editor.tsx",
     "components/quiz-scoring.tsx",
     "components/recent-sales-switch.tsx",
@@ -1476,6 +1492,7 @@
     "components/share-row.tsx",
     "components/shipping-editor.tsx",
     "components/short-links.tsx",
+    "components/side-panel-switch.tsx",
     "components/signin-form.tsx",
     "components/site-footer.tsx",
     "components/site-nav.tsx",
@@ -1522,9 +1539,11 @@
     "components/studio-tools.tsx",
     "components/takedown-actions.tsx",
     "components/task-editor.tsx",
+    "components/tasks-agenda.tsx",
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",
+    "components/team-two-step-switch.tsx",
     "components/template-library.tsx",
     "components/terms-check-panel.tsx",
     "components/test-counts-notice.tsx",
@@ -1542,6 +1561,8 @@
     "components/url-field.tsx",
     "components/usage-meter.tsx",
     "components/video-embed.tsx",
+    "components/video-stamp.tsx",
+    "components/video-window.tsx",
     "components/visit-us-block.tsx",
     "components/visit-us-editor.tsx",
     "components/waitlist-panel.tsx",
@@ -1645,6 +1666,7 @@
     "app/api/store/answers/route.ts",
     "app/api/store/api-keys/route.ts",
     "app/api/store/ask/route.ts",
+    "app/api/store/assistant-memory/route.ts",
     "app/api/store/assistant-next/route.ts",
     "app/api/store/assistant-settings/route.ts",
     "app/api/store/assistant/route.ts",
@@ -1696,6 +1718,7 @@
     "app/api/store/course/start/route.ts",
     "app/api/store/course/task/route.ts",
     "app/api/store/course/task/upload/route.ts",
+    "app/api/store/creator-card/route.ts",
     "app/api/store/crm/route.ts",
     "app/api/store/currency/route.ts",
     "app/api/store/depth/route.ts",
@@ -1750,6 +1773,8 @@
     "app/api/store/language/route.ts",
     "app/api/store/leads/route.ts",
     "app/api/store/leaving/route.ts",
+    "app/api/store/letters/link/route.ts",
+    "app/api/store/letters/open/route.ts",
     "app/api/store/letters/route.ts",
     "app/api/store/licence/route.ts",
     "app/api/store/license/route.ts",
@@ -1777,6 +1802,8 @@
     "app/api/store/numbers/ask/route.ts",
     "app/api/store/option/route.ts",
     "app/api/store/order/route.ts",
+    "app/api/store/orders/bundle/route.ts",
+    "app/api/store/orders/older/route.ts",
     "app/api/store/orders/route.ts",
     "app/api/store/outreach/route.ts",
     "app/api/store/package/route.ts",
@@ -1865,6 +1892,7 @@
     "app/api/stripe/disconnect/route.ts",
     "app/api/stripe/refresh/route.ts",
     "app/api/stripe/return/route.ts",
+    "app/api/studio-demo/route.ts",
     "app/api/takedown/route.ts",
     "app/api/v1/access/route.ts",
     "app/api/v1/affiliates/route.ts",
@@ -1876,6 +1904,7 @@
     "app/api/v1/leads/route.ts",
     "app/api/v1/members/route.ts",
     "app/api/v1/products/route.ts",
+    "app/api/v1/sales/route.ts",
     "app/api/v1/stats/route.ts",
     "app/api/v1/store/route.ts",
     "app/api/v1/students/route.ts"
@@ -1942,8 +1971,16 @@
       "status": "not yet reviewed for this programme"
     },
     {
+      "source": "app/help/layout.tsx",
+      "status": "AAA review not completed"
+    },
+    {
       "source": "app/layout.tsx",
       "status": "not yet reviewed for this programme"
+    },
+    {
+      "source": "app/platform/[slug]/layout.tsx",
+      "status": "AAA review not completed"
     },
     {
       "source": "app/signin/layout.tsx",
@@ -1957,6 +1994,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 134
+    "pageTemplates": 135
   }
 }

@@ -219,7 +219,20 @@ export const emptyBlocksLeft = (): BlocksLeft => ({ pictures: 0, refs: 0, review
  * the same page.
  */
 export function copiedBlocks(blocks: readonly PageBlock[], products: IdMap, forms: IdMap, left: BlocksLeft): PageBlock[] {
-  return blocks.map((original) => {
+  return blocks.flatMap((original): PageBlock[] => {
+    // A booking block (552 [BB1]) books one call: the call's copy, or the block is left out and counted, since
+    // without a call it has nothing to book (lib/sales-page.ts would not keep it). A call is never copied today
+    // (skipReason "call"), so in practice it is always left out.
+    if (original.kind === "booking") {
+      const mapped = products(original.product);
+      if (!mapped) {
+        left.refs += 1;
+        return [];
+      }
+      const block: PageBlock = { ...original, product: mapped };
+      delete block.saved;
+      return [block];
+    }
     const block = { ...original } as PageBlock;
     delete block.saved;
     if (block.kind === "pictures" && block.items.length) {
@@ -252,7 +265,7 @@ export function copiedBlocks(blocks: readonly PageBlock[], products: IdMap, form
       if (!mapped) left.refs += 1;
       block.form = mapped;
     }
-    return block;
+    return [block];
   });
 }
 

@@ -103,6 +103,46 @@ export function lengthsProblemWords(problem: LengthsProblem, currency: Currency,
   }
 }
 
+/** The studio's words when an other length is not longer than the call's own (app/api/store/call answers "shorter"). */
+export const SHORTER_LENGTH = "Each other length has to be longer than the call's own length. Pick a longer one, or make the call's own length shorter.";
+/** The studio's words when the call's own line (the product's price) is outside the currency's range: it is not typed in the lengths. */
+export const OWN_PRICE = "This product's price is outside what your store's currency allows for a call. Change the product's price first, then add the other lengths.";
+
+/**
+ * What the studio's lengths editor says for a refused save (app/api/store/call:
+ * `problem`, `index` counted from the call's own line, 0, and `minutes`), and
+ * which of its rows to mark (`row`, counted from 1, the first other length;
+ * null when the problem is not on a row it shows). Line 0 is the call's own
+ * length at the product's price, which is not typed there: a price problem on
+ * it is the product's price, and "cheaper" on it can only mean a row shorter
+ * than it, priced above it, so it is said as the shorter row it is, never as a
+ * price to raise that cannot be changed there.
+ */
+export function lengthsRefusal(reply: { problem: string; index?: number; minutes?: number }, currency: Currency): { message: string; row: number | null; problem: string } {
+  const row = typeof reply.index === "number" && reply.index > 0 ? reply.index : null;
+  if (reply.index === 0 && reply.problem === "price") return { message: OWN_PRICE, row: null, problem: "price" };
+  if (reply.problem === "shorter" || (reply.index === 0 && reply.problem === "cheaper")) return { message: SHORTER_LENGTH, row, problem: "shorter" };
+  return { message: lengthsProblemWords(reply.problem as LengthsProblem, currency, reply.minutes), row, problem: reply.problem };
+}
+
+/** Whether the editor marks a row's price, not its length, for a problem the server sent: a price out of range, or one below a shorter length's (3.3.1). */
+export function problemOnPrice(problem: string): boolean {
+  return problem === "price" || problem === "cheaper";
+}
+
+/**
+ * The row (counted from 1, the first other length) of the first other length
+ * shorter than the call's own, from the lengths as the editor sent them, or
+ * null: said as "shorter" before any price comparison it would make fail.
+ */
+export function shorterRow(extra: readonly unknown[], ownMinutes: number): number | null {
+  const at = extra.findIndex((row) => {
+    const minutes = row && typeof row === "object" ? Number((row as Record<string, unknown>).minutes) : NaN;
+    return Number.isFinite(minutes) && minutes < ownMinutes;
+  });
+  return at < 0 ? null : at + 1;
+}
+
 const WHOLE = /^\d{1,4}$/;
 
 /**

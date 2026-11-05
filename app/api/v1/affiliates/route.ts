@@ -1,6 +1,6 @@
 import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
 import { apiOkFields, badFields } from "@/lib/api-fields";
-import { affiliates } from "@/lib/api-read";
+import { AFFILIATE_FIELDS, affiliates } from "@/lib/api-read";
 
 /**
  * GET /api/v1/affiliates — every affiliate, with what they earned, were paid and are owed. It takes
@@ -9,11 +9,11 @@ import { affiliates } from "@/lib/api-read";
 export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
-  // A `?fields=` that cannot be read is refused before any further request is taken or anything read.
-  const bad = badFields(request);
+  // A `?fields=` that cannot be answered is refused before any further request is taken or anything read.
+  const bad = badFields(request, AFFILIATE_FIELDS);
   if (bad) return bad;
   try {
-    const found = await affiliates(store, (more) => takeMoreApi(store, more));
+    const found = await affiliates(store, (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
     return apiOkFields(request, found);
   } catch (error) {

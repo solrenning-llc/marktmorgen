@@ -28,6 +28,7 @@
  *
  *   nl:erase:link:<hash of a token>  { e: address, s: [store ids still to do] }, an hour
  */
+import { after } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -124,29 +125,52 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   const email = normaliseEmail(raw);
   if (!(await withinLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "limited" };
   if (!(await withinLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "limited" };
-  const known = new Set(await storesKnownFor(email));
-  const stores: Store[] = [];
   if (input.handle) {
     const store = await storeForHandle(input.handle).catch(() => null);
     if (store?.sid) {
+      // The store's room is read before anything about the address: "full" comes to every address alike.
       const room = await askedRoom(store);
       if (room.state === "full") return { status: "full", ...(room.opens ? { opens: room.opens } : {}) };
-      if (await knows(store, email, known)) stores.push(store);
+      // Whether the store knows the address, and the email, only after the answer (review of #2101, inbox
+      // C4-15 (3)(a)): their time, and a send that fails or finds the room just taken, would only ever come to
+      // an address the store knows. They go to the server's log; the page always gives the privacy contact.
+      afterAnswer(async () => {
+        const known = new Set(await storesKnownFor(email));
+        if (!(await knows(store, email, known))) return;
+        const answer = await emailLink([store], email, input.origin);
+        if (answer.status !== "sent") console.warn(`a deletion link asked from one store was not emailed: ${answer.status} (store ${store.sid})`);
+      });
     }
-    return stores.length ? emailLink(stores, email, input.origin) : { status: "sent" };
+    return { status: "sent" };
   }
-  for (const sid of [...known].slice(0, MAX_ERASE_STORES)) {
-    const store = await storeForId(sid).catch(() => null);
-    if (store?.sid) stores.push(store);
-  }
-  if (stores.length) {
-    const answer = await emailLink(stores, email, input.origin).catch((error: unknown) => {
-      console.error("emailing a deletion link failed", error);
-      return { status: "error" } as EraseAnswer;
-    });
-    if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status}`);
-  }
+  // Every store: which stores know the address, and the email, only after the answer, for the same reason.
+  afterAnswer(async () => {
+    const stores: Store[] = [];
+    for (const sid of (await storesKnownFor(email)).slice(0, MAX_ERASE_STORES)) {
+      const store = await storeForId(sid).catch(() => null);
+      if (store?.sid) stores.push(store);
+    }
+    if (!stores.length) return;
+    const answer = await emailLink(stores, email, input.origin);
+    if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status} (stores ${stores.map((s) => s.sid).join(",")})`);
+  });
   return { status: "sent" };
+}
+
+/**
+ * Runs what depends on the address after the answer is sent (as lib/buyer-orders.ts does): inside the
+ * route's time, or at once and unwaited when there is no request to wait for. What fails goes to the log.
+ */
+function afterAnswer(task: () => Promise<void>): void {
+  const run = () =>
+    task().catch((error: unknown) => {
+      console.error("emailing a deletion link failed", error);
+    });
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 /**
@@ -209,19 +233,40 @@ async function emailLink(stores: Store[], email: string, origin: string): Promis
 /** The address a live link was sent to, and the stores it still deletes from; null when it has run out. */
 export async function readErasureLink(token: string): Promise<{ email: string; stores: Store[] } | null> {
   if (!ERASE_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
+  const reply = await redisPipeline([["GET", linkKey(token)]]);
+  if (!exactGrantReply(reply, 1)) throw new Error("Your data could not be checked. Try again.");
+  const [raw] = reply;
+  if (raw === null) return null;
   const grant = parseGrant(raw);
-  if (!grant) return null;
-  const stores = (await Promise.all(grant.s.map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
+  if (!grant) throw new Error("Your data could not be checked. Try again.");
+  const stores = await Promise.all(grant.s.map(async (sid) => {
+    const store = await storeForId(sid);
+    // A missing store record cannot prove that no personal data remains.
+    // Do not show only part of the scope the person is about to delete.
+    if (!store) throw new Error("Your data could not be checked. Try again.");
+    return store;
+  }));
   return { email: grant.e, stores };
+}
+
+/** An absent response slot is not Redis's confirmed null for a missing key. */
+function exactGrantReply(reply: unknown, length: number): reply is unknown[] {
+  if (!Array.isArray(reply) || reply.length !== length) return false;
+  for (let i = 0; i < length; i++) if (!Object.hasOwn(reply, i)) return false;
+  return true;
 }
 
 function parseGrant(raw: unknown): Grant | null {
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Partial<Grant>;
-    if (typeof v.e !== "string" || !EMAIL_PATTERN.test(v.e) || !Array.isArray(v.s)) return null;
-    return { e: v.e, s: v.s.filter((s): s is string => typeof s === "string" && STORE_ID.test(s)).slice(0, MAX_ERASE_STORES) };
+    if (typeof v.e !== "string" || !EMAIL_PATTERN.test(v.e) || !Array.isArray(v.s) || v.s.length === 0 || v.s.length > MAX_ERASE_STORES) return null;
+    const ids = new Set<string>();
+    for (const sid of v.s) {
+      if (typeof sid !== "string" || !STORE_ID.test(sid) || ids.has(sid)) return null;
+      ids.add(sid);
+    }
+    return { e: v.e, s: [...ids] };
   } catch {
     return null;
   }
@@ -244,9 +289,14 @@ export type EraseDone = {
 export async function confirmErasure(token: string, now = Date.now()): Promise<EraseDone> {
   if (!ERASE_TOKEN.test(token) || !isRedisConfigured()) return { state: "gone", deleted: [], later: [] };
   const key = linkKey(token);
-  const [raw, ttl] = await redisPipeline([["GET", key], ["TTL", key]]);
+  const reply = await redisPipeline([["GET", key], ["TTL", key]]);
+  // Unknown scope stays pending without consuming or rewriting its grant.
+  const pending: EraseDone = { state: "more", deleted: [], later: [] };
+  if (!exactGrantReply(reply, 2)) return pending;
+  const [raw, ttl] = reply;
+  if (raw === null && ttl === -2) return { state: "gone", deleted: [], later: [] };
   const grant = parseGrant(raw);
-  if (!grant) return { state: "gone", deleted: [], later: [] };
+  if (!grant || typeof ttl !== "number" || !Number.isSafeInteger(ttl) || ttl <= 0) return pending;
   const deleted: string[] = [];
   const later: string[] = [];
   for (const sid of grant.s) {
@@ -255,7 +305,12 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
       continue;
     }
     const store = await storeForId(sid).catch(() => null);
-    if (!store) continue;
+    if (!store) {
+      // Unknown is still to do: never discard the grant and claim completion
+      // while this store's data could not even be reached.
+      later.push(sid);
+      continue;
+    }
     const result = await erasePerson(store, grant.e, { kind: "person" }).catch(() => ({ ok: false as const, reason: "unavailable" as const }));
     if (!result.ok) {
       later.push(sid);
@@ -265,7 +320,7 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
     await tellOwner(store, grant.e).catch((error: unknown) => console.error("telling a store's owner about a deletion failed", error));
   }
   if (later.length) {
-    await redisPipeline([["SET", key, JSON.stringify({ e: grant.e, s: later } satisfies Grant), "EX", Math.max(60, Number(ttl) || ERASE_LINK_SECONDS)]]);
+    await redisPipeline([["SET", key, JSON.stringify({ e: grant.e, s: later } satisfies Grant), "EX", Math.max(60, ttl)]]);
     return { state: "more", deleted, later };
   }
   await redisPipeline([["DEL", key]]);

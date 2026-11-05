@@ -107,7 +107,8 @@ export type BlockKind =
   | "product"
   | "quotes"
   | "form"
-  | "row";
+  | "row"
+  | "booking";
 
 export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "hero", label: "Hero", hint: "The big headline at the top, with the product's picture or a video." },
@@ -131,9 +132,8 @@ export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "product", label: "Another product", hint: "One of your other products, with its picture, price and a link to its own page: what goes well with this one." },
   { kind: "facts", label: "By the numbers", hint: "Lessons, episodes, buyers, the average rating: counted for you from the store, never typed, and always up to date." },
   { kind: "form", label: "Form", hint: "One of your forms, surveys or quizzes, made under Forms: the questions, and where the answers lead. On your own pages." },
-  // "row" (RowBlock) is not offered here yet: it is kept and drawn, but the
-  // studio has no editor for its columns until the next unit of queue item
-  // 375 [TB1], and nothing is offered before it works (AGENTS.md, VR).
+  // On a product's page only: not in SITE_KINDS (lib/site-page-rules.ts) nor in a saved section (lib/saved-blocks.ts, NOT_IN_SECTIONS).
+  { kind: "row", label: "Columns", hint: "One to three columns side by side, each with headings, words, a list, icons, buttons, pictures or a video. One column on a phone." },
 ];
 
 export type VideoProvider = "youtube" | "vimeo" | "loom";
@@ -306,6 +306,25 @@ export type QuotesBlock = { id: string; kind: "quotes"; heading: string; items: 
 /** One of the store's forms, surveys or quizzes (lib/forms.ts), by its id: only on the store's own pages. */
 export type FormBlock = { id: string; kind: "form"; heading: string; form: string };
 
+/**
+ * One of the store's calls, booked from the page itself (552 [BB1], added
+ * 4 November 2026): a paid call, a call also sold in packages, or a free
+ * intro call (551 [FB1]), by its product id. Only the id and an optional
+ * heading are kept, so the call's name, length and place are always today's,
+ * read from the call itself; a call taken off, made a draft or no longer a
+ * call is simply not drawn. Unit 1 draws a link to the call's own booking
+ * page (/@<store>/book/<id>); the time picker inside the block comes with
+ * unit 2, from the same picker and the same times, never a second way of
+ * booking.
+ *
+ * One per page (MAX_BOOKING_BLOCKS), as the reviews have one place: two would
+ * ask a visitor the same question twice, and once the picker is in the block
+ * each one reads the call's times, so a second one would double the reads for
+ * nothing.
+ */
+export type BookingBlock = { id: string; kind: "booking"; product: string; heading: string };
+export const MAX_BOOKING_BLOCKS = 1;
+
 /** An https address as it will be linked, or "" when it is not one: no other scheme, no login in it, no address on this machine. */
 export function quoteUrl(raw: unknown): string {
   if (typeof raw !== "string") return "";
@@ -344,11 +363,14 @@ export type FeatureBlock = { id: string; kind: "feature"; heading: string; body:
  * (quoteUrl). On a phone the columns become one, in reading order: the first
  * column's elements, then the second's, then the third's.
  *
+ * A video can also sit behind a button of its own words and open in a
+ * window over the page (unit 5): the same three players, loaded only once the
+ * button is pressed, in a dialog built the way the picture viewer's is
+ * (components/video-window.tsx after components/picture-viewer.tsx).
+ *
  * Left out, and why: audio (no block keeps an audio file of its own; a file
  * would need the claim and delete rules pictures have in
- * lib/sales-page-store.ts) and a video that opens in a window (the page has
- * no such window for a video yet; the picture viewer's dialog,
- * components/picture-viewer.tsx, is the pattern to reuse when it comes).
+ * lib/sales-page-store.ts).
  */
 export const MIN_ROW_COLUMNS = 1;
 export const MAX_ROW_COLUMNS = 3;
@@ -413,9 +435,16 @@ export type RowElement =
   | { kind: "icon"; name: RowIcon; label: string }
   | { kind: "button"; label: string; url: string }
   | { kind: "image"; picture: Picture; decorative: boolean }
-  | { kind: "video"; video: Video; title: string };
+  | { kind: "video"; video: Video; title: string }
+  /**
+   * A video behind a button (unit 5): the button's own words open a window
+   * with the player. A kind of its own, not a flag on "video", so every
+   * switch over the parts has to say how it draws, reads and copies one,
+   * and a part made before it can never be read as one.
+   */
+  | { kind: "video-window"; video: Video; title: string; label: string };
 export type RowElementKind = RowElement["kind"];
-export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subheading", "paragraph", "list", "icon", "button", "image", "video"];
+export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subheading", "paragraph", "list", "icon", "button", "image", "video", "video-window"];
 
 export type RowBlock = { id: string; kind: "row"; columns: RowElement[][] };
 
@@ -463,6 +492,7 @@ export type PageBlock = { screens?: BlockShow; saved?: string } & (
   | QuotesBlock
   | FormBlock
   | RowBlock
+  | BookingBlock
 );
 
 export type SalesPage = {
@@ -752,15 +782,17 @@ export function readVideo(raw: string): Video | null {
 }
 
 /** The only frame addresses a page ever gets, one per player, built from the id alone. */
-export function embedUrl(video: Video): string {
+export function embedUrl(video: Video, { autoplay = true }: { autoplay?: boolean } = {}): string {
+  // Off only for a visitor who asked for less motion (components/video-window.tsx): the player loads and waits for its own play button.
+  const play = autoplay ? 1 : 0;
   if (video.provider === "youtube") {
     // enablejsapi lets the page hear where the player is, for how far the video is watched (components/page-depth.tsx).
-    return `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
+    return `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=${play}&rel=0&modestbranding=1&enablejsapi=1`;
   }
   if (video.provider === "vimeo") {
-    return `https://player.vimeo.com/video/${video.id}?dnt=1&autoplay=1${video.hash ? `&h=${video.hash}` : ""}`;
+    return `https://player.vimeo.com/video/${video.id}?dnt=1&autoplay=${play}${video.hash ? `&h=${video.hash}` : ""}`;
   }
-  return `https://www.loom.com/embed/${video.id}?autoplay=1&hide_owner=true&hide_share=true&hide_title=true`;
+  return `https://www.loom.com/embed/${video.id}?autoplay=${play}&hide_owner=true&hide_share=true&hide_title=true`;
 }
 
 /** The address a person would open the video at, for the studio's field. */
@@ -815,6 +847,15 @@ export function picturesOf(block: PageBlock): Picture[] {
 }
 
 /**
+ * How many pictures every block but the one at `index` shows, by picturesOf
+ * (a row's included): what the editor takes from MAX_PAGE_PICTURES before it
+ * offers room for one more, so it never offers what the save then refuses.
+ */
+export function picturesOutside(blocks: readonly PageBlock[], index: number): number {
+  return blocks.reduce((n, block, i) => (i === index ? n : n + picturesOf(block).length), 0);
+}
+
+/**
  * One element of a row, made safe to use; null when it cannot be one: an
  * unknown kind, no words where words are the element, an icon not on the
  * list, a button address that is not https (javascript:, data: and the
@@ -862,6 +903,11 @@ export function parseRowElement(raw: unknown): RowElement | null {
     case "video": {
       const video = parseVideo(value.video);
       return video ? { kind: "video", video, title: line(value.title, MAX_HEADING) } : null;
+    }
+    case "video-window": {
+      const video = parseVideo(value.video);
+      const label = line(value.label, MAX_CTA_LABEL);
+      return video && label ? { kind: "video-window", video, title: line(value.title, MAX_HEADING), label } : null;
     }
     default:
       return null;
@@ -918,6 +964,8 @@ function rowElementWhole(raw: unknown, kept: RowElement): boolean {
     }
     case "video":
       return whole(value.title) === kept.title;
+    case "video-window":
+      return whole(value.title) === kept.title && whole(value.label) === kept.label;
   }
 }
 
@@ -932,6 +980,13 @@ function rowSentWhole(raw: Record<string, unknown>): boolean {
     const kept = parseRowElement(element);
     return kept !== null && rowElementWhole(element, kept);
   });
+}
+
+/** Whether a booking block as sent can be kept whole: a call's id, and no heading or one within MAX_HEADING (never cut short). */
+function bookingSentWhole(raw: Record<string, unknown>): boolean {
+  if (typeof raw.product !== "string" || !PRODUCT_ID_PATTERN.test(raw.product)) return false;
+  if (raw.heading === undefined) return true;
+  return typeof raw.heading === "string" && line(raw.heading, Infinity).length <= MAX_HEADING;
 }
 
 /** Every picture file a page shows, each once: what is kept when the page is saved, and deleted when it is not. */
@@ -1085,6 +1140,9 @@ function parseBlock(raw: unknown): PageBlock | null {
       const columns = parseRowColumns(value.columns);
       return columns ? { id, kind: "row", columns } : null;
     }
+    // Kept whole or not at all: without a call it books nothing, and its heading is never cut short (blocksProblem tells it back).
+    case "booking":
+      return bookingSentWhole(value) ? { id, kind: "booking", product: value.product as string, heading } : null;
     default:
       return null;
   }
@@ -1108,6 +1166,7 @@ function parseBlocks(list: unknown, pictures: Set<string>): PageBlock[] {
     pictures.add(path);
   };
   let reviews = false;
+  let bookings = 0;
   for (const entry of list.slice(0, MAX_BLOCKS * 2)) {
     const block = parseBlock(entry);
     if (!block || seen.has(block.id)) continue;
@@ -1119,6 +1178,10 @@ function parseBlocks(list: unknown, pictures: Set<string>): PageBlock[] {
     if (block.kind === "reviews") {
       if (reviews) continue;
       reviews = true;
+    }
+    if (block.kind === "booking") {
+      if (bookings >= MAX_BOOKING_BLOCKS) continue;
+      bookings += 1;
     }
     // Pictures are counted across the page, and one file is shown once.
     if (block.kind === "pictures") {
@@ -1217,6 +1280,7 @@ export type PageProblem =
   | "too_big"
   | "same_version"
   | "row"
+  | "booking"
   | null;
 
 /** The rules of one version's blocks, told back; `kept` is that version as parsed. */
@@ -1225,6 +1289,8 @@ function blocksProblem(sent: unknown[], kept: PageBlock[]): PageProblem {
   const kinds = sent.map((b) => (b && typeof b === "object" ? (b as { kind?: unknown }).kind : null));
   if (kinds.slice(1).includes("hero")) return "hero_first";
   if (kinds.filter((k) => k === "reviews").length > 1) return "two_reviews";
+  // One booking block a page, with a call chosen and its heading whole.
+  if (kinds.filter((k) => k === "booking").length > MAX_BOOKING_BLOCKS) return "booking";
   for (const block of sent) {
     const value = block && typeof block === "object" ? (block as Record<string, unknown>) : {};
     if (value.kind === "hero" && value.media === "video" && !parseVideo(value.video)) return "video";
@@ -1244,6 +1310,7 @@ function blocksProblem(sent: unknown[], kept: PageBlock[]): PageProblem {
     }
     // A row with no columns or more than three, too many elements, or an element that cannot be kept as sent.
     if (value.kind === "row" && !rowSentWhole(value)) return "row";
+    if (value.kind === "booking" && !bookingSentWhole(value)) return "booking";
   }
   // A picture sent that was not kept: not a picture, a second copy of one, or past what a page holds.
   const sentPictures = sent.reduce<number>((n, b) => {
@@ -1326,6 +1393,8 @@ export function emptyBlock(kind: BlockKind, id = newBlockId()): PageBlock {
       return { id, kind, heading: "", form: "" };
     case "row":
       return { id, kind, columns: [[], []] };
+    case "booking":
+      return { id, kind, product: "", heading: "" };
   }
 }
 

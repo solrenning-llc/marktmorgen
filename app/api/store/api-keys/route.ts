@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
     if (action === "turn_on") {
       if ((await liveSecondStep(email, session)) === null) return Response.json({ ok: false, error: "second_step_on" }, { status: 403 });
-      // For a key whose maker could not be matched to the team, `as` says whose it is: "owner" or a teammate's address.
+      // For a key whose maker could not be matched to the team, or was never recorded, `as` says whose it is: "owner" or a teammate's address.
       const turned = await turnKeyOn(store, email, role, text(body.id, 20), text(body.as, 300));
       if (turned !== "ok") return Response.json({ ok: false, error: turned }, { status: turned === "unknown" ? 404 : turned === "whose" ? 400 : 409 });
       return Response.json({ ok: true, keys: await keys() }, { headers: { "Cache-Control": "no-store" } });

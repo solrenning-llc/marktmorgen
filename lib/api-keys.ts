@@ -326,6 +326,22 @@ export async function rewriteMakers(sid: string, change: (maker: KeyMaker, id: s
   return done;
 }
 
+/**
+ * Records whose a key is when nobody was recorded as its maker (keys made
+ * before 4 November 2026), written only over exactly the text read
+ * (RECORD_SWAP): a key revoked meanwhile, or given a maker meanwhile, is left
+ * as it is. Returns whether it was written.
+ */
+export async function claimMaker(sid: string, id: string, maker: KeyMaker): Promise<boolean> {
+  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return false;
+  const [raw] = await redisPipeline([["HGET", listKey(sid), id]]);
+  if (typeof raw !== "string") return false;
+  const stored = parseStored(raw);
+  if (!stored || stored.id !== id || stored.maker) return false;
+  const [changed] = await redisPipeline([["EVAL", RECORD_SWAP, 1, listKey(sid), id, raw, JSON.stringify({ ...stored, maker })]]);
+  return Array.isArray(changed) && changed.map(String).includes(id);
+}
+
 /** Writes key records only over exactly the text read: nothing for a record gone (revoked) or changed. Modelled by lib/redis-memory.ts. */
 export const RECORD_SWAP = `-- marktmorgen:api-key-record-swap:v1
 local changed = {}

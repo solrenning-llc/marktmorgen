@@ -54,7 +54,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
   const [revoking, setRevoking] = useState<string | null>(null);
   // Turning a paused key back on asks once too, saying what it means (turnOnNote): it is not paused again by the rule.
   const [turning, setTurning] = useState<string | null>(null);
-  // For a key that could not be linked to anyone: whose the owner says it is, "owner" or a teammate's address.
+  // For a key that could not be linked to anyone, or nobody is recorded as making: whose the owner says it is, "owner" or a teammate's address.
   const [whose, setWhose] = useState("");
 
   async function send(payload: Record<string, unknown>, which: string) {
@@ -188,7 +188,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
                     <span className="max-w-xl text-ink">
                       <span className="font-semibold">Turn it back on?</span> {turnOnNote(key, whose)}
                     </span>
-                    {key.why === "unmatched" ? (
+                    {key.why === "unmatched" || key.why === "unrecorded" ? (
                       <label className="flex flex-wrap items-center gap-2" htmlFor={`whose-${key.id}`}>
                         <span className="font-semibold text-ink">Whose key is it?</span>
                         <select id={`whose-${key.id}`} value={whose} onChange={(e) => setWhose(e.target.value)} className="field min-h-11 w-auto">
@@ -204,8 +204,8 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
                     ) : null}
                     <button
                       type="button"
-                      onClick={() => turnOn(key.id, key.why === "unmatched" ? whose : "")}
-                      disabled={busy !== null || (key.why === "unmatched" && !whose)}
+                      onClick={() => turnOn(key.id, key.why === "unmatched" || key.why === "unrecorded" ? whose : "")}
+                      disabled={busy !== null || ((key.why === "unmatched" || key.why === "unrecorded") && !whose)}
                       aria-busy={busy === `on:${key.id}`}
                       className="btn btn-primary btn-sm"
                     >

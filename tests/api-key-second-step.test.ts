@@ -322,7 +322,7 @@ async function main(): Promise<void> {
   is("it works again", await asApi(nedTwo.body.key), { status: 200, error: "" });
   is("and so does its endpoint", [await held(store, nedHook), await sale(store)], ["none", 2]);
   is("his other key stays paused until he turns it on too", (await asApi(nedOne.body.key)).error, "key_paused");
-  is("the owner turns on the old key", (await keys(ownerPasskey, { action: "turn_on", id: view(ownerView, "Old Zap 2").id })).body.ok, true);
+  is("the owner turns on the old key", (await keys(ownerPasskey, { action: "turn_on", id: view(ownerView, "Old Zap 2").id, as: "owner" })).body.ok, true);
 
   part("Revoking a key stops its endpoints for good");
   is("Ned revokes his bot", (await keys(nedPasskey, { action: "revoke", id: botId })).body.ok, true);
@@ -639,6 +639,34 @@ async function main(): Promise<void> {
   await revokeKey(fourth.sid, unknownKey.made.id);
   await revokeKey(fourth.sid, ghost.made.id);
 
+  part("Codex D (#2290): a key nobody is recorded as making is turned on only once the owner says whose it is, so later sweeps still reach it");
+  const legacyWriter = await makeKey(fourth.sid, "Legacy writer", Date.now(), true);
+  if (!legacyWriter.ok) throw new Error("legacy writer not made");
+  await swapHolds(fourth.sid, [legacyWriter.made.id], "told", [null]);
+  const legacyShown = (await shownKeys(fourth, OWNER4, "owner")).find((k) => k.name === "Legacy writer")!;
+  is("the owner may turn it on, choosing whose it is", [legacyShown.why, legacyShown.mayTurnOn, legacyShown.whoseChoices.includes(GIA)], ["unrecorded", true, true]);
+  const blind = await keys(owner4Passkey, { action: "turn_on", id: legacyWriter.made.id }, fourth);
+  is("turning it on without saying whose it is is refused, and it stays paused", [blind.status, blind.body.error, await hold4(legacyWriter.made.id), (await asApi(legacyWriter.key)).error], [400, "whose", "told", "key_paused"]);
+  const given = await keys(owner4Passkey, { action: "turn_on", id: legacyWriter.made.id, as: GIA }, fourth);
+  const legacyRecord = (await keyRecords(fourth.sid)).find((k) => k.id === legacyWriter.made.id);
+  is("given to Gia, it is hers and works", [given.body.ok, await hold4(legacyWriter.made.id), legacyRecord?.maker?.by === makerPrint(fourth.sid, GIA), legacyRecord?.maker?.owner, (await asApi(legacyWriter.key)).status], [true, "vouched", true, false, 200]);
+  await setMemberRole(fourth, GIA, "editor");
+  is("when her role no longer allows a writer, it waits for the owner again", [await hold4(legacyWriter.made.id), (await asApi(legacyWriter.key)).error], ["role", "key_paused"]);
+  await setMemberRole(fourth, GIA, "admin");
+  is("turned back on by the owner once her role allows it", (await keys(owner4Passkey, { action: "turn_on", id: legacyWriter.made.id }, fourth)).body.ok, true);
+  await removeMember(fourth, GIA);
+  is("and when Gia leaves, it goes with her, for good", [await hold4(legacyWriter.made.id), (await asApi(legacyWriter.key)).error], ["left", "key_paused"]);
+  await putMember(fourth, GIA, "admin");
+  const ownersOld = await makeKey(fourth.sid, "Owner's legacy", Date.now(), true);
+  if (!ownersOld.ok) throw new Error("legacy key not made");
+  await swapHolds(fourth.sid, [ownersOld.made.id], "told", [null]);
+  is("claimed by the owner as theirs", [(await keys(owner4Passkey, { action: "turn_on", id: ownersOld.made.id, as: "owner" }, fourth)).body.ok, (await keyRecords(fourth.sid)).find((k) => k.id === ownersOld.made.id)?.maker?.owner], [true, true]);
+  await putMember(fourth, HAL, "admin");
+  await removeMember(fourth, HAL);
+  is("it stays on when a teammate leaves", [await hold4(ownersOld.made.id), (await asApi(ownersOld.key)).status], ["vouched", 200]);
+  await revokeKey(fourth.sid, legacyWriter.made.id);
+  await revokeKey(fourth.sid, ownersOld.made.id);
+
   await newDay();
   part("M5 (c): when the sweep after a removal fails, the route says to repeat it, and repeating finishes it");
   await putMember(fourth, HAL, "admin");
@@ -695,7 +723,7 @@ async function main(): Promise<void> {
   part("L7: turning a key back on says it will not be paused by the rule again, before it is done");
   is("the note for a key paused for its maker's role", turnOnNote({ why: "role" }), "It works again at once, and the team's two-step rule will not pause it again. It stops again if its maker's role no longer allows such a key, or when they leave the team.");
   is("and for one given to a teammate, it says it becomes theirs and when it stops", turnOnNote({ why: "unmatched" }, GIA).startsWith(`It becomes ${GIA}'s: it works again at once and the team's two-step rule will not pause it again, but it stops if their role no longer allows such a key or they leave the team.`), true);
-  is("and for one nobody is recorded as making", turnOnNote({ why: "unrecorded" }).includes("will not pause it again"), true);
+  is("and for one nobody is recorded as making, it says it becomes theirs too", [turnOnNote({ why: "unrecorded" }).includes("will not pause it again"), turnOnNote({ why: "unrecorded" }, "owner").startsWith("It becomes yours:"), turnOnNote({ why: "unrecorded" }).includes("Nobody is recorded as its maker, so choose only the person you know made it.")], [true, true, true]);
   const editorSource = readFileSync("components/api-key-editor.tsx", "utf8");
   is("the panel asks with it before turning on", editorSource.includes("{turnOnNote(key, whose)}") && editorSource.includes("Yes, turn it on") && editorSource.includes("setTurning(key.id);"), true);
 

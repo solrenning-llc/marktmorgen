@@ -54,6 +54,7 @@ import {
   type KeyMaker,
   type KeyRecord,
   NOT_LEFT,
+  claimMaker,
   isPaused,
   keyRecords,
   makerPrint,
@@ -453,8 +454,8 @@ export async function shownKeys(store: Store, email: string, role: Role): Promis
       // One its maker's role still does not allow is not offered: turning it on would change nothing.
       const mayTurnOn = mayTurnOnAs(why, k, whose, mine, role) && (why === "unmatched" || !pauseWhy(store.sid, k.maker, "vouched", team.members, k.write, team.rule));
       const mayRevoke = why !== "left" || role === "owner";
-      // For an unmatched key the owner says whose it is: themself, or a teammate whose role allows it.
-      const whoseChoices = why === "unmatched" && mayTurnOn ? team.members.filter((m) => can(m.role, "export") && (!k.write || can(m.role, "import"))).map((m) => m.email) : [];
+      // For an unmatched or unrecorded key the owner says whose it is: themself, or a teammate whose role allows it.
+      const whoseChoices = (why === "unmatched" || why === "unrecorded") && mayTurnOn ? team.members.filter((m) => can(m.role, "export") && (!k.write || can(m.role, "import"))).map((m) => m.email) : [];
       return { id: k.id, name: k.name, hint: k.hint, madeAt: k.madeAt, usedAt: k.usedAt, write: k.write, agent: k.agent, paused: why !== null, maker, mayTurnOn, mayRevoke, why, whoseChoices };
     })
     .sort((a, b) => b.madeAt - a.madeAt);
@@ -468,10 +469,12 @@ export type TurnOn = "ok" | "unknown" | "not_paused" | "not_yours" | "whose" | "
  * hold it was read with, so a teammate leaving at that instant wins. The
  * endpoints it added are sent to again from then on (read at every send).
  *
- * A key whose maker could not be matched to the team is turned on only once
- * the owner says whose it is (`as`: "owner", or a current teammate's
- * address): its maker is rewritten to that person first, so it is from then
- * on a key of theirs, under their role and gone when they leave. One whose
+ * A key whose maker could not be matched to the team, or one nobody is
+ * recorded as making, is turned on only once the owner says whose it is
+ * (`as`: "owner", or a current teammate's address): its maker is written as
+ * that person first, so it is from then on a key of theirs, under their role
+ * and gone when they leave (Codex D: turned on with no maker, it was out of
+ * reach of every later sweep). One whose
  * maker's role does not allow it is turned on only once the role does.
  */
 export async function turnKeyOn(store: Store, email: string, role: Role, id: string, as = ""): Promise<TurnOn> {
@@ -482,7 +485,7 @@ export async function turnKeyOn(store: Store, email: string, role: Role, id: str
   const why = pauseWhy(store.sid, key.maker, key.hold, team.members, key.write, team.rule);
   if (!why) return "not_paused";
   if (!mayTurnOnAs(why, key, whoseOf(key.maker, team.byPrint), makerPrints(store.sid, email), role)) return "not_yours";
-  if (why === "unmatched") {
+  if (why === "unmatched" || why === "unrecorded") {
     const target = normalised(as);
     const member = team.members.find((m) => m.email === target);
     if (target !== "owner" && !member) return "whose";
@@ -490,8 +493,9 @@ export async function turnKeyOn(store: Store, email: string, role: Role, id: str
     const maker: KeyMaker = member ? { owner: false, by: makerPrint(store.sid, member.email), step: false } : { owner: true, by: "", step: true };
     if (!maker.owner && !maker.by) return "whose";
     const before = key.maker;
-    const written = await rewriteMakers(store.sid, (m, at) => (at === id && before && !m.owner && !m.left && m.by === before.by ? maker : null));
-    if (!written.includes(id)) return "not_paused";
+    // Codex D (#2290): one nobody is recorded as making gets a maker too, so a later exit or role change still reaches it.
+    const written = before ? (await rewriteMakers(store.sid, (m, at) => (at === id && !m.owner && !m.left && m.by === before.by ? maker : null))).includes(id) : await claimMaker(store.sid, id, maker);
+    if (!written) return "not_paused";
   } else if (pauseWhy(store.sid, key.maker, "vouched", team.members, key.write, team.rule)) {
     // Its maker's role (or match) still does not allow it: turning it on would change nothing.
     return "role_disallows";

@@ -73,14 +73,13 @@ export type ShownKey = ApiKey & {
  * did, whatever that role is now.
  */
 export function turnOnNote(key: Pick<ShownKey, "why">, whose = ""): string {
-  if (key.why === "unmatched") {
+  if (key.why === "unmatched" || key.why === "unrecorded") {
     const who = whose && whose !== "owner" ? `${whose}'s` : "yours";
-    return `It becomes ${who}: it works again at once and the team's two-step rule will not pause it again, but it stops ${whose && whose !== "owner" ? "if their role no longer allows such a key or they leave the team" : "only if you revoke it"}. It could not be linked to anyone, most likely because the server's secret changed, so choose only the person you know made it.`;
+    const unknown = key.why === "unmatched" ? "It could not be linked to anyone, most likely because the server's secret changed" : "Nobody is recorded as its maker";
+    return `It becomes ${who}: it works again at once and the team's two-step rule will not pause it again, but it stops ${whose && whose !== "owner" ? "if their role no longer allows such a key or they leave the team" : "only if you revoke it"}. ${unknown}, so choose only the person you know made it.`;
   }
   if (key.why === "role") return "It works again at once, and the team's two-step rule will not pause it again. It stops again if its maker's role no longer allows such a key, or when they leave the team.";
-  const base = "It works again at once, and the team's two-step rule will not pause it again.";
-  if (key.why === "unrecorded") return `${base} Nobody is recorded as its maker, so turn it on only if you know it is yours or one you trust.`;
-  return base;
+  return "It works again at once, and the team's two-step rule will not pause it again.";
 }
 
 /** The words for a key whose maker was never recorded: every key made before 4 November 2026. */
@@ -107,6 +106,6 @@ export function pausedWords(key: Pick<ShownKey, "why" | "mayTurnOn">): string {
   if (key.why === "left") return `Whoever made it is no longer on the team. ${stopped}. It can only be revoked, by the store's owner.`;
   if (key.why === "role") return `The role of whoever made it no longer allows such a key. ${stopped}, ${until}.`;
   if (key.why === "unmatched") return `It could not be linked to anyone on the team, most likely because the server's secret changed. ${stopped}, ${until}. Before turning it on, check whose it is: its name and when it was last used help.`;
-  if (key.why === "unrecorded") return `Nobody is recorded as this key's maker (keys made before November 4, 2026), and after a change on the team it waits for the owner. ${stopped}, ${until}.`;
+  if (key.why === "unrecorded") return `Nobody is recorded as this key's maker (keys made before November 4, 2026), and after a change on the team it waits for the owner. ${stopped}, ${until}. Before turning it on, check whose it is: its name and when it was last used help.`;
   return `The team now logs in with a second step, and this key was made without one. ${stopped}, ${key.mayTurnOn ? "until you turn it back on" : "until whoever made it turns it back on"}.`;
 }

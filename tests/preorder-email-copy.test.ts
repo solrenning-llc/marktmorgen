@@ -18,7 +18,7 @@ const PRODUCT = "breadbookcopy1";
 const EXPECTED: Record<LanguageCode, string> = {
   en: "It is out now and it is yours. The way to open it is in your purchases; it may also reach you by email.",
   es: "Ya ha salido y es tuyo. La forma de abrirlo está en tus compras; también puede llegarte por email.",
-  fr: "Il est sorti et il est à vous. Vous pouvez l'ouvrir depuis vos achats; vous pouvez aussi recevoir le lien par e-mail.",
+  fr: "Il est sorti et il est à vous. Vous pouvez l'ouvrir depuis vos achats ; vous pouvez aussi recevoir le lien par e-mail.",
   de: "Es ist jetzt erschienen und gehört Ihnen. Sie können es über Ihre Käufe öffnen; der Zugang kann Sie auch per E-Mail erreichen.",
   it: "Ora è uscito ed è tuo. Puoi aprirlo dai tuoi acquisti; il modo per entrare può arrivarti anche via email.",
   nl: "Het is nu uit en het is van jou. Je kunt het vanuit je aankopen openen; de toegang kan je ook per e-mail bereiken.",

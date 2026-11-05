@@ -90,7 +90,13 @@ export async function POST(request: NextRequest) {
           await deleteFile(path).catch(() => {});
           return no("too_big");
         }
-        if (!(await takeRoom(room, found.size, taskRoomFor(store)))) {
+        // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
+        // in the store unaccounted for.
+        const roomTaken = await takeRoom(room, found.size, taskRoomFor(store)).catch(async (error: unknown) => {
+          await deleteFile(path).catch(() => {});
+          throw error;
+        });
+        if (!roomTaken) {
           await deleteFile(path).catch(() => {});
           return no("full");
         }

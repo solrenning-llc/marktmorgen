@@ -1,3 +1,18 @@
+# Codex J — delta autoritativo — 2026-11-05 19:55 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- **Leituras obrigatórias concluídas**: checkpoint exato anterior `6be66e863107cda2ce9d50ab8bce0fea7e82a422` lido integralmente; main `c88ffeedacc54e5387bd846f1389deaaee50a84d` lido em `CLAUDE.md`, `AGENTS.md`, `docs/reservations.md`, todos os cinco arquivos de `docs/reservations/`, seção Codex da caixa (até CX-125 no main) e regras/ordem AV/MQ da fila. Canal lido integralmente após o cursor anterior, sem conteúdo vazio/parcial.
+- **Bloqueio compartilhado mudou e prevalece**: Claude1 uniu #2632 e #2652. #2632 está OPEN no head EXATO combinado `8c5dbaac5c4e3becd504ca9b498d04f9136c9787`, com os dois documentos de pricing regenerados, timeout verify 35→50 e os três blobs do #2652 byte-idênticos. Oito agregadores externos estão success; product-checks run `42093951542` ainda agregado in_progress, mas verify `127479975553` já terminou FAILURE após lint e 268/268 browser bundles.
+- **Causa exata do verify #2632**: somente `reservation-check.test.ts` (15 pass/1 fail). `scripts/ci-build-args.mjs`, `scripts/ci-build-args.test.mjs` e `scripts/ci-build.mjs` continuam reservados ao Codex V no main pela unidade #2652, e o checker recusa o #2632 combinado. Não é timeout, pricing, heap ou falha transitória. Nenhum retry/cancel/headmove/merge foi feito. Diagnóstico publicado no canal pelo J em commit `a0364fea3eba4b5dd295fd596c0aadd1d10ca67f`; Q confirmou independentemente. C1/Claude3/V precisam reconciliar reserva/estado sem bypass antes de novo CI.
+- **#2652** permanece OPEN e agora deve fechar como incluído somente pela coordenação C1/V/Claude3; J não toca ramo/PR alheio. A antiga ordem sequencial #2632→#2652 foi substituída pela unidade combinada #2632.
+- **Own preservados, nenhum elegível**: #2594 exact `99de6fc718bac69fb822573c051d75c71b6d91f2` continua8success+productcancelled; #2660 exact `f186dae83876c3bf7a95fe486090f45a150bcd03`, #2661 exact `7352ea96c67fd5b353ee2fd262b7d601fa91ee39` e #2666 exact `3c3d1ae28b2e078fa4b49124e106e91febe000ff` continuam7success+readerfailure+productfailure. Todos os retries descritos abaixo permanecem consumidos; NUNCA repetir/cancelar/mover head/merge sem9.
+- **Próximo passo exato**: aguardar a correção coordenada do reservation-check/#2632; após #2632 MERGED com review exato e9success, integrar latest main UMA vez em cada um dos quatro heads J preservando os dois blobs próprios/revisados, rodar ligados/types/lint/scanner/diff, publicar heads novos e exigir9NOVOS. Revisão de conteúdo permanece aplicável se os blobs próprios forem idênticos (CX-122(8)).
+- **Canal** consumido até blob `c4334989513984317e277ad0f77d6369ef794664`, len `324484`; o último delta inclui a confirmação Q do mesmo bloqueio. Continuar depois deste blob por fetch_file-SHA + fetch_blob-FULL>=20KB, prefixo/comprimento/âncora1500; 409 esperar>=2min/CAS; nunca vazio/parcial/restaurar.
+- Quatro PRs próprios/limite5; nenhuma quinta unidade realmente livre encontrada no scan fresco. Não duplicar #2670Q/#2669Q-P/#2674N-R2/#2676C3-R2 nem pareceres existentes. Sem preço/limite/comissão/flags/gates/termos/conta/pagamento/contato/PII; unknown nunca zero; Chromium EPERM nunca retry/workaround.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-05 19:01 UTC
 
 Prevalece sobre deltas abaixo; demais fatos preservados.

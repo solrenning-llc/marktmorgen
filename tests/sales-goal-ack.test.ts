@@ -1,7 +1,11 @@
 import type { NextRequest } from "next/server";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { POST } from "@/app/api/store/goal/route";
+import { SalesGoalCard } from "@/components/sales-goal-card";
 import { readGoal } from "@/lib/sales-goal-rules";
 import { readSalesGoal } from "@/lib/sales-goal";
+import * as salesGoalModule from "@/lib/sales-goal";
 import { goalStore } from "./sales-goal-ack-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -66,6 +70,22 @@ async function main() {
   const absent = await submit(0);
   is("confirmed DEL of absent target", [absent.status, absent.body], [200, { ok: true, goal: 0 }]);
   is("confirmed removal actually persisted", (await readSalesGoal(goalStore.statsId, "usd")).cents, 0);
+  part("Unknown saved-goal evidence remains unavailable instead of becoming no goal");
+  for (const reply of [[], [undefined], [false], [1], ["{"], [JSON.stringify({ currency: "usd", since: "2026-10" })], [JSON.stringify({ cents: 5000, currency: "usd", since: "2026-10" }), "extra"]]) {
+    await seed(); fault = { command: "GET", reply };
+    is("unknown goal read " + JSON.stringify(reply), await readSalesGoal(goalStore.statsId, "usd"), { cents: -1, since: "" });
+  }
+  await seed(); fault = { command: "GET", reply: [null] };
+  is("explicit absent key remains confirmed no goal", await readSalesGoal(goalStore.statsId, "usd"), { cents: 0, since: "" });
+  await seed();
+  is("confirmed target remains exact", await readSalesGoal(goalStore.statsId, "usd"), { cents: 5000, since: "2026-10" });
+  is("confirmed target in another currency remains no goal here", await readSalesGoal(goalStore.statsId, "eur"), { cents: 0, since: "" });
+  const unavailable = renderToStaticMarkup(createElement(SalesGoalCard, { goal: -1, byDay: {}, today: "2026-11-05", currency: "usd" }));
+  is("unknown goal card says the saved goal could not be checked", unavailable.includes("Your saved goal could not be checked"), true);
+  is("unknown goal card never says no goal is set", unavailable.includes("Set a goal for the month"), false);
+  const reportGoal = (salesGoalModule as unknown as { withGoalAvailability?: (message: { text: string }, cents: number) => { text: string } }).withGoalAvailability;
+  is("unknown saved goal is explicit in a creator report", reportGoal?.({ text: "The rest of the report." }, -1).text, "Your saved goal could not be checked. Goal progress is unavailable. Try again later.\n\nThe rest of the report.");
+  is("known saved goal leaves the creator report unchanged", reportGoal?.({ text: "The report." }, 5000).text, "The report.");
   done();
 }
 main().catch(error => { console.error(error); process.exit(1); });

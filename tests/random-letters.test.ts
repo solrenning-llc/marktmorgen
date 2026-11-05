@@ -16,7 +16,7 @@
  *     tests/recovery-address.test.ts and tests/two-step.test.ts.
  */
 import { readFileSync } from "node:fs";
-import { randomLetters } from "@/lib/random-letters";
+import { randomLetters, lettersByByte } from "@/lib/random-letters";
 import { CERT_ID_PATTERN, newCertificateId } from "@/lib/certificate";
 import { newItemId } from "@/lib/course";
 import { makeLink } from "@/lib/numbers-links";
@@ -86,6 +86,14 @@ const FILES = [
 ];
 const MODULO = /%\s*(?:[\w.]+\.length\b|\d[\d_]*\b)/;
 is("none of the files that draw ids or codes takes a value modulo a length or a number", FILES.filter((file) => MODULO.test(readFileSync(file, "utf8"))), []);
+// CodeQL on #2578 (js/biased-cryptographic-random) read Math.floor(byte / per) as a bias; the byte now only indexes a table.
+is("randomLetters does no arithmetic on the random byte", /\bbyte\s*[/%*+-]|[/%*]\s*byte\b/.test(readFileSync("lib/random-letters.ts", "utf8").slice(readFileSync("lib/random-letters.ts", "utf8").indexOf("export function randomLetters"), readFileSync("lib/random-letters.ts", "utf8").indexOf("export function lettersByByte"))), false);
+for (const alphabet of ["abcdefghijklmnopqrstuvwxyz0123456789", "abc", "ab", "a", "x".repeat(0) + "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"]) {
+  const table = lettersByByte(alphabet);
+  const counts = new Map<string, number>();
+  for (const letter of table) if (letter !== undefined) counts.set(letter, (counts.get(letter) ?? 0) + 1);
+  is(`every letter of a ${alphabet.length}-letter alphabet stands for the same number of bytes, and no byte for two`, [table.length, counts.size, new Set(counts.values()).size, [...counts.values()][0] * alphabet.length, table.filter((l) => l !== undefined).length], [256, alphabet.length, 1, Math.floor(256 / alphabet.length) * alphabet.length, Math.floor(256 / alphabet.length) * alphabet.length]);
+}
 is("the browser components draw through randomLetters", ["components/funnel-editor.tsx", "components/inbox-studio.tsx", "lib/certificate.ts", "lib/course.ts"].filter((file) => !readFileSync(file, "utf8").includes("randomLetters(")), []);
 
 done();

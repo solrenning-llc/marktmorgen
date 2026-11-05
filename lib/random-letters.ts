@@ -11,13 +11,21 @@
  */
 export function randomLetters(alphabet: string, length: number): string {
   if (alphabet.length < 1 || alphabet.length > 256) throw new RangeError("The alphabet has 1 to 256 letters.");
-  const per = Math.floor(256 / alphabet.length);
-  const limit = per * alphabet.length;
+  // Each kept byte names one letter through a table: the same number of bytes for every letter, and no arithmetic
+  // on the random value itself (which CodeQL cannot tell from a biased modulo).
+  const byByte = lettersByByte(alphabet);
   let out = "";
   while (out.length < length) {
     for (const byte of globalThis.crypto.getRandomValues(new Uint8Array(length - out.length + 4))) {
-      if (byte < limit && out.length < length) out += alphabet[Math.floor(byte / per)];
+      const letter = byByte[byte];
+      if (letter !== undefined && out.length < length) out += letter;
     }
   }
   return out;
+}
+
+/** The letter each byte stands for: the first `per` bytes the first letter, and so on; the bytes past the last whole share stand for none. */
+export function lettersByByte(alphabet: string): readonly (string | undefined)[] {
+  const per = Math.floor(256 / alphabet.length);
+  return Array.from({ length: 256 }, (_, byte) => (byte < per * alphabet.length ? alphabet[Math.floor(byte / per)] : undefined));
 }

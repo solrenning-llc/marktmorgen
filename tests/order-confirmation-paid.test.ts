@@ -18,7 +18,7 @@ async function paid() {
   const session = f.sessions.get(checkout.id)!;
   Object.assign(session, { status: "complete", payment_status: "paid", amount_total: 4000, customer_details: { email: "buyer@example.test" },
     payment_intent: { object: "payment_intent", status: "succeeded", amount_received: 4000, currency: "usd",
-      latest_charge: { object: "charge", paid: true, amount: 4000, amount_refunded: 0, currency: "usd", refunded: false } },
+      latest_charge: { object: "charge", paid: true, amount: 4000, amount_refunded: 0, currency: "usd", refunded: false, disputed: false } },
     shipping_details: { name: "Original Buyer", address: { line1: "1 Original Street", city: "Test City", country: "US" } } });
   f.advance(61_000); // The bound source deliberately schedules its first payment check.
   return { ...f, id: originId(), session, checkout };

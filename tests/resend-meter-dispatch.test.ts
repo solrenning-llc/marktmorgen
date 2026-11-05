@@ -47,12 +47,19 @@ test('only the confirmed dispatch CAS winner executes the debit callback',async(
  assert.equal(results.filter(r=>r.kind==='response').length,1);assert.equal(posts(f),1);
  assert.equal(hooks,1);assert.equal(await allowanceUsed(owner,'email'),1);
 });
-test('lost dispatch ACK keeps the account hold without calling debit or provider',async()=>{
+test('lost dispatch ACK reconciles its own hold before a fresh metered retry',async()=>{
  store.clear();const f=await createResendFallbackFixture({credential,cap:1,fetch:accepted});f.loseNext('dispatch');let hooks=0;
  const hook=async()=>{hooks++;return(await takeAllowance(owner,'email')).ok;};
  assert.equal((await guardedResendPost(request('lost-dispatch-meter',hook),f.runtime)).kind,'unknown');
- await guardedResendPost(request('lost-dispatch-meter',hook),f.runtime);
- assert.equal(hooks,0);assert.equal(await allowanceUsed(owner,'email'),0);assert.equal(posts(f),0);assert.equal(f.held(),1);
+ assert.equal(hooks,0);assert.equal(await allowanceUsed(owner,'email'),0);assert.equal(posts(f),0);assert.equal(f.held(),0);
+ assert.equal([...f.claims.values()][0]?.state,'confirmed_not_accepted');
+ const dispatch=f.commands.find(c=>c[5]==='dispatch'),settlement=f.commands.find(c=>c[5]==='settle');
+ assert.ok(dispatch);assert.ok(settlement);assert.equal(settlement[23],'confirmed_not_accepted');
+ assert.notEqual(dispatch[26],'');assert.equal(settlement[26],dispatch[26]);
+ assert.equal((await guardedResendPost(request('lost-dispatch-meter',hook),f.runtime)).kind,'response');
+ assert.equal(hooks,1);assert.equal(await allowanceUsed(owner,'email'),1);assert.equal(posts(f),1);assert.equal(f.held(),0);
+ assert.equal((await guardedResendPost(request('lost-dispatch-meter',hook),f.runtime)).kind,'accepted_receipt');
+ assert.equal(hooks,1);assert.equal(await allowanceUsed(owner,'email'),1);assert.equal(posts(f),1);
 });
 test('a refusing or throwing callback settles only its acknowledged dispatch capability',async()=>{
  for(const throws of [false,true]){
@@ -68,10 +75,14 @@ test('unknown callback settlement ACK does not authorize any POST or repeat debi
  const result=await guardedResendPost(request('lost-debit-settle',async()=>{hooks++;return false;}),f.runtime);
  assert.equal(result.kind,'unknown');assert.equal(hooks,1);assert.equal(posts(f),0);assert.equal(f.commands.some(c=>c[5]==='cancel'),false);
 });
-test('callback time consumes the original exclusive dispatch deadline',async()=>{
+test('callback deadline expiring before HTTP releases only its own account hold',async()=>{
  store.clear();const f=await createResendFallbackFixture({credential,cap:1,fetch:accepted});let hooks=0;
  const result=await guardedResendPost(request('slow-debit',async()=>{hooks++;await new Promise(r=>setTimeout(r,1050));return true;}),f.runtime);
- assert.equal(result.kind,'unknown');assert.equal(hooks,1);assert.equal(posts(f),0);assert.equal(f.held(),1);
+ assert.equal(result.kind,'unknown');assert.equal(hooks,1);assert.equal(posts(f),0);assert.equal(f.held(),0);
+ assert.equal([...f.claims.values()][0]?.state,'confirmed_not_accepted');
+ const dispatch=f.commands.find(c=>c[5]==='dispatch'),settlement=f.commands.find(c=>c[5]==='settle');
+ assert.ok(dispatch);assert.ok(settlement);assert.equal(settlement[23],'confirmed_not_accepted');
+ assert.notEqual(dispatch[26],'');assert.equal(settlement[26],dispatch[26]);
 });
 test('one invocation reuses its store debit after known HTTP429 without skipping either dispatch',async()=>{
  store.clear();let count=0;const f=await createResendFallbackFixture({credential,cap:5,fetch:async()=>++count===1?Response.json({error:'slow'},{status:429}):Response.json({id:'synthetic_after_429'})});

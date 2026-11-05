@@ -356,6 +356,25 @@ async function main(): Promise<void> {
       }
     }
     is("no getter was run", visits, 0);
+    // A Proxy is not Redis's own data either, and none of its traps runs (Codex G on #2681, 1e3c6bfb).
+    let traps = 0;
+    const handler: ProxyHandler<unknown[]> = {
+      getOwnPropertyDescriptor(target, key) { traps += 1; return Reflect.getOwnPropertyDescriptor(target, key); },
+      // Resolving a promise looks up "then" on whatever it resolves with (the language's own step, before our code
+      // has the reply): that one lookup is not our reading the reply, so it is not counted.
+      get(target, key) { if (key !== "then") traps += 1; return Reflect.get(target, key); },
+    };
+    const outerProxy = new Proxy([["1", "2", "3"]], handler);
+    const innerProxy = [new Proxy(["1", "2", "3"], handler)];
+    for (const [what, answer] of [["a Proxy reply", outerProxy], ["a Proxy count list", innerProxy]] as const) {
+      redis.pipeline = (async () => answer) as unknown as typeof redis.pipeline;
+      try {
+        is(`${what}: not known`, await payoutUnknownMonth(month()), null);
+      } finally {
+        redis.pipeline = real;
+      }
+    }
+    is("no Proxy trap was run", traps, 0);
   }
 
   part("The studio says it, with the way to look in PayPal");

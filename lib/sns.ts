@@ -121,20 +121,24 @@ export async function verifySns(m: SnsMessage, config: SesConfig, now = Date.now
 
 /** What one announcement from Amazon SES says became of an email: who bounced or complained, and the email's own tags. */
 export type SesEvent = {
-  kind: "bounced" | "complained";
+  kind: "delivered" | "delayed" | "bounced" | "complained";
   permanent: boolean;
   recipients: string[];
   tags: Record<string, string>;
+  messageId: string;
+  occurredAt?: number;
 };
 
-/** The event inside an announcement, or null when it is not a bounce or a complaint. */
+/** The delivery event inside an announcement, or null when it is not one we report. */
 export function readSesEvent(message: string): SesEvent | null {
   let v: {
     eventType?: unknown;
     notificationType?: unknown;
-    bounce?: { bounceType?: unknown; bouncedRecipients?: unknown };
-    complaint?: { complainedRecipients?: unknown };
-    mail?: { tags?: unknown };
+    bounce?: { bounceType?: unknown; bouncedRecipients?: unknown; timestamp?: unknown };
+    complaint?: { complainedRecipients?: unknown; timestamp?: unknown };
+    delivery?: { recipients?: unknown; timestamp?: unknown };
+    deliveryDelay?: { delayedRecipients?: unknown; timestamp?: unknown };
+    mail?: { tags?: unknown; messageId?: unknown; timestamp?: unknown };
   };
   try {
     v = JSON.parse(message) as typeof v;
@@ -146,7 +150,7 @@ export function readSesEvent(message: string): SesEvent | null {
   const addresses = (list: unknown): string[] =>
     Array.isArray(list)
       ? list
-          .map((r) => (r && typeof r === "object" ? (r as { emailAddress?: unknown }).emailAddress : null))
+          .map((r) => typeof r === "string" ? r : (r && typeof r === "object" ? (r as { emailAddress?: unknown }).emailAddress : null))
           .filter((a): a is string => typeof a === "string" && a.length > 0 && a.length <= 320)
           .slice(0, 50)
       : [];
@@ -158,7 +162,16 @@ export function readSesEvent(message: string): SesEvent | null {
       if (typeof first === "string") tags[name] = first;
     }
   }
-  if (type === "Bounce") return { kind: "bounced", permanent: v.bounce?.bounceType === "Permanent", recipients: addresses(v.bounce?.bouncedRecipients), tags };
-  if (type === "Complaint") return { kind: "complained", permanent: false, recipients: addresses(v.complaint?.complainedRecipients), tags };
+  const messageId = typeof v.mail?.messageId === "string" && v.mail.messageId.length <= 200 ? v.mail.messageId : "";
+  // mail.timestamp is when SES accepted the send. Reports use the event's
+  // own time, just as Resend's created_at does, including across midnight.
+  const stamp = type === "Bounce" ? v.bounce?.timestamp : type === "Complaint" ? v.complaint?.timestamp
+    : type === "Delivery" ? v.delivery?.timestamp : type === "DeliveryDelay" ? v.deliveryDelay?.timestamp : undefined;
+  const at = typeof stamp === "string" ? Date.parse(stamp) : NaN;
+  const occurred = Number.isSafeInteger(at) ? { occurredAt: at } : {};
+  if (type === "Bounce") return { kind: "bounced", permanent: v.bounce?.bounceType === "Permanent", recipients: addresses(v.bounce?.bouncedRecipients), tags, messageId, ...occurred };
+  if (type === "Complaint") return { kind: "complained", permanent: false, recipients: addresses(v.complaint?.complainedRecipients), tags, messageId, ...occurred };
+  if (type === "Delivery") return { kind: "delivered", permanent: false, recipients: addresses(v.delivery?.recipients), tags, messageId, ...occurred };
+  if (type === "DeliveryDelay") return { kind: "delayed", permanent: false, recipients: addresses(v.deliveryDelay?.delayedRecipients), tags, messageId, ...occurred };
   return null;
 }

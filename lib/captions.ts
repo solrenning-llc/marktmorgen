@@ -120,8 +120,8 @@ export function toVtt(input: unknown): { ok: true; vtt: string; cues: number } |
     const lines = block.split("\n");
     const at = lines.findIndex((line) => line.includes("-->"));
     if (at < 0) {
-      const first = lines[0];
-      const header = index === 0 && /^WEBVTT(?:[ \t]|$)/.test(first);
+      const first = lines[0].replace(/[ \t]+$/, "");
+      const header = index === 0 && lines.length === 1 && /^WEBVTT(?:[ \t]|$)/.test(first);
       const metadata = /^NOTE(?:[ \t]|$)/.test(first) || first === "STYLE" || first === "REGION";
       if (header || metadata) continue;
       return { ok: false, reason: "format" };

@@ -1,0 +1,10 @@
+import {build} from 'esbuild';
+import {readFileSync} from 'node:fs';
+import {spawnSync,execFileSync} from 'node:child_process';
+import {join,dirname} from 'node:path';
+import {testAliases,testEnvironment} from '../../tests/test-config.mjs';
+const root=process.cwd(),here=join(root,'tests'),parent=process.argv.includes('--previous');
+const plugins=parent?[{name:'exact-pre-delta-readers',setup(b){b.onLoad({filter:/\/lib\/(product-option|move-members)\.ts$/},a=>({contents:execFileSync('git',['show','1d42ad96738c0d57f63805f53d8812e03fc21f69:'+a.path.slice(root.length+1)],{encoding:'utf8'}),resolveDir:dirname(a.path),loader:'ts'}));}}]:[];
+const result=await build({stdin:{contents:readFileSync(join(here,'c2-2685-move-cost.proof.ts'),'utf8'),resolveDir:here,loader:'ts'},bundle:true,platform:'node',format:'cjs',write:false,alias:testAliases('move-invite-off-sale.test.ts',root,here),plugins,logLevel:'silent'});
+const run=spawnSync(process.execPath,['-'],{input:result.outputFiles[0].text,cwd:root,env:testEnvironment(process.env),encoding:'utf8',maxBuffer:3000000});
+process.stdout.write(run.stdout);if(run.status)process.stderr.write(run.stderr);if(run.error)throw run.error;process.exitCode=run.status??1;

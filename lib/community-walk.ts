@@ -20,7 +20,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Member, directory } from "@/lib/community";
 import { allEvents, eventCount } from "@/lib/community-events";
 import { communityOf, eventEntry, lessonBodies, lessonEntries, memberEntry } from "@/lib/community-index";
-import { type SearchKind, index, indexCommands, unindex } from "@/lib/community-search";
+import { INDEXED_WORDS_BYTES, type SearchKind, indexWrites, indexedWords, unindexWrites } from "@/lib/community-search";
 import { MAX_BODY_LENGTH, lessonsInOrder, readCourse } from "@/lib/course";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
 import { walkUnits } from "@/lib/community-read-rules";
@@ -77,17 +77,28 @@ export type WalkPay = (units: number) => Promise<boolean>;
 
 type Entry = { thing: string; score: number; parts: string[] };
 
-/** Indexes these things, a batch at a time, each batch's commands paid before it is written. */
+/**
+ * Indexes these things, a batch at a time: the words each is found by now
+ * are read (paid first), the writes are counted from what was read and paid,
+ * and then exactly those are sent. A write by anything else meanwhile changes
+ * what this writes, never how much (Codex I, #2316: counted first and read
+ * again later, a write in between was sent unpaid). A reply that cannot be
+ * read, or a write that fails, stops the walk unmarked.
+ */
 async function indexPaid(communityId: string, kind: SearchKind, entries: (Entry | { thing: string; gone: true })[], pay: WalkPay): Promise<boolean> {
   for (let at = 0; at < entries.length; at += WALK_BATCH) {
     const batch = entries.slice(at, at + WALK_BATCH);
-    // Counting the batch's commands is itself a command each.
-    if (!(await pay(walkUnits(batch.length, 0)))) return false;
-    const commands = await indexCommands(communityId, kind, batch.map((e) => ({ thing: e.thing, parts: "gone" in e ? [] : e.parts })));
-    if (commands === null || !(await pay(walkUnits(commands, 0)))) return false;
-    for (const e of batch) {
-      if ("gone" in e) await unindex(communityId, kind, e.thing).catch(() => {});
-      else await index(communityId, kind, e.thing, e.score, e.parts).catch(() => {});
+    if (!(await pay(walkUnits(batch.length, batch.length * INDEXED_WORDS_BYTES)))) return false;
+    const before = await indexedWords(communityId, kind, batch.map((e) => e.thing));
+    if (before === null) return false;
+    const writes = batch.map((e, i) => ("gone" in e ? unindexWrites(communityId, kind, e.thing, before[i]) : indexWrites(communityId, kind, e.thing, e.score, e.parts, before[i])));
+    const commands = writes.reduce((sum, w) => sum + w.length, 0);
+    if (!commands) continue;
+    if (!(await pay(walkUnits(commands, 0)))) return false;
+    for (const w of writes) {
+      if (!w.length) continue;
+      const sent = await redisPipeline(w).then(() => true, () => false);
+      if (!sent) return false;
     }
   }
   return true;

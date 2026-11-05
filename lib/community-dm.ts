@@ -49,7 +49,7 @@
  * is what makes one conversation rather than two halves of one.
  */
 import { redisPipeline } from "@/lib/redis";
-import { holdsAll } from "@/lib/community-search";
+import { countOf, holdsAll } from "@/lib/community-search";
 import { CREATOR } from "@/lib/community";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -364,8 +364,9 @@ export const SEARCH_CONVERSATIONS = 30;
 export async function searchedConversations(id: string, who: string): Promise<number | null> {
   try {
     const [n] = await redisPipeline([["ZCARD", inboxKey(id, who)]]);
-    const count = Number(n);
-    return Number.isSafeInteger(count) && count >= 0 ? Math.min(count, SEARCH_CONVERSATIONS) : null;
+    // An absent or odd reply is unknown, never none (Codex I, #2316).
+    const count = countOf(n);
+    return count === null ? null : Math.min(count, SEARCH_CONVERSATIONS);
   } catch {
     return null;
   }

@@ -951,7 +951,7 @@ export const COST_LINES: CostLine[] = [
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
-      { file: "lib/community-walk.ts", names: ["walkUnits(", "indexCommands("] },
+      { file: "lib/community-walk.ts", names: ["walkUnits(", "indexedWords(", "INDEXED_WORDS_BYTES"] },
       { file: "lib/traffic.ts", names: ["countRequest", "takePublicRequest", "requestsKey"] },
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).

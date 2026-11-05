@@ -15,6 +15,8 @@ import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, setCommunity, setSubscription } from "@/lib/store";
 import { createEvent } from "@/lib/community-events";
 import { needsWalk, walkCommunity } from "@/lib/community-walk";
+import { index } from "@/lib/community-search";
+import { searchedConversations } from "@/lib/community-dm";
 import { WALK_BYTES_PER_UNIT, WALK_COMMANDS_PER_UNIT } from "@/lib/community-read-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -89,6 +91,63 @@ async function main(): Promise<void> {
   is("paid as it went, the walk is done and marked", [walked, await needsWalk(communityId)], [true, false]);
   is("no step sent more commands than it paid for", over, 0);
   console.log(`  a walk of twelve events and no members: ${paid} requests, at ${WALK_COMMANDS_PER_UNIT} commands or ${WALK_BYTES_PER_UNIT} bytes each`);
+
+  // Codex I (#2316), the walk measured step by step against what each step paid; `inject` runs once, unmeasured, after the first read of an event's own words.
+  const eventIndex = new RegExp(`^nl:cm:${communityId}:wie:(.+)$`);
+  const many = Array.from({ length: 600 }, (_, i) => `loaf${i}x`);
+  const measured = async (reply: (commands: (string | number)[][], replies: unknown[]) => unknown[], inject: ((thing: string) => Promise<void>) | null) => {
+    await redis.pipeline([["DEL", `nl:cm:${communityId}:sv`]]);
+    let stepSent = 0;
+    let stepAllowed = 3;
+    let worst = 0;
+    let removed = 0;
+    let measuring = true;
+    let pending = inject;
+    redis.pipeline = async (commands) => {
+      if (!measuring) return original.call(redis, commands);
+      stepSent += commands.length;
+      removed += commands.filter((c) => c[0] === "ZREM").length;
+      if (stepSent > stepAllowed) worst = Math.max(worst, stepSent - stepAllowed);
+      const replies = reply(commands, await original.call(redis, commands));
+      const read = commands.find((c) => (c[0] === "SCARD" || c[0] === "SMEMBERS") && eventIndex.test(String(c[1])));
+      if (read && pending) {
+        const run = pending;
+        pending = null;
+        measuring = false;
+        await run(eventIndex.exec(String(read[1]))![1]);
+        measuring = true;
+      }
+      return replies;
+    };
+    const finished = await walkCommunity(club, async (units) => {
+      stepSent = 0;
+      stepAllowed = units * WALK_COMMANDS_PER_UNIT + 2;
+      return true;
+    }).catch(() => "threw");
+    redis.pipeline = original;
+    return { finished, worst, removed, still: await needsWalk(communityId) };
+  };
+
+  part("Codex I (#2316) 1: a reply that cannot be read stops the walk; it is never read as nothing");
+  const blank = await measured((commands, replies) => replies.map((r, i) => (commands[i][0] === "SMEMBERS" && eventIndex.test(String(commands[i][1])) ? null : r)), null);
+  is("an odd reply for an event's words: stopped, nothing removed, still to be done", [blank.finished, blank.removed, blank.still, blank.worst], [false, 0, true, 0]);
+  const short = await measured((commands, replies) => (commands.some((c) => c[0] === "SMEMBERS" && eventIndex.test(String(c[1]))) ? replies.slice(0, 1) : replies), null);
+  is("a partial reply: stopped, nothing removed, still to be done", [short.finished, short.removed, short.still, short.worst], [false, 0, true, 0]);
+
+  part("Codex I (#2316) 2: a write to the index while the walk counts never makes it send more than it paid");
+  const raced = await measured((_, replies) => replies, async (thing) => {
+    // Right after the walk read (or counted) the words it is found by, the real index writes six hundred others for it.
+    await index(communityId, "event", thing, 1, many);
+  });
+  is("the walk finishes, no step over what it paid", [raced.finished, raced.worst, raced.still], [true, 0, false]);
+
+  part("Codex I (#2316) 1: a count of a person's conversations that comes back empty is unknown, not none");
+  const zcard = redis.pipeline;
+  redis.pipeline = async (commands) => (commands[0]?.[0] === "ZCARD" ? [null] : zcard.call(redis, commands));
+  const unknownCount = await searchedConversations(communityId, "someone");
+  redis.pipeline = zcard;
+  is("ZCARD answering null gives null", unknownCount, null);
+  is("and a real empty inbox is none", await searchedConversations(communityId, "someone"), 0);
 
   done();
 }

@@ -1,0 +1,75 @@
+/tmp/g2692-return-focal.log
+=== g-2692-null-metadata.proof.ts ===
+
+Valid Stripe metadata null is not an unknown refund row
+  FAIL  owned refund control
+        expected "found"
+        got      "unknown"
+  FAIL  owned refund remains readable beside nullable unrelated metadata
+        expected "found"
+        got      "unknown"
+  FAIL  charge outcome remains readable beside nullable unrelated metadata
+        expected "found"
+        got      "unknown"
+  ok    explicitly absent metadata is not this store's refund
+  ok    empty object metadata control
+
+Real pending-plan recovery can finish its known refund
+  ok    known owned refund ends plan and removes its legacy note
+  ok    recovery creates no new refund
+
+7 checks, 3 failing.
+plan-refund: store e97dea72c81b4870b683c2d4c7b4ea2e's email was not sent (no address or no sender)
+
+=== g-2692-null-metadata-with-charge.proof.ts ===
+
+Valid Stripe metadata null is not an unknown refund row
+  ok    owned refund control
+  ok    owned refund remains readable beside nullable unrelated metadata
+  ok    charge outcome remains readable beside nullable unrelated metadata
+  ok    explicitly absent metadata is not this store's refund
+  ok    empty object metadata control
+  ok    owned missing charge remains unknown
+  ok    owned null charge remains unknown
+  ok    foreign missing metadata remains unknown
+
+Real pending-plan recovery can finish its known refund
+  ok    known owned refund ends plan and removes its legacy note
+  ok    recovery creates no new refund
+
+10 checks, all passing.
+plan-refund: store fda40f27b2664382a58a3263302e22b7's email was not sent (no address or no sender)
+
+
+/tmp/g2692-5caa-focal-red.log
+=== g-2692-null-metadata-with-charge.proof.ts ===
+
+Valid Stripe metadata null is not an unknown refund row
+  ok    owned refund control
+  FAIL  owned refund remains readable beside nullable unrelated metadata
+        expected "found"
+        got      "unknown"
+  FAIL  charge outcome remains readable beside nullable unrelated metadata
+        expected "found"
+        got      "unknown"
+  FAIL  explicitly absent metadata is not this store's refund
+        expected "none"
+        got      "unknown"
+  ok    empty object metadata control
+  FAIL  owned missing charge remains unknown
+        expected "unknown"
+        got      "found"
+  FAIL  owned null charge remains unknown
+        expected "unknown"
+        got      "found"
+  ok    foreign missing metadata remains unknown
+
+Real pending-plan recovery can finish its known refund
+  FAIL  known owned refund ends plan and removes its legacy note
+        expected ["canceled",null]
+        got      ["active","{\"s\":\"sub_flow10001\",\"at\":1796168999,\"t\":1796168999,\"m\":1}"]
+  ok    recovery creates no new refund
+
+10 checks, 6 failing.
+
+

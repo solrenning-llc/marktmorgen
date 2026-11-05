@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -1080,10 +1081,15 @@ export async function movedCount(catalog: string): Promise<number | null> {
   return /^\d{1,6}$/.test(found) ? Number(found) : 0;
 }
 
-/** Sends writes in pipelines of a few hundred. */
+/**
+ * Sends writes in pipelines of a few hundred. Each pipeline has to answer once for every command it sent; one that
+ * answers otherwise (none, fewer, more, or not a list) may not have landed, so it throws (CX-123 rule 24, Codex Z on
+ * #2690) and whoever was saving stops before writing the store record: an unknown write is never said done.
+ */
 export async function runWrites(commands: Command[]): Promise<void> {
   for (let i = 0; i < commands.length; i += 400) {
-    await redisPipeline(commands.slice(i, i + 400));
+    const slice = commands.slice(i, i + 400);
+    if (!repliesFor(await redisPipeline(slice), slice.length)) throw new UnknownReplyError("a product write");
   }
 }
 

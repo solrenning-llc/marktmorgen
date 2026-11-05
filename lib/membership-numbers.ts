@@ -30,6 +30,7 @@
  */
 import { DISCOUNT_KINDS, type DiscountKind, entryOf } from "@/lib/discount-impact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { keepUnlessErased, suppressedAmong } from "@/lib/suppression";
 import { onAccount } from "@/lib/stripe-account";
@@ -543,6 +544,24 @@ export function membersOnOption(numbers: Numbers | null, productId: string, opti
   if (!Object.hasOwn(table.value, optionId)) return 0;
   const count = ownValue(table.value, optionId);
   return count && typeof count.value === "number" && Number.isSafeInteger(count.value) && count.value >= 0 ? count.value : null;
+}
+
+/**
+ * The membership numbers already kept for this store, read only if they fit in `maxBytes` (642 [WG2], Codex Z on
+ * #2690): one GETRANGE of at most maxBytes + 1 bytes, so nothing past the bound is ever transferred, and never
+ * Stripe. Null when nothing is kept, when the reading is bigger than the bound, or when it is not JSON; the caller
+ * reads its shape exactly (membersOnOption). Unknown, never 0.
+ */
+export async function keptNumbersWithin(store: Store, maxBytes: number): Promise<Numbers | null> {
+  if (!store.stripeAccountId || !store.statsId || !isRedisConfigured() || !Number.isSafeInteger(maxBytes) || maxBytes < 1) return null;
+  const replies = repliesFor(await redisPipeline([["GETRANGE", cacheKey(store), 0, maxBytes]]), 1);
+  const kept: unknown = replies ? replies[0] : null;
+  if (typeof kept !== "string" || kept === "" || new TextEncoder().encode(kept).length > maxBytes) return null;
+  try {
+    return JSON.parse(kept) as Numbers;
+  } catch {
+    return null;
+  }
 }
 
 /** The store's membership numbers kept CACHE_SECONDS; a person's erasure deletes it (lib/store-readings.ts, forgetReadingsPerson). */

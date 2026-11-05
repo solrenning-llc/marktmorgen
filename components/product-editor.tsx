@@ -1272,7 +1272,7 @@ function OptionsBlock({
                     <div className="mt-1 text-sm text-ink">
                       <p>
                         {recurring
-                          ? "New buyers can’t pick this price. Members who already pay on it keep it and are billed as before. An invite to move a member onto it from another platform can’t be used while it is off sale."
+                          ? "New buyers can’t pick this price. Members who already pay on it keep it and are billed as before, and anyone you invited to move here on it still gets it."
                           : "New buyers can’t pick this price. People who already bought it keep what they bought."}
                       </p>
                       {recurring ? (
@@ -1284,7 +1284,7 @@ function OptionsBlock({
                           </p>
                         ) : (
                           <p className="mt-1 font-semibold">
-                            {count === 1 ? "1 member still pays on it here." : `${count} members still pay on it here.`}
+                            {count === 1 ? "1 member still pays on it here, as of your last membership reading." : `${count} members still pay on it here, as of your last membership reading.`}
                           </p>
                         )
                       ) : null}

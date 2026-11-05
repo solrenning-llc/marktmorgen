@@ -30,7 +30,8 @@ import { membershipLine, speech } from "@/lib/buyer-words";
 import { moveWords } from "@/lib/buyer-words/move";
 import { activeIntro } from "@/lib/intro-price";
 import { firstChargeAt, linkSeconds, reminderAt } from "@/lib/move-rules";
-import { giveData, needData } from "@/lib/store-data";
+import { dataKey, giveData, needData } from "@/lib/store-data";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const invitesKey = (statsId: string) => `nl:mv:${statsId}`;
@@ -38,6 +39,8 @@ export const linkKey = (token: string) => `nl:mv:link:${token}`;
 const DUE_KEY = "nl:mv:due";
 /** The slot invites are counted in, in the store's data room. */
 const INVITES_SLOT = "mv";
+/** The most bytes of invitations the studio reads to count them per price (one studio request's included bytes, less room). */
+export const INVITED_READ_BYTES = 40_000;
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const FIELD_PATTERN = /^[0-9a-f]{32}:[A-Za-z0-9_-]{1,64}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
@@ -56,9 +59,21 @@ export type Invite = {
   at: number;
   /** The token of their link. */
   t: string;
-  /** When they kept it here, in seconds; 0 until then. */
+  /** When they kept it here, in seconds; 0 until then; KEPT_UNKNOWN when the record does not say. */
   kept: number;
+  /** Set when the record's kept could not be read: taken as used, never as unused (Codex C2, Revisor 1 on #2685). */
+  keptUnknown?: true;
 };
+
+/**
+ * The kept of a record whose kept cannot be read. Not 0, so every "not yet kept" check (openMove, the emails, the
+ * moving-in page) takes it as used: no price taken off sale reopens to it and no email goes. The record itself is
+ * still read, so the person's copy shows it and their erasure deletes it.
+ */
+export const KEPT_UNKNOWN = -1;
+/** How long a moving-in checkout stays the one an invitation opens: Stripe's own life of a checkout, and a minute. */
+const OPEN_SECONDS = 86_400 + 60;
+const openKey = (statsId: string, field: string) => `nl:mv:open:${statsId}:${field}`;
 
 export const inviteField = (email: string, productId: string) => `${addressHash(email)}:${productId}`;
 
@@ -67,7 +82,13 @@ function parseInvite(raw: unknown): Invite | null {
   try {
     const v = JSON.parse(raw) as Partial<Invite>;
     if (typeof v.e !== "string" || typeof v.p !== "string" || typeof v.r !== "number" || typeof v.t !== "string") return null;
-    return { e: v.e, p: v.p, o: typeof v.o === "string" ? v.o : "", r: v.r, job: typeof v.job === "string" ? v.job : "", at: Number(v.at) || 0, t: v.t, kept: Number(v.kept) || 0 };
+    // When it was kept, exactly (Codex C2 on #2685): a whole number of seconds, 0 for not yet. Anything else cannot
+    // say whether the invitation was used, so it is KEPT_UNKNOWN: taken as used, never as unused, which would reopen a
+    // price taken off sale to it (withInvitedOption). The record is still read, for the person's copy and erasure
+    // (Revisor 1 on #2685).
+    const keptAt: unknown = v.kept;
+    const known = typeof keptAt === "number" && Number.isSafeInteger(keptAt) && keptAt >= 0;
+    return { e: v.e, p: v.p, o: typeof v.o === "string" ? v.o : "", r: v.r, job: typeof v.job === "string" ? v.job : "", at: Number(v.at) || 0, t: v.t, kept: known ? keptAt : KEPT_UNKNOWN, ...(known ? {} : { keptUnknown: true as const }) };
   } catch {
     return null;
   }
@@ -142,9 +163,24 @@ export async function moveCounts(store: Store): Promise<{ invited: number; kept:
  * reads as an invitation. Anything else (no reading, a reply that is not a list, a record that does not read)
  * makes every count unknown (null), never 0; 0 only when the whole list was read and none names the option.
  */
-export async function pendingInvitesOnOptions(store: Store, productId: string, optionIds: string[]): Promise<Record<string, number | null>> {
+export async function pendingInvitesOnOptions(store: Store, productId: string, optionIds: string[], maxBytes = INVITED_READ_BYTES, now = Date.now()): Promise<Record<string, number | null>> {
   const unknown = Object.fromEntries(optionIds.map((id) => [id, null])) as Record<string, number | null>;
   if (!store.statsId || !isRedisConfigured()) return unknown;
+  // Bounded before anything is transferred (Codex Z on #2690): the invitations' bytes as the store's data room
+  // counts them when they are written (INVITES_SLOT, at least every field and value), and how many there are. None
+  // at all is a proved 0; more bytes than the bound, or invitations with no count of their bytes (written before it
+  // was kept), are unknown, and the list is not read.
+  const room = dataKey(store);
+  try {
+    const sized = repliesFor(await redisPipeline([["HLEN", invitesKey(store.statsId)], ...(room ? [["HGET", room, INVITES_SLOT]] : [])]), room ? 2 : 1);
+    const many = sized ? countOf(sized[0]) : null;
+    if (many === null) return unknown;
+    if (many === 0) return Object.fromEntries(optionIds.map((id) => [id, 0])) as Record<string, number | null>;
+    const counted = sized && room && typeof sized[1] === "string" && /^\d{1,12}$/.test(sized[1]) ? Number(sized[1]) : null;
+    if (counted === null || counted > maxBytes) return unknown;
+  } catch {
+    return unknown;
+  }
   let reply: unknown;
   try {
     const receipt: unknown = await redisPipeline([["HVALS", invitesKey(store.statsId)]]);
@@ -159,7 +195,12 @@ export async function pendingInvitesOnOptions(store: Store, productId: string, o
     const slot = Object.getOwnPropertyDescriptor(reply, String(at));
     const invite = slot && Object.hasOwn(slot, "value") ? parseInvite(slot.value) : null;
     if (!invite) return unknown;
-    if (invite.p !== productId || invite.kept > 0 || !Object.hasOwn(counts, invite.o)) continue;
+    if (invite.p !== productId || !Object.hasOwn(counts, invite.o)) continue;
+    // One whose state cannot be read: not a guess either way (Claude 4 on #2690).
+    if (invite.kept < 0) return unknown;
+    if (invite.kept > 0) continue;
+    // Only while its link still works: the link lives linkSeconds from the day it was sent (lib/move-rules.ts).
+    if (invite.at + linkSeconds(invite.r, invite.at * 1000) <= Math.floor(now / 1000)) continue;
     counts[invite.o] = (counts[invite.o] ?? 0) + 1;
   }
   return counts;
@@ -321,13 +362,31 @@ export async function openMove(
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, invite.o)) return { ok: false, reason: "unavailable" };
   const option = product.options.length ? invite.o : undefined;
+  // One invitation opens one checkout (Claude 4 on #2690): pressed twice at once or again later, it is the same one,
+  // so one member never holds two memberships from it. Taken before Stripe is asked, for the life of a checkout; an
+  // answer in any other shape than OK or nil opens nothing.
+  const key = openKey(store.statsId as string, invite.field);
+  const taken = repliesFor(await redisPipeline([["SET", key, "opening", "NX", "EX", OPEN_SECONDS]]), 1);
+  if (!taken || (taken[0] !== "OK" && taken[0] !== null)) return { ok: false, reason: "refused" };
+  if (taken[0] === null) {
+    const open = repliesFor(await redisPipeline([["GET", key]]), 1);
+    const url = open ? open[0] : null;
+    // The checkout already opened for it, or one still being opened: never a second.
+    return typeof url === "string" && url.startsWith("https://") ? { ok: true, url } : { ok: false, reason: "refused" };
+  }
   try {
     const held = await withStockHold(store, product, (holding) =>
       createCheckout(store, product, origin, option, { email: invite.e, noTrial: true, held: holding, moved: { firstChargeAt: firstChargeAt(invite.r, now) }, digitalConsent: consent }),
     );
-    if (!held.ok) return { ok: false, reason: "unavailable" };
+    if (!held.ok) {
+      await redisPipeline([["DEL", key]]);
+      return { ok: false, reason: "unavailable" };
+    }
+    await redisPipeline([["SET", key, held.value.url, "XX", "EX", OPEN_SECONDS]]);
     return { ok: true, url: held.value.url };
   } catch (error) {
+    // Nothing was opened: the invitation may be pressed again.
+    await redisPipeline([["DEL", key]]).catch(() => {});
     // The store's orders for the month are reached (lib/order-admission.ts): not open right now, nothing charged.
     if (error instanceof OrdersPausedError) return { ok: false, reason: "unavailable" };
     // The box to start access at once was not checked: said beside it, nothing opened.
@@ -356,6 +415,8 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
     ["DEL", ...held.map((h) => linkKey(h.invite.t))],
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
+    // The checkout their link last opened, kept a day so it is not opened twice.
+    ["DEL", ...held.map((h) => openKey(statsId, h.field))],
   ]);
   return held.length;
 }

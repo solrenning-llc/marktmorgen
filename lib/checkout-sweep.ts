@@ -54,6 +54,7 @@ import { REMIND_WITHIN_SECONDS, remindAbandoned } from "@/lib/checkout-recovery"
 import { enroll, readFlows } from "@/lib/flows";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
+import { noteKept } from "@/lib/move-members";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
 import { affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
@@ -462,6 +463,18 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // The creator's phone and email platform, told of each sale once.
     if (listensToSales(store)) {
       await noteSales(store, paid).catch((error) => console.error("telling about sales failed", store.handle, error));
+    }
+    // A membership moved from another platform, paid (or started on its trial): its invitation is kept now, whether or
+    // not its member came back to the thanks page, so the link never opens a second membership, and a price taken off
+    // sale since stays theirs alone (lib/move-members.ts; Claude 4 on #2690).
+    {
+      const handles = saleHandles(store);
+      for (const row of paid) {
+        const meta = row.metadata ?? {};
+        const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
+        if (meta.moved !== "yes" || !meta.product || !email || !handles.has(meta.store ?? "")) continue;
+        await noteKept(store, email, meta.product).catch((error) => console.error("noting a moved membership kept failed", store.handle, error));
+      }
     }
     const confirming = canConfirm(store);
     const marks = paid.length && confirming

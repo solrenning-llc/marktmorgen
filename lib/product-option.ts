@@ -275,13 +275,6 @@ export function namedPriceGone(product: { options: { id: string }[] }, optionId:
 }
 
 /**
- * Whether the price an email named can be bought today: not gone
- * (namedPriceGone), and, when it names an option, that option is one the
- * checkout offers (sellableOptions: it hands something over). An option kept
- * with nothing to hand over is not a price on sale: the link opens nothing
- * and no email or reminder names it.
- */
-/**
  * The product as one invited member sees it (642 [WG2], C4-20261105-1945-C2-2): the option their invitation
  * recorded back on sale, and only it, so the price they already paid elsewhere is kept here. Every other option,
  * and the product for everyone else, is untouched; the same object comes back when there is nothing to change.
@@ -300,6 +293,13 @@ export function withInvitedOption<T extends { options: ProductOption[] }>(produc
   return { ...product, options };
 }
 
+/**
+ * Whether the price an email named can be bought today: not gone
+ * (namedPriceGone), and, when it names an option, that option is one the
+ * checkout offers (sellableOptions: it hands something over). An option kept
+ * with nothing to hand over is not a price on sale: the link opens nothing
+ * and no email or reminder names it.
+ */
 export function namedPriceOffered(product: Listing, optionId: string): boolean {
   if (namedPriceGone(product, optionId)) return false;
   return !optionId || sellableOptions(product).some((option) => option.id === optionId);

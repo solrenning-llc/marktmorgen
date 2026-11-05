@@ -479,6 +479,27 @@ async function main(): Promise<void> {
   is("D partial ACL source read keeps original membership and restriction",[d9Members.includes(d9From),d9Members.includes(d9To),await readPipelineAccess(statsId,d9From)],[true,false,{wkshp1:"none"}]);
   is("D target cannot write without confirmed migration of its restrictions",d9TargetWrite.status===200,false);
 
+  part("Codex D and G2 (#2036): an extra answer to the copy's one write never confirms it");
+  for (const [kind, from, to] of [["HSET", "dacksource@example.com", "dacktarget@example.com"], ["HDEL", "dackfree@example.com", "dackstale@example.com"]] as const) {
+    await putMember(store, from, "support");
+    // HSET: a restricted teammate's restriction is the copy. HDEL: a free teammate, and a field left on the new address that the copy clears.
+    if (kind === "HSET") await writePipelineAccess(statsId, from, { wkshp1: "none" }, store);
+    else await redisPipeline([["HSET", `nl:crm:pacc:${statsId}`, to, JSON.stringify({ wkshp1: "none" })]]);
+    let skipped = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 1 && commands[0][0] === kind && commands[0][1] === `nl:crm:pacc:${statsId}` && commands[0][2] === to) { skipped++; return [1, 1]; }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try { await moveMemberships(from, to); } catch { /* refused: the membership stays */ }
+    redis.pipeline = real;
+    const team = (await readTeam(store.sid)).members.map((m) => m.email);
+    is(`${kind} answered [1, 1] and never applied: the membership stays on the old address`, [skipped, team.includes(from), team.includes(to)], [1, true, false]);
+    if (kind === "HSET") {
+      is("with its restriction", await readPipelineAccess(statsId, from), { wkshp1: "none" });
+      is("and the new address cannot write", (await crm(to, { action: "deal", deal: { title: "D extra ACK bypass", email: "", cents: 1, stage: "wnew01", note: "" } })).status === 200, false);
+    }
+  }
+
   done();
 }
 

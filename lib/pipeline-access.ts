@@ -93,10 +93,10 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([who, v], 1) : 0);
   const grown = weight(value) - weight(before);
   if (grown > 0) await needData(room, [{ slot: ACCESS_SLOT, bytes: grown }]);
-  const written: unknown = await redisPipeline([value ? ["HSET", accessKey(statsId), who, value] : ["HDEL", accessKey(statsId), who]]);
+  const written = oneAnswer(await redisPipeline([value ? ["HSET", accessKey(statsId), who, value] : ["HDEL", accessKey(statsId), who]]));
   // Saved only on the exact answer of that one command (0 or 1); anything else is not a saved restriction, and the
   // owner is told it was not saved, never shown the new access as applied (Codex D, #2036). The room taken stays.
-  if (!Array.isArray(written) || written.length !== 1 || (written[0] !== 0 && written[0] !== 1)) throw new PipelineAccessWriteUnconfirmed();
+  if (written === null) throw new PipelineAccessWriteUnconfirmed();
   if (grown < 0) await giveData(room, [{ slot: ACCESS_SLOT, bytes: -grown }]);
   return clean;
 }
@@ -106,6 +106,11 @@ export class PipelineAccessWriteUnconfirmed extends Error {
   constructor() {
     super("We could not confirm this person's access was saved. Reload the page to see what it is now, then choose again if it is not what you chose.");
   }
+}
+
+/** The answer of a pipeline of one HSET or HDEL when it is exactly one 0 or 1; null for anything else. */
+function oneAnswer(reply: unknown): 0 | 1 | null {
+  return Array.isArray(reply) && reply.length === 1 && (reply[0] === 0 || reply[0] === 1) ? reply[0] : null;
 }
 
 /**
@@ -134,8 +139,8 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
     // No restriction to carry: a field the new address had from before (someone else's, long gone) must not
     // restrict them, so it goes, and gives its room back.
     if (weight(old) === 0) return;
-    const [deleted] = await redisPipeline([["HDEL", accessKey(statsId), after]]);
-    if (deleted !== 0 && deleted !== 1) throw new Error("clearing the new address's pipeline access could not be confirmed");
+    const deleted = oneAnswer(await redisPipeline([["HDEL", accessKey(statsId), after]]));
+    if (deleted === null) throw new Error("clearing the new address's pipeline access could not be confirmed");
     if (deleted === 1) await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
     return;
   }
@@ -156,8 +161,10 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
       await forceData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
     }
   }
-  const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]);
-  if (written !== 0 && written !== 1) throw new Error("copying a teammate's pipeline access could not be confirmed");
+  // The exact answer of that one command, before the membership moves: an extra answer, or one of another kind, is
+  // not a copy (Codex D and G2, #2036: [1, 1] for a write that never landed moved a restricted teammate unrestricted).
+  const written = oneAnswer(await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]));
+  if (written === null) throw new Error("copying a teammate's pipeline access could not be confirmed");
   if (grown < 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: -grown }]);
 }
 

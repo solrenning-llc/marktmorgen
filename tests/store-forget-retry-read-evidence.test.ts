@@ -4,8 +4,10 @@
  * unknown; it must never turn a missing count into zero.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { storeForgetMonth } from "@/lib/store-forget-retry";
 import { store as redis } from "./redis-stub";
+import { NOT_A_COST } from "./plan-cost-registry";
 
 type Command = (string | number)[];
 
@@ -45,7 +47,23 @@ async function main(): Promise<void> {
   redis.clear();
   assert.deepEqual(await storeForgetMonth("2026-12"), { month: "2026-12", queued: 0, done: 0, gaveUp: 0, waitingNow: 0, keptNow: 0 });
 
-  console.log("store-forget retry read evidence: 6/6");
+  const findings: string[] = [];
+  redis.pipeline = async () => { throw new Error("transport unavailable"); };
+  try {
+    if (await storeForgetMonth(month) !== null) findings.push("a rejected Redis transport did not become unknown");
+  } catch {
+    findings.push("a rejected Redis transport escaped instead of becoming unknown");
+  } finally {
+    redis.pipeline = original;
+  }
+
+  const source = readFileSync("lib/store-forget-retry.ts", "utf8");
+  if (!/export const STORE_FORGET_MONTH_READ_COMMANDS\s*=\s*4\b/.test(source)) findings.push("the four-command read has no named ceiling");
+  const attribution = NOT_A_COST.STORE_FORGET_MONTH_READ_COMMANDS;
+  if (!attribution || !/company/i.test(attribution) || !/unknown|not wired|before/i.test(attribution)) findings.push("the company read has no explicit non-zero attribution");
+
+  assert.deepEqual(findings, []);
+  console.log("store-forget retry read evidence: 8/8");
 }
 
 void main();

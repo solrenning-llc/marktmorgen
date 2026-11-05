@@ -43,6 +43,7 @@ const byKey = new Map<string, { status: number; body: unknown }>();
 const bySender = new Map<string, string>();
 let batches = 0;
 let posts = 0;
+let receivers: string[][] = [];
 const items = new Map<string, string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -56,7 +57,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     posts += 1;
     const mode = next;
     const key = headers.get("paypal-request-id") ?? "";
-    const body = JSON.parse(String(init.body)) as { sender_batch_header: { sender_batch_id: string }; items: { sender_item_id: string }[] };
+    const body = JSON.parse(String(init.body)) as { sender_batch_header: { sender_batch_id: string }; items: { sender_item_id: string; receiver: string }[] };
+    receivers.push(body.items.map((item) => item.receiver));
     const sender = body.sender_batch_header.sender_batch_id;
     if (mode === "drop-before") throw new TypeError("fetch failed: before PayPal");
     if (mode === "server") return json({ name: "INTERNAL_SERVER_ERROR" }, 500);
@@ -106,6 +108,7 @@ async function seed(store: Store): Promise<void> {
   items.clear();
   batches = 0;
   posts = 0;
+  receivers = [];
   duplicateLink = true;
   const at = Math.floor(Date.now() / 1000) - 86_400;
   const person = (id: string, email: string, code: string) => JSON.stringify({ id, email, code, status: "approved", appliedAt: 1, decidedAt: 2, note: "" });
@@ -163,6 +166,16 @@ async function main(): Promise<void> {
   await settlePayPal(store);
   is("paid once, and nobody on their way any more", [await paidCents(store), (await onTheirWay(store)).size], [4500, 0]);
   is("counted for the month: one unknown, one settled", [(await counts()).unknown, (await counts()).settled], [1, 1]);
+
+  part("A retry keeps the exact recipients from the request whose answer was lost");
+  await seed(store);
+  next = "make-then-drop";
+  await payWithPayPal(store);
+  const changed = JSON.stringify({ id: "aaaaaaaaaaaa", email: "sara@example.com", paypal: "changed@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" });
+  await redis.pipeline([["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", changed]]);
+  next = "make";
+  await settlePayPal(store);
+  is("the idempotent retry sends the same body", receivers[1], receivers[0]);
 
   part("The first request never reached PayPal: the retry makes it, once");
   await seed(store);

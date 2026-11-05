@@ -473,6 +473,37 @@ async function main(): Promise<void> {
     is(`${file}: "anyone can read it" always comes with its exception`, [/anyone can read it once it is(?: published, including people who are not on your list)?\. /.test(text), text.includes("unless you keep it for the people who have products you choose")], [false, true]);
   }
 
+  part("A product still for sale whose listing does not read is not \"no longer for sale\"");
+  // More products than the first page holds, so one listing is read from its own record, not the store's head.
+  const extra: string[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const one = await addProduct(OWNER, `Extra ${i + 1}`, "", "9", null);
+    if (!one.ok) throw new Error("no extra product");
+    extra.push(one.product.id);
+  }
+  const current = (await storeForEmail(OWNER))!;
+  const unlisted = [...many, ...extra].find((id) => !current.catalog.head.some((l) => l.id === id));
+  if (!unlisted || current.catalog.inline || !current.catalog.id) throw new Error("no product outside the head to make unreadable");
+  const kept2 = await publishLetter(current, broadcast(current, "f1", { subject: "Workbook members" }), now, [unlisted]);
+  if (!kept2.ok) throw new Error(kept2.message);
+  const listingKey = `nl:catalog:${current.catalog.id}:l:${unlisted}`;
+  const listing = redis.run(["GET", listingKey]);
+  if (typeof listing !== "string") throw new Error("no listing record");
+  redis.run(["SET", listingKey, "{not json"]);
+  const unreadableHtml = await render(store, kept2.letter.id);
+  is(
+    "a visitor: never told it is gone; told the products could not all be shown, without \"below\", and still offered the form",
+    [unreadableHtml.includes("no longer for sale"), unreadableHtml.includes("products below"), unreadableHtml.includes("We couldn&#x27;t show every one of them just now"), unreadableHtml.includes("/api/store/letters/link"), unreadableHtml.includes(SECRET)],
+    [false, false, true, true, false],
+  );
+  const fayPass = await pass("fay@example.com", "all");
+  sessions["fay@example.com"] = [paid("cs_test_fay000000001", unlisted)];
+  is("and a proved holder of it reads it", (await render(store, kept2.letter.id, { [cookieName]: fayPass })).includes(SECRET), true);
+  const ownerUnreadable = await render(store, kept2.letter.id, { [SESSION_COOKIE]: owner });
+  is("the creator is not told none of the products is left", [ownerUnreadable.includes("None of the products you chose is on your store anymore"), ownerUnreadable.includes("Only you and people who have one of these products")], [false, true]);
+  redis.run(["SET", listingKey, listing]);
+  is("read again, the list is whole and says \"below\"", (await render(store, kept2.letter.id)).includes("products below"), true);
+
   part("The creator is told when none of the products is left");
   const lone = await publishLetter(store, broadcast(store, "c1", { subject: "Knife notes" }), now, [other.product.id]);
   if (!lone.ok) throw new Error(lone.message);

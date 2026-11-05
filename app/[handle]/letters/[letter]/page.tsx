@@ -17,7 +17,7 @@ import { bodyHtml } from "@/lib/mail-body";
 import { readLetter } from "@/lib/letters";
 import { membersOnly } from "@/lib/letter-rules";
 import { letterReader } from "@/lib/letter-access";
-import { readListings } from "@/lib/catalog";
+import { hasProduct, readListings } from "@/lib/catalog";
 import { productSegment } from "@/lib/product-slug";
 
 type Params = {
@@ -73,8 +73,12 @@ export default async function LetterPage({ params, searchParams }: Params) {
   const reader = kept ? await letterReader(store, letter, await cookies()) : ({ state: "public" } as const);
   const readable = reader.state === "public" || reader.state === "owner" || reader.state === "in";
   const products = kept ? await readListings(store, letter.products) : [];
+  // Which of its products the store still has, from the store's own record (the set lib/letter-access.ts asks about), not from the listings read for the page.
+  const known = kept ? (letter.products ?? []).filter((id) => hasProduct(store, id)) : [];
+  // A listing that did not read is not a product gone: the list says it is incomplete, and the form stays.
+  const incomplete = products.length < known.length;
   // Nobody but the creator can open it once every product it was kept for is gone.
-  const gone = kept && !readable && products.length === 0;
+  const gone = kept && !readable && known.length === 0;
   const query = kept ? await searchParams : {};
   const linkState = typeof query.link === "string" ? query.link : "";
   // Only the four answers the form gives; anything else in the address ("constructor", "toString") draws nothing.
@@ -92,8 +96,8 @@ export default async function LetterPage({ params, searchParams }: Params) {
           <h1 className="font-display mt-2 text-3xl font-semibold leading-tight sm:text-4xl [overflow-wrap:anywhere]">{letter.subject}</h1>
           {kept ? (
             <section aria-labelledby="letter-for" className="mt-6">
-              <h2 id="letter-for" className="text-sm font-semibold">{readable ? w.forHolders : gone ? w.goneTitle : w.lockedLead}</h2>
-              {reader.state === "owner" ? <p className="st-muted mt-1 text-sm">{products.length ? w.ownerNote : w.noneLeft}</p> : null}
+              <h2 id="letter-for" className="text-sm font-semibold">{readable ? w.forHolders : gone ? w.goneTitle : incomplete ? w.lockedLeadSome : w.lockedLead}</h2>
+              {reader.state === "owner" ? <p className="st-muted mt-1 text-sm">{known.length ? w.ownerNote : w.noneLeft}</p> : null}
               {gone ? <p className="mt-1 text-sm">{w.goneBody}</p> : null}
               {products.length ? (
                 <ul className="mt-2 space-y-1">
@@ -110,6 +114,7 @@ export default async function LetterPage({ params, searchParams }: Params) {
                   ))}
                 </ul>
               ) : null}
+              {incomplete ? <p className="st-muted mt-2 text-sm">{w.notAllShown}</p> : null}
             </section>
           ) : null}
           {readable ? (

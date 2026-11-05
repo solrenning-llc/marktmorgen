@@ -59,6 +59,7 @@
 import { SITE_URL } from "./site-url";
 import { escapeHtml } from "./embed-rules";
 import { type ScriptMode, SCRIPT_MEDIUM, withTags } from "./embed-sites";
+import { contrast } from "./store-look";
 
 /** Which version of the script this is; a change to it is a new version, and the old one keeps working. */
 export const SCRIPT_VERSION = 1;
@@ -131,13 +132,18 @@ export const MAX_LINK_TEXT = 60;
 
 /** The link's look, the same as the plain button's (lib/embed-rules.ts buttonStyle), written into its style attribute. */
 function styleText(fill: string, onFill: string): string {
-  const safe = (colour: string) => (/^#[0-9a-f]{6}$/i.test(colour) ? colour : "#15112e");
+  const safe = (colour: string, fallback: string) => (/^#[0-9a-f]{6}$/i.test(colour) ? colour : fallback);
+  const background = safe(fill, "#15112e");
+  const foreground = safe(onFill, "#ffffff");
+  // This 16px label needs 7:1 (WCAG 1.4.6). Preserve readable choices;
+  // otherwise use the existing default pair, without changing the loader.
+  const [readableFill, readableText] = contrast(background, foreground) >= 7 ? [background, foreground] : ["#15112e", "#ffffff"];
   return [
     "display:inline-block",
     "padding:14px 28px",
     "border-radius:999px",
-    `background:${safe(fill)}`,
-    `color:${safe(onFill)}`,
+    `background:${readableFill}`,
+    `color:${readableText}`,
     "font:600 16px/1.25 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
     "text-decoration:none",
   ].join(";");

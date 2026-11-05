@@ -1,4 +1,4 @@
-import { assessPlanPaymentDisputeCosts, PLAN_PAYMENT_DISPUTE_COST_RULES } from '@/lib/plan-payment-dispute-cost-rules';
+import { assessPlanPaymentDisputeCosts, PLAN_PAYMENT_DISPUTE_COST_RULES, PLAN_PAYMENT_DISPUTE_KEYS } from '@/lib/plan-payment-dispute-cost-rules';
 import { PUBLISHED_PLAN_PRICES, TRIAL_DAYS, REFUND_DAYS, type Tier, type Cycle } from '@/lib/plan';
 import { CLOSING_DAYS } from '@/lib/plan-closing-rules';
 import { LONGEST_PAUSE_MONTHS, PAUSE_EVERY_DAYS, PLAN_BREAKS_ENABLED } from '@/lib/plan-pause-rules';
@@ -122,6 +122,11 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  if(!reviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
  const review=JSON.parse(reviewEncoded) as CommercialMarginReview|null;
  if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
+ const boundDisputes=assessPlanPaymentDisputeCosts(review.planPaymentDisputes);
+ if(!boundDisputes||!PLAN_PAYMENT_DISPUTE_KEYS.every(key=>
+  boundDisputes[key].principalCents===disputes[key].principalCents&&
+  boundDisputes[key].feesCents===disputes[key].feesCents&&
+  boundDisputes[key].lostPaymentWorstCaseCents===disputes[key].lostPaymentWorstCaseCents))return null;
  const until=iso(p.admissionsUntil),through=iso(p.liabilitiesThrough);
  if(until===null||through===null||until<now.getTime()||p.reviewedLiabilityTailDays===null)return null;
  const monthDays=contractCoverageDays('month',p.reviewedLiabilityTailDays),yearDays=contractCoverageDays('year',p.reviewedLiabilityTailDays);

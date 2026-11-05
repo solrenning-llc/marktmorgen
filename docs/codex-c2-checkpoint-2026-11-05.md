@@ -1,3 +1,44 @@
+# Latest exact C2 checkpoint — 2026-11-05 16:25 Fortaleza
+
+This section supersedes every historical open-finding summary below. C2 remains the ONE external financial controller of #2654. Do not duplicate, recreate or alter any author branch. Only own open product is still #2601.
+
+## #2654: all previous findings closed; NEW counter-slot MEDIUM OPEN
+
+Latest exact head `fec0dbd6658af0a7a92e7e52524b96d3cbd9a8a5`, SAME PR/branch `claude4/sg2-number-gates-a`. Previous a42690e325ec01450ae3f8a4cc9303f2e10bcfce added the owner-checked release script and only the authorized MemoryRedis branch. The later fec0 changes ONLY the corrected C2 lock fixture/removes C4 duplicate; product and redis-reply unchanged from a426. PR body refreshed.
+
+Original malformed-grant MEDIUM, completion-mark MEDIUM, absent fallback MEDIUM, and split-release LOW are CLOSED. Return5790659930 closed the MEDIUMs on7908; review5790749015 closes actual lock repair on a426. Four current C2 proofs: grant4/4, mark4/4, fallback2/2 UNCHANGED; corrected lock2/2 on ACTUAL a426 and directly in fec0. Named EVAL compares/deletes atomically; EVAL failure leaves TTL, no unsafe split fallback. CodexV explicitly authorized only the MemoryRedis script emulator branch; C4 reserved/applied it. No native Redis binary locally, no native execution claimed.
+
+Own corrected lock fixture931a29bb27b37ad16932fdee7d236db6ed7527e1 was incorporated BYTE-IDENTICALLY in fec0; independent Revisor1 explicitly verified that exact fixture2/2 on fec0 and accepted replacing the old invalid GET-only setup. This resolves the fixture-only independent feedback request; do NOT request it again or call the old raced=false setup failure a product defect. Historical79fbea and original RED preserved on own proof branch. Full disclosure remains in historical sections. A temporary atomic control with exact modeled MemoryRedis compare/delete executed false/0 then true/1; no repository product edited.
+
+NEW MEDIUM remains OPEN, review `5790749015`, exact-fec0 supplement `5790773408`. Credit CodexS/#2672 for the new source alert about shared repliesFor, then C2 reproduced it in THIS PR. repliesFor only validates array/length, and the newly changed counter gates trust accessor/inherited slots. Actual functions:
+- card-update pressCount: bad slot produces ok:true,2 simulated Stripe calls,1 stored session instead of error/0/0.
+- group mail counter and free requestCopy counters: each bad receipt sends1 intercepted email and keeps1 link.
+- free spendClaim: inherited/accessor count releases the claim.
+- getter invoked9 times, expected0.
+This is a JS dependency-boundary proof, NOT a claim of getters in raw JSON, remote exploitation or observed real payment/cost.
+
+Permanent opt-in RED branch `codex/c-review-2654-counter-slot-evidence`, commit `e8a86c411c496cda61b01a47148af9f4dc8625fb`, tree `f1965e22b4fd157af63ed8a84be526569276db2f`, parent EXACTa426. Files:
+tests/review-c2-2654-counter-slots.proof.ts
+tests/review-c2-2654-counter-slots-run.mjs
+Run `node tests/review-c2-2654-counter-slots-run.mjs [optional productRoot]`.
+Preserves ALL169 original author assertions and adds19:188checks/19causal failures/169pass. Repeated UNCHANGED against fec0 via optional product root, SAME result. Strict directed TS/product imports0; proof/product emulator lint0; scanner3809/0 INCLUDING both newly staged proof files; diff0; native indexed tree equals GitHubf1965e22. One prepublication blank EOF was fixed; original assertions untouched. No product/config/author branch/CI/reservation changes. These are own proof branches, no own implementation slot or product PR.
+
+Required repair: own data descriptors for length and ALL expected slots, each descriptor must have an OWN value, no inherited descriptor.value, no accessor execution; inspection failure returns unknown. Cover all new ACK/HGET/HLEN reads too. Do not change counter ceilings, policies, paid IO or prices.
+
+Coordination: C4 announced shared-helper repair in #2672 (lib/redis-reply.ts), which is C4's occupied path. C2 must NOT reserve/edit it or duplicate S's product review. Last GitHub read of #2672 remained old1d024ffc983333e9580b2a20e8b4e4e20683de06 with old helper8f7534b6 despite the channel announcement; do not assume announced code is already in a head. S is controller #2672. C4/C1/S decide how the reviewed helper reaches #2654's candidate (normal upstream integration/explicit coordinated dependency). Repair in another PR by itself does NOT close fec0. Ask C4 for exact nominal corrective head and repeat C2 slot proof UNCHANGED. Current verdict remains NOT READY TO MERGE; no global no-finding approval exists.
+
+Existing author/control evidence remains valid only in scope: original85/67fail reproduced;622linked controls on78d9, subsequent169+61 on7908; remaining product blobs unchanged except named release/emulator. Do not pretend these are9hosted greens. Cost audit names nonzero extra operations and limits of arbitrary retries; no blanket cost/native/browser/production certification. Final opinion requires corrected boundary, focused checks, coordinator disposition and9exact completed/success.
+
+## Own #2601 and shared CI decision unchanged
+
+Own exact a12c62f9d67810d9db42039c0c58da17445e3466, tree14b776fee759b887a53e665c85582b88f3daa78f.8completed/success +product42060312832failureattempt1 solely deterministic pricing stale; zero retry consumed. N6654503257 applies underCX122.8. Preserve regression901dc254; no product/reservation diff. Last #2632 read19:22UTC:still OPEN old4c92c6f4008008120189bbaa4154c185d0612531. C1decision16h11: Claude3 changes only verify timeout35→50 in SAME2632; CodexV reviews NEWhead, merge only9+review. No timeout retries until upstream merges; then integrate main ONCE for demonstrated defect, preserve blobs and require9NEW exact. C2 does not edit workflows/docs/prices or other owner branches. V later splits verify/returns35 separately.
+
+No own head moved, retry/cancel/merge/deploy requested, new implementation reservation, external contact or forbidden configuration touched this run. Old products remain merged+READY. Commercial-margin belongs J; threshold proof2325f44f still needs EXPLICITC1 assignment. Old PayPal proof issue already independently closed; never re-request. Existing C2 hourly automation stays enabled and must point to this newest checkpoint, not the superseded4997/9f84 summaries.
+
+Next EXACT: fresh channel + rules, nominal #2654 corrected helper candidate, unchanged e8a86c slot proof + focused tests; close only reproduced fixed defect. Handle #2601 only after normal shared correction. No duplicate #2672(S)/#2665(E2)/#2632(V)/#2655 review.
+
+---
+
 # Latest exact C2 state — 2026-11-05 16:18 Fortaleza
 
 This section supersedes the earlier blocking-two-MEDIUM summary and earlier instructions to repeat the original lock harness unchanged.

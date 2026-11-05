@@ -24,15 +24,19 @@ test('cleanup cannot remove a successor hold acquired between its GET and DEL', 
   let successor: Promise<Awaited<ReturnType<typeof takePlace>>> | undefined;
   let raced = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    const result = await pipeline(commands);
-    if (!raced && commands.length === 1 && commands[0][0] === 'GET' && commands[0][1] === opening) {
+    const splitRelease = commands.length === 1 && commands[0][0] === 'GET' && commands[0][1] === opening;
+    const atomicRelease = commands.some(c => c[0] === 'EVAL' && c.includes(opening) && String(c[1]).includes('GET') && String(c[1]).includes('DEL'));
+    if (!raced && (splitRelease || atomicRelease)) {
       raced = true;
-      // The GET saw the old owner's token. Its lease ends before DEL.
+      // For split cleanup, GET already saw the old token. For atomic cleanup,
+      // the successor acquires before the indivisible compare-and-delete.
+      const result = splitRelease ? await pipeline(commands) : undefined;
       advance(31_000);
       successor = takePlace({ store: shop, token, recordStart: async () => { enterSuccessor(); await release; } });
       await entered;
+      return splitRelease ? result : pipeline(commands);
     }
-    return result;
+    return pipeline(commands);
   }) as typeof redis.pipeline;
   let firstThrew = false, thirdStarted = false, successorHold: unknown;
   try {

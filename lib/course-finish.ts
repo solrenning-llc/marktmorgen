@@ -27,6 +27,11 @@ import type { Store } from "@/lib/store";
 const finishedKey = (courseId: string, email: string) => `nl:course:${courseId}:fin:${emailKey(email)}`;
 const openedKey = (courseId: string, email: string) => `nl:course:${courseId}:open:${emailKey(email)}`;
 
+/** Only a complete, own acknowledgement confirms this invocation took the claim. */
+function confirmedClaim(reply: unknown): boolean {
+  return Array.isArray(reply) && reply.length === 1 && Object.getOwnPropertyDescriptor(reply, "0")?.value === "OK";
+}
+
 /**
  * After a student opens a course: the first time, starts what opening it
  * starts (lib/flows.ts, trigger "started"). Never throws: opening a lesson
@@ -35,8 +40,8 @@ const openedKey = (courseId: string, email: string) => `nl:course:${courseId}:op
 export async function noteIfOpened(store: Store, productId: string, courseId: string, email: string): Promise<boolean> {
   try {
     if (!email || !isRedisConfigured()) return false;
-    const [claimed] = await redisPipeline([["SET", openedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
-    if (claimed === null) return false;
+    const claim = await redisPipeline([["SET", openedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
+    if (!confirmedClaim(claim)) return false;
     await enroll(store, email, { joined: false, started: productId });
     return true;
   } catch (error) {
@@ -58,8 +63,8 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     if (!lessons.length) return false;
     const done = await doneLessons(courseId, email);
     if (!lessons.every((id) => done.has(id))) return false;
-    const [claimed] = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
-    if (claimed === null) return false;
+    const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
+    if (!confirmedClaim(claim)) return false;
     await enroll(store, email, { joined: false, finished: productId });
     return true;
   } catch (error) {

@@ -52,7 +52,7 @@ test('unknown held history cannot make the next version unaccounted',async()=>{
  }finally{redis.pipeline=base;}
 });
 test('unknown unapplied delete cannot release room while history survives',async()=>{
- const f=await fixture(),base=redis.pipeline.bind(redis);redis.pipeline=async batch=>batch.some(c=>c[0]==='DEL'&&c[1]===f.key)?[]:base(batch);
+ const f=await fixture(),base=redis.pipeline.bind(redis);redis.pipeline=async batch=>batch.some(c=>(c[0]==='DEL'&&c[1]===f.key)||(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:flow-version-drop:')&&c[3]===f.key))?[]:base(batch);
  try{
   await assert.rejects(dropFlowVersions(f.shop,f.shop.listId!,f.id),'a delete Redis did not confirm is said so, never taken as done');
   const [held,charged]=await base([['LRANGE',f.key,0,-1],['HGET',f.room,'wv:'+f.id]]);const required=dataBytes(held as string[],(held as string[]).length);

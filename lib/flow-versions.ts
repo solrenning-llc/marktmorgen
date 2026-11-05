@@ -19,8 +19,10 @@
  * and it keeps the version it replaces, so putting one back can itself be
  * undone.
  *
- * The versions take room in the store's data room (slot wv:<flowId>), set to
- * what the list holds after each push; one that does not fit is not kept,
+ * The versions take room in the store's data room (slot wv:<flowId>), moved
+ * by what each push or deletion changes, never set to a total (Codex G2 on
+ * #1927: a total read after a refused push cut a newer list's room); one that
+ * does not fit is not kept,
  * and the save goes ahead without it: a full room never stops a creator
  * saving their workflow. Putting a version back is the exception: it keeps
  * the version it replaces first, or puts nothing back (lib/flows.ts).
@@ -34,7 +36,7 @@ import type { Flow } from "@/lib/flows";
 import { parseFlowList } from "@/lib/flow-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { dataBytes, dataBytesOfLength } from "@/lib/store-data-rules";
 import { MAX_FLOW_VERSIONS } from "@/lib/flow-versions-rules";
 
 export { MAX_FLOW_VERSIONS };
@@ -93,14 +95,19 @@ export async function keepFlowVersion(store: DataStore, listId: string, before: 
     // Tried again after the workflows changed under a save (lib/flows.ts): kept once, not twice.
     if (held.length && held[0].slice(held[0].indexOf("\n") + 1) === body) return true;
     const kept = [entry, ...held].slice(0, MAX_FLOW_VERSIONS);
-    await needData(store, [{ slot: SLOT(before.id), bytes: dataBytes(kept, kept.length), set: true }]);
+    // The push lands only on the list it was counted from (KEEP_FLOW_VERSION), so what it changes is known here: the
+    // room moves by that, taken first when it grows, and only this push's own taking goes back when it is refused.
+    const grown = dataBytes(kept, kept.length) - dataBytes(held, held.length);
+    if (grown > 0) await needData(store, [{ slot: SLOT(before.id), bytes: grown }]);
     const reply: unknown = await redisPipeline([["EVAL", KEEP_FLOW_VERSION, 1, key, held.length, held[0] ?? "", entry, MAX_FLOW_VERSIONS]]);
-    if (Array.isArray(reply) && reply.length === 1 && reply[0] === 1) return true;
-    if (Array.isArray(reply) && reply.length === 1 && reply[0] === 0) {
-      // Changed meanwhile: its room is counted again from what it holds now, never from the version not kept.
-      const now = await heldVersions(key);
-      if (now) await needData(store, [{ slot: SLOT(before.id), bytes: dataBytes(now, now.length), set: true }]);
+    const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+    if (answer === 1) {
+      if (grown < 0) await giveData(store, [{ slot: SLOT(before.id), bytes: -grown }]);
+      return true;
     }
+    // Changed meanwhile: nothing was pushed, and the room the newer push counted for itself is never touched.
+    if (answer === 0 && grown > 0) await giveData(store, [{ slot: SLOT(before.id), bytes: grown }]);
+    // Any other answer: the push may have landed, and what it took stays counted.
     return false;
   } catch (error) {
     if (!(error instanceof DataRoomError)) console.error("keeping a workflow's earlier version failed", error);
@@ -145,13 +152,31 @@ export async function readFlowVersions(listId: string | null, flowId: string): P
 }
 
 /**
- * Forgets the earlier versions of a workflow that is gone, and gives back
- * their room only once Redis confirms the list is deleted: an answer that is
- * not its own keeps the room counted, and throws.
+ * Deletes a workflow's earlier versions and answers, from the same step,
+ * {records deleted (0 or 1), how many versions it held, their total length}:
+ * the room given back is exactly what it removed. Modelled by lib/redis-memory.ts.
  */
-export async function dropFlowVersions(store: DataStore, listId: string, flowId: string): Promise<void> {
+export const DROP_FLOW_VERSIONS = `-- marktmorgen:flow-version-drop:v1
+local items = redis.call('LRANGE', KEYS[1], 0, -1)
+local length = 0
+for _, item in ipairs(items) do length = length + string.len(item) end
+return {redis.call('DEL', KEYS[1]), #items, length}`;
+
+/**
+ * Forgets the earlier versions of a workflow that is gone, and gives back
+ * their room only once Redis confirms the list is deleted, by what it removed
+ * as measured in the same step (never a total set later, which could undo a
+ * newer push's room): an answer that is not its own keeps the room counted,
+ * and throws.
+ */
+export async function dropFlowVersions(store: DataStore | null, listId: string, flowId: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  const reply: unknown = await redisPipeline([["DEL", versionsKey(listId, flowId)]]);
-  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== 0 && reply[0] !== 1)) throw new Error("a workflow's earlier versions could not be confirmed deleted");
-  await giveData(store, [{ slot: SLOT(flowId), bytes: 0, set: true }]);
+  const reply: unknown = await redisPipeline([["EVAL", DROP_FLOW_VERSIONS, 1, versionsKey(listId, flowId)]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  const whole = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (!Array.isArray(answer) || answer.length !== 3 || (answer[0] !== 0 && answer[0] !== 1) || !whole(answer[1]) || !whole(answer[2]) || (answer[0] === 0 && (answer[1] !== 0 || answer[2] !== 0))) {
+    throw new Error("a workflow's earlier versions could not be confirmed deleted");
+  }
+  const [deleted, count, length] = answer as [number, number, number];
+  if (store && deleted === 1) await giveData(store, [{ slot: SLOT(flowId), bytes: dataBytesOfLength(length, count) }]);
 }

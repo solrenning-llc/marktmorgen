@@ -122,6 +122,12 @@ export class MemoryRedis {
           return 1;
         }
         // lib/flow-versions.ts KEEP_FLOW_VERSION: a version pushed only onto the list it was counted from.
+        // lib/flow-versions.ts DROP_FLOW_VERSIONS: the list deleted, with how many versions it held and their length.
+        if (key.startsWith("-- marktmorgen:flow-version-drop:v1\n") && args[0] === "1" && args.length === 2) {
+          const items = (this.run(["LRANGE", args[1], "0", "-1"]) ?? []) as string[];
+          const length = items.reduce((sum, item) => sum + Buffer.byteLength(item, "utf8"), 0);
+          return [this.run(["DEL", args[1]]), items.length, length];
+        }
         if (key.startsWith("-- marktmorgen:flow-version-keep:v1\n") && args[0] === "1" && args.length === 6) {
           const [, list, length, head, entry, most] = args;
           const n = Math.min(Number(this.run(["LLEN", list]) ?? 0), Number(most));

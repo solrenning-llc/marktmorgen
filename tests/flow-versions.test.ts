@@ -16,7 +16,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { WorkflowVersions } from "@/components/workflow-versions";
-import { readFlows, removeFlow, saveFlow, setFlowActive } from "@/lib/flows";
+import { forgetStoreWorkflows, readFlows, removeFlow, saveFlow, setFlowActive } from "@/lib/flows";
 import { MAX_FLOW_VERSIONS, readFlowVersions } from "@/lib/flow-versions";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -82,6 +82,15 @@ async function main(): Promise<void> {
   is(`only the newest ${MAX_FLOW_VERSIONS}`, [kept.length, kept[0].flow.steps[0].subject], [MAX_FLOW_VERSIONS, `Subject ${MAX_FLOW_VERSIONS + 1}`]);
   await removeFlow(await store(), id);
   is("a removed workflow's versions are gone", [(await readFlowVersions(list, id)).length, (await redis.pipeline([["LLEN", `nl:wf:ver:${list}:${id}`]]))[0]], [0, 0]);
+
+  part("A store deleted takes every workflow's versions with it (Codex Reviewer 2 on #1927)");
+  const kept2 = await saveFlow(await store(), welcome("First words", "Kept"));
+  if (!kept2.ok) throw new Error(`no workflow: ${kept2.reason}`);
+  const keptId = kept2.flows.find((f) => f.name === "Kept")!.id;
+  await saveFlow(await store(), { id: keptId, active: false, ...welcome("Second words", "Kept") });
+  is("a version is kept before the store goes", (await readFlowVersions(list, keptId)).length, 1);
+  await forgetStoreWorkflows(await store());
+  is("and gone with it", (await redis.pipeline([["EXISTS", `nl:wf:ver:${list}:${keptId}`]]))[0], 0);
 
   part("The studio");
   const drawn = renderToStaticMarkup(createElement(WorkflowVersions, { flowId: id, request: async () => ({ ok: true, versions: [] }), onRestored: () => undefined }));

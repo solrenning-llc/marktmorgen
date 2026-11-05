@@ -523,6 +523,8 @@ export async function forgetStoreWorkflows(store: Store): Promise<void> {
   if (!store.listId || !isRedisConfigured()) return;
   const flows = await readFlowListStrict(store.listId);
   for (const flow of flows) await purgeFlow(store, flow);
+  // Each workflow's earlier versions go with it (Codex Reviewer 2 on #1927): a failed deletion throws, never left behind.
+  for (const flow of flows) await dropFlowVersions(null, store.listId, flow.id);
   await erase([forgetHeldCommand(store.listId), ["DEL", flowsKey(store.listId)]]);
 }
 

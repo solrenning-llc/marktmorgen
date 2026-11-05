@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { testAliases, testEnvironment } from './test-config.mjs';
 const here=dirname(fileURLToPath(import.meta.url));
 const root=resolve(process.argv[2] || join(here,'..'));
-const file='z-occupied-ai-counter-proof.test.ts';
+const file='z-occupied-ai-counter-proof.proof.ts';
 const aliases=testAliases(file,root,here);
 for(const name of ['redis','store-request','customer-voice','review-ai-summary','stats-report','numbers-ask','person-agenda-read','ai'])aliases['@/lib/'+name]=join(here,'z-occupied-ai-counter-world.ts');
 const folder=mkdtempSync(join(tmpdir(),'z-occupied-counter-'));

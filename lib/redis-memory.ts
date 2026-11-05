@@ -532,8 +532,7 @@ export class MemoryRedis {
           return 1;
         }
         // lib/crm.ts SET_CRM_VALUE: a person's value written unless they are marked deleted or the save carries another generation, answering what it replaced.
-        if (key.startsWith("-- marktmorgen:crm-value-set:v5
-") && ((args[0] === "3" && args.length === 7) || (args[0] === "4" && args.length === 9))) {
+        if (key.startsWith("-- marktmorgen:crm-value-set:v5\n") && ((args[0] === "3" && args.length === 7) || (args[0] === "4" && args.length === 9))) {
           const leased = args[0] === "4";
           const [, target, erased, generation] = args;
           const [person, value, carried, member] = args.slice(leased ? 5 : 4);

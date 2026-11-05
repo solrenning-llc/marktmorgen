@@ -102,11 +102,11 @@ try{
  assert.equal((await budget.initializeResendFallbackBudget({review,usage},{pipeline})).status,'initialized');
  const held=await budget.reserveResendFallback({review,usage,attemptId,recipients:1,payloadFingerprint:hash('synthetic final body')},{pipeline});assert.equal(held.status,'reserved');
  // Admission has setup slack. Approach its ORIGINAL reset without changing it.
- if(cfg.case!=='healthy')await new Promise(resolve=>setTimeout(resolve,Math.max(0,reset-realNow()-500)));
+ if(cfg.case!=='healthy'&&cfg.case!=='lost_ack')await new Promise(resolve=>setTimeout(resolve,Math.max(0,reset-realNow()-500)));
  const authorizationWall=realNow();
  Date.now=cfg.case==='moving_offset'?()=>realNow()-400:cfg.case==='large_offset'?()=>authorizationWall-73*3600000:cfg.case==='healthy'?realNow:()=>authorizationWall;
- const delay=cfg.case==='healthy'||cfg.case==='consumer_delay'?0:cfg.case==='moving_offset'?606:650;
- const sdk={pipeline:async commands=>{const result=await pipeline(commands);if(commands[0][5]==='dispatch'&&delay)await new Promise(resolve=>setTimeout(resolve,delay));return result;}};
+ const delay=cfg.case==='healthy'||cfg.case==='consumer_delay'||cfg.case==='lost_ack'?0:cfg.case==='moving_offset'?606:650;
+ const sdk={pipeline:async commands=>{const result=await pipeline(commands);if(commands[0][5]==='dispatch'&&cfg.case==='lost_ack')throw Error('Synthetic committed dispatch ACK lost');if(commands[0][5]==='dispatch'&&delay)await new Promise(resolve=>setTimeout(resolve,delay));return result;}};
  const began=performance.now(),permission=await budget.markResendFallbackDispatched(held.claim,sdk),elapsed=performance.now()-began;
  if(cfg.case==='consumer_delay')await new Promise(resolve=>setTimeout(resolve,650));
  // The consumer is deliberately minimal: the real transport has its own
@@ -116,7 +116,8 @@ try{
   const response=await fetch(cfg.base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({syntheticCase:cfg.case,reset})});
   assert.equal(response.status,200);postAt=(await response.json()).at;posts++;
  }
- const state=await one(['HMGET',keys[0],'held','spent']);assert.deepEqual(state,['1','0']);
+ const state=await one(['HMGET',keys[0],'held','spent']);assert.deepEqual(state,[permission.status==='dispatch'?'1':'0','0']);
+ if(cfg.case==='lost_ack')assert.equal(await one(['HGET',keys[1],'state']),'released');
  if(cfg.case==='healthy'){assert.equal(posts,1);assert.ok(postAt<reset);}
  else if(cfg.case==='large_offset'){assert.equal(posts,0);}
  else if(cfg.unsafe){assert.equal(posts,1);assert.ok(postAt>=reset);}
@@ -324,7 +325,7 @@ def main():
                 guard = " || performance.now() >= sendBeforeMonotonicMs"
                 assert source.count(guard) == 1
                 unsafe.write_text(source.replace(guard, ""))
-                for red, cases in [(False, ["frozen", "moving_offset", "large_offset", "consumer_delay", "healthy"]),
+                for red, cases in [(False, ["frozen", "moving_offset", "large_offset", "consumer_delay", "healthy", "lost_ack"]),
                                    (True, ["frozen", "moving_offset", "consumer_delay"])]:
                     for case in cases:
                         config = {"module": str(unsafe if red else actual), "port": port,
@@ -432,7 +433,7 @@ def main():
         for before_expiry in (True, False):
             acc = account(); initialize(acc, cap=1)
             saved = call(acc, "partial-cancel", cap=1)
-            tail = "redis.call('PEXPIREAT',KEYS[2],expiry)\n redis.call('HINCRBY',KEYS[1],'held',-units)\n return {'released'}"
+            tail = "redis.call('PEXPIREAT',KEYS[2],expiry)\n if not closed then redis.call('HINCRBY',KEYS[1],'held',-units) end\n return {'released'}"
             assert script.count(tail) == 1
             replacement = "error('synthetic cancel interruption'); " + tail if before_expiry else tail.replace("redis.call('HINCRBY'", "error('synthetic cancel interruption'); redis.call('HINCRBY'", 1)
             try:
@@ -517,7 +518,7 @@ def main():
             acc = account(); initialize(acc)
             saved = call(acc, "partial-settlement")
             claim_call(acc, "partial-settlement", saved, "dispatch")
-            needle = "redis.call('HINCRBY',KEYS[1],'held',-units)\nreturn {'settled',outcome}" if before_release else "redis.call('PEXPIREAT',KEYS[2],expiry)\nif outcome=='accepted'"
+            needle = "if not closed then redis.call('HINCRBY',KEYS[1],'held',-units) end\nreturn {'settled',outcome}" if before_release else "redis.call('PEXPIREAT',KEYS[2],expiry)\nif outcome=='accepted'"
             assert script.count(needle) == 1
             interrupted = script.replace(needle, "error('synthetic settlement interruption'); " + needle, 1)
             try:
@@ -543,6 +544,7 @@ def main():
         claim_call(acc, "accepted-before-reset", first, "dispatch")
         assert claim_call(acc, "accepted-before-reset", first, "settle", "accepted") == ["settled", "accepted"]
         pending = call(acc, "pending-reset", used=2, units=3, period_start=old_start, period_reset=old_reset)
+        idle = call(acc, "idle-reset", used=2, units=1, period_start=old_start, period_reset=old_reset)
         claim_call(acc, "pending-reset", pending, "dispatch")
         claim_call(acc, "pending-reset", pending, "settle", "unknown")
         while redis_now() <= old_reset:
@@ -552,10 +554,19 @@ def main():
         assert call(acc, "new-no-proof", **next_period) == ["denied", "unreviewed_reset"]
         assert int(client.command("HGET", keys(acc, "new-no-proof")[0], "spent")) == 2
         assert call(acc, "new-with-proof", prior=[old_start, old_reset, 5, old_reset], **next_period)[0] == "reserved"
-        assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "seenUsed", "spent", "held")] == [4, 0, 4]
-        assert claim_call(acc, "pending-reset", pending, "settle", "accepted") == ["settled", "accepted"]
-        assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "spent", "held")] == [3, 1]
-        print("PASS: only a reviewed consecutive provider period resets settled spend; unresolved holds carry over")
+        assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "seenUsed", "spent", "held")] == [4, 0, 1]
+        # Closure accounts for every prior attempt. A late old claim must
+        # never consume or release a new period's reservation.
+        assert claim_call(acc, "pending-reset", pending, "settle", "accepted") == ["denied", "closed_period"]
+        assert claim_call(acc, "pending-reset", pending, "settle", "confirmed_not_accepted") == ["settled", "confirmed_not_accepted"]
+        assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "spent", "held")] == [0, 1]
+        assert claim_call(acc, "pending-reset", pending, "settle", "confirmed_not_accepted") == ["already_settled", "confirmed_not_accepted"]
+        assert int(client.command("HGET", keys(acc, "new-with-proof")[0], "held")) == 1
+        assert claim_call(acc, "idle-reset", idle, "cancel") == ["released"]
+        assert claim_call(acc, "idle-reset", idle, "cancel") == ["already_released"]
+        assert int(client.command("HGET", keys(acc, "new-with-proof")[0], "held")) == 1
+        assert call(acc, "idle-reset", prior=[old_start, old_reset, 5, old_reset], **next_period) == ["denied", "closed_period"]
+        print("PASS: reviewed closure releases old holds; late old settlements cannot alter the new period")
 
         acc = account()
         assert call(acc, "bootstrap", "initialize", cap=50_001) == ["denied", "arguments"]

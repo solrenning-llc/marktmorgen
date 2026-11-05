@@ -22,6 +22,12 @@ function helpFocusInsetSource(){
  return css;
 }
 
+function topicFocusInsetSource(){
+ const css=readFileSync(new URL("../../app/platform/[slug]/focus-scroll.css",import.meta.url),"utf8");
+ assert.match(css,/\[data-topic-focus-inset\]\s+a\.card\s*\{[^}]*scroll-margin-block:\s*3rem/s,"linked topic cards keep native-focus clearance");
+ return css;
+}
+
 /** Disposable documents exercise the real helper with native keys, without app writes. */
 export async function checkPublicKeyboardFocusRegressions({browser}) {
  const context=await browser.newContext({viewport:{width:390,height:900},serviceWorkers:"block"});
@@ -71,6 +77,17 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
     return node.classList.contains("is-in")&&style.opacity==="1"&&style.transform==="none";
    },undefined,{timeout:3000});
   }finally{await tall.close();}
+  // Firefox left a 457.2px topic card at top 493.08px in a 720px viewport,
+  // putting its center 1.68px below the viewport. Exercise the page-scoped
+  // real stylesheet without assigning focus or scrolling from script.
+  const tallCard=await context.newPage();
+  try{
+   const topicCss=topicFocusInsetSource();
+   await tallCard.setViewportSize({width:1280,height:720});
+   await tallCard.setContent(`<style>${style}${topicCss}.card{display:block;height:457.2px}</style><div style="height:4218px"></div><div data-topic-focus-inset><a class="card" href="#end">A tall linked topic card</a></div><div id="end">End</div>`);
+   assert.equal(await tallCard.locator("a.card").evaluate(node=>getComputedStyle(node).scrollMarginBlock),"48px","real topic-card focus inset is active");
+   await checkPublicKeyboardCycle({page:tallCard,path:"real-topic-tall-card",is});
+  }finally{await tallCard.close();}
   for(const color of ["rgb(0, 0, 0)","rgb(255, 255, 0)","rgba(0, 0, 0, 0)"]){
    const radio=await context.newPage();
    try{
@@ -83,6 +100,6 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
     else await journey();
    }finally{await radio.close();}
   }
-  console.log("AX2_KEYBOARD_FOCUS_REGRESSIONS:"+JSON.stringify({coveredThirteenthRejected:true,clearThirteenPassed:true,wrappedInlinePassed:true,tallSectionRevealed:true,opaqueRadiosPassed:2,transparentRadioRejected:true,scope:"Native focus and fragment-center hit tests in disposable documents, including the real reveal script/CSS; not a visual contrast or full obstruction audit."}));
+  console.log("AX2_KEYBOARD_FOCUS_REGRESSIONS:"+JSON.stringify({coveredThirteenthRejected:true,clearThirteenPassed:true,wrappedInlinePassed:true,tallSectionRevealed:true,tallTopicCardPassed:true,opaqueRadiosPassed:2,transparentRadioRejected:true,scope:"Native focus and fragment-center hit tests in disposable documents, including the real reveal and page-scoped focus CSS; not a visual contrast or full obstruction audit."}));
  } finally {await context.close();}
 }

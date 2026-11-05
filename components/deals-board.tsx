@@ -206,8 +206,17 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   // The question stays open only while its deal is on the board where it was asked: hidden by a search or a filter, the agenda
   // shown, another pipeline chosen or the deal moved, it closes for good, so it never comes back by itself on the card (3.2.5).
   // Cleared while rendering, never shown for a frame: focus is not inside it then (it is on the control that hid or moved the deal).
-  const confirmingId = confirming && view === "board" && visibleDeals.some(d => d.id === confirming.id && d.stage === confirming.stage) ? confirming.id : null;
+  // The right to change taken away (a refresh with this pipeline now view only) closes it for good too (Codex review of #2295).
+  const confirmingId = confirming && canChange && view === "board" && visibleDeals.some(d => d.id === confirming.id && d.stage === confirming.stage) ? confirming.id : null;
   if (confirming && !confirmingId) setConfirming(null);
+  // When the right to change goes while focus is on a control it removes (the question, Remove, Edit), focus would fall to the
+  // page itself: it goes to the notice that says why, never to nothing (2.4.3). Focus the person put elsewhere stays there.
+  const couldChange = useRef(canChange);
+  useLayoutEffect(() => {
+    const lost = couldChange.current && !canChange;
+    couldChange.current = canChange;
+    if (lost && (!document.activeElement || document.activeElement === document.body)) document.getElementById("deal-board-view-only")?.focus();
+  }, [canChange]);
   const selectionChanged = !!search || responsible !== "all" || filter !== "all" || order !== (view === "agenda" ? "due" : "current");
   const open = totals.filter((t) => t.stage.kind === "open");
   const won = totals.filter((t) => t.stage.kind === "won");
@@ -509,7 +518,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
           ) : null}
         </div>
         {/* Said once, at the top of the board, for a pipeline this person may only see (639 [GL7](7)); a refused change says why too. */}
-        {!canChange ? <p id="deal-board-view-only" className="notice mt-4">{VIEW_ONLY_WORDS}</p> : null}
+        {!canChange ? <p id="deal-board-view-only" tabIndex={-1} className="notice mt-4">{VIEW_ONLY_WORDS}</p> : null}
 
         <div className="mt-5" role="group" aria-label="Pipelines">
           <div className="flex flex-wrap items-center gap-2">

@@ -394,6 +394,20 @@ try {
   await page.waitForFunction(() => document.activeElement?.id === "deal-stage-dealaaaaa1", null, { timeout: 5000 }).catch(() => {});
   is("moved with the question open: the question is closed in its new stage, and focus is on its stage select", [...await question("dealaaaaa1"), await active(), await page.locator("section:has(#deal-column-talk00) #deal-stage-dealaaaaa1").count()], [0, "false", null, "deal-stage-dealaaaaa1", 1]);
 
+  // Codex review of #2295 (LOW): the right to change the pipeline taken away while the question is open closes it for good,
+  // so it does not come back by itself when the right is given back; focus goes to the board's notice, never to nothing.
+  await mount(world());
+  await press("deal-remove-dealaaaaa1");
+  await page.waitForFunction(() => document.activeElement?.id === "deal-confirm-dealaaaaa1" || !!document.activeElement?.closest("#deal-confirm-dealaaaaa1"));
+  await page.evaluate(() => { window.harness.world.viewOnly = ["sales0"]; window.harness.refresh(); });
+  await page.waitForFunction(() => !document.getElementById("deal-remove-dealaaaaa1"));
+  await settled();
+  is("the right to change taken away with the question open: the question is gone and focus is on the view-only notice", [await page.locator("#deal-confirm-dealaaaaa1").count(), await active()], [0, "deal-board-view-only"]);
+  await page.evaluate(() => { window.harness.world.viewOnly = []; window.harness.refresh(); });
+  await page.waitForFunction(() => !!document.getElementById("deal-remove-dealaaaaa1"));
+  await settled();
+  is("given back: the question stays closed", await question("dealaaaaa1"), [0, "false", null]);
+
   // 639 [GL7](7): a pipeline this person may only see says so once, at the top of the board.
   await mount(world({ viewOnly: ["sales0"] }));
   is("the view-only notice is shown once, at the top of the board, and no change control is drawn", [await page.evaluate(() => document.body.innerText.split("You can see this pipeline but not change it.").length - 1), await page.locator("#deal-board-view-only").count(), await page.locator('[id^="deal-remove-"], [id^="deal-edit-"], #deal-new').count()], [1, 1, 0]);

@@ -32,7 +32,7 @@ for (const [label, saved] of [
   const button = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
   is(`${label} keeps one server-rendered control`, button.length > 0, true);
   is(`${label} says its handler is not ready`, button.includes('aria-disabled="true"'), true);
-  is(`${label} keeps its accessible name`, button.includes(`aria-label="${label}"`), true);
+  is(`${label} gives voice control the visible Loading name`, button.includes("aria-label="), false);
   is(`${label} visibly says Loading before hydration`, />Loading…<\//.test(button), true);
   is(`${label} does not draw a false open editor`, html.includes("data-socials-editor"), false);
 }

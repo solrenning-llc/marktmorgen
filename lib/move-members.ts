@@ -22,7 +22,7 @@ import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
+import { namedPriceGone, namedPriceOffered, withInvitedOption } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { onAccount } from "@/lib/stripe-account";
 import { storeBase } from "@/lib/purchase-email";
@@ -168,7 +168,9 @@ export async function inviteEmail(store: Store, field: string, now = Date.now())
   if (!store.statsId) return null;
   const invite = await readInvite(store.statsId, field);
   if (!invite || invite.kept) return null;
-  const product = await readListing(store, invite.p);
+  // The price their invitation names, even one the creator has since taken off sale (642 [WG2]): theirs to keep.
+  const listing = await readListing(store, invite.p);
+  const product = listing ? withInvitedOption(listing, invite.o) : null;
   if (!product?.recurring || !canSellProduct(store, product)) return null;
   const price = priceWords(store, product, invite.o);
   if (!price) return null;
@@ -197,7 +199,8 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
   if (!invite || invite.kept) return null;
   const first = firstChargeAt(invite.r, now);
   if (!first) return null;
-  const product = await readListing(store, invite.p);
+  const listing = await readListing(store, invite.p);
+  const product = listing ? withInvitedOption(listing, invite.o) : null;
   if (!product?.recurring || !canSellProduct(store, product)) return null;
   const price = priceWords(store, product, invite.o);
   if (!price) return null;
@@ -275,7 +278,11 @@ export async function openMove(
 ): Promise<MoveOpen> {
   const invite = await readMove(store, productId, token);
   if (!invite) return { ok: false, reason: "expired" };
-  const product: Product | null = await readProduct(store, productId);
+  const stored: Product | null = await readProduct(store, productId);
+  // A price the creator has since taken off sale stays open to this member alone while the invitation is not yet
+  // kept (642 [WG2], C4-20261105-1945-C2-2): the checkout below gets the product with that option back on sale;
+  // every other path reads the product as it is, and refuses it.
+  const product: Product | null = stored && !invite.kept ? withInvitedOption(stored, invite.o) : stored;
   if (!product?.recurring) return { ok: false, reason: "unavailable" };
   // The option they had. One the creator has since taken away, even the last,
   // is not swapped for another or for the product's own price: the page says

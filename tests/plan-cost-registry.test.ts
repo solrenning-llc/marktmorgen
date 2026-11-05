@@ -30,6 +30,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
+import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
@@ -45,6 +47,10 @@ import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/l
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
+import { affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
+import { MAX_POST_PAGES } from "@/lib/store-sitemap";
+import { affiliateLoadRead, affiliatePageRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
+import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
 import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
@@ -230,6 +236,29 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // An affiliate's own page and the store's map take requests sized by what they read (lib/public-read-rules.ts, 4 November 2026):
+  // at every size, from an empty program or store to the largest, the requests cost more than the reads.
+  const sizes = [0, 1, 15, 16, 17, 31, 32, 33, 149, 150, 151, 500, 1_000, 5_000, 50_000, 1_000_000];
+  for (const fields of sizes) for (const rows of [0, 1, 16, 17, 200, 700, 5_000]) for (const listings of [0, 1, 32, 33, 1_000, 2_000]) for (const stripePages of [0, 1, 3, 13, 23, 40]) {
+    const size = { fields, rows, listings, stripePages };
+    assert.ok(affiliatePageUnits(size) * laterPageCost() >= affiliatePageRead(size), `affiliate book ${JSON.stringify(size)}: ${affiliatePageUnits(size)} x ${laterPageCost()} < ${affiliatePageRead(size)}`);
+  }
+  for (const sliceBytes of [0, 1, 65_536, 65_537, 131_072, 131_073, 1_000_000, 8_000_000]) for (const listings of [0, 1, 32, 33, 2_000]) for (const codes of [null, 0, 1, 150, 151, 5_000]) {
+    const load = { sliceBytes, listings, codes };
+    assert.ok(affiliateLoadUnits(load) * laterPageCost() >= affiliateLoadRead(load), `affiliate load ${JSON.stringify(load)}: ${affiliateLoadUnits(load)} x ${laterPageCost()} < ${affiliateLoadRead(load)}`);
+  }
+  for (const listings of [0, 1, 31, 32, 33, 100, MAX_PRODUCTS]) {
+    // Somebody not signed in: the page itself is the request isResting counts, and its listings take listingUnits more.
+    assert.ok(listingUnits(listings) * laterPageCost() >= publicListingsRead(listings), `affiliate terms, ${listings} listings`);
+    for (const carried of [0, 1, 999, 1_000, 1_001, MAX_PRODUCTS]) for (const postPages of [0, 1, 4, 5, 6, MAX_POST_PAGES]) {
+      const size = { listings, carried, postPages };
+      assert.ok(sitemapUnits(size) * laterPageCost() >= sitemapRead(size), `store map ${JSON.stringify(size)}: ${sitemapUnits(size)} x ${laterPageCost()} < ${sitemapRead(size)}`);
+    }
+  }
+  const typicalBook = { fields: 50 + 50 + 1_000 + 40 + 20, rows: 5, listings: 20, stripePages: 23 };
+  const typicalLoad = { sliceBytes: 12_000, listings: 3, codes: null };
+  console.log(`an affiliate program's book worked out: ${affiliatePageUnits(typicalBook)} requests for 50 affiliates and 1,000 sales ($${affiliatePageRead(typicalBook).toFixed(6)}), at most once a day; each other load ${affiliateLoadUnits(typicalLoad)} ($${affiliateLoadRead(typicalLoad).toFixed(6)}), ${affiliateLoadUnits({ ...typicalLoad, codes: 5 })} with codes; at $${laterPageCost().toFixed(6)} a request`);
+  console.log(`a store's map: ${sitemapUnits({ listings: 0, carried: 20, postPages: 1 })} requests for 20 products and 12 posts ($${sitemapRead({ listings: 0, carried: 20, postPages: 1 }).toFixed(6)}), ${sitemapUnits({ listings: MAX_PRODUCTS - 50, carried: 50, postPages: MAX_POST_PAGES })} at the largest ($${sitemapRead({ listings: MAX_PRODUCTS - 50, carried: 50, postPages: MAX_POST_PAGES }).toFixed(6)})`);
   // An opening of a buyer's orders page is ORDERS_OPEN_UNITS public requests before anything is read: more than its time, its fixed reads and
   // its page cost, with ORDERS_SPARE (a tenth) to spare, the page measured as it is sent (C3-80, C3-83); and each request its meter takes
   // pays for ORDERS_UNIT_COMMANDS commands, a listing counted as ORDERS_LISTING_COMMANDS.
@@ -259,6 +288,15 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
+  // Making a store's count of its tasks again reads every task once, after tasksRecountUnits(people) studio requests are taken:
+  // more than four commands and what that many people can keep cost, at a whole studio request's shape (lib/crm.ts).
+  for (const people of [1, 3, 49, 50, 51, MAX_STORE_TASKS]) {
+    const read = request("studio", 4, Math.min(people * MAX_PERSON_TASKS, MAX_STORE_TASKS) * (TASK_KEPT_BYTES + 64));
+    assert.ok(tasksRecountUnits(people) * UNIT_COST.studio >= read, `${people} people: ${tasksRecountUnits(people)} x ${UNIT_COST.studio} < ${read}`);
+    assert.ok(tasksRecountUnits(people) <= TASKS_RECOUNT_UNITS);
+  }
+  assert.ok(TASKS_RECOUNT_UNITS * UNIT_COST.studio >= request("studio", 4, TASKS_RECOUNT_BYTES));
+  console.log(`a recount of a store's tasks: ${TASKS_RECOUNT_BYTES} bytes at most, ${TASKS_RECOUNT_UNITS} studio requests at most, once a store`);
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
 });

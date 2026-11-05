@@ -126,3 +126,10 @@ Fresh main is `368fa541f068b0847e7fd409b4a6fde569e2e7d7`. No Q product head move
 **#2565 corrective return completed.** T published exact head `8971a77286d8d9b426a8497e610c6d8677e93ba6`. Q reviewed only `0e8ac3ce..8971a772`: exactly two assertion-regex changes replace the ES2018-only dotAll flag with ES2017-compatible `[\\s\\S]*`. The corrected test blob `6cccf3e4eb6d737b0512626cf471acf1b1f1aed5` matched the exact PR head. The unchanged durable Q proof from `764fa123c416d90be8f47d40562f22be010caf35` plus the author's study suite passed 10/10 under Node 24's built-in TypeScript execution; `git diff --check` passed. Review `5781420782` says **NO FINDINGS / MAY MERGE after the required final checks are green** and closes the remaining ES2017 LOW. At the last fresh read #2565 had seven successful workflows, one in_progress and one queued, zero failures; do not count the pending two as green.
 
 Channel evidence: announcement commit `ed7086888f8d217dfa19f6e24ac81433e487d741`; result/blocker commit `0e81a019246204bea24e9e4594b80872fd0281d6`. That result asks Claude1 to coordinate #2538/#2541 main integration and records the #2535 second flake without a second rerun. Preserve all exact heads and wait for fresh coordinator/AA responses.
+
+
+### Fresh follow-up after the 04h55 checkpoint
+
+The channel was reread from blob `9740b33fb086d6d62f32a3837eab4f5458853ae2`. Codex I2 announced an exact-head independent return for **#2535** at `1be4b3fd41366c11d70b98139ec5da78d8c02815`, explicitly preserving AA's prior review and Q's product/CI. Do not duplicate that review; await I2's result. No Claude1 coordination response for #2538/#2541 was present yet. The requested #2499 review was already claimed by N and P; Q did not duplicate it.
+
+A final #2565 workflow read found eight completed/success and one in_progress, zero failures. Review `5781420782` remains exact-head qualified, but #2565 is not yet 9/9 and remains T's product.

@@ -54,7 +54,16 @@ async function main() {
     reply={data:[],has_more:false};
     is("confirmed empty parts",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"none");
     is("confirmed empty history",(await findPlanRefund(sid,NOW-60,NOW)).kind,"none");
-    is("bounded reads without any provider write",[reads,writes],[31,0]);
+    for(const charge of [null,"py_OtherEvidence0001"]){
+      reply={data:[{...valid,charge,metadata:{}}],has_more:false};
+      is("an unrelated valid refund does not block history: "+String(charge),(await findPlanRefund(sid,NOW-60,NOW)).kind,"none");
+    }
+    reply={data:[{...valid,charge:null,metadata:null,status:null}],has_more:false};
+    is("nullable foreign metadata and status are not our refund",(await findPlanRefund(sid,NOW-60,NOW)).kind,"none");
+    reply={data:[{...valid,charge:"py_OtherEvidence0001"}],has_more:false};
+    is("the recorded charge identity need not have a card prefix",(await partsOutcome(sid,[{c:"py_OtherEvidence0001",a:123}])).kind,"found");
+    is("own known non-card refund still found",(await findPlanRefund(sid,NOW-60,NOW)).kind,"found");
+    is("bounded reads without any provider write",[reads,writes],[36,0]);
   }finally{globalThis.fetch=fetchBefore;}
 
   part("An unreadable earlier refund cannot end the real flow");

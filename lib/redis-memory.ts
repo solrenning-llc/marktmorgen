@@ -113,6 +113,13 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/course.ts READ_COURSE_WITHIN: the record only while it is no larger than the bound.
+        if (key.startsWith("-- marktmorgen:course-read-within:v1\n") && args[0] === "1" && args.length === 3) {
+          if (Number(this.run(["STRLEN", args[1]]) ?? 0) > Number(args[2])) return [0];
+          const held = this.run(["GET", args[1]]);
+          // Redis 7.4 sends a missing record as [1, null] (Codex A3's run of this exact script on #1933).
+          return [1, typeof held === "string" ? held : null];
+        }
         // CX-67: existing exposure reservation used by held-store company work.
         if (key.includes("local receiptField='case:'..ARGV[3]..':'..ARGV[4]") && args[0] === "1" && args.length === 9) {
           const [, ledger, review, binding, scope, id, rawCharge, rawLimit, rawFunded] = args;

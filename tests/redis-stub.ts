@@ -1,7 +1,12 @@
 import { MemoryRedis } from "@/lib/redis-memory";
+import { noteRead } from "@/lib/read-meter";
 export const store = new MemoryRedis();
 export const isRedisConfigured = () => true;
-export const redisPipeline = (commands: (string | number)[][]) => store.pipeline(commands);
+export const redisPipeline = async (commands: (string | number)[][]) => {
+  const answers = await store.pipeline(commands);
+  noteRead(commands.length, answers);
+  return answers;
+};
 /** Moves the test clock, for a cooldown that has to be outlasted. */
 export const advance = (ms: number) => store.advance(ms);
 /**

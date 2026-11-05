@@ -526,6 +526,42 @@ export async function readCourse(id: string): Promise<Course | null> {
   return parseCourse(raw);
 }
 
+/**
+ * The most bytes a course's record is read at by an agent (the MCP tools get_course_outline and get_lesson): its
+ * modules and lessons are bounded (MAX_MODULES, MAX_LESSONS, MAX_LESSON_FILES), but a file's name is not, so a record
+ * past this is not read at all (READ_COURSE_WITHIN), and the agent is told so; what is set aside for the read is
+ * never less than what it reads (Codex G2 on #1933).
+ */
+export const COURSE_READ_MOST_BYTES = 1_000_000;
+/** Reads a course's record only while it is no larger than ARGV[1] bytes: {1, record}, {1, nil} (sent as [1, null]) when there is none, or {0} when it is larger. Modelled by lib/redis-memory.ts. */
+export const READ_COURSE_WITHIN = `-- marktmorgen:course-read-within:v1
+if redis.call('STRLEN', KEYS[1]) > tonumber(ARGV[1]) then return {0} end
+return {1, redis.call('GET', KEYS[1])}`;
+/** What READ_COURSE_WITHIN runs inside, which Upstash bills one by one beside the EVAL. */
+export const READ_COURSE_WITHIN_CALLS = 2;
+/** A course's record too large for an agent to read at once (COURSE_READ_MOST_BYTES). */
+export class CourseTooLarge extends Error {
+  constructor() {
+    super("This course is too large for an assistant to read at once. Open it in your studio instead.");
+    this.name = "CourseTooLarge";
+  }
+}
+
+/** One course, read only within COURSE_READ_MOST_BYTES (CourseTooLarge past it); null when there is none. */
+export async function readCourseWithin(id: string): Promise<Course | null> {
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(id)) return null;
+  const reply: unknown = await redisPipeline([["EVAL", READ_COURSE_WITHIN, 1, courseKey(id), COURSE_READ_MOST_BYTES]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  if (Array.isArray(answer) && answer.length === 1 && answer[0] === 0) throw new CourseTooLarge();
+  // Redis answers a missing record [1, null] and a kept one [1, "..."]: anything else is not known, never "no course"
+  // (Codex A3 on #1933), and a kept record that is not a course is not "no course" either.
+  if (!Array.isArray(answer) || answer.length !== 2 || answer[0] !== 1 || (answer[1] !== null && typeof answer[1] !== "string")) throw new Error("the course could not be read");
+  if (answer[1] === null) return null;
+  const course = parseCourse(answer[1]);
+  if (!course) throw new Error("the course could not be read");
+  return course;
+}
+
 /** Several at once, for the pages that show every course of a store. */
 export async function readCourses(ids: string[]): Promise<Map<string, Course>> {
   const found = new Map<string, Course>();

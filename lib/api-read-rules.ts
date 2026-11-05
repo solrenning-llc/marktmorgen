@@ -30,7 +30,16 @@
  * every size. Pure: no reads here.
  */
 import { MAX_LESSONS } from "@/lib/course";
-import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
+import { MAX_PAGE_BYTES, MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
+import { AB_RECORD_BYTES, MAX_VERSIONS } from "@/lib/sales-page-store";
+import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
+import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
+import { COURSE_READ_MOST_BYTES, MAX_BODY_LENGTH, READ_COURSE_WITHIN_CALLS } from "@/lib/course";
+import { MAX_QUESTIONS } from "@/lib/quiz";
+import { MAX_TASK_PROMPT } from "@/lib/assignment-rules";
+import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
+import { SHARE_LIMITS } from "@/lib/funnel-share-rules";
+import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, LIVE_READ_MOST, STATS_DAYS } from "@/lib/stats";
 import { LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
 import { MAX_FLOWS } from "@/lib/flow-limits";
@@ -427,3 +436,96 @@ export const CODE_SENT_BYTES = 1_024;
 export function codesWork(): ReadWork {
   return { commands: 0, bytes: 0, sent: MAX_CODES * CODE_SENT_BYTES, stripePages: 1, roundTrips: 0 };
 }
+
+// ---------------------------------------------------------------- the MCP tools of the creator's own records (631 [AA1])
+
+/** A product's cached card as kept for searching (title, price, page), read whole: a review ceiling, as LISTING_BYTES. */
+export const CARD_READ_BYTES = 1_024;
+/** One page of list_bundle_choices as sent: a product each, PRODUCT_SENT_BYTES, and the note. */
+export const BUNDLE_PAGE_SENT_BYTES = 20 * PRODUCT_SENT_BYTES + 4_096;
+/**
+ * list_bundle_choices at its most (lib/bundle-choices.ts): one HMGET of SEARCH_STRETCH (100) cached cards, then at
+ * most PICKER_PAGE (20) listings, in two trips (Codex G2 on #1933: twenty listings read on the door's one request).
+ */
+export const BUNDLE_CHOICES_MOST: ReadWork = { commands: 1 + 20, bytes: 100 * CARD_READ_BYTES + 20 * LISTING_BYTES, sent: BUNDLE_PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };
+/** An import's record (lib/imports.ts), read whole: its counts, kind, source, file name and tags; a review ceiling. */
+export const IMPORT_JOB_BYTES = 16_384;
+/** An import as get_imports sends it, counts only. */
+export const IMPORT_SENT_BYTES = 1_024;
+/** get_imports at its most: the index (IMPORTS_LIST_SIZE, 10, ids of 64 bytes at most) and each import's record, in two trips. */
+export const IMPORTS_MOST: ReadWork = { commands: 1 + 10, bytes: 10 * 64 + 10 * IMPORT_JOB_BYTES, sent: 10 * IMPORT_SENT_BYTES + 2_048, stripePages: 0, roundTrips: 2 };
+
+/**
+ * A record of text read whole, as the REST API answers it: JSON, in which a character may be escaped to six bytes.
+ * What a record of `chars` characters at its most can weigh read.
+ */
+export const readAtMost = (chars: number) => 6 * chars;
+/** A product's long description read (lib/product-about.ts, MAX_ABOUT_LENGTH characters). */
+export const ABOUT_READ_BYTES = readAtMost(MAX_ABOUT_LENGTH);
+/** A sales page read (lib/sales-page-store.ts): it is never kept longer than MAX_STORED_PAGE_BYTES characters. */
+export const PAGE_READ_BYTES = readAtMost(MAX_STORED_PAGE_BYTES);
+/** A sales page as get_sales_page and get_page_versions send it: blocks of a page of MAX_PAGE_BYTES, each character escaped. */
+export const PAGE_SENT_BYTES = readAtMost(MAX_PAGE_BYTES);
+/** get_product_description at its most: the product's listing (when the store's record does not hold it), then its description. */
+export const PRODUCT_TEXT_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + ABOUT_READ_BYTES, sent: ABOUT_READ_BYTES + 4_096, stripePages: 0, roundTrips: 2 };
+/** get_sales_page at its most: the listing, then the page. */
+export const SALES_PAGE_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + PAGE_READ_BYTES, sent: PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };
+/** get_page_test at its most: the listing, the page, then the test's counts (AB_RECORD_BYTES). */
+export const PAGE_TEST_MOST: ReadWork = { commands: 3, bytes: LISTING_BYTES + PAGE_READ_BYTES + readAtMost(AB_RECORD_BYTES), sent: 8_192, stripePages: 0, roundTrips: 3 };
+/** get_page_reading at its most: the listing, then the page and how far it is read (DEPTH_RECORD_BYTES) side by side. */
+export const PAGE_READING_MOST: ReadWork = { commands: 3, bytes: LISTING_BYTES + PAGE_READ_BYTES + readAtMost(DEPTH_RECORD_BYTES), sent: 64_000, stripePages: 0, roundTrips: 2 };
+/** get_page_versions at its most: the listing, then the MAX_VERSIONS versions kept, each a page at its most. */
+export const PAGE_VERSIONS_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + MAX_VERSIONS * PAGE_READ_BYTES, sent: PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };
+/** A course's record read by an agent, at its most (lib/course.ts, COURSE_READ_MOST_BYTES), a JSON text escaped once more. */
+export const COURSE_READ_BYTES = 2 * COURSE_READ_MOST_BYTES;
+/** get_course_outline at its most: the listing, then the course read within its bound (an EVAL and the two calls inside). */
+export const COURSE_OUTLINE_MOST: ReadWork = { commands: 2 + READ_COURSE_WITHIN_CALLS, bytes: LISTING_BYTES + COURSE_READ_BYTES, sent: COURSE_READ_BYTES, stripePages: 0, roundTrips: 2 };
+/**
+ * get_lesson at its most: as the outline, then the lesson's text (MAX_BODY_LENGTH characters), quiz (MAX_QUESTIONS
+ * questions of a 300-character question, six 160-character choices and a 600-character explanation) and task
+ * (MAX_TASK_PROMPT characters) side by side.
+ */
+export const LESSON_TEXT_BYTES = readAtMost(MAX_BODY_LENGTH) + readAtMost(MAX_QUESTIONS * (300 + 6 * 160 + 600)) + readAtMost(MAX_TASK_PROMPT);
+export const LESSON_MOST: ReadWork = { commands: 5 + READ_COURSE_WITHIN_CALLS, bytes: LISTING_BYTES + COURSE_READ_BYTES + LESSON_TEXT_BYTES, sent: LESSON_TEXT_BYTES + 4_096, stripePages: 0, roundTrips: 3 };
+/** list_saved_blocks at its most: every saved section of a store, never more than the largest plan keeps, each MAX_SECTION_BYTES, escaped once more. */
+export const SAVED_BLOCKS_MOST: ReadWork = { commands: 1, bytes: 2 * Math.max(...Object.values(SHARE_LIMITS).map((l) => l.savedBlocks)) * MAX_SECTION_BYTES, sent: 2 * Math.max(...Object.values(SHARE_LIMITS).map((l) => l.savedBlocks)) * MAX_SECTION_BYTES, stripePages: 0, roundTrips: 1 };
+/** One view kept for the live box (lib/stats.ts): who, where from and when, with its score, as answered. */
+export const LIVE_VIEW_BYTES = 128;
+/**
+ * get_live at its most: the live box pruned and read up to LIVE_READ_MOST newest views, and today's counts (a day's
+ * fields, its visitors and the kept sales); when today's sales are not kept, a page of PayPal sales (100) and one of
+ * each of Stripe's two walks (lib/stats.ts, readToday), and the sales kept again.
+ */
+export function liveMost(sales: boolean): ReadWork {
+  return {
+    commands: 2 + 3 + (sales ? 2 + 1 : 0),
+    bytes: LIVE_READ_MOST * LIVE_VIEW_BYTES + (DAY_FIELDS_MAX + 1) * STATS_FIELD_BYTES + 1_024 + (sales ? 100 * PAYPAL_PAID_BYTES : 0),
+    sent: 16_384,
+    stripePages: sales ? 2 : 0,
+    roundTrips: 2 + (sales ? 2 : 0),
+  };
+}
+/** The product titles get_numbers_for_days names (lib/stats.ts readRange: at most 15 products), from their cached cards in one HMGET. */
+export const RANGE_PRODUCTS_NAMED = 15;
+/**
+ * get_numbers_for_days at its most, for a stretch of `span` days (lib/stats.ts readRange): each day's counts and
+ * visitors and the stretch's visitors, the same days before when they are kept, then the sales of the stretch (PayPal,
+ * SALES_PAGES pages of 100, and Stripe's two walks of SALES_PAGES pages), then the titles of the products it names.
+ */
+export function rangeMost(span: number, beforeKept: boolean, sales: boolean, stripe: boolean): ReadWork {
+  return {
+    commands: 2 * span + 1 + (beforeKept ? 1 + span : 0) + (sales ? 2 : 0) + 1,
+    bytes: span * (DAY_FIELDS_MAX + 1) * STATS_FIELD_BYTES + (beforeKept ? span * 64 + 64 : 0) + (sales ? SALES_PAGES * 100 * PAYPAL_PAID_BYTES : 0) + RANGE_PRODUCTS_NAMED * CARD_READ_BYTES,
+    sent: span * 256 + 30 * 256 + 4_096,
+    stripePages: sales && stripe ? 2 * SALES_PAGES : 0,
+    roundTrips: 1 + (sales ? 2 : 0) + 1,
+  };
+}
+/**
+ * A proposal by an agent (the MCP propose tools, lib/agent-propose.ts) at its most, before the proposals book: up to
+ * three reads of the product's listing and its long description, the book's lock taken, the book measured under it,
+ * written and the lock let go. The book's own read is admitted once measured, at what it weighs (lib/agent-book.ts).
+ */
+export const PROPOSE_MOST: ReadWork = { commands: 10, bytes: 3 * LISTING_BYTES + ABOUT_READ_BYTES, sent: 2_048, stripePages: 0, roundTrips: 9 };
+/** What reading a measured record of `bytes` adds, escaped once more as it is answered. */
+export const measuredReadWork = (bytes: number): ReadWork => ({ commands: 1, bytes: 2 * bytes, sent: 0, stripePages: 0, roundTrips: 1 });

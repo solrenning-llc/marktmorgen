@@ -1,9 +1,17 @@
-import { apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import { type Settle, apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import type { Store } from "@/lib/store";
+import { proposeDescription, proposeSummary, proposeTitle } from "@/lib/agent-propose";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
+import { PROPOSE_MOST, measuredReadWork, BUNDLE_CHOICES_MOST, COURSE_OUTLINE_MOST, RANGE_PRODUCTS_NAMED, SALES_PAGES, liveMost, rangeMost, IMPORTS_MOST, LESSON_MOST, SAVED_BLOCKS_MOST, PAGE_READING_MOST, PAGE_TEST_MOST, PAGE_VERSIONS_MOST, PRODUCT_TEXT_MOST, SALES_PAGE_MOST, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
+import { type ReadMeter, metered, withAdmission } from "@/lib/read-meter";
+import { BookReadRefused } from "@/lib/agent-book";
+import { CourseTooLarge, READ_COURSE_WITHIN_CALLS } from "@/lib/course";
 import { apiNumbers } from "@/lib/api-numbers";
 import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
+import { type Card, cachedCards } from "@/lib/catalog";
+import { LIVE_READ_MOST, rangeProblem, rangeShape, readLive, readRange, readToday, readsSales } from "@/lib/stats";
 import {
   affiliatesTool,
   buyersTool,
@@ -11,8 +19,20 @@ import {
   emailsTool,
   funnelTool,
   insightsTool,
+  liveTool,
   membershipsTool,
+  productTextTool,
   productsTool,
+  rangeTool,
+  readCourseTool,
+  readLessonTool,
+  readPageReadingTool,
+  readPageTestTool,
+  readPageVersionsTool,
+  savedBlocksTool,
+  bundleChoicesTool,
+  importsTool,
+  readSalesPageTool,
   windowOf,
 } from "@/lib/mcp-tools";
 
@@ -53,6 +73,52 @@ export async function GET() {
 /** The most one JSON-RPC message may weigh: far past any call a tool takes. */
 const MAX_RPC_BYTES = 16_000;
 
+/**
+ * A read paid for before it is made (Codex G2 on #1933): set aside at `most`; inside, a measured read (the proposals
+ * book) is admitted at what it weighs before it is read (lib/read-meter.ts, withAdmission); every database call is
+ * counted (metered), and the whole is settled at what was read and sent, before anything is sent, across what was set
+ * aside. A refusal is the one that refused, with nothing more read.
+ */
+async function payFor<T>(store: Store, most: ReadWork, read: () => Promise<T>): Promise<{ refusal: Response } | { value: T; meter: ReadMeter; settle: (work: Partial<ReadWork>) => Promise<Response | null> }> {
+  const first = apiReadUnits(most);
+  const opened = await holdMoreApi(store, first);
+  if (opened instanceof Response) return { refusal: opened };
+  const holds: { settle: Settle; units: number }[] = [{ settle: opened, units: first }];
+  let refusal: Response | null = null;
+  const admit = async (bytes: number) => {
+    const units = apiReadUnits(measuredReadWork(bytes));
+    const more = await holdMoreApi(store, units);
+    if (more instanceof Response) {
+      refusal = more;
+      return false;
+    }
+    holds.push({ settle: more, units });
+    return true;
+  };
+  const held = () => holds.reduce((n, h) => n + h.units, 0);
+  // What is due is settled across what was set aside, in order; the last takes or gives back the rest.
+  const settleAll = async (due: number) => {
+    let left = due;
+    for (const [i, h] of holds.entries()) {
+      const part = i === holds.length - 1 ? left : Math.min(left, h.units);
+      left -= part;
+      const refused = await h.settle(part);
+      if (refused) return refused;
+    }
+    return null;
+  };
+  let value: T;
+  let meter: ReadMeter;
+  try {
+    ({ value, meter } = await metered(() => withAdmission(admit, read)));
+  } catch (error) {
+    if (!(error instanceof BookReadRefused) || !refusal) throw error;
+    // Not admitted: what was read before is settled, and the refusal said.
+    return { refusal };
+  }
+  return { value, meter, settle: (work) => settleAll(settledUnits(work, held())) };
+}
+
 export async function POST(request: Request) {
   let message: Rpc;
   try {
@@ -76,6 +142,27 @@ export async function POST(request: Request) {
     });
   }
   if (method === "ping") return result(id, {});
+
+  // A tool that prepares a change needs a key that may (631 [AA1] (c)); checked instead of the plain read, so the call is counted once.
+  const asked = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
+  const prepares = { propose_product_description: proposeDescription, propose_product_title: proposeTitle, propose_product_summary: proposeSummary } as const;
+  if (method === "tools/call" && typeof asked.name === "string" && Object.hasOwn(prepares, asked.name)) {
+    const agent = await apiAgent(request, "draft");
+    if (agent instanceof Response) {
+      const refusal = (await agent.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof refusal?.message === "string" ? refusal.message : "This key cannot prepare changes for you to confirm.");
+    }
+    // Paid for before it reads, as every tool past the door: the listing and description, the book once measured.
+    const run = await payFor(agent.store, PROPOSE_MOST, () => prepares[asked.name as keyof typeof prepares](agent.store, agent.keyId, asked.arguments ?? {}));
+    const refusedWords = async (refusal: Response) => {
+      const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be done just now. Try again in a moment.");
+    };
+    if ("refusal" in run) return refusedWords(run.refusal);
+    const sent = Buffer.byteLength(JSON.stringify(run.value));
+    const refused = await run.settle({ commands: run.meter.commands, bytes: run.meter.bytes, sent, roundTrips: run.meter.trips });
+    return refused ? refusedWords(refused) : result(id, run.value);
+  }
 
   const store = await apiStore(request);
   if (store instanceof Response) {
@@ -101,6 +188,20 @@ export async function POST(request: Request) {
       return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be read just now. Try again in a moment.");
     };
     const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
+    // A tool of the creator's own records (631 [AA1]): set aside at its most before it reads anything, metered as it
+    // reads, and settled at what it read and sends before it is sent (Codex G2 on #1933). Not read, nothing is shown.
+    const paid = async (most: ReadWork, read: () => Promise<unknown>, unavailable: string | (() => string), scriptCalls = 0, stripePages = 0) => {
+      // Every database call the tool makes is counted (lib/read-meter.ts): commands, trips and the bytes answered.
+      const run = await payFor(store, most, read);
+      if ("refusal" in run) return refusedWith(run.refusal);
+      const { value, meter } = run;
+      const out = value === null || value === undefined ? said({ error: typeof unavailable === "function" ? unavailable() : unavailable }, true) : said(value);
+      // A script's own calls are billed one by one beside it: counted for each script the tool ran.
+      // Stripe's pages are not counted by the meter: the tool's most of them is settled (more, never less, than read).
+      const work = { stripePages, commands: meter.commands + (meter.commands > 0 ? scriptCalls : 0), bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: meter.trips };
+      const refused = await run.settle(work);
+      return refused ? refusedWith(refused) : result(id, out);
+    };
     const days = windowOf(params.arguments?.days);
     const windowed: Record<string, (data: StatsData) => unknown | Promise<unknown>> = {
       get_numbers: (data) => summaryOf(data),
@@ -126,6 +227,79 @@ export async function POST(request: Request) {
       const refused = await read.settle(Buffer.byteLength(answer.content[0].text));
       return refused ? refusedWith(refused) : result(id, answer);
     }
+    if (params.name === "get_live") {
+      // At most LIVE_READ_MOST views are read, said as "at least" past it; Stripe's pages counted when sales are read.
+      return paid(liveMost(readsSales(store)), async () => {
+        const [live, today] = await Promise.all([readLive(store, Date.now(), LIVE_READ_MOST), readToday(store).catch(() => null)]);
+        return liveTool(live, today);
+      }, "Your live numbers could not be read just now. Try again in a moment.", 0, readsSales(store) ? 2 : 0);
+    }
+    if (params.name === "get_numbers_for_days") {
+      const from = typeof params.arguments?.from === "string" ? params.arguments.from.slice(0, 10) : "";
+      const to = typeof params.arguments?.to === "string" ? params.arguments.to.slice(0, 10) : "";
+      const problem = rangeProblem(from, to);
+      if (problem) {
+        const words = { dates: "Send from and to as YYYY-MM-DD.", order: "from must not be after to.", future: "to must not be after today (UTC).", kept: "Days are kept for 400 days; start later." } as const;
+        return result(id, said({ error: words[problem] }, true));
+      }
+      // Paid for by the stretch asked (rangeShape): its days, the days before when kept, its sales; then only the
+      // products it names are titled (their cached cards, one HMGET), never every card of the catalog (Codex G2, #1933).
+      const shape = rangeShape(from, to);
+      const sales = readsSales(store);
+      return paid(rangeMost(shape.span, shape.beforeKept, sales, Boolean(store.stripeAccountId)), async () => {
+        const range = await readRange(store, from, to);
+        if (!range) return null;
+        const cards = range.products.length ? await cachedCards(store, range.products.slice(0, RANGE_PRODUCTS_NAMED).map((p) => p.id)).catch(() => new Map<string, Card | null>()) : new Map<string, Card | null>();
+        const titles = new Map([...cards].flatMap(([key, card]) => (card ? [[key, card.title] as [string, string]] : [])));
+        return rangeTool(range, titles);
+      }, "Your numbers could not be read just now. Try again in a moment.", 0, sales && store.stripeAccountId ? 2 * SALES_PAGES : 0);
+    }
+    if (params.name === "get_product_description" || params.name === "get_sales_page") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const page = params.name === "get_sales_page";
+      return paid(page ? SALES_PAGE_MOST : PRODUCT_TEXT_MOST, async () => (product ? await (page ? readSalesPageTool(store, product) : productTextTool(store, product)) : null), "There is no product with that id in this store. Use list_products for the ids.");
+    }
+    if (params.name === "get_course_outline" || params.name === "get_lesson") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
+      let refusal = params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids.";
+      return paid(params.name === "get_lesson" ? LESSON_MOST : COURSE_OUTLINE_MOST, async () => {
+        try {
+          return !product ? null : params.name === "get_lesson" ? (lesson ? await readLessonTool(store, product, lesson) : null) : await readCourseTool(store, product);
+        } catch (error) {
+          // A course too large to read at once is said so, and nothing of it was read.
+          if (!(error instanceof CourseTooLarge)) throw error;
+          refusal = error.message;
+          return null;
+        }
+      }, () => refusal, READ_COURSE_WITHIN_CALLS);
+    }
+    if (params.name === "get_page_test" || params.name === "get_page_reading") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const unknown = "There is no product with that id in this store. Use list_products for the ids.";
+      if (params.name === "get_page_reading") return paid(PAGE_READING_MOST, async () => (product ? readPageReadingTool(store, product) : null), unknown);
+      let refusal = unknown;
+      return paid(PAGE_TEST_MOST, async () => {
+        const tested = product ? await readPageTestTool(store, product) : { found: false as const, error: unknown };
+        if (!tested.found) refusal = tested.error;
+        return tested.found ? tested.value : null;
+      }, () => refusal);
+    }
+    if (params.name === "get_page_versions") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const raw = params.arguments?.version;
+      const version = raw === undefined || raw === null ? null : Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) < 100 ? (raw as number) : -1;
+      if (version === -1) return result(id, said({ error: "version is a whole number from the list, 0 for the newest." }, true));
+      let refusal = "There is no product with that id in this store. Use list_products for the ids.";
+      return paid(PAGE_VERSIONS_MOST, async () => {
+        const found = product ? await readPageVersionsTool(store, product, version) : { found: false as const, error: refusal };
+        if (!found.found) refusal = found.error;
+        return found.found ? found.value : null;
+      }, () => refusal);
+    }
+    if (params.name === "list_saved_blocks") return paid(SAVED_BLOCKS_MOST, () => savedBlocksTool(store), "Your saved sections could not be read just now. Try again in a moment.");
+    if (params.name === "list_bundle_choices") return paid(BUNDLE_CHOICES_MOST, () => bundleChoicesTool(store, params.arguments ?? {}), "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment.");
+    if (params.name === "get_imports") return paid(IMPORTS_MOST, () => importsTool(store), "Your imports could not be read just now. This is not an empty history; try again in a moment.");
     if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
     if (params.name === "get_emails") return answer(await emailsTool(store, charge));
     if (params.name === "get_affiliates") return answer(await affiliatesTool(store, charge));

@@ -3,6 +3,7 @@
 // Each pipeline is given up after REDIS_TIMEOUT_MS (lib/fetch-timeout.ts),
 // failing as a network failure does, so no page or job hangs on Redis.
 import { REDIS_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { noteRead } from "@/lib/read-meter";
 
 type Command = (string | number)[];
 
@@ -46,8 +47,9 @@ export async function redisPipeline(commands: Command[]): Promise<unknown[]> {
   });
   const failed = results.find((item) => item.error);
   if (failed) throw new Error(`Redis error: ${failed.error}`);
-
-  return results.map((item) => item.result);
+  const answers = results.map((item) => item.result);
+  noteRead(commands.length, answers);
+  return answers;
 }
 
 /**

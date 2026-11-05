@@ -69,8 +69,9 @@
  *                                 tries:<key> its first step's failures, left:<key> the walks it was left by,
  *                                 partial:<key> a key of it passed over, out:<key> it sits this walk out;
  *                                 unread:<list> -> the walks that could not prune a list of the company's passed over
- *   nl:closed:prune   hash        "<list>|<a store's key>" -> its sid and stats id (JSON): the members a list passed
- *                                 over still owes, pruned at the start of each walk until it reads (SG2 third review)
+ *   nl:closed:prune   hash        "<list>|<a store's key>" -> 1: a member a list passed over still owes; and
+ *                                 "marks|<a store's key>" -> every id its walk named it by (JSON), once a store,
+ *                                 whatever the lists: pruned once a gap until each list reads (SG2 third and fourth reviews)
  *
  * Reading the database is the company's, bounded by its schedule: one walk a
  * day at the most, WALK_COUNT keys a command (docs/funded-exposure-review.md).
@@ -146,6 +147,10 @@ export const PREPARE_TRIES = 5;
 export const PARKED_GAP_MS = 7 * 24 * 60 * 60 * 1000;
 /** The runs a page of the walk fails before the keys it cannot read are passed over (and said), so one key never holds every store. */
 export const PAGE_TRIES = 3;
+/** A closing store's renewals read with no status asked are read again after this, while its closing still asks. */
+export const RESCAN_MS = 4 * 7 * 24 * 60 * 60 * 1000;
+/** The times a reading of renewals starts again from its first page after Stripe refused the page it stopped at. */
+export const SCAN_RESTARTS = 3;
 /** The weekly tries of a parked store's first step, about three months: after them it is kept in line and said, no longer tried by itself. */
 export const PARKED_TRIES = 12;
 /** A stopped store's score in line: after any time the walk will run at, so never due by itself. */
@@ -810,6 +815,8 @@ type WalkState = {
   left: Map<string, number>;
   /** The lists passed over, and the walks that tried to prune them since. */
   unread: Map<string, number>;
+  /** Closing stores whose reading of renewals Stripe refused SCAN_RESTARTS times (by address). */
+  scansStuck: number;
   /** When what the company's lists owe was last pruned. */
   prunedAt: number;
   /** Stores put in the batch since the last walk began: a run that stops before beginning one leaves them to the next. */
@@ -830,7 +837,7 @@ function walkStateOf(reply: unknown): WalkState {
   if (!CURSOR.test(cursor)) return refuse("the walk's cursor");
   const phase = fields.get("phase") || "idle";
   if (phase !== "idle" && phase !== "walk" && phase !== "finish") return refuse("the walk's phase");
-  const state: WalkState = { cursor, phase, started: number("started"), pageTries: number("pagetries"), parked: 0, stopped: 0, partial: [], out: [], left: new Map(), unread: new Map(), pending: number("pending") > 0, prunedAt: number("pruned") };
+  const state: WalkState = { cursor, phase, started: number("started"), pageTries: number("pagetries"), parked: 0, stopped: 0, partial: [], out: [], left: new Map(), unread: new Map(), pending: number("pending") > 0, prunedAt: number("pruned"), scansStuck: 0 };
   for (const [name, raw] of fields) {
     const [kind, ...rest] = name.split(":");
     const ref = rest.join(":");
@@ -844,6 +851,7 @@ function walkStateOf(reply: unknown): WalkState {
     else if (kind === "out") state.out.push(ref);
     else if (kind === "left") state.left.set(ref, count());
     else if (kind === "unread") state.unread.set(ref, count());
+    else if (kind === "scanstuck") state.scansStuck += 1;
   }
   return state;
 }
@@ -903,25 +911,21 @@ function deletedByItsOwner(ref: string, now: number): Batched | null {
 async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
   const lists = [...state.unread].filter(([, tries]) => tries < UNREAD_TRIES).map(([list]) => list);
   if (!lists.length) return;
-  const [flat] = await redisPipeline([["HGETALL", PRUNE_KEY]]);
-  if (!allStrings(flat) || flat.length % 2 !== 0) refuse("what the company's lists owe");
-  const rowsOf = flat as string[];
-  const owed = new Map<string, { field: string; entry: Batched }[]>();
-  for (let i = 0; i < rowsOf.length; i += 2) {
-    const field = rowsOf[i];
-    const cut = field.lastIndexOf("|");
-    const value = json(rowsOf[i + 1]);
-    if (cut < 1 || !value || typeof value.sid !== "string" || !(value.statsId === null || typeof value.statsId === "string")) refuse("what a company's list owes");
-    const ref = field.slice(cut + 1);
-    const marks = [value!.sid as string, value!.statsId as string | null].filter((id): id is string => typeof id === "string" && id.length >= 6);
-    const list = field.slice(0, cut);
-    owed.set(list, [...(owed.get(list) ?? []), { field, entry: { ref, email: "", sid: String(value!.sid), statsId: null, name: "", handle: "", handles: [], marks, endedAt: 0, at: 0 } }]);
-  }
+  const { rows, marks } = await owedOf();
   for (const list of lists) {
-    const rows = owed.get(list) ?? [];
+    const owing = rows.get(list) ?? [];
     try {
-      await pruneIndex(list, ownersOf(rows.map((row) => row.entry)), refFree);
-      await redisPipeline([...(rows.length ? [["HDEL", PRUNE_KEY, ...rows.map((row) => row.field)]] : []), ["HDEL", WALK_KEY, `unread:${list}`]]);
+      // Every id of each store, exactly as its walk had them: one missing is unknown, never "only its key".
+      const entries = owing.map((ref) => ({ ref, email: "", sid: "", statsId: null, name: "", handle: "", handles: [], marks: marks.get(ref) ?? refuse("the ids a list owes a store by"), endedAt: 0, at: 0 }));
+      await pruneIndex(list, ownersOf(entries), refFree);
+      rows.delete(list);
+      // A store's ids go once no list owes it any more.
+      const stillOwed = new Set([...rows.values()].flat());
+      const done = owing.filter((ref) => !stillOwed.has(ref));
+      await redisPipeline([
+        ...(owing.length ? [["HDEL", PRUNE_KEY, ...owing.map((ref) => `${list}|${ref}`), ...done.map((ref) => `marks|${ref}`)]] : []),
+        ["HDEL", WALK_KEY, `unread:${list}`],
+      ]);
       state.unread.delete(list);
     } catch (error) {
       const [tries] = await redisPipeline([["HINCRBY", WALK_KEY, `unread:${list}`, 1]]);
@@ -929,6 +933,34 @@ async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
       console.error("closed-data: a list of the company's passed over still cannot be read; what it owes is kept, and it is tried again with the next walk", error);
     }
   }
+}
+
+/** What the company's lists passed over owe, read exactly: the stores each list owes, and every id of each store. */
+async function owedOf(): Promise<{ rows: Map<string, string[]>; marks: Map<string, string[]> }> {
+  const [flat] = await redisPipeline([["HGETALL", PRUNE_KEY]]);
+  if (!allStrings(flat) || flat.length % 2 !== 0) refuse("what the company's lists owe");
+  const list = flat as string[];
+  const rows = new Map<string, string[]>();
+  const marks = new Map<string, string[]>();
+  for (let i = 0; i < list.length; i += 2) {
+    const field = list[i];
+    if (field.startsWith("marks|")) {
+      let ids: unknown;
+      try {
+        ids = JSON.parse(list[i + 1]);
+      } catch {
+        ids = null;
+      }
+      if (!allStrings(ids)) refuse("the ids a list owes a store by");
+      marks.set(field.slice("marks|".length), ids as string[]);
+      continue;
+    }
+    const cut = field.lastIndexOf("|");
+    if (cut < 1 || list[i + 1] !== "1") refuse("what a company's list owes");
+    const name = field.slice(0, cut);
+    rows.set(name, [...(rows.get(name) ?? []), field.slice(cut + 1)]);
+  }
+  return { rows, marks };
 }
 
 /** What the closing job does when a store's records are gone: told by the caller (lib/plan-closing.ts), which writes it down and emails the owner. */
@@ -1075,7 +1107,8 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     // finished while it is owed and not kept (third review, I). A write that fails throws, and the page is read again.
     if (passed.length) {
       await redisPipeline([
-        ...passed.map((list) => ["HSET", PRUNE_KEY, ...walked.flatMap((entry) => [`${list}|${entry.ref}`, JSON.stringify({ sid: entry.sid, statsId: entry.statsId })])]),
+        // Every id its walk names it by (fourth review, J): a list may name a store by any of them (its list, its folder...).
+        ["HSET", PRUNE_KEY, ...passed.flatMap((list) => walked.flatMap((entry) => [`${list}|${entry.ref}`, 1])), ...walked.flatMap((entry) => [`marks|${entry.ref}`, JSON.stringify(entry.marks)])],
         ["HSET", WALK_KEY, ...passed.flatMap((list) => [`unread:${list}`, 0])],
       ]);
       for (const list of passed) state.unread.set(list, 0);
@@ -1101,7 +1134,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
           if (await recordGone(entry)) {
             await finish(entry, now);
             // Done: out of the batch, and out of line too, if taking it out after its first step failed (and it was tried again).
-            await redisPipeline([["HDEL", BATCH_KEY, ref], ["ZREM", DUE_KEY, ref], ["HDEL", WALK_KEY, triesField(ref), `left:${ref}`, `out:${ref}`]]);
+            await redisPipeline([["HDEL", BATCH_KEY, ref], ["ZREM", DUE_KEY, ref], ["HDEL", WALK_KEY, triesField(ref), `left:${ref}`, `out:${ref}`, ...entry.handles.map((h) => `scanstuck:${h}`)]]);
             state.left.delete(ref);
             report.finished += 1;
             finished = true;
@@ -1131,7 +1164,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
  * queue item 465 [MR2], reserved by Codex E) is to show closedDataLine. Whether
  * a store kept this way is let go is the owner's policy, still open.
  */
-export type ClosedDataNow = { parked: number; stopped: number; left: number; stuck: number; unread: number; unreadKept: number };
+export type ClosedDataNow = { parked: number; stopped: number; left: number; stuck: number; unread: number; unreadKept: number; owedKept: number; scansStuck: number };
 
 export async function closedDataNow(): Promise<ClosedDataNow | null> {
   if (!isRedisConfigured()) return null;
@@ -1139,8 +1172,10 @@ export async function closedDataNow(): Promise<ClosedDataNow | null> {
     const [raw] = await redisPipeline([["HGETALL", WALK_KEY]]);
     const state = walkStateOf(raw);
     const stuck = [...state.left.values()].filter((n) => n >= LEFT_WALKS).length;
-    const unreadKept = [...state.unread.values()].filter((n) => n >= UNREAD_TRIES).length;
-    return { parked: state.parked, stopped: state.stopped, left: state.left.size, stuck, unread: state.unread.size, unreadKept };
+    const kept = [...state.unread].filter(([, n]) => n >= UNREAD_TRIES).map(([list]) => list);
+    // The members the lists given up on still owe (fourth review, 3): each a closed store's member left in a list.
+    const owedKept = kept.length ? [...(await owedOf()).rows].filter(([list]) => kept.includes(list)).reduce((sum, [, refs]) => sum + refs.length, 0) : 0;
+    return { parked: state.parked, stopped: state.stopped, left: state.left.size, stuck, unread: state.unread.size, unreadKept: kept.length, owedKept, scansStuck: state.scansStuck };
   } catch {
     return null;
   }
@@ -1149,11 +1184,12 @@ export async function closedDataNow(): Promise<ClosedDataNow | null> {
 /** The owner's words for it, in the report (Portuguese, the owner's language; numbers only). Empty when nothing is kept. */
 export function closedDataLine(m: ClosedDataNow | null): string {
   if (m === null) return "Apagamento dos dados de lojas fechadas: não foi possível ler o estado neste mês; o estado é desconhecido.";
-  if (!m.parked && !m.stopped && !m.left && !m.unread) return "";
+  if (!m.parked && !m.stopped && !m.left && !m.unread && !m.scansStuck) return "";
   return [
     `Apagamento dos dados de lojas fechadas, agora: ${m.parked} lojas em nova tentativa semanal, ${m.stopped} sem novas tentativas depois de todas elas (registro e dados guardados);`,
     `${m.left} lojas que a última caminhada não terminou, ${m.stuck} delas sem novas caminhadas (dados guardados);`,
-    `${m.unread} listas da empresa que não puderam ser lidas, ${m.unreadKept} delas sem novas tentativas (membros de lojas fechadas ainda nelas).`,
+    `${m.unread} listas da empresa que não puderam ser lidas, ${m.unreadKept} delas sem novas tentativas, com ${m.owedKept} membros de lojas fechadas ainda nelas;`,
+    `${m.scansStuck} leituras de assinaturas de lojas em fechamento que o Stripe recusou ${SCAN_RESTARTS} vezes (renovações não dadas como paradas).`,
     "O que está guardado sem novas tentativas precisa de decisão do dono.",
   ].join(" ");
 }
@@ -1244,10 +1280,17 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
     // and the renewals are never "all stopped" while a page of them is unread.
     const folder = await storeFolder(storeRef(store));
     const field = `renewscan:${handle}`;
-    const [saved] = await redisPipeline([["HGET", workKey(folder), field]]);
-    if (saved !== null && typeof saved !== "string") refuse("where the closing's reading of renewals stopped");
-    if (saved === "whole") continue;
-    let page = typeof saved === "string" ? saved : "";
+    const [saved, restartsRaw] = await redisPipeline([["HGET", workKey(folder), field], ["HGET", workKey(folder), `renewrestarts:${handle}`]]);
+    if ((saved !== null && typeof saved !== "string") || (restartsRaw !== null && (typeof restartsRaw !== "string" || !/^[0-9]{1,6}$/.test(restartsRaw)))) refuse("where the closing's reading of renewals stopped");
+    // Read whole: read again only after RESCAN_MS (fourth review), while the closing still asks.
+    const wholeAt = typeof saved === "string" && saved.startsWith("whole:") ? Number(saved.slice("whole:".length)) : NaN;
+    if (Number.isFinite(wholeAt) && Date.now() - wholeAt < RESCAN_MS) continue;
+    // Stripe refused the page it stopped at SCAN_RESTARTS times: not read again by itself, never "all stopped", and said.
+    if (Number(restartsRaw ?? 0) >= SCAN_RESTARTS) {
+      out.done = false;
+      continue;
+    }
+    let page = typeof saved === "string" && !saved.startsWith("whole:") ? saved : "";
     let whole = false;
     for (let round = 0; round < RENEWAL_PAGES; round += 1) {
       if (Date.now() > until) break;
@@ -1255,8 +1298,11 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
       try {
         any = await search(`metadata['store']:'${handle}'`, page);
       } catch (error) {
-        // A page Stripe no longer knows is read again from the first, the next day.
-        if (page) await redisPipeline([["HDEL", workKey(folder), field]]);
+        // A page Stripe no longer knows is read again from the first, the next day, SCAN_RESTARTS times at the most.
+        if (page) {
+          const [, restarts] = await redisPipeline([["HDEL", workKey(folder), field], ["HINCRBY", workKey(folder), `renewrestarts:${handle}`, 1]]);
+          if (countOf(restarts, "a reading's restarts") >= SCAN_RESTARTS) await redisPipeline([["HSET", WALK_KEY, `scanstuck:${handle}`, 1]]);
+        }
         throw error;
       }
       const unknown = fresh(any.rows, (st) => !ENDED.includes(st) && !LIVE.includes(st));
@@ -1268,7 +1314,7 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
         break;
       }
     }
-    await redisPipeline([["HSET", workKey(folder), field, whole ? "whole" : page]]);
+    await redisPipeline([["HSET", workKey(folder), field, whole ? `whole:${Date.now()}` : page]]);
     if (!whole) out.done = false;
   }
   return out;

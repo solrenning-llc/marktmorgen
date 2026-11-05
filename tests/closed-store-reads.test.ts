@@ -11,12 +11,12 @@
 import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { claimHandle, storeForEmail, storeRef } from "@/lib/store";
+import { claimHandle, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { finishClosed, renewalsAskToday, renewalsLate, renewalsMayClose, RENEWAL_LATE_GAP_DAYS, RENEWAL_TRY_DAYS } from "@/lib/plan-closing";
 import { COMMAND, PREPARE_COMMANDS } from "./plan-cost-registry";
-import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PRUNE_KEY, UNREAD_TRIES, closedDataLine, closedDataNow, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PRUNE_KEY, RESCAN_MS, SCAN_RESTARTS, UNREAD_TRIES, closedDataLine, closedDataNow, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -462,13 +462,67 @@ async function main(): Promise<void> {
   });
 
   await section("Third review, 2: the owner's report line counts what is kept, numbers only", async () => {
-  await real([["HSET", "nl:closed:walk", "tries:#" + "b".repeat(32), PREPARE_TRIES + PARKED_TRIES, "left:#" + "c".repeat(32), LEFT_WALKS, "unread:nl:x:list", UNREAD_TRIES]]);
+  await real([["HSET", "nl:closed:walk", "tries:#" + "b".repeat(32), PREPARE_TRIES + PARKED_TRIES, "left:#" + "c".repeat(32), LEFT_WALKS, "unread:nl:x:list", UNREAD_TRIES], ["HSET", PRUNE_KEY, "nl:x:list|#" + "d".repeat(32), 1, "marks|#" + "d".repeat(32), JSON.stringify(["d".repeat(32)])]]);
   const now = await closedDataNow();
-  is("counted", now && [now.stopped, now.stuck, now.unreadKept], [1, 1, 1]);
+  is("counted, with the members a list given up on still owes", now && [now.stopped, now.stuck, now.unreadKept, now.owedKept], [1, 1, 1, 1]);
+  await real([["HDEL", PRUNE_KEY, "nl:x:list|#" + "d".repeat(32), "marks|#" + "d".repeat(32)]]);
   const line = closedDataLine(now);
   is("in the owner's words, with no store and no person", [line.includes("1 sem novas tentativas"), line.includes("example.com"), line.includes("#")], [true, false, false]);
   is("unknown is said as unknown", closedDataLine(null).includes("desconhecido"), true);
   await real([["HDEL", "nl:closed:walk", "tries:#" + "b".repeat(32), "left:#" + "c".repeat(32), "unread:nl:x:list"]]);
+  });
+
+  await section("Fourth review, J: what a list passed over owes is pruned by every id of the store, its list and its folder too", async () => {
+  await walkedOut([], 2);
+  later();
+  const uma = await closing("umaids");
+  const umaStore = (await storeForEmail(uma))!;
+  const folder = await storeFolder(storeRef(umaStore));
+  const step = `${umaStore.listId}|${umaStore.handle}|flowuma1|0|contact@example.com`;
+  await real([["ZADD", "nl:mail:flowq", 4102444800, step], ["SADD", "nl:orders:folders:q", folder, "someone-elses-folder"]]);
+  const odd = failing((c) => c[0] === "TYPE" && (c[1] === "nl:mail:flowq" || c[1] === "nl:orders:folders:q"), () => "not-a-kind", 1_000);
+  later();
+  for (let i = 0; i < PAGE_TRIES + 2; i += 1) await quietly(() => run().catch(() => null));
+  const marksKept = (await real([["HGET", PRUNE_KEY, `marks|${uma}`]]))[0] as string | null;
+  is("finished, what both lists owe kept with every id of it, once", [(await stateOfRef(uma)).erased !== undefined, marksKept !== null && (JSON.parse(marksKept) as string[]).includes(umaStore.listId!) && (JSON.parse(marksKept) as string[]).includes(folder)], [true, true]);
+  odd.times = odd.used;
+  later();
+  await quietly(run);
+  is("when they read: the contact's step and the folder gone, the others' kept, nothing owed", [(await real([["ZSCORE", "nl:mail:flowq", step]]))[0], (await real([["SISMEMBER", "nl:orders:folders:q", folder]]))[0], (await real([["SISMEMBER", "nl:orders:folders:q", "someone-elses-folder"]]))[0], (await real([["HLEN", PRUNE_KEY]]))[0]], [null, 0, 1, 0]);
+  });
+
+  await section("Fourth review: the renewals read with no status asked are read again after RESCAN_MS, and a page Stripe refuses has a ceiling", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_closed_store_reads_only_a_stand_in";
+  const vic = { ...(await storeForEmail(await closing("vicscan")))!, stripeAccountId: "acct_closedreads02" };
+  const work = `nl:closing:work:${await storeFolder(storeRef(vic))}`;
+  const before = globalThis.fetch;
+  let unfiltered = 0;
+  let refuse = false;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    const query = url.searchParams.get("query") ?? "";
+    if (/status:/.test(query)) return Response.json({ object: "search_result", data: [], has_more: false, next_page: null });
+    unfiltered += 1;
+    const page = url.searchParams.get("page");
+    if (refuse && page) return Response.json({ error: { message: "invalid page", type: "invalid_request_error" } }, { status: 400 });
+    return Response.json(page ? { object: "search_result", data: [], has_more: false, next_page: null } : { object: "search_result", data: [], has_more: true, next_page: "p1" });
+  }) as typeof fetch;
+  const outcome = () => stopRenewals(vic, Date.now() + 10_000).then((r) => (r.done ? "done" : "not done"), () => "refused");
+  try {
+    is("read whole once: done", [await outcome(), unfiltered], ["done", 2]);
+    is("then not read again inside RESCAN_MS", [await outcome(), unfiltered], ["done", 2]);
+    await real([["HSET", work, `renewscan:${vic.handle}`, `whole:${Date.now() - RESCAN_MS - 1}`]]);
+    is("and read again after it", [await outcome(), unfiltered], ["done", 4]);
+    await real([["HDEL", work, `renewscan:${vic.handle}`]]);
+    refuse = true;
+    const tries: string[] = [];
+    for (let i = 0; i < SCAN_RESTARTS; i += 1) tries.push(await quietly(outcome));
+    const count = unfiltered;
+    is("a page Stripe refuses: read again from the first SCAN_RESTARTS times, then never done, not read again, and said", [tries, await outcome(), unfiltered === count, (await closedDataNow())?.scansStuck], [Array(SCAN_RESTARTS).fill("refused"), "not done", true, 1]);
+  } finally {
+    globalThis.fetch = before;
+    await real([["HDEL", "nl:closed:walk", `scanstuck:${vic.handle}`], ["DEL", work], ["ZREM", DUE_KEY, storeRef(vic)]]);
+  }
   });
 
   done();

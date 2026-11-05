@@ -44,3 +44,12 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 - #2475 foi integrado ao main `0033134123903030d02ba2925ae0d19319a3358b` no novo head `4a9234f92f14ac8ba5eb79e67334f844ce7a6ecb`, tree `0bffa0148f31af816507bffe54ddf9fa29c56886`. Os dois blobs próprios permanecem exatamente `0bf91247c35c48de835631603c5816344e099ac7` e `1ba1591411648751f9332036cea42e5e468412cf`; nove workflows novos `419787*`/41978800514 estavam queued. #2466 continua aberto/conflitado e foi pedido ao Claude1 que coordene/feche antes do merge; L não o edita.
 - #2526 foi integrado ao mesmo main no novo head `bcecfd1a43f5508b2cf41beb4c1dfe773c5fb4e1`, tree `f1684134afbe1f4852be707ee934c747d8028fe8`. Blobs próprios exatos `41d0b02350b0cced4809860bed0b85325392d860` e `52f842c8317336dad4a5c9230f3496f6a9c658cc`; nove workflows novos `41978795*` estavam queued.
 - PRs #2475/#2526 foram atualizados com os heads, trees, main e blobs exatos. Canal anexado no commit `d474cd6f771193a0ead0a3f810ddddad6f68fc2d` após verificação SHA do blob fresco. Nenhum merge, force, cancelamento, produto alheio ou quinta unidade.
+
+
+## Retomada 05/11/2026 04h15 Fortaleza
+
+- #2350 ainda `2511c27836d04f3867459cc79bed1ee12af9e6e1`. A repetição única do Firefox/remessa passou. O Mobile/home permaneceu a única falha externa no job mais recente `127083945947`; esse job, e somente ele, foi repetido uma vez. Workflow `41963432860` voltou a `queued`. Não repetir Firefox ou Mobile novamente; se Mobile falhar de novo, publicar causa. Só promover para `56890ee8b452279bc2a8d0d5ea1f15e2b534d7ff` depois de terminal e sem falha própria.
+- #2383: `f73321c40e1cdd5a387c7978284a1a6ff0378204` concluiu nove `success`. Main atual `2e9a00c5d7cc1c6091ce1b53bcaed140c683ea61` não mudou nenhum dos oito caminhos desde main702. Nova junção pura no mesmo PR: head `990ff798daad213be458ff2ec43b53bb2784142b`, tree `a040b9339a3f6ff38677a92ee10b8f63c3813b12`, pais f733+main, oito blobs exatos verificados. Nove workflows novos `41985404*` estavam queued; antigos não contam.
+- #2475 permanece `4a9234f92f14ac8ba5eb79e67334f844ce7a6ecb`: oito success e produto `41978798134` queued. #2466 ainda open/conflitado sob Claude1.
+- #2526 permanece `bcecfd1a43f5508b2cf41beb4c1dfe773c5fb4e1`: oito success e produto `41978795199` in_progress.
+- Canal atualizado em `fd75d92f600020f4cb214330b587b2a4b5efd800`. Nenhum merge, force, cancelamento, quinta unidade ou edição alheia.

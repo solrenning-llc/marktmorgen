@@ -604,9 +604,13 @@ function ListCard({
             const a = await call({ action: "import", text, confirm });
             setBusy(false);
             if (a.ok) {
-              setDone(`${n(Number(a.added))} added. ${n(Number(a.already))} were already on your list or had left it, and stay as they were.${Number(a.skipped) ? ` ${n(Number(a.skipped))} did not look like email addresses.` : ""}`);
-              setText("");
-              setConfirm(false);
+              const remaining = a.notImported && typeof a.notImported === "object" ? Number((a.notImported as { left?: unknown }).left) : 0;
+              const incomplete = Number.isSafeInteger(remaining) && remaining > 0;
+              setDone(`${n(Number(a.added))} added. ${n(Number(a.already))} were already on your list or had left it, and stay as they were.${Number(a.skipped) ? ` ${n(Number(a.skipped))} did not look like email addresses.` : ""}${incomplete ? ` ${n(remaining)} not imported. Try again; the addresses already imported will stay as they are.` : ""}`);
+              if (!incomplete) {
+                setText("");
+                setConfirm(false);
+              }
               router.refresh();
             } else setError(message(a));
           }}

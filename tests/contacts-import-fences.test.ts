@@ -30,6 +30,7 @@ test('a partial second paste batch cannot leave imported contacts outside the ra
  console.log('LATE_PASTE',reads,response.status,count,ramp);
  assert.equal(reads,2);assert.ok(count>=500,'the earlier confirmed batch must have really landed');
  assert.ok(ramp,'500 imported addresses still require the existing import ramp');
+ const body=await response.json();assert.equal(body.added,500);assert.equal(body.already,0);assert.equal(body.notImported.left,1);assert.match(body.notImported.message,/not imported.*try again/i);
 });
 for(const mode of ['file','paste'] as const){
  test(`a completed real erasure between the ${mode} read and write cannot restore the contact`,async()=>{
@@ -65,3 +66,36 @@ for (const reply of [[], [[]], [[1, 1]], [["1"]], [[null]], [[true]]]) {
   assert.equal(script,1);assert.equal(fallback,0);assert.equal(redis.run(['HLEN',leadsKey(shop.listId!)]),0);
  });
 }
+test('paste refuses an unknown additional studio debit before contact work',async()=>{
+ const {owner,shop}=await setup();const original=redis.pipeline;let contactReads=0,contactWrites=0,admissions=0;
+ let response!:Response;
+ try{
+  redis.pipeline=async commands=>{
+   if(commands.some(c=>c[0]==='INCRBY'&&String(c[1]).startsWith('nl:allow:studio:')&&Number(c[2])>1)){admissions++;return [null,undefined];}
+   if(commands.some(c=>c[0]==='HMGET'&&c[1]===leadsKey(shop.listId!)))contactReads++;
+   if(commands.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:contact-import:')))contactWrites++;
+   return original.call(redis,commands);
+  };
+  const cookie=`${SESSION_COOKIE}=${await openSession(owner)}`;
+  response=await POST(new NextRequest('https://marktmorgen.com/api/store/mail',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'import',confirm:true,text:'blocked@example.com'})}));
+ }finally{redis.pipeline=original;}
+ assert.equal(response.status,429);assert.equal(admissions,1);assert.equal(contactReads,0);assert.equal(contactWrites,0);
+ assert.equal(redis.run(['HLEN',leadsKey(shop.listId!)]),0);
+});
+test('an applied script with a lost answer is confirmed read-only and still starts the import ramp',async()=>{
+ const {owner,shop}=await setup();const original=redis.pipeline;let scripts=0;
+ let response!:Response;
+ try{
+  redis.pipeline=async commands=>{
+   const result=await original.call(redis,commands);
+   if(commands.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:contact-import:'))){scripts++;return [];}
+   return result;
+  };
+  const cookie=`${SESSION_COOKIE}=${await openSession(owner)}`;
+  response=await POST(new NextRequest('https://marktmorgen.com/api/store/mail',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'import',confirm:true,text:Array.from({length:100},(_,i)=>`landed${i}@example.com`).join('\n')})}));
+ }finally{redis.pipeline=original;}
+ assert.equal(scripts,1,'no script replay after unknown ACK');assert.equal(response.status,200);
+ const body=await response.json();assert.equal(body.added,100);assert.equal(body.notImported,null);
+ assert.ok(redis.run(['GET',`nl:mail:ramp:${healthId(shop)}`]));
+ assert.equal(redis.run(['GET',`nl:store:leads:${shop.listId}:agreed`]),'100');
+});

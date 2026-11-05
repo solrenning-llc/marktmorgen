@@ -144,7 +144,10 @@ def main():
         run = subprocess.run(["node", str(root / "scripts" / "contact-erasure-redis.mjs")], cwd=root, env=env, timeout=600)
         if run.returncode != 0:
             sys.exit(run.returncode)
-        print("PASS: deleting a person against a real Redis")
+        native = subprocess.run(["node", str(root / "scripts" / "contact-import-redis.mjs")], cwd=root, env=env, timeout=120)
+        if native.returncode != 0:
+            sys.exit(native.returncode)
+        print("PASS: deleting a person against a real Redis, including the atomic import fence")
     finally:
         try:
             client.command("FLUSHDB")

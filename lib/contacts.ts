@@ -382,13 +382,26 @@ return out`;
 
 type ImportWrite = { email: string; value: string; was: string; added: boolean; left: boolean };
 async function writeImportedContacts(listId: string, writes: ImportWrite[]): Promise<number[]> {
-  const reply = await redisPipeline([["EVAL", IMPORT_CONTACTS_WRITE, 4, leadsKey(listId), `nl:erased:${listId}`, agreedKey(listId), unsubKey(listId),
-    ...writes.flatMap((w) => [w.email, suppressionPrint(listId, w.email), w.was, w.value, w.added ? 1 : 0, w.left ? 1 : 0])]]);
-  exactImportReply(reply, 1);
-  exactImportReply(reply[0], writes.length);
-  if (!reply[0].every((v) => v === -1 || v === 0 || v === 1)) throw new Error(CONTACT_IMPORT_UNKNOWN);
-  // Never fall back to an unfenced HSET on a lost or unknown script answer.
-  return reply[0] as number[];
+  try {
+    const reply = await redisPipeline([["EVAL", IMPORT_CONTACTS_WRITE, 4, leadsKey(listId), `nl:erased:${listId}`, agreedKey(listId), unsubKey(listId),
+      ...writes.flatMap((w) => [w.email, suppressionPrint(listId, w.email), w.was, w.value, w.added ? 1 : 0, w.left ? 1 : 0])]]);
+    exactImportReply(reply, 1);
+    exactImportReply(reply[0], writes.length);
+    if (!reply[0].every((v) => v === -1 || v === 0 || v === 1)) throw new Error(CONTACT_IMPORT_UNKNOWN);
+    return reply[0] as number[];
+  } catch {
+    // Read-only recovery of a lost answer: an exact current value can prove
+    // that it landed. Never write an unfenced HSET or retry the Lua here.
+    const reply = await redisPipeline([
+      ["HMGET", leadsKey(listId), ...writes.map((w) => w.email)],
+      suppressedAmongCommand(listId, writes.map((w) => w.email)),
+    ]);
+    exactImportReply(reply, 2);
+    const now = importValues(reply[0], writes.length);
+    const erased = importValues(reply[1], writes.length);
+    if (!writes.every((w, i) => erased[i] !== null || now[i] === w.value)) throw new Error(CONTACT_IMPORT_UNKNOWN);
+    return writes.map((_, i) => erased[i] !== null ? -1 : 1);
+  }
 }
 
 /**

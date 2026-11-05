@@ -4,7 +4,7 @@ export const CONTACT_IMPORT_WORK = {
   commandsPerRow: 8,
   commandsPerChunk: 64,
   fixedCommands: 16,
-  bytesPerRow: 4096,
+  bytesPerRow: 16384,
   bytesPerChunk: 65536,
   commandsPerStudioUnit: 20,
   bytesPerStudioUnit: 50000,

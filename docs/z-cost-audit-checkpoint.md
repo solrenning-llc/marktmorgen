@@ -1,3 +1,38 @@
+# PONTO DE PARADA VIGENTE — 05/11/2026, após fechamento focal #2690
+
+Esta seção supera estados antigos; histórico/REDs/WIPs abaixo preservados. CINCO unidades, nenhuma sexta. Não recriar código nem renovar CI sem novidade AV12.
+
+| Unidade | Head remoto próprio | Próximo permitido |
+| --- | --- | --- |
+| #2602 codex/z-service-counter-admission | 980a03f5edf5330b027d13df943b87dd12438e8c | Original9greens/duasfinanceiras; conflito real alias. WIP integração b096e3ee7991b4c56f0bd9c10f7478f4e81ee09d preservado. Só após2632MERGEDlegítimo: mainUMAvez, preservarblobs,dirigidos/tipos/lint/scanner/diff+9NOVOS. |
+| #2615 codex/z-preview-counter-admission | 5bdd9b78092271c730251de190ed92dfcd348a75 | Qclean;8success+productcancelled apósretryúnico. Sem9,semmerge. Retentativasverify127143841589/mac127144213372 CONSUMIDAS. Não repetir. |
+| SEM PR codex/z-ai-report-counter-admission | 12b09050dde6c858d37f00630c3874d930139e67 | RED140b3eb1,29/18→29/29;264greens. Após2632legítimo: mainUMAvez+checks/PR/revisão/9NOVOS. |
+| SEM PR codex/z-assistant-counter-admission | 7b2f59e2597fb6b1640ac3eb37735872e9a58017 | REDd0b4fc11,42/27→42/42;240greens. Mesmogate2632. |
+| SEM PR codex/z-chat-counter-admission | 1ad267f106319c48c974522b4e32747d397669b8 | REDb9f9677b8ebb1afca2c58e26fd34975d48fafe5b,28/16→28/28;298greens. Mesmogate2632. |
+
+#2484MERGED0f139490d3fc79045fd370cd9b5478b64e2f69e5, #2606MERGED18f206cc, #2614MERGED08b265eb; todos normal/expectedhead/revisãoaplicável/9exatos. Retentativa2484verify127130387972 CONSUMIDA. Retenção/UI de2484continuam reportadas, não resolvidas pelo leitor.
+
+## Revisão #2690 encerrada no recorte Z, não liberação global
+Parecer5793692529 noheadEXATO162aa3871c6a5776bbe3e9b29b17791f01be4442: MEUS2MÉDIOS FECHADOS. C4mantém segunda financeira/convites,Tprimeira; parentb4202c58 fora do meu retorno. Não incorporarPRalheio.
+Histórico: review5793340510/b1622M; retorno5793670379/978f aindaMcrítico[null,0,0] aceito; novo162runWritesagoraexigeOKSET+inteiroseguroDEL/HSET/HDEL. MESMAprova8cases: b1624pass4fail→d7fd7pass1fail→978f7pass1fail→1628/8. AtualnilSETdá500/clientfalse/buyerstateunconfirmed. []tambémfechado, concorrentespositivosverdes.
+Cache: produtor2000subs184454B, GETRANGE0..40000=40001B após1studio, dentroMESMO148320B; maiorcachevira null,nunca0, semGETinteiro/Stripe. Antiga7caseprova9ae6051463d4c252c824e2278d689e0d1b84c222 INALTERADA. Antesderivação explicadacanal21b922f1.
+Prova/relatório atual codex/z-review-2690-financial@0aa6461409248177435e37c8bfa62d4b206164ed/tree38eb58121695aa53488145639d8bb2b076e74464, docs/reviews/z-2690-return.md +tests/z2690-return.proof.ts. node tests/z2690-run.mjs [product-root] z2690-return.proof.ts.
+209ligadoslatest(67+18+22+27+24+27+24)verdes; DATAREGISTRY6/7continua faltandoparentnl:mv:open, entregueC2/T/C4. Não dizer suíte toda verde/parentaprovado/9exatos. Tiposproduto3raízes+prova0/lint0/scanner3808/0/diff/árvoreremota=nativa. Só sintéticos; semnativeRedis/browser/provedor/pagamento/globalbuild/CIreal certificado.
+Claim/reservaANTEScódigo21b922f1e2640ad28b49083eddd1172b4baed309; retornoaberto reportadocbbd11406a8f677ff2c6470e659d3760d39a5289, FECHAMENTOreportado1969e7bdeab84ac306b8c0cbe6bcedeb36520e51.
+Um batchlocal tinhafilenameoption-membersinexistente; corrigido sólauncherargumentparaoption-member-count, nãoassert/código. Tentativaexploratóriaacdparentnãoécontraprova da correção; comparaçãooficialéb162→d7→978→162.
+
+## Outras pendências
+#2709review5793527209 com2LEVESLATENTES aindaaguardaQdisposição: reader3→4HLENsemcostentry eoutagerejectemveznull, ambossemcallerprodutivo. Prova ec623deb, detalhes abaixo. Não duplicarrevisãointegral, sóretornonominalapóscorretivo.
+Provas report-only (CRM/retention/UI) e ressalvasR2 unknown→slow429 dosnovosreport/assistant preservadas abaixo; nenhuma liberação por silêncio.
+
+## Coordenação e vigia
+Mainlocalconfirmado6725b5c97d9bd8d26cd7cfd215c33521bacd4513 (#2713documental). #2632continuaaguardandolimpezareservaVnaBASEporC1, depoisC3integraUMAvez+9NOVOS+MERGElegítimo; nãoeditarcontrole/reservasalheias,nãomainchase,nãoretrycompartilhado. Nenhuma própria elegível semisso; não sondarCIemrodadas.
+ÚNICA vigiashell/flock60s: sessão36793, /tmp/z-main-watch.sh, acompanhaCodexinboxhash+merge2632/2679. 50728expirou;27243foiperdidanatrocadecontexto, flockimpediuduplicata. Clone/worktrees em/workspace/scratch/b63eb70a66ab, cwdnovo/b6cdbc49dd28; dependênciassymlink77662bfb. StoreJSanteriorpodeapagar; remotosautoritativos.
+Update_file/expected_refGraphQLfalharam nesta passagem. FallbackGitData funcionou: criarárvore/commit+update_refSEMforce; proteçãofast-forward garante nãoperdermensagemconcorrente. ParaCANALlerrefcom ?nocache=timestamp, fileporSHAimutável, commitbase+append eupdate_refnãoforce naMESMAchamada; semcachebust refsestavamvelhos/422. Esperar2minapóserro, nunca reescreverhistória. CPjápublicado4d4af239, ramorecuperaçãoz-checkpoint-recovery-20261105 éprovas/doc apenas, não6ºproduto.
+Próximo EXATO: retornopróprio/retornoQ ou2632LEGITIMAMENTEMERGED; depoisexecutaretapasdatabela. Semnovaunidadeatéliberarvaga, semrevisãojáanunciada. Publicar<=30min ePONTOcanalantesencerrar.
+
+---
+
 # Atualização vigente — chat, #2709 e retorno nominal #2690
 
 SUPERSEDE contagem antiga: CINCO unidades próprias (#2602, #2615 e SEM PR reports/assistant/chat). #2484 jáMERGED0f139490d3fc79045fd370cd9b5478b64e2f69e5, normal/expected-head, APItrue, G+9exatos; #2606/2614 tambémmerged. Não sexta. Retentativas2484verify127130387972 e2615verify127143841589/mac127144213372 CONSUMIDAS, nunca repetir. #2615 continua8success+productcancelled apósretry, headinalterado; C1/Vavisados78ea87a9.

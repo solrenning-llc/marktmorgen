@@ -106,7 +106,7 @@ const SAME: Record<string, Record<string, string[]>> = {
   // "{price} {every}": the price and the words for how often, each already in the language.
   // "Bonus 7": Spanish says bonus too.
   // "Pages" is the French word for the menu of a store's own pages too.
-  "page blocks": { es: ["bonusN"], fr: ["pagesMenu"], de: ["socialWebsite"], it: ["socialEmail"], nl: ["socialWebsite"] },
+  "page blocks": { es: ["bonusN"], fr: ["pagesMenu"], de: ["socialWebsite"], it: ["socialEmail", "videoWindowMark"], nl: ["socialWebsite", "videoWindowMark"] },
   // "Audience" is the French word too.
   "media kit": { fr: ["audienceTitle"] },
   // "Total" is the word in these languages too.

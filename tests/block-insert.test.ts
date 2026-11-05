@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   is("a place between every two blocks", editor.includes("index < drafts.length - 1 ? placeAt(index + 1) : null"), true);
   is("each place is a 44 pixel button whose name holds its visible words", editor.includes('className={`inline-flex min-h-11 items-center gap-1 rounded-full') && editor.includes("aria-label={`Add here: ${armed"), true);
   is("a card dropped on a place goes through the same insertion", editor.includes("add(draggingKind, placeOf(event), true);"), true);
-  is("the destination line is shape, not only color", editor.includes('className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand" : "bg-transparent"}`}'), true);
+  is("the destination line is shape, not only color", editor.includes('className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`}'), true);
   is("the new block's first field takes the focus", editor.includes("focusNew.current = block.id;") && editor.includes('panel.querySelector<HTMLElement>("input:not([disabled])'), true);
   is("from the gallery too, at every place, through the same insertion", (editor.match(/onPick=\{\(kind\) => add\(kind, (?:at|drafts\.length), true\)\}/g) ?? []).length, 2);
   is("and from the side menu", editor.includes("add(kind, picking, true);") && editor.includes("add(armed, at, true);"), true);

@@ -2,7 +2,7 @@
  * The page editor's right-hand column on a wide screen (375 [TB1]): the side
  * menu of blocks to add and the page as visitors see it share it, one at a
  * time, switched at its top. Seen in a browser at 1280 pixels: with the menu
- * (15rem) and the page (24.5rem) as two columns of their own, the column the
+ * (15rem) and the page (25.5rem) as two columns of their own, the column the
  * blocks are edited in was left 182 pixels, too narrow for its own fields
  * ("Add to column 1" cut its choices, a row's first field was 31 pixels).
  * Pure, so tests/side-panel.test.ts checks the choice and the arithmetic.
@@ -29,8 +29,14 @@ export function readSidePanel(saved: string | null | undefined): SidePanel {
   return saved === "add" || saved === "preview" ? saved : SIDE_PANEL_DEFAULT;
 }
 
-/** The right-hand column's width, in pixels (24.5rem: a phone's 390 pixels at their real size). */
-export const SIDE_COLUMN_PX = 24.5 * 16;
+/**
+ * The right-hand column's width, in pixels (25.5rem): a phone's 390 pixels at
+ * their real size beside the column's own scroll bar, which keeps its room
+ * (scrollbar-gutter: stable) whether or not it shows (inbox C4-31).
+ */
+export const SIDE_COLUMN_PX = 25.5 * 16;
+/** The most a classic scroll bar takes from the column's width, in pixels. */
+export const SIDE_SCROLLBAR_PX = 17;
 
 /** The gap between the two columns (gap-5). */
 export const SIDE_GAP_PX = 20;

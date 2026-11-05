@@ -150,6 +150,22 @@ jobs:
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_order_admission_redis.py
+      - name: Actual Redis durable shipment dispatch checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_shipment_mail_outbox_redis.py
+      - name: Actual Redis original-window order settlement checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_order_confirmation_checkpoint_redis.py
+      - name: Actual Redis protected pre-payment confirmation origin checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_order_confirmation_outbox_redis.py
+      - name: Actual Redis global fallback ownership and clock checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_resend_fallback_budget_redis.py --port 16379
       - name: Synthetic self-hosted HTTP to actual Redis contract
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"

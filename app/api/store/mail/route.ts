@@ -16,7 +16,8 @@ import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
-import { buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
+import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
+import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
 import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FlowRunUnavailable, PERSON_KEY, listRuns, readRun } from "@/lib/flow-runs";
@@ -117,6 +118,8 @@ export async function POST(request: NextRequest) {
   const { email, ref, body } = guarded;
   const action = text(body.action, 20);
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // The store's buyers not read because what reading them costs could not be counted (lib/segments.ts, buyerLedger).
+  const notCounted = (message: string) => Response.json({ ok: false, error: "studio_used", message: message || NOT_COUNTED }, { status: 429 });
 
   try {
     let store = await storeForEmail(ref);
@@ -161,10 +164,14 @@ export async function POST(request: NextRequest) {
       if (!isNarrowed(narrow) && body.channels !== true) {
         return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who), undefined, label)).length });
       }
-      const ledger = await buyerLedger(store).catch((error) => {
+      // Counted before it is read: the ten-minute copy by its size, or Stripe, PayPal and the imported buyers again.
+      const counting = countLedger(store);
+      const ledger = await buyerLedger(store, counting.count).catch((error) => {
+        if (error instanceof LedgerNotCounted) return error;
         console.error("reading a store's buyers for an email failed", error);
         return null;
       });
+      if (ledger instanceof LedgerNotCounted) return notCounted(counting.said.message);
       if (!ledger) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
       // One moment for the kinds counted and the kind kept, so a buyer at a boundary is the same kind in both.
       const now = Date.now();
@@ -233,6 +240,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "broadcast") {
+      // A narrowed email reads the store's buyers again when their copy ran out: counted first, nothing written when not.
+      // It also holds, in the month it goes out, what the scheduled job's readings then cost at the most: without
+      // room for them in that month it is refused now, with the sentence saying why, and nothing is written.
+      const counting = countLedger(store);
       const created = await createBroadcast(store, {
         subject: text(body.subject, 400),
         body: text(body.body, MAX_MAIL_BODY * 2),
@@ -245,17 +256,24 @@ export async function POST(request: NextRequest) {
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).
         test: body.test && typeof body.test === "object" ? body.test : undefined,
+      }, counting.count).catch((error) => {
+        if (error instanceof LedgerNotCounted) return error;
+        throw error;
       });
-      if (!created.ok) return fail(created.reason);
+      if (created instanceof LedgerNotCounted) return notCounted(counting.said.message);
+      if (!created.ok) return created.reason === "studio_used" ? notCounted(created.message) : fail(created.reason);
       const id = created.broadcast.id;
       // A draft that has now been sent or scheduled is done with.
       const fromDraft = text(body.draftId, 40);
       const draftCleanupConfirmed = await finishBroadcastDraft(store, fromDraft, body.draftSavedAt);
       if (!draftCleanupConfirmed) console.error("A confirmed campaign draft cleanup could not be confirmed");
-      if (created.broadcast.sendAt <= Math.floor(Date.now() / 1000) + 60) {
-        // Starts as soon as the studio has its answer; the scheduled job
-        // finishes anything this run does not.
-        after(() => advanceBroadcast(id, storeForHandle, Date.now() + 50_000).then(() => undefined));
+      if (created.startsNow) {
+        // Due now (exactly as advanceBroadcast takes it): starts as soon as the studio has its answer; the scheduled
+        // job finishes anything this run does not. One set for later, even a minute, is the scheduled job's.
+        // With the narrowing read and counted just now: not read or counted again. When the scheduled job takes the
+        // lock first, its reading draws from what the email held for it (lib/broadcasts.ts, advanceBroadcast).
+        const keep = created.keep;
+        after(() => advanceBroadcast(id, storeForHandle, Date.now() + 50_000, { keep }).then(() => undefined));
       }
       return Response.json({ ok: true, broadcast: created.broadcast, draftCleanupConfirmed });
     }

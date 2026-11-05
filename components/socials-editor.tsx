@@ -175,7 +175,6 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
         <button
           type="button"
           aria-disabled={ready ? undefined : true}
-          aria-label={controlLabel}
           onClick={() => {
             if (!ready) return;
             setRows(start());

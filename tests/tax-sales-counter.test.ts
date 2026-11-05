@@ -248,3 +248,32 @@ test("inherited serialization accessors are refused without invoking the getter"
     assert.deepEqual(result, { status: "unknown" });
   }
 });
+
+for (const accessor of [false, true]) {
+  test(`an intermediate array ancestor cannot hide sales with a ${accessor ? "computed" : "data"} serialization hook`, () => {
+    const previous = Object.getPrototypeOf(Array.prototype);
+    const ancestor = Object.create(previous);
+    const value = ledger([entry("above-threshold", { amountMinor: 3_000_001 })]);
+    const before = countTaxSales(value);
+    let calls = 0, reads = 0;
+    let result: ReturnType<typeof countTaxSales>;
+    let captured: TaxSalesLedger;
+    Object.defineProperty(ancestor, "toJSON", accessor ? {
+      configurable: true, get() { reads++; return () => { calls++; return []; }; },
+    } : { configurable: true, value() { calls++; return []; } });
+    try {
+      Object.setPrototypeOf(Array.prototype, ancestor);
+      result = countTaxSales(value);
+      assert.equal(reads, 0);
+      assert.equal(calls, 0);
+      captured = JSON.parse(JSON.stringify(value));
+    } finally { Object.setPrototypeOf(Array.prototype, previous); }
+    assert.equal(reads, accessor ? 1 : 0);
+    assert.equal(calls, 1);
+    const after = countTaxSales(captured);
+    assert.equal(after.status, "known");
+    if (after.status === "known") assert.equal(after.settledApplicableMinor, 0);
+    assert.deepEqual(result, { status: "unknown" });
+    assert.deepEqual(countTaxSales(value), before);
+  });
+}

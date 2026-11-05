@@ -65,6 +65,7 @@ function main() {
   for (const broken of ["2\n00:00:03,000 -> 00:00:04,000\nMissing a dash.", "2\n00:00:03,000 00:00:04,000\nNo separator.", "A detached part of the transcript."]) {
     is(`a broken block without an arrow is refused, never silently lost: ${broken.split("\n")[0]}`, vtt(`1\n00:00:01,000 --> 00:00:02,000\nGood.\n\n${broken}`), "refused: format");
   }
+  is("a forbidden timing separator in cue words refuses the whole file, never drops a line", vtt("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nGood words.\nThis --> that.\n"), "refused: format");
   is("a file over the size one may be", vtt(`WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n${"a".repeat(MAX_CAPTION_BYTES)}\n`), "refused: too_big");
 
   part("The languages");

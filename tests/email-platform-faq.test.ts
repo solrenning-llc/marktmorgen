@@ -39,11 +39,11 @@ is("a free sign-up, a list sign-up and a sale each need the plan or its trial", 
 part("The answers, in both states");
 const now = emailPlatformBeginnerQuestions(false, TRIAL_DAYS);
 const later = emailPlatformBeginnerQuestions(true, TRIAL_DAYS);
-is("three questions", now.map((x) => x.q), ["How do I connect my email tool?", "How do I know it works?", "Can I try it before paying?"]);
+is("three questions", now.map((x) => x.q), ["How do I connect my email tool?", "How do I know it works?", "Can I connect my email tool before paying?"]);
 const how = answer(now, "How do I connect my email tool?");
 is("connecting: the owner or an Admin, the studio's words in order, the warning", [how.startsWith("The owner or an Admin does it."), (() => { const at = [w.tool, w.platform, w.connect, `${w.target} …`, w.who, w.save].map((x) => how.indexOf(`“${x}”`)); return at.every((x, k) => x >= 0 && (k === 0 || x > at[k - 1])); })(), how.endsWith("no platform can be connected for now.")], [true, true, true]);
 is("works: the test button once connected, the log's own title", [answer(now, "How do I know it works?").startsWith(`Once connected, press “${w.test}”`), answer(now, "How do I know it works?").includes(`Under “${w.log}”`)], [true, true]);
-is("try before paying: the shared answer, and nobody sent before the plan", [answer(now, "Can I try it before paying?").startsWith(tryBeforePaying("The connection", "the connection", false, TRIAL_DAYS)), answer(now, "Can I try it before paying?").endsWith("open a checkout only on a plan."), answer(later, "Can I try it before paying?").startsWith(tryBeforePaying("The connection", "the connection", true, TRIAL_DAYS)), answer(later, "Can I try it before paying?").endsWith("open a checkout only on a plan or its trial.")], [true, true, true, true]);
+is("try before paying: the shared answer, and nobody sent before the plan", [answer(now, "Can I connect my email tool before paying?").startsWith(tryBeforePaying("The connection", "the connection", false, TRIAL_DAYS)), answer(now, "Can I connect my email tool before paying?").endsWith("open a checkout only on a plan."), answer(later, "Can I connect my email tool before paying?").startsWith(tryBeforePaying("The connection", "the connection", true, TRIAL_DAYS)), answer(later, "Can I connect my email tool before paying?").endsWith("open a checkout only on a plan or its trial.")], [true, true, true, true]);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
 is("no figure but the trial's days, no percent, no result promised", [/\d/.test(all.split(`${TRIAL_DAYS}-day`).join("")), /%|guarantee|more sales|proven/i.test(all)], [false, false]);

@@ -4,6 +4,7 @@ import { hasPixels, needsConsent, pixelNames } from "@/lib/pixels";
 import { StoreBeacon } from "@/components/store-beacon";
 import { AffiliateClick } from "@/components/affiliate-click";
 import { type PixelEvent, StorePixels } from "@/components/store-pixels";
+import { placeOf } from "@/lib/reddit-pixel";
 
 /**
  * What a store page carries besides the page: the visit count, on the store
@@ -29,7 +30,10 @@ export async function StoreTracking({
   event?: PixelEvent;
 }) {
   const withPixels = hasPixels(store.pixels);
-  const askFirst = withPixels || store.affiliates.enabled ? needsConsent((await headers()).get("x-vercel-ip-country")) : true;
+  const asked = await headers();
+  const askFirst = withPixels || store.affiliates.enabled ? needsConsent(asked.get("x-vercel-ip-country")) : true;
+  // Reddit's Limited Data Use needs the visitor's country and region (lib/reddit-pixel.ts); read only when that pixel is on.
+  const place = store.pixels.reddit ? placeOf(asked.get("x-vercel-ip-country"), asked.get("x-vercel-ip-country-region")) : undefined;
   return (
     <>
       {countVisit ? <StoreBeacon handle={store.handle} /> : presence ? <StoreBeacon handle={store.handle} front={false} product={product} /> : null}
@@ -43,6 +47,7 @@ export async function StoreTracking({
           pixels={store.pixels}
           names={pixelNames(store.pixels)}
           askFirst={askFirst}
+          place={place}
           event={event}
         />
       ) : null}

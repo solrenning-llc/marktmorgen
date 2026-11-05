@@ -69,17 +69,18 @@ test("inconsistent hold-write envelopes never return the opened checkout as conf
         return { id: "cs_test_synthetic" };
       });
       assert.deepEqual(result, { ok: false, reason: "busy" });
-      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "EVAL", "HSET", "HDEL", "EVAL"]);
+      // Since Codex G2's review (5 November 2026) the lock is checked with the provisional hold in one script (STOCK_ADMIT), after the write.
+      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "HSET", "HDEL", "EVAL"]);
     }
     assert.equal(opened, 0);
-    // The checkout's own hold: opened, never returned while its write is unconfirmed.
-    // A reply for its two commands (the hold, and taking back the provisional one) that is not two known acknowledgments.
-    const second: unknown[] = [null, undefined, false, 0, 1, "OK", {}, [], Array(1), Array(2), [1], [1, null], ["OK", 1], [1, 2], [0, 1, 1], { 0: 1, 1: 1, length: 2 }];
+    // The checkout's own hold: opened, never returned while its write is unconfirmed, and the provisional one never let go
+    // before it is (STOCK_BIND is not even asked). A reply for its one command that is not one known acknowledgment.
+    const second: unknown[] = [null, undefined, false, 0, 1, "OK", {}, [], Array(1), [null], ["OK"], [2], [1, 1], { 0: 1, length: 1 }];
     for (const reply of second) {
       const commands: unknown[][] = [];
       redis.pipeline = async batch => {
         commands.push(...batch);
-        if (batch.length === 2 && batch[0][0] === "HSET") return reply as unknown[];
+        if (batch.length === 1 && batch[0][0] === "HSET" && batch[0][2] === "cs_test_synthetic") return reply as unknown[];
         return answer(batch);
       };
       const result: { ok: boolean; reason?: string } = await withStockHold(creator, product, async held => {
@@ -88,10 +89,19 @@ test("inconsistent hold-write envelopes never return the opened checkout as conf
         return { id: "cs_test_synthetic" };
       });
       assert.deepEqual(result, { ok: false, reason: "busy" });
-      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "EVAL", "HSET", "EVAL", "HSET", "HDEL"]);
+      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "HSET", "EVAL", "EVAL", "HSET"]);
+    }
+    // The hand-over itself (STOCK_BIND) answered in any shape but 1: never returned.
+    for (const reply of [[0], [-1], [null], [], Array(1), ["1"], [true], null, { 0: 1, length: 1 }]) {
+      redis.pipeline = async batch => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v1\n") ? reply as unknown[] : answer(batch));
+      const result: { ok: boolean; reason?: string } = await withStockHold(creator, product, async () => {
+        opened += 1;
+        return { id: "cs_test_synthetic" };
+      });
+      assert.deepEqual(result, { ok: false, reason: "busy" });
     }
   } finally { redis.pipeline = original; }
-  assert.equal(opened, 16);
+  assert.equal(opened, 14 + 9);
 });
 
 // Codex G2's three races (review of #1730, 5 November 2026; tests/review-g2-cart-stock-races.test.ts) for a product bought on

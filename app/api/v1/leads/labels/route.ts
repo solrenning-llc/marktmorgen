@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   const body = writer.body;
   try {
     const done = await roomFor(() => changeLeadLabels(writer.store, body));
-    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, WRITE_ERRORS[done.error][1]);
+    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, done.message ?? WRITE_ERRORS[done.error][1]);
     return apiOk({ data: done.value });
   } catch (error) {
     console.error("api: changing labels failed", error);

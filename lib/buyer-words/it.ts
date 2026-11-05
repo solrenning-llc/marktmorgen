@@ -50,6 +50,12 @@ export const it: BuyerWords = {
   callLive: (dates) => `Sessione dal vivo, online, ${dates} ${plural(dates, "data in programma", "date in programma")}`,
   callGroup: (minutes, seats) => `Chiamata di gruppo, ${minutes} minuti, fino a ${seats} persone, online`,
   callOne: (minutes) => `Chiamata di ${minutes} minuti, online`,
+  callLengths: (list) => `Chiamata di ${list} minuti, online`,
+  inPersonLive: (dates) => `Sessione dal vivo, di persona, ${dates} ${plural(dates, "data in programma", "date in programma")}`,
+  inPersonGroup: (minutes, seats) => `${minutes} minuti, fino a ${seats} persone, di persona`,
+  inPersonOne: (minutes) => `${minutes} minuti, di persona`,
+  inPersonLengths: (list) => `${list} minuti, di persona`,
+  inPersonLiveNone: "Sessione dal vivo, di persona, nessuna data in programma",
   bundleOf: (count, worth) => `Pacchetto di ${count} prodotti${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `${worth} di prodotti a ${price}`,
   podcast: (episodes) => `Podcast privato, ${episodes} ${plural(episodes, "episodio", "episodi")}, nella tua app di podcast`,
@@ -78,7 +84,7 @@ export const it: BuyerWords = {
   buyAsGift: "Acquista come regalo",
   buyAsGiftFor: (price) => `Acquista come regalo — ${price}`,
   giftNote: (store) =>
-    `Paghi sulla pagina di Stripe. Subito dopo, la persona riceve un'unica email da ${store} con il tuo nome, il tuo messaggio e un link per aprirlo con il proprio indirizzo. Tu ricevi la ricevuta, non una copia.`,
+    `Paghi sulla pagina di Stripe. Dopo il pagamento, il regalo appartiene al suo indirizzo. Se le arriva l'unica email da ${store}, contiene il tuo nome, il tuo messaggio e un link per aprirlo. Tu ricevi la ricevuta, non una copia.`,
   giftProblems: {
     email: "Non sembra un indirizzo email. Controlla l'indirizzo del destinatario e riprova.",
     option: "Scegli cosa regalare, poi riprova. Non è stato addebitato nulla.",
@@ -298,4 +304,9 @@ export const it: BuyerWords = {
   cardTestMode: "Modalità di prova: nessuna carta reale viene addebitata.",
   cardCheckout: "Pagamento sicuro con Stripe, in una nuova scheda.",
   cardOpens: (store) => `Si apre nel negozio di ${store}, in una nuova scheda.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} o più`,
+  plusTax: "+ imposte, se dovute",
+  salePriceUntil: (price, when) => `Prezzo scontato: ${price}, fino al ${when}`,
 };

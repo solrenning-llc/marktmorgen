@@ -5,7 +5,7 @@
  * keys and for the owner and Admins (app/studio/discord/page.tsx,
  * app/studio/page.tsx), its own words (components/discord-studio.tsx), the
  * code's limits and how often access is checked (lib/discord-rules.ts), and
- * the shared answer to "Can I try it before paying?" (lib/beginner-faq.ts).
+ * the shared answer to "Can I try Discord access before paying?" (lib/beginner-faq.ts).
  * No number of servers, members or sales. Shown first in the page's own
  * "Questions" block.
  */
@@ -29,11 +29,11 @@ export function discordBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRI
       a: `In your studio, open “${w.tool}” and press “${w.connect}”; Discord asks which of your servers to add our bot to, and you need to be allowed to manage it. Then, under “${w.roles}”, pick the roles for each product and press “${w.save}”. Only the store's owner and Admins see “${w.tool}” in the studio; if you are one of them and it is not there, it is not switched on yet on our side.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try Discord access before paying?",
       a: `${tryBeforePaying("Discord access", "the connection to your server and the roles each product gives", onSale, trialDays)} Only the owner and Admins can, once Discord is switched on on our side.${onSale ? "" : " Paid plans are not on sale yet, so no buyer can join from a purchase now."}`,
     },
     {
-      q: "How many people use it?",
+      q: "How many people use Discord access?",
       a: `We publish no number of servers, members or sales, because we do not have a real, checked count to show. Under “${w.joined}”, your studio lists the newest people given roles by a purchase: their name on Discord, the address they bought with, their roles and the day they joined. Someone whose access ended leaves the list.`,
     },
   ];

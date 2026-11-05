@@ -1,6 +1,7 @@
 import type { ActivationTiming } from "@/lib/store-activation";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
+import { startList, startProgressWords } from "@/lib/studio-start-rules";
 
 export type StartStep = {
   key: string;
@@ -11,26 +12,29 @@ export type StartStep = {
 };
 
 /**
- * The first steps of a new store, in order, with what is already done ticked.
- * Every tick is read from the store itself, so nothing here can be ticked by
- * pressing it; it disappears on its own once every step is done.
+ * The first steps of a new store, in order, with what is already done ticked
+ * (484 [IT1]): at most five steps to the first sale, then the rest
+ * (lib/studio-start-rules.ts). Every tick is read from the store itself, so
+ * nothing here can be ticked by pressing it; it disappears on its own once
+ * every step is done. The steps can be collapsed and opened again (a native
+ * disclosure, so it works by keyboard and without scripts); the title, the
+ * progress, the next step and the first offer's timing stay in sight.
  */
-export function StudioStart({ steps, activation, launchChecklist }: { steps: StartStep[]; activation?: ActivationTiming; launchChecklist?: string }) {
+export function StudioStart({ steps: all, activation, launchChecklist }: { steps: StartStep[]; activation?: ActivationTiming; launchChecklist?: string }) {
+  const { phase, steps, toSale } = startList(all);
   const done = steps.filter((s) => s.done).length;
   if (steps.length === 0 || (done === steps.length && !activation)) return null;
   const next = steps.find((s) => !s.done);
   const percent = Math.round((done / steps.length) * 100);
 
   return (
-    <section aria-labelledby="start-title" className="card mt-8 p-6 sm:p-8">
+    <section aria-labelledby="start-title" className="card mt-8 p-6 sm:p-8" data-start-phase={phase}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="start-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
             Getting your store ready
           </h2>
-          <p className="mt-1 text-sm text-ink-soft">
-            {`${done} of ${steps.length} done. Everything saves as you go, so you can stop and come back.`}
-          </p>
+          <p className="mt-1 text-sm text-ink-soft">{startProgressWords(phase, done, steps.length, toSale)}</p>
         </div>
         {next ? (
           <Link href={next.href} className="btn btn-primary btn-sm">
@@ -46,38 +50,46 @@ export function StudioStart({ steps, activation, launchChecklist }: { steps: Sta
       <div
         className="mt-4 h-2 overflow-hidden rounded-full bg-sand"
         role="progressbar"
-        aria-label="Steps done"
+        aria-label={phase === "after" ? "More steps done" : toSale ? "Steps to your first sale done" : "First steps done"}
         aria-valuemin={0}
         aria-valuemax={steps.length}
         aria-valuenow={done}
+        aria-valuetext={`${done} of ${steps.length}`}
       >
-        <div className="h-full rounded-full bg-violet-brand transition-[width] duration-500" style={{ width: `${percent}%` }} />
+        <div className="h-full rounded-full bg-violet-brand transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${percent}%` }} />
       </div>
-      {launchChecklist ? <details className="group mt-5"><summary className="flex min-h-11 cursor-pointer items-center gap-2 py-3 font-semibold text-ink"><span aria-hidden="true" className="transition-transform group-open:rotate-90">▸</span>Review the saved launch checklist</summary><pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-ink-soft">{launchChecklist}</pre></details> : null}
-      <ol className="mt-6 grid min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-        {steps.map((step, i) => (
-          <li key={step.key} className="flex min-w-0 gap-3">
-            <span
-              className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-[0.75rem] font-semibold ${
-                step.done ? "bg-mint-soft text-mint-deep" : step === next ? "bg-violet-brand text-white" : "bg-sand text-ink-soft"
-              }`}
-            >
-              {step.done ? <Icon name="check" size={14} strokeWidth={2.6} /> : i + 1}
-              <span className="sr-only">{step.done ? " (done)" : ""}</span>
-            </span>
-            <span className="min-w-0 [overflow-wrap:anywhere]">
-              {step.done ? (
-                <span className="font-semibold text-ink-mute line-through decoration-ink-mute/40">{step.title}</span>
-              ) : (
-                <Link href={step.href} className="font-semibold text-ink underline-offset-4 hover:text-violet-deep hover:underline">
-                  {step.title}
-                </Link>
-              )}
-              <span className="block text-sm text-ink-soft">{step.hint}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
+      <details className="group/start mt-4" open>
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 py-2 text-sm [&::-webkit-details-marker]:hidden font-semibold text-ink-soft underline-offset-4 hover:text-ink hover:underline">
+          <span aria-hidden="true" className="transition-transform motion-reduce:transition-none group-open/start:rotate-90">▸</span>
+          <span className="group-open/start:hidden">Show the steps</span>
+          <span className="hidden group-open/start:inline">Hide the steps</span>
+        </summary>
+        {launchChecklist ? <details className="group mt-5"><summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 py-3 font-semibold text-ink [&::-webkit-details-marker]:hidden"><span aria-hidden="true" className="transition-transform motion-reduce:transition-none group-open:rotate-90">▸</span>Review the saved launch checklist</summary><pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-ink-soft">{launchChecklist}</pre></details> : null}
+        <ol className="mt-6 grid min-w-0 grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+          {steps.map((step, i) => (
+            <li key={step.key} className="flex min-w-0 gap-3">
+              <span
+                className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-[0.75rem] font-semibold ${
+                  step.done ? "bg-mint-soft text-mint-deep" : step === next ? "bg-violet-brand text-white" : "bg-sand text-ink-soft"
+                }`}
+              >
+                {step.done ? <Icon name="check" size={14} strokeWidth={2.6} /> : i + 1}
+                <span className="sr-only">{step.done ? " (done)" : ""}</span>
+              </span>
+              <span className="min-w-0 [overflow-wrap:anywhere]">
+                {step.done ? (
+                  <span className="font-semibold text-ink-mute line-through decoration-ink-mute/40">{step.title}</span>
+                ) : (
+                  <Link href={step.href} className="font-semibold text-ink underline-offset-4 hover:text-violet-deep hover:underline">
+                    {step.title}
+                  </Link>
+                )}
+                <span className="block text-sm text-ink-soft">{step.hint}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+      </details>
     </section>
   );
 }

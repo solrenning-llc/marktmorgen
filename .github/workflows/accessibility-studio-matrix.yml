@@ -55,7 +55,7 @@ jobs:
         browser: [chromium, firefox, webkit]
     env:
       # New AX2 cases stay off for private/unknown repositories; existing cases remain.
-      AX2_PUBLIC_STANDARD: ${{ github.repository == 'viniciussucupira/marktmorgen' && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+      AX2_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
       NEXT_TELEMETRY_DISABLED: "1"
       E2E_BROWSER: ${{ matrix.browser }}
     steps:
@@ -69,6 +69,8 @@ jobs:
       - run: npm ci
       - name: Verify the package matches the preinstalled browser image
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
+      - name: Deals board focus, confirmed removal, Move only on its button, errors tied to fields and one status region (synthetic, no server)
+        run: node tests/e2e/deals-board-focus.mjs
       - run: node scripts/ci-build.mjs
       - name: Authenticated studio and page editor at five widths with AAA and access modes
         run: node tests/e2e/accessibility-studio-matrix.mjs

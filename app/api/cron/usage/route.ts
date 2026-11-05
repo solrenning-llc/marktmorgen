@@ -11,6 +11,7 @@ import {
 } from "@/lib/delivery";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLANS_ON_SALE } from "@/lib/opening";
+import { largerPlanFor } from "@/lib/larger-plan";
 import { SITE_URL } from "@/lib/site-url";
 import { SETUP_VIDEO_SECONDS, costsPaused, standingOf, videoLimitFor } from "@/lib/plan-standing";
 import { watchedFolders, watchedIn } from "@/lib/watch";
@@ -191,7 +192,7 @@ async function visitsRun(): Promise<VisitsRun> {
           "visits, and nothing anyone bought is taken away.",
           "",
           ...(standing === "paid"
-            ? [resetWords(store), "Moving to a larger plan opens them at once."]
+            ? [resetWords(store), ...(largerPlanFor(store) ? ["Moving to a larger plan opens them at once."] : [])]
             : PLANS_ON_SALE || standing === "trial"
               ? ["Your pages open again as soon as your plan is paid, or when the month", "turns, whichever comes first."]
               : ["Your pages open again when the month turns. Plans are not on sale yet."]),
@@ -369,7 +370,7 @@ async function ordersRun(): Promise<OrdersRun> {
           `Your store has had ${ordersWords(orders)} ${standingOf(store) === "trial" ? "in its free trial" : "this billing month"}, which is the ${countWords(limit)} ${standingOf(store) === "trial" ? "a free trial" : "your plan"}`,
           "covers, so new orders are paused.",
           resetWords(store),
-          "Moving to a larger plan opens them at once.",
+          ...(largerPlanFor(store) ? ["Moving to a larger plan opens them at once."] : []),
           "",
           "A buyer who presses buy now is told plainly that the store is not taking new",
           "orders right now, and nothing is charged. Anybody who was already paying",

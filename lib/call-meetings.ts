@@ -28,13 +28,14 @@
  *   nl:meet:rf:<callsId>:since   the time refunds were read up to, in seconds
  *   nl:meet:rf:<callsId>:seen    refunds already read
  */
+import { whereOf } from "@/lib/call-place";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
-import { refundedInFull } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
-import { readMoves } from "@/lib/call-records";
+import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
 import { MEET_STORES, callRefunded, dropScope, dueScopes, retryRecord } from "@/lib/meet-links";
 import { type PaidCall, isCallProduct, paidCalls, tellNewLink } from "@/lib/calls";
@@ -125,7 +126,8 @@ export async function syncMeetings(
       const booked = list.filter((c) =>
         outcome.record.group ? c.product === outcome.record.product && c.start === outcome.record.start : c.session === outcome.record.session,
       );
-      if (product && isCallProduct(product) && booked.length) {
+      // In person now (lib/call-place.ts): no link is sent to anybody.
+      if (product && isCallProduct(product) && whereOf(product.call).kind !== "place" && booked.length) {
         run.told += await tellNewLink({ store, product, meeting: outcome.record, previous: outcome.previous, people: booked, origin }).catch(() => 0);
       }
     }
@@ -175,18 +177,28 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   let handled = 0;
   let after = "";
   let complete = false;
+  // A failed or unfinished read of the lost disputes keeps the anchor.
+  let unsure = false;
+  let lostRead: LostRead | null = null;
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A dispute closed as lost ends the booking's meeting
+    // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
+    // with the first page, from Stripe's closing events (kept thirty days).
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("meet", callsId)) : null;
+    if (lost) lostRead = lost;
+    if (lost && !lost.complete) unsure = true;
+    const rows = [...(lost?.rows ?? []), ...refunds];
     for (const refund of rows) {
       if (Date.now() >= deadline) break;
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      if ((refund.status !== "succeeded" && refund.status !== "pending") || !refundedInFull(refund.charge)) {
+      if (!rowGivesBack(refund)) {
         newest = Math.max(newest, created);
         continue;
       }
@@ -196,7 +208,17 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         continue;
       }
       const intent = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      if (!INTENT.test(intent) || lookups <= 0) continue;
+      if (!INTENT.test(intent)) {
+        // No payment to look up (a charge made without one): no booking can be told from it, so it is read, and a
+        // lost dispute like it never holds the place back (review of #2158).
+        await redisPipeline([
+          ["SADD", seenKey(callsId), id],
+          ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
+        ]);
+        newest = Math.max(newest, created);
+        continue;
+      }
+      if (lookups <= 0) continue;
       lookups -= 1;
       const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
       const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
@@ -208,26 +230,48 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         if (Number.isFinite(start) && (await callRefunded(store, { session: session.id, product: meta.product ?? "", start, email: typeof details.email === "string" ? details.email : null }))) {
           handled += 1;
         }
+        // A call refunded in full leaves the private calendar feed (lib/calls.ts, callFromRow, drops a payment
+        // refunded in full): marked, its file is made again at the app's next check, not a day later, with or
+        // without a meeting room (inbox C4-18, M3). A lost dispute is not marked: the feed reads the payment, which a
+        // lost dispute does not show as refunded, so the booking stays there until lib/calls.ts reads it.
+        if (refund.object !== "dispute") {
+          await markBookingsChanged(callsId).catch((error: unknown) => console.error("marking the bookings changed failed", error));
+        }
         // A team booking refunded in full gives its hosts their time back, on every store.
         const hosts = (meta.hosts ?? "").split(",").filter(isHostId);
         if (hosts.length && isClaimId(meta.claim)) await releaseClaim(hosts, meta.claim).catch(() => {});
       }
       await redisPipeline([
         ["SADD", seenKey(callsId), id],
-        ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS],
+        ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
       ]);
       newest = Math.max(newest, created);
     }
-    const last = rows[rows.length - 1];
+    const last = refunds[refunds.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") {
       complete = true;
       break;
     }
     after = last.id;
   }
-  // Moved forward only past what was read to the end, as the license keys do.
-  if ((complete && lookups > 0 && Date.now() < deadline) || !(Number(anchorRaw) > 0)) {
-    await redisPipeline([["SET", anchorKey(callsId), String(complete ? Math.max(newest, anchor) : anchor), "EX", REFUND_KEEP_SECONDS * 2]]);
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
+  // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed
+  // meanwhile is read from the top next run (review of #2158, inbox C4-24).
+  if (lostRead) {
+    if (!(await confirmLostRead(lostRead, seenKey(callsId)))) unsure = true;
+    else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
+  }
+  // The place moves only past what was read to the end, sure, with lookups left and inside its time. A store with no place yet keeps
+  // the one it started from, so the next run reads the same window and the lost disputes' kept place still counts; its
+  // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
+  // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
+  const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
+  if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.max(newest, anchor)), "EX", REFUND_KEEP_SECONDS * 2]]);
+  else if (!(Number(anchorRaw) > 0)) {
+    await redisPipeline([
+      ["SET", anchorKey(callsId), String(anchor), "EX", REFUND_KEEP_SECONDS * 2],
+      ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
+    ]);
   }
   return handled;
 }

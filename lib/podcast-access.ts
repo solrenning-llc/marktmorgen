@@ -171,3 +171,16 @@ export async function forgetPodcastPerson(store: Store, productIds: string[], em
   const [gone] = await redisPipeline([["DEL", ...productIds.flatMap((p) => [byKey(sid, p, email), okKey(sid, p, email)]), ...held.map(tokenKey)]]);
   return Number(gone) || 0;
 }
+
+/**
+ * The products whose private podcast feed a person has, for the copy of their
+ * data (619 [SZ3], lib/person-copy.ts). The feed's secret address is not
+ * given: it is a key, and the person has it in the email that sent it. Only
+ * reads; never makes a feed.
+ */
+export async function feedsOf(store: Store, productIds: string[], email: string): Promise<string[]> {
+  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+  const sid = store.statsId;
+  const tokens = await redisPipeline(productIds.map((p) => ["GET", byKey(sid, p, email)]));
+  return productIds.filter((_, i) => typeof tokens[i] === "string" && FEED_TOKEN.test(tokens[i] as string));
+}

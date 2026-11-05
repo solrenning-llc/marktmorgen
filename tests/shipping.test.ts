@@ -22,6 +22,8 @@ import { parseOptions } from "@/lib/product-option";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { confirmationFor } from "@/lib/purchase-email";
 import { markShipped, readTracking } from "@/lib/shipments";
+import { shipmentOutboxFixture, shipmentPolicy } from "./shipment-mail-outbox-fixture";
+import { installSesMailFixture } from "./ses-mail-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -192,65 +194,172 @@ async function main(): Promise<void> {
   is("a link that is not one is refused", (await markShipped(store, session.id as string, "javascript:alert(1)")).ok ? "marked" : "refused", "refused");
   is("tracking URLs cannot carry credentials", readTracking("https://user:secret@tools.usps.com/go"), null);
   const originalPipeline: typeof redis.pipeline = redis.pipeline.bind(redis);
+  const outbox = shipmentOutboxFixture();
+  const runtime = { lifecycle: "active" as const, policy: shipmentPolicy(), pipeline: outbox.pipeline };
+  const noFunding = await markShipped(store, session.id as string, "", undefined, { lifecycle: "active", policy: null });
+  is("unreviewed pending storage is explicit unavailability before marking", noFunding, { ok: false, reason: "mail_unavailable" });
+  is("unreviewed storage never creates a physical shipment mark", redis.run(["GET", `nl:ship:done:${session.id}`]), null);
+  part("Never-activated deployments retain the original guarded one-shot action");
+  const originalSession = session;
+  const legacySender = installSesMailFixture({ fallback: globalThis.fetch, onResend: () => { throw new Error("synthetic unknown fallback outcome"); } });
+  legacySender.configure();
+  const observed: (string | number)[][] = [];
   try {
-    for (const acknowledgement of [undefined, false, 0, 1, "true", {}, []]) {
-      redis.pipeline = async (commands) => commands.some(command => command[0] === "SET" && String(command[1]).startsWith("nl:ship:done:"))
-        ? [acknowledgement] : originalPipeline(commands);
-      const refusedClaim = await markShipped(store, session.id as string, "");
-      is("unknown claim acknowledgment refuses before mail", [refusedClaim.ok, emails.length], [false, 0]);
+    session = { ...originalSession, id: "cs_test_legacycompat000001" };
+    redis.pipeline = async commands => { observed.push(...commands.filter(c => String(c[1]).startsWith("nl:ship:done:"))); return originalPipeline(commands); };
+    const first = await markShipped(store, String(session.id), "https://example.test/original");
+    is("the default action marks and uses the guarded SES sender", [first.ok, first.ok && first.emailed, legacySender.sent.length], [true,true,1]);
+    is("a new legacy mark keeps SET NX first without an extra GET", observed.map(c=>c[0]), ["SET"]);
+    is("the original claim retains its 400-day expiry", observed[0]?.slice(3), ["NX","EX",400*86400]);
+    is("legacy acceptance is truthful, never a pending source", first.ok && first.mail, {state:"accepted",delayed:false});
+    const again = await markShipped(store, String(session.id), "https://example.test/loser");
+    is("a second press reads the original winner and sends nothing more", [again.ok && again.shipped.tracking,again.ok && again.emailed,legacySender.sent.length], ["https://example.test/original",false,1]);
+    is("an occupied claim needs only the original SET and GET", observed.map(c=>c[0]), ["SET","SET","GET"]);
+    is("no queue or budget-pool is silently created", [redis.run(["EXISTS","nl:ship:mail:due"]),redis.run(["EXISTS","nl:ship:mail:all"]),redis.run(["EXISTS","nl:ship:mail:pool"])], [0,0,0]);
+    is("the legacy path does not bypass the Resend guard", legacySender.resend.length, 0);
+    session={...originalSession,id:"cs_test_legacycompat000002",customer_details:{email:"not an address"}};
+    const invalid=await markShipped(store,String(session.id),"");
+    is("an invalid recipient still permits the old shipment record without mail",[invalid.ok,invalid.ok&&invalid.emailed,legacySender.sent.length],[true,false,1]);
+    session={...originalSession,id:"cs_test_legacycompatrace01"};
+    const raced=await Promise.all([markShipped(store,String(session.id),"https://example.test/race-a"),markShipped(store,String(session.id),"https://example.test/race-b")]);
+    is("concurrent legacy presses return one stored winner and invoke only one accepted send",[raced.every(r=>r.ok),raced[0].ok&&raced[1].ok&&raced[0].shipped.tracking===raced[1].shipped.tracking,raced.filter(r=>r.ok&&r.emailed).length,legacySender.sent.length],[true,true,1,2]);
+    const before=legacySender.sent.length;
+    session={...originalSession,id:"cs_test_legacycompat000003"};
+    for(const reply of [undefined,false,0,1,"true",{},[],["OK",null],[null,"OK"]]){
+      redis.pipeline=async commands=>commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:")) ? (Array.isArray(reply)&&reply.length===2?reply:[reply]) : originalPipeline(commands);
+      const result=await markShipped(store,String(session.id),"");
+      is("legacy unknown claim ACK never authorizes email",[result.ok,legacySender.sent.length],[false,before]);
     }
-    redis.pipeline = async (commands) => {
-      if (commands.some(command => command[0] === "SET" && String(command[1]).startsWith("nl:ship:done:"))) throw new Error("synthetic storage outage");
+    redis.pipeline=async commands=>{
+      if(commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:"))){await originalPipeline(commands);throw Error("synthetic lost claim ACK");}
       return originalPipeline(commands);
     };
-    is("claim transport failure refuses before mail", [(await markShipped(store, session.id as string, "")).ok, emails.length], [false, 0]);
-  } finally { redis.pipeline = originalPipeline; }
-  part("A single shipment claim requires exactly one reply");
+    is("a committed lost ACK never sends",[(await markShipped(store,String(session.id),"https://example.test/kept")).ok,legacySender.sent.length],[false,before]);
+    redis.pipeline=originalPipeline;
+    const recovered=await markShipped(store,String(session.id),"https://example.test/not-kept");
+    is("retry after a lost ACK returns its stored winner without sending",[recovered.ok&&recovered.shipped.tracking,recovered.ok&&recovered.emailed,legacySender.sent.length],["https://example.test/kept",false,before]);
+    session={...originalSession,id:"cs_test_legacycompat000004"};
+    const denied=await markShipped(store,String(session.id),"",undefined,{lifecycle:"retired",policy:null});
+    is("retired cannot fall back to a new legacy mark",[denied.ok,redis.run(["GET",`nl:ship:done:${session.id}`]),legacySender.sent.length],[false,null,before]);
+    const unknown=await markShipped(store,String(session.id),"",undefined,{lifecycle:"unknown" as never});
+    is("unknown lifecycle cannot become legacy",[unknown.ok,redis.run(["GET",`nl:ship:done:${session.id}`])],[false,null]);
+    session={...originalSession,id:"cs_test_legacycompat000005"};
+    legacySender.setSesOutcome("lost");
+    const uncertain=await markShipped(store,String(session.id),"");
+    is("provider uncertainty preserves the shipment without inventing a queue",[uncertain.ok,uncertain.ok&&uncertain.emailed,uncertain.ok&&uncertain.mail],[true,false,{state:"not_recorded",delayed:false}]);
+  } finally { legacySender.restore(); redis.pipeline=originalPipeline; session=originalSession; }
+  for (const acknowledgement of [undefined, false, 0, 1, "true", {}, []]) {
+    const refusedClaim = await markShipped(store, session.id as string, "", undefined, {
+      ...runtime, pipeline: async commands => commands.some(command => command[0] === "EVAL")
+        ? [acknowledgement] : outbox.pipeline(commands),
+    });
+    is("unknown durable claim acknowledgment refuses before mail", [refusedClaim.ok, emails.length], [false, 0]);
+  }
+  is("claim transport failure refuses before mail", [(await markShipped(store, session.id as string, "", undefined, {
+    ...runtime, pipeline: async () => { throw new Error("synthetic storage outage"); },
+  })).ok, emails.length], [false, 0]);
+
+  part("A single durable shipment claim requires exactly one reply");
   const malformedClaimReplies: unknown[] = [null,undefined,false,0,"OK",{},[],Array(1),["OK",null],[null,"OK"],{0:"OK",length:1}];
   for (const receipt of malformedClaimReplies) {
     const shipmentCommands: (string | number)[][] = [];
     const emailsBefore = emails.length;
-    try {
-      redis.pipeline = async (commands) => {
-        if (commands.some(command => String(command[1]).startsWith("nl:ship:done:"))) {
-          shipmentCommands.push(...commands);
-          return receipt as unknown[];
-        }
-        return originalPipeline(commands);
-      };
-      const result = await markShipped(store, session.id as string, "");
-      is("an unknown outer claim cannot grant success or email", [result.ok ? "marked" : result.reason,emails.length], ["unknown",emailsBefore]);
-      is("unknown claims are neither reread nor destructively removed",shipmentCommands.map(command => command[0]),["SET"]);
-    } finally { redis.pipeline = originalPipeline; }
+    const result = await markShipped(store, session.id as string, "", undefined, {
+      ...runtime, pipeline: async commands => {
+        shipmentCommands.push(...commands);
+        return receipt as unknown[];
+      },
+    });
+    is("an unknown outer claim cannot grant success or email", [result.ok ? "marked" : result.reason,emails.length], ["unknown",emailsBefore]);
+    is("unknown claims are neither retried nor destructively removed",shipmentCommands.map(command => command[0]),["EVAL"]);
   }
   part("An occupied shipment claim needs a readable existing record");
   const badRecords: unknown[] = [undefined, null, "broken", "null", "[]", JSON.stringify({ at: -1, tracking: "" }), JSON.stringify({ at: 1.5, tracking: "" }), JSON.stringify({ at: 1, tracking: "https://user:secret@example.com/track" }), JSON.stringify({ at: 1, tracking: 7 })];
   const beforeClaimEmails = emails.length;
   for (const badRecord of badRecords) {
+    let sourceReads = 0;
     try {
-      redis.pipeline = async (commands) => {
-        if (commands.some(command => String(command[1]).startsWith("nl:ship:done:"))) return commands.map(command => command[0] === "SET" ? null : badRecord);
+      redis.pipeline = async commands => {
+        if (commands.some(command => String(command[1]).startsWith("nl:ship:done:"))) {
+          sourceReads++;
+          return commands.map(() => sourceReads === 1 ? null : badRecord);
+        }
         return originalPipeline(commands);
       };
-      const refusedClaim: Awaited<ReturnType<typeof markShipped>> = await markShipped(store, session.id as string, "");
+      const refusedClaim = await markShipped(store, session.id as string, "", undefined, {
+        ...runtime, pipeline: async commands => commands.some(command => command[0] === "EVAL")
+          ? [["legacy", JSON.stringify({ at: 1_790_000_000, tracking: "" })]] : outbox.pipeline(commands),
+      });
       is("an unreadable occupied claim never fabricates shipment success", [refusedClaim.ok ? "marked" : refusedClaim.reason, emails.length], ["unknown", beforeClaimEmails]);
     } finally { redis.pipeline = originalPipeline; }
   }
   try {
     const keptShipment = { at: 1_790_000_000, tracking: "https://example.com/old-tracking" };
-    redis.pipeline = async (commands) => {
-      if (commands.some(command => String(command[1]).startsWith("nl:ship:done:"))) return commands.map(command => command[0] === "SET" ? null : JSON.stringify(keptShipment));
+    redis.pipeline = async commands => {
+      if (commands.some(command => String(command[1]).startsWith("nl:ship:done:"))) return commands.map(() => JSON.stringify(keptShipment));
       return originalPipeline(commands);
     };
-    const keptClaim = await markShipped(store, session.id as string, "https://example.com/new-tracking");
+    const keptClaim = await markShipped(store, session.id as string, "https://example.com/new-tracking", undefined, runtime);
     is("a readable occupied claim returns its original record without another email", [keptClaim.ok ? keptClaim.shipped : null, keptClaim.ok ? keptClaim.emailed : null, emails.length], [keptShipment, false, beforeClaimEmails]);
   } finally { redis.pipeline = originalPipeline; }
 
-  const marked = await markShipped(store, session.id as string, "https://tools.usps.com/go?x=1");
-  const mail = emails.at(-1)!;
-  is("the buyer gets one email, with the tracking link and the address", [marked.ok && marked.emailed, mail.to, mail.subject, mail.text.includes("https://tools.usps.com/go?x=1"), mail.text.includes("Austin, TX 78701")], [true, "ana@example.com", "The Supper Book is on its way", true, true]);
-  const again = await markShipped(store, session.id as string, "");
-  is("and never a second one", [again.ok && again.emailed, emails.length], [false, 1]);
+  part("An active funded shipment without a recipient still requires an exact claim ACK");
+  const noRecipientSession = session;
+  try {
+    session={...noRecipientSession,id:"cs_test_invalidrecipientack01",customer_details:{email:"not an address"}};
+    const malformedNoRecipient: unknown[] = [["OK","unexpected"],["OK",null],null,undefined,false,0,"OK",{},[],Array(1),[undefined],[null],[false],[0],["true"]];
+    for(const receipt of malformedNoRecipient){
+      const seen:(string|number)[][]=[];
+      redis.pipeline=async commands=>{seen.push(...commands.filter(c=>String(c[1]).startsWith("nl:ship:done:")));return commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:"))?receipt as unknown[]:originalPipeline(commands);};
+      const beforeEmails=emails.length,beforeOutbox=outbox.commands.length;
+      const result=await markShipped(store,String(session.id),"",undefined,runtime);
+      is("a malformed no-recipient claim cannot confirm a shipment",result.ok?"marked":result.reason,"unknown");
+      is("malformed no-recipient claims add no re-read, outbox work or email",[seen.map(c=>c[0]),outbox.commands.length-beforeOutbox,emails.length-beforeEmails],[["GET","SET"],0,0]);
+    }
+    redis.pipeline=async commands=>{
+      if(commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:")))throw Error("synthetic no-recipient SET outage");
+      return originalPipeline(commands);
+    };
+    const failed=await markShipped(store,String(session.id),"",undefined,runtime);
+    is("a no-recipient claim transport exception returns unknown",failed.ok?"marked":failed.reason,"unknown");
+    session={...session,id:"cs_test_invalidrecipientlost01"};
+    redis.pipeline=async commands=>{
+      const reply=await originalPipeline(commands);
+      return commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:"))?[...reply,"unexpected"]:reply;
+    };
+    const lost=await markShipped(store,String(session.id),"https://example.test/committed",undefined,runtime);
+    is("a committed mark with an extra reply remains unconfirmed and is never deleted",[lost.ok,JSON.parse(String(redis.run(["GET",`nl:ship:done:${session.id}`]))).tracking],[false,"https://example.test/committed"]);
+    redis.pipeline=originalPipeline;
+    session={...session,id:"cs_test_invalidrecipientvalid01"};
+    const accepted=await markShipped(store,String(session.id),"https://example.test/no-recipient",undefined,runtime);
+    is("one real OK still confirms the no-recipient mark without sending",[accepted.ok,accepted.ok&&accepted.emailed,accepted.ok&&accepted.mail,emails.length],[true,false,{state:"not_recorded",delayed:false},0]);
+    is("the no-recipient mark keeps its existing TTL",Number(redis.run(["TTL",`nl:ship:done:${session.id}`]))>399*86400,true);
+  }finally{redis.pipeline=originalPipeline;session=noRecipientSession;}
+  part("The active producer deadline begins before the Stripe read");
+  const clockSession = session, priorFetch = globalThis.fetch;
+  const started = Date.now(); let clock = started, capturedAuthorization: number | null = null;
+  try {
+    session={...clockSession,id:"cs_test_activeclock000001"};
+    globalThis.fetch=(async(input,init)=>{ if(new URL(String(input)).pathname.includes("/checkout/sessions/"))clock=started+11*60_000; return priorFetch(input,init); }) as typeof fetch;
+    const result=await markShipped(store,String(session.id),"",undefined,{...runtime,now:()=>clock,pipeline:async commands=>{
+      for(const c of commands)if(c[0]==="EVAL"&&c[13]==="enqueue")capturedAuthorization=JSON.parse(String(c[15])).authorizedAt;
+      return [["unknown"]];
+    }});
+    is("the original pre-await timestamp is preserved in the real enqueue argument",[capturedAuthorization,clock],[started,started+11*60_000]);
+    is("an unknown durable ACK after the delayed read still authorizes no mark",result.ok,false);
+  }finally{globalThis.fetch=priorFetch;session=clockSession;}
+  // The route and the SES sender are real; only Redis ACKs and remote HTTP
+  // are synthetic. The Lua itself is separately verified on real Redis.
+  const sender = installSesMailFixture({ fallback: globalThis.fetch });
+  sender.configure();
+  try {
+    const marked = await markShipped(store, session.id as string, "https://tools.usps.com/go?x=1", undefined, runtime);
+    const mail = sender.sent.at(-1)!;
+    is("the buyer gets one email, with unchanged tracking and address", [marked.ok && marked.emailed, mail.to[0], mail.subject, mail.text.includes("https://tools.usps.com/go?x=1"), mail.text.includes("Austin, TX 78701")], [true, "ana@example.com", "The Supper Book is on its way", true, true]);
+    const again = await markShipped(store, session.id as string, "", undefined, runtime);
+    is("and never a second one", [again.ok && again.emailed, sender.sent.length], [false, 1]);
+    is("no unbudgeted Resend fallback was used", sender.resend.length, 0);
+  } finally { sender.restore(); }
   session = { ...session, id: `cs_test_${"t".repeat(24)}`, metadata: { store: "harbor", product: pdf.product.id } };
   is("an order that was not shipped cannot be marked", (await markShipped(store, session.id as string, "")).ok ? "marked" : "refused", "refused");
 

@@ -17,13 +17,13 @@ const MESSAGES: Record<string, string> = {
   code: "That does not look like a share code. It starts with mmf_.",
   code_gone: "That link has been revoked, has run out, or was never made. Ask for a new one.",
   share_busy: "That link has been used as often as it can be this month. Ask the creator for the file instead.",
-  shares_month: "Your store has made as many share links this month as your plan allows. It opens again with your next billing month.",
-  previews_month: "Your store has looked at as many funnels this month as your plan allows. It opens again with your next billing month.",
-  exports_month: "Your store has downloaded as many funnel files this month as your plan allows. It opens again with your next billing month.",
+  shares_month: "Your store has made as many share links as its figure allows for now. More can be made when the figure opens again.",
+  previews_month: "Your store has looked at as many funnels as its figure allows for now. More can be looked at when the figure opens again.",
+  exports_month: "Your store has downloaded as many funnel files as its figure allows for now. More can be downloaded when the figure opens again.",
   busy: "Too many previews in the last hour. Try again in a little while.",
-  shares_full: "Your store holds as many share links as your plan allows. Revoke one to make another.",
-  imports_full: "Your store has brought in as many funnels this month as your plan allows. It opens again with your next billing month, or on a larger plan.",
-  too_big: "This funnel is larger than your plan allows in one file.",
+  shares_full: "Your store holds all the share links it can keep. Revoke one to make another.",
+  imports_full: "Your store has brought in as many funnels as its figure allows for now. More can come in when the figure opens again.",
+  too_big: "This funnel is larger than your store can put in one file.",
   days: "Choose how long the link should work.",
   unknown: "That funnel is gone. Reload the page.",
   plan: "Something in the preview stops it. Review the list below.",
@@ -34,7 +34,7 @@ const MESSAGES: Record<string, string> = {
   setup_incomplete: "We could not confirm it finished. Some pages, forms or the funnel may already exist: review them before trying again.",
   bundle_format: "This is not a Marktmorgen funnel file.",
   bundle_newer: "This file was made by a newer version of Marktmorgen. Reload the page and try again.",
-  bundle_too_big: "This file is larger than your plan brings in.",
+  bundle_too_big: "This file is larger than your store can bring in.",
   bundle_unsafe: "This file contains something that looks like code, so it is not accepted.",
   bundle_shape: "This file has parts the funnel format does not have, so it is not accepted.",
   bundle_steps: "The file's steps do not match its pages and products.",
@@ -233,7 +233,7 @@ export function FunnelSharePanel({
   async function readFile(file: File | undefined) {
     if (!file) return;
     if (file.size > limits.bundleBytes) {
-      setError(`This file is ${bytesWords(file.size)}; your plan brings in funnels up to ${bytesWords(limits.bundleBytes)}.`);
+      setError(`This file is ${bytesWords(file.size)}; your store can bring in funnels up to ${bytesWords(limits.bundleBytes)}.`);
       return;
     }
     let parsed: unknown;

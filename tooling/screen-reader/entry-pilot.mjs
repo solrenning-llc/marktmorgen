@@ -5,13 +5,14 @@ import {resolve,join} from "node:path";
 import {nvda,voiceOver} from "@guidepup/guidepup";
 import {resetVoiceOverRunner} from "./reset-voiceover.mjs";
 import {navigateToContent} from "./navigate-to-content.mjs";
+import {startWindowsForegroundProbe} from "./windows-foreground.mjs";
 const root=resolve("../.."),require=createRequire(join(root,"package.json"));
 const kind=process.platform==="win32"?"nvda":process.platform==="darwin"?"voiceover":null;
 if(!kind)throw Error("Real reader pilot requires Windows or macOS");
 const engine=kind==="nvda"?"chromium":"webkit",reader=kind==="nvda"?nvda:voiceOver;
 const port=3196,origin="http://127.0.0.1:"+port;
 const app=spawn(process.execPath,[join(root,"node_modules/next/dist/bin/next"),"start","-H","127.0.0.1","-p",String(port)],{cwd:root,env:{...process.env,NEXT_TELEMETRY_DISABLED:"1"},stdio:["ignore","pipe","pipe"]});
-let output="",browser,context,writes=0,foreign=0,primaryFailure=false,stage="local app startup";
+let output="",browser,context,foreground,writes=0,foreign=0,primaryFailure=false,stage="local app startup";
 for(const stream of [app.stdout,app.stderr])stream.on("data",chunk=>{output=(output+chunk).slice(-6000);});
 async function report(step,expected){
  const spoken=await reader.lastSpokenPhrase();
@@ -27,6 +28,11 @@ try{
   if(up)break;await new Promise(resolve=>setTimeout(resolve,500));
  }
  assert.ok(up,"Local synthetic app did not start: "+output);
+ if(kind==="nvda"&&process.env.GITHUB_ACTIONS==="true"){
+  // Start the hidden persistent observer before any browser window exists.
+  try{foreground=await startWindowsForegroundProbe();}
+  catch(error){console.error("AX2_NVDA_NATIVE_FOREGROUND_UNKNOWN:"+JSON.stringify({stage:"observer startup",error:String(error)}));}
+ }
  browser=await require("playwright-core")[engine].launch({headless:false});
  context=await browser.newContext({serviceWorkers:"block",locale:"en-US"});
  await context.route("**/*",route=>{
@@ -50,7 +56,7 @@ try{
   // Verify the expected application state independently before checking speech.
   await page.getByRole("heading",{level:1,name:fixture.heading,exact:true}).waitFor();
   stage="reader content navigation "+fixture.path;
-  await navigateToContent(reader,page,kind);
+  await navigateToContent(reader,page,kind,foreground);
   stage="reader heading assertions "+fixture.path;
   let matched=false;
   for(let step=0;step<8;step++){
@@ -77,6 +83,7 @@ try{
  const cleanupErrors=[];
  for(const [step,close] of [
   ["reader stop",()=>reader.stop()],
+  ["foreground observer close",()=>foreground?.close()],
   ["browser context close",()=>context?.close()],
   ["browser close",()=>browser?.close()],
   ["local app stop",()=>app.kill()],

@@ -49,7 +49,7 @@
  * is what makes one conversation rather than two halves of one.
  */
 import { redisPipeline } from "@/lib/redis";
-import { holdsAll } from "@/lib/community-search";
+import { countOf, holdsAll } from "@/lib/community-search";
 import { CREATOR } from "@/lib/community";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -359,6 +359,18 @@ export function dmKeys(id: string, who: string): string[] {
 
 /** How many of a person's conversations one search reads, the most recent first. */
 export const SEARCH_CONVERSATIONS = 30;
+
+/** How many conversations a search of this person's messages reads (SEARCH_CONVERSATIONS at the most): one command, before it reads them (lib/page-read-rules.ts). Null when it cannot be counted. */
+export async function searchedConversations(id: string, who: string): Promise<number | null> {
+  try {
+    const [n] = await redisPipeline([["ZCARD", inboxKey(id, who)]]);
+    // An absent or odd reply is unknown, never none (Codex I, #2316).
+    const count = countOf(n);
+    return count === null ? null : Math.min(count, SEARCH_CONVERSATIONS);
+  } catch {
+    return null;
+  }
+}
 /** How many of the latest messages of each it reads. */
 export const SEARCH_MESSAGES = 200;
 /** How many conversations are read in one request, so no reply is ever large. */
@@ -422,6 +434,28 @@ export async function forgetDmPerson(id: string, who: string): Promise<number> {
   commands.push(["DEL", ...dmKeys(id, who)]);
   await redisPipeline(commands);
   return pairs.length;
+}
+
+/**
+ * Every private conversation and request one member is in, whole, for the
+ * copy of their data (619 [SZ3], lib/person-copy.ts): the conversations the
+ * erasure deletes. Each message says whether they wrote it; the other
+ * person is not named (their key, handle and address are theirs). Only
+ * reads: no read mark is set.
+ */
+export async function conversationsOf(id: string, who: string): Promise<{ request: boolean; messages: { mine: boolean; fromCreator: boolean; text: string; at: number }[] }[]> {
+  const [mine, asked] = await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]);
+  const requests = new Set((Array.isArray(asked) ? asked : []).map(String));
+  const pairs = [...new Set([...(Array.isArray(mine) ? mine : []), ...requests].map(String))].filter((p) => p.split(".").includes(who));
+  if (!pairs.length) return [];
+  const lists = await redisPipeline(pairs.map((pair) => ["LRANGE", chatKey(id, pair), 0, -1]));
+  return pairs.map((pair, i) => ({
+    request: requests.has(pair),
+    messages: (Array.isArray(lists[i]) ? (lists[i] as unknown[]) : [])
+      .map(parseMessage)
+      .filter((m): m is Message => m !== null)
+      .map((m) => ({ mine: m.a === who, fromCreator: m.a === CREATOR, text: m.text, at: m.at })),
+  }));
 }
 
 /** How many conversations and requests one member is in: what deleting them goes through (lib/community-erasure.ts). */

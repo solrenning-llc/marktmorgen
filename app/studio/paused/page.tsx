@@ -7,7 +7,7 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { withinLimit } from "@/lib/request-guard";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceWindow, resetWords } from "@/lib/allowance-window";
-import { POOL_FULL_WORDS } from "@/lib/free-pool-rules";
+import { poolFullWords } from "@/lib/free-pool-rules";
 import { PLAN_TITLES, PRO_ON_SALE, type Tier } from "@/lib/plan";
 import { standingOf } from "@/lib/plan-standing";
 import { PLANS_ON_SALE } from "@/lib/opening";
@@ -79,7 +79,7 @@ export default async function StudioPausedPage({ searchParams }: Params) {
             <>
               <p className="mt-4 text-ink-soft">
                 {why === "pool"
-                  ? POOL_FULL_WORDS
+                  ? poolFullWords(PLANS_ON_SALE)
                   : why === "daily"
                     ? "They have a small daily limit of their own, so the month\u2019s studio requests never stop them. Try again tomorrow, or write to support."
                   : why === "unknown"

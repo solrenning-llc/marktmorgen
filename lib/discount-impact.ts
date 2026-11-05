@@ -67,7 +67,11 @@ export function discountKindOf(row: Record<string, unknown>): DiscountKind {
 
 /** What a checkout's discount took off, in the smallest unit. Pure. */
 export function discountOff(row: Record<string, unknown>): number {
-  return num((row.total_details as { amount_discount?: unknown } | null | undefined)?.amount_discount);
+  const off = num((row.total_details as { amount_discount?: unknown } | null | undefined)?.amount_discount);
+  if (off > 0) return off;
+  // A code on a booking with a deposit is taken off before Stripe's page (lib/deposit-code.ts): its note says how much.
+  const noted = Number((row.metadata as Record<string, unknown> | null | undefined)?.code_off);
+  return Number.isSafeInteger(noted) && noted > 0 ? noted : 0;
 }
 
 const emailOf = (row: Record<string, unknown>) => {

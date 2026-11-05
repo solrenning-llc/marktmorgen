@@ -29,7 +29,8 @@ import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
 import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
-import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { StripeError } from "@/lib/stripe-account";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
 import { NO_DEAL } from "@/lib/cart-rules";
 import { NO_RECOVERY } from "@/lib/recovery-setting";
@@ -110,13 +111,27 @@ async function main(): Promise<void> {
   is("a lock another checkout holds opens nothing, and the locks taken are let go", [busy, calls, lock3[0]], [{ ok: false, reason: "busy" }, 0, null]);
   await redis.pipeline([["DEL", `nl:stock:lock:${creator.statsId}:print2`]]);
   let failed = "";
+  // Stripe's own refusal, a 4xx answered before it makes anything: the only failure that proves no checkout exists.
   await withCartStockHolds(creator, [limited("print4", 5), limited("print5", 5)], async () => {
-    throw new Error("Stripe said no");
+    throw new StripeError(400, "parameter_invalid", "Stripe said no");
   }).catch((error: Error) => {
     failed = error.message;
   });
   const locks = await redis.pipeline([["GET", `nl:stock:lock:${creator.statsId}:print4`], ["GET", `nl:stock:lock:${creator.statsId}:print5`]]);
-  is("a checkout that fails to open holds nothing and lets every lock go", [failed, locks, await stockLeft(creator, limited("print4", 5))], ["Stripe said no", [null, null], 5]);
+  is("a checkout Stripe refused to make holds nothing and lets every lock go", [failed.endsWith("Stripe said no"), locks, await stockLeft(creator, limited("print4", 5))], [true, [null, null], 5]);
+  class NotAsked extends Error {}
+  await withCartStockHolds(creator, [limited("print20", 5)], async () => {
+    throw new NotAsked("refused before Stripe was asked");
+  }, (error) => error instanceof NotAsked).catch(() => {});
+  is("a refusal the caller names, raised before Stripe is asked, holds nothing", await stockLeft(creator, limited("print20", 5)), 5);
+  let lostOpen = "";
+  await withCartStockHolds(creator, [limited("print21", 5), limited("print22", 5)], async () => {
+    throw new TypeError("Connection lost after the checkout was made");
+  }).catch((error: Error) => {
+    lostOpen = error.message;
+  });
+  is("an opening whose answer was lost keeps its units held: the checkout may exist at Stripe", [lostOpen, await stockLeft(creator, limited("print21", 5)), await stockLeft(creator, limited("print22", 5))], ["Connection lost after the checkout was made", 4, 4]);
+  is("and the held ones lapse once any checkout made under them has closed", await stockLeft(creator, limited("print21", 5), Date.now() + 37 * 60 * 1000 + 1000), 5);
   is("a store whose counts have nowhere to be read opens nothing", await withCartStockHolds({ statsId: null } as unknown as Store, [a], async () => ({ id: "x" })), { ok: false, reason: "busy" });
   await redis.pipeline([["HSET", `nl:stock:${creator.statsId}:print13`, "cs_test_cartstockjunk0002", "not a hold"]]);
   let unreadOpened = 0;
@@ -171,6 +186,31 @@ async function main(): Promise<void> {
   });
   redis.pipeline = original;
   is("a reply with holes is never taken for the provisional holds' acknowledgment", [sparse, sparseOpened], [{ ok: false, reason: "busy" }, 0]);
+  const script = (commands: (string | number)[][], tag: string) => commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith(`-- marktmorgen:${tag}:v1\n`);
+  let admitOpened = 0;
+  redis.pipeline = async (commands) => (script(commands, "stock-admit") ? [] : original(commands));
+  const unadmitted = await withCartStockHolds(creator, [limited("print16", 1)], async () => {
+    admitOpened += 1;
+    return { id: "cs_test_cartstockadmit001" };
+  });
+  redis.pipeline = original;
+  is("an admission whose answer is unknown opens nothing, and takes its own provisional hold back", [unadmitted, admitOpened, await stockLeft(creator, limited("print16", 1))], [{ ok: false, reason: "busy" }, 0, 1]);
+  redis.pipeline = async (commands) => (script(commands, "stock-bind") ? [{ error: "lost" }] : original(commands));
+  const unbound = await withCartStockHolds(creator, [limited("print17", 1)], async () => ({ id: "cs_test_cartstockbind0001" }));
+  redis.pipeline = original;
+  is("a hand-over whose answer is unknown: closed at Stripe, nobody sent to it, the unit back only once Stripe says expired", [unbound, expired.includes("cs_test_cartstockbind0001"), await stockLeft(creator, limited("print17", 1))], [{ ok: false, reason: "busy" }, true, 1]);
+  complete.add("cs_test_cartstockbind0002");
+  redis.pipeline = async (commands) => (script(commands, "stock-bind") ? [] : original(commands));
+  const unclosed = await withCartStockHolds(creator, [limited("print18", 1)], async () => ({ id: "cs_test_cartstockbind0002" }));
+  redis.pipeline = original;
+  is("and while Stripe will not close it, its unit stays held", [unclosed, await stockLeft(creator, limited("print18", 1))], [{ ok: false, reason: "busy" }, 0]);
+  const gap = await withCartStockHolds(creator, [limited("print19", 1)], async () => {
+    // The provisional hold lapsed and was let go while Stripe was opening the checkout (a paused request): the unit may have been sold since.
+    const fields = ((await original([["HGETALL", key("print19")]]))[0] as string[]).filter((_, i) => i % 2 === 0);
+    await original(fields.map((field) => ["HDEL", key("print19"), field]));
+    return { id: "cs_test_cartstockgap00001" };
+  });
+  is("a checkout opened after its provisional hold was let go is closed at Stripe, nobody sent to it", [gap, expired.includes("cs_test_cartstockgap00001")], [{ ok: false, reason: "busy" }, true]);
   await withCartStockHolds(creator, [limited("print10", 1)], async () => ({ id: "cs_test_cartstockdone0001" }));
   complete.add("cs_test_cartstockdone0001");
   await releaseCartStockHolds(creator, [limited("print10", 1)], "cs_test_cartstockdone0001");
@@ -220,6 +260,22 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", `nl:stock:${owner.statsId}:${made.Poster}`, "cs_test_cartstockjunk0001", "not a hold"]]);
   const unread = (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${made.Poster}`))).json()) as { items: { ok: boolean; soldOut: boolean }[] };
   is("a count that cannot be read is not paid for, and never said to be sold out", unread.items.map((item) => [item.ok, item.soldOut]), [[false, false]]);
+
+  part("A key count that cannot be read never sells (SG2, finding 12)");
+  const licence = await addProduct(OWNER, "Licence", "", "20", null);
+  if (!licence.ok) throw new Error("no licence");
+  await setProductLink(OWNER, licence.product.id, "https://example.com/licence");
+  const keyed = await setProductKeys(OWNER, licence.product.id, { source: "pool", prefix: "", groups: 4, groupLength: 4, lowAt: 0 });
+  if (!keyed.ok) throw new Error("no keys on the licence");
+  is("a pool with no keys left: back to the cart", (await pay([made.Guide, licence.product.id])).to, "?cart=changed");
+  const before = opened;
+  for (const reply of [[], ["3"], [null], [-1], [{ error: "lost" }]] as unknown[][]) {
+    redis.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "LLEN" ? reply : original(commands)) as never;
+    const answer = await pay([made.Guide, licence.product.id]);
+    redis.pipeline = original;
+    is(`a key count answered ${JSON.stringify(reply)}: nothing opened, try again`, answer.to, "?cart=error");
+  }
+  is("no checkout was made on an unknown key count", opened, before);
 
   part("Where else a sold out one is not offered");
   const { readFileSync } = await import("node:fs");

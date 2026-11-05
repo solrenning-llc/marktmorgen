@@ -7,7 +7,7 @@
  * (components/course-toggle.tsx, components/course-editor.tsx), the review
  * switch of an assignment (components/task-editor.tsx), the certificate's page,
  * read from our record (app/[handle]/certificate/[id]), and the shared answer
- * to "Can I try it before paying?" (lib/beginner-faq.ts). No number of
+ * to "Can I try quizzes and certificates before paying?" (lib/beginner-faq.ts). No number of
  * students or certificates. Shown first in the page's own "Questions" block.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";
@@ -26,11 +26,11 @@ export function quizBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_
       a: `A quiz at the end of a lesson of a course, up to ${MAX_QUESTIONS} multiple-choice questions marked on our side, or an assignment students hand in, which you can read and approve before the lesson counts as done. With certificates on, a student who finishes every lesson and passes every quiz that has to be passed types their name and gets a certificate, with a page of its own that anyone can open to check it.`,
     },
     {
-      q: "How do I start one?",
+      q: "How do I add a quiz and a certificate?",
       a: `In your studio, on a product with a price, press “${w.course}”. On a lesson with no assignment, press “${w.lesson}”, then “${w.add}”. Write each question, type its answers and check the right one; add more with “${w.question}”, set “${w.pass}” and “${w.tries}”, and press “${w.save}”. For certificates, check “${w.certificate}” on the course.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try quizzes and certificates before paying?",
       a: tryBeforePaying("Quizzes and certificates", "a course's quizzes and its certificate", onSale, trialDays),
     },
     {

@@ -33,7 +33,7 @@ export function domainBeginnerQuestions(on: boolean, onSale = PLANS_ON_SALE, tri
         : "Not for now: there is nowhere to add one until domains are switched on here.",
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I put my store on my own domain before paying?",
       a: !on
         ? `Not yet: there is nothing to try until domains are switched on here. ${demo}`
         : onSale

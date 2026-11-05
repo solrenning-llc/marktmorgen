@@ -1,5 +1,5 @@
 /**
- * The one answer every feature page gives to "Can I try it before paying?"
+ * The one answer every feature page gives to its own "Can I try … before paying?"
  * (534 [FQ1], lib/beginner-faq.ts; this check added 2 November 2026, unit
  * 28). Checked against what the code does: a store without a paid plan, a
  * trial included, has smaller figures than the cheapest plan, counted over

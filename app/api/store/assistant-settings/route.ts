@@ -16,7 +16,8 @@ import { clearAssistantMissed } from "@/lib/store-assistant";
  * chat shows only while it is.
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "page", 6_000);
+  // Emptying the list of missed questions cannot be undone: named apart (lib/two-step.ts).
+  const guarded = await guardStoreWrite(request, "page", 6_000, (sent) => (sent.clear === true ? "clear" : ""));
   if (!guarded.ok) return guarded.response;
   try {
     if (guarded.body.clear === true) {

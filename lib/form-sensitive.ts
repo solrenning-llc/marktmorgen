@@ -26,11 +26,22 @@ export const SENSITIVE_WHY: Readonly<Record<SensitiveKind, string>> = {
   id: "A form never asks for an identity number such as a Social Security or passport number: a store has no need for it, and keeping one is a risk to the buyer.",
 };
 
+/**
+ * What one label asks for, or null. The same rules as a form's questions, for any other place a visitor is
+ * asked to type something (631 [AA1] (d): code the AI generates, lib/generated-code-check.ts).
+ */
+export function sensitiveKindOf(text: string): SensitiveKind | null {
+  const label = text.trim();
+  for (const [what, rule] of RULES) if (rule.test(label)) return what;
+  return null;
+}
+
 /** The first question that asks for one of them, with its words and its kind; null when none does. */
 export function sensitiveFieldOf(form: Pick<FormDef, "fields">): { label: string; what: SensitiveKind } | null {
   for (const field of form.fields) {
     const label = field.label.trim();
-    for (const [what, rule] of RULES) if (rule.test(label)) return { label, what };
+    const what = sensitiveKindOf(label);
+    if (what) return { label, what };
   }
   return null;
 }

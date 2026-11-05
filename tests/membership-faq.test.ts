@@ -1,7 +1,7 @@
 /**
  * The questions someone starting out asks about memberships (534 [FQ1],
  * unit 3, lib/membership-faq.ts; added 2 November 2026), and the one answer
- * every feature page gives to "Can I try it before paying?"
+ * every feature page gives to "Can I try memberships before paying?"
  * (lib/beginner-faq.ts). Checked: the editor's and the numbers page's own
  * words, read from their files; the trial answer follows PLANS_ON_SALE and
  * the upload policy, and is the same shared answer on the courses page; no
@@ -34,13 +34,13 @@ is("a private podcast can be a membership, as the editor says", editor.includes(
 part("The answers");
 const now = membershipBeginnerQuestions(false);
 const later = membershipBeginnerQuestions(true, TRIAL_DAYS);
-is("four questions", now.map((x) => x.q), ["What is a membership here?", "How do I start one?", "Can I try it before paying?", "Do memberships work?"]);
+is("four questions", now.map((x) => x.q), ["What is a membership here?", "How do I start a membership?", "Can I try memberships before paying?", "Do memberships work?"]);
 is("every day, week, month or year, as the intervals are", answer(now, "What is a membership here?").includes("charges again every day, week, month or year"), true);
 is("never \"the same amount\": introductory and yearly prices and discounts exist", /same amount/.test(answer(now, "What is a membership here?")), false);
-is("start: the editor's own field, choice and buttons", [MEMBERSHIP_EDITOR_WORDS.field, MEMBERSHIP_EDITOR_WORDS.once, MEMBERSHIP_EDITOR_WORDS.add, MEMBERSHIP_EDITOR_WORDS.save].every((w) => answer(now, "How do I start one?").includes(`“${w}”`)), true);
-is("try before paying: the one shared answer, in a membership's words", [answer(now, "Can I try it before paying?"), answer(later, "Can I try it before paying?")], [tryBeforePaying("A membership", "a product as a membership", false), tryBeforePaying("A membership", "a product as a membership", true, TRIAL_DAYS)]);
-is("and the courses page gives the same answer in a course's words", answer(courseBeginnerQuestions(false), "Can I try it before paying?"), tryBeforePaying("A course", "a course with its modules and the text of its lessons", false));
-is("uploads said as the policy has them", [AUTOMATIC_UPLOAD_CAPS.setup.opens, answer(now, "Can I try it before paying?").includes(uploadsWait("setup")), uploadsWait("setup")], [0, true, "Files and lesson videos can be uploaded once a paid plan starts."]);
+is("start: the editor's own field, choice and buttons", [MEMBERSHIP_EDITOR_WORDS.field, MEMBERSHIP_EDITOR_WORDS.once, MEMBERSHIP_EDITOR_WORDS.add, MEMBERSHIP_EDITOR_WORDS.save].every((w) => answer(now, "How do I start a membership?").includes(`“${w}”`)), true);
+is("try before paying: the one shared answer, in a membership's words", [answer(now, "Can I try memberships before paying?"), answer(later, "Can I try memberships before paying?")], [tryBeforePaying("A membership", "a product as a membership", false), tryBeforePaying("A membership", "a product as a membership", true, TRIAL_DAYS)]);
+is("and the courses page gives the same answer in a course's words", answer(courseBeginnerQuestions(false), "Can I try courses before paying?"), tryBeforePaying("A course", "a course with its modules and the text of its lessons", false));
+is("uploads said as the policy has them", [AUTOMATIC_UPLOAD_CAPS.setup.opens, answer(now, "Can I try memberships before paying?").includes(uploadsWait("setup")), uploadsWait("setup")], [0, true, "Files and lesson videos can be uploaded once a paid plan starts."]);
 is("one space between sentences, never two", /\s{2}/.test(now.map((x) => x.a).join(" ")), false);
 is("does it work: no figure, the creator's own page and tiles, once Stripe can be read", [answer(now, "Do memberships work?").startsWith("We publish no number of members or sales"), MEMBERSHIP_NUMBERS.tiles.every((t) => answer(now, "Do memberships work?").includes(`“${t}”`)), answer(now, "Do memberships work?").includes("connected and can be read")], [true, true, true]);
 const all = [...now, ...later].map((x) => x.a).join(" ");

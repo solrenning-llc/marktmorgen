@@ -5,12 +5,15 @@
  * support inbox only — never to the address typed — with a link that opens
  * it; that link touches only the store it names; each takedown is written
  * on the store's record and emailed to the creator; and a store switched off
- * sells nothing and shows no sign-up box until it is back on.
+ * sells nothing and shows no sign-up box until it is back on. A notice is
+ * counted on the public transparency page only once it reached the inbox: a
+ * try that failed to send, and is sent again, never counts twice.
  */
 import { addProduct, addStoreLink, claimHandle, ensureStatsId, setJoin, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, reportedProduct, takeDown } from "@/lib/takedown";
 import { canSell } from "@/lib/store-checkout";
+import { transparencyCounts } from "@/lib/transparency";
 import { KIND } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -18,9 +21,11 @@ import { paidPeriod } from "./billing-period-fixture";
 
 type Sent = { to: string[] | string; subject: string; text: string; reply_to?: string };
 const sent: Sent[] = [];
+let senderDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
+    if (senderDown) return new Response(JSON.stringify({ message: "unavailable" }), { status: 500 });
     sent.push(JSON.parse(String(init?.body)) as Sent);
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
   }
@@ -80,6 +85,12 @@ async function main(): Promise<void> {
   is("a token that is not one opens nothing", [await openReport("0".repeat(48)), await openReport("nope")], [null, null]);
   for (let i = 0; i < 4; i++) await fileReport(read.report, "9.9.9.9", "https://marktmorgen.com");
   is("five an hour from one connection", await fileReport(read.report, "9.9.9.9", "https://marktmorgen.com"), "limited");
+  const received = async () => (await transparencyCounts()).years[0]?.notices.copyright ?? 0;
+  is("each notice that reached the inbox is counted once", await received(), 5);
+  senderDown = true;
+  const tries = [await fileReport(read.report, "8.8.8.8", "https://marktmorgen.com"), await fileReport(read.report, "8.8.8.8", "https://marktmorgen.com")];
+  senderDown = false;
+  is("two tries that could not be sent: an error each, and nothing more counted", [tries, (await received()) - 5], [["error", "error"], 0]);
 
   is("a notice about a product's page points at that product", (await reportedProduct({ ...opened!.report, url: `https://marktmorgen.com/@noticeshop/p/${made.product.id}` }, (await storeForEmail(owner))!))?.id, made.product.id);
 

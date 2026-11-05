@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   const asked = limitsCheck([{ kind: "transactional", used: 75, figure: 150 }], reset, true);
   is("access emails past the share confirmations may take: only those confirmations pause, buyers' links still go", [asked.state, asked.found.startsWith("Confirmation emails to new addresses"), asked.ifLeft?.includes("Links your buyers ask for still go out.")], ["problem", true, true]);
   is("below that share: fine", limitsCheck([{ kind: "transactional", used: 74, figure: 150 }], reset, true).state, "ok");
-  const way = (paying: boolean) => { const fix = limitsCheck([{ kind: "email", used: 75, figure: 75 }], reset, paying).fix; return fix?.kind === "studio" ? fix.label : null; };
+  const way = (paying: boolean) => { const fix = limitsCheck([{ kind: "email", used: 75, figure: 75 }], reset, paying, true, true).fix; return fix?.kind === "studio" ? fix.label : null; };
   is("the way out: a larger plan when paying, a plan at all when not", [way(true), way(false)], ["See a larger plan", "Start a plan"]);
 
   part("Parts with no reader yet");

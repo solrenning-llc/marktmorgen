@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   const listing = (await readListing(store, made.product.id)) as CallListing;
   const at = weekdayAt(3, 600);
   const confirm = (session: string, due?: Parameters<typeof confirmBooking>[0]["due"]) =>
-    confirmBooking({ store, product: listing, session, start: at, end: at + 3_600_000, buyerEmail: "ana@example.com", buyerTz: NY, amountCents: 2000, currency: "usd", origin: "https://marktmorgen.com", ...(due === undefined ? {} : { due }) });
+    confirmBooking({ store, product: listing, session, start: at, end: at + 3_600_000, buyerEmail: "ana@example.com", buyerTz: NY, amountCents: 2000, currency: "usd", origin: "https://marktmorgen.com", ...(due === undefined ? {} : { due, cancel: null }) });
 
   emails.length = 0;
   reads.length = 0;
@@ -175,16 +175,16 @@ async function main(): Promise<void> {
   part("Every path hands it on, and the pages say it");
   const calls = readFileSync("lib/calls.ts", "utf8");
   is("the sale's note is read with every paid booking", calls.includes("    due: readDue(meta),\n"), true);
-  is("the booking catch-up and the daily job hand it to the confirmation", [calls.includes("      due: call.due,\n      origin,\n    }).catch((error) => console.error(\"catching up a booking failed\""), readFileSync("lib/call-reminders.ts", "utf8").includes("              due: call.due,\n")], [true, true]);
+  is("the booking catch-up and the daily job hand it to the confirmation", [calls.includes("      due: call.due,\n      cancel: call.cancel,\n      origin,\n    }).catch((error) => console.error(\"catching up a booking failed\""), readFileSync("lib/call-reminders.ts", "utf8").includes("              due: call.due,\n")], [true, true]);
   is(
     "only an in-person booking is read for it, before the once-only mark",
-    [calls.includes('if (whereOf(product.call).kind !== "place") due = null;'), calls.indexOf("due = (await paidCall(store, session))?.due ?? null;") < calls.indexOf('const [fresh] = await orderWrite(store, [["SET", confirmedKey(session)')],
+    [calls.includes('const needDue = due === undefined && whereOf(product.call).kind === "place";'), calls.indexOf("const sale = await paidCall(store, session);") < calls.indexOf('const [fresh] = await orderWrite(store, [["SET", confirmedKey(session)')],
     [true, true],
   );
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
   is(
-    "the thanks page reads it for an in-person booking, hands it on, and shows it under the address",
-    [thanks.includes("sessionId && order.state === \"paid\" && order.call && order.product.call?.place"), thanks.includes("      due,\n      origin: SITE_URL,"), thanks.indexOf("data-call-due") > thanks.indexOf("data-call-place")],
+    "the thanks page reads the sale for every paid call, hands the rest and the promise on, and shows the rest under the address",
+    [thanks.includes("sessionId && order.state === \"paid\" && order.call\n      ? await paidCall(store, sessionId)"), thanks.includes("      due,\n      cancel,\n      origin: SITE_URL,"), thanks.indexOf("data-call-due") > thanks.indexOf("data-call-place")],
     [true, true, true],
   );
   const book = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
   );
   is("never for a session from a package", book.includes("const due = fromPackage ? null : chargeNow("), true);
   const recovery = readFileSync("lib/checkout-recovery.ts", "utf8");
-  is("the reminder of an abandoned checkout says the rest, at today's price", recovery.includes("const deposit = due.rest > 0 ? [bookingWords(store.language).depositRest(money(due.rest), store.name)] : [];") && recovery.includes("g.recoverPrice(money(product.priceCents)), ...deposit,"), true);
+  is("the reminder of an abandoned checkout says the rest, at today's price", recovery.includes("const deposit = due.rest > 0 ? [bookingWords(store.language).depositRest(money(due.rest), store.name)] : [];") && recovery.includes("g.recoverPrice(price), ...deposit,") && recovery.includes(": lengths.length ? w.fromPrice(money(fromPrice(lengths) as number)) : money(product.priceCents);"), true);
 
   done();
 }

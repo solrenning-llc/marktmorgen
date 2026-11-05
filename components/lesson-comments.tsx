@@ -12,7 +12,7 @@ import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-languag
 import { NewTab } from "@/components/new-tab";
 
 /** The notices that say something went wrong, as opposed to that it went through. */
-const WARNINGS = new Set(["empty", "name", "slow", "parent", "replies", "full", "gone", "off"]);
+const WARNINGS = new Set(["empty", "name", "slow", "parent", "replies", "full", "gone", "off", "locked"]);
 
 /**
  * How long ago, "5 min ago", and past a week the day it was written, as

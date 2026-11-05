@@ -5,6 +5,7 @@ import {createServer} from "node:https";
 import {request as httpRequest} from "node:http";
 import {resolve,join} from "node:path";
 import {startServices} from "./services.mjs";
+import {prepareReviewedMailApp} from "./reviewed-mail-app.mjs";
 const root=resolve("."),require=createRequire(join(root,"package.json"));
 const engine=process.env.E2E_BROWSER??"chromium";
 if(!["chromium","firefox","webkit"].includes(engine))throw Error("Unsupported browser");
@@ -18,6 +19,7 @@ const env = {
   UPSTASH_REDIS_REST_URL: FAKE,
   UPSTASH_REDIS_REST_TOKEN: "local",
   RESEND_API_KEY: "re_local_only_a_stand_in",
+  RESEND_READ_API_KEY: "re_local_only_a_stand_in",
   RESEND_API_BASE: FAKE,
   ANTHROPIC_API_KEY: "sk-ant-local_only_"+"x".repeat(30),
   ANTHROPIC_API_BASE: FAKE,
@@ -44,12 +46,14 @@ const proxy=createServer({key:readFileSync(process.env.SIGNUP_TLS_KEY),cert:read
  incoming.pipe(forwarded);
 });
 let services=await startServices(4498);
-const app=spawn(process.execPath,[join(root,"node_modules/next/dist/bin/next"),"start","-p",String(port)],{env,stdio:["ignore","pipe","pipe"]});
-let output="";for(const stream of [app.stdout,app.stderr])stream.on("data",chunk=>output=(output+chunk).slice(-6000));
+let reviewedApp,app,output="";
 let browser,cases=0,failed=0,audits=0;const gaps=[];
 try{
+ reviewedApp=await prepareReviewedMailApp(root,env);
+ app=spawn(process.execPath,[join(reviewedApp.root,"node_modules/next/dist/bin/next"),"start","-H","127.0.0.1","-p",String(port)],{cwd:reviewedApp.root,env,stdio:["ignore","pipe","pipe"]});
+ for(const stream of [app.stdout,app.stderr])stream.on("data",chunk=>output=(output+chunk).slice(-6000));
  await new Promise((resolve,reject)=>{proxy.once("error",reject);proxy.listen(3199,"localhost",resolve);});
- let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error("Local app exited");try{up=(await fetch(upstream)).ok;}catch{}if(up)break;await new Promise(r=>setTimeout(r,500));}
+ let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error("Local app exited");try{up=(await fetch(upstream,{signal:AbortSignal.timeout(5_000)})).ok;}catch{}if(up)break;await new Promise(r=>setTimeout(r,500));}
  if(!up)throw Error("Local app did not start");
  browser=await driver.launch();console.log("SIGNUP_MATRIX_ENGINE:"+JSON.stringify({requested:engine,actual:driver.name(),version:browser.version()}));
  for(const width of [320,390,768,1280,1920])for(const mode of ["baseline","text-spacing","reduced-motion","forced-colors","reflow-320",...(process.env.AX2_PUBLIC_STANDARD==="true"?["dark"]:[])]){
@@ -199,5 +203,5 @@ try{
  }
  console.log("SIGNUP_MATRIX_OPEN_GAPS:"+JSON.stringify(gaps));
  console.log("SIGNUP_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,audits,failed,scope:"Real local request/captured fake email/explicit confirmation/new empty studio/actual initial claim/anonymous public store after session removal and reload. Synthetic services only; no production signup/store/payment/message/checkout or buyer proof."}));
-}finally{if(browser)await browser.close();app.kill("SIGTERM");proxy.closeAllConnections();await new Promise(r=>proxy.close(r));await services.close();}
+}finally{if(browser)await browser.close();if(app&&app.exitCode===null){const closed=new Promise(resolve=>app.once("exit",resolve));const forced=setTimeout(()=>app.kill("SIGKILL"),5_000);app.kill("SIGTERM");await closed;clearTimeout(forced);}if(proxy.listening){proxy.closeAllConnections();await new Promise(r=>proxy.close(r));}await services.close();if(reviewedApp)await reviewedApp.cleanup();}
 process.exitCode=failed?1:0;

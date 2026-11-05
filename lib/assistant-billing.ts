@@ -28,6 +28,7 @@ export const ASSISTANT_LOOKUP_KEY = "nimbus_assistant_month";
 const SESSION_PATTERN = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 /** The version invoices are read at, where a paid invoice names its charge (lib/billing.ts, CHARGE_VERSION). */
 const INVOICE_VERSION = "2024-06-20";
+const CHECKOUT_VERSION = "2025-09-30.clover";
 
 /** Why a store may not buy the add-on now, or null when it may. */
 export function assistantRefusal(store: Store, nowSeconds = Date.now() / 1000): "plan" | "already" | "disputed" | "customer" | null {
@@ -83,6 +84,7 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
   if (assistantRefusal(store)) throw new Error("the add-on cannot be sold to this store now");
   const body = new URLSearchParams({
     mode: "subscription",
+    "subscription_data[billing_mode][type]": "classic",
     locale: "en",
     customer: store.stripeCustomerId!,
     "line_items[0][price]": await ensureAssistantPrice(),
@@ -96,7 +98,7 @@ export async function createAssistantCheckout(store: Store, origin: string): Pro
     success_url: `${origin}/api/billing/assistant?session_id={CHECKOUT_SESSION_ID}${store.sid ? `&store=${store.sid}` : ""}`,
     cancel_url: `${origin}/studio?${store.sid ? `store=${store.sid}&` : ""}assistant=canceled#assistant`,
   });
-  const session = await onPlatform("POST", "/checkout/sessions", body);
+  const session = await onPlatform("POST", "/checkout/sessions", body, { version: CHECKOUT_VERSION });
   if (typeof session.url !== "string" || !session.url) throw new Error("Stripe did not return a checkout URL");
   return session.url;
 }

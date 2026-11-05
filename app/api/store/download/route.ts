@@ -1,12 +1,11 @@
 import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { preorderWords } from "@/lib/buyer-words/preorder";
-import { readListing } from "@/lib/catalog";
 import { type Listing, type Store, normaliseHandle, storeForHandle } from "@/lib/store";
 import { readOrder } from "@/lib/store-checkout";
 import { plain, serveFile } from "@/lib/serve-file";
 import { offerRefunded, upsellDelivery } from "@/lib/upsell";
-import { findPurchase, ordersGrant } from "@/lib/buyer-orders";
+import { OrdersBusy, findPurchase } from "@/lib/buyer-orders";
 import { stampedCopy, wantsStamp } from "@/lib/pdf-stamp";
 import { renewPath } from "@/lib/membership-access";
 import { originFrom } from "@/lib/request-origin";
@@ -27,8 +26,10 @@ import { ordersWords } from "@/lib/buyer-words/orders";
  * to a page that says so and offers the way back (lib/membership-access.ts).
  *
  * A PDF on a product whose creator switched stamping on goes out with the
- * buyer's email on every page (lib/pdf-stamp.ts), which can take a few
- * seconds the first time for a big book: hence the longer time limit.
+ * buyer's email on every page (lib/pdf-stamp.ts), and an EPUB with the same
+ * line as an invisible mark inside the book (lib/epub-stamp.ts), which can
+ * take a few seconds the first time for a big book: hence the longer time
+ * limit.
  */
 export const maxDuration = 60;
 
@@ -52,7 +53,7 @@ const STATUSES = {
   refunded: 410,
 } as const;
 
-/** The file, stamped with its buyer's email when the product asks for it. */
+/** The file, stamped with its buyer's email when the product asks for it (a PDF or an EPUB). */
 async function deliver(
   store: Store,
   product: Listing,
@@ -98,25 +99,32 @@ export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("token");
   // Counted by the link, before anything is asked of Stripe.
   const link = token ? `t:${token}` : `s:${request.nextUrl.searchParams.get("session_id") ?? ""}`;
-  if (!(await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"))) {
-    return new Response(say.tooOften, {
+  const tooOften = () =>
+    new Response(say.tooOften, {
       status: 429,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "600", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
     });
-  }
+  if (!(await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"))) return tooOften();
   if (token) {
-    let purchase;
-    let email: string | null = null;
+    // Only the purchase asked for is read, by its reference, paid for before each read (lib/buyer-orders.ts, findPurchase):
+    // a store with no room left for it is answered as too often, and nothing more is asked of Stripe.
+    let found;
     try {
-      purchase = await findPurchase(store, token, request.nextUrl.searchParams.get("ref") ?? "");
-      email = await ordersGrant(store, token);
+      found = await findPurchase(store, token, request.nextUrl.searchParams.get("ref") ?? "", {
+        pid: request.nextUrl.searchParams.get("pid") ?? "",
+        // Only a key a product ticked at checkout goes under (lib/bundle-rules.ts, BUMP_KEYS); any other is not one.
+        item: (BUMP_KEYS as readonly string[]).includes(request.nextUrl.searchParams.get("item") ?? "") ? request.nextUrl.searchParams.get("item") ?? "" : "",
+      });
     } catch (error) {
+      if (error instanceof OrdersBusy) return tooOften();
       console.error("looking up a purchase failed", error);
       return plain(502, say.purchaseCheckFailed);
     }
-    if (!purchase) {
+    if (!found) {
       return plain(410, say.linkExpired);
     }
+    // The listing of what is handed over (stamped or not) is the one the lookup already read: nothing is read again.
+    const { purchase, email, listing } = found;
     if (purchase.ended) return toRenew(request, store, { id: purchase.productId });
     // A product ticked at checkout is asked for by the key its order names it under.
     const asked = request.nextUrl.searchParams.get("item") ?? "";
@@ -128,7 +136,7 @@ export async function GET(request: NextRequest) {
       const line = (bumped ? bumped.items : purchase.items)?.lines.find((l) => l.productId === pid) ?? null;
       if (!line || !line.delivery) return plain(404, say.nothingToDownload);
       if (!line.delivery.file) return plain(409, say.notADownloadPurchases);
-      const item = await readListing(store, line.productId);
+      const item = await listing(line.productId);
       if (!item) return plain(404, say.nothingToDownload);
       return deliver(store, item, line.delivery.file, { reference: purchase.reference, email, paidAt: purchase.paidAt });
     }
@@ -137,7 +145,7 @@ export async function GET(request: NextRequest) {
     if (!delivery.file) {
       return plain(409, say.notADownloadPurchases);
     }
-    const owner = await readListing(store, bumped ? bumped.id : purchase.productId);
+    const owner = await listing(bumped ? bumped.id : purchase.productId);
     if (!owner) return serveFile(delivery.file);
     return deliver(store, owner, delivery.file, { reference: purchase.reference, email, paidAt: purchase.paidAt });
   }

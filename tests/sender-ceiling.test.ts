@@ -1,13 +1,13 @@
 /**
- * List email is held back before the sender's own ceiling stops everything.
+ * The Resend ceiling still protects service and import email, while creator
+ * list delivery waits for confirmed Amazon SES capacity.
  *
- * The sender pauses a whole account at five times its plan's monthly emails
+ * Resend pauses a whole account at five times its plan's monthly emails
  * (resend.com/docs/knowledge-base/account-quotas-and-limits, read October 6,
- * 2026). The whole account is every creator's newsletter and also every
- * login link and every email that hands a buyer their file. So list email
- * waits at four fifths of that ceiling, and the rest is kept for the emails a
- * store cannot run without. These check that it waits, loses nothing, tells
- * the owner once, and goes on by itself.
+ * 2026). The account includes login links and emails that hand buyers their
+ * files. These checks preserve that ceiling and its service reserve, then
+ * prove that a saved list waits for SES, loses nothing and resumes by itself
+ * without falling through to Resend.
  */
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
@@ -19,6 +19,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { windowId } from "@/lib/allowance-window";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const OWNER = "owner@example.com";
 type Message = { to: string[]; subject: string };
@@ -30,7 +31,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   if (url.hostname !== "api.resend.com") return new Response("{}", { status: 404 });
   if (senderDown) return new Response("{}", { status: 500 });
-  if (url.pathname === "/emails/batch") batches.push(JSON.parse(String(init?.body)) as Message[]);
+  if (url.pathname === "/emails/batch") {
+    const batch = JSON.parse(String(init?.body)) as Message[];
+    batches.push(batch);
+    return Response.json({ data: batch.map((_, i) => ({ id: `synthetic_${i}` })) });
+  }
   else single.push(JSON.parse(String(init?.body)) as Message);
   return new Response(JSON.stringify({ id: "email_1" }));
 }) as typeof fetch;
@@ -85,7 +90,7 @@ async function main(): Promise<void> {
   is("a bulk notice is refused the same way", await reserveDay(21), false);
 
   part("The owner is told, once");
-  is("one email to the site's own inbox", single.map((m) => [m.to[0], m.subject]), [["support@marktmorgen.com", "List email is waiting: the sender's monthly volume is nearly used"]]);
+  is("one email to the site's own inbox", single.map((m) => [m.to[0], m.subject]), [["support@marktmorgen.com", "List email is waiting for Amazon SES"]]);
   await reserve(store, 21);
   await reserve(store, 21);
   is("and not again this month, however many sends meet it", single.length, 1);
@@ -97,20 +102,22 @@ async function main(): Promise<void> {
   const went = await sendEmail({ ...message("buyer@example.com"), subject: "Your login link" });
   is("a login link is sent all the same", [went, single.length], [true, 1]);
 
-  part("A broadcast waits, and goes on by itself");
+  part("A broadcast waits for SES, and goes on by itself");
   redis.run(["SET", sentKey(), String(listCeiling() - 10)]);
+  const mail = installSesMailFixture({ fallback: globalThis.fetch });
+  mail.configure();
+  await mail.setReady(false);
   const created = await createBroadcast(store, { subject: "The plan is here", body: "It is ready.", productId: "", notProductId: "", sendAt: undefined });
   if (!created.ok) throw new Error(`no broadcast: ${created.reason}`);
   batches.length = 0;
   let b = (await advanceBroadcast(created.broadcast.id, storeForHandle, Date.now() + 30_000))!;
   is("it waits, and says why in words a creator can read", [b.status, b.note === SENDER_WAIT_NOTE], ["waiting", true]);
-  is("nobody was written to, and nobody was dropped", [b.sent, b.total, batches.length], [0, 30, 0]);
-  // The owner moves the sender to a larger plan and says so on the host.
-  process.env.SENDER_MONTHLY_QUOTA = "100000";
+  is("nobody was written to, and nobody was dropped", [b.sent, b.total, mail.sesAttempts.length, batches.length], [0, 30, 0, 0]);
+  await mail.setReady(true);
   b = (await advanceBroadcast(created.broadcast.id, storeForHandle, Date.now() + 30_000))!;
-  is("with the plan raised, it finishes without anyone pressing anything", [b.status, b.sent, b.note], ["sent", 30, ""]);
-  is("to everyone, once", new Set(batches.flat().map((m) => m.to[0])).size, 30);
-  delete process.env.SENDER_MONTHLY_QUOTA;
+  is("with SES capacity confirmed, it finishes without anyone pressing anything", [b.status, b.sent, b.note], ["sent", 30, ""]);
+  is("to everyone through SES once, never through Resend", [mail.ses.length, new Set(mail.ses.flatMap((m) => m.to)).size, mail.resend.length, batches.length], [30, 30, 0, 0]);
+  mail.restore();
 
 
   part("Unconfirmed sender usage cannot authorize list admission");
@@ -159,8 +166,8 @@ async function main(): Promise<void> {
     redis.run(["DEL", `nl:sender:${new Date().toISOString().slice(0, 7)}:told`]);
     single.length = 0;
     await reserve(store, 1);
-    is("the existing owner notice names uncertainty rather than invented usage",
-      single.map(m => m.subject), ["List email is waiting: sender usage cannot be confirmed"]);
+    is("unknown usage does not invent a new diagnosis or dispatch an accepted owner notice again",
+      [single.map(m => m.subject), redis.run(["GET", `nl:sender:${new Date().toISOString().slice(0, 7)}:told`])], [[], "1"]);
     single.length = 0;
     is("an essential login link remains available while list usage is unknown",
       [await sendEmail({ ...message("buyer@example.com"), subject: "Your login link" }), single.length], [true, 1]);

@@ -27,7 +27,7 @@ import {
 /** The structure roles this file writes (ISO 32000-1, 14.8.4). */
 export type TagRole = "H1" | "H2" | "P";
 
-type Tagged = { role: TagRole; mcid: number; actualText?: string };
+type Tagged = { role: TagRole; mcid: number; page: number; actualText?: string };
 
 function xml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -57,26 +57,42 @@ export function xmpPacket(meta: { title: string; author: string; producer: strin
 }
 
 /**
- * Tags one page of a document. Draw through `text` and `artifact` in reading
- * order, then call `finish` once, before saving.
+ * Tags a document, one page or several. Draw through `text` and `artifact` in
+ * reading order; `nextPage` moves on to a page added after the first (639
+ * [GL7](26): a form's answers can run over several); call `finish` once,
+ * before saving.
  */
 export class PageTagger {
   private readonly items: Tagged[] = [];
+  private readonly pages: PDFPage[];
+  private mcids = 0;
 
   constructor(
     private readonly pdf: PDFDocument,
-    private readonly page: PDFPage,
-  ) {}
+    page: PDFPage,
+  ) {
+    this.pages = [page];
+  }
+
+  private get page(): PDFPage {
+    return this.pages[this.pages.length - 1];
+  }
+
+  /** From here on, what is drawn is on this page (one added to the document after the last). */
+  nextPage(page: PDFPage): void {
+    this.pages.push(page);
+    this.mcids = 0;
+  }
 
   /** Draws something a reader reads, as one element of `role`. `actualText` replaces what is drawn (a shortened line). */
   text(role: TagRole, draw: () => void, actualText?: string): void {
-    const mcid = this.items.length;
+    const mcid = this.mcids++;
     // An inline property list, `<< /MCID n >>`: pdf-lib writes a dictionary operand as it writes any object.
     const props = this.pdf.context.obj({ MCID: mcid }) as unknown as PDFName;
     this.page.pushOperators(PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [PDFName.of(role), props]));
     draw();
     this.page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
-    this.items.push({ role, mcid, ...(actualText ? { actualText } : {}) });
+    this.items.push({ role, mcid, page: this.pages.length - 1, ...(actualText ? { actualText } : {}) });
   }
 
   /** What the last element is read as, when what was drawn is shorter (a line cut with an ellipsis). */
@@ -103,20 +119,24 @@ export class PageTagger {
           Type: "StructElem",
           S: item.role,
           P: documentRef,
-          Pg: this.page.ref,
+          Pg: this.pages[item.page].ref,
           K: item.mcid,
           ...(item.actualText ? { ActualText: PDFHexString.fromText(item.actualText) } : {}),
         }),
       ),
     );
     context.assign(documentRef, context.obj({ Type: "StructElem", S: "Document", P: rootRef, Lang: PDFString.of(meta.lang), K: elements }));
-    const parentTree = context.register(context.obj({ Nums: [PDFNumber.of(0), context.obj(elements)] }));
-    context.assign(rootRef, context.obj({ Type: "StructTreeRoot", K: documentRef, ParentTree: parentTree, ParentTreeNextKey: 1 }));
+    // Each page's marked content, by its number: page i's elements in the order of their MCIDs.
+    const nums = this.pages.flatMap((_, i) => [PDFNumber.of(i), context.obj(elements.filter((_, at) => this.items[at].page === i))]);
+    const parentTree = context.register(context.obj({ Nums: nums }));
+    context.assign(rootRef, context.obj({ Type: "StructTreeRoot", K: documentRef, ParentTree: parentTree, ParentTreeNextKey: this.pages.length }));
     catalog.set(PDFName.of("StructTreeRoot"), rootRef);
     catalog.set(PDFName.of("MarkInfo"), context.obj({ Marked: true, Suspects: false }));
     catalog.getOrCreateViewerPreferences().setDisplayDocTitle(true);
-    this.page.node.set(PDFName.of("StructParents"), PDFNumber.of(0));
-    this.page.node.set(PDFName.of("Tabs"), PDFName.of("S"));
+    this.pages.forEach((page, i) => {
+      page.node.set(PDFName.of("StructParents"), PDFNumber.of(i));
+      page.node.set(PDFName.of("Tabs"), PDFName.of("S"));
+    });
     this.pdf.setLanguage(meta.lang);
     this.pdf.setTitle(meta.title, { showInWindowTitleBar: true });
     this.pdf.setAuthor(meta.author);

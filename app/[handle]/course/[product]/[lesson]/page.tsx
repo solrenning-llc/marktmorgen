@@ -226,7 +226,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {body ? (
               <div className="mt-6" style={{ color: "var(--st-text)" }}>
-                <LessonText text={body} />
+                <LessonText text={body} codeLabel={w.codeBlock} />
               </div>
             ) : null}
 

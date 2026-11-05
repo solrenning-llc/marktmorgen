@@ -1,3 +1,5 @@
+import { addProduct, setProductLink, setStripeAccount } from "@/lib/store";
+import { confirmPurchase, confirmationKey } from "@/lib/purchase-email";
 /**
  * Email goes through Amazon SES when Amazon says it may, and through Resend
  * whenever it may not — with nobody choosing, nothing lost, and nobody
@@ -18,8 +20,8 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/mail/ses/route";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { isMailable, upsertContact } from "@/lib/contacts";
-import { hasResend, isSenderConfigured, sendBatch, sendEmail, sentKey, sentThisMonth } from "@/lib/email";
-import { listCeiling, reserveDay, senderRoom } from "@/lib/mail";
+import { hasResend, isSenderConfigured, sendBatch, sendListBatch, sendEmail, sentKey, sentThisMonth } from "@/lib/email";
+import { listCeiling, reserve as reserveMail, reserveDay, senderRoom } from "@/lib/mail";
 import { LIST_TAG, STORE_TAG, healthId, listHealth } from "@/lib/mail-health";
 import { HOLD_SECONDS, isSesConfigured, notYetTaken, sesBulkRoom, sesConfig, sesSentLast24h, sesState } from "@/lib/ses";
 import { stringToSign, type SnsMessage } from "@/lib/sns";
@@ -36,7 +38,7 @@ type AmazonSent = { to: string; subject: string; body: Record<string, unknown>; 
 type ResendSent = { to: string; subject: string; key: string | null };
 const amazon: AmazonSent[] = [];
 const resend: ResendSent[] = [];
-const resendKeys = new Set<string>();
+const resendKeys = new Map<string, string>();
 let asked = 0;
 let account: Record<string, unknown> | number = 0;
 let accountLosesReply = false;
@@ -75,12 +77,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (url.hostname === "api.resend.com") {
     const key = (init?.headers as Record<string, string>)["Idempotency-Key"] ?? null;
+    const bytes = String(init?.body);
+    const body = JSON.parse(bytes) as { to: string[]; subject: string } | { to: string[]; subject: string }[];
     // Resend answers a key it has seen without sending again.
-    if (key && resendKeys.has(key)) return json({ id: "again" });
-    if (key) resendKeys.add(key);
-    const body = JSON.parse(String(init?.body)) as { to: string[]; subject: string } | { to: string[]; subject: string }[];
+    if (key && resendKeys.has(key) && resendKeys.get(key) !== bytes) return json({ name: "invalid_idempotent_request" }, 409);
+    if (key && resendKeys.has(key)) return json(Array.isArray(body) ? { data: body.map((_, i) => ({ id: `again_${i}` })) } : { id: "again" });
+    if (key) resendKeys.set(key, bytes);
     for (const m of Array.isArray(body) ? body : [body]) resend.push({ to: m.to[0], subject: m.subject, key });
-    return json({ id: "email_1" });
+    return json(Array.isArray(body) ? { data: body.map((_, i) => ({ id: `email_${i + 1}` })) } : { id: "email_1" });
   }
   if (url.hostname === `sts.${REGION}.amazonaws.com`) {
     const form = new URLSearchParams(String(init?.body));
@@ -184,7 +188,7 @@ async function main(): Promise<void> {
   part("Once means once");
   clear();
   const receipt = { ...letter("buyer@example.com", "Your receipt"), idempotencyKey: "receipt:cs_test_1" };
-  is("the same receipt asked for twice", [await sendEmail(receipt), await sendEmail(receipt)], [true, true]);
+  is("the first send is confirmed; its legacy claim alone cannot confirm replay", [await sendEmail(receipt), await sendEmail(receipt)], [true, false]);
   is("is sent one time", [amazon.length, resend.length], [1, 0]);
 
   part("An uncertain once-only claim holds both actual senders");
@@ -253,6 +257,56 @@ async function main(): Promise<void> {
     redis.pipeline = originalPipeline;
   }
   is("the positive probe sees the sole member and one sender", [memberReads, amazon.length, resend.length], [1, 1, 0]);
+
+  part("An existing legacy SES claim cannot certify a purchase confirmation");
+  const auditOwner = "legacy-audit-owner@example.test";
+  await claimHandle(auditOwner, "legacyaudit", "Synthetic legacy audit", "");
+  await ensureStatsId(auditOwner);
+  await setStripeAccount(auditOwner, "acct_audit0001", true);
+  await setSubscription(auditOwner, { customerId: "cus_LegacyAudit0001", subscriptionId: "sub_LegacyAudit0001", active: true, period: paidPeriod() });
+  const auditMade = await addProduct(auditOwner, "Synthetic audit product", "", "49", null);
+  if (!auditMade.ok) throw new Error("Synthetic audit product unavailable");
+  await setProductLink(auditOwner, auditMade.product.id, "https://example.test/audit-only");
+  const auditStore = (await storeForEmail(auditOwner))!;
+  const auditPaid = (sessionId: string) => ({ id: sessionId, status: "complete", payment_status: "paid", mode: "payment",
+    created: Math.floor(Date.now() / 1000), amount_total: 4900, currency: "usd", payment_intent: "pi_LegacyAudit0001",
+    metadata: { store: "legacyaudit", product: auditMade.product.id }, customer_details: { email: "legacy-audit-buyer@example.test" } }) as never;
+  for (const loss of ["claim-ack-before-post", "ses-ack-after-post"] as const) {
+    account = approved(); askAgain(); clear();
+    const sessionId = "cs_test_" + (loss === "claim-ack-before-post" ? "a" : "b").repeat(24);
+    const key = `nimbus-confirm:${sessionId}`;
+    const claim = `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+    const session = auditPaid(sessionId);
+    const knownSendCounts = [await sesSentLast24h(), await sentThisMonth()];
+    let interrupted = false;
+    if (loss === "claim-ack-before-post") redis.pipeline = async commands => {
+      const result = await originalPipeline(commands);
+      if (!interrupted && commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === claim) {
+        interrupted = true; throw new Error("Synthetic SET ACK lost before any provider POST");
+      }
+      return result;
+    };
+    else amazonLosesReply = () => "throw";
+    let first: Awaited<ReturnType<typeof confirmPurchase>>;
+    try {first=await confirmPurchase(auditStore,sessionId,session);} finally {redis.pipeline=originalPipeline;amazonLosesReply=()=>null;}
+    const afterFirst = {claim:redis.run(["GET",claim]),consumer:redis.run(["GET",confirmationKey(sessionId)]),amazon:amazon.length,resend:resend.length};
+    const second=await confirmPurchase(auditStore,sessionId,session);
+    const afterSecond = {claim:redis.run(["GET",claim]),consumer:redis.run(["GET",confirmationKey(sessionId)]),amazon:amazon.length,resend:resend.length};
+    is(`${loss}: the first unacknowledged operation reports failure`, first, "failed");
+    is(`${loss}: no consumer confirmation is committed on unknown acknowledgement`, afterFirst.consumer, null);
+    is(`${loss}: the existing claim remains sticky`, [afterFirst.claim, afterSecond.claim], ["1", "1"]);
+    is(`${loss}: the replay never adds a provider POST`, [afterFirst.amazon, afterFirst.resend, afterSecond.amazon, afterSecond.resend], loss === "claim-ack-before-post" ? [0, 0, 0, 0] : [1, 0, 1, 0]);
+    is(`${loss}: a replay cannot manufacture the consumer's sent marker`, afterSecond.consumer, null);
+    is(`${loss}: unknown acceptance must not become consumer sent`, second, "failed");
+    is(`${loss}: a held replay does not add a known-send counter`, [await sesSentLast24h(), await sentThisMonth()], knownSendCounts);
+  }
+
+  account = approved(); askAgain(); clear();
+  const knownSessionId = "cs_test_" + "c".repeat(24);
+  const knownSession = auditPaid(knownSessionId);
+  is("a confirmed purchase still commits its own sent marker", [await confirmPurchase(auditStore, knownSessionId, knownSession), redis.run(["GET", confirmationKey(knownSessionId)])], ["sent", "sent"]);
+  is("a replay with that confirmed consumer marker is already done", await confirmPurchase(auditStore, knownSessionId, knownSession), "already");
+  is("confirmed consumer replay adds no provider dispatch", [amazon.length, resend.length], [1, 0]);
 
   part("An uncertain individual SES acknowledgement never triggers another sender");
   for (const loss of ["throw", 500, 503] as const) {
@@ -465,22 +519,22 @@ async function main(): Promise<void> {
   let usageGetters = 0;
   let usageOutside = 0;
   const usageRow = (value: unknown) => {
-    const rows = Array<unknown>(24).fill(null);
-    rows[23] = value;
+    const rows = Array<unknown>(25).fill(null);
+    rows[24] = value;
     return rows;
   };
   const usageCases: [string, () => unknown][] = [
     ["missing envelope", () => undefined],
-    ["not an array", () => ({ length: 24, 0: "10" })],
+    ["not an array", () => ({ length: 25, 0: "10" })],
     ["empty envelope", () => []],
-    ["short envelope", () => Array(23).fill(null)],
-    ["sparse envelope", () => new Array(24)],
+    ["short envelope", () => Array(24).fill(null)],
+    ["sparse envelope", () => new Array(25)],
     ["inherited member", () => {
-      const rows = Array(24).fill(null);
-      delete rows[23];
-      return Object.setPrototypeOf(rows, { 23: "10" });
+      const rows = Array(25).fill(null);
+      delete rows[24];
+      return Object.setPrototypeOf(rows, { 24: "10" });
     }],
-    ["getter", () => Object.defineProperty(Array(24).fill(null), "23", { get() { usageGetters += 1; return null; } })],
+    ["getter", () => Object.defineProperty(Array(25).fill(null), "24", { get() { usageGetters += 1; return null; } })],
     ["missing member", () => usageRow(undefined)],
     ["empty string", () => usageRow("")],
     ["boolean", () => usageRow(true)],
@@ -497,7 +551,7 @@ async function main(): Promise<void> {
       rows[0] = String(Number.MAX_SAFE_INTEGER);
       return rows;
     }],
-    ["oversized", () => new Proxy(Array(25).fill(null), {
+    ["oversized", () => new Proxy(Array(26).fill(null), {
       getOwnPropertyDescriptor(target, key) {
         if (key !== "length") usageOutside += 1;
         return Reflect.getOwnPropertyDescriptor(target, key);
@@ -522,7 +576,7 @@ async function main(): Promise<void> {
     let reads = 0;
     redis.pipeline = async (commands) => {
       const reply = await originalPipeline(commands);
-      if (commands.length === 24 && commands.every(command => command[0] === "GET" && String(command[1]).startsWith("nl:ses:h:"))) {
+      if (commands.length === 25 && commands.every(command => command[0] === "GET" && String(command[1]).startsWith("nl:ses:h:"))) {
         reads += 1;
         return answer() as unknown[];
       }
@@ -536,19 +590,22 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = originalPipeline;
     }
-    is(`${name}: each existing call reads exactly its original 24-position pipeline`, reads, 3);
+    is(`${name}: each existing call reads exactly the 25-position pipeline`, reads, 3);
     is(`${name}: neither provider accepted and the stored usage remains`,
       [amazon.length, resend.length, redis.run(["GET", usageKey]), await sentThisMonth()], [0, 0, "10", counted]);
   }
   is("usage getters and out-of-cardinality members were not evaluated", [usageGetters, usageOutside], [0, 0]);
+  await originalPipeline([["DEL", usageKey], ["HSET", usageKey, "unexpected", "10"]]);
+  is("a wrong-type hourly bucket is unknown, never known zero", await sesSentLast24h(), null);
+  is("wrong-type hourly evidence grants no list capacity", await senderRoom(), 0);
   if (oldUsage === null) await originalPipeline([["DEL", usageKey]]);
   else await originalPipeline([["SET", usageKey, String(oldUsage), "EX", 26 * 3_600]]);
   const usageAt = Date.UTC(2032, 0, 15, 12);
-  const usageKeys = Array.from({ length: 24 }, (_, i) => `nl:ses:h:${new Date(usageAt - i * 3_600_000).toISOString().slice(0, 13)}`);
-  is("24 explicitly absent hourly buckets are known zero", await sesSentLast24h(usageAt), 0);
+  const usageKeys = Array.from({ length: 25 }, (_, i) => `nl:ses:h:${new Date(usageAt - i * 3_600_000).toISOString().slice(0, 13)}`);
+  is("25 explicitly absent hourly buckets are known zero", await sesSentLast24h(usageAt), 0);
   await originalPipeline(usageKeys.map((key, i) => ["SET", key, String(i + 1), "EX", 26 * 3_600]));
-  is("all 24 explicit stored counters contribute, including the last", await sesSentLast24h(usageAt), 300);
-  await originalPipeline(usageKeys.map((key, i) => ["SET", key, i === 23 ? String(Number.MAX_SAFE_INTEGER) : "0", "EX", 26 * 3_600]));
+  is("all 25 explicit stored counters contribute, including the last", await sesSentLast24h(usageAt), 325);
+  await originalPipeline(usageKeys.map((key, i) => ["SET", key, i === 24 ? String(Number.MAX_SAFE_INTEGER) : "0", "EX", 26 * 3_600]));
   is("the last position can hold the largest exactly represented safe total", await sesSentLast24h(usageAt), Number.MAX_SAFE_INTEGER);
 
 
@@ -659,7 +716,7 @@ async function main(): Promise<void> {
 
 
 
-  part("An uncertain existing owner-notice claim sends no email");
+  part("An uncertain existing owner-notice read sends no email");
   const claimPipeline = redis.pipeline;
   const ownerNoticeKey = `nl:sender:${new Date().toISOString().slice(0, 7)}:told`;
   let noticeGetterCalls = 0;
@@ -669,7 +726,7 @@ async function main(): Promise<void> {
   Object.setPrototypeOf(inheritedNotice, { 0: "OK" });
   try {
     for (const [name, reply] of [
-      ["empty", []], ["already claimed", [null]], ["boolean", [true]], ["lowercase", ["ok"]],
+      ["empty", []], ["already written", ["1"]], ["boolean", [true]], ["lowercase", ["ok"]],
       ["extra", ["OK", "OK"]], ["computed", computedNotice], ["inherited", inheritedNotice],
       ["lost acknowledgement", new Error("synthetic applied owner claim reply lost")],
     ] as [string, unknown][]) {
@@ -678,8 +735,7 @@ async function main(): Promise<void> {
       const askedBefore = asked;
       redis.pipeline = async commands => {
         if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === sentKey()) return [];
-        if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === ownerNoticeKey) {
-          await claimPipeline.call(redis, commands);
+        if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === ownerNoticeKey) {
           if (reply instanceof Error) throw reply;
           return reply as unknown[];
         }
@@ -687,7 +743,7 @@ async function main(): Promise<void> {
       };
       is(`${name}: unconfirmed notice claim keeps list admission held`, await reserveDay(1), false);
       is(`${name}: no provider email or account query is authorized`, [amazon.length, resend.length, asked], [0, 0, askedBefore]);
-      is(`${name}: a possibly applied claim is retained`, (await claimPipeline.call(redis, [["GET", ownerNoticeKey]]))[0], "1");
+      is(`${name}: an unknown read creates no notice mark`, (await claimPipeline.call(redis, [["GET", ownerNoticeKey]]))[0], null);
     }
     is("owner-notice claim getters were never invoked", noticeGetterCalls, 0);
   } finally {
@@ -705,7 +761,8 @@ async function main(): Promise<void> {
     for (const sample of noticeCases) {
       account = approved({ SendQuota: { Max24HourSend: sample.max, MaxSendRate: 14 } });
       askAgain();
-      redis.run(["DEL", `nl:sender:${new Date().toISOString().slice(0, 7)}:told`]);
+      const sampleKey = `nl:sender:${new Date().toISOString().slice(0, 7)}:told`;
+      redis.run(["DEL", sampleKey, `nl:ses:once:${createHash("sha256").update(sampleKey).digest("hex").slice(0, 40)}`]);
       clear();
       redis.pipeline = async commands => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === sentKey()
         ? sample.usage === null ? [] : [sample.usage]
@@ -714,19 +771,14 @@ async function main(): Promise<void> {
       const notice = amazon.find(m => m.to === SUPPORT);
       const content = notice?.body.Content as { Simple?: { Body?: { Text?: { Data?: string } } } } | undefined;
       const words = content?.Simple?.Body?.Text?.Data ?? "";
-      is(`${sample.name}: existing subject distinguishes unknown usage`, notice?.subject,
-        sample.usage === null ? "List email is waiting: sender usage cannot be confirmed" : "List email is waiting: the sender's monthly volume is nearly used");
-      is(`${sample.name}: no quota sentinel is printed as a negative volume`,
-        [words.includes("allows -1"), words.includes("up to -1"), words.includes("used up too")], [false, false, false]);
-      is(`${sample.name}: daily account limit is described precisely`,
-        [words.includes("no daily quota ceiling for this account"), words.includes("allows 50,000"), words.includes("up to 40,000")],
-        [sample.max === -1, sample.max !== -1, sample.max !== -1]);
-      if (sample.max === -1) {
-        is("account information preserves rate and store allowances",
-          [words.includes("14 emails per second"), words.includes("Each store's existing email allowance and delivery controls still apply")], [true, true]);
-      }
-      is(`${sample.name}: unknown usage does not ask for a paid-plan change`,
-        words.includes("move the sender to a larger plan"), sample.usage !== null);
+      is(`${sample.name}: canonical subject does not assert a changing diagnosis`, notice?.subject,
+        "List email is waiting for Amazon SES");
+      is(`${sample.name}: no numeric quota or current usage is embedded`,
+        [words.includes("50,000"), words.includes("40,000"), words.includes("allows -1"), words.includes("14 emails per second")], [false, false, false, false]);
+      is(`${sample.name}: unknown capacity waits for confirmation`, words.includes("Sending waits until availability can be confirmed."), true);
+      is(`${sample.name}: lists retain their SES-only route`, words.includes("Creator list email sends only through Amazon SES."), true);
+      is(`${sample.name}: fallback proof requirements are explicit`, words.includes("Missing proof blocks that route."), true);
+      is(`${sample.name}: no paid-plan change is prescribed from unknown evidence`, words.includes("move the sender to a larger plan"), false);
       is(`${sample.name}: essential route remains explicit`,
         words.includes("Sign-in links, receipts and deliveries keep their existing sending route"), true);
       await reserveDay(sample.want);
@@ -915,7 +967,7 @@ async function main(): Promise<void> {
   amazonSays = () => ({ status: 400, type: "AccountSuspendedException", message: "Sending paused for this account." });
   is("a sign-in link is sent all the same", await sendEmail(letter("buyer@example.com", "Your login link")), true);
   is("through Resend, in the same breath", [amazon.length, resend.filter((m) => m.to === "buyer@example.com").length], [0, 1]);
-  is("the site's own inbox is told, through Resend", resend.filter((m) => m.to === SUPPORT).map((m) => m.subject), ["Amazon SES is not sending: email is going out through Resend"]);
+  is("the site's own inbox is told, through Resend", resend.filter((m) => m.to === SUPPORT).map((m) => m.subject), ["Amazon SES is not sending: check the account"]);
   const held = await sesState();
   is("Amazon is left alone for ten minutes", [held?.ready, (held?.hold ?? 0) - Math.floor(Date.now() / 1000) > HOLD_SECONDS - 5], [false, true]);
   tries = 0;
@@ -968,6 +1020,60 @@ async function main(): Promise<void> {
   is("fifty more do not: they go by Resend, whole, rather than wait", [amazon.length, resend.length], [50, 50]);
   is("and the rest of Amazon's day is still there for a sign-in link", [await sendEmail(letter("buyer@example.com", "Your login link")), amazon.length, resend.length], [true, 51, 50]);
 
+
+  part("List-only mail waits for SES without using the service fallback");
+  redis.clear(); resendKeys.clear(); clear();
+  const savedRole = process.env.AWS_SES_ROLE_ARN;
+  delete process.env.AWS_SES_ROLE_ARN;
+  is("missing SES leaves list recipients waiting without either sender",
+    [await sendListBatch([letter("list-missing@example.com")], "list:missing", { by: "monthly" }), amazon.length, resend.length],
+    ["waiting", 0, 0]);
+  process.env.AWS_SES_ROLE_ARN = savedRole;
+  account = approved({ SendingEnabled: false }); askAgain();
+  is("a paused account is known waiting, not unknown acceptance",
+    [await sendListBatch([letter("list-paused@example.com")], "list:paused", { by: "monthly" }), amazon.length, resend.length],
+    ["waiting", 0, 0]);
+  is("the existing Amazon-only probe contract still says retry",
+    await sendBatch([letter("probe-paused@example.com")], "list:probe", { by: "company" }, "amazon"), "retry");
+  is("service email still uses its default fallback",
+    [await sendEmail(letter("service-paused@example.com")), amazon.length, resend.filter(m => m.to === "service-paused@example.com").length],
+    [true, 0, 1]);
+  redis.clear(); resendKeys.clear(); clear();
+  account = approved({ SendQuota: { Max24HourSend: 0, MaxSendRate: 100 } });
+  is("no SES daily room cannot authorize a list Resend send",
+    [await sendListBatch([letter("list-day@example.com")], "list:day", { by: "monthly" }), amazon.length, resend.length],
+    ["waiting", 0, 0]);
+  redis.clear(); resendKeys.clear(); clear(); account = approved();
+  is("confirmed SES capacity sends the actual list batch",
+    [await sendListBatch([letter("list-healthy@example.com")], "list:healthy", { by: "monthly" }), amazon.map(m => m.to), resend.length],
+    ["sent", ["list-healthy@example.com"], 0]);
+  redis.clear(); resendKeys.clear(); clear(); account = approved();
+  amazonSays = () => ({ status: 400, type: "AccountSuspendedException", message: "Sending paused" });
+  is("a rejection after a send attempt remains held",
+    await sendListBatch([letter("list-refused@example.com")], "list:refused", { by: "monthly" }), "retry");
+  is("the list recipient never reaches Resend", resend.filter(m => m.to !== SUPPORT).length, 0);
+  is("the owner notice does not claim the list mail was delivered",
+    resend.filter(m => m.to === SUPPORT).map(m => m.subject), ["Amazon SES is not sending: check the account"]);
+  redis.clear(); resendKeys.clear(); clear(); account = approved();
+  amazonSays = () => ({ status: 400, type: "BadRequestException", message: "Synthetic confirmed recipient refusal" });
+  is("a known recipient refusal cannot be called a sent list",
+    [await sendListBatch([letter("list-rejected@example.com")], "list:rejected", { by: "monthly" }), amazon.length, resend.length],
+    ["refused", 0, 0]);
+  redis.clear(); resendKeys.clear(); clear(); account = approved();
+  amazonSays = to => to === "list-bad@example.com" ? { status: 400, type: "BadRequestException", message: "Synthetic confirmed refusal" } : { status: 200 };
+  const mixedList = [letter("list-good@example.com"), letter("list-bad@example.com")];
+  is("partial acceptance holds the caller rather than authorizing automatic replay",
+    await sendListBatch(mixedList, "list:mixed", { by: "monthly" }), "retry");
+  is("the held partial batch has one accepted recipient and no fallback",
+    [amazon.map(m => m.to), resend.length], [["list-good@example.com"], 0]);
+  redis.clear(); resendKeys.clear(); clear(); account = approved();
+  amazonSays = () => ({ status: 200 });
+  amazonLosesReply = to => to === "list-unknown@example.com" ? 500 : null;
+  is("unknown SES acceptance never becomes safe waiting or fallback",
+    [await sendListBatch([letter("list-unknown@example.com")], "list:unknown", { by: "monthly" }), amazon.length, resend.length],
+    ["retry", 1, 0]);
+  amazonLosesReply = () => null; account = approved();
+
   part("Amazon does not answer");
   account = 500;
   askAgain();
@@ -979,6 +1085,76 @@ async function main(): Promise<void> {
   account = 403;
   askAgain();
   is("a key Amazon does not believe is an answer: not usable", [(await sesState())?.ready, (await sesState())?.why], [false, "key"]);
+
+  part("One original identity before sender awaits, with the legacy structural contract");
+  const identityClaim = (key: string) => `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+  redis.clear(); clear(); account = approved();
+  const entryKey = "identity-before-meter-await-A", laterKey = "identity-before-meter-await-B";
+  redis.run(["SET", identityClaim(entryKey), "1", "EX", 86_400]);
+  const entryMessage = { ...letter("entry@example.test"), idempotencyKey: entryKey };
+  const entryPending = sendEmail(entryMessage);
+  entryMessage.idempotencyKey = laterKey;
+  is("capture precedes the first sender await, including metering", [await entryPending, amazon.length, resend.length, redis.run(["GET", identityClaim(laterKey)])], [false, 0, 0, null]);
+  let rejectedIdentityReads = 0;
+  const rejectedMessage = Object.defineProperty(letter("not-an-address"), "idempotencyKey", { get() { rejectedIdentityReads += 1; return entryKey; } });
+  is("synchronous recipient refusal does not evaluate identity", [await sendEmail(rejectedMessage), rejectedIdentityReads], [false, 0]);
+  for (const fallback of [false, true]) {
+    for (const changing of [false, true]) {
+      redis.clear(); clear();
+      account = fallback ? approved({ ProductionAccessEnabled: false }) : approved();
+      const a = `identity-snapshot-${fallback}-${changing}-A`;
+      const b = `identity-snapshot-${fallback}-${changing}-B`;
+      if (!fallback) redis.run(["SET", identityClaim(a), "1", "EX", 86_400]);
+      const message = { ...letter("identity@example.test"), idempotencyKey: a };
+      const pipeline = redis.pipeline;
+      let release!: () => void;
+      let entered!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const waiting = new Promise<void>((resolve) => { entered = resolve; });
+      let paused = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      redis.pipeline = async (commands) => {
+        if (!paused && commands.some((command) => command[0] === "GET" && command[1] === "nl:ses:state")) {
+          paused = true; entered(); await gate;
+        }
+        return pipeline(commands);
+      };
+      try {
+        const pending = sendEmail(message);
+        await Promise.race([waiting, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Synthetic readiness gate not reached")), 3_000); })]);
+        if (changing) message.idempotencyKey = b;
+        release();
+        const result = await pending;
+        is(`readiness ${fallback ? "fallback" : "SES"}, ${changing ? "mutated" : "fixed"}: original identity retained`,
+          [result, amazon.length, resend.length, redis.run(["GET", identityClaim(b)]), resend[0]?.key ?? null],
+          fallback ? [true, 0, 1, null, a] : [false, 0, 0, null, null]);
+      } finally {
+        release(); if (timer) clearTimeout(timer); redis.pipeline = pipeline;
+      }
+    }
+  }
+  for (const fallback of [false, true]) {
+    redis.clear(); clear();
+    account = fallback ? approved({ ProductionAccessEnabled: false }) : approved();
+    const a = `identity-accessor-${fallback}-A`, b = `identity-accessor-${fallback}-B`;
+    if (!fallback) redis.run(["SET", identityClaim(a), "1", "EX", 86_400]);
+    let reads = 0;
+    const message = Object.defineProperty(letter("getter@example.test"), "idempotencyKey", { get() { return ++reads === 1 ? a : b; } });
+    const result = await sendEmail(message);
+    is(`legacy getter is read once for ${fallback ? "fallback" : "SES"}`,
+      [result, reads, amazon.length, resend.length, redis.run(["GET", identityClaim(b)]), resend[0]?.key ?? null],
+      fallback ? [true, 1, 0, 1, null, a] : [false, 1, 0, 0, null, null]);
+  }
+  for (const [name, value] of [["missing", undefined], ["undefined", undefined], ["null", null], ["empty", ""], ["whitespace", "  "], ["long", "k".repeat(512)]] as const) {
+    redis.clear(); clear(); account = approved();
+    const message = { ...letter("identity-compat@example.test"), ...(name === "missing" ? {} : { idempotencyKey: value }) };
+    is(`compatible SES identity ${name}`, [await sendEmail(message as Parameters<typeof sendEmail>[0]), amazon.length, resend.length], [true, 1, 0]);
+  }
+  redis.clear(); clear(); account = approved();
+  const inheritedKey = "identity-inherited-original";
+  redis.run(["SET", identityClaim(inheritedKey), "1", "EX", 86_400]);
+  const inheritedMessage = Object.assign(Object.create({ idempotencyKey: inheritedKey }), letter("inherited@example.test"));
+  is("inherited legacy identity remains respected", [await sendEmail(inheritedMessage), amazon.length, resend.length], [false, 0, 0]);
 
   delete process.env.AWS_SES_ROLE_ARN;
   delete process.env.VERCEL_OIDC_TOKEN;
@@ -1083,6 +1259,144 @@ async function main(): Promise<void> {
   fetched.length = 0;
   const elsewhere = await POST(announce({ Type: "SubscriptionConfirmation", Token: "abc", SubscribeURL: "https://example.net/confirm", Message: "You have chosen to subscribe" }));
   is("a link anywhere else is not opened", [elsewhere.status, fetched.filter((u) => u.includes("example.net"))], [400, []]);
+
+  part("Owner notices record acceptance only after the real sender accepts");
+  const dailyNotice = `nl:ses:told:${new Date().toISOString().slice(0, 10)}`;
+  const monthlyNotice = `nl:sender:${new Date().toISOString().slice(0, 7)}:told`;
+  const acceptedKey = process.env.RESEND_API_KEY;
+  process.env.AWS_SES_ROLE_ARN = "arn:aws:iam::123456789012:role/marktmorgen-email";
+  const originalNoticeFetch = globalThis.fetch;
+  const originalNoticePipeline = redis.pipeline;
+  const notices: [string, string, () => Promise<unknown>][] = [
+    ["SES down", dailyNotice, () => sendEmail(letter("notice-trigger@example.test"))],
+    ["general sender", monthlyNotice, () => reserveDay(1)],
+    ["list-only sender", monthlyNotice, () => reserveMail(store, 1, true)],
+  ];
+  try {
+    for (const [purpose, marker, trigger] of notices) {
+      const setup = () => {
+        redis.clear(); clear(); resendKeys.clear();
+        account = approved();
+        amazonSays = () => ({ status: 400, type: "AccountSuspendedException", message: "synthetic paused" });
+        if (purpose !== "SES down") {
+          account = approved({ ProductionAccessEnabled: false });
+          redis.run(["SET", sentKey(), String(listCeiling())]);
+        }
+      };
+      // Deliberately unregistered: synthetic refusal, not proof of production NULL policy.
+      setup(); process.env.RESEND_API_KEY = "re_SYNTHETIC_NOTICE_UNREVIEWED_ONLY";
+      await trigger(); await trigger();
+      is(`${purpose}: refused fallback consumes no notice mark`, [redis.run(["GET", marker]), amazon.length, resend.length], [null, 0, 0]);
+      process.env.RESEND_API_KEY = acceptedKey;
+      setup();
+      const beforePosts: unknown[] = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(String(input));
+        if (url.hostname === "api.resend.com" && init?.method === "POST") {
+          const body = JSON.parse(String(init.body));
+          if (body.to?.[0] === SUPPORT) beforePosts.push(redis.run(["GET", marker]));
+        }
+        return originalNoticeFetch(input, init);
+      }) as typeof fetch;
+      await trigger();
+      is(`${purpose}: marker absent at provider POST, written after acceptance`, [beforePosts, redis.run(["GET", marker])], [[null], "1"]);
+      await trigger();
+      is(`${purpose}: confirmed notice mark skips subsequent owner email`, resend.filter(m => m.to === SUPPORT).length, 1);
+      const notice = resend.find(m => m.to === SUPPORT);
+      is(`${purpose}: sender has a stable purpose/period identity`, notice?.key, marker);
+      for (const outcome of ["rejected", "uncertain"] as const) {
+        setup();
+        let attempted = 0;
+        globalThis.fetch = (async (input, init) => {
+          const url = new URL(String(input));
+          if (url.hostname === "api.resend.com" && init?.method === "POST" && JSON.parse(String(init.body)).to?.[0] === SUPPORT) {
+            attempted += 1;
+            is(`${purpose}/${outcome}: no mark before POST`, redis.run(["GET", marker]), null);
+            if (outcome === "rejected") return new Response(JSON.stringify({ message: "synthetic rejection" }), { status: 422 });
+            await originalNoticeFetch(input, init);
+            throw new TypeError("synthetic provider ACK lost after acceptance");
+          }
+          return originalNoticeFetch(input, init);
+        }) as typeof fetch;
+        await trigger(); await trigger();
+        is(`${purpose}/${outcome}: no acceptance mark`, redis.run(["GET", marker]), null);
+        is(`${purpose}/${outcome}: uncertain acceptance cannot dispatch twice`, resend.filter(m => m.to === SUPPORT).length, outcome === "uncertain" ? 1 : 0);
+        is(`${purpose}/${outcome}: provider was exercised`, attempted > 0, true);
+      }
+      globalThis.fetch = originalNoticeFetch;
+      let noticeReadGetters = 0;
+      const accessorRead = Object.defineProperty(new Array(1), "0", { get() { noticeReadGetters += 1; return null; } });
+      const inheritedRead = Object.setPrototypeOf(new Array(1), { 0: null });
+      for (const reply of [[], ["1"], [undefined], [true], [null, null], new Array(1), accessorRead, inheritedRead, new Error("synthetic notice read lost")]) {
+        setup();
+        redis.pipeline = async commands => {
+          if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === marker) {
+            if (reply instanceof Error) throw reply;
+            return reply;
+          }
+          return originalNoticePipeline.call(redis, commands);
+        };
+        await trigger();
+        is(`${purpose}: existing or unknown marker read holds owner notice`, [resend.filter(m => m.to === SUPPORT).length, redis.run(["GET", marker])], [0, null]);
+        redis.pipeline = originalNoticePipeline;
+      }
+      is(`${purpose}: notice reads never invoke getters`, noticeReadGetters, 0);
+      setup();
+      await Promise.all([trigger(), trigger()]);
+      is(`${purpose}: concurrent notices share provider identity`, resend.filter(m => m.to === SUPPORT).map(m => m.key), [marker]);
+      setup();
+      redis.pipeline = async commands => {
+        if (commands.some(c => c[0] === "SET" && c[1] === marker)) throw Error("synthetic mark persistence unavailable after ACK");
+        return originalNoticePipeline.call(redis, commands);
+      };
+      await trigger(); await trigger();
+      is(`${purpose}: lost marker persistence retains sender deduplication`, [redis.run(["GET", marker]), resend.filter(m => m.to === SUPPORT).map(m => m.key)], [null, [marker]]);
+      redis.pipeline = originalNoticePipeline;
+      globalThis.fetch = originalNoticeFetch;
+      setup();
+      const retryBodies: string[] = [];
+      globalThis.fetch = (async (input, init) => {
+        if (new URL(String(input)).hostname === "api.resend.com" && init?.method === "POST" && JSON.parse(String(init.body)).to?.[0] === SUPPORT) retryBodies.push(String(init.body));
+        return originalNoticeFetch(input, init);
+      }) as typeof fetch;
+      redis.pipeline = async commands => {
+        if (commands.some(c => c[0] === "SET" && c[1] === marker)) throw Error("synthetic marker failed after provider acceptance");
+        return originalNoticePipeline.call(redis, commands);
+      };
+      await trigger();
+      is(`${purpose}: accepted sender with lost marker still has no notice mark`, redis.run(["GET", marker]), null);
+      redis.pipeline = originalNoticePipeline;
+      // Change every formerly interpolated diagnosis. Monthly retry also
+      // changes between list-only and general admission, under the same key.
+      if (purpose === "SES down") {
+        askAgain(); account = approved();
+        amazonSays = () => ({ status: 400, type: "AccountSuspendedException", message: "different synthetic account reason" });
+        await trigger();
+      } else if (purpose === "list-only sender") await reserveDay(1);
+      else await reserveMail(store, 1, true);
+      is(`${purpose}: canonical retry recovers existing receipt and records mark`, [redis.run(["GET", marker]), retryBodies.length, resend.filter(m => m.to === SUPPORT).length], ["1", 1, 1]);
+      globalThis.fetch = originalNoticeFetch;
+      setup();
+      let rejectOnce = true;
+      const rejectedBodies: string[] = [];
+      globalThis.fetch = (async (input, init) => {
+        if (new URL(String(input)).hostname === "api.resend.com" && init?.method === "POST" && JSON.parse(String(init.body)).to?.[0] === SUPPORT) {
+          rejectedBodies.push(String(init.body));
+          if (rejectOnce) { rejectOnce = false; return new Response(JSON.stringify({ message: "synthetic known rejection" }), { status: 422 }); }
+        }
+        return originalNoticeFetch(input, init);
+      }) as typeof fetch;
+      await trigger();
+      is(`${purpose}: known rejection leaves the period unspent`, redis.run(["GET", marker]), null);
+      if (purpose === "SES down") { askAgain(); account = approved(); }
+      await trigger();
+      is(`${purpose}: rejected key is not cached and the next acceptance records the period`, [redis.run(["GET", marker]), rejectedBodies.length, rejectedBodies[0] === rejectedBodies[1], resend.filter(m => m.to === SUPPORT).length], ["1", 2, true, 1]);
+      globalThis.fetch = originalNoticeFetch;
+    }
+  } finally {
+    redis.pipeline = originalNoticePipeline; globalThis.fetch = originalNoticeFetch;
+    process.env.RESEND_API_KEY = acceptedKey; amazonSays = () => ({ status: 200 });
+  }
 
   done();
 }

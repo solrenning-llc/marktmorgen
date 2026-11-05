@@ -5,11 +5,13 @@ import { StoreFullError, imageFolder, isFree, setProductPage } from "@/lib/store
 import { productIdFor, readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { EMPTY_PAGE, MAX_BLOCKS, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { claimPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
+import { takePictureDoor } from "@/lib/picture-door";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -46,6 +48,11 @@ export async function POST(request: NextRequest) {
     if (problem) return Response.json({ ok: false, error: problem }, { status: 400 });
     // A form is asked on the store's own pages, where it can lead a funnel on; a product's page has its own checkout.
     if (page.blocks.some((block) => block.kind === "form")) return Response.json({ ok: false, error: "kind" }, { status: 400 });
+    // A booking block is kept and drawn but not offered yet (552 [BB1] unit 1): nothing saves one, in either version,
+    // until its picker and its call chooser exist, so a hand-made request cannot put any id on a page.
+    if ([...page.blocks, ...(page.variant?.blocks ?? [])].some((block) => block.kind === "booking")) {
+      return Response.json({ ok: false, error: "kind" }, { status: 400 });
+    }
     if (oversized(page)) return Response.json({ ok: false, error: "too_big" }, { status: 400 });
     // What is shown after a free sign-up is another product of this store,
     // one that costs money; a paid product's page shows nothing after.
@@ -76,6 +83,8 @@ export async function POST(request: NextRequest) {
     const stored = store.statsId && product.page ? await readPage(store.statsId, id) : null;
     const before = stored ? picturePaths(stored) : [];
     const shown = picturePaths(page);
+    // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
+    if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
     const fresh = shown.filter((path) => !before.includes(path));
     if (fresh.length > 0) {
       if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
@@ -91,6 +100,8 @@ export async function POST(request: NextRequest) {
         await releasePictures(store.statsId, id, fresh);
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
+      // Now on this page: no failed request elsewhere may delete it as a fresh upload (lib/picture-door.ts).
+      await takePictureDoor(fresh);
     }
 
     const marked = await setProductPage(guarded.ref, id, has);

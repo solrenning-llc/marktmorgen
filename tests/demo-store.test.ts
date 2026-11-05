@@ -356,7 +356,9 @@ async function main(): Promise<void> {
   // instead: some page builders hold pasted code in a frame that may not
   // move the page, and every one of them lets it open a tab.
   const EMBED = "app/embed/[handle]/[product]/page.tsx";
-  const leaves = (file: string, tag: string) => /target="_top"/.test(tag) || (file.endsWith(EMBED) && /target="_blank"/.test(tag));
+  // So does the time picker's form when it is drawn inside that frame (637 [GL5] unit 6, its newTab), and only there.
+  const PICKER = "components/slot-picker.tsx";
+  const leaves = (file: string, tag: string) => /target="_top"/.test(tag) || ((file.endsWith(EMBED) || file.endsWith(PICKER)) && /target="_blank"/.test(tag));
   is("there are such forms to check", forms.length >= 9, true);
   is("each of them has target=\"_top\", or a new tab on the pasted card", forms.filter((f) => !leaves(f.file, f.tag)).map((f) => f.file), []);
   const marked = [...sources("app"), ...sources("components")].flatMap((file) =>

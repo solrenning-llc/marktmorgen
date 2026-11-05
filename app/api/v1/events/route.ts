@@ -1,4 +1,5 @@
-import { apiError, apiOk, apiStore } from "@/lib/api-guard";
+import { apiError, apiOk, apiStore, takeMoreApi } from "@/lib/api-guard";
+import { apiReadUnits, eventsWork } from "@/lib/api-read-rules";
 import { WEBHOOK_EVENTS, isWebhookEvent, recentMessages } from "@/lib/webhooks";
 
 /**
@@ -15,6 +16,9 @@ export async function GET(request: Request) {
   const type = params.get("type");
   if (!isWebhookEvent(type)) return apiError(400, "type", `Ask for one event type: ${WEBHOOK_EVENTS.join(", ")}.`);
   const limit = Number(params.get("limit") ?? 3);
+  // The newest LOG_SIZE deliveries are read whatever the limit, so their most is taken first (lib/api-read-rules.ts, eventsWork).
+  const refused = await takeMoreApi(store, apiReadUnits(eventsWork()));
+  if (refused) return refused;
   try {
     return apiOk({ data: await recentMessages(store, type, Number.isFinite(limit) ? limit : 3) });
   } catch (error) {

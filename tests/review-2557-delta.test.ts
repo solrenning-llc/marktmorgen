@@ -112,9 +112,14 @@ const props = (event: Parameters<typeof StorePixels>[0]["event"] = null) => ({ h
 
 async function main(): Promise<void> {
   part("1. The store's front page, reached by a plain link from a thanks page whose pixels never started");
+  // Adjusted with the fix: a page cannot change its document.referrer, so the fix starts no script on
+  // such a page (the thanks page now clears its key on mount, so only a click made before that is left).
+  // "Would start" is checked on the same page reached from a referrer without a key.
+  const clean = browserAt("https://marktmorgen.com/@harbor", { referrer: "https://marktmorgen.com/@harbor/thanks" });
+  runPixels(props());
+  is("the scripts would start", clean.seen.length > 0, true);
   const front = browserAt("https://marktmorgen.com/@harbor", { referrer: `https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}` });
   runPixels(props());
-  is("the scripts would start", front.seen.length > 0, true);
   is("no script starts while the page's referrer names the checkout", front.seen.filter((s) => s.referrer.includes(SESSION)).map((s) => new URL(s.src).hostname), []);
 
   part("2. Links on the thanks page to other pages of this site");

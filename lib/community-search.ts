@@ -165,29 +165,41 @@ export function countOf(raw: unknown): number | null {
 }
 
 /**
- * What one read of a thing's own words costs at the most, in bytes: every
- * word it is written under by index (MAX_INDEXED_WORDS at the most) and as
- * many more again, for a set two writes at once left holding both their
- * words, each word at its longest with its quotes and comma.
+ * As many of a thing's own words as one read of them takes (indexedWords):
+ * every word index writes it under (MAX_INDEXED_WORDS) and as many more
+ * again, for a set writes at the same moment left holding more than one
+ * version's words. The read asks for one more than this, so a set holding
+ * more is seen to, never read whole.
  */
-export const INDEXED_WORDS_BYTES = 2 * MAX_INDEXED_WORDS * (MAX_WORD + 4);
+export const INDEXED_WORDS_READ = 2 * MAX_INDEXED_WORDS;
+/**
+ * What one read of a thing's own words costs at the most, in bytes: the
+ * words it asks for (INDEXED_WORDS_READ, and one more), each at its longest
+ * with its quotes and comma. Bounded by the read itself (SRANDMEMBER with a
+ * count), however many writes ran at once (Codex I2, #2316).
+ */
+export const INDEXED_WORDS_BYTES = (INDEXED_WORDS_READ + 1) * (MAX_WORD + 4);
 
 /**
- * The words each of these things is found by now, one SMEMBERS each. Null
- * when any reply is not a list of words: an odd or partial reply is never
- * read as none (Codex I, #2316). For the walk of a community's archive
- * (lib/community-walk.ts), which pays for the writes counted from these
- * before it sends them.
+ * The words each of these things is found by now, one read each, of
+ * INDEXED_WORDS_READ words and one more at the most (SRANDMEMBER with a
+ * count), so no reply is ever larger than INDEXED_WORDS_BYTES, however many
+ * writes ran at once (Codex I2, #2316). A thing holding more than
+ * INDEXED_WORDS_READ is answered as "over": not read whole, so not to be
+ * rewritten from it. Null when any reply is not a list of words: an odd or
+ * partial reply is never read as none (Codex I, #2316). For the walk of a
+ * community's archive (lib/community-walk.ts), which pays for this read and
+ * then for the writes counted from it before it sends them.
  */
-export async function indexedWords(id: string, kind: SearchKind, things: string[]): Promise<string[][] | null> {
+export async function indexedWords(id: string, kind: SearchKind, things: string[]): Promise<(string[] | "over")[] | null> {
   if (!things.length) return [];
   try {
-    const raw = await redisPipeline(things.map((thing) => ["SMEMBERS", indexKey(id, kind, thing)]));
+    const raw = await redisPipeline(things.map((thing) => ["SRANDMEMBER", indexKey(id, kind, thing), INDEXED_WORDS_READ + 1]));
     if (!Array.isArray(raw) || raw.length !== things.length) return null;
-    const out: string[][] = [];
+    const out: (string[] | "over")[] = [];
     for (const reply of raw) {
       if (!Array.isArray(reply) || !reply.every((word) => typeof word === "string")) return null;
-      out.push(reply as string[]);
+      out.push(reply.length > INDEXED_WORDS_READ ? "over" : (reply as string[]));
     }
     return out;
   } catch {

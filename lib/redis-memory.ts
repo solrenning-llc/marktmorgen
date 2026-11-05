@@ -970,6 +970,12 @@ export class MemoryRedis {
       }
       case "SMEMBERS":
         return [...this.set(key)];
+      case "SRANDMEMBER": {
+        // With a positive count, as Redis answers it: that many distinct members at most (the order is Redis's own).
+        const count = Number(args[0]);
+        if (!Number.isSafeInteger(count) || count < 0) throw new Error("ERR value is not an integer or out of range");
+        return [...this.set(key)].slice(0, count);
+      }
       case "SUNION": {
         // Read without making any key, as Redis does; a key of another kind is refused.
         const out = new Set<string>();

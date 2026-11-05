@@ -91,7 +91,13 @@ async function indexPaid(communityId: string, kind: SearchKind, entries: (Entry 
     if (!(await pay(walkUnits(batch.length, batch.length * INDEXED_WORDS_BYTES)))) return false;
     const before = await indexedWords(communityId, kind, batch.map((e) => e.thing));
     if (before === null) return false;
-    const writes = batch.map((e, i) => ("gone" in e ? unindexWrites(communityId, kind, e.thing, before[i]) : indexWrites(communityId, kind, e.thing, e.score, e.parts, before[i])));
+    // One holding more words than a read takes (writes at the same moment left it so) is not rewritten from part of
+    // them: it stays as it is, findable, until the next write of it reads it whole (index).
+    const writes = batch.map((e, i) => {
+      const had = before[i];
+      if (had === "over") return [];
+      return "gone" in e ? unindexWrites(communityId, kind, e.thing, had) : indexWrites(communityId, kind, e.thing, e.score, e.parts, had);
+    });
     const commands = writes.reduce((sum, w) => sum + w.length, 0);
     if (!commands) continue;
     if (!(await pay(walkUnits(commands, 0)))) return false;

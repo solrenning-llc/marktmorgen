@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, setCommunity, setSubscription } from "@/lib/store";
 import { createEvent } from "@/lib/community-events";
 import { needsWalk, walkCommunity } from "@/lib/community-walk";
-import { index } from "@/lib/community-search";
+import { INDEXED_WORDS_BYTES, index } from "@/lib/community-search";
 import { searchedConversations } from "@/lib/community-dm";
 import { WALK_BYTES_PER_UNIT, WALK_COMMANDS_PER_UNIT } from "@/lib/community-read-rules";
 import { store as redis } from "./redis-stub";
@@ -59,9 +59,11 @@ async function main(): Promise<void> {
   await setSubscription(C, { customerId: "cus_club", subscriptionId: "sub_club", active: true, tier: "pro", period: paidPeriod() });
   const club = (await setCommunity(C, true))!;
   const communityId = club.community!.id;
+  const eventIds: string[] = [];
   for (let i = 0; i < 12; i += 1) {
     const event = await createEvent(club, { title: `Bread night ${i}`, about: "Sourdough, rye and spelt, with a long ferment and a hot oven. ".repeat(4), start: Date.now() + (i + 1) * 86_400_000, minutes: 60, tz: "UTC", cap: 0, where: "room", link: "", meet: null, only: [] });
     if (!event.ok) throw new Error("no event");
+    eventIds.push(event.event.id);
   }
   await redis.pipeline([["DEL", `nl:cm:${communityId}:sv`]]);
 
@@ -109,7 +111,7 @@ async function main(): Promise<void> {
       removed += commands.filter((c) => c[0] === "ZREM").length;
       if (stepSent > stepAllowed) worst = Math.max(worst, stepSent - stepAllowed);
       const replies = reply(commands, await original.call(redis, commands));
-      const read = commands.find((c) => (c[0] === "SCARD" || c[0] === "SMEMBERS") && eventIndex.test(String(c[1])));
+      const read = commands.find((c) => (c[0] === "SCARD" || c[0] === "SMEMBERS" || c[0] === "SRANDMEMBER") && eventIndex.test(String(c[1])));
       if (read && pending) {
         const run = pending;
         pending = null;
@@ -129,9 +131,9 @@ async function main(): Promise<void> {
   };
 
   part("Codex I (#2316) 1: a reply that cannot be read stops the walk; it is never read as nothing");
-  const blank = await measured((commands, replies) => replies.map((r, i) => (commands[i][0] === "SMEMBERS" && eventIndex.test(String(commands[i][1])) ? null : r)), null);
+  const blank = await measured((commands, replies) => replies.map((r, i) => ((commands[i][0] === "SMEMBERS" || commands[i][0] === "SRANDMEMBER") && eventIndex.test(String(commands[i][1])) ? null : r)), null);
   is("an odd reply for an event's words: stopped, nothing removed, still to be done", [blank.finished, blank.removed, blank.still, blank.worst], [false, 0, true, 0]);
-  const short = await measured((commands, replies) => (commands.some((c) => c[0] === "SMEMBERS" && eventIndex.test(String(c[1]))) ? replies.slice(0, 1) : replies), null);
+  const short = await measured((commands, replies) => (commands.some((c) => (c[0] === "SMEMBERS" || c[0] === "SRANDMEMBER") && eventIndex.test(String(c[1]))) ? replies.slice(0, 1) : replies), null);
   is("a partial reply: stopped, nothing removed, still to be done", [short.finished, short.removed, short.still, short.worst], [false, 0, true, 0]);
 
   part("Codex I (#2316) 2: a write to the index while the walk counts never makes it send more than it paid");
@@ -140,6 +142,45 @@ async function main(): Promise<void> {
     await index(communityId, "event", thing, 1, many);
   });
   is("the walk finishes, no step over what it paid", [raced.finished, raced.worst, raced.still], [true, 0, false]);
+
+  part("Codex I2 (#2316): however many writes ran at once, one read of a thing's words is never larger than it paid for");
+  // Three real index calls for the same event, each stopped after it read the empty set, then let go together: the set
+  // ends with every word of the three (1,800 of 24 letters), more than any one write leaves.
+  const crowded = eventIds[0];
+  const crowdedKey = `nl:cm:${communityId}:wie:${crowded}`;
+  await redis.pipeline([["DEL", crowdedKey]]);
+  const passOn = redis.pipeline;
+  let waiting: (() => void)[] = [];
+  redis.pipeline = async (commands) => {
+    const replies = await passOn.call(redis, commands);
+    if (commands.length === 1 && commands[0][0] === "SMEMBERS" && commands[0][1] === crowdedKey) {
+      await new Promise<void>((go) => {
+        waiting.push(go);
+        if (waiting.length === 3) for (const release of waiting) release();
+      });
+    }
+    return replies;
+  };
+  await Promise.all([0, 1, 2].map((n) => index(communityId, "event", crowded, 1, Array.from({ length: 600 }, (_, i) => `w${n}${String(i).padStart(3, "0")}${"x".repeat(18)}`))));
+  redis.pipeline = passOn;
+  waiting = [];
+  const [crowdedSize] = await redis.pipeline([["SCARD", crowdedKey]]);
+  is("(the set holds every word of the three writes)", crowdedSize, 1800);
+  let largestRead = 0;
+  let crowdedRewritten = false;
+  await redis.pipeline([["DEL", `nl:cm:${communityId}:sv`]]);
+  redis.pipeline = async (commands) => {
+    const replies = await passOn.call(redis, commands);
+    commands.forEach((c, i) => {
+      if (eventIndex.test(String(c[1])) && (c[0] === "SMEMBERS" || c[0] === "SRANDMEMBER")) largestRead = Math.max(largestRead, Buffer.byteLength(JSON.stringify(replies[i])));
+      if (String(c[1]) === crowdedKey && ["SADD", "SREM", "DEL"].includes(String(c[0]))) crowdedRewritten = true;
+    });
+    return replies;
+  };
+  const crowdedWalk = await walkCommunity(club, async () => true);
+  redis.pipeline = passOn;
+  is("the walk finishes; the largest read of a thing's words fits what was paid before it", [crowdedWalk, largestRead <= INDEXED_WORDS_BYTES], [true, true]);
+  is("and the crowded thing is left as it is, not rewritten from part of its words", [crowdedRewritten, (await redis.pipeline([["SCARD", crowdedKey]]))[0]], [false, 1800]);
 
   part("Codex I (#2316) 1: a count of a person's conversations that comes back empty is unknown, not none");
   const zcard = redis.pipeline;

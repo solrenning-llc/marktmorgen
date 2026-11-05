@@ -133,7 +133,12 @@ async function call(
       cache: "no-store",
       signal: controller.signal,
     });
-    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const parsed: unknown = await response.json().catch(() => undefined);
+    const object = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+    const data = (object ? parsed : {}) as Record<string, unknown>;
+    // A success whose answer is not a JSON object is not known (CX-123 rule 24): money may have moved, so it is
+    // never read as an empty answer. Every caller handles it as it handles a lost answer.
+    if (response.ok && !object) throw new PayPalError(response.status, "UNREADABLE");
     if (!response.ok) {
       const details = Array.isArray(data.details) ? (data.details as { issue?: unknown }[]) : [];
       const code = typeof details[0]?.issue === "string" ? details[0].issue : typeof data.name === "string" ? data.name : "UNKNOWN";
@@ -552,12 +557,19 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
     }
   }
   const { capture, payee, email } = captureIn(done);
-  if (!capture) return { ok: false, reason: "pending" };
+  // Taken, but the answer does not say how: the buyer may have paid, so the sweep asks PayPal again (CX-123 rule 24).
+  if (!capture) {
+    await watchLater(order, opened);
+    return { ok: false, reason: "pending" };
+  }
   if (!matches(opened, capture, payee)) {
     console.error("a PayPal capture did not match its order", order);
     return { ok: false, reason: "mismatch" };
   }
-  if (!email || typeof capture.id !== "string") return { ok: false, reason: "error" };
+  if (!email || typeof capture.id !== "string") {
+    await watchLater(order, opened);
+    return { ok: false, reason: "error" };
+  }
   if (capture.status === "PENDING") {
     await watchLater(order, opened);
     return { ok: false, reason: "pending" };
@@ -662,12 +674,16 @@ export async function watchPayPal(
       continue;
     }
     const { capture, payee, email } = captureIn(done);
-    // Approved and never taken: nothing was charged, and nothing is taken now.
+    // Approved and never taken: nothing was charged, and nothing is taken now. An order whose status is not
+    // PayPal's word is not known: kept, and asked again (CX-123 rule 24).
     if (!capture) {
+      if (typeof done.status !== "string") continue;
       if (done.status !== "APPROVED" && done.status !== "CREATED" && done.status !== "SAVED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
       continue;
     }
-    if (capture.status === "PENDING") continue;
+    if (capture.status === "PENDING" || typeof capture.status !== "string") continue;
+    // Completed and what was asked, but without the buyer's address or the capture's id: paid, not yet readable.
+    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) continue;
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {
       const { paid, fresh } = await settle(order, opened, capture.id, email);
       if (fresh) {
@@ -693,9 +709,16 @@ export async function watchPayPal(
     let status = "";
     try {
       const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: store.paypalSeller.merchant });
-      status = typeof capture.status === "string" ? capture.status : "";
+      // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
+      // "not refunded", and moved back so it cannot hold the place of the orders behind it.
+      if (typeof capture.status !== "string" || !capture.status) {
+        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+        continue;
+      }
+      status = capture.status;
     } catch (error) {
       console.error("reading a PayPal capture failed", error);
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
       continue;
     }
     if (status !== "REFUNDED") {

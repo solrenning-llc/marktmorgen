@@ -176,7 +176,12 @@ async function call(method: "GET" | "DELETE", path: string, params: Record<strin
   } catch {
     throw new MetaError("busy", "Meta could not be reached");
   }
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsed: unknown = await response.json().catch(() => undefined);
+  // Only a JSON object is one of Meta's answers (CX-123 rule 24): a success that is not one, or cannot be read, is
+  // not known, never "nothing" (a read with no rows would erase the days already read).
+  const object = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+  const body = (object ? parsed : {}) as Record<string, unknown>;
+  if (response.ok && !object) throw new MetaError("busy", `Meta answered ${response.status} in a shape that could not be read`);
   if (response.ok && !body.error) return body;
   const error = (body.error ?? {}) as { code?: number; message?: string };
   const code = Number(error.code);
@@ -535,7 +540,9 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     };
     for (let page = 0; next && page < 20; page += 1) {
       const answer = await call("GET", next, params, open.value);
-      for (const row of Array.isArray(answer.data) ? (answer.data as InsightRow[]) : []) rows.push(row);
+      // Every page names its rows, each in Meta's shape; anything else is not a read, and nothing kept is replaced.
+      if (!Array.isArray(answer.data) || !answer.data.every(insightRow)) throw new MetaError("busy", "Meta's ad spend came back in a shape that could not be read");
+      for (const row of answer.data as InsightRow[]) rows.push(row);
       const paging = answer.paging as { next?: unknown } | undefined;
       // Meta's next page carries the token and every parameter itself; it is followed only on Meta's own host.
       next = typeof paging?.next === "string" && sameHost(paging.next) ? paging.next : null;
@@ -569,6 +576,16 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   } finally {
     await redisPipeline([["DEL", readingKey(statsId)]]).catch(() => {});
   }
+}
+
+/** One row of the insights asked for: its campaign, its day, its platform and a spend Meta wrote as a decimal. */
+function insightRow(row: unknown): boolean {
+  if (row === null || typeof row !== "object" || Array.isArray(row)) return false;
+  const r = row as Record<string, unknown>;
+  return typeof r.spend === "string" && /^\d{1,15}(\.\d{1,6})?$/.test(r.spend) &&
+    typeof r.date_start === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.date_start) &&
+    (r.campaign_name === undefined || typeof r.campaign_name === "string") &&
+    (r.publisher_platform === undefined || typeof r.publisher_platform === "string");
 }
 
 function sameHost(link: string): boolean {

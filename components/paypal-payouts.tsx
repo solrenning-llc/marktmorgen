@@ -25,6 +25,7 @@ const MESSAGES: Record<string, string> = {
   off: "Switch your affiliate program on first.",
   slow: "Too many tries for now. Try again in an hour.",
   error: "PayPal could not be reached. Nothing was sent. Try again in a moment.",
+  unknown: "We sent the batch to PayPal, but its answer did not reach us, so we do not know whether it was paid. Nobody in it will be sent again: they show as on their way. Look at your PayPal activity to see whether it went.",
 };
 
 async function send(payload: Record<string, unknown>): Promise<Record<string, unknown>> {

@@ -8,7 +8,9 @@
  * batch (a 4xx with PayPal's own error name) leaves them owed.
  * Synthetic only: a stand-in for PayPal's API on api-m.paypal.com.
  */
-import { connectPayPal, onTheirWay, payWithPayPal } from "@/lib/paypal-payouts";
+import { readFileSync } from "node:fs";
+import { connectPayPal, onTheirWay, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { autoPayEmail } from "@/lib/affiliate-payday";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -20,6 +22,7 @@ const SCOPE = "https://uri.paypal.com/payments/payouts openid";
 type Mode = "ok" | "garbled" | "empty" | "no-id" | "dropped" | "server" | "funds";
 let mode: Mode = "ok";
 let made = 0;
+let reads = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -39,6 +42,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (mode === "server") return json({ name: "INTERNAL_SERVER_ERROR" }, 500);
     return json({ batch_header: { payout_batch_id: id, batch_status: "PENDING" } }, 201);
   }
+  if (url.pathname.startsWith("/v1/payments/payouts/")) reads += 1;
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);
 }) as typeof fetch;
 
@@ -84,6 +88,22 @@ async function main(): Promise<void> {
     is("a second press sends no new batch", made, 1);
     is("and says there is nothing to pay now", second.ok ? "paid" : second.reason, "nothing");
   }
+
+  part("The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it");
+  await seed(store);
+  made = 0;
+  mode = "dropped";
+  await payWithPayPal(store);
+  reads = 0;
+  const settled = await settlePayPal(store);
+  is("both still waiting, no read of a batch id PayPal never gave", [settled.waiting, settled.paid, settled.released, reads], [2, 0, 0, 0]);
+  is("and still on their way", (await onTheirWay(store)).size, 2);
+
+  part("What the creator is told never says nothing was sent");
+  const email = autoPayEmail({ ok: false, reason: "unknown" }, "usd");
+  is("the payday email says it is not known, and to look at PayPal", [email.text.includes("Nothing left your PayPal"), email.text.includes("we do not know whether it was paid"), email.text.includes("PayPal activity")], [false, true, true]);
+  const studioWords = /unknown: "([^"]+)"/.exec(readFileSync("components/paypal-payouts.tsx", "utf8"))?.[1] ?? "";
+  is("the studio's words for it", [studioWords.includes("Nothing was sent"), studioWords.includes("we do not know whether it was paid"), studioWords.includes("PayPal activity")], [false, true, true]);
 
   part("A batch PayPal refused by name (insufficient funds): owed, paid on the next press");
   await seed(store);

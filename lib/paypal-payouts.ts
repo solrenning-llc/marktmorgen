@@ -108,7 +108,11 @@ async function call(method: "GET" | "POST", path: string, auth: string, body?: s
       cache: "no-store",
       signal: controller.signal,
     });
-    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const parsed: unknown = await response.json().catch(() => undefined);
+    const object = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+    const data = (object ? parsed : {}) as Record<string, unknown>;
+    // A success whose answer is not a JSON object is not known (CX-123 rule 24): never read as an empty answer.
+    if (response.ok && !object) throw new PayPalError(response.status, "UNREADABLE");
     if (!response.ok) {
       const name = typeof data.name === "string" ? data.name : typeof data.error === "string" ? data.error : "UNKNOWN";
       throw new PayPalError(response.status, name);
@@ -207,7 +211,21 @@ export function batchBody(store: Store, lines: BatchLine[], senderBatchId: strin
 
 export type PayResult =
   | { ok: true; batch: string; people: number; cents: number }
-  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "funds" | "refused" | "busy" | "error" };
+  /** "unknown": the batch was sent and PayPal's answer is not known, so it may have been paid; nobody in it is sent again. */
+  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "funds" | "refused" | "busy" | "error" | "unknown" };
+
+/**
+ * Whether PayPal's answer to a batch says it was not made: a 4xx (other than
+ * a timeout) is the request refused. Anything else (no answer, the line
+ * dropped, the wait run out, a 5xx, a success that cannot be read or names
+ * no batch) may have made it.
+ */
+function refusedBeforeMade(error: unknown): boolean {
+  return error instanceof PayPalError && error.status >= 400 && error.status < 500 && error.status !== 408;
+}
+
+/** The open batch's field for a batch sent whose answer is not known yet: "?" and our own sender_batch_id. */
+export const UNKNOWN_BATCH_PREFIX = "?";
 
 /**
  * Sends everyone owed and cleared, from the creator's PayPal, as one batch.
@@ -228,21 +246,40 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const auth = await bearer(store);
       if (!auth) return { ok: false, reason: "reconnect" };
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;
+      const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => ({ a: l.affiliate.id, c: l.cents })) };
+      // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
+      // or if it never answers, nobody in it can be put in another batch or payout file. Redis must say it holds it.
+      const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;
+      const held: unknown = await redisPipeline([
+        ["HSET", openKey(statsId), unknownField, JSON.stringify(open)],
+        ["SADD", STORES, store.sid],
+      ]);
+      if (!Array.isArray(held) || held.length !== 2 || held[0] !== 1 || (held[1] !== 0 && held[1] !== 1)) {
+        // Not known to be held: nothing is sent. The field is taken out again if it was written.
+        await redisPipeline([["HDEL", openKey(statsId), unknownField]]).catch(() => undefined);
+        return { ok: false, reason: "error" };
+      }
       let made: Record<string, unknown>;
       try {
         made = await call("POST", "/v1/payments/payouts", auth, batchBody(store, lines, senderBatchId), senderBatchId);
       } catch (error) {
+        if (!refusedBeforeMade(error)) {
+          console.error("a PayPal batch was sent and its answer is not known; kept on its way", error);
+          return { ok: false, reason: "unknown" };
+        }
+        // PayPal refused it: nothing was made, so its people are owed again.
+        await redisPipeline([["HDEL", openKey(statsId), unknownField]]);
         if (error instanceof PayPalError && error.code === "INSUFFICIENT_FUNDS") return { ok: false, reason: "funds" };
         if (error instanceof PayPalError && (error.status === 401 || error.status === 403)) return { ok: false, reason: "refused" };
         throw error;
       }
       const header = (made.batch_header ?? {}) as { payout_batch_id?: unknown };
       const batch = typeof header.payout_batch_id === "string" ? header.payout_batch_id : "";
-      if (!BATCH_ID.test(batch)) return { ok: false, reason: "error" };
-      const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => ({ a: l.affiliate.id, c: l.cents })) };
+      // Made, but which batch is not said: kept on its way under our own id, never sent again.
+      if (!BATCH_ID.test(batch)) return { ok: false, reason: "unknown" };
       await redisPipeline([
         ["HSET", openKey(statsId), batch, JSON.stringify(open)],
-        ["SADD", STORES, store.sid],
+        ["HDEL", openKey(statsId), unknownField],
       ]);
       return { ok: true, batch, people: lines.length, cents: batchTotal(lines) };
     });
@@ -273,6 +310,11 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   if (!auth) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {
+    // A batch whose answer is not known has no PayPal id to read: it stays on its way (CX-123 rule 24).
+    if (batch.startsWith(UNKNOWN_BATCH_PREFIX)) {
+      out.waiting += sent.lines.length;
+      continue;
+    }
     const statusOf = new Map<string, { status: string; item: string }>();
     let batchStatus = "";
     try {

@@ -85,3 +85,16 @@ test("missing native non-executable evidence detection is unknown, never permiss
   } finally { Object.defineProperty(process, "getBuiltinModule", descriptor); }
   assert.equal(commercialMarginReady(value), true);
 });
+for (const name of ["allocatedFixedCostsVerified", "prepaidUsageEnforced"] as const) test(`an inherited ${name} cannot replace an absent own assertion`, () => {
+  const value = review(); Reflect.deleteProperty(value, name);
+  const descriptor = Object.getOwnPropertyDescriptor(Object.prototype, name);
+  try {
+    // Synthetic ambient prototype pollution; no real input vector is claimed.
+    Object.defineProperty(Object.prototype, name, { configurable: true, value: true });
+    assert.equal(commercialMarginReady(value), false);
+  } finally {
+    if (descriptor) Object.defineProperty(Object.prototype, name, descriptor);
+    else Reflect.deleteProperty(Object.prototype, name);
+  }
+  assert.equal(commercialMarginReady(review()), true);
+});

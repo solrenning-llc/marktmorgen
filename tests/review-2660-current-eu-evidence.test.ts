@@ -8,7 +8,7 @@ test("the dated evidence uses the current consolidated VAT Directive", () => {
   const text = read();
   assert.match(
     text,
-    /https:\/\/eur-lex\.europa\.eu\/legal-content\/en\/TXT\/\?uri=CELEX%3A02006L0112-20250414/,
+    /https:\/\/eur-lex\.europa\.eu\/eli\/dir\/2006\/112\/2025-04-14\/eng/,
     "the 2026 evidence snapshot must cite EUR-Lex's current 14 April 2025 consolidation, not the superseded 1 January 2024 consolidation",
   );
   assert.doesNotMatch(text, /02006L0112-20240101/);

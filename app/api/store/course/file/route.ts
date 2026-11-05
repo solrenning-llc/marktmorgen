@@ -9,6 +9,8 @@ import { readCourseListing } from "@/lib/catalog";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { takePublicRequest } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 
 /**
  * A lesson's download: a worksheet, the slides. Handed over only to someone
@@ -25,6 +27,12 @@ export async function GET(request: NextRequest) {
   const file = found && Number.isInteger(index) ? found.lesson.files[index] : undefined;
   if (!found || !file) return plain(404, "Not found.");
 
+  if (found.lesson.preview && product.hidden) {
+    // A draft's preview hands out nothing to whoever only knows its id: only
+    // to its students and the store's owner and team, signed in (MM-SA-30).
+    const jar = await cookies();
+    if ((await courseAccess(store, product, jar)).state !== "open" && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) return plain(404, "Not found.");
+  }
   if (!found.lesson.preview) {
     // Said to the student in the store's language (lib/buyer-words/courses.ts).
     const w = coursesWords(store.language);

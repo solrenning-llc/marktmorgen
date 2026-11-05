@@ -17,9 +17,10 @@ import CoursePage from "@/app/[handle]/course/[product]/page";
 import LessonPage from "@/app/[handle]/course/[product]/[lesson]/page";
 import { GET as courseFileRoute } from "@/app/api/store/course/file/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { emailKey, storeKey } from "@/lib/learn";
 import { saveCourse, type Course } from "@/lib/course";
 import { coursesWords } from "@/lib/buyer-words/courses";
-import { putMember } from "@/lib/team";
+import { putMember, setRequireTwoStep } from "@/lib/team";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setProductHidden, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
@@ -30,6 +31,7 @@ import { ROOM } from "./data-room";
 const OWNER = "kiln@example.com";
 const EDITOR = "editor@example.com";
 const STRANGER = "someone@example.com";
+const STUDENT = "student@example.com";
 const BASE = "https://marktmorgen.com";
 
 /** What a page did: drawn, sent elsewhere (and where), or not found. */
@@ -78,7 +80,7 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER)) as Store;
   if (!store.sid) throw new Error("no store id");
   if (!(await putMember(store, EDITOR, "editor"))) throw new Error("no editor");
-  const sessions = { stranger: "", owner: await openSession(OWNER), editor: await openSession(EDITOR), signedInStranger: await openSession(STRANGER) };
+  const sessions = { stranger: "", owner: await openSession(OWNER), editor: await openSession(EDITOR), signedInStranger: await openSession(STRANGER), student: await openSession(STUDENT) };
   type Who = keyof typeof sessions;
   const cookieOf = (who: Who): Record<string, string> => (sessions[who] ? { cookie: `${SESSION_COOKIE}=${sessions[who]}` } : {});
   const asked = (who: Who, path: string) => {
@@ -143,15 +145,37 @@ async function main(): Promise<void> {
     is("its preview lesson's download gets past the door", download.status !== 404 && download.status !== 403, true);
   }
 
-  part("A session that cannot be read is a no");
-  const broken = redis.pipeline.bind(redis);
-  redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => String(c[0]) === "GET" && String(c[1]).startsWith("nl:auth:session"))) throw new Error("store down");
-    return broken(commands);
-  }) as typeof redis.pipeline;
-  const unread = await sample("editor");
-  is("the draft's sample is not drawn", unread.status, 404);
-  redis.pipeline = broken as typeof redis.pipeline;
+  part("A draft, to a student who bought it before it went back to draft");
+  // What Stripe would answer for this address, kept as the course's access reads it (lib/learn.ts, courseLedger).
+  const started = Math.floor(Date.now() / 1000) - 86_400;
+  await redis.pipeline([["SET", `nl:learn:paid:${storeKey(store)}:${emailKey(STUDENT)}`, JSON.stringify({ p: { [id]: started }, x: [], r: [] }), "EX", 600]]);
+  is("the course's front door", await front("student"), "shown");
+  is("its preview lesson", await lesson("student"), "shown");
+  is("a lesson it paid for", await lesson("student", "lesson000002"), "shown");
+  const studied = await file("student");
+  is("its preview lesson's download gets past the door", studied.status !== 404 && studied.status !== 403, true);
+  const studentSample = await sample("student");
+  is("the sample certificate stays the team's (a student gets their own when they finish)", studentSample.status, 404);
+
+  part("A team that requires two-step sign-in, as the studio reads it");
+  if (!(await setRequireTwoStep(store, true, OWNER))) throw new Error("two-step not required");
+  is("a member whose session had no second step sees nothing of the draft", [(await sample("editor")).status, await front("editor")], [404, "redirect /@kilnworks"]);
+  is("the owner still does", (await sample("owner")).status, 200);
+  await setRequireTwoStep(store, false, OWNER);
+
+  part("What cannot be read is a no");
+  const real = redis.pipeline.bind(redis);
+  const failing = (prefix: string) =>
+    (redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => String(c[0]) === "GET" && String(c[1]).startsWith(prefix))) throw new Error("store down");
+      return real(commands);
+    }) as typeof redis.pipeline);
+  failing("nl:auth:session");
+  is("a session that cannot be read: the draft's sample is not drawn", (await sample("editor")).status, 404);
+  failing("nl:team:");
+  is("a team that cannot be read: not drawn for a member", (await sample("editor")).status, 404);
+  redis.pipeline = real as typeof redis.pipeline;
+  is("read again, the member sees it", (await sample("editor")).status, 200);
 
   done();
 }

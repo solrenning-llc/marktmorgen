@@ -139,6 +139,15 @@ export type ProductOption = {
    * here measures.
    */
   best: boolean;
+  /**
+   * Taken off sale by the creator (642 [WG2]): never shown or sold again
+   * (sellableOptions leaves it out, so every page and every checkout path,
+   * an old link included, refuses it), while whoever bought or subscribes on
+   * it keeps what they have: delivery reads options by id, never through
+   * sellableOptions, and renewals bill the price Stripe already holds.
+   * Absent on every option written before this existed, which is on sale.
+   */
+  offSale?: true;
 };
 
 /** Lines of what an option includes, trimmed, bounded and without blanks. */
@@ -182,6 +191,7 @@ export function parseOptions(raw: unknown): ProductOption[] {
       details: parseDetails(value.details),
       // Only the first one marked counts: a page with two picks has none.
       best: value.best === true && !picked,
+      ...(value.offSale === true ? { offSale: true as const } : {}),
     });
     if (value.best === true) picked = true;
     if (options.length >= MAX_OPTIONS) break;
@@ -212,7 +222,8 @@ export function sellableOptions(product: Listing): ProductOption[] {
   // A course or a private podcast is its own delivery: every option opens it,
   // and a file or link on one is something extra that option includes.
   const opens = Boolean(product.course || product.podcast || product.shipping);
-  return product.options.filter((option) => optionDelivers(option, opens));
+  // One the creator took off sale is never offered, whatever it hands over (642 [WG2]).
+  return product.options.filter((option) => !option.offSale && optionDelivers(option, opens));
 }
 
 /**
@@ -230,6 +241,9 @@ export function sellableOptions(product: Listing): ProductOption[] {
  * product: at least one has to be ready, because that is what the buyer picks.
  */
 export function handsOver(product: Listing): boolean {
+  // Every price taken off sale (642 [WG2]): nothing is for sale, whatever the product is. Without this a course or a
+  // podcast, which answer by their lessons or episodes below, would open a checkout at the product's own price.
+  if (product.options.length > 0 && product.options.every((option) => option.offSale)) return false;
   // A bundle hands over its products: it is ready once it holds two. Whether
   // each can still be handed over is read when the checkout opens.
   if (product.bundle) return product.options.length === 0 && product.recurring === null && product.bundle.length >= MIN_BUNDLE_ITEMS;

@@ -24,3 +24,17 @@ export const COLLECTION_PRODUCTS_PER_UNIT = 4;
 export function collectionUnits(products: number): number {
   return Math.min(MAX_UNITS, whole(products / COLLECTION_PRODUCTS_PER_UNIT));
 }
+
+/**
+ * A bundle's items a collection page reads to show what each bundle on it
+ * holds (lib/bundles.ts, offeredItems), per request: each one's listing. A
+ * bundle holds up to MAX_BUNDLE_ITEMS (lib/bundle-rules.ts), so they are
+ * counted once the page knows them and paid for before they are read
+ * (Codex G2 on #2583, 5 November 2026).
+ */
+export const BUNDLE_ITEMS_PER_UNIT = 16;
+
+/** The requests a collection page takes for the bundle items it reads, beyond collectionUnits. */
+export function bundleItemUnits(items: number): number {
+  return Math.min(MAX_UNITS, whole(items / BUNDLE_ITEMS_PER_UNIT));
+}

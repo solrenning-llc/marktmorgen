@@ -601,6 +601,11 @@ export function collectionRead(products: number): number {
   return products * (4 * COMMAND + bodyWork((2 + MAX_BUMPS) * READ_LISTING_BYTES));
 }
 
+/** The items the bundles on a collection page hold, read to show them (lib/bundles.ts, offeredItems): each one's listing, one command each. */
+export function bundleItemRead(items: number): number {
+  return items * (COMMAND + bodyWork(READ_LISTING_BYTES));
+}
+
 /**
  * Review ceilings for a community search and the walk of its archive, paid
  * for since 4 November 2026 (lib/community-read-rules.ts). What working
@@ -963,8 +968,8 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
       // A collection's products paid before they are read, and a license check before it reads the product (4 November 2026).
-      { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits"] },
-      { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)"] },
+      { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
+      { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },

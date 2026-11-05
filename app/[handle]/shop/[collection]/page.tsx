@@ -9,7 +9,7 @@ import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { offersCart } from "@/lib/cart-checkout";
 import { MAX_CART, cartable } from "@/lib/cart-rules";
 import { bumpTargets } from "@/lib/product-extras";
-import { offeredItems } from "@/lib/bundles";
+import { bundleItemsToRead, offeredItems } from "@/lib/bundles";
 import { preorderDay, soonState } from "@/lib/preorders";
 import { stockLeft } from "@/lib/stock";
 import { outOfKeys } from "@/lib/licence-keys";
@@ -19,7 +19,7 @@ import { canUseDomain } from "@/lib/domains";
 import { summaries } from "@/lib/reviews";
 import { forVisitor } from "@/lib/visitor";
 import { isResting, takePublicRequest } from "@/lib/traffic";
-import { collectionUnits } from "@/lib/page-read-rules";
+import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
@@ -118,6 +118,9 @@ export default async function CollectionPage({ params }: Params) {
   const products = ids.flatMap((id) => listed.find((p) => p.id === id) ?? []);
   const targets = [...new Set(products.flatMap((p) => bumpTargets(p)))].filter((id) => !ids.includes(id));
   const related: Listing[] = [...products, ...(targets.length ? await readListings(store, targets).catch(() => []) : [])];
+  // The items their bundles hold, up to MAX_BUNDLE_ITEMS each, paid for once known and before they are read (Codex G2 on #2583).
+  const items = bundleItemsToRead(related);
+  if (items.length > 0 && !(await takePublicRequest(store, "public", undefined, bundleItemUnits(items.length)))) return <StoreResting store={store} />;
 
   const selling = canSell(store);
   const cartOn = selling && offersCart(store);

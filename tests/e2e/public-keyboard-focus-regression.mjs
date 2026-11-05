@@ -1,5 +1,19 @@
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+import {createRequire} from "node:module";
+import {runInNewContext} from "node:vm";
 import {checkPublicKeyboardCycle} from "./accessibility-public-keyboard.mjs";
+
+function revealFixtureSource(){
+ const {transpileModule,ModuleKind}=createRequire(import.meta.url)("typescript");
+ const compiled=transpileModule(readFileSync(new URL("../../lib/reveal-scripts.ts",import.meta.url),"utf8"),{compilerOptions:{module:ModuleKind.CommonJS}}).outputText;
+ const exports={};runInNewContext(compiled,{exports});
+ const css=readFileSync(new URL("../../app/globals.css",import.meta.url),"utf8");
+ const hidden=css.match(/:root\[data-reveal="on"\] \.reveal \{[^}]*\}/)?.[0];
+ const shown=css.match(/:root\[data-reveal="on"\] \.reveal\.is-in \{[^}]*\}/)?.[0];
+ assert.ok(hidden&&shown&&typeof exports.REVEAL_WATCH==="string","real reveal script and CSS are available");
+ return {script:exports.REVEAL_WATCH,css:hidden+shown};
+}
 
 /** Disposable documents exercise the real helper with native keys, without app writes. */
 export async function checkPublicKeyboardFocusRegressions({browser}) {
@@ -33,6 +47,21 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
   assert.ok(await wrapped.locator("a").evaluate(node=>node.getClientRects().length>1),"wrapped fixture has multiple rendered fragments");
   await checkPublicKeyboardCycle({page:wrapped,path:"synthetic-wrapped-inline-link",is});
   await wrapped.close();
+  // The real help trace expanded one section to 9305px in a 720px viewport.
+  // Exercise the actual initial observer and stylesheet, with native keys.
+  const tall=await context.newPage();
+  try{
+   const source=revealFixtureSource();
+   await tall.setViewportSize({width:1280,height:720});
+   await tall.setContent(`<!doctype html><html data-reveal="on"><head><style>${style}:root{--ease:linear}${source.css}</style></head><body><button>Before the section</button><div style="height:1000px"></div><section class="reveal" style="height:9305px"><div style="height:8500px"></div><button>Inside a tall section</button></section><button>After the section</button></body></html>`);
+   await tall.addScriptTag({content:source.script});
+   assert.equal(await tall.locator(".reveal").evaluate(node=>getComputedStyle(node).opacity),"0","below-fold section starts unrevealed");
+   await checkPublicKeyboardCycle({page:tall,path:"real-reveal-tall-section",is});
+   await tall.waitForFunction(()=>{
+    const node=document.querySelector(".reveal"),style=getComputedStyle(node);
+    return node.classList.contains("is-in")&&style.opacity==="1"&&style.transform==="none";
+   },undefined,{timeout:3000});
+  }finally{await tall.close();}
   for(const color of ["rgb(0, 0, 0)","rgb(255, 255, 0)","rgba(0, 0, 0, 0)"]){
    const radio=await context.newPage();
    try{
@@ -45,6 +74,6 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
     else await journey();
    }finally{await radio.close();}
   }
-  console.log("AX2_KEYBOARD_FOCUS_REGRESSIONS:"+JSON.stringify({coveredThirteenthRejected:true,clearThirteenPassed:true,wrappedInlinePassed:true,opaqueRadiosPassed:2,transparentRadioRejected:true,scope:"Native focus and fragment-center hit tests in disposable documents; not a visual contrast or full obstruction audit."}));
+  console.log("AX2_KEYBOARD_FOCUS_REGRESSIONS:"+JSON.stringify({coveredThirteenthRejected:true,clearThirteenPassed:true,wrappedInlinePassed:true,tallSectionRevealed:true,opaqueRadiosPassed:2,transparentRadioRejected:true,scope:"Native focus and fragment-center hit tests in disposable documents, including the real reveal script/CSS; not a visual contrast or full obstruction audit."}));
  } finally {await context.close();}
 }

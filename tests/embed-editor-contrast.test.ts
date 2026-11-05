@@ -48,7 +48,14 @@ try {
   const plain=document.querySelector('#buy-button'),script=document.querySelector('#checkout-script');
   return {plain:plain.querySelector('textarea[readonly]').value,script:script.querySelector('textarea[readonly]').value,notice:document.body.textContent.includes('These colors are hard to read.'),choices:document.querySelectorAll('a[href="/studio#look"]').length};
  });
- console.log(JSON.stringify({unsafe,valid,requests,errors}));
+ await page.evaluate(()=>window.renderEditors('invalid','#ffcc00'));
+ await page.waitForFunction(()=>document.querySelector('#checkout-script textarea[readonly]').value.includes('#ffcc00'));
+ const partial=await page.evaluate(()=>{
+  const plain=document.querySelector('#buy-button'),script=document.querySelector('#checkout-script');
+  const pair=html=>{const a=new DOMParser().parseFromString(html,'text/html').querySelector('a');return [a.style.backgroundColor,a.style.color];};
+  return {plain:pair(plain.querySelector('textarea[readonly]').value),script:pair(script.querySelector('textarea[readonly]').value),plainNotice:plain.textContent.includes('The code uses readable colors'),scriptNotice:script.textContent.includes('The code uses readable colors'),plainPromisesWhite:plain.textContent.includes('The code uses dark and white'),scriptPromisesWhite:script.textContent.includes('The code uses dark and white')};
+ });
+ console.log(JSON.stringify({unsafe,valid,partial,requests,errors}));
 } finally {if(browser)await browser.close();}
 `;
 
@@ -56,6 +63,7 @@ type Pair = [string, string];
 const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 60_000, maxBuffer: 2_000_000 })) as {
   unsafe: { plain: Pair; script: Pair; preview: Pair; plainNotice: boolean; scriptNotice: boolean; choices: number };
   valid: { plain: string; script: string; notice: boolean; choices: number };
+  partial: { plain: Pair; script: Pair; plainNotice: boolean; scriptNotice: boolean; plainPromisesWhite: boolean; scriptPromisesWhite: boolean };
   requests: number; errors: string[];
 };
 function ratio(pair: Pair): number {
@@ -76,6 +84,12 @@ is("the script editor explains the substituted colors", result.unsafe.scriptNoti
 is("both offer the existing store-color choice", result.unsafe.choices, 2);
 is("readable colors are preserved in both copies", [result.valid.plain.includes("background:#4f2acc;color:#ffffff"), result.valid.script.includes("background:#4f2acc;color:#ffffff")], [true, true]);
 is("normal colors have no irrelevant correction notice", [result.valid.notice, result.valid.choices], [false, 0]);
+is("an invalid background preserves a readable gold foreground in both copies", [result.partial.plain, result.partial.script], [["rgb(21, 17, 46)", "rgb(255, 204, 0)"], ["rgb(21, 17, 46)", "rgb(255, 204, 0)"]]);
+is("the partially corrected pair is readable", ratio(result.partial.plain) >= 7 && ratio(result.partial.script) >= 7, true);
+is("the simple editor describes readable colors without promising a fixed pair", result.partial.plainNotice, true);
+is("the script editor describes readable colors without promising a fixed pair", result.partial.scriptNotice, true);
+is("the simple editor does not promise white when its foreground is gold", result.partial.plainPromisesWhite, false);
+is("the script editor does not promise white when its foreground is gold", result.partial.scriptPromisesWhite, false);
 is("no outside service or saved-setting request", result.requests, 0);
 is("no browser error", result.errors, []);
 done();

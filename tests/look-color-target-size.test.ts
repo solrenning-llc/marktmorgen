@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
-import { compile } from "@tailwindcss/node";
 import { LookEditor } from "@/components/look-editor";
 import { ACCENTS, parseLook } from "@/lib/store-look";
 
 async function main() {
+  // Load the installed compiler at runtime: its native CSS dependency must
+  // not be folded into the test runner's temporary JavaScript bundle.
+  const { compile } = createRequire(`${process.cwd()}/package.json`)("@tailwindcss/node") as typeof import("@tailwindcss/node");
   const html = renderToStaticMarkup(createElement(AppRouterContext.Provider, {
     value: { refresh() {} } as never,
   }, createElement(LookEditor, {

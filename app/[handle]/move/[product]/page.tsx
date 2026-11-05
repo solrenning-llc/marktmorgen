@@ -12,7 +12,7 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { productPath } from "@/components/store-product";
 import { readListing } from "@/lib/catalog";
 import { priceWords, readMove } from "@/lib/move-members";
-import { namedPriceGone } from "@/lib/product-option";
+import { namedPriceGone, withInvitedOption } from "@/lib/product-option";
 import { firstChargeAt } from "@/lib/move-rules";
 
 type Params = {
@@ -47,8 +47,10 @@ export default async function MovePage({ params, searchParams }: Params) {
   if (!store) notFound();
   const say = speech(store);
   const m = moveWords(store.language);
-  const product = (await readListing(store, productId)) ?? null;
-  const invite = product ? await readMove(store, product.id, token).catch(() => null) : null;
+  const listing = (await readListing(store, productId)) ?? null;
+  const invite = listing ? await readMove(store, listing.id, token).catch(() => null) : null;
+  // The price their invitation names, even one since taken off sale, while not yet kept (642 [WG2], lib/move-members.ts openMove).
+  const product = listing && invite && !invite.kept ? withInvitedOption(listing, invite.o) : listing;
   const selling = product?.recurring ? canSellProduct(store, product) : false;
   const price = invite && product && selling ? priceWords(store, product, invite.o) : null;
   const first = invite ? firstChargeAt(invite.r) : null;

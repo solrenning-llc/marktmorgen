@@ -151,7 +151,9 @@ export async function moveCounts(store: Store): Promise<{ invited: number; kept:
   if (!store.statsId || !isRedisConfigured()) return { invited: 0, kept: 0 };
   const [all] = await redisPipeline([["HVALS", invitesKey(store.statsId)]]);
   const invites = (Array.isArray(all) ? all : []).map(parseInvite).filter((i): i is Invite => i !== null);
-  return { invited: invites.length, kept: invites.filter((i) => i.kept > 0).length };
+  // An invitation whose state cannot be read (KEPT_UNKNOWN) is in neither column: not a guess either way.
+  const known = invites.filter((i) => !i.keptUnknown);
+  return { invited: known.length, kept: known.filter((i) => i.kept > 0).length };
 }
 
 /** Marks an invitation kept: the member paid, or their membership was found live. */
@@ -283,7 +285,7 @@ export async function readMove(store: Store, productId: string, token: string): 
   }
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" };
 
 /** The checkout a member's link opens: this membership, this address, first charged on the renewal date. */
 export async function openMove(
@@ -297,6 +299,9 @@ export async function openMove(
 ): Promise<MoveOpen> {
   const invite = await readMove(store, productId, token);
   if (!invite) return { ok: false, reason: "expired" };
+  // Kept already, or its state cannot be read (KEPT_UNKNOWN): the link opens nothing more, at any price, so one
+  // member never holds two memberships from it (Revisor 1 on #2685). The page says it was moved.
+  if (invite.kept !== 0) return { ok: false, reason: "done" };
   const stored: Product | null = await readProduct(store, productId);
   // A price the creator has since taken off sale stays open to this member alone while the invitation is not yet
   // kept (642 [WG2], C4-20261105-1945-C2-2): the checkout below gets the product with that option back on sale;

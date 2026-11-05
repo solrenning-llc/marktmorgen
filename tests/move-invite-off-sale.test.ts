@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   is("the gift and group picker still leaves it out", givableOptions({ ...product, recurring: null } as never).map((o) => o.id), [plus]);
   await noteKept(store, "ada@example.com", id);
   const keptAgain = await openMove(store, id, ada.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  is("an invitation already kept does not reopen the price off sale", keptAgain.ok ? "opened" : keptAgain.reason, "unavailable");
+  is("an invitation already kept does not reopen the price off sale: it says it was moved (\"done\", Revisor 1 on #2685)", keptAgain.ok ? "opened" : keptAgain.reason, "done");
 
   part("An invitation whose \"kept\" cannot be read is not taken as unused (Codex C2 on #2685)");
   const benRecord = JSON.parse(redis.run(["HGET", `nl:mv:${statsId}`, benField]) as string) as Record<string, unknown>;

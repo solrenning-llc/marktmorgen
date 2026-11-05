@@ -13,8 +13,9 @@ export const maxDuration = 60;
  * one a day at the most starts a walk of the database for every store that
  * came due since the last, and the runs after it carry it on to the end and
  * email each store's owner when theirs is done. One run at a time. A store
- * whose first step fails is tried again, and once parked is said on every
- * run that looks at the line (lib/closed-store-data.ts, PREPARE_TRIES).
+ * whose first step fails is tried again by itself, a day later and, once
+ * parked, once a week; a store the walk could not finish is walked again with
+ * the next walk. Both are said on every run (lib/closed-store-data.ts).
  */
 export async function GET(request: NextRequest) {
   return withCutoff(Date.now() + 57_000, () => run(request));
@@ -30,8 +31,9 @@ async function run(request: NextRequest): Promise<Response> {
   try {
     const report = await eraseClosed(Date.now() + 45_000, finishClosed);
     if (report.stores || report.finished || report.failed || !report.done) console.log(`closed-data: ${report.stores} stores begun, ${report.failed} whose first step failed (tried again), ${report.pages} pages read, ${report.deleted} keys deleted, ${report.pruned} list members taken out, ${report.finished} stores done`);
-    // Said on every run that looks at the line until each is put back: a parked store's records are kept, not deleted.
-    if (report.parked) console.error(`closed-data: ${report.parked} closed stores are parked after failing their first step ${PREPARE_TRIES} times; their records are kept until the cause is fixed and they are put back in line (lib/closed-store-data.ts)`);
+    // Said on every run: a parked store's record is kept until a weekly try succeeds; a store left is walked again.
+    if (report.parked) console.error(`closed-data: ${report.parked} closed stores failed their first step ${PREPARE_TRIES} times or more; each is tried again once a week, and its record is kept until a try succeeds`);
+    if (report.left) console.error(`closed-data: ${report.left} closed stores were not finished by the last walk (a key passed over, or a record not yet gone); they are walked again with the next walk`);
     return Response.json({ ok: true, ...report }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("deleting closed stores' records failed", error);

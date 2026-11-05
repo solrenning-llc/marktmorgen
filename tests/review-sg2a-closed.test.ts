@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { claimHandle, storeForEmail, storeRef } from "@/lib/store";
+import { claimHandle, storeForEmail } from "@/lib/store";
 import { finishClosed } from "@/lib/plan-closing";
 import { DUE_KEY, WALK_GAP_MS, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
 
@@ -120,8 +120,11 @@ async function main(): Promise<void> {
       searches += 1;
       const n = Number((url.searchParams.get("page") ?? "p0").slice(1)) || 0;
       // 52 pages of memberships its members cancelled over the years, none live.
-      const data = Array.from({ length: 100 }, (_, i) => ({ id: `sub_${n}_${i}`, status: "canceled" }));
-      return Response.json({ object: "search_result", data, has_more: n < 51, next_page: n < 51 ? `p${n + 1}` : null });
+      const all = Array.from({ length: 100 }, (_, i) => ({ id: `sub_${n}_${i}`, status: "canceled" }));
+      // As Stripe's search does: a status clause in the query keeps only the subscriptions of that status.
+      const status = /status:'([a-z_]+)'/.exec(url.searchParams.get("query") ?? "")?.[1];
+      const data = status ? all.filter((row) => row.status === status) : all;
+      return Response.json(status ? { object: "search_result", data, has_more: false, next_page: null } : { object: "search_result", data, has_more: n < 51, next_page: n < 51 ? `p${n + 1}` : null });
     }) as typeof fetch;
     try {
       const results: boolean[] = [];

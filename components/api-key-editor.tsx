@@ -34,15 +34,19 @@ function when(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+/** Said where the list of keys could not be read: never shown as no keys (audit SG2, finding 23). */
+export const KEYS_UNREAD = "We could not read your keys just now, so they are not listed here. Reload the page to try again.";
+
 /**
  * The keys a creator gives their own tools to read the store with.
  *
  * Shown in full once, when it is made, and never again: the studio keeps only
  * a fingerprint of it, so there is nothing here to show a second time and
- * nothing in the database for anybody to lift.
+ * nothing in the database for anybody to lift. "unread": the list could not
+ * be read, which is said as such, never as no keys.
  */
-export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
-  const [keys, setKeys] = useState<ShownKey[]>(first);
+export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
+  const [keys, setKeys] = useState<ShownKey[] | null>(first === "unread" ? null : first);
   const [name, setName] = useState("");
   const [write, setWrite] = useState(false);
   const [made, setMade] = useState<{ key: string; name: string; paused: boolean } | null>(null);
@@ -66,12 +70,13 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; key?: string; paused?: boolean; keys?: ShownKey[] };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; key?: string; paused?: boolean; keys?: ShownKey[] | null };
       if (!data.ok) {
         setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         return null;
       }
-      if (data.keys) setKeys(data.keys);
+      // Sent as null when the list could not be read after the change.
+      if ("keys" in data) setKeys(Array.isArray(data.keys) ? data.keys : null);
       return data;
     } catch {
       setError(MESSAGES.server_error);
@@ -118,7 +123,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
     }
   }
 
-  const full = keys.length >= MAX_KEYS;
+  const full = keys !== null && keys.length >= MAX_KEYS;
 
   return (
     <section id="api" className="card mt-8 scroll-mt-32 p-6 sm:p-8" aria-labelledby="api-title">
@@ -126,7 +131,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
         <h2 id="api-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
           API keys
         </h2>
-        <span className={`tag ${keys.length ? "tag-live" : ""}`}>{`${keys.length} of ${MAX_KEYS}`}</span>
+        {keys ? <span className={`tag ${keys.length ? "tag-live" : ""}`}>{`${keys.length} of ${MAX_KEYS}`}</span> : null}
       </div>
       <p className="mt-2 text-ink-soft">
         Let your own tools read your store: your list, your members, your students, your affiliates and your bookings.
@@ -163,7 +168,9 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
         </div>
       ) : null}
 
-      {keys.length ? (
+      {keys === null ? (
+        <p className="notice notice-warn mt-5" role="status">{KEYS_UNREAD}</p>
+      ) : keys.length ? (
         <ul className="mt-5 space-y-3">
           {keys.map((key) => (
             <li key={key.id} className="rounded-[12px] bg-paper px-4 py-3 ring-1 ring-line">

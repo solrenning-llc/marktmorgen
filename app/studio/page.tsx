@@ -634,6 +634,11 @@ const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Your account moved",
     body: "This address logs you in from now on. Every session the old one had open is closed.",
   },
+  // The move stands, but the sessions open before could not all be closed (app/api/auth/move; review of #2556).
+  "moved-sessions-open": {
+    title: "Your account moved, but other sessions may still be open",
+    body: "This address logs you in from now on. We could not close every session that was open before the move. Choose “Log out of all devices” at the bottom of your studio.",
+  },
   same: {
     title: "That is the address you already use",
     body: "Nothing to move.",
@@ -1044,7 +1049,8 @@ export default async function StudioPage({
   // first time there is a call to put in it, and the busy times are read (from
   // the ten-minute copy, usually) to point out a dated session that clashes.
   if (current && callProducts.length > 0 && may("settings")) await ensureFeedToken(current).catch(() => {});
-  const apiKeys = current && may("export") ? await shownKeys(current, email, role).catch(() => []) : null;
+  // A list that cannot be read is said as such in the studio, never as no keys (audit SG2, finding 23).
+  const apiKeys = current && may("export") ? await shownKeys(current, email, role).catch(() => "unread" as const) : null;
   const [calendar, calendarBusyTimes, hooks] = current
     ? await Promise.all([
         callProducts.length > 0 && may("settings") ? calendarView(current).catch(() => null) : Promise.resolve(null),
@@ -1247,7 +1253,7 @@ export default async function StudioPage({
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">Two-step login is set to turn off</p>
             <p className="mt-1 text-sm text-ink-soft">
-              {`Somebody who opened a login link was let in without the second step, saying the phone, the recovery codes, the passkeys and the recovery address are all lost. What matters is locked for them, and two-step login turns off on ${new Date(twoStep.reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}. If that was not you, press Cancel under Two-step login: they are logged out at once. Then change your email password.`}
+              {`Somebody who opened a login link was let in without the second step, saying the phone, the recovery codes, the passkeys and the recovery address are all lost. What matters is locked for them, and two-step login turns off on ${new Date(twoStep.reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}. If that was not you, press Cancel under Two-step login to log them out, and change your email password.`}
             </p>
             <a href="#two-step" className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
               Go to Two-step login

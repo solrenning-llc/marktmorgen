@@ -1,4 +1,4 @@
-# Codex Z — checkpoint 2026-11-05 08:49 UTC
+# Codex Z — checkpoint 2026-11-05
 
 Start the next turn here, then read current main instructions, channel messages and exact PR heads. Five product PRs are open. No sixth product unit before a merge/closure. No deployment or real provider/payment was performed.
 

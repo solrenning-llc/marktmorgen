@@ -9,7 +9,7 @@ Current coordinator baseline read: main `363122a475017403476389e362641d578b53002
 | #2459 | merged by S as `169e9d7109b2ab88367869e81d894409af41b22b` | RED `ae88ae6b`; Codex M no-finding comment `6648916094`; nine exact-head aggregators green | none; no deployment/customer-availability claim |
 | #2473 | remote branch is test-only RED head `d57357ab42fa2abc522def9f16c90e3e526bd0c3`; last complete product head was `29ebbfa69224db815032aa5c92cdca845e2a53ea` | original RED `808e61eb`; correction REDs `38c`, `58b`; SG2 return RED `d57357ab`; local free-file correction passes evidence 95/95 and member-health 21/21 | #2391 still owns `lib/community.ts`; Codex O explicitly asked S not to overlap `lastSeenIn` until #2391 merges. No final product head or final review yet |
 | #2490 | merged by S as `69fc1edd2f0a881b678939b7a9ca7bb641d9eb85` | RED `d30c079b`; Codex J no-finding review `5779658603`; nine exact-head aggregators green | none; no deployment/customer-availability claim |
-| #2507 | open at final integrated head `f3e381c50d6ecdb7dd24df95f3278cc55e05bb13`, tree `57808c06ff28264b3dd4cdf514ffbefaa7d2bcb0` | RED `2de5fa62`: 174/136 failures; integrated GREEN 189+37+18+7+24 = 275; scoped strict TSC/lint/scanner 3624/0/diff green | Codex G exact-head return requested in comment `6650622127`; nine new exact-head aggregators |
+| #2507 | open at final integrated head `f3e381c50d6ecdb7dd24df95f3278cc55e05bb13`, tree `57808c06ff28264b3dd4cdf514ffbefaa7d2bcb0` | RED `2de5fa62`: 174/136 failures; integrated GREEN 189+37+18+7+24 = 275; scoped strict TSC/lint/scanner 3624/0/diff green; Codex G exact-head no-finding return `5780372583` | nine exact-head aggregators, currently pending/queued |
 | #2516 | open at final integrated head `d6818344df8c5e7734ee31183cd1bcbe0291f280`, tree `47f2a5b882eb66eb9ae9c53d91424e4c78a9654e` | original RED `a959a5bc`; independent return RED `b25e285b` 14/13; final proof 14/14; integrated related total 490/490; global TSC/lint/scanner 3626/0/diff green | I2 exact-head return requested in comment `6650550304`; nine final aggregators are newly pending |
 
 No own unit changes outgoing-money behavior. One independent explicit no-finding review is sufficient. Never merge before that exact-head review and nine exact-head aggregate successes. Merge own PR only with an expected-head lease and no bypass/direct main.
@@ -23,7 +23,7 @@ Latest O response in the channel: #2391 remained open and occupied `lib/communit
 ## Review and CI facts
 
 - #2516 exact final head has nine newly created workflow runs, all pending at the latest snapshot. I2's no-finding review `5780267424` covers pre-integration head `c4be1790`; an exact-final-head return was requested.
-- #2507 integrates current main cleanly at `f3e381c5`; its new exact-head workflows and Codex G return must both complete before merge. The prior `5efa5c21` workflow snapshot is obsolete.
+- #2507 integrates current main cleanly at `f3e381c5` and has exact-head Codex G approval `5780372583`; only its nine exact-head workflows remain before merge. The prior `5efa5c21` snapshot is obsolete.
 - Review #2489 was already completed and later merged; do not repeat it.
 - #2550 belonged to Codex P under channel rule 7; S withdrew and must not claim its local inspection as a review.
 - Before any foreign review, search the fresh channel for both PR number and exact head. Never edit a foreign branch/PR/product.

@@ -415,6 +415,39 @@ async function main(): Promise<void> {
   is("the board says why, never that the change could not be confirmed", readFileSync("components/deals-board.tsx", "utf8").includes("locked: \"You got in without your second step, so removing a deal, a pipeline or a field waits until two-step login turns off. Nothing was removed."), true);
   is("a full session still removes it", [(await crm(owner, { action: "undeal", id: keptDeal })).status], [200]);
 
+  part("Codex D (#2036): a partial access read never grants a restricted write");
+  await putMember(store, "sam@example.com", "support");
+  await writePipelineAccess(statsId, "sam@example.com", { wkshp1: "none" }, store);
+  const dBody = { action: "deal", deal: { title: "D forbidden write", email: "", cents: 1, stage: "wnew01", note: "" } };
+  const dControl = await crm("sam@example.com", dBody);
+  is("D control: the real support session cannot write the hidden pipeline", [dControl.status,dControl.body.error], [403,"pipeline_access"]);
+  const dBefore = await real([["HLEN",dealsKey]]);
+  let dPartial = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if(commands.length===1 && commands[0][0]==="HGET" && commands[0][1]===`nl:crm:pacc:${statsId}` && commands[0][2]==="sam@example.com") { dPartial++; return []; }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const dAfterPartial = await crm("sam@example.com", dBody);
+  redis.pipeline = real;
+  const dCount = await real([["HLEN",dealsKey]]);
+  is("(the partial read was made)", dPartial > 0, true);
+  is("D partial read refuses and creates no deal", [dAfterPartial.status,dAfterPartial.body.error,dCount], [503,"crm_schema_read_unavailable",dBefore]);
+
+  part("Codex D (#2036): a restriction is said saved only on a confirmed write");
+  await writePipelineAccess(statsId,"sam@example.com",{},store);
+  let dDropped=0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if(commands.length===1 && commands[0][0]==="HSET" && commands[0][1]===`nl:crm:pacc:${statsId}` && commands[0][2]==="sam@example.com") { dDropped++; return []; }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const dSave=await pacc({email:"sam@example.com",choices:{wkshp1:"none"},was:{}});
+  redis.pipeline=real;
+  const dActual=await readPipelineAccess(statsId,"sam@example.com");
+  const dStillOpen=await crm("sam@example.com",dBody);
+  is("(the write was dropped)", dDropped > 0, true);
+  is("D unconfirmed restriction is never reported as saved: refused, saying nothing was changed", [dSave.status, dSave.body.error, dSave.body.ok, dSave.body.access], [503, "unavailable", false, undefined]);
+  is("and what is read is what is really there: no restriction, so the board does not show one", [dActual, dStillOpen.status], [{}, 200]);
+
   done();
 }
 

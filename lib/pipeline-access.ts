@@ -67,8 +67,11 @@ function mapOf(raw: unknown): AccessMap | null {
  */
 export async function readPipelineAccess(statsId: string | null, email: string): Promise<AccessMap | null> {
   if (!statsId || !isRedisConfigured()) return {};
-  const [raw] = await redisPipeline([["HGET", accessKey(statsId), normaliseEmail(email)]]);
-  return mapOf(raw);
+  const reply: unknown = await redisPipeline([["HGET", accessKey(statsId), normaliseEmail(email)]]);
+  // Only the exact answer of the one HGET is read: its text, or null (nothing recorded). A partial or empty reply, or
+  // one of another kind, is not a record and never no restriction: it throws, so the caller refuses (Codex D, #2036).
+  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new Error("pipeline access could not be read");
+  return mapOf(reply[0]);
 }
 
 /** Every teammate's restrictions, by address. */
@@ -90,9 +93,19 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([who, v], 1) : 0);
   const grown = weight(value) - weight(before);
   if (grown > 0) await needData(room, [{ slot: ACCESS_SLOT, bytes: grown }]);
-  await redisPipeline([value ? ["HSET", accessKey(statsId), who, value] : ["HDEL", accessKey(statsId), who]]);
+  const written: unknown = await redisPipeline([value ? ["HSET", accessKey(statsId), who, value] : ["HDEL", accessKey(statsId), who]]);
+  // Saved only on the exact answer of that one command (0 or 1); anything else is not a saved restriction, and the
+  // owner is told it was not saved, never shown the new access as applied (Codex D, #2036). The room taken stays.
+  if (!Array.isArray(written) || written.length !== 1 || (written[0] !== 0 && written[0] !== 1)) throw new PipelineAccessWriteUnconfirmed();
   if (grown < 0) await giveData(room, [{ slot: ACCESS_SLOT, bytes: -grown }]);
   return clean;
+}
+
+/** A restriction whose write did not answer as written: nothing may be taken as saved. */
+export class PipelineAccessWriteUnconfirmed extends Error {
+  constructor() {
+    super("This person's access could not be saved just now. Nothing was changed. Try again in a moment.");
+  }
 }
 
 /**

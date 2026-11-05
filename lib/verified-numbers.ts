@@ -27,10 +27,13 @@ import { readFullNumbers } from "@/lib/mcp-tools";
 import { readTitles } from "@/lib/catalog";
 import { type Store, storesAfter } from "@/lib/store";
 import type { StatsData } from "@/lib/stats";
+import { paidFiguresComplete } from "@/lib/paid-coverage";
 
 export type VerifiedWindow = { visitors: number; views: number; checkouts: number; sales: number | null; cents: number | null };
 
 export type Verified = {
+  /** Identifies snapshots whose producer checked paid-reading completeness. */
+  coverageVersion: 1;
   /** The day it was read (UTC), and when. */
   day: string;
   at: number;
@@ -52,7 +55,7 @@ const key = (statsId: string) => `nl:verified:${statsId}`;
 
 /** The record from the studio's own numbers. Pure. */
 export function verifiedFrom(data: StatsData, titles: Map<string, string>, now: number): Verified {
-  const known = data.sales === "ok";
+  const known = paidFiguresComplete(data);
   const window = (w: "d7" | "d30" | "d90"): VerifiedWindow => {
     const t = data.totals[w];
     return { visitors: t.visitors, views: t.views, checkouts: t.checkouts, sales: known ? t.sales : null, cents: known ? t.cents : null };
@@ -60,6 +63,7 @@ export function verifiedFrom(data: StatsData, titles: Map<string, string>, now: 
   const countries = data.salesCountries?.d90 ?? [];
   const withCountry = countries.reduce((sum, c) => sum + c.sales, 0);
   return {
+    coverageVersion: 1,
     day: new Date(now).toISOString().slice(0, 10),
     at: Math.floor(now / 1000),
     currency: data.currency,
@@ -89,7 +93,9 @@ function parse(raw: unknown): Verified | null {
   if (typeof raw !== "string") return null;
   try {
     const value: unknown = JSON.parse(raw);
-    if (!recordWith(value, ["day", "at", "currency", "salesRead", "windows", "channels", "products", "countries"])) return null;
+    // Legacy snapshots could certify a partial purchase reading. They have no
+    // coverage provenance, so leave them unavailable until normal refresh.
+    if (!recordWith(value, ["coverageVersion", "day", "at", "currency", "salesRead", "windows", "channels", "products", "countries"]) || value.coverageVersion !== 1) return null;
     if (typeof value.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.day) || !count(value.at) || !Number.isSafeInteger(value.at * 1000) || new Date(value.at * 1000).toISOString().slice(0, 10) !== value.day) return null;
     if (typeof value.currency !== "string" || !/^[a-zA-Z]{3}$/.test(value.currency) || typeof value.salesRead !== "boolean") return null;
     const money = (v: unknown) => value.salesRead ? count(v) : v === null;

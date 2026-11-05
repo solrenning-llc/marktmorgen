@@ -64,6 +64,8 @@ async function main() {
     ["missing expanded customer", scoredMember({ customer: undefined })],
     ["missing unit amount", scoredMember({ items: { data: [{ quantity: 1, current_period_end: 1_900_000_000, price: { recurring: { interval: "month", interval_count: 1 } } }] } })],
     ["missing subscription currency", scoredMember({ currency: undefined })],
+    ["missing item quantity", scoredMember({ items: { data: [{ current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })],
+    ["null item quantity", scoredMember({ items: { data: [{ quantity: null, current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })],
   ] as [string, unknown][]) {
     reset([page([row])]);
     let refused = false;
@@ -74,6 +76,9 @@ async function main() {
   reset([page([scoredMember()])]);
   const scored = await memberHealth(store, true, 1_800_000_000_000);
   is("fully evidenced owned row stays complete", [scored?.complete, scored?.members.length, scored?.members[0]?.monthly, scored?.atRisk], [true, 1, 2000, 2000]);
+  reset([page([scoredMember({ items: { data: [{ quantity: 3, current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })])]);
+  const quantity = await memberHealth(store, true, 1_800_000_000_000);
+  is("confirmed item quantity remains exact", [quantity?.members[0]?.monthly, quantity?.atRisk], [6000, 6000]);
   part("Confirmed empty, filtered and paginated controls");
   reset([page([])]);
   is("explicit empty list confirms absence", await runningMembers(store), { rows: [], complete: true });

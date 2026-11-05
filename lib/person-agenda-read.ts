@@ -43,6 +43,9 @@ export function countLedger(store: Store): { count: (units: number) => Promise<b
   };
 }
 
+/** Said when studio requests could not be counted and the refusal came with no sentence of its own: nothing was read. */
+export const NOT_COUNTED = "Your studio's requests could not be counted just now, so nothing was read or changed. Try again in a minute.";
+
 /**
  * Counts `units` studio requests, or says why not: when more are asked than
  * are left, that this needs more than is left, never that they are all spent

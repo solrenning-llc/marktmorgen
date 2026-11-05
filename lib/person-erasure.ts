@@ -93,6 +93,8 @@ import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
 import { forgetRequestsPerson } from "@/lib/payment-request-store";
 import { forgetAgreementsPerson } from "@/lib/agreement-store";
+import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
+import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
 
 
 /**
@@ -113,6 +115,8 @@ export type ErasureNote = "discord-roles" | "email-platform";
  * links, their place in a sequence).
  */
 export const ERASERS: Eraser[] = [
+  { module: "lib/order-confirmation-outbox.ts", run: (s) => forgetOrderConfirmationMail(s.statsId, s.email) },
+  { module: "lib/shipment-mail-outbox.ts", run: (s) => forgetShipmentMail(s.statsId, s.email) },
   { module: "lib/flows.ts", run: async (s) => (await forgetWorkflowPerson(s.store, s.email)).flows },
   { module: "lib/mail-clicks.ts", run: (s) => forgetClicksPerson(s.listId, s.email) },
   { module: "lib/mail-health.ts", run: (s) => forgetHealthPerson(s.store, s.email) },

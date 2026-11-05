@@ -81,3 +81,18 @@ test("the document is what the numbers render today", () => {
   assert.equal(read(DOC_FILE), renderPricingOptimization(), `${DOC_FILE} is stale: run node scripts/pricing-optimization.mjs`);
   assert.match(read(DOC_FILE), /\*\*An analysis for the owner, not a change\.\*\*/);
 });
+
+test('the exhaustive C oracle keeps the solver raw share floor and the same five-cent linear budgets',()=>{
+ const input=milpInput();
+ for(const tier of TIERS){
+  const choice=exhaustive(tier,'C',-1.5)!;
+  const plan=input.plans[tier],option=plan.options.find(o=>o.monthCents===choice.monthCents)!;
+  for(const name of input.printed)assert.equal(choice.shares[name],plan.figures[name]>0?input.alternatives.C:1);
+  for(const cycle of ['Month','Year'] as const){
+   const base=cycle==='Month'?plan.baseMonth:plan.baseYear;
+   const coef=cycle==='Month'?plan.coefMonth:plan.coefYear;
+   const used=base+input.printed.reduce((sum,name)=>sum+coef[name]*choice.shares[name],0);
+   assert.ok(used<=option[`room${cycle}`],`${tier} ${cycle} includes the solver safety reserve`);
+  }
+ }
+});

@@ -1,3 +1,4 @@
+import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recordHeldMonth, type HeldFunding } from "@/lib/held-stores";
 /**
  * A store whose plan has ended, and what it still keeps.
  *
@@ -63,7 +64,7 @@
  * every store whose plan ended fits.
  */
 import { createHash } from "node:crypto";
-import { findStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
+import { observeStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
 import { readAllListings } from "@/lib/catalog";
 import { editCourse, filesInCourse, readCourse, saveCourse } from "@/lib/course";
 import { bytesWords } from "@/lib/delivery";
@@ -92,7 +93,7 @@ import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/cl
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
 import { formatMoney } from "@/lib/money";
-import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, liveByCustomer, markShut, plansByCustomer, refusePlanIfClosing } from "@/lib/closing-plan-guard";
+import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, markShut, refusePlanIfClosing } from "@/lib/closing-plan-guard";
 
 export { CLOSING_DAYS, RECHECK_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS };
 
@@ -591,10 +592,12 @@ export type Closing = {
    */
   state: "fits" | "running" | "told" | "waiting" | "removed" | "held" | "gone";
   note?: string;
+  /** Only unknown platform billing coverage enters the funded retry index. */
+  coverage?: "unknown";
 };
 
 /** One store whose plan has ended, looked at for today. */
-export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY): Promise<Closing> {
+export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY, mayObserve?: () => Promise<boolean>): Promise<Closing> {
   const store = await storeForEmail(key);
   if (!store) {
     await redisPipeline([["ZREM", ENDED_INDEX, key], ["ZREM", FINAL_INDEX, key], ["DEL", stateKey(key)]]);
@@ -612,7 +615,15 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // A plan paid for it since its day began (a checkout opened before and
     // finished on it) is ended and returned in full (lib/closing-plan-guard.ts).
     await markShut(store, final.day ?? now, was);
-    await refuseLatePlans(store);
+    // The durable final index survives a late active snapshot, which clears
+    // planEndedAt. Keep the original closing proof for the refund guard.
+    const closingStore = store.planEndedAt ? store : { ...store, planEndedAt: new Date(was).toISOString() };
+    if (mayObserve && !(await mayObserve())) return { key, state: "held", coverage: "unknown", note: "daily-recheck-budget" };
+    const latePlansChecked = await refuseLatePlans(closingStore).catch(error => {
+      console.error("checking a closing store platform coverage failed", error);
+      return false;
+    });
+    if (!latePlansChecked) return { key, state: "held", coverage: "unknown", note: "its plan subscriptions could not all be checked" };
     if (final.removed) {
       if (!final.due) {
         await markDue(key, now);
@@ -746,12 +757,13 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // The day has come. Stripe is asked, today, before anything is touched:
   // about the subscription this store has written down, and then for any
   // other in good standing that names it.
-  if (!isBillingConfigured()) return { key, state: "held", note: "Stripe could not be asked" };
+  if (mayObserve && !(await mayObserve())) return { key, state: "held", coverage: "unknown", note: "daily-recheck-budget" };
+  if (!isBillingConfigured()) return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
   let live;
   try {
     if (store.subscriptionId) {
       const own = await readSubscription(store.subscriptionId);
-      if (own.state === "unknown") return { key, state: "held", note: "Stripe could not be asked" };
+      if (own.state === "unknown") return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
       if (own.state === "active") {
         await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period });
         await redisPipeline([["DEL", stateKey(key)]]);
@@ -760,10 +772,20 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     }
     // Stripe's search can lag about a minute; its list by the store's customer does not, so a plan paid just
     // before this check still keeps the store (the owner's decision: a plan started in time saves it).
-    live = (await findStoreSubscriptions(store)).live ?? (await liveByCustomer(store));
+    const observation = await observeStoreSubscriptions(store);
+    let searchKnown = true;
+    try { live = (await observation.find()).live; }
+    catch (error) {
+      searchKnown = false;
+      console.error("searching for an ended store's plan failed", error);
+    }
+    // A positive, independent customer observation can still save the store
+    // when search is unavailable; an empty list cannot prove unknown absence.
+    live ??= await observation.customerLive();
+    if (!live && !searchKnown) return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
   } catch (error) {
     console.error("asking Stripe about an ended plan failed", error);
-    return { key, state: "held", note: "Stripe could not be asked" };
+    return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
   }
   if (live) {
     // Our note was wrong, or the plan was started again a moment ago: put right.
@@ -866,20 +888,44 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
  * began returned (lib/closing-plan-guard.ts). Stripe not answering is tried
  * again on the next run; the daily sync and the way back check it too.
  */
-async function refuseLatePlans(store: Store): Promise<void> {
-  if (!isBillingConfigured()) return;
+async function refuseLatePlans(store: Store): Promise<boolean> {
+  if (!isBillingConfigured()) return false;
+  let complete = true;
+  const ids = new Map<string, string>();
+  const observation = await observeStoreSubscriptions(store);
   try {
-    const found = await findStoreSubscriptions(store);
-    const ids = new Map<string, string>([...(found.live ? [[found.live.subscriptionId, found.live.customerId] as const] : []), ...found.lapsed.map((id) => [id, found.customerId ?? ""] as const)]);
-    // And what Stripe's list by customer shows already that its search may not yet.
-    for (const row of await plansByCustomer(store)) {
-      if (row.status === "canceled" || row.status === "incomplete_expired") continue;
-      if (!ids.has(String(row.id))) ids.set(String(row.id), store.stripeCustomerId ?? "");
-    }
-    for (const [id, customerId] of ids) await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId });
+    const found = await observation.find();
+    if (found.live) ids.set(found.live.subscriptionId, found.live.customerId);
+    for (const id of found.lapsed) ids.set(id, found.customerId ?? "");
   } catch (error) {
-    console.error("looking for a plan paid for a closing store failed", error);
+    complete = false;
+    console.error("searching for a plan paid for a closing store failed", error);
   }
+  // This observation is independent: a rejected address search must never
+  // prevent us from finding and stopping a late charge by customer.
+  try {
+    for (const row of observation.customerPlans()) {
+      if (row.status === "canceled" || row.status === "incomplete_expired") continue;
+      if (!ids.has(row.id)) ids.set(row.id, row.customerId);
+    }
+  } catch (error) {
+    complete = false;
+    console.error("listing plans paid for a closing store failed", error);
+  }
+  for (const [id, customerId] of ids) {
+    try {
+      let stopped = false;
+      const result = await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId, onStopped: () => { stopped = true; } });
+      // A pending refund is self-contained in UNDO_KEY and retried after the
+      // store is gone. Only a proved cancellation may hand it over: merely
+      // returning "returning" can also mean an unreadable queue or live plan.
+      if (result !== "returned" && result !== "returned-early" && !(result === "returning" && stopped)) complete = false;
+    } catch (error) {
+      complete = false;
+      console.error("refusing a plan paid for a closing store failed", error);
+    }
+  }
+  return complete;
 }
 
 /**
@@ -898,6 +944,7 @@ export async function finishClosed(entry: Batched, now = Date.now()): Promise<vo
 export const ERASED_KEPT_DAYS = 400;
 
 const AFTER = "nl:plan:closing:after";
+const FINAL_AFTER = "nl:held:walk";
 const PAGE = 200;
 
 /**
@@ -908,24 +955,67 @@ const PAGE = 200;
  * look at is still walked to its end, a part a day. A store is looked at
  * once in a run however many share the moment their plans ended.
  */
-export async function closeEnded(deadline: number, now = Date.now(), hands: Hands = HANDS): Promise<Closing[]> {
+export async function closeEnded(deadline: number, now = Date.now(), hands: Hands = HANDS, funding?: HeldFunding): Promise<Closing[]> {
   if (!isRedisConfigured()) return [];
-  // First the stores whose closing day began and did not finish (queue item 307 [EC1]): a plan started since does not take them out of the line of ended plans' notice, but they are seen through.
   const finals: Closing[] = [];
-  const [finalRefs] = await redisPipeline([["ZRANGEBYSCORE", FINAL_INDEX, "-inf", "+inf", "LIMIT", 0, PAGE]]);
-  for (const ref of Array.isArray(finalRefs) ? (finalRefs as unknown[]).map(String) : []) {
-    if (Date.now() > deadline) return finals;
+  const seen = new Set<string>();
+  const incomplete = async () => { await recordHeldMonth(now, false); return finals; };
+  const visit = async (ref: string, retry = false) => {
+    if (seen.has(ref)) return;
+    seen.add(ref);
+    // Earlier versions indexed every held reason. Local pause/notice/member
+    // progress must run before a daily platform-coverage claim is needed.
+    const wasCoverageHeld = await heldStoreKnown(ref);
+    let result: Closing, attempted = false;
     try {
-      finals.push(await closeOne(ref, now, hands, deadline));
+      const mayObserve = wasCoverageHeld ? async () => {
+        if (!retry) return false;
+        attempted = await claimHeldRecheck(ref, now);
+        return attempted;
+      } : undefined;
+      result = await closeOne(ref, now, hands, deadline, mayObserve);
     } catch (error) {
       console.error("seeing a closing store through failed", error);
-      finals.push({ key: ref, state: "held", note: "failed" });
+      result = { key: ref, state: "held", note: "failed" };
     }
+    const coverageHeld = result.state === "held" && result.coverage === "unknown";
+    // A store not actually attempted keeps its older due score; otherwise the
+    // ordinary final walk would reset every score and starve stores after50.
+    if (!(wasCoverageHeld && coverageHeld && !attempted) && (wasCoverageHeld || coverageHeld)) await noteHeldClosing(ref, coverageHeld, now, funding);
+    finals.push(result);
+  };
+  // Oldest due first; each processed entry moves to tomorrow. The atomic
+  // daily claim precedes either provider read, including concurrent runs.
+  for (const ref of await heldStoresDue(now)) {
+    if (Date.now() > deadline) return incomplete();
+    await visit(ref, true);
   }
+  const [savedFinal, finalCount] = await redisPipeline([["GET", FINAL_AFTER], ["ZCARD", FINAL_INDEX]]);
+  if (savedFinal !== null && (typeof savedFinal !== "string" || !/^(0|[1-9][0-9]*)$/.test(savedFinal) || !Number.isSafeInteger(Number(savedFinal)))) throw new Error("final closing cursor is unknown");
+  let finalOffset = savedFinal === null ? 0 : Number(savedFinal);
+  let finalWalkComplete = finalOffset === 0;
+  for (;;) {
+    const [finalRefs] = await redisPipeline([["ZRANGEBYSCORE", FINAL_INDEX, "-inf", "+inf", "LIMIT", finalOffset, PAGE]]);
+    if (!Array.isArray(finalRefs) || finalRefs.length > PAGE || Array.from({ length: finalRefs.length }, (_, i) => !Object.hasOwn(finalRefs, i) || typeof finalRefs[i] !== "string").some(Boolean)) throw new Error("final closing page is unknown");
+    for (let i = 0; i < finalRefs.length; i++) {
+      if (Date.now() > deadline) {
+        await redisPipeline([["SET", FINAL_AFTER, finalOffset + i, "EX", 30 * 86400]]);
+        return incomplete();
+      }
+      await visit(finalRefs[i]);
+    }
+    finalOffset += finalRefs.length;
+    if (finalRefs.length < PAGE) break;
+    await redisPipeline([["SET", FINAL_AFTER, finalOffset, "EX", 30 * 86400]]);
+  }
+  await redisPipeline([["DEL", FINAL_AFTER]]);
+  const [afterFinalCount] = await redisPipeline([["ZCARD", FINAL_INDEX]]);
+  // Rank shifts caused by concurrent removals may skip a row until the next
+  // cycle. Continue next time, but never certify that partial monthly count.
+  finalWalkComplete &&= typeof finalCount === "number" && Number.isSafeInteger(finalCount) && finalCount >= 0 && afterFinalCount === finalCount;
   const [saved] = await redisPipeline([["GET", AFTER]]);
   let from: string = typeof saved === "string" && /^\d+$/.test(saved) ? saved : "0";
-  const seen = new Set<string>(finals.map((row) => row.key));
-  const out: Closing[] = [...finals];
+  const out = finals;
   for (;;) {
     const [raw] = await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]);
     const flat = Array.isArray(raw) ? raw : [];
@@ -935,15 +1025,9 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
       if (seen.has(row.key)) continue;
       if (Date.now() > deadline) {
         await redisPipeline([["SET", AFTER, String(Math.floor(Number(row.score))), "EX", 30 * 24 * 60 * 60]]);
-        return out;
+        return incomplete();
       }
-      seen.add(row.key);
-      try {
-        out.push(await closeOne(row.key, now, hands, deadline));
-      } catch (error) {
-        console.error("looking at a store whose plan ended failed", error);
-        out.push({ key: row.key, state: "held", note: "failed" });
-      }
+      await visit(row.key);
     }
     if (rows.length < PAGE) break;
     // The next page begins at the last moment of this one, which the page
@@ -952,5 +1036,6 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
     from = last === from.replace("(", "") ? `(${last}` : last;
   }
   await redisPipeline([["DEL", AFTER]]);
+  await recordHeldMonth(now, finalWalkComplete);
   return out;
 }

@@ -280,12 +280,24 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
   rows:COMMERCIAL_PROFIT_SOURCES.map(source=>({source,netProfitCents:null,shareOfNetProfitBps:null})),
   totalNetProfitCents:null,reason:"unknown",
  };
+ // Retain the original financial containers before an executable Proxy trap
+ // can replace its reference while the shared encoder inspects descriptors.
+ let originals:unknown[];
+ try{
+  const own=(value:unknown,key:string):unknown=>{
+   if(!value||typeof value!=="object")return undefined;
+   const field=Object.getOwnPropertyDescriptor(value,key);
+   return field&&Object.hasOwn(field,'value')?field.value:undefined;
+  };
+  const sources=own(input,'sources');
+  originals=[input,sources,...COMMERCIAL_PROFIT_SOURCES.map(source=>own(sources,source))];
+ }catch{return result;}
  const encoded=canonicalFinancialSnapshot(input);
  if(encoded===null)return result;
  // The own-data encoder rejects accessors before this native clone probe.
- // A Proxy may conceal an unreviewed cost from its descriptor snapshot; native
- // cloning rejects proxies anywhere in the original graph, without trusting traps.
- try{structuredClone(input);}catch{return result;}
+ // Cloning retained references also rejects a cost-hiding Proxy that detached
+ // itself from the caller's graph during encoding.
+ try{structuredClone(originals);}catch{return result;}
  const data=JSON.parse(encoded) as CommercialProfitMixInput|null;
  if(!data||Array.isArray(data)||(data.basis!=="worst_case"&&data.basis!=="reconciled_actual")||
   (data.interval!=="month"&&data.interval!=="year")||data.currency!=="USD"||

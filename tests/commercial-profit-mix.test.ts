@@ -118,6 +118,32 @@ test('transparent proxies at each accounting boundary are not financial evidence
  }
 });
 
+test('a cost-hiding Proxy cannot remove itself from the input before the native check',()=>{
+ const input=fixture();
+ const row=Object.assign(input.sources.captions!,{unreviewedSupplierCents:null});
+ input.sources.captions=new Proxy(row,{
+  ownKeys(target){
+   input.sources.captions={...target};
+   return Reflect.ownKeys(target).filter(key=>key!=='unreviewedSupplierCents');
+  },
+ });
+ const result=commercialProfitMix(input);
+ assert.equal(result.reason,'unknown');assert.equal(result.totalNetProfitCents,null);
+});
+
+test('a source-map Proxy cannot detach while concealing another unreconciled source',()=>{
+ const input=fixture();
+ const sources=Object.assign(input.sources,{unreviewedSupplier:null});
+ input.sources=new Proxy(sources,{
+  ownKeys(target){
+   input.sources={...target};
+   return Reflect.ownKeys(target).filter(key=>key!=='unreviewedSupplier');
+  },
+ });
+ const result=commercialProfitMix(input);
+ assert.equal(result.reason,'unknown');assert.equal(result.totalNetProfitCents,null);
+});
+
 test('an inherited amount cannot replace a required own cost category',()=>{
  const descriptor=Object.getOwnPropertyDescriptor(Object.prototype,'taxesCents');
  let calls=0;

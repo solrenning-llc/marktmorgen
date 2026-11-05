@@ -44,3 +44,39 @@ for (const boundary of ["outer", "row"] as const) {
     );
   });
 }
+
+test("the captured dispute assessment matches the review bound after projection", () => {
+  const fixture = contractFixture();
+  const baseline = contractFundingConfiguration(fixture.policy, fixture.context, fixture.now);
+  assert.ok(baseline);
+
+  const original = fixture.review;
+  const later = structuredClone(fixture.review);
+  later.planPaymentDisputes!.creator_year!.maximumPaidPrincipalCents! += 100;
+  fixture.policy.financialSnapshot = canonicalFinancialSnapshot(later)!;
+  assert.equal(
+    contractFundingConfiguration(
+      fixture.policy,
+      { ...fixture.context, review: later },
+      fixture.now,
+    ),
+    null,
+    "the larger plain liability does not fit the previously reserved cash",
+  );
+
+  let reads = 0;
+  const context = new Proxy(fixture.context, {
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+      return key === "review" && descriptor
+        ? { ...descriptor, value: ++reads === 1 ? original : later }
+        : descriptor;
+    },
+  });
+  assert.equal(
+    contractFundingConfiguration(fixture.policy, context, fixture.now),
+    null,
+    "a later bound liability cannot use an earlier smaller assessment",
+  );
+  assert.ok(reads > 1, "the regression exercises distinct boundary captures");
+});

@@ -323,3 +323,14 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 3. #2451/#2544/#2608/#2674 mantêm os bloqueios e retries exatamente acima.
 4. Cinco unidades ocupadas; não abrir sexta. Revisão de terceiro só se estiver realmente livre, anunciada antes e sem duplicar.
 5. Merge próprio apenas `expected_head_sha` + UMA revisão sem grave/médio + NOVE agregadores exatos verdes (duas apenas se dinheiro sai). Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+### Revisão financeira #2714 — 05/11/2026 20h39 Fortaleza
+
+- Claim publicado antes da revisão; nenhuma revisão anterior anunciada no delta lido. Revisão não conta como sexta unidade e nenhum ramo/PR/CI/reserva do autor foi alterado.
+- PR #2714/head EXATO `70bd2df1af785c8b9ad5a9f0c20438d06e771060`, base `0f139490d3fc79045fd370cd9b5478b64e2f69e5`. Parecer GitHub `5793684267`: **NÃO LIBERADO, 1 MÉDIO**.
+- Achado: `lib/winback-send.ts:110-115` valida apenas que `data` é array e `has_more` é booleano. Uma assinatura ativa parcial, com `metadata` omitido, vira não-correspondência e a página final faz `cameBack()` devolver `false`; o e-mail de reconquista é enviado a quem pode já ter voltado.
+- RED independente durável: `codex/n-review-2714-evidence@8b8d4a9e9b16be3fbce42f49a9688b4403cabe29`, blob `badc03c7829a82094d6216ae8834dd565e5ced68`. Só estende o teste do autor; no head do produto, 8 verificações/1 falha: linha `{ id, status:"active" }` sem metadata esperava nenhum e-mail, recebeu envio para Fox.
+- Correção exigida: toda linha usada para provar ausência deve ter forma completa dos campos necessários; linha parcial/malformada deve devolver `null`, soltar a marca pelo caminho unknown já existente e não enviar. Novo teste deve falhar antes da correção.
+- RED original `087991eb` reproduzido: winback 7/6 falhas; checkout 6/4; recovery 8/3. GREEN do produto: 7/7, 6/6, 8/8. Quinze arquivos ligados: 15/15. ESLint focal limpo; scanner 3.806/0; diff-check limpo; TypeScript somente os seis `LayoutProps` conhecidos fora do diff. Sem Redis nativo, Stripe real, e-mail real ou navegador.
+- Próximo retorno desta revisão: somente delta corretivo do #2714, se pedido. Continua necessária a segunda revisão financeira independente; não presumir fechamento.

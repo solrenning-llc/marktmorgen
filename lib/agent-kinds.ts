@@ -9,7 +9,7 @@
  * batch is fine), with undo.
  */
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
-import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, writeAbout } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, writeAboutIf } from "@/lib/product-about";
 import { setProductAbout, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
@@ -19,11 +19,14 @@ export type AgentKind = ProposalKind & {
   /** What the store holds now for this target, as the proposal's "before" is compared with. */
   current: (store: Store, target: string) => Promise<Json>;
   /**
-   * Writes `value` in; false when it could not be written, "terms" when the
+   * Writes `value` in, only while the store still holds `expected` (what the
+   * proposal or the undo was decided on), checked in the same step as the
+   * write: "changed" when it holds something else now and nothing was written
+   * (Codex G on #1929). False when it could not be written, "terms" when the
    * words are not allowed where they would go (refusal). `ref` is the store's
    * owner, as studio writes use.
    */
-  write: (store: Store, ref: string, target: string, value: Json) => Promise<boolean | "terms">;
+  write: (store: Store, ref: string, target: string, value: Json, expected: Json) => Promise<boolean | "terms" | "changed">;
   /**
    * Why `value` may not be written on this target now, in words for the agent
    * and the creator, or null. The studio's own screen refuses the same
@@ -64,14 +67,22 @@ export const PRODUCT_DESCRIPTION: AgentKind = {
     return listing.about ? await readAbout(store.statsId, target) : "";
   },
   refusal: descriptionRefusal,
-  async write(store, ref, target, value) {
+  async write(store, ref, target, value, expected) {
     if (typeof value !== "string" || !store.statsId) return false;
+    // A product gone since (current read null) is changed, never written to.
+    if (typeof expected !== "string") return "changed";
     // Checked again here: the product may have been published since it was proposed.
     if (await descriptionRefusal(store, target, value)) return "terms";
     const text = cleanAbout(value);
+    // The words first, only over the ones it was decided on; then the product's mark that it has some.
+    const written = await writeAboutIf(store.statsId, target, expected, text, store);
+    if (written !== true) return written;
     const marked = await setProductAbout(ref, target, text !== "");
-    if (!marked.ok || !marked.store.statsId) return false;
-    await writeAbout(marked.store.statsId, target, text, marked.store);
+    if (!marked.ok) {
+      // The mark could not follow: the words go back to what they were, so the two never disagree.
+      await writeAboutIf(store.statsId, target, text, expected, store).catch((error: unknown) => console.error("putting back a description failed", error));
+      return false;
+    }
     return true;
   },
 };

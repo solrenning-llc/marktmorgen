@@ -113,6 +113,15 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
+        if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, about, expected, text] = args;
+          const now = this.run(["GET", about]);
+          const held = typeof now === "string" ? now : "";
+          if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+          this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
+          return [1];
+        }
         if (key.startsWith("-- marktmorgen:pause-due-observation:v1\n") && args[0] === "1" && args.length === 3) {
           const [,target,deadline]=args;
           if(!/^(0|[1-9][0-9]*)$/.test(deadline)||Number(deadline)>1_000_000_000_000)return [-1];

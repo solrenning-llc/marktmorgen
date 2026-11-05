@@ -2,6 +2,27 @@
 export async function checkShippingSave({browser,LOCAL,fixture,is}){
  const saved={cents:750,region:"na",countries:["US","CA"],note:"Ships tomorrow",sku:"Créateur-01"};
  const product={id:fixture.product,shipping:saved};
+ const beforeReady=await browser.newContext({viewport:{width:390,height:1000},javaScriptEnabled:false});
+ try{
+  await beforeReady.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
+  const initial=await beforeReady.newPage();let writes=0;
+  await initial.route("**/api/**",async route=>{
+   if(["GET","HEAD"].includes(route.request().method())){await route.continue();return;}
+   writes++;await route.abort("blockedbyclient");
+  });
+  await initial.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
+  const summary=initial.getByText("SKU: Synthetic-SKU",{exact:true}).locator("..");
+  for(const name of ["Change","Stop shipping it"]){
+   const button=summary.getByRole("button",{name,exact:true});
+   await button.waitFor({state:"attached"});
+   is(name+" is natively unavailable before shipping hydration",await button.isDisabled(),true);
+   is(name+" exposes unavailable shipping hydration",await button.getAttribute("aria-disabled"),"true");
+   is(name+" visibly reports shipping preparation",(await button.innerText()).trim(),"Loading…");
+   await button.dispatchEvent("click");
+  }
+  is("shipping form stays closed before hydration",await initial.locator("form").count(),0);
+  is("shipping controls start no write before hydration",writes,0);
+ }finally{await beforeReady.close();}
  const cases=[
  {name:"HTTP failure",status:500,body:{ok:true,product}},
  {name:"truthy success",body:{ok:"true",product}},

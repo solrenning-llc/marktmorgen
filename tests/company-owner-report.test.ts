@@ -142,3 +142,15 @@ test("an inherited timestamp cannot execute while refusing an incomplete source"
     Reflect.deleteProperty(Object.prototype, "observedAtMs");
   }
 });
+
+test("conflicting duplicate JSON members remain unknown before last-value normalization", () => {
+  const duplicateSource = `{"keptStar":{"observedAtMs":${NOW},"month":"${MONTH}","times":999},"keptStar":{"observedAtMs":${NOW},"month":"${MONTH}","times":8}}`;
+  const duplicateCount = `{"keptStar":{"observedAtMs":${NOW},"month":"${MONTH}","times":999,"times":8}}`;
+  const escapedDuplicateCount = `{"keptStar":{"observedAtMs":${NOW},"month":"${MONTH}","times":999,"ti\\u006des":8}}`;
+
+  for (const serialized of [duplicateSource, duplicateCount, escapedDuplicateCount]) {
+    const kept = companyOwnerReport(serialized, MONTH, NOW).sections.find(row => row.id === "keptStar");
+    assert.equal(kept?.status, "unknown");
+    assert.equal(kept?.observedAtMs, null);
+  }
+});

@@ -56,6 +56,20 @@ async function main() {
       is(`${kind}: exactly its expected effect`, [world.events.length, world.confirmations], kind === "Notification" ? [1, 0] : [0, 1]);
       is(`${kind}: existing claim shape and retention stay unchanged`, world.commands, [["SET", "nl:sns:seen:synthetic-sns-claim-1", "1", "NX", "EX", 86_400]]);
     }
+    part("An applied claim with a lost response must not become a completed duplicate");
+    for (const [label, reply, throws] of [
+      ["empty reply", [], false], ["false reply", [false], false],
+      ["extra reply", ["OK", null], false], ["thrown reply", [], true],
+    ] as const) {
+      reset(reply, throws);
+      // Model the legitimate case in which Redis applied SET but its reply
+      // was lost: the same notification's next SET NX observes that marker.
+      await POST(request("Notification")).catch(() => null);
+      world.reply = [null];
+      world.throws = false;
+      const retry = await POST(request("Notification"));
+      is(`${label}: do not acknowledge an unfinished event as complete`, retry.status !== 200 || world.events.length === 1, true);
+    }
   } finally { globalThis.fetch = originalFetch; }
   done();
 }

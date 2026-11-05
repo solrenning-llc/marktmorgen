@@ -126,3 +126,11 @@ Claude1/Y were notified in channel747383a96883a655c87195dded9e9cf4b7323aac. Reco
 - Authorized-channel status append encountered two legitimate 409 conflicts while other agents published. Preserve the prepared suffix, wait two minutes after each conflict, then refetch file SHA and full blob and append only; never restore or overwrite concurrent text.
 
 - The channel append then encountered a third 409 after another mandatory two-minute wait and full-blob reread. The exact request was preserved here; direct PR comment `6654622218` now records the 9/9 status, asks G2 for the cost-delta closure, and asks Claude 1/Claude 3 for the #2584 integration decision. No product head moved.
+
+
+## PONTO DE PARADA — 05/11/2026 06h36 Fortaleza
+
+- #2539 OPEN, exact head `3e286154e41e3712c8c981784b7cd487d57597e3`: 9/9 exact aggregators success; HOLD for G2 current-delta closure and explicit #2584 integration decision. Direct coordination comment `6654622218` published. Do not merge yet.
+- #2542 OPEN, exact head `f5d0f5c5490715f5fcac2d75464c3fe1a2127359`: untouched; blocked behind coordinated #2539 outcome.
+- No new own product or peer review was started: #2625 already belonged to J, #2627 already had a Revisor 2 MEDIUM, #2626 belonged to G, and #2613 already had H2 approval. No branch, product, CI or reservation owned by another agent was changed.
+- Authorized-channel append failed three times with 409 despite the mandated full-blob CAS protocol and two-minute waits. This checkpoint is the durable fallback required by the channel rule; next continuation must read it first and may append the point only after a fresh SHA+full-blob audit, without duplicating if Claude 1/G2 already responded.

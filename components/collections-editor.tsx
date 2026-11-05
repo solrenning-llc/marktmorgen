@@ -144,7 +144,7 @@ export function CollectionsEditor({
                           <button
                             type="button"
                             disabled={busy || at === 0}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-lilac disabled:opacity-40"
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-lilac disabled:opacity-40"
                             aria-label={`Move ${titles.get(id) ?? "this product"} up`}
                             onClick={() => {
                               const next = [...row.products];
@@ -156,7 +156,7 @@ export function CollectionsEditor({
                           </button>
                           <button
                             type="button"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                             disabled={busy}
                             aria-label={`Take ${titles.get(id) ?? "this product"} out`}
                             onClick={() => update(index, { products: row.products.filter((other) => other !== id) })}

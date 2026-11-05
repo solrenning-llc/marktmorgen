@@ -1,14 +1,31 @@
-# Codex D2 checkpoint — November 5, 2026, 22:18 UTC
+# Codex D2 checkpoint — November 5, 2026, 22:29 UTC
 
 Read this checkpoint first, then the fresh Codex inbox, channel and GitHub state. Preserve heads, proofs and retry counters. Conversation/channel: PT-BR. Code, commits and PRs: English. Coordinator: Claude1. Lane: 474 TX4 / 473 TX3, with E2 cross-reviews.
 
-## Latest return — November 5, 2026, 22:18 UTC
+## Latest return — November 5, 2026, 22:29 UTC
 
 Applied the owner's Pro continuation order C1-1900, C1-1857 and C4-1859. The actual full channel instructions are C1-1809 (AV12, referenced as1808) and C1-1843 (default lane audit, referenced as1846). Existing hourly continuation was re-enabled exactly once; no duplicate automation or repeated model polling. Five own products remain at the exact heads below, each8/9; no retry, cancellation, product edit, head move or merge.
 
 Shared controller #2632 is now OPEN at f183d78fd326c404c5a75fd6a3b9328b9fe24c94. The coordinator explicitly authorized including #2652 and #2677; V/C3 control the combined branch. Last single observation: eight successful aggregates, product42117120004 running. Preserve active CI. Do not copy unmerged fixes, duplicate its review or integrate main before normal incorporation. The old cancelled4c92/42044911877 record below is historical, not the current head.
 
-No new E2 focal return was unclaimed; its five products already have applicable reviews. S requested an unclaimed review of #2691/28450130c8c5a83944954dfbdd3c044ba8eba110. GitHub had zero reviews and the fresh channel no competing claim. D2's attempted announcement hit409; wait two minutes, re-read the FULL channel, and announce only if still free. No review code has been written or author branch edited.
+No new E2 focal return was unclaimed; its five products already have applicable reviews. D2's2691 announcement hit409, waited two minutes and re-read the full channel: V had claimed it. D2 did not duplicate its tests/review. V subsequently found a partial-sales MEDIUM; it remains V/S's work.
+
+D2 instead announced2692 financial review in channel71e0634dd77fec1db0d3e6291f43a18d4a015d06. It is complete with an OPEN MEDIUM; see the exact immutable proof below. H2 controls the SECOND financial review (PR comment6671131708); no duplicate second reviewer.
+
+Main changed to d7bbf9d35915ad5c6aa602158949c32ababa1a44, only reservation cleanup2694. That real novelty justified one metadata refresh:2632 is still OPEN/f183d78fd326c404c5a75fd6a3b9328b9fe24c94. No premature main integration or repeated CI polling. A single local passive shell watcher is active, session77150, script /workspace/scratch/ddab4228c898/d2-main-watch.py: reads main at least60seconds apart, stops within60minutes, emits only a candidate2632 integration signal. A signal is NOT merge authorization; fresh GitHub state and exact checks remain required. Local event file: /workspace/scratch/ddab4228c898/d2-main-watch-event.json. It uses a lock to avoid duplicate watchers.
+
+## Financial review #2692 — OPEN MEDIUM, no clearance
+
+Exact head5caa7807f1611f7893379ad7084e07b320abc0c3. D2 review5793009445, inline4486788278. In lib/plan-refund-flow.ts:216–226, duplicate refund IDs are refused within one page but not across pages for distinct noted charges. One unique successful refund can be counted toward both debts. Real partial-refund→daily settlement proof shows subscription canceled and pending note deleted while only one payment was actually refunded. Honest-page control keeps the partial plan active.
+
+Immutable proof commit2ff8feda8e2b32d03d52e00708dcb88431c8312a on codex/d-review-2692-refund-evidence. tests/d2-review-2692-evidence.test.ts blobce1670bf4d5fa0bc241c4cd917761afc7701809a. Remote content read back EXACT. Run: node proofs/d2/run-2692.mjs final d2-review-2692-evidence.test.ts.9checks/3causal failures+6controls. Same unchanged proof yields9/3 on RED6f7eb8f4 source libraries; inherited defect in the modified reader, not a new regression. Only the two product libraries differ between that RED and head; both author test blobs are identical. RED author tests114/33+81/28; final195/195. Linked336/336, total531 counted passing checks plus2assertion-only groups. Scoped strict types including real transitive imports0, focused ESLint0, scanner including staged review files3801/0, diff0, actual client bundles268/268. No provider/native Redis/browser/global TypeScript/deploy claim.
+
+Report commit7460803497d03a70f0208e9e6ed3a9f490e2f98b, proofs/d2/review-2692.md. Channel result9eecb000d3875261325f40074f64c86bdb51e27c after409 and two-minute/full-CAS retry. Initial linked launcher used nonexistent essential-studio.test.ts; corrected to essential-studio-allowance and broadcast-allowance-window, all11 remaining groups then passed. No absent test counted.
+
+R2 independently reproduced D2's9/3 in the19:25 channel message. R2 also has a SEPARATE OPEN MEDIUM: allowanceUsed now throws, and app/studio/page.tsx:981, agreements:41, path:60, requests:43 do not catch it, so unknown counter/window causes whole-page failure. The author's error-boundary caveat does not waive this finding. D2 supplement6671182908 explicitly preserves it;531 valid-fixture checks do NOT certify outage rendering. H2's second financial review is in progress. Closing D2's replay finding alone is insufficient; R2's consumer disposition/focal return is also required. No author product/branch/CI was edited.
+
+Next focal action: when C2 posts a corrected head, repeat IMMUTABLE2ff8feda proof; only close the duplicate-refund MEDIUM after9/9 pass and reading the delta. Do not certify the separate page-error finding without R2/owner resolution. Two financial clearances and nine exact-head successful workflows remain necessary.
+
 
 ## Read-only fiscal audit: OPEN MEDIUM, no sixth product
 
@@ -94,6 +111,6 @@ Next:
 2. Once the shared fixes merge, integrate necessary main preserving reviewed product blobs, require nine NEW successes, then merge normally with Q review applicable; no second review.
 3. #2632 is OPEN atf183d78fd326c404c5a75fd6a3b9328b9fe24c94 with8success+product42117120004 running at the last observation. It includes2652+2677 by explicit coordinator exception; V/C3 control it. Do not duplicate reviews, poll in model turns, merge their PRs or copy unmerged corrections.
 4. Canada/Swiss/Africa unique timeout retries are exhausted. Report shared repair/coordination to C1/V; never repeat them.
-5. With five products waiting, only an unclaimed independent review, requested focal return or read-only default audit evidence; no sixth own product and no duplicate reviewer. The malformed persisted tax-setting MEDIUM remains OPEN, with immutable proof and C1 assignment requested. Retry the2691 announcement only after the409 two-minute delay and fresh no-claim check.
+5. With five products waiting, only an unclaimed independent review, requested focal return or read-only default audit evidence; no sixth own product and no duplicate reviewer. The malformed persisted tax-setting MEDIUM remains OPEN, with immutable proof and C1 assignment requested. 2691 belongs to V; do not duplicate it.2692 D2 MEDIUM and the separate R2 page-error MEDIUM remain open; wait for the corrected head and re-run immutable proof2ff8feda before any clearance.
 
 Most recent CI record: PR#2647 comment6664184558. Channel CAS conflicts around17:05 were retried after two minutes; successful result/retry checkpoint append95e79b1ad8edb723bc5828f62e2411392e15bfa2. Before ending, append PONTO DE PARADA with all five exact heads, retry counters and next action. Keep all work durable at most30min.

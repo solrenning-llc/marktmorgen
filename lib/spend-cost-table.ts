@@ -186,17 +186,27 @@ export type ProtocolInfrastructureBounds = {
 export function protocolInfrastructureMicroUsd(
   input: ProtocolInfrastructureBounds | null,
 ): { baseMicroUsd: number; providerAllowanceMicroUsd: number; totalMicroUsd: number } | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  if (!input || typeof input !== 'object') return null;
   const keys = ['functionCalls', 'memoryGbMilliseconds', 'cpuMilliseconds',
     'redisCommands', 'transferBytes', 'retainedBytes', 'retentionMonths', 'storageCopies'] as const;
   const values: bigint[] = [];
   try {
+    // Reject unpriced categories before projecting the known components. A
+    // complete profile must survive a plain-data snapshot without omissions.
+    if (Array.isArray(input) ||
+        ![Object.prototype, null].includes(Object.getPrototypeOf(input)) ||
+        Reflect.ownKeys(input).length !== keys.length) return null;
     for (const key of keys) {
       const field = Object.getOwnPropertyDescriptor(input, key);
-      if (!field || !Object.hasOwn(field, 'value') ||
+      if (!field || !field.enumerable || !Object.hasOwn(field, 'value') ||
           !Number.isSafeInteger(field.value) || field.value < 0) return null;
       values.push(BigInt(field.value));
     }
+    // Native structured serialization rejects Proxy exotic objects even
+    // when their reflection traps conceal fields. Only validated numeric
+    // data reaches this step, so ordinary accessors are never executed.
+    // https://html.spec.whatwg.org/multipage/structured-data.html#structuredserializeinternal
+    structuredClone(input);
   } catch { return null; }
   const [calls, memory, cpu, commands, transfer, retained, months, copies] = values;
   if (copies < BigInt(1) || (retained > BigInt(0) && months === BigInt(0))) return null;

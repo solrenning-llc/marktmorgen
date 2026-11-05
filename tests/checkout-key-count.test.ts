@@ -33,8 +33,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 // The pool's count is read with LLEN on the pool's own key; every other
 // command reaches the stand-in Redis unchanged.
-type Answer = "real" | "throws" | "text" | "null" | "negative" | "fraction" | "empty" | "sparse" | "extra";
+type Answer = "real" | "throws" | "text" | "null" | "negative" | "fraction" | "empty" | "sparse" | "extra" | "accessor";
 let answer: Answer = "real";
+let accessorReads = 0;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const asksPool = commands.some((command) => command[0] === "LLEN" && String(command[1]).endsWith(":pool"));
@@ -44,6 +45,18 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
   if (answer === "empty") return [];
   if (answer === "sparse") return Array(replies.length);
   if (answer === "extra") return [...replies, 0];
+  if (answer === "accessor") {
+    const hostile: unknown[] = [];
+    Object.defineProperty(hostile, "0", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        accessorReads += 1;
+        return 1;
+      },
+    });
+    return hostile;
+  }
   return replies.map((reply, i) =>
     commands[i][0] === "LLEN" && String(commands[i][1]).endsWith(":pool")
       ? answer === "text" ? "many" : answer === "null" ? null : answer === "negative" ? -1 : 0.5
@@ -89,6 +102,8 @@ async function main(): Promise<void> {
   for (const as of ["throws", "text", "null", "negative", "fraction", "empty", "sparse", "extra"] as const) {
     is(`the pool's count ${as === "throws" ? "fails to load" : `answers ${as}`}: the plain error, Stripe never reached`, await open(as), ["https://marktmorgen.com/@keycountshop?status=error", 0]);
   }
+  is("an accessor-backed slot is unknown: the plain error, Stripe never reached", await open("accessor"), ["https://marktmorgen.com/@keycountshop?status=error", 0]);
+  is("an accessor-backed Redis slot is never executed", accessorReads, 0);
 
   done();
 }

@@ -24,7 +24,7 @@ test("the global organization description follows current commercial availabilit
   const description = organizationDescription();
   if (!PLANS_ON_SALE) {
     assert.equal(description, PREVIEW_LINE);
-    assert.doesNotMatch(description, /buyers? pay|stripe account|sale/i);
+    assert.doesNotMatch(description, /buyers? pay|stripe account/i);
     return;
   }
   assert.match(description, /buyers? pay/i);

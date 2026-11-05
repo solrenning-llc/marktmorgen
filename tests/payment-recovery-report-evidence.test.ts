@@ -50,6 +50,8 @@ async function main() {
     ["unknown attempt count", page([invoice("in_attempt", { attempt_count: null })])],
     ["missing payment time", page([invoice("in_time", { status_transitions: {} })])],
     ["future payment time", page([invoice("in_time", { status_transitions: { paid_at: now / 1000 + 1 } })])],
+    ["unknown billing reason", page([invoice("in_reason", { billing_reason: "not_a_stripe_reason" })])],
+    ["prototype-shaped billing reason", page([invoice("in_reason", { billing_reason: "__proto__" })])],
   ] as [string, unknown][]) {
     reset([reply]); await refuses(name); is(name + ": no extra provider read", reads, 1);
   }
@@ -57,6 +59,15 @@ async function main() {
   for (const reply of [[], [null], [[]], [["1"]], [["1", "2", "3"]], [[null, {}]], [["bad", "2"]], [["-1", "0"]], [["9007199254740992", "0"]], [["1", 2]]] as unknown[][]) {
     reset(); fault = { command: "HMGET", reply }; await refuses("Unknown monthly counts " + JSON.stringify(reply));
   }
+  reset([page([])]);
+  await original([["HSET", countKey(store.statsId!, monthOf(now)), "failed", String(Number.MAX_SAFE_INTEGER), "cards", "2"]]);
+  await refuses("Monthly counter total outside the exact integer range");
+  reset([page([])]);
+  await original([["SET", cache, JSON.stringify({ at: Math.floor(now / 1000), currency: "usd", recovered: 0, cents: 0, afterEmail: 0, afterEmailCents: 0, elsewhere: 0, month: { failed: Number.MAX_SAFE_INTEGER, cards: 2 }, complete: true })]]);
+  let unsafeCacheRefused = false;
+  try { await recoveryReport(store, false, now); } catch { unsafeCacheRefused = true; }
+  is("cached monthly counter total outside the exact integer range is refused", unsafeCacheRefused, true);
+  is("unsafe cached monthly total starts no provider work or replacement write", [reads, writes], [0, 0]);
   for (const reply of [[], [undefined], [null], ["1"], [2], [true], [1, 0]] as unknown[][]) {
     reset(); fault = { command: "EXISTS", reply }; await refuses("Unknown email receipt " + JSON.stringify(reply));
   }
@@ -73,6 +84,13 @@ async function main() {
   const before = reads;
   is("confirmed cache retains the report", await recoveryReport(store, false, now), known);
   is("confirmed cache makes no provider call", reads, before);
+  reset([page([invoice("in_manual", { billing_reason: "manual" })])]);
+  const manual = await recoveryReport(store, true, now);
+  is("recognized non-renewal invoice is not reported as recovered", [manual?.recovered, manual?.cents, manual?.complete], [0, 0, true]);
+  reset([page([])]);
+  await original([["HSET", countKey(store.statsId!, monthOf(now)), "failed", String(Number.MAX_SAFE_INTEGER - 2), "cards", "2"]]);
+  const edge = await recoveryReport(store, true, now);
+  is("largest exact monthly counter total remains known", edge?.month, { failed: Number.MAX_SAFE_INTEGER - 2, cards: 2 });
   reset([page([invoice("in_first")], true), page([invoice("in_first")])]);
   await refuses("repeated next-page identity"); is("duplicate page stops before another request", reads, 2);
   reset(Array.from({ length: 10 }, (_, n) => page([invoice("in_page" + n)], true)));

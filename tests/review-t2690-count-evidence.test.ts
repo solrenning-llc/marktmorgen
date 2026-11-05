@@ -26,7 +26,7 @@ test("the real option-count route never turns malformed kept evidence into a dis
   const made = await addProduct(owner, "Synthetic membership", "", "10", { interval: "month", trialDays: 0, payments: 0 });
   assert.ok(made.ok);
   assert.equal((await addOption(owner, made.product.id, "Basic", "10")).ok, true);
-  await setStripeAccount(owner, "acct_1TestReviewT2690", true);
+  await setStripeAccount(owner, "acct_TestT2690", true);
   const store = (await storeForEmail(owner))!;
   const product = (await readProduct(store, made.product.id))!;
   const option = product.options[0].id;

@@ -28,7 +28,7 @@ import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
 import { readPage, readVersions } from "@/lib/sales-page-store";
 import { readSections } from "@/lib/saved-block-store";
-import { PICKER_PAGE, bundleChoices, choicePage, choiceQuery } from "@/lib/bundle-choices";
+import { PICKER_PAGE, bundleChoicesPage, choiceCursor, choiceQuery } from "@/lib/bundle-choices";
 import { storeImports } from "@/lib/imports";
 import type { PageBlock } from "@/lib/sales-page";
 import { type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
@@ -557,11 +557,11 @@ export async function savedBlocksTool(store: Store) {
  */
 export async function bundleChoicesTool(store: Store, args: Record<string, unknown>) {
   const owner = typeof args.bundle === "string" ? args.bundle.slice(0, 40) : "";
-  const listed = await bundleChoices(store, { owner, query: choiceQuery(args.search), page: choicePage(args.page) });
+  // A page at a time, each inside the one API request it pays for (Codex A3, #1933): never the whole catalog in one call.
+  const listed = await bundleChoicesPage(store, { owner, query: choiceQuery(args.search), after: choiceCursor(args.cursor) });
   return {
-    note: `Products that can go in a bundle first, then the rest with why_not saying why they cannot, ${PICKER_PAGE} a page. price is in the smallest unit of the store's currency. hidden products are not listed on the store page.`,
-    page: listed.page,
-    more: listed.more,
+    note: `Products that may go in a bundle, in the creator's order, ${PICKER_PAGE} a page, each with can_go_in, and why_not saying why it cannot. To read the next page, call again with cursor set to next_cursor; next_cursor is null on the last page. matches counts the products not ruled out by their kind, each checked on its own page. price is in the smallest unit of the store's currency. hidden products are not listed on the store page.`,
+    next_cursor: listed.next === null ? null : String(listed.next),
     matches: listed.matches,
     products: listed.products.map((p) => ({ id: p.id, title: p.title, price: p.priceCents, what: p.what, hidden: p.hidden, can_go_in: p.why === null, why_not: p.why })),
   };

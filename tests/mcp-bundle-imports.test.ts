@@ -8,7 +8,7 @@
 import { POST } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
 import { bundleChoices } from "@/lib/bundle-choices";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
+import { addDraftProducts, addProduct, claimHandle, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     const all = await call("list_bundle_choices");
     const listed = all.value.products as Choice[];
     is("answered", all.isError, false);
-    is("those that can go in first, then the rest with why", listed.map((p) => [p.title, p.can_go_in, p.why_not]), [
+    is("in the creator's order, each with whether it can go in and why not", listed.map((p) => [p.title, p.can_go_in, p.why_not]), [
       ["Sourdough guide", true, null],
       ["Recipe cards", true, null],
       ["Coming later", false, "It has nothing to hand over yet"],
@@ -62,13 +62,42 @@ async function main(): Promise<void> {
     is("a membership is never offered, as in the picker", listed.some((p) => p.title === "Bakers club"), false);
     is("prices in the smallest unit", listed[0].price, 1900);
     const picker = await bundleChoices(store, { owner: "", query: "", page: 1 });
-    is("the same list as the creator's picker", listed.map((p) => [p.id, p.why_not]), picker.products.map((p) => [p.id, p.why]));
+    is("the same products and reasons as the creator's picker", listed.map((p) => [p.id, p.why_not]).sort(), picker.products.map((p) => [p.id, p.why]).sort());
     const searched = await call("list_bundle_choices", { search: "  RECIPE  " });
     is("found by name, as typed", (searched.value.products as Choice[]).map((p) => p.title), ["Recipe cards"]);
     const own = await call("list_bundle_choices", { bundle: guide.product.id });
     is("the bundle being made is left out of its own list", (own.value.products as Choice[]).some((p) => p.id === guide.product.id), false);
-    const far = await call("list_bundle_choices", { page: 9 });
-    is("a page past the end is empty, not an error", [far.isError, (far.value.products as Choice[]).length, far.value.more], [false, 0, false]);
+    is("one page: no next cursor", all.value.next_cursor, null);
+    const far = await call("list_bundle_choices", { cursor: "900" });
+    is("a cursor past the end is an empty page, not an error", [far.isError, (far.value.products as Choice[]).length, far.value.next_cursor], [false, 0, null]);
+
+    part("Codex A3 (#1933): each call reads one page, what one API request pays for; the catalog a page at a time");
+    const made = await addDraftProducts(OWNER, Array.from({ length: 100 }, (_, i) => ({ title: `Synthetic guide ${String(i).padStart(3, "0")}`, summary: "", priceCents: 1900, link: "https://example.com/guide" })));
+    if (!made.ok) throw new Error("No synthetic drafts");
+    const original = redis.pipeline.bind(redis);
+    const seen = new Set<string>();
+    const reads: number[] = [];
+    let cursor: string | null | undefined = undefined;
+    let calls = 0;
+    do {
+      const commands: (string | number)[][] = [];
+      redis.pipeline = async (batch) => {
+        commands.push(...batch);
+        return original(batch);
+      };
+      let page: Answer;
+      try {
+        page = await call("list_bundle_choices", { search: "synthetic guide", ...(cursor ? { cursor } : {}) });
+      } finally {
+        redis.pipeline = original;
+      }
+      calls += 1;
+      reads.push(commands.filter((c) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]))).length);
+      for (const p of page.value.products as Choice[]) seen.add(p.id);
+      cursor = page.value.next_cursor as string | null;
+    } while (cursor && calls < 10);
+    is("100 products in five pages, every one of them seen once", [calls, seen.size], [5, 100]);
+    is("no page reads more than 20 listings", Math.max(...reads) <= 20, true);
 
     part("Imports, as counts only");
     is("none yet", (await call("get_imports")).value.imports, []);

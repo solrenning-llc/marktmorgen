@@ -190,12 +190,12 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "list_bundle_choices",
     description:
-      "The store's products a bundle can be made of, 20 a page: first those that can go in, then the rest, each with why it cannot (a membership, a call, several prices, free, a limited number, nothing to hand over yet), exactly as the creator's bundle picker lists them.",
+      "The store's products a bundle may be made of, 20 a page in the creator's order, each with whether it can go in and why it cannot (a membership, a call, several prices, free, a limited number, nothing to hand over yet), by the same rule as the creator's bundle picker. Each call reads one page; pass cursor: next_cursor from the last answer for the next one, until next_cursor is null.",
     inputSchema: {
       type: "object",
       properties: {
         search: { type: "string", description: "Words in the product's name; left out, every product." },
-        page: { type: "number", description: "Which page, from 1." },
+        cursor: { type: "string", description: "Where the page starts: next_cursor from the previous answer; left out, the first page." },
         bundle: { type: "string", description: "The bundle being made, from list_products, left out of its own list." },
       },
       additionalProperties: false,

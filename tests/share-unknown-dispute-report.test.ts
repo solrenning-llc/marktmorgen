@@ -10,7 +10,7 @@ const fee={id:'fee_UnknownState0001',account:'acct_Receipt0001',charge:'ch_Unkno
 const row={id:'du_UnknownState0001',object:'dispute',charge:fee.charge,currency:'usd',status:'future_status'};
 const now=1800000000;
 type Diagnostic={unknownDisputes:number;unknownDisputeFees:string[];unknownAmounts:number;unknownAmountFees:string[]};
-async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown;unavailable?:boolean;feePatch?:Record<string,unknown>;chargePatch?:Record<string,unknown>;metadataPatch?:Record<string,unknown>;sessionPatch?:Record<string,unknown>;sessionListPatch?:Record<string,unknown>}={}){
+async function world(options:{feeListReply?:unknown;recent?:boolean;historical?:boolean;reply?:unknown;unavailable?:boolean;feePatch?:Record<string,unknown>;chargePatch?:Record<string,unknown>;metadataPatch?:Record<string,unknown>;sessionPatch?:Record<string,unknown>;sessionListPatch?:Record<string,unknown>}={}){
  redis.clear();process.env.STRIPE_SECRET_KEY='sk_test_fee_refund_only_a_stand_in';
  const calls:{method:string;url:URL}[]=[];
  if(options.historical){
@@ -26,7 +26,7 @@ async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown
  globalThis.fetch=async(input,init)=>{
   const url=new URL(String(input)),method=init?.method??'GET';calls.push({method,url});
   assert.equal(url.origin,'https://api.stripe.com');
-  if(url.pathname==='/v1/application_fees')return Response.json({object:'list',has_more:false,data:options.recent===false?[]:[feeReply]});
+  if(url.pathname==='/v1/application_fees')return Response.json(options.feeListReply===undefined?{object:'list',has_more:false,data:options.recent===false?[]:[feeReply]}:options.feeListReply);
   if(url.pathname==='/v1/events')return Response.json({object:'list',has_more:false,data:[{id:'evt_UnknownState0001',data:{object:{application_fee:fee.id}}}]});
   if(url.pathname==='/v1/application_fees/'+fee.id)return Response.json(feeReply);
   if(url.pathname==='/v1/charges/'+fee.charge)return Response.json(chargeReply);
@@ -40,6 +40,28 @@ async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown
  };
  try{return {counts:await settleShares(Date.now()+60000,now,false),calls};}finally{globalThis.fetch=oldFetch;}
 }
+test('G2: confirmed empty fee ledger is a complete zero control',async()=>{
+ const {counts,calls}=await world({feeListReply:{object:'list',has_more:false,data:[]}});
+ assert.equal(counts.complete,true);assert.equal(counts.failed,0);assert.equal(counts.fees,0);assert.equal(calls.filter(c=>c.method==='POST').length,0);
+});
+for(const [label,feeListReply] of [['missing data',{}],['null data',{object:'list',has_more:false,data:null}],['missing has_more',{object:'list',data:[]}],['more pages without cursor',{object:'list',has_more:true,data:[]}],['malformed fee row',{object:'list',has_more:false,data:[{}]}]] as const){
+ test('G2: unconfirmed fee list cannot mean complete zero: '+label,async()=>{
+  const {counts,calls}=await world({feeListReply});
+  assert.equal(calls.filter(c=>c.method==='POST').length,0);
+  assert.equal(counts.complete,false,'incomplete evidence must stay unknown');assert.equal(counts.failed,1);
+  assert.equal(counts.fees,0);assert.equal(counts.unknownAmounts,0);assert.deepEqual(counts.unknownAmountFees,[]);
+ });
+}
+test('G2: validate every fee row before authorizing a refund from that page',async()=>{
+ const {counts,calls}=await world({feeListReply:{object:'list',has_more:false,data:[fee,{}]},chargePatch:{disputed:false},metadataPatch:{share_bps:'0'}});
+ assert.equal(calls.filter(c=>c.method==='POST').length,0);assert.equal(counts.complete,false);assert.equal(counts.failed,1);assert.equal(counts.fees,0);
+});
+test('G2: repeated pagination cursor is an incomplete read, not fifty paid repeats',async()=>{
+ const {counts,calls}=await world({feeListReply:{object:'list',has_more:true,data:[fee]},chargePatch:{disputed:false}});
+ assert.equal(counts.complete,false);assert.equal(counts.failed,1);assert.equal(calls.filter(c=>c.url.pathname==='/v1/application_fees').length,2);
+ assert.equal(calls.filter(c=>c.method==='POST').length,0);
+});
+
 for(const [label,options,expected] of [
  ['recent',{},1],['historical',{recent:false,historical:true},1],['both paths',{historical:true},2],
 ] as const){

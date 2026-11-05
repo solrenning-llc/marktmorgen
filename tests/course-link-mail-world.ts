@@ -116,3 +116,31 @@ export async function proveAvailableCourseMail(){
   assert.equal(fixture.sent.length,2);assert.equal(fixture.calls.resend,0);
  }finally{fixture.restore();}
 }
+
+/** A configured account can still be known unavailable. Production fallback
+ * defaults stay null; the fixture supplies only SES HTTP/account answers. */
+export async function provePausedSesCourseMail(){
+ const {installSesMailFixture}=await import('./ses-mail-fixture');
+ const fixture=installSesMailFixture();redis.clear();fixture.configure();
+ process.env.RESEND_API_KEY='re_SYNTHETIC_COURSE_PROOF_NO_PROVIDER';
+ const original=redis.pipeline;
+ const trace:Command[]=[];
+ try{
+  await fixture.setReady(false);
+  assert.ok((await claimHandle(owner,'paused-course-school','Paused School','')).ok);
+  await ensureStatsId(owner);await setPastBuyers(owner);
+  const made=await addProduct(owner,'Paused course','Original summary','49',null);assert.ok(made.ok);
+  await setProductCourse(owner,made.product.id,{id:'d'.repeat(32),lessons:1});
+  const stored=(await storeForEmail(owner))!,product=(await readProduct(stored,made.product.id))!;
+  await grantImported(stored.statsId!,'d'.repeat(24),[{email:buyer,productId:product.id,items:null}],1793293200,stored.sid);
+  const paidStore={...stored,subscriptionActive:true,subscriptionId:null,trialEnds:0,planEndedAt:'',tier:'pro' as const};
+  redis.pipeline=async commands=>{trace.push(...commands);return original(commands);};
+  for(let i=0;i<2;i++)assert.equal(await sendCourseLink(paidStore,product,buyer,origin),false);
+  assert.equal(trace.filter(c=>c[0]==='SET'&&String(c[1]).startsWith('nl:learn:link:')).length,0,'no unreachable token is created');
+  assert.equal(await requestCourseLink({store:paidStore,product,email:buyer,ip:'192.0.2.40',origin}),'error');
+  assert.equal(await requestCourseLink({store:paidStore,product,email:stranger,ip:'192.0.2.41',origin}),'error');
+  assert.equal(trace.filter(c=>/nl:learn:(paid|enr):/.test(String(c[1]))).length,0,'known global refusal precedes entitlement lookup');
+  assert.equal(redis.keys().filter(k=>k.startsWith('nl:allow:transactional:')).length,0);
+  assert.equal(fixture.calls.ses,0);assert.equal(fixture.calls.resend,0);
+ }finally{redis.pipeline=original;fixture.restore();}
+}

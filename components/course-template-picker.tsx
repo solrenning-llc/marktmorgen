@@ -43,7 +43,7 @@ export function CourseTemplatePicker({
         Pick one to see what it adds. Nothing is saved until you say so, and you can change every title and day afterward.
       </p>
 
-      <fieldset className="mt-4 min-w-0">
+      <fieldset className="mt-4 min-w-0" disabled={busy}>
         <legend className="field-label">Pick a structure</legend>
         <div className="mt-2 grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
           {COURSE_TEMPLATES.map((template) => (

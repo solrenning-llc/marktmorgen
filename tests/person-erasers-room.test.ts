@@ -92,7 +92,7 @@ async function quiz(): Promise<void> {
 
 async function waitlist(): Promise<void> {
   part("Waitlist: a place and its link to leave come back, once, confirmed or not");
-  process.env.RESEND_API_KEY = "re_test_erasure_room";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
   await ensureStatsId("owner@example.com");
   await ensureListId("owner@example.com");

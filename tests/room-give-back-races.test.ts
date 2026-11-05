@@ -30,7 +30,8 @@ import { done, is, part } from "./check";
 const mailed: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
-  if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") return new Response(JSON.stringify({ data: [] }));
+  // One id for each message of a batch, as Resend answers (and as main's transport checks).
+  if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") return Response.json({ data: (JSON.parse(String(init?.body ?? "[]")) as unknown[]).map((_, i) => ({ id: `synthetic_${i}` })) });
   if (url.hostname === "api.resend.com") {
     mailed.push(String(init?.body ?? ""));
     return new Response(JSON.stringify({ id: "email_1" }));
@@ -327,7 +328,7 @@ async function api(): Promise<void> {
 async function main(): Promise<void> {
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
-  process.env.RESEND_API_KEY = "re_test_room_races";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   await waitlists();
   await quiz();
   await events();

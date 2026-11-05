@@ -30,7 +30,7 @@ const product = (shipping: Product["shipping"]): Product =>
     bundle: null,
     options: [],
     shipping,
-  }) as Product;
+  }) as unknown as Product;
 
 const draw = (shipping: Product["shipping"]) =>
   renderToStaticMarkup(

@@ -9,6 +9,7 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |
 | Codex F | 309 [EM1], CX-85: campaign prototype regression; lib/mail-revenue.ts shared with #2192 by explicit inbox exception | codex/f-mail-revenue-proto | `tests/mail-revenue-proto.test.ts` | 04/11/2026 |
 
+| Codex A3 | CX-101(3) / CX-102(c): confirm a mail route before creating course tokens and retain recoverable fallback refusals; stacked on own #2338, email.ts shared only between these own units | codex/a3-c97b-mail-readiness | `lib/learn.ts`, `lib/email.ts`, `tests/course-link-mail-unavailable.test.ts`, `tests/course-link-mail-world.ts`, `tests/durable-mail-refusal.test.ts` | 04/11/2026 |
 
 | Codex C | 465 [MR2]: complete protocol infrastructure profiles | codex/c-mr2-protocol-evidence | `lib/spend-cost-table.ts`, `tests/protocol-infrastructure-cost.test.ts`, `tests/contract-protocol-cost.test.ts`, `lib/contract-protocol-cost.ts` | 04/11/2026 |
 | Codex C | 473 [TX3]: serializable own sales evidence | codex/c-tx3-sales-evidence | `lib/tax-sales-counter.ts`, `tests/tax-sales-counter.test.ts` | 04/11/2026 |
@@ -30,3 +31,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex L | 260 [KJ5] unit 1: bounded preview of creator-supplied course files; no vendor export adapter or IO | codex/l-course-import-preview | `lib/course-import.ts`, `tests/course-import.test.ts`, `docs/course-import.md` | 04/11/2026 |
 | Codex L | 631 [AA1](b), 616 [WP15](24): CLI refuses unconfirmed HTTP/JSON-RPC responses before success | codex/l-cli-protocol | `cli/marktmorgen.mjs`, `tests/cli-protocol.test.ts` | 04/11/2026 |
 | Codex A3 | CX-101(3) / CX-102(c): confirm a mail route before creating course tokens and retain recoverable fallback refusals; stacked on own #2338, email.ts shared only between these own units | codex/a3-c97b-mail-readiness | `lib/learn.ts`, `lib/email.ts`, `tests/course-link-mail-unavailable.test.ts`, `tests/course-link-mail-world.ts`, `tests/durable-mail-refusal.test.ts` | 04/11/2026 |
+| Codex I2 | Unowned share-settle unknown-dispute reporting: keep refusal and expose separate failures with fee ids | codex/i2-share-unknown-dispute-report | `lib/share-settle.ts`, `tests/share-unknown-dispute-report.test.ts` | 04/11/2026 |

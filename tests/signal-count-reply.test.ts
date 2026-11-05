@@ -49,3 +49,13 @@ for (const receipt of [[true, 1], ["1", 1], [1], [1, 1, 1], [1, "1"], [1, true],
     assert.notEqual(await countGap(store), null, "a count not made is written down");
   });
 }
+
+test("a key deleted takes its expiry with it, as in Redis: a count made again gets a new one", async () => {
+  // The stand-in kept the expiry of a deleted key, so EXPIRE NX on a count
+  // made again under the same name answered 0, which Redis never does there.
+  const { MemoryRedis } = await import("@/lib/redis-memory");
+  const r = new MemoryRedis();
+  assert.deepEqual(await r.pipeline([["INCRBY", "count", 1], ["EXPIRE", "count", 60, "NX"]]), [1, 1]);
+  assert.deepEqual(await r.pipeline([["DEL", "count"], ["TTL", "count"]]), [1, -2]);
+  assert.deepEqual(await r.pipeline([["INCRBY", "count", 1], ["TTL", "count"], ["EXPIRE", "count", 60, "NX"]]), [1, -1, 1]);
+});

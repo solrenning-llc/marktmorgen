@@ -20,6 +20,8 @@ const expected = new Map<string, string[]>([
   ["app/api/store/resend/route.ts", ["resend-sale", "resend-store"]],
   ["app/api/store/address/route.ts", ["move-ask"]],
   ["app/api/auth/join/route.ts", ["join"]],
+  ["lib/api-write.ts", ["api-give"]],
+  ["lib/inbound-mail.ts", ["creator-inbound"]],
 ]);
 
 part("SG2(17): the remaining paid-email callers refuse unknown counters");

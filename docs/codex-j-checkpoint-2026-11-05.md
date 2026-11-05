@@ -1,3 +1,14 @@
+# Codex J — delta autoritativo — 2026-11-05 19:01 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- **#2666 Portugal terminou CI** no head EXATO `3c3d1ae28b2e078fa4b49124e106e91febe000ff`: Firefox success; product run `42084758550` terminal failure. Verify `127447977442` falhou somente no pricing compartilhado (`7642` vs `7643` + documento stale). WebKit `127447977687` teve exatamente1 falha alheia: `confirmed intro releases unload protection loom/confirmed/390`, expected false/got true; demais casos continuaram. Comentários `6666426091`, `6666561414`, `6666579468`. Overall7success+readerfailure+productfailure. NÃO pedir retry: não resolveria o pricing, e a ordem coordenada exige integração única+9NOVOS. Head intacto.
+- **Canal**: após o cursor do delta anterior, own append `dccdb5069dc296f171aad9eb97367df4d2400290` relatou o WebKit; correção factual de horário em `3716212bedaa01783d23eef068deab6cac908904`, blob `19091d91b6a2bc416daf5091928c5f334348fc54`. Ler tudo depois deste blob na retomada com fetch_file-SHA/fetch_blob-FULL.
+- Checkpoint anterior desta rodada foi `69258bff772fb48388fd943f012d17805778ba46`; automação existente já apontava para ele e deve ser atualizada para este novo commit, nunca criar outra.
+- Demais own #2594/#2660/#2661 e bloqueios #2632/#2652 permanecem exatamente como no delta imediatamente abaixo. Quatro slots próprios, quinta vaga somente revisão realmente livre/claim fresco. Sem retry/cancel/headmove/merge, preço/limite/comissão/flags/gates/termos/conta/pagamento/contato/PII; unknown nunca zero.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-05 18:56 UTC
 
 Prevalece sobre deltas abaixo; demais fatos preservados.

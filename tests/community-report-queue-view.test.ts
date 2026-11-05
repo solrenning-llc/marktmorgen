@@ -69,6 +69,50 @@ async function pageFlow() {
     }
     broken = "none";
     is("a subsequent successful page load can show the confirmed empty state", /Nothing waiting/.test(await draw()), true);
+
+    part("Confirmed reports still need confirmed target reads (independent review P)");
+    const post = "123456789abc", comment = "abcdef123456", community = store.community!.id;
+    const postKey = `nl:cm:${community}:p:${post}`, commentsKey = `nl:cm:${community}:c:${post}`;
+    const postValue = { id: post, a: "creator", sp: "general", title: "Reported target", text: "Report evidence", at: 1, n: 1, hid: false };
+    const commentValue = { id: comment, parent: "", a: "creator", text: "Reported comment", at: 1, hid: false };
+    await original([["SET", postKey, JSON.stringify(postValue)], ["HSET", commentsKey, comment, JSON.stringify(commentValue)]]);
+    let mode = "valid", target = `p:${post}`;
+    redis.pipeline = async (commands) => {
+      if (commands[0]?.[0] === "ZREVRANGEBYSCORE" && commands[0][1] === `nl:cm:${community}:rep`) return [[target, "1000"]] as never;
+      if (commands[0]?.[0] === "SCARD" && String(commands[0][1]).startsWith(`nl:cm:${community}:rep:`)) return [1] as never;
+      if (commands[0]?.[0] === "GET" && commands[0][1] === postKey) {
+        if (mode === "post-partial") return [] as never;
+        if (mode === "post-throw") throw Error("synthetic unavailable post read");
+        if (mode === "post-absent") return [null] as never;
+        if (mode === "post-invalid") return ["invalid JSON"] as never;
+        if (mode === "post-mismatch") return [JSON.stringify({ ...postValue, id: "fedcba654321" })] as never;
+      }
+      if (commands[0]?.[0] === "HGET" && commands[0][1] === commentsKey) {
+        if (mode === "comment-partial") return [] as never;
+        if (mode === "comment-throw") throw Error("synthetic unavailable comment read");
+        if (mode === "comment-absent") return [null] as never;
+        if (mode === "comment-invalid") return ["invalid JSON"] as never;
+        if (mode === "comment-mismatch") return [JSON.stringify({ ...commentValue, id: "fedcba654321" })] as never;
+      }
+      if (mode === "name-partial" && commands[0]?.[0] === "HGET" && commands[0][1] === `nl:cm:${community}:m`) return [] as never;
+      return original(commands);
+    };
+    is("a fully confirmed reported post is shown", /Reported target/.test(await draw()), true);
+    for (mode of ["post-partial", "post-throw", "comment-partial", "comment-throw", "post-invalid", "comment-invalid", "post-mismatch", "comment-mismatch"]) {
+      target = mode.startsWith("comment") ? `c:${post}:${comment}` : `p:${post}`;
+      const page = await draw();
+      is(`${mode}: unavailable without a false empty state or failed page`, [/Reports could not be loaded/.test(page), /Nothing waiting|No reports\./.test(page), page === "PAGE_FAILED"], [true, false, false]);
+    }
+    mode = "valid"; target = `c:${post}:${comment}`;
+    is("a fully confirmed reported comment is shown", /Reported comment/.test(await draw()), true);
+    mode = "post-absent"; target = `p:${post}`;
+    is("an explicitly absent deleted post can still be omitted", /Nothing waiting/.test(await draw()), true);
+    mode = "comment-absent"; target = `c:${post}:${comment}`;
+    is("an explicitly absent deleted comment can still be omitted", /Nothing waiting/.test(await draw()), true);
+    await original([["SET", postKey, JSON.stringify({ ...postValue, a: "b".repeat(32) })]]);
+    mode = "name-partial"; target = `p:${post}`;
+    const unnamed = await draw();
+    is("an unknown author label does not claim the member chose no name", [/Reported target/.test(unnamed), /A member without a name/.test(unnamed)], [true, false]);
   } finally { redis.pipeline = original; cookieValues.clear(); }
   done();
 }

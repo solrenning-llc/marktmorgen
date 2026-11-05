@@ -611,7 +611,7 @@ const each = (emails: string[], state: Acted["state"], note: string): Acted[] =>
  * sequence that starts with it, and nobody is started twice. A write whose
  * answer is lost is "uncertain": the run is held, never repeated by itself.
  */
-async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number }): Promise<Acted[]> {
+async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => string }): Promise<Acted[]> {
   const listId = store.listId;
   if (!listId || !emails.length) return [];
   if (action.do === "wait") return each(emails, "confirmed", "Waited.");
@@ -732,7 +732,7 @@ async function actOnPeople(
   store: Store,
   action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number },
+  at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => string },
 ): Promise<Acted[]> {
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
@@ -750,7 +750,8 @@ async function actOnPeople(
     }
     for (const [i, email] of emails.entries()) {
       try {
-        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, generations[i])) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
+        // And only while this run still holds its lease, checked in the write itself: a deletion takes it away (Codex G, #2287).
+        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, generations[i], at.lease ? { key: LEASE, member: at.lease(email) } : undefined)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: `“${field.name}” was not set: the store's data room is full.` });
@@ -1257,7 +1258,7 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, lease: (email) => `${group}|${email}` }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
         // Anybody act did not answer for has no known outcome.
         const answered = new Set(outcomes.map((o) => o.email));
         const all = [...outcomes, ...each(going.filter((e) => !answered.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];

@@ -85,6 +85,11 @@ const filled = (block: PageBlock): boolean => {
     case "booking":
       // Not offered and not drawn yet (552 [BB1] unit 1): a block nobody sees counts for nothing.
       return false;
+    case "divider":
+    case "space":
+      // Only arrangement (375 [TB1]): left out of the blocks read, so a line or some room never moves a button
+      // away from the top or the end of the page, nor counts as anything the page says.
+      return false;
     case "quotes":
       return block.items.length > 0;
     case "row":

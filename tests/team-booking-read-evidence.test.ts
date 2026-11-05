@@ -90,6 +90,6 @@ test("a valid configured team still follows the unchanged plan policy", async ()
 });
 
 test("a store with no call diary needs no team read", async () => {
-  assert.equal((await readTeams({ callsId: undefined })).size, 0);
+  assert.equal((await readTeams({ callsId: null })).size, 0);
   assert.equal(reads, 0);
 });

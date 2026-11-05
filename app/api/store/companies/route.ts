@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import {
+  CompaniesUnreadable,
   companiesKept,
   companiesRequestUnits,
   COMPANY_REFUSALS,
@@ -72,6 +73,8 @@ export async function GET(request: NextRequest) {
     return Response.json({ ok: true, companies }, { headers: NO_STORE });
   } catch (error) {
     console.error("reading companies failed", error);
+    // Redis's answer was not whole (Codex G2, #2574): unavailable, never an empty list.
+    if (error instanceof CompaniesUnreadable) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }
@@ -85,7 +88,7 @@ export async function POST(request: NextRequest) {
   // Taken as sent, never cut: a record that cannot be read is deleted by the exact id the page showed (round 4, L3).
   const id = typeof body.id === "string" && body.id.length <= 512 ? body.id : "";
   const person = typeof body.person === "string" ? body.person : "";
-  const refuse = (error: CompanyRefusal) => Response.json({ ok: false, error, message: COMPANY_REFUSALS[error] }, { status: error === "unknown" ? 404 : error === "busy" ? 409 : 400 });
+  const refuse = (error: CompanyRefusal) => Response.json({ ok: false, error, message: COMPANY_REFUSALS[error] }, { status: error === "unknown" ? 404 : error === "busy" ? 409 : error === "unconfirmed" ? 502 : 400 });
   try {
     let result;
     let refused: Response | null;
@@ -133,6 +136,7 @@ export async function POST(request: NextRequest) {
     return result.ok ? Response.json({ ok: true, companies: result.companies }, { headers: NO_STORE }) : refuse(result.error);
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });
+    if (error instanceof CompaniesUnreadable) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("saving a company failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

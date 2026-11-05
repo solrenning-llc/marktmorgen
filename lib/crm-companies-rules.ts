@@ -74,7 +74,7 @@ const PERSON = PERSON_KEY;
 
 export type Company = { id: string; name: string; website: string; note: string; people: string[]; createdAt: number };
 
-export type CompanyRefusal = "name" | "taken" | "website" | "note" | "full" | "people" | "unknown" | "busy";
+export type CompanyRefusal = "name" | "taken" | "website" | "note" | "full" | "people" | "unknown" | "busy" | "unconfirmed";
 
 /** What each refusal tells the creator, in plain words, with what to do. */
 export const COMPANY_REFUSALS: Record<CompanyRefusal, string> = {
@@ -86,6 +86,7 @@ export const COMPANY_REFUSALS: Record<CompanyRefusal, string> = {
   people: `A company can have up to ${MAX_COMPANY_PEOPLE} people. Take someone off it first.`,
   unknown: "That company is no longer there. Reload the page.",
   busy: "Someone else is changing your companies right now. Try again in a moment.",
+  unconfirmed: "That change may not have been saved. Reload the page to see your companies as they are, then try again if it is not there.",
 };
 
 export type CompanyResult = { ok: true; companies: Company[] } | { ok: false; error: CompanyRefusal };

@@ -98,6 +98,8 @@ for (const [label, patch] of [
 });
 for (const [label, patch] of [
  ["foreign identity kind", { id: "pi_JExpanded0001" }],
+ ["foreign intent with coherent total", { payment_intent: "pi_JForeign0001" }],
+ ["foreign expanded intent with coherent total", { payment_intent: { object: "payment_intent", id: "pi_JForeign0001" } }],
  ["unconfirmed expanded intent", { payment_intent: { id: intentId } }],
  ["foreign expanded intent kind", { payment_intent: { object: "invoice", id: intentId } }],
  ["different paid total", { amount_total: 1000, total_details: { amount_tax: 0, amount_shipping: 0 } }],

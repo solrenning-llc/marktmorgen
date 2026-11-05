@@ -54,8 +54,17 @@ export async function POST(request: NextRequest) {
   if (verdict !== "ok") return Response.json({ ok: false }, { status: 401 });
 
   const seenKey = `nl:sns:seen:${message.MessageId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 80)}`;
-  const [fresh] = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
-  if (fresh === null) return Response.json({ ok: true });
+  let claim: unknown;
+  try {
+    claim = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
+  } catch {
+    return Response.json({ ok: false }, { status: 503 });
+  }
+  // Only a confirmed claim may authorize effects. An unknown reply does not
+  // prove ownership, so it must not authorize deleting the existing marker.
+  if (!Array.isArray(claim) || claim.length !== 1) return Response.json({ ok: false }, { status: 503 });
+  if (claim[0] === null) return Response.json({ ok: true });
+  if (claim[0] !== "OK") return Response.json({ ok: false }, { status: 503 });
   const letGo = () => redisPipeline([["DEL", seenKey]]).catch(() => {});
 
   try {

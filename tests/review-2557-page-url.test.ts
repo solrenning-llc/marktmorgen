@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     stripe.seen.filter((s) => s.page.includes(SESSION)).map((s) => new URL(s.src).hostname),
     [],
   );
-  is("and the address is not left naming it afterwards either", (globalThis as unknown as { location: URL }).location.href.includes(SESSION), false);
+  is("and the address is not left naming it afterward either", (globalThis as unknown as { location: URL }).location.href.includes(SESSION), false);
 
   part("PayPal thanks page: what address the pixels read");
   const paypal = browserAt(`https://marktmorgen.com/@harbor/thanks?paypal=${PAYPAL}`);

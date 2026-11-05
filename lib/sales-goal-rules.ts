@@ -14,6 +14,9 @@ import type { ChannelDays } from "@/lib/stats";
 
 /** Ten million in the store's currency: no month's goal a creator types is over it. */
 export const MAX_GOAL_CENTS = 1_000_000_000;
+/** A private sentinel: zero is confirmed no goal; this value means the saved goal was unreadable. */
+export const UNKNOWN_SALES_GOAL_CENTS = -1;
+export const GOAL_UNAVAILABLE_LINE = "Your saved goal could not be checked. Goal progress is unavailable. Try again later.";
 
 /** A goal as typed: a whole number of cents above zero, at most MAX_GOAL_CENTS; 0 to have none. */
 export function readGoal(raw: unknown): number | null {

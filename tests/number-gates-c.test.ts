@@ -26,11 +26,19 @@ import { NextRequest } from "next/server";
 import { POST as creatorsRoute } from "@/app/api/creators/route";
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
 import { openCommunityLink, requestCommunityLink } from "@/lib/community-access";
-import { freshConfig, saveConfig, within } from "@/lib/community";
+import { communityViewer } from "@/lib/community-access";
+import { freshConfig, readMember, saveConfig, within } from "@/lib/community";
+import { parseChatSetting, room } from "@/lib/community-chat";
+import { parseDmSetting } from "@/lib/community-dm";
+import { communityWords } from "@/lib/buyer-words/community";
+import { emailKey, mintPass, passCookieName } from "@/lib/learn";
+import { GET as openRoute } from "@/app/api/store/community/open/route";
+import { POST as chatRoute } from "@/app/api/store/community/chat/route";
+import { POST as messagesRoute } from "@/app/api/store/community/messages/route";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { recordClick, requestAffiliateLink } from "@/lib/affiliates";
 import { requestOrdersLink } from "@/lib/buyer-orders";
-import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setAffiliateSetting, setCommunity, setLanguage, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -318,6 +326,149 @@ async function main(): Promise<void> {
       is("a confirmed sixth answer in the hour is refused as before", [await ask(), kept(from)], [[429, "rate_limited"], 0]);
     }
     counter = null;
+  }
+
+  // ---- The community's own routes, called as a member's browser calls them ----------------------------
+  // A paying store with its community on, the room and private messages open, one product that lets in,
+  // and a member holding it (the ticket's answer kept as the gate keeps it), named, with a pass cookie.
+  // The store writes in Spanish, so what a route says is seen to be in the store's language.
+  const CLUB = "club@numbergatesc.example";
+  const MEMBER = "member@numbergatesc.example";
+  const clubMade = await claimHandle(CLUB, "numbergatesclub", "Number Gates Club", "");
+  if (!clubMade.ok) throw new Error("no club store");
+  await ensureStatsId(CLUB);
+  await ensureStoreId(CLUB);
+  await ensureListId(CLUB);
+  await setSubscription(CLUB, { customerId: "cus_NumberGatesC2", subscriptionId: "sub_NumberGatesC2", active: true, tier: "creator", period: paidPeriod() });
+  const ticket = await addProduct(CLUB, "Club pass", "", "0", null);
+  if (!ticket.ok) throw new Error("no product");
+  await setCommunity(CLUB, true);
+  await setLanguage(CLUB, "es");
+  const club: Store = (await storeForEmail(CLUB))!;
+  const cid = club.community!.id;
+  await saveConfig(cid, { ...freshConfig(club.name), access: [ticket.product.id], chat: parseChatSetting({ on: true }), dm: parseDmSetting({ on: true, between: true }) });
+  await redis.pipeline([["SET", `nl:cm:${cid}:ok:${emailKey(MEMBER)}`, JSON.stringify({ v: 1, ok: true })]]);
+  const cookie = `${passCookieName(club)}=${await mintPass(club, MEMBER, "all")}`;
+  const viewer = await communityViewer(club, { get: (name: string) => (name === passCookieName(club) ? { value: cookie.split("=")[1] } : undefined) } as never);
+  if (viewer.state !== "in" || !viewer.member) throw new Error("the member is not in: " + viewer.state);
+  const memberKey = viewer.key;
+  // The name the member is seen by, written as the record keeps it (setProfile's compare-and-set runs a script the stand-in does not).
+  const [record] = await redis.pipeline([["HGET", `nl:cm:${cid}:m`, memberKey]]);
+  await redis.pipeline([["HSET", `nl:cm:${cid}:m`, memberKey, JSON.stringify({ ...JSON.parse(String(record)), n: "Member One" })]]);
+  if (!(await readMember(cid, memberKey))?.n) throw new Error("no name");
+  const es = communityWords("es").notices;
+  const en = communityWords("en").notices;
+  const rateIs = (kind: string) => (commands: Command[]) =>
+    commands.length === 2 && commands[0]?.[0] === "SET" && key(commands[0]) === `nl:cm:rl:${cid}:${memberKey}:${kind}` && commands[1]?.[0] === "INCR";
+  const quietly = async <T>(call: () => Promise<T>) => {
+    const quiet = console.error;
+    console.error = () => {};
+    try {
+      return await outcome(call);
+    } finally {
+      console.error = quiet;
+    }
+  };
+  /** Status, body and the headers that matter, or what the route threw. */
+  const read = async (call: () => Promise<Response>) => {
+    const got = await quietly(call);
+    if (typeof got === "string") return got;
+    return { status: got.status, store: got.headers.get("cache-control"), cookie: got.headers.get("set-cookie") !== null, location: got.headers.get("location"), body: got.status === 303 ? "" : await got.text() };
+  };
+
+  part("The room's route: a count it cannot read answers 503 with the room's own words, nothing said (app/api/store/community/chat/route.ts)");
+  {
+    let n = 0;
+    const say = () =>
+      chatRoute(
+        new NextRequest("https://marktmorgen.com/api/store/community/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Origin: ORIGIN, Host: "marktmorgen.com", cookie },
+          body: JSON.stringify({ handle: club.handle, action: "say", text: `Room message ${(n += 1)}` }),
+        }),
+      );
+    const said = async () => (await room(cid, 0)).messages.length;
+    for (const [label, reply] of SET_INCR_UNKNOWN) {
+      counter = { match: rateIs("comment"), reply };
+      const before = await said();
+      const got = await read(say);
+      is(`${label}: 503 "unknown", not stored, nothing said`, [got, (await said()) - before], [{ status: 503, store: "no-store", cookie: false, location: null, body: JSON.stringify({ ok: false, error: "unknown" }) }, 0]);
+    }
+    counter = { match: rateIs("comment"), reply: ["OK", 1] };
+    {
+      const before = await said();
+      const got = await read(say);
+      is("a confirmed count: the message is said, as before", [typeof got === "object" && got.status, (await said()) - before], [200, 1]);
+    }
+    counter = { match: rateIs("comment"), reply: [null, 31] };
+    {
+      const got = await read(say);
+      is("a confirmed count past the hour's messages: 429 hourly, as before", typeof got === "object" && [got.status, got.body], [429, JSON.stringify({ ok: false, error: "hourly" })]);
+    }
+    counter = null;
+  }
+
+  part("Private messages: a count it cannot read answers 503 in the store's language, nothing sent (app/api/store/community/messages/route.ts)");
+  {
+    let n = 0;
+    const post = (fields: Record<string, string>) => () =>
+      messagesRoute(
+        new NextRequest("https://marktmorgen.com/api/store/community/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN, Host: "marktmorgen.com", cookie },
+          body: new URLSearchParams({ handle: club.handle, ...fields }).toString(),
+        }),
+      );
+    const send = () => post({ action: "send", to: "creator", text: `A private message ${(n += 1)}` })();
+    const dmWrites = (from: number) => wroteSince(from, (c) => key(c).includes(":dm:"));
+    for (const kind of ["dm", "dmNew"]) {
+      for (const [label, reply] of SET_INCR_UNKNOWN) {
+        counter = { match: rateIs(kind), reply };
+        const from = seen.length;
+        const got = await read(send);
+        is(`${kind}, ${label}: 503 "nothing was changed" in Spanish, nothing sent`, [got, dmWrites(from)], [{ status: 503, store: "no-store", cookie: false, location: null, body: es.error }, 0]);
+      }
+    }
+    // Once the message is being written, whether it went in is not known: the person is asked to look first.
+    counter = { match: (commands) => commands.some((c) => key(c).includes(":dm:")), reply: "throw" };
+    is("Redis lost while the message is written: 503 \"could not confirm\" in Spanish", await read(send), { status: 503, store: "no-store", cookie: false, location: null, body: es.unconfirmed });
+    counter = null;
+    {
+      const got = await read(send);
+      is("confirmed counts: sent, as before", typeof got === "object" && [got.status, /n=dm(sent|asked)/.test(got.location ?? "")], [303, true]);
+    }
+    counter = { match: rateIs("dm"), reply: [null, 61] };
+    {
+      const got = await read(send);
+      is("a confirmed count past the hour's messages: slow, as before", typeof got === "object" && [got.status, /n=slow/.test(got.location ?? "")], [303, true]);
+    }
+    counter = null;
+  }
+
+  part("Opening an emailed link: opens it cannot count answer 503, no pass given (app/api/store/community/open/route.ts)");
+  {
+    const sent = mails.length;
+    if ((await requestCommunityLink({ store: club, email: MEMBER, ip: ip(), origin: ORIGIN })) !== "sent" || mails.length - sent !== 1) throw new Error("no community link");
+    const token = mails.at(-1)!.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
+    const openIt = () => openRoute(new NextRequest(`https://marktmorgen.com/api/store/community/open?token=${token}`, { headers: { Host: "marktmorgen.com" } }));
+    const isOpen = (commands: Command[]) =>
+      commands.length === 3 && commands[0]?.[0] === "GET" && key(commands[0]).startsWith("nl:cm:link:") && commands[2]?.[0] === "INCR";
+    const passes = (from: number) => wroteSince(from, (c) => c[0] === "SET" && key(c).startsWith("nl:learn:"));
+    for (const [label, reply] of SET_INCR_UNKNOWN) {
+      counter = { match: isOpen, reply: Array.isArray(reply) ? [null, ...reply] : reply };
+      const from = seen.length;
+      const got = await read(openIt);
+      // A gone link with an unknown count is still unknown: nothing tells it from a link that is there.
+      is(`${label}: 503 "nothing was changed", no pass, no cookie`, [got, passes(from)], [{ status: 503, store: "no-store", cookie: false, location: null, body: en.error }, 0]);
+    }
+    // The store is known once the link is read: what fails after that is said in its language.
+    counter = { match: (commands) => commands[0]?.[0] === "SET" && key(commands[0]).startsWith("nl:learn:"), reply: "throw" };
+    is("Redis lost while the pass is written: 503 in Spanish, no cookie", await read(openIt), { status: 503, store: "no-store", cookie: false, location: null, body: es.error });
+    counter = null;
+    {
+      const got = await read(openIt);
+      is("a confirmed count: the pass is given, as before", typeof got === "object" && [got.status, got.cookie], [303, true]);
+    }
   }
 
   done();

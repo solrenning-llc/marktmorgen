@@ -660,7 +660,7 @@ function knownPhysicalPayment(session: ProviderSession): boolean {
   // Missing or unexpanded refund evidence does not prove an unrefunded order.
   return session.payment_status === "paid" && payment?.object === "payment_intent" && payment.status === "succeeded" &&
     payment.amount_received === session.amount_total && payment.currency === session.currency && charge?.object === "charge" &&
-    charge.paid === true && charge.amount === session.amount_total && charge.currency === session.currency && charge.refunded === false &&
+    charge.paid === true && charge.amount === session.amount_total && charge.currency === session.currency && charge.refunded === false && charge.disputed !== true &&
     Number.isSafeInteger(charge.amount_refunded) && Number(charge.amount_refunded) >= 0 && Number(charge.amount_refunded) < Number(charge.amount) &&
     !refundedInFull(payment);
 }

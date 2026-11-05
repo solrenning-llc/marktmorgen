@@ -138,6 +138,12 @@ test("a disputed charge is deferred without dispatch or original accounting", as
   assert.ok(retained);
   assert.equal(retained.row.phase, "awaiting_payment");
   assert.equal(f.commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION), false);
+  payment.latest_charge.disputed = false;
+  f.advance(180_000);
+  await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, barrier) => {
+    assert.equal(await barrier(), true); posts++; return "accepted";
+  }, f.runtime, f.id);
+  assert.equal(posts, 1, "fresh undisputed evidence allows the retained confirmation to resume");
 });
 
 test("never activated means no worker or cleanup IO; retired cleanup still erases the source", async () => {

@@ -5,7 +5,7 @@ import { createCheckout } from "@/lib/store-checkout";
 import { singleDigitalFixture } from "./single-digital-confirmation-world";
 
 test("an active single digital checkout cannot bypass unfunded durable admission", async () => {
-  for (const lifecycle of ["active"] as const) {
+  for (const news of [false, true]) {
     const f = await singleDigitalFixture();
     let posts = 0;
     process.env.STRIPE_SECRET_KEY = "sk_test_SYNTHETIC_ONLY";
@@ -14,7 +14,7 @@ test("an active single digital checkout cannot bypass unfunded durable admission
       return Response.json({ id: "cs_test_SyntheticLegacyDigital001", url: "https://checkout.stripe.com/c/pay/synthetic" });
     };
     let returned = false;
-    try { await createCheckout(f.store, f.product, "https://example.test", undefined, { digitalConsent: { version: EU_WITHDRAWAL_CONSENT_VERSION, at: Math.floor(f.created / 1000) } }, { ...f.runtime, lifecycle, policy: null }); returned = true; } catch { /* Fail closed is required. */ }
+    try { await createCheckout(f.store, f.product, "https://example.test", undefined, { news, digitalConsent: { version: EU_WITHDRAWAL_CONSENT_VERSION, at: Math.floor(f.created / 1000) } }, { ...f.runtime, lifecycle: "active", policy: null }); returned = true; } catch { /* Fail closed is required. */ }
     assert.equal(f.commands.length, 0, "blocked producer spends no durable source commands");
     assert.equal(posts, 0, "no legacy payment POST before funded durable admission");
     assert.equal(returned, false, "no unprotected payment URL");

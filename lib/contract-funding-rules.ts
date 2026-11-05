@@ -35,6 +35,8 @@ const bounded=(n:unknown):n is number=>integer(n)&&n<=CONTRACT_FUNDING_RULES.max
 function originalContractFundingContext(context:unknown):{
  context:ContractFundingContext;
  disputes:NonNullable<ReturnType<typeof assessPlanPaymentDisputeCosts>>;
+ disputeEvidence:unknown;
+ disputeSnapshot:string;
 }|null {
  try{
   if(!context||typeof context!=='object'||Array.isArray(context))return null;
@@ -50,6 +52,8 @@ function originalContractFundingContext(context:unknown):{
   if(!disputesField||!Object.hasOwn(disputesField,'value')||!disputesField.enumerable)return null;
   const disputes=assessPlanPaymentDisputeCosts(disputesField.value);
   if(!disputes)return null;
+  const disputeSnapshot=canonicalFinancialSnapshot(disputesField.value);
+  if(!disputeSnapshot)return null;
   const reviewKeys=Reflect.ownKeys(review);
   if(reviewKeys.some(key=>typeof key!=='string')||!reviewKeys.includes('planPaymentDisputes'))return null;
   const capturedReview=Object.create(Object.getPrototypeOf(review)===null?null:Object.prototype) as CommercialMarginReview;
@@ -64,7 +68,8 @@ function originalContractFundingContext(context:unknown):{
   if(!termsAgain||!Object.hasOwn(termsAgain,'value')||!termsAgain.enumerable||termsAgain.value!==termsField.value||
    !reviewAgain||!Object.hasOwn(reviewAgain,'value')||!reviewAgain.enumerable||reviewAgain.value!==review||
    !disputesAgain||!Object.hasOwn(disputesAgain,'value')||!disputesAgain.enumerable||disputesAgain.value!==disputesField.value)return null;
-  return {context:{termsSnapshot:termsField.value,review:capturedReview},disputes};
+  return {context:{termsSnapshot:termsField.value,review:capturedReview},disputes,
+   disputeEvidence:disputesField.value,disputeSnapshot};
  }catch{return null;}
 }
 /** Stable own-data financial evidence, without executing accessors or toJSON. */
@@ -142,12 +147,20 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  // Recheck the captured descriptor graph after serialization. A later Proxy
  // may mutate an earlier object after its bytes were visited; descriptor-only
  // validation observes that change without executing an introduced getter.
- if(!canonicalFinancialSnapshot(context.review))return null;
+ const stableReviewEncoded=canonicalFinancialSnapshot(context.review);
+ if(!stableReviewEncoded)return null;
+ const finalOriginalDisputes=assessPlanPaymentDisputeCosts(original.disputeEvidence);
+ const finalOriginalSnapshot=canonicalFinancialSnapshot(original.disputeEvidence);
+ if(!finalOriginalDisputes||finalOriginalSnapshot!==original.disputeSnapshot||
+  !PLAN_PAYMENT_DISPUTE_KEYS.every(key=>
+   finalOriginalDisputes[key].principalCents===disputes[key].principalCents&&
+   finalOriginalDisputes[key].feesCents===disputes[key].feesCents&&
+   finalOriginalDisputes[key].lostPaymentWorstCaseCents===disputes[key].lostPaymentWorstCaseCents))return null;
  const captured=JSON.parse(encoded) as {policy:ContractFundingPolicy|null;context:ContractFundingContext};
  const p=captured.policy;context=captured.context;
  if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,now))return null;
  const reviewEncoded=canonicalFinancialSnapshot(context.review);
- if(!reviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
+ if(!reviewEncoded||reviewEncoded!==stableReviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
  const review=JSON.parse(reviewEncoded) as CommercialMarginReview|null;
  if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
  const boundDisputes=assessPlanPaymentDisputeCosts(review.planPaymentDisputes);

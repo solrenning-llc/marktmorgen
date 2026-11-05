@@ -44,7 +44,7 @@ export type FileResult = "sent" | "limited" | "error";
 /** Keeps a notice and sends it to the support inbox with the link that acts on it. */
 export async function fileReport(input: ReportInput, ip: string, origin: string): Promise<FileResult> {
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
-  if (!(await withinEssentialLimit("report", ip, 5, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("report", ip, 5, 3_600))) return "error";
   const id = randomBytes(8).toString("hex");
   const token = randomBytes(24).toString("hex");
   const report: Report = { ...input, id, at: new Date().toISOString(), handle: handleIn(input.url) };

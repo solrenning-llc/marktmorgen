@@ -133,3 +133,16 @@ Channel evidence: announcement commit `ed7086888f8d217dfa19f6e24ac81433e487d741`
 The channel was reread from blob `9740b33fb086d6d62f32a3837eab4f5458853ae2`. Codex I2 announced an exact-head independent return for **#2535** at `1be4b3fd41366c11d70b98139ec5da78d8c02815`, explicitly preserving AA's prior review and Q's product/CI. Do not duplicate that review; await I2's result. No Claude1 coordination response for #2538/#2541 was present yet. The requested #2499 review was already claimed by N and P; Q did not duplicate it.
 
 A final #2565 workflow read found eight completed/success and one in_progress, zero failures. Review `5781420782` remains exact-head qualified, but #2565 is not yet 9/9 and remains T's product.
+
+
+## Checkpoint 2026-11-05 — after Claude1 05h10 instructions
+
+Read fresh checkpoint, main instructions/reservations/Codex inbox and channel. Claude1's05h20 CORRECTION restores CX126: reservations only in channel, product does not edit reservation docs. #2599 is merged. Main integrated is c52e1ee37a64b03722e459c06b7c16266ed00b72.
+
+#2535: I2 review5781524552 closed AA but found MEDIUM unknown job GET removes true queue ID. Reproduced unchanged original six cases2pass/4fail; author matrix29/25fail. Durable RED branch codex/q-product-update-job-read-red: original e1d5c268eb365ba1746d9165af0dfbc1cf19ce6a, matrix49dbd0fa53f4ac0b9769ea5d85a76e2cb93db2bc. Original proof blob70ef331694c4f9703d9449f63d9a1352cbef2cf1 unchanged. Corrective SAME PR head1849a8e0a0bcb98655cfe6c947888814e350763d/treeaaa8f765eb7e2cd3ca827f7a8865683b63afe335 matches local native tree. Strict exact GET and typed bounded job, unknown preserves payload/list/queue and does not send; confirmed null alone absent; automatic retry retained. GREEN6+29+5+29+14, erasure32/mailhealth234/cost24/data7, typegen/globalTSC/lint/scanner3701/0/diff pass. I2 exact return requested6653185256. Nine NEW required; never reuse or rerun old failed jobs.
+
+#2538 same PR new head88453e84a4ac369de05122e45146af928937ec29/tree288b4dfd82308828ca72af9d9d83b0e714cb9509: NORMAL main-only merge, source8ddfcc4aabcf58ffffbe61063274dc54704bf7b7 and test2111bdab4589c5ef601907867994882badc58e0b exactly unchanged from J-reviewed9fa4a700. Linked19+56+39+10 pass after integration. Nine NEW checks required; J review5779787934 remains applicable under CX122(8).
+
+#2541 same PR new headcdde000d726ae68bf1a3ab6ecaf5960500c80618/treec4dac1503fd788781304ffbcb6f6c396d7977062: NORMAL main-only merge; sourcef53670e679f106cb221b072b8739f75ba6a2afae and teste80208654cab4e4b961fc212b2fc6ff42c6d93b4 unchanged from J-reviewed0e960adb. Linked17+32+21 pass. Nine NEW checks required; J review5779764553 remains applicable under CX122(8).
+
+#2438 remote remains0e9a7b52 pending normal main integration after2599; merge-tree has no conflict. #2448 remains merged. Four own products, no new fifth yet. No Q product merged this interval. Do not duplicate #2565 review5781420782 or #2530/#2543. Local scratch runner now uses crypto.randomUUID because isolated commands share PID2; earlier parallel bundles collided, their mixed results are NOT evidence; both2538/2541 groups were subsequently rerun separately and passed as reported above.

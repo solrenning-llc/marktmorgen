@@ -1489,6 +1489,7 @@
     "components/site-footer.tsx",
     "components/site-nav.tsx",
     "components/site-pages-editor.tsx",
+    "components/skip-link.tsx",
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
     "components/stats-panel.tsx",

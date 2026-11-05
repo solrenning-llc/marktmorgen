@@ -76,7 +76,7 @@ test("confirmed empty and complete pages preserve empty, unpaid, foreign and ded
 });
 
 test("a second address variant must also be confirmed before returning the first variant's records", async () => {
-  const r = await setup(variant => variant === "Copy-Person@example.test" ? page() : {});
+  const r = await setup((variant: string) => variant === "Copy-Person@example.test" ? page() : {});
   try {
     assert.equal(await paidCheckoutsOf(r.shop, "Copy-Person@example.test"), null);
     assert.equal(r.calls.length, 2);

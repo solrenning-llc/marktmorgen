@@ -39,6 +39,7 @@ import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
@@ -291,6 +292,19 @@ function parseMember(raw: unknown): Member | null {
   }
 }
 
+/** What one INCR answered: a whole number from one up, or null when the reply is not exactly that. */
+function incremented(replies: unknown): number | null {
+  const one = repliesFor(replies, 1);
+  const count = one ? countOf(one[0]) : null;
+  return count !== null && count >= 1 ? count : null;
+}
+
+/** Places taken as GET answers them: none when there is no count yet, the whole number written, or null for anything else. */
+function takenOf(reply: unknown): number | null {
+  if (reply === null) return 0;
+  return typeof reply === "string" && /^(0|[1-9][0-9]{0,15})$/.test(reply) ? Number(reply) : null;
+}
+
 /** Reads a hash as Redis returns it, a flat list or an object. */
 function values(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw.filter((_, i) => i % 2 === 1);
@@ -325,19 +339,33 @@ export async function askPlace(input: {
   const title = groupTitle(product, group);
   const g = givingWords(store.language);
 
-  const [held, takenRaw] = await redisPipeline([
-    ["HEXISTS", membersKey(group.id), addressHash(email)],
-    ["GET", takenKey(group.id)],
-  ]);
-  const has = Number(held) === 1;
-  if (!has && (Number(takenRaw) || 0) >= group.people) return "full";
+  // Read in their exact shape: an answer that is missing, cut short or of
+  // another shape is not "nothing taken", and nothing is sent on it (CX-123 rule 24).
+  const read = repliesFor(
+    await redisPipeline([
+      ["HEXISTS", membersKey(group.id), addressHash(email)],
+      ["GET", takenKey(group.id)],
+    ]),
+    2,
+  );
+  const held = read ? countOf(read[0]) : null;
+  const takenCount = read ? takenOf(read[1]) : null;
+  if (held === null || held > 1 || takenCount === null) return "unavailable";
+  const has = held === 1;
+  if (!has && takenCount >= group.people) return "full";
 
   // The link can be passed to anybody, and each address typed on it is sent
   // one email: counted per purchase and per day, generously for a real team
   // and far short of a way to fill inboxes.
-  const [sentRaw] = await redisPipeline([["INCR", mailKey(group.id)]]);
-  if (Number(sentRaw) === 1) await redisPipeline([["EXPIRE", mailKey(group.id), 86_400]]);
-  if (Number(sentRaw) > group.people * 3 + 10) return "slow";
+  const sentCount = incremented(await redisPipeline([["INCR", mailKey(group.id)]]));
+  if (sentCount === null) {
+    // It may have counted a first one without its day: the day is put on it,
+    // so an answer lost here never leaves the purchase unable to send for good.
+    await redisPipeline([["EXPIRE", mailKey(group.id), 86_400]]).catch(() => undefined);
+    return "unavailable";
+  }
+  if (sentCount === 1) await redisPipeline([["EXPIRE", mailKey(group.id), 86_400]]);
+  if (sentCount > group.people * 3 + 10) return "slow";
   // The email is one of the store's access emails, taken as it is sent
   // (lib/email.ts); when the month's are used, the person is told so here.
   if ((await allowanceUsed(store, "transactional")) >= allowanceFor(store, "transactional")) return "resting";
@@ -429,8 +457,17 @@ export async function takePlace(input: {
   const [fresh] = await redisPipeline([["HSETNX", membersKey(group.id), who, JSON.stringify({ e: email, at } satisfies Member)]]);
   if (Number(fresh) !== 1) return { outcome: "already", email, group };
   const giveBack = () => redisPipeline([["HDEL", membersKey(group.id), who], ["DECR", takenKey(group.id)]]);
-  const [count] = await redisPipeline([["INCR", takenKey(group.id)]]);
-  if (Number(count) > group.people) {
+  // The place counted in its exact shape. An answer that never came or is of
+  // another shape may or may not have counted it: no place is handed back
+  // (that could hand out one more than was paid for), nothing is given, and
+  // only this address's mark comes off, so opening the link again is not
+  // told "already yours" for a place it never got (CX-123 rule 24).
+  const count = await redisPipeline([["INCR", takenKey(group.id)]]).then(incremented, () => null);
+  if (count === null) {
+    await redisPipeline([["HDEL", membersKey(group.id), who]]).catch(() => undefined);
+    throw new UnknownReplyError("a place's count");
+  }
+  if (count > group.people) {
     await giveBack();
     return { outcome: "full", email, group };
   }

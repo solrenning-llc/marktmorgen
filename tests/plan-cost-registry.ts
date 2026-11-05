@@ -1451,7 +1451,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE,
-  "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE,
+  "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
   "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,
   "lib/payment-recovery.ts": STORE, "lib/podcast-access.ts": STORE, "lib/quiet-sales.ts": STORE, "lib/store-contact.ts": STORE,
   "lib/store-join.ts": STORE, "lib/team.ts": STORE, "lib/tier-switch.ts": STORE, "lib/waitlist.ts": STORE,

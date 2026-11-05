@@ -1,0 +1,9 @@
+# D2 focal return — PR2692,35e670e3
+
+Exact head35e670e3cf35a9997821bd5e47bb104afb9f6453. Full two-path delta from45aa read. The cross-charge replay MEDIUM remains CLOSED: unchanged independent proof2ff8feda, blobce1670bf4d5fa0bc241c4cd917761afc7701809a, passes9/9. Cross-page ID sets remain in partsOutcome and now protect findPlanRefund; pagination uses all observed IDs rather than the filtered owned rows.
+
+The author compatibility regression is unchanged between RED5b262cb304da3c93930a0aa60fe851581721bdf7 and final35e, blob159cae2a39202b804f44eab631c5dacfe40156f6. Only lib/plan-refund-flow.ts differs between those trees. The exact RED source produced95checks/5failures; final95/95. New cases include unrelated nullable charge/metadata/status and a recorded py_ charge. These are synthetic contract checks; D2 has not independently verified the pinned Stripe documentation and does not make an external schema certification.
+
+Fresh final coverage: independent9+author95+read41+write22+rules67+route28+page15=277/277. Strict scoped TypeScript with transitive imports, focused ESLint, staged scanner3801/0 and diff checks pass. No browser, native Redis, provider, global TypeScript, client-bundle re-run or deployment claim. Exact proof files are preserved at2ff8feda; run with node proofs/d2/run-2692.mjs final d2-review-2692-evidence.test.ts on the corrected source checkout.
+
+NO OVERALL CLEARANCE. R2's four studio pages still do not handle allowanceUsed throwing; the author is awaiting nominal ownership/permission for consumer unavailable/retry rendering. This focal return does not close that MEDIUM or supersede H2/R2's independent scope. Two financial clearances and nine exact-head successes remain mandatory. Five D2 product heads are unchanged and8/9; no retry, product edit, head move, merge, sixth product or author-branch change.

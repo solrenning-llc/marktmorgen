@@ -8,7 +8,7 @@ import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { redisPipeline } from "@/lib/redis";
 import {
   CURRENT_RESEND_FALLBACK_REVIEW, reserveResendFallback,
-  markResendFallbackDispatched, settleResendFallback, readAcceptedResendFallbackReceipt,
+  markResendFallbackDispatched, settleResendFallback, readAcceptedResendFallbackReceipt, cancelResendFallbackReserved,
   type ResendFallbackReview, type ResendFallbackSdk, type ResendFallbackUsage,
 } from "@/lib/resend-fallback-budget";
 
@@ -165,7 +165,10 @@ export async function guardedResendPost(request: ResendPost, runtime: ResendTran
   // Only this invocation's acknowledged exclusive dispatch may debit a
   // caller's allowance. A shared reserved claim is not that capability.
   const dispatch = await markResendFallbackDispatched(reserve.claim, sdk);
-  if (dispatch.status !== "dispatch") return { kind: "unknown" };
+  if (dispatch.status !== "dispatch") {
+    await cancelResendFallbackReserved(reserve.claim, sdk);
+    return { kind: "unknown" };
+  }
   if (r.beforePost) {
     let ready = false;
     try { ready = await r.beforePost(); } catch { /* No HTTP POST is made. */ }
@@ -187,7 +190,7 @@ export async function guardedResendPost(request: ResendPost, runtime: ResendTran
       if (!response.ok) await response.body?.cancel();
       return { response, ok: response.ok && accepted(proof, r.path, r.recipients) };
     });
-    if (!result) { await settleResendFallback(dispatch.claim, "unknown", sdk); return { kind: "unknown" }; }
+    if (!result) { await settleResendFallback(dispatch.claim, "confirmed_not_accepted", sdk); return { kind: "unknown" }; }
     const outcome = result.ok ? "accepted" : notAccepted(result.response.status) ? "confirmed_not_accepted" : "unknown";
     let settled = await settleResendFallback(dispatch.claim, outcome, sdk);
     // A repeat of the same owned settlement reconciles a lost Redis ACK;

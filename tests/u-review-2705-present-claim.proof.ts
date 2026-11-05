@@ -10,13 +10,13 @@ import { done, is } from "./check";
 const name = "Sample Signer";
 const date = "Sample date";
 const unqualifiedSentClaim: Record<string, RegExp> = {
-  en: /A copy is sent by email/,
-  es: /Se envía una copia por email/,
-  fr: /Une copie est envoyée par e-mail/,
-  de: /Eine Kopie wird per E-Mail .* geschickt/,
-  it: /Una copia viene inviata via email/,
-  nl: /Er wordt een kopie per e-mail gestuurd/,
-  pt: /É enviada uma cópia por email/,
+  en: /a copy is sent by email/i,
+  es: /se envía una copia por email/i,
+  fr: /une copie est envoyée par e-mail/i,
+  de: /(?:eine kopie wird|wird eine kopie) per e-mail .* geschickt/i,
+  it: /una copia viene inviata via email/i,
+  nl: /(?:er wordt een kopie|wordt een kopie) per e-mail .*gestuurd/i,
+  pt: /é enviada uma cópia por email/i,
 };
 
 globalThis.fetch = async () => {
@@ -32,9 +32,15 @@ async function main() {
     state.agreement = agreement;
     const result = await sendSignedCopies(store, agreement, version, signature);
     is(`${language}: the real sender confirms neither copy was sent`, result, { signer: false, creator: false });
-    const message = agreementWords(language).signedBody(name, date);
-    is(`${language}: the signer and date remain visible`, [message.includes(name), message.includes(date)], [true, true]);
-    is(`${language}: refusal cannot justify an unqualified present-tense sent claim`, unqualifiedSentClaim[language].test(message), false);
+    const words = agreementWords(language);
+    const signedMessage = words.signedBody(name, date);
+    const beforeMessage = words.before("Sample Store");
+    is(`${language}: the signer and date remain visible`, [signedMessage.includes(name), signedMessage.includes(date)], [true, true]);
+    is(
+      `${language}: refusal cannot justify unqualified present-tense sent claims`,
+      [unqualifiedSentClaim[language].test(signedMessage), unqualifiedSentClaim[language].test(beforeMessage)],
+      [false, false],
+    );
   }
   is("both synthetic sender attempts occurred once per language", state.attempts, 14);
   is("the real sender records failure and no sent copies", [state.agreement?.copies, Boolean(state.agreement?.failed)], [0, true]);

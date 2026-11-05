@@ -50,7 +50,7 @@ import { type Listing, type Store, saleHandles, storeForHandle } from "@/lib/sto
 import { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers } from "@/lib/product-updates-rules";
 import { noteForErasure } from "@/lib/erasure-index";
 import { orderWrite } from "@/lib/order-data";
-import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { suppressedCommand } from "@/lib/suppression";
 import { BUYER_LEDGER_UNITS, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { paypalKept } from "@/lib/paypal-sales";
 import { countUnits } from "@/lib/person-agenda-read";
@@ -297,8 +297,12 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           store.listId ? ["HGET", leadsKey(store.listId), email] : ["EXISTS", "nl:none"],
           suppressedCommand(store.listId, email),
         ]),
-      );
-      const recipients = emails.filter((_, i) => Number(checks[i * 3]) !== 1 && !(store.listId && parseContact(checks[i * 3 + 1])?.unsub) && !wasSuppressed(checks[i * 3 + 2]));
+      ).catch(() => null);
+      const recipients = checkedUpdateRecipients(emails, checks, Boolean(store.listId));
+      if (recipients === null) {
+        job = { ...job, status: "waiting", note: "The recipients could not be checked just now. Nothing more was sent. We will try again." };
+        break;
+      }
       if (recipients.length) {
         const reserved = await reserve(store, recipients.length);
         if (reserved !== "ok") {
@@ -354,6 +358,34 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
   } finally {
     await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
   }
+}
+
+/** Every opt-out and erasure slot must be confirmed before any recipient is admitted. */
+function checkedUpdateRecipients(emails: string[], checks: unknown, hasList: boolean): string[] | null {
+  if (!Array.isArray(checks) || checks.length !== emails.length * 3) return null;
+  const recipients: string[] = [];
+  for (let i = 0; i < emails.length; i++) {
+    for (let j = 0; j < 3; j++) if (!Object.hasOwn(checks, i * 3 + j)) return null;
+    const [off, raw, erased] = checks.slice(i * 3, i * 3 + 3);
+    if ((off !== 0 && off !== 1) || (erased !== 0 && erased !== 1)) return null;
+    let unsubscribed = false;
+    if (hasList) {
+      if (raw !== null) {
+        if (typeof raw !== "string") return null;
+        try {
+          const value: unknown = JSON.parse(raw);
+          // Older contacts may lack unsub; any present value must be boolean.
+          if (!value || typeof value !== "object" || Array.isArray(value) ||
+              ("unsub" in value && typeof value.unsub !== "boolean")) return null;
+        } catch { return null; }
+        const contact = parseContact(raw);
+        if (!contact) return null;
+        unsubscribed = contact.unsub;
+      }
+    } else if (raw !== 0 && raw !== 1) return null;
+    if (off === 0 && !unsubscribed && erased === 0) recipients.push(emails[i]);
+  }
+  return recipients;
 }
 
 /** Moves every waiting update on. For the mail job. */

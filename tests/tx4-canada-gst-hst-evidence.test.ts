@@ -25,6 +25,7 @@ test("TX4 separates quarterly filing, payment, retention and designated currency
     "within one month",
     "April 30", "July 31", "October 31", "January 31",
     "GST/HST NETFILE",
+    "return's due date",
     "confirmation number",
     "filing confirmation is not proof of payment",
     "six years from the end of the last year",

@@ -35,7 +35,7 @@ import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
 import { LockBusyError, releaseLock } from "@/lib/redis-lock";
 import { windowId } from "@/lib/allowance-window";
 import { claimHandle, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { dataKey, dataUsed, takeData } from "@/lib/store-data";
+import { dataKey, dataUsed, noteData, takeData } from "@/lib/store-data";
 import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { putMember } from "@/lib/team";
 import { store as redis } from "./redis-stub";
@@ -282,6 +282,8 @@ async function main(): Promise<void> {
         current[1].name = "Renamed on the board";
         newRecord = JSON.stringify(current);
         await original([["SET", "nl:crm:pipes:" + statsId, newRecord]]);
+        // The board's own save counts its room by what it changes, as a real save does.
+        await noteData(store, [{ slot: "crm:pipes", bytes: dataBytes([newRecord], 1) - dataBytes([oldRecord], 1) }]);
       }
       return original(commands);
     };
@@ -426,6 +428,8 @@ async function main(): Promise<void> {
       if (!planted && commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-deals-import"))) {
         planted = true;
         await original([["HSET", "nl:crm:deals:" + statsId, hubSpotDealId("9301"), foreign]]);
+        // The deal made meanwhile counts its own room, as a real save does.
+        await noteData(store, [{ slot: "dl:" + hubSpotDealId("9301"), bytes: dataBytes([hubSpotDealId("9301"), foreign], 1) }]);
       }
       return original(commands);
     };

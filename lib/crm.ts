@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, holdLock, takeLock, withLock } from "@/lib/redis-lock";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
-import { type DataChange, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { type DataChange, type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import { type DueTask, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
@@ -287,27 +287,25 @@ return 1`;
 async function writePipelines(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[], moved: { id: string; before: string; record: Record<string, unknown> }[], room: DataStore): Promise<void> {
   if (!(await stillHeld(held))) throw new CrmLockLost();
   const record = JSON.stringify(pipelines);
-  // Their room in the store's data room first (DataRoomError when they do not fit, and nothing is written).
-  await needData(room, [{ slot: PIPES_SLOT, bytes: dataBytes([record], 1), set: true }]);
+  // The room moves by what this write changes, never set to a total (Codex J on #2048): the script writes only over
+  // the exact record read (snapshotRaw), so what it replaces is known here. Taken first when it grows (DataRoomError
+  // when it does not fit, and nothing is written); given back when it shrinks, once written.
+  const grown = dataBytes([record], 1) - (snapshotRaw ? dataBytes([snapshotRaw], 1) : 0);
+  if (grown > 0) await needData(room, [{ slot: PIPES_SLOT, bytes: grown }]);
   let saved: unknown;
   try {
     saved = await redisPipeline([["EVAL", SAVE_CRM_PIPELINES, 2, pipesKey(statsId), held.key, snapshotRaw, record, held.token]]);
   } catch { throw new CrmSchemaWriteUnconfirmed(); }
   const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
-  const unheld = changedLength(answer, -2);
-  if (unheld !== undefined) {
-    // The lock was not ours when the write ran: nothing was written, the room goes back to what is kept now.
-    await giveData(room, [{ slot: PIPES_SLOT, bytes: unheld === null ? 0 : dataBytesOfLength(unheld, 1), set: true }]).catch(() => {});
-    throw new CrmLockLost();
-  }
-  const lost = changedLength(answer);
-  if (lost !== undefined) {
-    // Nothing was written: the room goes back to what the record kept there now weighs, as the script measured it in
-    // the same step (the write that changed it meanwhile sized the room to itself, never to the snapshot read here).
-    await giveData(room, [{ slot: PIPES_SLOT, bytes: lost === null ? 0 : dataBytesOfLength(lost, 1), set: true }]).catch(() => {});
-    throw new CrmSchemaConflict();
+  // Nothing was written (the lock was not ours, or the record changed): only what this write took goes back, by
+  // difference, so a newer write's own room is never undone, however late this answer arrives.
+  const refused = changedLength(answer, -2) !== undefined ? new CrmLockLost() : changedLength(answer) !== undefined ? new CrmSchemaConflict() : null;
+  if (refused) {
+    if (grown > 0) await giveData(room, [{ slot: PIPES_SLOT, bytes: grown }]).catch(() => {});
+    throw refused;
   }
   if (!Array.isArray(saved) || saved.length !== 1 || saved[0] !== 1) throw new CrmSchemaWriteUnconfirmed();
+  if (grown < 0) await giveData(room, [{ slot: PIPES_SLOT, bytes: -grown }]).catch(() => {});
   try {
     const copied = await redisPipeline([["SET", stagesKey(statsId), JSON.stringify(pipelines[0].stages)]]);
     if (!Array.isArray(copied) || copied.length !== 1 || copied[0] !== "OK") throw new CrmSchemaWriteUnconfirmed();
@@ -613,13 +611,22 @@ export async function importSnapshot(statsId: string): Promise<{ raw: string; pi
   return { raw, pipelines, dealIds: new Set(ids as string[]) };
 }
 
-/** The room an import takes before it writes (`take`), and what goes back when it writes nothing (`back`). */
-export function importRoom(snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[]): { take: DataChange[]; back: DataChange[] } {
-  const pipes: DataChange[] = pipelines ? [{ slot: PIPES_SLOT, bytes: dataBytes([JSON.stringify(pipelines)], 1), set: true }] : [];
-  const pipesBack: DataChange[] = pipelines ? [{ slot: PIPES_SLOT, bytes: snapshotRaw ? dataBytes([snapshotRaw], 1) : 0, set: true }] : [];
+/**
+ * The room an import takes before it writes (`take`), what goes back when it
+ * writes nothing (`back`), and what goes back once it is written (`shrunk`).
+ * Every change is by difference, never a total (Codex J on #2048): the
+ * pipelines by what the new record weighs past the one read (the write lands
+ * only over that one), each deal by its own weight (only new ids are written).
+ * So what goes back is only what this import took, and a newer write's room
+ * is never undone, however late the answer arrives.
+ */
+export function importRoom(snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[]): { take: DataChange[]; back: DataChange[]; shrunk: DataChange[] } {
+  const grown = pipelines ? dataBytes([JSON.stringify(pipelines)], 1) - (snapshotRaw ? dataBytes([snapshotRaw], 1) : 0) : 0;
+  const dealsTaken = deals.map((deal) => ({ slot: dealSlot(deal.id), bytes: dealBytes(deal) }));
   return {
-    take: [...pipes, ...deals.map((deal) => ({ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }))],
-    back: [...pipesBack, ...deals.map((deal) => ({ slot: dealSlot(deal.id), bytes: 0, set: true }))],
+    take: [...(grown > 0 ? [{ slot: PIPES_SLOT, bytes: grown }] : []), ...dealsTaken],
+    back: [...(grown > 0 ? [{ slot: PIPES_SLOT, bytes: grown }] : []), ...dealsTaken],
+    shrunk: grown < 0 ? [{ slot: PIPES_SLOT, bytes: -grown }] : [],
   };
 }
 
@@ -712,18 +719,14 @@ export async function writeImport(statsId: string, held: Held, snapshotRaw: stri
   } catch { throw new CrmDealWriteUnconfirmed(); }
   const answer = importReply(reply, deals.length);
   if (!answer) throw new CrmDealWriteUnconfirmed();
-  if (answer.written) return;
-  // Surely nothing was written: whatever happens while the room is put right, the caller is told so.
-  try {
-    const free = deals.filter((deal) => !answer.there.has(deal.id));
-    await giveData(room, importRoom(snapshotRaw, null, free).back);
-    // Counted as kept now, whatever it comes to: another write may have grown it since the room was taken.
-    const kept: DataChange[] = [...answer.there].map(([id, value]) => ({ slot: dealSlot(id), bytes: dataBytes([id, value], 1), set: true }));
-    if (pipelines) kept.push({ slot: PIPES_SLOT, bytes: answer.current ? dataBytes([answer.current], 1) : 0, set: true });
-    if (kept.length) await noteData(room, kept);
-  } catch {
-    // The room is put right as far as it can be; nothing was written either way.
+  if (answer.written) {
+    const { shrunk } = importRoom(snapshotRaw, pipelines, deals);
+    if (shrunk.length) await giveData(room, shrunk).catch(() => undefined);
+    return;
   }
+  // Surely nothing was written: only what this import took goes back, by difference (importRoom), so the room of a
+  // deal or a pipelines record another write keeps now is never touched.
+  await giveData(room, importRoom(snapshotRaw, pipelines, deals).back).catch(() => undefined);
   throw answer.code === -3 ? new CrmDealsFull() : answer.code === -4 ? new CrmLockLost() : new CrmSchemaConflict();
 }
 

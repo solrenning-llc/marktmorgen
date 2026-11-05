@@ -146,3 +146,25 @@ Read fresh checkpoint, main instructions/reservations/Codex inbox and channel. C
 #2541 same PR new headcdde000d726ae68bf1a3ab6ecaf5960500c80618/treec4dac1503fd788781304ffbcb6f6c396d7977062: NORMAL main-only merge; sourcef53670e679f106cb221b072b8739f75ba6a2afae and teste80208654cab4e4b961fc212b2fc6ff42c6d93b4 unchanged from J-reviewed0e960adb. Linked17+32+21 pass. Nine NEW checks required; J review5779764553 remains applicable under CX122(8).
 
 #2438 remote remains0e9a7b52 pending normal main integration after2599; merge-tree has no conflict. #2448 remains merged. Four own products, no new fifth yet. No Q product merged this interval. Do not duplicate #2565 review5781420782 or #2530/#2543. Local scratch runner now uses crypto.randomUUID because isolated commands share PID2; earlier parallel bundles collided, their mixed results are NOT evidence; both2538/2541 groups were subsequently rerun separately and passed as reported above.
+
+
+## Checkpoint 2026-11-05 05h40 Fortaleza — five own products
+
+The own head set is now:
+- #2438 `6da1a24763a718e88e157703542c24957bfc6123`, tree `c2a08237d965846b7b5c459827587eb0f950f6d6`.
+- #2535 `1849a8e0a0bcb98655cfe6c947888814e350763d`, tree `aaa8f765eb7e2cd3ca827f7a8865683b63afe335`.
+- #2538 `88453e84a4ac369de05122e45146af928937ec29`.
+- #2541 `cdde000d726ae68bf1a3ab6ecaf5960500c80618`.
+- NEW #2609 `9e8e87950650bea71b33e0ca96034a4da8d49b9c`, branch `codex/q-person-copy-checkout-evidence`, tree `4ee3766a6323dc35fb4eca62e8ff0347f504872f`.
+
+No Q product merged in this interval. Five active products: do not open a sixth. New nine checks on the first four were queued/in_progress at the last read, no old greens carried over. No CI cancellation or rerun was used.
+
+#2438 normal main merge after2599 succeeded without conflicts; ten non-shared reviewed blobs unchanged; the three shared emulator/registry files automatically union main's additions with Q's own additions. Actual reservation CLI now passes13/13 against main; no checker or reservation change. Linked134+15+2+2+11+7+24 pass, Next typegen/globalTSC/lint/scanner3710/0/diff pass. Author's old untracked erasure-store-read test matched the now-tracked main blob392a6934 exactly and was preserved at /dev/shm/codex-q-erasure-store-read-preserved-20261105.test.ts before the merge. #2448 remains merged.
+
+IMPORTANT connector correction: normalized fetch_pr returns mergeable=false for a raw REST null. Raw #2538 returned mergeable:null, mergeable_state:unknown; that is not evidence of a conflict. Native merge-trees were clean. Do not move heads simply because this normalized boolean is false; use raw REST plus actual merge-tree. Preserve the new in-flight heads, no undo/churn. J opinions remain applicable under CX122(8) to main-only integrations; #2535 still requires I2's corrective return requested6653185256.
+
+#2609 reservation: 139 open PR file lists checked without errors, full reservations/main07b1cd84/channel checked; no owner/Y/SG2 overlap for lib/person-copy-stripe.ts or new test. First append got409; retried after2minutes with fresh blob, successful channel commit9abe7c7689de3dbee76f6a823c4f7ef86314fda1 before code. Only two product files. RED `5af5902dd9811e39d429fcd8fde3e79302b6b4ad`:24 tests/21 failures, includes actual copyPerson omitting a retained shipment on an unknown page. Final26/26 adds positive deduplication/null-metadata/no-payment controls; linked copy9+20+6+9 pass. Strict scoped TypeScript with real imports, lint, scanner3708/0, reservation2 and diff pass. GlobalTSC passed for the correction and24 tests; a final rerun after2 positive controls was killed by the shared environment exit137 without diagnostic, so final globalTSC is NOT claimed. Source blob973a58c162dd2dac05fec0bb567bf9f17d41e87a; final test blob4517ac1b53bc7ebb5260b60009d3306ab46f92fd, both verified. No new command/request/retry/key/retention or admission change. #2609 is ready for independent review, request6653518207; nine final workflows required. Rule30 triage-only candidate next-offer.ts132/145 is owned by open1969; untouched.
+
+Independent review #2607 completed at exact931e6f0031fee33362637db549e13f42ccf875cf, review5781954542: NO FINDINGS / PODE ENTRAR after9. Full three-file diff/model/SSR read; unchanged authorRED1/1fail ->1/1pass, linked6+1+4, reviewer3/1fail ->3/3pass. Durable proof branch codex/q-review-2607-controls: REDdbe0fcf5df2687bf8b4c8fd8fc8b3b6b4e9aba78, GREEN69916c2865091bcb1cf47b9127973979bca5a340; proof blob7002cd38805042334d8547d03c6d3e23307097ee. Strict scoped types/lint/scanner3707/0/diff passed. No T source/branch/CI/reservation changed; no globalTSC/browser/crawler/deployment claim. Do not repeat this review.
+
+Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated review2607: /dev/shm/codex-q-review-2607. Both depend on the existing root node_modules symlink; durable work is on GitHub. Next: read I2's2535 return and #2609 reviewer, inspect the five exact-head CIs, diagnose only new failures, and merge own qualified products once all nine succeed.

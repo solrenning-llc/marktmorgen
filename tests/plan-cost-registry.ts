@@ -200,6 +200,18 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
 /** An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). */
 export const ORDER_COMPUTE = 0.0003;
 /**
+ * A cart's stock work at its worst (lib/stock.ts, withCartStockHolds; 513 [PF1], the independent review of 5 November 2026):
+ * every limited product of a cart of MAX_CART, its lock taken at its most tries, its count, its provisional hold, the admission
+ * and the hand-over scripts with the commands they run inside, the hand-over's failure path, and the previous checkout's units
+ * handed back first (releaseCartStockHolds). Measured in tests/cart-stock.test.ts and held to a declared share of ORDER_COMPUTE,
+ * so the rest of it is left for the order's pages and jobs. Stripe is never asked while a lock is held; the holds that ran out
+ * are asked about after the locks are let go, every product at once, at most MAX_CHECKS times each at CHECK_MS (lib/stock.ts),
+ * so the waiting is at most CART_STOCK_STRIPE_WAIT_MS besides the locks' own short waits.
+ */
+export const CART_STOCK_COMMANDS_MOST = 80;
+export const CART_STOCK_SHARE_OF_ORDER_COMPUTE = 0.55;
+export const CART_STOCK_STRIPE_WAIT_MS = 5 * 2_000;
+/**
  * The access emails a plan's window holds (lib/store-allowance-rules.ts):
  * since 17 October 2026 counted and refused past the figure, before sending
  * (lib/email.ts, EmailMeter); until then a figure set high that no counter held.

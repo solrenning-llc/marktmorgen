@@ -38,6 +38,7 @@ import { NO_SALE } from "@/lib/store-sale";
 import type { Listing, Product, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { CART_STOCK_COMMANDS_MOST, CART_STOCK_SHARE_OF_ORDER_COMPUTE, CART_STOCK_STRIPE_WAIT_MS, COMMAND, ORDER_COMPUTE } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 
@@ -74,6 +75,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 
+/** MAX_CHECKS in lib/stock.ts: the holds that ran out one count asks Stripe about. */
+const MAX_LAPSED = 5;
 const limited = (id: string, stock: number) => parseProduct({ id, title: `Print ${id}`, summary: "", priceCents: 2000, stock, link: `https://example.com/${id}` }) as Listing;
 const plain = (id: string) => parseProduct({ id, title: `Guide ${id}`, summary: "", priceCents: 900, link: `https://example.com/${id}` }) as Listing;
 
@@ -215,6 +218,85 @@ async function main(): Promise<void> {
   complete.add("cs_test_cartstockdone0001");
   await releaseCartStockHolds(creator, [limited("print10", 1)], "cs_test_cartstockdone0001");
   is("a checkout paid but not yet marked sold, which Stripe will not close, keeps its unit", await stockLeft(creator, limited("print10", 1)), 0);
+
+  part("The worst a cart's stock costs, in commands and in waiting (review of 5 November 2026)");
+  const costly = { statsId: "e".repeat(32), stripeAccountId: "acct_test_cartstockcost" } as Store;
+  const costKey = (id: string) => `nl:stock:${costly.statsId}:${id}`;
+  const costLock = (id: string) => `nl:stock:lock:${costly.statsId}:${id}`;
+  // Counted as Upstash bills them: every command of a pipeline, and the ones the admission and the hand-over scripts run inside (three a product).
+  let commands = 0;
+  const counting = async (batch: (string | number)[][]) => {
+    for (const command of batch) {
+      commands += 1;
+      // The admission names two keys a product (its lock and its holds), the hand-over one.
+      if (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:stock-admit:v1\n")) commands += 3 * (Number(command[2]) / 2);
+      if (command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:stock-bind:v1\n")) commands += 3 * Number(command[2]);
+    }
+    return original(batch);
+  };
+  // How many tries a lock taken by someone else costs before the cart gives up on it.
+  await original([["SET", costLock("c1"), "someone-else", "EX", 60]]);
+  commands = 0;
+  redis.pipeline = async (batch) => {
+    if (batch.length === 1 && batch[0][0] === "SET" && batch[0][1] === costLock("c1")) commands += 1;
+    return original(batch);
+  };
+  is("a lock taken by someone else: nothing opens", await withCartStockHolds(costly, [limited("c1", 6)], async () => ({ id: "cs_test_cartstockcost0000" })), { ok: false, reason: "busy" });
+  redis.pipeline = original;
+  const tries = commands;
+  await original([["DEL", costLock("c1")]]);
+  // Stripe is asked only with no lock held, every product at once.
+  let underLock = 0, inFlight = 0, mostInFlight = 0, asked = 0;
+  onGet = async () => {
+    asked += 1;
+    const locks = await original(["c1", "c2", "c3", "c4", "r1", "r2", "r3", "r4"].map((id) => ["GET", costLock(id)]));
+    if (locks.some((lock) => lock !== null)) underLock += 1;
+    inFlight += 1;
+    mostInFlight = Math.max(mostInFlight, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    inFlight -= 1;
+  };
+  const lapse = async (id: string, n: number) => {
+    for (let i = 0; i < n; i += 1) {
+      const session = `cs_test_lapsed${id}${String(i).padStart(6, "0")}`;
+      sessions.set(session, { id: session, status: "expired" });
+      await original([["HSET", costKey(id), session, JSON.stringify({ until: Date.now() - 1000 })]]);
+    }
+  };
+  // The order at its worst: four limited products, each with holds that ran out; the hand-over's failure path; the previous checkout handed back.
+  const cart4 = ["c1", "c2", "c3", "c4"].map((id) => limited(id, 6));
+  for (const id of ["c1", "c2", "c3", "c4"]) await lapse(id, MAX_LAPSED);
+  await withCartStockHolds(costly, cart4, async () => ({ id: "cs_test_cartstockprev0001" }));
+  commands = 0;
+  redis.pipeline = counting;
+  await releaseCartStockHolds(costly, cart4, "cs_test_cartstockprev0001");
+  const handedBack = commands;
+  commands = 0;
+  const worst = await withCartStockHolds(costly, cart4, async () => ({ id: "cs_test_cartstockcost0001" }));
+  const opening = commands;
+  commands = 0;
+  redis.pipeline = async (batch) => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v1\n") ? (await counting(batch), []) : counting(batch));
+  await withCartStockHolds(costly, cart4, async () => ({ id: "cs_test_cartstockcost0002" }));
+  const failing = commands;
+  redis.pipeline = original;
+  const most = handedBack + Math.max(opening, failing) + cart4.length * (tries - 1);
+  is("the order's stock work at its worst stays inside its declared commands", [worst.ok, most <= CART_STOCK_COMMANDS_MOST], [true, true]);
+  is("and those commands inside their declared share of an order's compute", CART_STOCK_COMMANDS_MOST * COMMAND <= CART_STOCK_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE, true);
+  // A cart refused only for holds that ran out: they are asked about after the locks are let go, all at once, and the next try opens.
+  const refusedCart = ["r1", "r2", "r3", "r4"].map((id) => limited(id, MAX_LAPSED));
+  for (const id of ["r1", "r2", "r3", "r4"]) await lapse(id, MAX_LAPSED);
+  asked = 0;
+  commands = 0;
+  redis.pipeline = counting;
+  const firstTry = await withCartStockHolds(costly, refusedCart, async () => ({ id: "cs_test_cartstockcost0003" }));
+  const refusedCost = commands;
+  redis.pipeline = original;
+  const nextTry = firstTry.ok ? firstTry : await withCartStockHolds(costly, refusedCart, async () => ({ id: "cs_test_cartstockcost0004" }));
+  onGet = null;
+  is("Stripe is never asked while a lock is held", underLock, 0);
+  is("the holds that ran out are asked about every product at once, at most MAX_CHECKS each", [mostInFlight, asked <= refusedCart.length * MAX_LAPSED], [refusedCart.length, true]);
+  is("so the stock work waits on Stripe at most its declared time", MAX_LAPSED * 2_000 <= CART_STOCK_STRIPE_WAIT_MS, true);
+  is("and a cart refused for them costs no more, and opens on its next try", [refusedCost + refusedCart.length * (tries - 1) <= CART_STOCK_COMMANDS_MOST, nextTry.ok], [true, true]);
 
   part("The checkout closes before the hold");
   const shop = { handle: "prints", name: "Prints", email: "prints@example.com", language: "en", currency: "usd", stripeAccountId: "acct_test_cartstock1", sale: { ...NO_SALE }, cartDeal: { ...NO_DEAL }, recovery: { ...NO_RECOVERY }, hasDiscounts: false, tax: { enabled: false, included: false, ids: false, invoices: false }, affiliates: { enabled: false, percent: 0, days: 30, rates: {}, payday: 0, hold: 0 }, catalog: { id: null, items: [], head: [], inline: null } } as unknown as Store;

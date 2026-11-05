@@ -276,7 +276,7 @@ export async function forgetCompanyPerson(statsId: string | null, person: string
     // of people can be read, everything else in it kept as it is; otherwise the deletion is said not done, never done.
     const rewrite = new Map<string, string>();
     for (const [id, raw] of stored.unreadable) {
-      if (!raw.includes(person)) continue;
+      if (!namesPerson(raw, person)) continue;
       const edited = withoutPerson(raw, person);
       if (edited === null) throw new Error("a company record that cannot be read names the person: the deletion is not done");
       rewrite.set(id, edited);
@@ -305,8 +305,33 @@ function withoutPerson(raw: string, person: string): string | null {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const record = parsed as Record<string, unknown>;
   if (!Array.isArray(record.people)) return null;
-  const edited = JSON.stringify({ ...record, people: record.people.filter((p) => p !== person) });
-  return edited.includes(person) ? null : edited;
+  const kept = { ...record, people: record.people.filter((p) => p !== person) };
+  return holds(kept, person) ? null : JSON.stringify(kept);
+}
+
+/** Whether a decoded value holds `person` anywhere: in a text, a key, or anything inside a list or an object. */
+function holds(value: unknown, person: string): boolean {
+  if (typeof value === "string") return value.includes(person);
+  if (Array.isArray(value)) return value.some((item) => holds(item, person));
+  if (value && typeof value === "object") return Object.entries(value).some(([key, item]) => key.includes(person) || holds(item, person));
+  return false;
+}
+
+/**
+ * Whether a record that cannot be read as a company names `person`, read as
+ * what it means, never as raw text (Codex G2, #2574: a key written with JSON's
+ * escapes is the same key once decoded): JSON is decoded and every text in it
+ * is searched. A record that is not even JSON is searched as it is, since
+ * nothing here can decode a link out of it.
+ */
+function namesPerson(raw: string, person: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw.includes(person);
+  }
+  return holds(parsed, person);
 }
 
 /**
@@ -317,6 +342,6 @@ function withoutPerson(raw: string, person: string): string | null {
 export async function companiesOfPerson(statsId: string | null, person: string): Promise<Company[]> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
   const stored = await readStored(statsId);
-  if ([...stored.unreadable.values()].some((raw) => raw.includes(person))) throw new CompaniesUnreadable("a record that cannot be read names this person");
+  if ([...stored.unreadable.values()].some((raw) => namesPerson(raw, person))) throw new CompaniesUnreadable("a record that cannot be read names this person");
   return stored.companies.filter((c) => c.people.includes(person));
 }

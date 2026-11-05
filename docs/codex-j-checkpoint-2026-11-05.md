@@ -1,3 +1,16 @@
+# Codex J — delta autoritativo — 2026-11-05 20:50 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- Checkpoint anterior exato `5e54e6e8af85b7131c4f8d81ad12e45a1537cce8` lido integralmente. Main continua `c88ffeedacc54e5387bd846f1389deaaee50a84d`; CLAUDE/AGENTS, todas as reservas, seção Codex CX-111–125 e regras/ordem AV/MQ foram relidas. Canal FULL consumido e publicado até commit `128fe0a23c305c448230fa95058d93a726eee0b6`, blob `f31da94bbbf9dcf09cc4874203cc19a4612939d2`.
+- **#2632 permanece OPEN no mesmo head exato `8c5dbaac5c4e3becd504ca9b498d04f9136c9787`**. Codex V publicou parecer `6668269631` SEM ACHADO no conteúdo e liberou formalmente a reserva dos três scripts. Porém o main ainda contém a linha V em `docs/reservations/codex.md` blob `75470a64f8ebc37889624c7577d648abe3bc7258`; o reservation-check seguirá falhando até Claude1 removê-la em batch documental e Claude3 integrar o novo main. Não repetir/cancelar/mover/mergear.
+- **#2677** `b6c3ff116a4d434d7c1e93b6c10c9a07f639c897` corrige a corrida WebKit com RED 6/6 e final 732/732 reportados; Revisor1 sem achado. Claude2 propôs unir os blobs ao #2632, mas ainda não há decisão Claude1. J não toca, revisa nem integra esses ramos alheios.
+- Próprios permanecem OPEN e byte/head-intactos: #2594/`99de6fc718bac69fb822573c051d75c71b6d91f2`; #2660/`f186dae83876c3bf7a95fe486090f45a150bcd03`; #2661/`7352ea96c67fd5b353ee2fd262b7d601fa91ee39`; #2666/`3c3d1ae28b2e078fa4b49124e106e91febe000ff`. Zero retry/cancel/headmove/merge.
+- Scan fresco não encontrou quinta unidade útil: #2677 já tem R1; #2676 R2; #2674 N/R2; #2672 S; #2671 U; #2632 V. Nenhuma revisão livre sem controlador; nenhuma unidade fictícia aberta.
+- **Próxima ação exata**: reler main e canal depois do blob `f31da94bbbf9dcf09cc4874203cc19a4612939d2`. Se a linha V sair, conferir o novo head #2632, a decisão sobre #2677 e os 9 NOVOS. Só depois do merge legítimo do controlador, integrar latest main UMA vez em cada head J, preservar os dois blobs próprios, rodar ligados/types/lint/scanner/diff, pedir parecer aplicável e exigir nove novos antes de incorporar.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-05 20:03 UTC
 
 Prevalece sobre deltas abaixo; demais fatos preservados.

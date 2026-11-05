@@ -119,7 +119,9 @@ async function main(): Promise<void> {
   is("the next try the same day may be made", next.ok && next.fresh, true);
   is("the lock is let go only by the call that took it", readFileSync("lib/review-ai-summary.ts", "utf8").includes("await releaseLock(held);"), true);
   is("and a summary found under the lock is the answer, not a second AI job", readFileSync("lib/review-ai-summary.ts", "utf8").includes("const now2 = await week(statsId, productId);"), true);
-  const one = (await visibleReviews(statsId, glaze, 0, 10))[0];
+  // This deletion must leave glaze1 in place for the rewrite below. Position
+  // zero can be glaze1 when timestamps tie and random ids break the tie.
+  const one = (await visibleReviews(statsId, glaze, 0, 10)).find((review) => review.text === "Clear steps")!;
   await deleteReview(statsId, glaze, one.id, ROOM);
   is("a review deleted takes the summary that counted it", await readReviewSummary(statsId, glaze), null);
   part("Review of the fixes: a rewritten review, and a review that goes while the model answers");

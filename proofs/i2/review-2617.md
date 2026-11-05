@@ -17,3 +17,12 @@ Durable TEST-ONLY original4e9f40d3da656e1c195848c6fc5f645d3f4769dd, tests/review
 Author fixture1d7230a4 is byte-identical between RED/final:24tests/3pass21fail ->24/24. Linked call-packages25, call-package-evidence18, call-lengths18, plan-cost24 and store-data7 pass:116 ordinary checks in six groups. The eight conditional hardening cases are NOT counted green; their two controls pass. One attempted guessed filename call-package-lengths did not exist; it executed no cases and was replaced by the actual call-lengths test,18/18.
 
 Strict scoped types of actual source/author test/own proof and imports, ESLint, scanner INCLUDING own staged proof3724/0 and diff-check pass. No browser, native Redis, actual supplier/account/payment, whole global build/TSC/CI, deployed state or complete cost/margin certification. All provider routes are controlled/refused and data uses the existing test adapter. No author product/ref/reservation/CI/metadata was edited.
+
+
+## Final fixture/main return — 2026-11-05 09:19 UTC
+
+Final reviewed source026713f1b64d316fb47e06fb3059bda25e5459c4, with main e8e916c1 integrated. Product call-packages and the author's 24-case purchase test are byte-identical to328952f3. Read the entire corrective person-copy-stripe diff: fixture tokens now match the issued48hex format; the secret-exclusion assertion explicitly checks BOTH tokens, another store and the other buyer. Added unreadable-package control refuses the WHOLE copy. No weakening of product validation. R2's fixture issue is closed in this delta, consistent with R2's own return.
+
+Executed on the exact final checkout: person-copy-stripe10 + author24 + call-packages25 + call-package-evidence18 + actual call-lengths18 =95 passing checks. The SAME own proof blob61c9ef9015912188efa03b80cdfbfb3980d21b46 remains2 positive controls/6 conditional hardening failures; LOW remains tracked with the explicit reachability limitations above. Strict scoped types of source, author fixture, own proof and person-copy-stripe plus imports, lint of all four, scanner including own proof, and diff-check passed. Prior plan-cost24/store-data7 were verified on3289 and are not relabeled as newly executed on0267. No whole global/browser/native/provider/deploy certification.
+
+No GRAVE/MEDIUM residual reproduced in the reviewed package correction. MAY MERGE final0267 only with all nine NEW exact-head aggregates and ordinary coordination; LOW is not described as fixed. No author branch/ref/CI/metadata changed.

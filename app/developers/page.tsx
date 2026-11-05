@@ -3,13 +3,15 @@ import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { API_PAGE } from "@/lib/api-read";
 import { API_RATE } from "@/lib/api-guard";
+import { FIELD_NAME_MAX, MAX_FIELDS_ASKED } from "@/lib/api-fields";
+import { DELIVERY_WRITE_MAX_BYTES, MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
 import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
 import { API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { PLAN_TITLES } from "@/lib/plan";
 import {
   BLOCKED_READ_MAX, BOOKINGS_READ, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_NUMBERS_BYTES, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, apiReadUnits, bookWork,
-  bookingsWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
+  bookingsWork, codeMakeWork, codeStopWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 
@@ -34,7 +36,11 @@ const NUMBERS_COUNT_NO_SALES = 1 + apiReadUnits(addWork(numbersWork({ kept: true
 const NUMBERS_KEPT_LEAST = 1 + apiReadUnits(keptNumbersWork(1, 1));
 const NUMBERS_KEPT_MOST = 1 + apiReadUnits(keptNumbersWork(NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES));
 const CODES_COUNT = 1 + apiReadUnits(codesWork());
-const EVENTS_COUNT = 1 + apiReadUnits(eventsWork());
+const CODE_MAKE_COUNT = 1 + apiReadUnits(codeMakeWork());
+const CODE_STOP_COUNT = 1 + apiReadUnits(codeStopWork());
+/** The recent events, measured first: an empty log, and the most, LOG_SIZE deliveries at the most each is kept at. */
+const EVENTS_LEAST = 1 + apiReadUnits(eventsWork({ deliveries: 0, bytes: 0, sent: 0 }));
+const EVENTS_MOST_COUNT = 1 + apiReadUnits(eventsWork());
 const MEMBERSHIPS_COUNT = 1 + apiReadUnits(membershipsWork(MEMBERSHIP_NUMBERS_BYTES));
 const MEMBERSHIPS_COUNT_COLD = 1 + apiReadUnits(addWork(membershipsWork(0), MEMBERSHIPS_COLD_WORK));
 const n = (count: number) => count.toLocaleString("en-US");
@@ -116,8 +122,9 @@ export default function DevelopersPage() {
           To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
           separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
           fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
-          <code className="font-mono">unknown_field</code>, with its name, and a name that cannot be a field (only letters,
-          digits and underscores, at most 30 names) is answered 400 <code className="font-mono">fields</code>. Both are
+          <code className="font-mono">unknown_field</code>, with its name, and a name that cannot be a field (a field name is
+          lowercase letters, digits and underscores, starting with a letter, up to {FIELD_NAME_MAX} characters) or more than{" "}
+          {MAX_FIELDS_ASKED} names is answered 400 <code className="font-mono">fields</code>. Both are
           answered before anything is read, so they count as one request. This works on every list above, on
           Store, on Bookings and on Discount codes.
         </p>
@@ -126,7 +133,7 @@ export default function DevelopersPage() {
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Every read except Store counts as more than one when it reads more than one request's worth: a page of products, of your list or of your members, a course's students, your numbers, your discount codes, your affiliates, your bookings and the recent events (/api/v1/events, the examples a tool such as Zapier shows while you set up a step: ${n(EVENTS_COUNT)} each), as said with each below; what it will take is taken before it reads. A read whose size is known only once it is read (a page of your list or your members, your numbers from their copy) sets aside the most it may take first, and gives back at once what it did not need. Past the figure, or when a read needs more than are left, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Every read except Store counts as more than one when it reads more than one request's worth: a page of products, of your list or of your members, a course's students, your numbers, your discount codes, your affiliates, your bookings and the recent events (/api/v1/events, the examples a tool such as Zapier shows while you set up a step: from ${n(EVENTS_LEAST)} to ${n(EVENTS_MOST_COUNT)} each, by the size of the deliveries it reads, measured before they are read; a webhook message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, each text in it at most ${MESSAGE_TEXT_MAX} characters, so ${n(EVENTS_MOST_COUNT)} is the most for messages made since November 4, 2026, and one kept from before counts at its size), as said with each below; what it will take is taken before it reads. A read whose size is known only once it is read (a page of your list or your members, your numbers from their copy) sets aside the most it may take first, and gives back at once what it did not need. Past the figure, or when a read needs more than are left, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
           {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
           <code className="font-mono">no_place</code>
@@ -539,7 +546,7 @@ export default function DevelopersPage() {
           Your discount codes, read from your own Stripe account as your studio lists them: what each takes off, how many
           times it was used, its limit, its smallest order and whether it is live.
         </Endpoint>
-        <p>{`Reading them asks your Stripe account, so it counts as ${n(CODES_COUNT)} of your API requests.`}</p>
+        <p>{`Reading them asks your Stripe account, so it counts as ${n(CODES_COUNT)} of your API requests; making a code counts as ${n(CODE_MAKE_COUNT)} and switching one off as ${n(CODE_STOP_COUNT)}, taken before Stripe is asked.`}</p>
         <Endpoint method="POST" path="/api/v1/codes">
           Makes a code on your own Stripe account, checked as in your studio. Send{" "}
           <code className="font-mono">{`{"code": "LAUNCH20", "percent": 20}`}</code>, or{" "}

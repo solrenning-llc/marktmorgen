@@ -18,7 +18,7 @@ const en = {
   almost: "Almost there",
   sentTitle: "Check your inbox",
   sentBody: (store: string) =>
-    `We emailed you a button to confirm you want emails from ${store}. It usually arrives within a minute; if it is not there, look in spam.`,
+    `We emailed you a button to confirm you want emails from ${store}. If it is not there, look in spam.`,
   sentNote: "You join the email list only after you confirm with the button.",
   confirmTitle: (store: string) => `Get emails from ${store}?`,
   confirmBody: (store: string) => `Press the button to join ${store}'s email list. Every email has a link to leave it.`,
@@ -52,7 +52,7 @@ const es: JoinWords = {
   almost: "Ya casi está",
   sentTitle: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
-    `Te enviamos un botón para confirmar que quieres recibir emails de ${store}. Suele llegar en menos de un minuto; si no está, mira en spam.`,
+    `Te enviamos un botón para confirmar que quieres recibir emails de ${store}. Si no está, mira en spam.`,
   sentNote: "Solo te unes a la lista de email después de confirmar con el botón.",
   confirmTitle: (store) => `¿Recibir emails de ${store}?`,
   confirmBody: (store) => `Pulsa el botón para unirte a la lista de ${store}. Cada email trae un enlace para salir de ella.`,
@@ -84,7 +84,7 @@ const fr: JoinWords = {
   almost: "Presque fini",
   sentTitle: "Regardez votre boîte de réception",
   sentBody: (store) =>
-    `Nous vous avons envoyé un bouton pour confirmer que vous voulez recevoir les e-mails de ${store}. Il arrive en général en moins d'une minute ; sinon, regardez dans les spams.`,
+    `Nous vous avons envoyé un bouton pour confirmer que vous voulez recevoir les e-mails de ${store}. S'il n'est pas là, regardez dans les spams.`,
   sentNote: "Vous rejoignez la liste d'e-mails uniquement après avoir confirmé avec le bouton.",
   confirmTitle: (store) => `Recevoir les e-mails de ${store} ?`,
   confirmBody: (store) => `Appuyez sur le bouton pour rejoindre la liste de ${store}. Chaque e-mail contient un lien pour la quitter.`,
@@ -116,7 +116,7 @@ const de: JoinWords = {
   almost: "Fast geschafft",
   sentTitle: "Schau in dein Postfach",
   sentBody: (store) =>
-    `Wir haben dir einen Button geschickt, mit dem du bestätigst, dass du E-Mails von ${store} möchtest. Er kommt meist innerhalb einer Minute an; falls nicht, sieh im Spam nach.`,
+    `Wir haben dir einen Button geschickt, mit dem du bestätigst, dass du E-Mails von ${store} möchtest. Falls nicht, sieh im Spam nach.`,
   sentNote: "Du wirst erst in die E-Mail-Liste aufgenommen, wenn du mit dem Button bestätigst.",
   confirmTitle: (store) => `E-Mails von ${store} erhalten?`,
   confirmBody: (store) => `Drück den Button, um dich in die Liste von ${store} einzutragen. Jede E-Mail enthält einen Link zum Austragen.`,
@@ -148,7 +148,7 @@ const it: JoinWords = {
   almost: "Ci sei quasi",
   sentTitle: "Controlla la tua casella",
   sentBody: (store) =>
-    `Ti abbiamo inviato un pulsante per confermare che vuoi ricevere le email di ${store}. Di solito arriva entro un minuto; se non c'è, guarda nello spam.`,
+    `Ti abbiamo inviato un pulsante per confermare che vuoi ricevere le email di ${store}. Se non c'è, guarda nello spam.`,
   sentNote: "Entri nella lista email solo dopo aver confermato con il pulsante.",
   confirmTitle: (store) => `Ricevere le email di ${store}?`,
   confirmBody: (store) => `Premi il pulsante per entrare nella lista di ${store}. Ogni email ha un link per uscirne.`,
@@ -180,7 +180,7 @@ const nl: JoinWords = {
   almost: "Bijna klaar",
   sentTitle: "Kijk in je inbox",
   sentBody: (store) =>
-    `We hebben je een knop gestuurd om te bevestigen dat je e-mails van ${store} wilt. Die komt meestal binnen een minuut; staat hij er niet, kijk dan bij spam.`,
+    `We hebben je een knop gestuurd om te bevestigen dat je e-mails van ${store} wilt. Staat hij er niet, kijk dan bij spam.`,
   sentNote: "Je komt pas op de e-maillijst nadat je met de knop hebt bevestigd.",
   confirmTitle: (store) => `E-mails van ${store} ontvangen?`,
   confirmBody: (store) => `Druk op de knop om je aan te melden voor de lijst van ${store}. Elke e-mail heeft een link om je af te melden.`,
@@ -213,7 +213,7 @@ const pt: JoinWords = {
   almost: "Quase lá",
   sentTitle: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
-    `Enviámos-lhe um botão para confirmar que quer receber emails de ${store}. Costuma chegar em menos de um minuto; se não estiver lá, veja no spam.`,
+    `Enviámos-lhe um botão para confirmar que quer receber emails de ${store}. Se não estiver lá, veja no spam.`,
   sentNote: "Só entra na lista de emails depois de confirmar com o botão.",
   confirmTitle: (store) => `Receber emails de ${store}?`,
   confirmBody: (store) => `Prima o botão para entrar na lista de ${store}. Cada email tem uma ligação para sair dela.`,

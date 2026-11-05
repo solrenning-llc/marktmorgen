@@ -1,6 +1,6 @@
 # External-page attribution study
 
-**Date:** November 5, 2026  
+**Date:** November 5, 2026
 **Status:** Study only — before implementation
 
 This study defines the evidence required to count activity on a creator-owned external page without a Marktmorgen checkout. It does not make that capability available today. This change contains no script, endpoint, account, vendor setup, acceptance of terms or production request. A later implementation needs its own reservation, RED, cost proof, privacy review, accessibility review and final CI.
@@ -17,7 +17,7 @@ The operating cost is **unknown, never zero**. There is no finite launch budget 
 
 | Official source | Dated source used | What it bounds here |
 | --- | --- | --- |
-| [EDPB Guidelines 2/2023 on Article 5(3) of the ePrivacy Directive](https://www.edpb.europa.eu/our-work-tools/our-documents/guidelines/guidelines-22023-technical-scope-art-53-eprivacy-directive_en) | Adopted November 14, 2023 | Access to or storage on a device can include URLs, pixels, local processing and identifiers; the scope is not limited to traditional cookies. This is not a finding that a particular design is exempt. |
+| [EDPB Guidelines 2/2023 on Article 5(3) of the ePrivacy Directive](https://www.edpb.europa.eu/our-work-tools/our-documents/guidelines/guidelines-22023-technical-scope-art-53-eprivacy-directive_en) | Version 2.0 adopted October 7, 2024; final page October 16, 2024 | Access to or storage on a device can include URLs, pixels, local processing and identifiers; the scope is not limited to traditional cookies. This is not a finding that a particular design is exempt. |
 | [EDPB Cookie Banner Taskforce report](https://www.edpb.europa.eu/our-work-tools/our-documents/other/report-work-undertaken-cookie-banner-taskforce_en) | Adopted January 17, 2023 | Refusal must be real, consent must not be preselected, and withdrawal must be available. National implementation can still differ. |
 | [EUR-Lex: Regulation (EU) 2016/679, Articles 5 and 7](https://eur-lex.europa.eu/eli/reg/2016/679/oj) | Regulation dated April 27, 2016 | Data minimization and demonstrable, withdrawable consent. |
 | [EUR-Lex: Directive 2002/58/EC, Article 5(3)](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:02002L0058-20091219) | Consolidated text dated December 19, 2009 | Device storage/access must be assessed before an optional script or identifier is used. |
@@ -26,8 +26,8 @@ The operating cost is **unknown, never zero**. There is no finite launch budget 
 | [California Privacy Protection Agency FAQ](https://cppa.ca.gov/faq.html) | Official page current when retrieved | Global Privacy Control can communicate an opt-out; minimization and deletion remain relevant. The FAQ is guidance, not legal advice. |
 | [W3C Referrer Policy](https://www.w3.org/TR/referrer-policy/) | Candidate Recommendation January 26, 2017 | A page can reduce cross-origin URL leakage with no-referrer or origin-only policy. |
 | [ClickFunnels: Custom HTML/JavaScript element](https://support.myclickfunnels.com/docs/how-to-use-the-custom-html-javascript-element) | Published November 15, 2024; updated October 27, 2026 | Competitor precedent for code on an external page, with an explicit warning that custom code can break a page. It is not a privacy endorsement. |
-| [WordPress: Custom HTML block](https://wordpress.com/support/wordpress-editor/blocks/custom-html-block/) | Published June 7, 2026; updated October 14, 2026 | External sites commonly accept static embedded markup. It does not establish permission to track. |
-| [Whop: affiliate attribution](https://docs.whop.com/affiliates/attribution) | Official documentation current when retrieved | Competitor precedent: a parameter can be carried into an embedded checkout and a completed checkout can confirm a sale. It does not prove a visit or a person. |
+| [WordPress: Custom HTML block](https://wordpress.com/support/wordpress-editor/blocks/custom-html-block/) | Last reviewed October 5, 2026 | External sites commonly accept static embedded markup. It does not establish permission to track. |
+| [Whop: attribute affiliates in an embedded checkout](https://docs.whop.com/third-party-integrations/embedded-checkouts/attribute-affiliates-embedded-checkout) | Official documentation current when retrieved | Competitor precedent: a parameter can be carried into an embedded checkout and a completed checkout can confirm a sale. It does not prove a visit or a person. |
 
 All links above were **Retrieved November 5, 2026**. Legal applicability remains a review question for the later implementation; this study does not claim a universal consent exemption.
 
@@ -57,6 +57,8 @@ A future creator setup would issue a scoped public token bound to one store and 
 The browser and application **must not send or store** the **full query string**, **full referrer**, **IP address**, name, **email**, fingerprint, user-agent-derived identity or any **persistent cross-site identifier**. No vendor pixel IDs are accepted in this channel. Although network infrastructure necessarily observes an IP address while routing a request, application code must not copy it into the event; the later review must separately verify infrastructure logs, access, redaction and retention.
 
 A restrictive referrer policy should send no referrer or origin only. Campaign values must be stripped of unexpected keys and control characters before they are admitted. Unknown fields reject the event rather than being retained “for later”.
+
+**Campaign tag values must reject personal data before any normalization.** An email-like, name-like, phone-like, account-like or high-entropy identifier value must reject the whole event. The receiver must not strip or hash an email or other personal data and retain the transformed value. The existing campaign cleaner is therefore not sufficient on its own: a later implementation must apply and test this refusal before calling that cleaner, and an uncertain value fails closed.
 
 ## Honest measurement and attribution
 

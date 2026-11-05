@@ -3,13 +3,12 @@ import {test} from 'node:test';
 import {NextRequest} from 'next/server';
 import {POST} from '@/app/api/store/creator-card/route';
 import {openSession,SESSION_COOKIE} from '@/lib/auth';
-import {readCreatorCard,NO_CARD,SAVE_CARD,DROP_CARD} from '@/lib/creator-card';
+import {readCreatorCard,NO_CARD} from '@/lib/creator-card';
 import {claimHandle,ensureStatsId,ensureStoreId,setSubscription,storeForEmail} from '@/lib/store';
 import {paidPeriod} from './billing-period-fixture';
 import {store as redis} from './redis-stub';
 
 globalThis.fetch=async()=>{throw Error('No external service in review');};
-if(process.env.G2_CARD_LUA==='1')console.log(JSON.stringify({SAVE_CARD,DROP_CARD}));
 
 test('a real confirmed save is still accepted',async()=>{
  const {post,store}=await fixture();const response=await post();
@@ -21,7 +20,7 @@ for(const [label,reply] of [
 ] as const)test(`an unapplied card save with ${label} is never confirmed`,async()=>{
  const {post,store}=await fixture();const real=redis.pipeline.bind(redis);let reached=false;
  redis.pipeline=async batch=>{
-  if(batch.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:card-save:'))){reached=true;return reply as never;}
+  if(batch.some(c=>(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:card-save:'))||(c[0]==='SET'&&String(c[1]).startsWith('nl:vcard:')))){reached=true;return reply as never;}
   return real(batch);
  };
  try{

@@ -34,4 +34,3 @@ async function main():Promise<void>{
   done();
 }
 void main();
-

@@ -180,7 +180,7 @@ export async function forgetNoticesPerson(id: string, who: string): Promise<numb
   const reply = await redisPipeline([["DEL", ...noticeKeys(id, who)]]);
   const length = Array.isArray(reply) ? Object.getOwnPropertyDescriptor(reply, "length") : undefined;
   const gone = Array.isArray(reply) ? Object.getOwnPropertyDescriptor(reply, "0") : undefined;
-  if (length?.value !== 1 || !gone || !("value" in gone) || typeof gone.value !== "number" || !Number.isSafeInteger(gone.value) || gone.value < 0 || gone.value > 2) {
+  if (length?.value !== 1 || !gone || !Object.hasOwn(gone, "value") || typeof gone.value !== "number" || !Number.isSafeInteger(gone.value) || gone.value < 0 || gone.value > 2) {
     throw new Error("Community notice erasure was not confirmed");
   }
   return gone.value;

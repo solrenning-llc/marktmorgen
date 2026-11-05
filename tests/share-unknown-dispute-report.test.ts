@@ -22,7 +22,7 @@ async function world(options:{feeListReply?:unknown;recent?:boolean;historical?:
  }
  const oldFetch=globalThis.fetch;
  const feeReply={...fee,...options.feePatch};
- const chargeReply={object:'charge',id:fee.charge,currency:'usd',amount:10000,amount_refunded:0,disputed:true,payment_intent:{id:'pi_UnknownState0001',metadata:{share_bps:'625',share_base:'10000',buyer_email:'synthetic-buyer@example.test',...options.metadataPatch}},...options.chargePatch};
+ const chargeReply={object:'charge',id:fee.charge,currency:'usd',amount:10000,amount_refunded:0,disputed:true,invoice:null,payment_intent:{object:'payment_intent',id:'pi_UnknownState0001',currency:'usd',amount:10000,latest_charge:fee.charge,metadata:{share_bps:'625',share_base:'10000',buyer_email:'synthetic-buyer@example.test',...options.metadataPatch}},...options.chargePatch};
  globalThis.fetch=async(input,init)=>{
   const url=new URL(String(input)),method=init?.method??'GET';calls.push({method,url});
   assert.equal(url.origin,'https://api.stripe.com');
@@ -30,7 +30,7 @@ async function world(options:{feeListReply?:unknown;recent?:boolean;historical?:
   if(url.pathname==='/v1/events')return Response.json({object:'list',has_more:false,data:[{id:'evt_UnknownState0001',data:{object:{application_fee:fee.id}}}]});
   if(url.pathname==='/v1/application_fees/'+fee.id)return Response.json(feeReply);
   if(url.pathname==='/v1/charges/'+fee.charge)return Response.json(chargeReply);
-  if(url.pathname==='/v1/checkout/sessions')return Response.json({object:'list',has_more:false,data:[{amount_total:10000,currency:'usd',total_details:{amount_tax:0,amount_shipping:0},...options.sessionPatch}],...options.sessionListPatch});
+  if(url.pathname==='/v1/checkout/sessions')return Response.json({object:'list',has_more:false,data:[{object:'checkout.session',id:'cs_test_UnknownState0001',payment_intent:'pi_UnknownState0001',amount_total:10000,currency:'usd',total_details:{amount_tax:0,amount_shipping:0},...options.sessionPatch}],...options.sessionListPatch});
   if(url.pathname==='/v1/disputes'){
    if(options.unavailable)throw Error('Synthetic dispute read unavailable');
    return Response.json(options.reply===undefined?{object:'list',has_more:false,data:[row]}:options.reply);
@@ -159,7 +159,7 @@ test('CX-110: a legacy session needs known amounts, matching currency and a comp
  assert.equal(counts.failed,0);assert.equal(counts.complete,true);assert.equal(counts.gaveBack,1);assert.equal(diagnostic.unknownAmounts,0);assert.equal(calls.filter(c=>c.method==='POST').length,1);
 });
 test('CX-110: invoice totals, basis points, date and currency must be known',async()=>{
- const invoice={currency:'usd',created:now-3600,total_excluding_tax:10000,subscription_details:{metadata:{store:'unknown-dispute-owner',share_bps:'625'}}};
+ const invoice={object:'invoice',id:'in_UnknownState0001',charge:fee.charge,currency:'usd',created:now-3600,total_excluding_tax:10000,subscription_details:{metadata:{store:'unknown-dispute-owner',share_bps:'625'}}};
  for(const patch of [{total_excluding_tax:undefined},{total_excluding_tax:null},{total_excluding_tax:'10000'},{total_excluding_tax:-1},{created:undefined},{created:NaN},{created:-1},{currency:undefined},{currency:'eur'},{subscription_details:{metadata:{store:'unknown-dispute-owner'}}}]){
   const {counts,calls}=await world({historical:true,chargePatch:{disputed:false,invoice:{...invoice,...patch}}}),diagnostic=counts as unknown as Diagnostic;
   assert.equal(calls.filter(c=>c.method==='POST').length,0,'invoice '+JSON.stringify(patch));

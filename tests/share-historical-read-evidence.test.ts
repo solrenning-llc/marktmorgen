@@ -32,7 +32,7 @@ async function world(options:{events?:unknown;pages?:(number:number)=>unknown;in
    if(url.pathname==='/v1/application_fees')return Response.json(page());
    if(url.pathname==='/v1/events'){eventPages++;return Response.json(options.pages?options.pages(eventPages):options.events===undefined?page([event]):options.events);}
    if(url.pathname==='/v1/application_fees/'+fee.id)return Response.json(Object.hasOwn(options,'feeReply')?options.feeReply:feeReply);
-   if(url.pathname==='/v1/charges/'+fee.charge)return options.chargeFails?Response.json({error:{message:'Synthetic outage'}},{status:500}):Response.json({object:'charge',id:fee.charge,application_fee:fee.id,currency:'usd',amount:10000,amount_refunded:10000,disputed:false,payment_intent:{id:'pi_HistoryRead0001',metadata:{share_bps:'625',share_base:'10000'}},...options.chargePatch});
+   if(url.pathname==='/v1/charges/'+fee.charge)return options.chargeFails?Response.json({error:{message:'Synthetic outage'}},{status:500}):Response.json({object:'charge',id:fee.charge,application_fee:fee.id,currency:'usd',amount:10000,amount_refunded:10000,disputed:false,invoice:null,payment_intent:{object:'payment_intent',id:'pi_HistoryRead0001',currency:'usd',amount:10000,latest_charge:fee.charge,metadata:{share_bps:'625',share_base:'10000'}},...options.chargePatch});
    if(method==='POST'&&url.pathname==='/v1/application_fees/'+fee.id+'/refunds'){
     const amount=Number(new URLSearchParams(String(init?.body)).get('amount'));feeReply.amount_refunded=Number(feeReply.amount_refunded)+amount;
     return Response.json({object:'fee_refund',id:'fr_HistoryRead0001',fee:fee.id,amount,currency:'usd'});

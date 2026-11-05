@@ -94,6 +94,20 @@ function providerReference(value: unknown, pattern: RegExp): string {
   return pattern.test(id) ? id : "";
 }
 
+/** Expanded payment data must identify its resource before it supplies money. */
+function expandedPayment(value: unknown, kind: string, pattern: RegExp, feeId: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownAmount(feeId, "Expanded payment evidence is unknown");
+  const row = value as Record<string, unknown>;
+  if (row.object !== kind || typeof row.id !== "string" || !pattern.test(row.id)) throw new UnknownAmount(feeId, "Expanded payment identity is unknown");
+  return row;
+}
+
+/** An expanded reference carries the same resource kind as a string id. */
+function paymentReference(value: unknown, kind: string, pattern: RegExp, feeId: string): string {
+  if (typeof value === "string" && pattern.test(value)) return value;
+  return str(expandedPayment(value, kind, pattern, feeId).id);
+}
+
 /** Null is a confirmed absence; missing or malformed is never no fee. */
 function historicalFeeReference(value: unknown): string | null {
   if (value === null) return null;
@@ -186,24 +200,30 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     }
   }
 
-  const invoice = charge.invoice as Record<string, unknown> | string | null;
-  if (invoice && typeof invoice === "object") {
+  // The requested expansion is either confirmed absent or a confirmed resource.
+  // A missing field or an unexpanded id cannot silently select another path.
+  if (charge.invoice !== null) {
+    const invoice = expandedPayment(charge.invoice, "invoice", /^in_[A-Za-z0-9]+$/, fee.id);
+    if (paymentReference(invoice.charge, "charge", /^(ch|py)_[A-Za-z0-9]+$/, fee.id) !== fee.charge) throw new UnknownAmount(fee.id, "Invoice does not belong to this charge");
     // A membership's payment: the rate written on the membership, held to
     // what the store owes on the day the invoice was made, which is none
     // inside the trial or once its plan has ended.
     const meta = ((invoice.subscription_details as { metadata?: unknown } | null)?.metadata ?? {}) as Record<string, string>;
-    const store = meta.store ? await storeForHandle(meta.store) : null;
+    const handle = str(meta.store);
+    const store = handle ? await storeForHandle(handle) : null;
     const written = metadataInteger(meta.share_bps), created = num(invoice.created);
     const goods = num(invoice.total_excluding_tax === undefined || invoice.total_excluding_tax === null ? invoice.subtotal : invoice.total_excluding_tax);
-    if (!store || written === null || written > 10_000 || created === null || goods === null || currency(invoice.currency) !== fee.currency) throw new UnknownAmount(fee.id);
+    if (!store || store.stripeAccountId !== fee.account || written === null || written > 10_000 || created === null || goods === null || currency(invoice.currency) !== fee.currency) throw new UnknownAmount(fee.id);
     const owedRate = shareBps(store, created, live);
     if (num(owedRate) === null || owedRate > 10_000) throw new UnknownAmount(fee.id);
     const bps = Math.min(written, owedRate);
     return owedOn({ bps, base: goods, amount, refunded, lostDispute });
   }
 
-  const intent = charge.payment_intent as Record<string, unknown> | string | null;
-  const meta = (intent && typeof intent === "object" ? intent.metadata : charge.metadata) as Record<string, string> | null;
+  const intent = charge.payment_intent === null ? null : expandedPayment(charge.payment_intent, "payment_intent", /^pi_[A-Za-z0-9]+$/, fee.id);
+  if (intent && (paymentReference(intent.latest_charge, "charge", /^(ch|py)_[A-Za-z0-9]+$/, fee.id) !== fee.charge
+    || currency(intent.currency) !== fee.currency || num(intent.amount) !== amount)) throw new UnknownAmount(fee.id, "Payment intent does not match this charge");
+  const meta = (intent ? intent.metadata : charge.metadata) as Record<string, string> | null;
   // The rate the sale was made at, written on it when the checkout opened.
   const bps = metadataInteger(meta?.share_bps);
   if (bps === null || bps > 10_000) throw new UnknownAmount(fee.id);
@@ -212,13 +232,14 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     // A legacy checkout may omit this metadata. A supplied invalid amount
     // never falls back or becomes zero; missing data needs the actual session.
     if (meta?.share_base !== undefined) throw new UnknownAmount(fee.id);
-    const intentId = intent && typeof intent === "object" ? str(intent.id) : str(intent);
+    const intentId = intent ? str(intent.id) : "";
     if (!intentId) throw new UnknownAmount(fee.id);
     const sessions = await onAccount("GET", fee.account, `/checkout/sessions?payment_intent=${encodeURIComponent(intentId)}&limit=1`, undefined, READ_VERSION);
     if (sessions?.object !== "list" || sessions.has_more !== false || !Array.isArray(sessions.data) || sessions.data.length !== 1) throw new UnknownAmount(fee.id);
-    const session = sessions.data[0] as Record<string, unknown> | null;
-    if (!session || typeof session !== "object" || Array.isArray(session) || currency(session.currency) !== fee.currency) throw new UnknownAmount(fee.id);
-    const read = session ? goodsOfSession(session) : null;
+    const session = expandedPayment(sessions.data[0], "checkout.session", /^cs_[A-Za-z0-9_]+$/, fee.id);
+    if (currency(session.currency) !== fee.currency || num(session.amount_total) !== amount
+      || paymentReference(session.payment_intent, "payment_intent", /^pi_[A-Za-z0-9]+$/, fee.id) !== intentId) throw new UnknownAmount(fee.id, "Checkout session does not match this payment intent");
+    const read = goodsOfSession(session);
     if (read === null) throw new UnknownAmount(fee.id);
     goods = read;
   }

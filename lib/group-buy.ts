@@ -315,19 +315,26 @@ function bit(reply: unknown): 0 | 1 | null {
 }
 
 /**
- * What an address was given of a product, as HGET answers it: null when
- * nothing, the job that gave it ("" when it cannot be read), or undefined
- * when the answer is not of that shape.
+ * What an address was given of a product, as HGET answers it: null only for
+ * an explicit nil (nothing given), the job that gave it and when for a record
+ * as lib/imported-purchases.ts grantImported writes one (a JSON object with
+ * a job and a time), or undefined for anything else: a record that cannot
+ * be read is unknown, never a gift made some other way (CX-123 rule 24), so
+ * it never says "has" or "already" and never takes a mark off.
  */
 function givenBy(reply: unknown): { job: string; at: number } | null | undefined {
   if (reply === null) return null;
   if (typeof reply !== "string") return undefined;
+  let value: unknown;
   try {
-    const value = JSON.parse(reply) as { job?: unknown; at?: unknown };
-    return { job: typeof value.job === "string" ? value.job : "", at: typeof value.at === "number" ? value.at : 0 };
+    value = JSON.parse(reply);
   } catch {
-    return { job: "", at: 0 };
+    return undefined;
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { job, at } = value as { job?: unknown; at?: unknown };
+  if (typeof job !== "string" || !job || typeof at !== "number" || !Number.isFinite(at) || at < 0) return undefined;
+  return { job, at };
 }
 
 /** Reads a hash as Redis returns it, a flat list or an object. */
@@ -454,6 +461,24 @@ export function placesHeld(group: Pick<Group, "h">, nowMs = Date.now()): boolean
 }
 
 /**
+ * The notice the purchase's page shows after its link was opened, by name
+ * (lib/buyer-words/giving.ts groupNotices): "opening" when opening a valid
+ * link threw, since then the place may or may not be the person's already
+ * (the product given, another open of the same link still going), and only
+ * opening it again says which. "expired" is only for a link that is not one,
+ * or no longer leads anywhere.
+ */
+export function placeNotice(input: { token: string; tokenValid: boolean; taken: Taken | null; threw: boolean; status: string }): string | null {
+  const { taken } = input;
+  if (taken?.outcome === "full") return "full";
+  if (taken?.outcome === "resting") return "resting";
+  if (input.tokenValid && input.threw) return "opening";
+  if (taken?.outcome === "gone" || (input.token && !taken)) return "expired";
+  // A notice only this page draws is never read from the address bar.
+  return input.status && input.status !== "expired" && input.status !== "opening" ? input.status : null;
+}
+
+/**
  * Opens the link from a place's email: takes a place for its address, once.
  * "already" is the same address opening its link again; "has" is an address
  * that owns the product some other way, which takes no place.
@@ -463,7 +488,6 @@ export async function takePlace(input: {
   token: string;
   recordStart: (email: string, courseProductId: string, startSeconds: number) => Promise<void>;
 }): Promise<Taken> {
-  const { store } = input;
   if (!PLACE_TOKEN.test(input.token) || !isRedisConfigured()) return { outcome: "gone" };
   const [raw] = await redisPipeline([["GET", tokenKey(input.token)]]);
   let asked: { g?: unknown; e?: unknown } = {};
@@ -471,63 +495,112 @@ export async function takePlace(input: {
     asked = typeof raw === "string" ? (JSON.parse(raw) as typeof asked) : {};
   } catch {}
   if (typeof asked.g !== "string" || typeof asked.e !== "string" || !asked.e) return { outcome: "gone" };
-  const group = await openGroup(store, asked.g);
+  const group = await openGroup(input.store, asked.g);
   if (!group) return { outcome: "gone" };
   const email = asked.e;
   const who = addressHash(email);
 
+  // The link opened again once all was done: answered from one read, with
+  // nothing written (CX-123 rule 24: in its exact shape, or not at all).
+  const first = await readPlace(group, email, who);
+  if (first.given?.job === groupJob(group.id) && first.mark?.d) return { outcome: "already", email, group };
+
   // One open of an address's link at a time (two tabs, or a mail scanner and
-  // the person), so each finds the address's mark as the other left it. An
-  // answer of another shape may have set it: it ends on its own.
+  // the person), so each finds the address's mark as the other left it. The
+  // opening is this open's own random value, and is taken off only while it
+  // still holds it. An answer of another shape may have set it: it ends on
+  // its own.
   const opening = openingKey(group.id, who);
-  const lock = await redisPipeline([["SET", opening, "1", "NX", "EX", 30]]).then((r) => repliesFor(r, 1)?.[0], () => undefined);
+  const mine = randomBytes(16).toString("hex");
+  const lock = await redisPipeline([["SET", opening, mine, "NX", "EX", OPENING_SECONDS]]).then((r) => repliesFor(r, 1)?.[0], () => undefined);
   if (lock === null) throw new Error("this place's link is being opened already");
   if (lock !== "OK") throw new UnknownReplyError("a place's opening");
   try {
     return await takeOpened(input, group, email, who);
   } finally {
-    await redisPipeline([["DEL", opening]]).catch(() => undefined);
+    // Read, compared and deleted in two steps (no script for it here): only
+    // an open that outlived its 30 seconds between the two could take off a
+    // newer one's, and every open still reads the address's state afresh.
+    const [held] = await redisPipeline([["GET", opening]]).catch(() => [undefined]);
+    if (held === mine) await redisPipeline([["DEL", opening]]).catch(() => undefined);
   }
+}
+
+/** How long one open of a link holds it, at most. */
+const OPENING_SECONDS = 30;
+
+/** A place's mark: who, when, the hour its order was admitted in, and whether all that follows the gift was done. */
+type Mark = Member & { h?: number; d?: 1 };
+
+function markOf(reply: unknown): Mark | null | undefined {
+  if (reply === null) return null;
+  if (typeof reply !== "string") return undefined;
+  try {
+    const value = JSON.parse(reply) as Partial<Mark>;
+    return {
+      e: typeof value.e === "string" ? value.e : "",
+      at: typeof value.at === "number" ? value.at : 0,
+      ...(Number.isSafeInteger(value.h) ? { h: value.h } : {}),
+      ...(value.d === 1 ? { d: 1 as const } : {}),
+    };
+  } catch {
+    return { e: "", at: 0 };
+  }
+}
+
+/** The address's mark and what it was given, in their exact shape; throws when either is not. */
+async function readPlace(group: Group, email: string, who: string): Promise<{ mark: Mark | null; given: { job: string; at: number } | null }> {
+  const read = repliesFor(
+    await redisPipeline([
+      ["HGET", membersKey(group.id), who],
+      ["HGET", importedKey(group.s, email), group.p],
+    ]),
+    2,
+  );
+  const mark = read ? markOf(read[0]) : undefined;
+  const given = read ? givenBy(read[1]) : undefined;
+  if (mark === undefined || given === undefined) throw new UnknownReplyError("a place's address");
+  return { mark, given };
 }
 
 async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, email: string, who: string): Promise<Taken> {
   const { store } = input;
   const members = membersKey(group.id);
-  const finish = async (at: number) => {
-    // The doors that read what an address was given are opened for this store.
+  const write = (mark: Mark) => JSON.stringify({ e: email, at: mark.at, ...(mark.h !== undefined ? { h: mark.h } : {}), ...(mark.d ? { d: 1 } : {}) });
+  /**
+   * All that follows the gift, each part once: the doors that read gifts
+   * opened for this store, a course dated from the day the place was taken,
+   * the order counted by its name (lib/orders.ts). Then the mark says it is
+   * done, and only once that is written is the room its order was admitted
+   * with given back (lib/order-admission.ts): a mark whose "done" was lost
+   * leaves that room held until its day ends, never given back twice.
+   */
+  const finish = async (mark: Mark) => {
     if (!store.pastBuyers) await setPastBuyers(storeRef(store));
-    // A course is dated from the day its place was taken, so what opens over
-    // time opens on time for each person (kept once: lib/learn.ts).
-    for (const id of [group.p, ...(group.items ?? [])]) await input.recordStart(email, id, at);
-    // Each place taken is one of the month's orders (lib/orders.ts), counted
-    // once by its name. The purchase was paid, so it is covered wherever its
-    // sale paid a share.
+    for (const id of [group.p, ...(group.items ?? [])]) await input.recordStart(email, id, mark.at);
+    // The purchase was paid, so it is covered wherever its sale paid a share.
     await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0);
+    const done = await redisPipeline([["HSET", members, who, write({ ...mark, d: 1 })]]).then((r) => repliesFor(r, 1), () => null);
+    if (done && countOf(done[0]) !== null && mark.h !== undefined) await settleAdmitted(store, mark.h);
   };
 
-  // Read in their exact shape, before anything is written (CX-123 rule 24).
-  const read = repliesFor(
-    await redisPipeline([
-      ["HEXISTS", members, who],
-      ["HGET", importedKey(group.s, email), group.p],
-    ]),
-    2,
-  );
-  const marked = read ? bit(read[0]) : null;
-  const given = read ? givenBy(read[1]) : undefined;
-  if (marked === null || given === undefined) throw new UnknownReplyError("a place's address");
+  // Read again now that this open holds the link.
+  const { mark, given } = await readPlace(group, email, who);
   if (given && given.job === groupJob(group.id)) {
-    // Given by this purchase: "already" only once that is so. What follows
-    // the gift is done again, each part once, in case the open that gave it
-    // stopped before them: only for a gift of the last week, well inside the
-    // mark that counts its order once (lib/orders.ts, 45 days).
-    if (given.at > 0 && now() - given.at < 7 * 86_400) await finish(given.at);
+    // Given by this purchase: "already" only once that is so. A gift whose
+    // mark went missing has it written back, so it is counted among the
+    // places. What follows the gift is done again when it was not, for a
+    // gift of the last week (well inside the mark that counts its order
+    // once, lib/orders.ts, 45 days).
+    const held: Mark = mark ?? { e: email, at: given.at };
+    if (!mark) await redisPipeline([["HSETNX", members, who, write(held)]]);
+    if (!held.d && given.at > 0 && now() - given.at < 7 * 86_400) await finish({ ...held, at: given.at });
     return { outcome: "already", email, group };
   }
   if (given) {
     // Given it some other way: no place is used for it, and a mark left by an
     // open that stopped half way is taken off.
-    if (marked === 1) await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
+    if (mark) await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
     return { outcome: "has", email, group };
   }
 
@@ -536,13 +609,13 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   // one among them. A mark already there is this address's own, from an open
   // that stopped before handing anything over, and is picked up here.
   const wrote = await redisPipeline([
-    ...(marked === 1 ? [] : [["HSETNX", members, who, JSON.stringify({ e: email, at } satisfies Member)] as (string | number)[]]),
+    ...(mark ? [] : [["HSETNX", members, who, write({ e: email, at })] as (string | number)[]]),
     ["HLEN", members],
   ]).then(
-    (r) => repliesFor(r, marked === 1 ? 1 : 2),
+    (r) => repliesFor(r, mark ? 1 : 2),
     () => null,
   );
-  const set = wrote && marked !== 1 ? bit(wrote[0]) : 1;
+  const set = wrote && !mark ? bit(wrote[0]) : 1;
   const count = wrote ? countOf(wrote.at(-1)) : null;
   if (!wrote || set === null || count === null || count < 1) {
     // The answer never came or is of another shape: the mark may be written,
@@ -582,25 +655,34 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
     }
     hour = admitted.hour;
   }
+  const placed: Mark = { e: email, at: mark?.at ?? at, ...(hour !== null ? { h: hour } : {}) };
   await redisPipeline([["EXPIRE", members, GROUP_KEPT_SECONDS]]);
 
-  const [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], at, store.sid);
+  const [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], placed.at, store.sid);
   if (!granted) {
-    const [again] = await redisPipeline([["HGET", importedKey(group.s, email), group.p]]);
-    const other = givenBy(again);
+    // Read in its exact shape: a gift this purchase made keeps its mark, so
+    // an unknown answer takes nothing off and is said as not done.
+    const one = repliesFor(await redisPipeline([["HGET", importedKey(group.s, email), group.p]]), 1);
+    const other = one ? givenBy(one[0]) : undefined;
+    if (other === undefined) throw new UnknownReplyError("a place's gift");
+    // This open's order was not the one counted: the room it was admitted
+    // with goes back (the other open gives back its own).
     if (!held && hour !== null) await settleAdmitted(store, hour);
     if (other && other.job === groupJob(group.id)) {
-      // This purchase gave it already: its place stays.
-      await finish(other.at > 0 ? other.at : at);
+      // This purchase gave it already, from another open of the same link:
+      // its place stays, and what follows is that open's, or the next one's.
       return { outcome: "already", email, group };
     }
     // It reached this address another way in the same instant.
     await giveBack();
     return { outcome: "has", email, group };
   }
-  await finish(at);
-  // Counted now, so what was held for it is given back (lib/order-admission.ts).
-  if (hour !== null) await settleAdmitted(store, hour);
+  // The hour goes on the mark once this open's gift is the one made, so an
+  // open that stops before all that follows is done gives its room back when
+  // the link is opened again; a mark without it leaves the room held until
+  // its day ends, never given back twice.
+  if (hour !== null) await redisPipeline([["HSET", members, who, write(placed)]]);
+  await finish(placed);
   return { outcome: "taken", email, group };
 }
 

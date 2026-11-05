@@ -23,8 +23,9 @@
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { cardLink, openCardUpdate } from "@/lib/card-update";
-import { askPlace, placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
-import { addressHash, importedFor } from "@/lib/imported-purchases";
+import { askPlace, placeNotice, placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
+import { addressHash, grantImported, importedFor, importedKey } from "@/lib/imported-purchases";
+import { recordEnrollment } from "@/lib/learn";
 import { requestCopy, spendClaim } from "@/lib/free";
 import { paidPeriod } from "./billing-period-fixture";
 import { advance, store as redis } from "./redis-stub";
@@ -263,14 +264,15 @@ async function main(): Promise<void> {
     const take = () => outcome(() => takePlace({ store, token, recordStart: async (email) => void starts.push(email) }));
     const givenTo = async (who: string) => (await importedFor((await storeForEmail(OWNER))!, who)).length;
     const marksOf = () => Number(redis.run(["HLEN", `nl:grp:${id}:m`]));
-    const isRead = (commands: Command[]) => commands.length === 2 && commands[0]?.[0] === "HEXISTS" && /^nl:grp:.+:m$/.test(key(commands[0])) && commands[1]?.[0] === "HGET";
+    const isRead = (commands: Command[]) => commands.length === 2 && commands[0]?.[0] === "HGET" && /^nl:grp:.+:m$/.test(key(commands[0])) && commands[1]?.[0] === "HGET";
     for (const [label, reply] of [
-      ["a mark answered as text", ["0", null]],
-      ["a mark of two", [2, null]],
-      ["what was given as a number", [0, 1]],
+      ["a mark answered as a number", [1, null]],
+      ["a mark answered as a list", [[], null]],
+      ["what was given as a number", [null, 1]],
+      ["what was given as true", [null, true]],
       ["a reply that is not a list", { x: 1 }],
-      ["a reply cut short", [0]],
-      ["a reply too long", [0, null, null]],
+      ["a reply cut short", [null]],
+      ["a reply too long", [null, null, null]],
       ["a read that never answers", "throw"],
     ] as [string, unknown][]) {
       counter = { match: isRead, reply };
@@ -366,7 +368,203 @@ async function main(): Promise<void> {
     }
   }
 
-  part("Two pressing for the last place in the same instant: one gets it, and nobody is told it is taken while it is free");
+  // Review of 5 November 2026: the proofs P1, P3 and P4 as the reviewer wrote them, then what each must give.
+  const given = async (address: string) => (await importedFor((await storeForEmail(OWNER))!, address)).length;
+  const linkFor = async (id: string, address: string) => {
+    const r = await askPlace({ store, id, email: address, product, base: BASE, from: FROM, ordersLink: async () => null });
+    if (r !== "sent") throw new Error("ask " + r);
+    return tokenFor(address);
+  };
+  const realStart = async (email: string, productId: string, start: number) => {
+    const c = productId === product.id ? product : await readListing(store, productId);
+    if (c?.course) await recordEnrollment(store, email, productId, start);
+  };
+  const importedKeyOf = (address: string) => importedKey(store.statsId!, address);
+  const o = (x: unknown) => (typeof x === "object" && x ? (x as { outcome: string }).outcome : x);
+  /** Orders the store's checkouts and places hold right now (lib/order-admission.ts), over every hour. */
+  const holding = () =>
+    redis
+      .keys()
+      .filter((k) => k.startsWith("nl:orders:open:") && !k.endsWith(":b"))
+      .reduce((sum, k) => sum + (redis.run(["HVALS", k]) as string[]).reduce((n, v) => n + Number(v), 0), 0);
+  const ordersCounted = (from: number) => seen.slice(from).filter((c) => c[0] === "INCR" && key(c).startsWith("nl:orders:n:")).length;
+  /** The page's notice after an open that threw, for a link that is one. */
+  const noticeAfterThrow = (token: string) => placeNotice({ token, tokenValid: true, taken: null, threw: true, status: "" });
+
+  part("P1: finish throws after the grant");
+  {
+    const id = await paidGroup("pi_ReviewP1");
+    const t = await linkFor(id, "p1@numbergates.example");
+    const before = holding();
+    let fail = true;
+    const got = await outcome(() => takePlace({ store, token: t, recordStart: async () => { if (fail) throw new Error("enrollment write lost"); } }));
+    is("P1 first open throws (page says unavailable: no place was taken)", got, "threw Error");
+    is("P1 but the product was given and the place counted", [await given("p1@numbergates.example"), await placesTaken(id)], [1, 1]);
+    is("P1 the page does not say no place was taken: it says to open the link again", noticeAfterThrow(t), "opening");
+    is("P1 the order's room is still held while what follows the gift is not done", holding() - before, 1);
+    fail = false;
+    const starts: string[] = [];
+    let from = seen.length;
+    const again = await outcome(() => takePlace({ store, token: t, recordStart: async (e, p) => void starts.push(p) }));
+    is("P1 reopen: already, and finish redone", [typeof again === "object" && again.outcome, starts.length], ["already", 1]);
+    is("P1 reopen: the order counted once, and its room given back once", [ordersCounted(from), holding() - before], [1, 0]);
+    from = seen.length;
+    const third = await outcome(() => takePlace({ store, token: t, recordStart: async (e, p) => void starts.push(p) }));
+    is("P1 opened once more: already, from one read of four commands, nothing redone", [o(third), seen.length - from, starts.length, ordersCounted(from), holding() - before], ["already", 4, 1, 0, 0]);
+  }
+
+  part("P2: commands per open");
+  {
+    const id = await paidGroup("pi_ReviewP2");
+    const t = await linkFor(id, "p2@numbergates.example");
+    let from = seen.length;
+    const first = await takePlace({ store, token: t, recordStart: realStart });
+    console.log("P2 taken commands:", seen.length - from, first.outcome, JSON.stringify(seen.slice(from).map((c) => c[0])));
+    from = seen.length;
+    const second = await takePlace({ store, token: t, recordStart: realStart });
+    console.log("P2 already commands:", seen.length - from, second.outcome, JSON.stringify(seen.slice(from).map((c) => c[0])));
+    is("P2 a place taken, then opened again: already, in four commands (the token, the purchase, the mark and the gift)", [first.outcome, second.outcome, seen.length - from], ["taken", "already", 4]);
+  }
+
+  part("P3: two opens of the same link at once");
+  {
+    const id = await paidGroup("pi_ReviewP3");
+    const t = await linkFor(id, "p3@numbergates.example");
+    const [a, b] = await Promise.all([
+      outcome(() => takePlace({ store, token: t, recordStart: async () => undefined })),
+      outcome(() => takePlace({ store, token: t, recordStart: async () => undefined })),
+    ]);
+    console.log("P3 outcomes:", o(a), o(b), "given:", await given("p3@numbergates.example"));
+    is("P3 one open takes it and the other is refused while it goes; the product given once", [[o(a), o(b)].sort(), await given("p3@numbergates.example"), await placesTaken(id)], [["taken", "threw Error"], 1, 1]);
+    is("P3 the refused open is not told no place was taken: it is told to open the link again", noticeAfterThrow(t), "opening");
+    is("P3 and opening it again says it is hers", o(await outcome(() => takePlace({ store, token: t, recordStart: async () => undefined }))), "already");
+  }
+
+  part("P4: grant refused and the re-read in another shape: mark removed while this purchase gave it");
+  {
+    const id = await paidGroup("pi_ReviewP4");
+    const x = "p4x@numbergates.example";
+    const tx = await linkFor(id, x);
+    const ty = await linkFor(id, "p4y@numbergates.example");
+    const tz = await linkFor(id, "p4z@numbergates.example");
+    // The grant lands first (another open of x whose lock had expired), and the re-read answers in another shape.
+    const imp = (c: Command) => c[0] === "HGET" && /^nl:imp:buy:/.test(key(c));
+    let hget = 0;
+    const orig = redis.pipeline;
+    let armed = true;
+    redis.pipeline = (async (commands: Command[]) => {
+      if (armed && commands.length === 1 && imp(commands[0])) {
+        hget += 1;
+        if (hget === 1) { armed = false; seen.push(...commands); return [1]; }
+      }
+      if (armed && commands.some((c) => c[0] === "EXPIRE" && /^nl:grp:.+:m$/.test(key(c)))) {
+        // simulate the other open of x granting now
+        await grantImported(store.statsId!, `group:${id}`, [{ email: x, productId: product.id, items: null }], 1_900_000_100, store.sid);
+      }
+      return orig(commands);
+    }) as typeof redis.pipeline;
+    const got = await outcome(() => takePlace({ store, token: tx, recordStart: async () => undefined }));
+    redis.pipeline = orig;
+    console.log("P4 x:", o(got), "x given:", await given(x), "marks:", await placesTaken(id));
+    is("P4 the re-read in another shape: said as not done, and x keeps the mark of the place this purchase gave", [o(got), await given(x), await placesTaken(id)], ["threw UnknownReplyError", 1, 1]);
+    const gy = await outcome(() => takePlace({ store, token: ty, recordStart: async () => undefined }));
+    const gz = await outcome(() => takePlace({ store, token: tz, recordStart: async () => undefined }));
+    console.log("P4 y:", o(gy), "z:", o(gz), "given x,y,z:", await given(x), await given("p4y@numbergates.example"), await given("p4z@numbergates.example"));
+    is("P4 never three gifts for two places: y takes the second, z is told every place is taken", [o(gy), o(gz), await given(x), await given("p4y@numbergates.example"), await given("p4z@numbergates.example")], ["taken", "full", 1, 1, 0]);
+  }
+
+  part("A record of what an address was given that cannot be read is unknown: never a gift, never a mark taken off");
+  {
+    for (const [n, raw] of ["{broken", "null", "[]", JSON.stringify({ job: "", at: 1 }), JSON.stringify({ job: "gift:x" })].entries()) {
+      const id = await paidGroup(`pi_ReviewU${n}`);
+      const u = `u${n}@numbergates.example`;
+      const tu = await linkFor(id, u);
+      const orig = redis.pipeline;
+      let armed = true;
+      // The grant refused (a record landed first, as P4's), and that record read back as this.
+      redis.pipeline = (async (commands: Command[]) => {
+        if (armed && commands.some((c) => c[0] === "EXPIRE" && key(c) === `nl:grp:${id}:m`)) redis.run(["HSET", importedKeyOf(u), product.id, raw]);
+        if (armed && commands.length === 1 && commands[0][0] === "HGET" && /^nl:imp:buy:/.test(key(commands[0]))) {
+          armed = false;
+          return [raw];
+        }
+        return orig(commands);
+      }) as typeof redis.pipeline;
+      const got = await outcome(() => takePlace({ store, token: tu, recordStart: async () => undefined }));
+      redis.pipeline = orig;
+      is(`the grant refused and its record read back as ${raw}: said as not done, the mark kept`, [o(got), await placesTaken(id)], ["threw UnknownReplyError", 1]);
+      is(`a record ${raw} when a link is asked for: unavailable, no link sent`, await askPlace({ store, id, email: u, product, base: BASE, from: FROM, ordersLink: async () => null }), "unavailable");
+      redis.run(["DEL", importedKeyOf(u)]);
+    }
+  }
+
+  part("A gift of this purchase granted by another open while this one went: already, its mark kept, this open's room given back");
+  {
+    const id = await paidGroup("pi_ReviewG");
+    const x = "g-x@numbergates.example";
+    const tx = await linkFor(id, x);
+    const before = holding();
+    const orig = redis.pipeline;
+    let armed = true;
+    redis.pipeline = (async (commands: Command[]) => {
+      if (armed && commands.some((c) => c[0] === "EXPIRE" && /^nl:grp:.+:m$/.test(key(c)))) {
+        armed = false;
+        await grantImported(store.statsId!, `group:${id}`, [{ email: x, productId: product.id, items: null }], 1_900_000_100, store.sid);
+      }
+      return orig(commands);
+    }) as typeof redis.pipeline;
+    const got = await outcome(() => takePlace({ store, token: tx, recordStart: async () => undefined }));
+    redis.pipeline = orig;
+    is("already, given once, the mark kept, and the room this open was admitted with given back", [o(got), await given(x), await placesTaken(id), holding() - before], ["already", 1, 1, 0]);
+  }
+
+  part("An address given the product another way: its pending mark comes off and no place is used");
+  {
+    const id = await paidGroup("pi_ReviewH");
+    const h = "h-other@numbergates.example";
+    const th = await linkFor(id, h);
+    redis.run(["HSET", `nl:grp:${id}:m`, addressHash(h), JSON.stringify({ e: h, at: 1 })]);
+    await grantImported(store.statsId!, "api:test-gift", [{ email: h, productId: product.id, items: null }], 1_900_000_100, store.sid);
+    is("has, and the half-way mark taken off", [o(await outcome(() => takePlace({ store, token: th, recordStart: async () => undefined }))), await placesTaken(id)], ["has", 0]);
+  }
+
+  part("A gift of this purchase whose mark went missing: the mark is written back, so it counts among the places");
+  {
+    const id = await paidGroup("pi_ReviewW");
+    const w = "w-mark@numbergates.example";
+    const tw = await linkFor(id, w);
+    is("taken", o(await outcome(() => takePlace({ store, token: tw, recordStart: async () => undefined }))), "taken");
+    redis.run(["HDEL", `nl:grp:${id}:m`, addressHash(w)]);
+    is("opened again: already, and the place counted again", [o(await outcome(() => takePlace({ store, token: tw, recordStart: async () => undefined }))), await placesTaken(id)], ["already", 1]);
+  }
+
+  part("The open's hold on its link: taken off only while it is still this open's");
+  {
+    const id = await paidGroup("pi_ReviewL");
+    const l = "l-lock@numbergates.example";
+    const tl = await linkFor(id, l);
+    const opening = `nl:grp:${id}:t:${addressHash(l)}`;
+    // This open outlives its 30 seconds: its hold ends and another open of the link takes it.
+    around = { match: (cs) => cs.some((c) => c[0] === "HSETNX" && key(c) === `nl:grp:${id}:m`), before: () => void redis.run(["SET", opening, "another-open", "EX", 30]), after: () => undefined };
+    is("the place taken", o(await outcome(() => takePlace({ store, token: tl, recordStart: async () => undefined }))), "taken");
+    is("the other open's hold is left where it is", redis.run(["GET", opening]), "another-open");
+    redis.run(["DEL", opening]);
+  }
+
+  part("The page's notice after the link was opened (lib/group-buy.ts placeNotice)");
+  {
+    const t = "a".repeat(64);
+    const g = { id: "grp_x", s: "s", p: "p", people: 2, at: 1 };
+    is("an open that threw, with a link that is one: open it again", placeNotice({ token: t, tokenValid: true, taken: null, threw: true, status: "" }), "opening");
+    is("a link that is not one: expired", placeNotice({ token: "nope", tokenValid: false, taken: null, threw: false, status: "" }), "expired");
+    is("a link that leads nowhere: expired", placeNotice({ token: t, tokenValid: true, taken: { outcome: "gone" }, threw: false, status: "" }), "expired");
+    is("every place taken: full", placeNotice({ token: t, tokenValid: true, taken: { outcome: "full", email: "a@b.example", group: g }, threw: false, status: "" }), "full");
+    is("the store resting: resting", placeNotice({ token: t, tokenValid: true, taken: { outcome: "resting", email: "a@b.example", group: g }, threw: false, status: "" }), "resting");
+    is("no link: the status the form sent", placeNotice({ token: "", tokenValid: false, taken: null, threw: false, status: "sent" }), "sent");
+    is("the opening notice is never read from the address bar", placeNotice({ token: "", tokenValid: false, taken: null, threw: false, status: "opening" }), null);
+  }
+
+  part("Two pressing for the last place: one gets it, and nobody is told it is taken while it is free");
   {
     const id = await paidGroup("pi_NumberGatesT");
     const members = `nl:grp:${id}:m`;

@@ -36,7 +36,7 @@ function exact(row: Data, fields: readonly string[]): boolean {
   return Object.keys(row).length === fields.length && fields.every(key => Object.hasOwn(row, key));
 }
 function fresh(row: Data, now: number): boolean {
-  return clock(row.observedAtMs) && row.observedAtMs <= now && now - row.observedAtMs <= OWNER_REPORT_FRESH_MS;
+  return Object.hasOwn(row, "observedAtMs") && clock(row.observedAtMs) && row.observedAtMs <= now && now - row.observedAtMs <= OWNER_REPORT_FRESH_MS;
 }
 function numbers(row: Data, fields: readonly string[]): Record<string, number> | null {
   const result: Record<string, number> = {};
@@ -139,6 +139,6 @@ export function companyOwnerReport(serialized: string | null, requestedMonth: st
     } catch { /* An absent or malformed snapshot remains unknown. */ }
   }
   return Object.freeze({ schema: 1, month,
-    sections: Object.freeze(IDS.map(id => month === null ? unknown(id) : section(id, root[id], month, now))),
+    sections: Object.freeze(IDS.map(id => month === null || !Object.hasOwn(root, id) ? unknown(id) : section(id, root[id], month, now))),
   });
 }

@@ -931,6 +931,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:2fa:lock:@lib/two-step.ts": company("An account's two-step record being changed", "An account's, seconds."),
   "nl:2fa:locked:@lib/two-step.ts": company("A session let in without its second step", "An account's."),
   "nl:2fa:lockedset:@lib/two-step.ts": company("An account's locked sessions, and when they could not be logged out", "An account's set, and its \":kept\" time (31 days). One shared list under the name \"any account\": at most KEPT_ANY_MAX (100) account tags of 41 bytes (4,100 bytes) or \"*\" past them, 31 days after the last failed read (lib/two-step.ts KEEP_ANY)."),
+  "nl:2fa:keptstar:@lib/two-step.ts": company("Monthly count of the kept accounts' list past its ceiling", "One count a month, no account; at most 14 monthly keys alive for 400 days."),
   "nl:2fa:rescue:@lib/two-step.ts": company("A rescue link", "An account's."),
   "nl:2fa:setup:@lib/two-step.ts": company("A second step being set up", "An account's."),
   "nl:upload-budget:v2:{@lib/upload-budget-policy.ts": company("The company's upload ledger, a month", "The company's ledger."),

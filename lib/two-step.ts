@@ -119,6 +119,27 @@ if v ~= '*' and not string.find(' ' .. v .. ' ', ' ' .. ARGV[1] .. ' ', 1, true)
 end
 redis.call('SET', KEYS[1], v, 'EX', ARGV[3])
 return v == '*' and 0 or 1`;
+/** How many times in a month the list was found past its ceiling (endLocked): a count, no account. */
+const keptStarKey = (month: string) => `nl:2fa:keptstar:${month}`;
+
+/** For the owner's report: how many times in `month` the list was past its ceiling; null when it cannot be read. */
+export async function keptStarMonth(month: string): Promise<number | null> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
+  const [raw] = await redisPipeline([["GET", keptStarKey(month)]]);
+  if (raw === null) return 0;
+  return typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw) && Number.isSafeInteger(Number(raw)) ? Number(raw) : null;
+}
+
+/**
+ * The owner's words for it, beside lib/store-forget-retry.ts storeForgetLine (Portuguese, numbers only; to be
+ * wired into the monthly owner report with it: lib/company-margin-report.ts, 465 [MR2], Codex E). Empty when none.
+ */
+export function keptStarLine(month: string, times: number | null): string {
+  if (times === null) return "Sessões travadas mantidas: não foi possível ler a contagem deste mês; o estado é desconhecido.";
+  if (!times) return "";
+  return `Sessões travadas mantidas em ${month}: em ${times} leituras ilegíveis, a lista de contas passou do teto de ${KEPT_ANY_MAX}. Enquanto isso durar, cada verificação de sessão sem trava própria custa 3 comandos Redis a mais, até ${SESSION_TTL_SECONDS / 86_400 + 1} dias depois da última dessas leituras.`;
+}
+
 /** A one-way tag of an account: its locked set's own hash, never the address. */
 const accountTag = (email: string) => lockedSetKey(email).slice("nl:2fa:lockedset:".length);
 const rescueKey = (token: string) => `nl:2fa:rescue:${sha(`nimbus-2fa-rescue:${token}`).slice(0, 40)}`;
@@ -511,12 +532,20 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
     console.error("logging out the sessions let in without a second step failed", new UnknownReplyError("the locked sessions"));
     // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
     // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
-    await redisPipeline([
+    const [, listed] = await redisPipeline([
       ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
       // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
       ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
       ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
     ]);
+    // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
+    // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
+    // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
+    if (listed !== 1) {
+      console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
+      const month = new Date(now).toISOString().slice(0, 7);
+      await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
+    }
     return false;
   }
   for (const session of sessions) await endSession(session);

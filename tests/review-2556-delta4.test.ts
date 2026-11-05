@@ -12,6 +12,7 @@ import { KEEP_ANY, KEPT_ANY_MAX, cancelReset, enterLocked, finishSetup, holdSign
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { COMMAND, LOCKED_UNTIL_STAR_EXTRA } from "./plan-cost-registry";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.RESEND_API_KEY = "re_test_reset_notices_only_a_stand_in";
@@ -67,7 +68,9 @@ async function main(): Promise<void> {
   const [list] = await real([["GET", ANY]]);
   is("(the list became \"*\")", list, "*");
   const after = await cost();
-  is("an unrelated account's session: commands per lockedUntil before and after", [before, after], [before, before]);
+  // Kept on purpose (the safe side, no session that was kept set free), and counted: at most LOCKED_UNTIL_STAR_EXTRA
+  // (tests/plan-cost-registry.ts) a call, only in the "*" state; was [before, before] at 136186a0e.
+  is("an unrelated account's session: commands per lockedUntil before and after, within the counted extra", [before, after <= before + LOCKED_UNTIL_STAR_EXTRA / COMMAND], [before, true]);
   is("the switch to \"*\" is said somewhere beyond the account's own failed read", logged.length > 1, true);
   done();
 }

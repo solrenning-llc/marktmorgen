@@ -14,8 +14,8 @@
  */
 import { crmPhone, crmUrl } from "@/lib/crm-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { type DataStore, DataRoomError, TAKE_DATA, dataKey, dataTakenOf, monthOf } from "@/lib/store-data";
+import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 
 export const MAX_CARD_NAME = 80;
 export const MAX_CARD_TITLE = 80;
@@ -146,6 +146,7 @@ export function vcardFileName(card: CreatorCard): string {
 }
 
 const cardKey = (statsId: string) => `nl:vcard:${statsId}`;
+/** The card's slot in the store's data room, as SAVE_CARD and DROP_CARD set it. */
 const CARD_SLOT = "card";
 /** The longest record a card can make, with room for JSON's quoting. */
 export const MAX_STORED_CARD_BYTES = (MAX_CARD_NAME + MAX_CARD_TITLE + MAX_CARD_EMAIL + 40 + 200 + MAX_CARD_NOTE) * 6 + 256;
@@ -162,20 +163,65 @@ export async function readCreatorCard(statsId: string | null): Promise<CreatorCa
   }
 }
 
+/** A card save whose answer could not be confirmed: it may or may not have been written. */
+export class CardSaveUnconfirmed extends Error {
+  constructor() {
+    super("We could not confirm your business card was saved. Reload the page to see what it is now, then save again if it is not what you saved.");
+    this.name = "CardSaveUnconfirmed";
+  }
+}
+
 /** Keeps a card as sent, after its room is taken; refused with the rule's reason, and then nothing is written. */
 export async function saveCreatorCard(statsId: string, raw: Record<string, unknown>, room: DataStore): Promise<{ ok: true; card: CreatorCard } | { ok: false; error: CardRefusal }> {
   const read = readCard(raw);
   if (!read.ok) return read;
   const json = JSON.stringify(read.card);
-  // Room first: a save that does not fit throws DataRoomError and nothing is written.
-  await needData(room, [{ slot: CARD_SLOT, bytes: dataBytes([json], 1), set: true }]);
-  await redisPipeline([["SET", cardKey(statsId), json]]);
-  return read;
+  // The card and its slot in one script (SAVE_CARD): the slot is set to the card written, so a save that does not fit
+  // writes nothing (DataRoomError), and two saves at once never leave a card larger than its slot (Codex L, #1961).
+  const key = dataKey(room);
+  if (!key || !isRedisConfigured()) throw new Error("the store's data room could not be counted");
+  const now = Date.now();
+  const replies: unknown = await redisPipeline([["EVAL", SAVE_CARD, 2, key, cardKey(statsId), contentRoomFor(room, now / 1000), monthOf(now), dataBytes([json], 1), json]]);
+  // The one script's answer, exactly: anything else does not show the card and its room were written, nor that they
+  // were not; it is said as not confirmed, and what was counted stays (Codex G2, #1961).
+  const taken = Array.isArray(replies) && replies.length === 1 ? dataTakenOf(room, replies[0], now / 1000) : null;
+  if (taken?.ok) return read;
+  if (taken?.reason === "full") throw new DataRoomError(taken);
+  throw new CardSaveUnconfirmed();
 }
 
-/** Forgets the card and gives back its room. */
+/**
+ * Forgets the card and gives back its room, in one script (DROP_CARD): only
+ * the card read here is deleted and its slot set to nothing, and a card saved
+ * since (another version) is left with its own slot (Codex L, #1961).
+ */
 export async function dropCreatorCard(statsId: string | null, room: DataStore): Promise<void> {
-  if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", cardKey(statsId)]]);
-  await giveData(room, [{ slot: CARD_SLOT, bytes: 0, set: true }]);
+  const key = dataKey(room);
+  if (!statsId || !key || !isRedisConfigured()) return;
+  const [held] = await redisPipeline([["GET", cardKey(statsId)]]);
+  const now = Date.now();
+  await redisPipeline([["EVAL", DROP_CARD, 2, key, cardKey(statsId), contentRoomFor(room, now / 1000), monthOf(now), typeof held === "string" ? held : ""]]);
 }
+
+/** The data room's own steps (TAKE_DATA) for the card's slot, set to `size`, inside a script whose KEYS[1] is the room. */
+const CARD_ROOM = `local function cardRoom(limit, always, month, size)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, always, month, 's', '${CARD_SLOT}', size}
+${TAKE_DATA}
+end`;
+
+/** Writes the card (KEYS[2]) and sets its slot to its size in the same step; nothing when it does not fit. Modelled by lib/redis-memory.ts. */
+export const SAVE_CARD = `-- marktmorgen:card-save:v1
+${CARD_ROOM}
+local taken = cardRoom(ARGV[1], '0', ARGV[2], ARGV[3])
+if taken[1] ~= 1 then return taken end
+redis.call('SET', KEYS[2], ARGV[4])
+return taken`;
+
+/** Deletes the card (KEYS[2]) only while it is the one read (ARGV[3], "" for none) and sets its slot to nothing; a card saved since keeps its slot. Modelled by lib/redis-memory.ts. */
+export const DROP_CARD = `-- marktmorgen:card-drop:v1
+${CARD_ROOM}
+local held = redis.call('GET', KEYS[2])
+if (held or '') ~= ARGV[3] then return {2, 0} end
+if held then redis.call('DEL', KEYS[2]) end
+return cardRoom(ARGV[1], '1', ARGV[2], '0')`;

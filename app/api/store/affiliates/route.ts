@@ -8,6 +8,7 @@ import { readListings } from "@/lib/catalog";
 import { answerInvite, waitingOne } from "@/lib/partner-invites";
 import {
   MAX_REFERENCE_LENGTH,
+  idleRemovalAllowed,
   acceptPartnership,
   addPayout,
   MAX_BULK_DECISIONS,
@@ -27,6 +28,7 @@ import {
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
 import { leadProblem } from "@/lib/affiliate-lead-rules";
 import { planTerms, readNoticeDays } from "@/lib/affiliate-notice";
+import { idleProblem, readIdleDays } from "@/lib/affiliate-idle-rules";
 import { MAX_LEAD_DECISIONS, decideLeads } from "@/lib/affiliate-leads";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -39,6 +41,11 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
  *   day), `hold` is how many days a sale waits before it can be paid, and
  *   `rule` is "last" or "first": which of two links a buyer followed earns it,
  *   and `lifetime` keeps a buyer with the affiliate who brought them, for good;
+ *   `idle` removes an approved affiliate with no sale and no lead for that
+ *   many days (0, or 90 to 730), always after a warning (630 [HN6](3));
+ *   `contacts` credits a sale nothing else credits to the affiliate whose
+ *   confirmed lead the buyer is (lib/affiliate-leads.ts contactFor), only
+ *   while the program pays per lead (creditsContacts);
  * `{ action: "code", promo, id }`, giving one of the creator's own discount
  *   codes to one affiliate so a sale that used it earns them their share with
  *   no click at all; an empty `id` takes the code back;
@@ -93,6 +100,9 @@ export async function POST(request: NextRequest) {
       // Notice before a cut (630 [HN6](2), lib/affiliate-notice.ts): none, or 3 to 90 days, refused otherwise.
       const notice = readNoticeDays(body.notice);
       if (body.notice !== undefined && body.notice !== null && body.notice !== "" && Number(body.notice) !== 0 && notice === 0) return fail("notice");
+      // Removing affiliates who bring nothing (630 [HN6](3)): 0, or 90 to 730 days, refused otherwise.
+      const idleRefused = idleProblem(body.idle);
+      if (idleRefused) return fail(idleRefused);
       const before = (await storeForEmail(guarded.ref))?.affiliates ?? null;
       const terms = (s: { percent: number; rates: Record<string, number>; days: number }) => ({ percent: s.percent, rates: s.rates, days: s.days });
       // A cut waits the longer of the notice the program had, as its affiliates were told, and the one chosen now;
@@ -100,7 +110,13 @@ export async function POST(request: NextRequest) {
       const plan = before
         ? planTerms(terms(before), terms(setting), Math.max(notice, before.notice ?? 0), Math.floor(Date.now() / 1000), before.pending ?? null)
         : { current: terms(setting), pending: null };
-      const result = await setAffiliateSetting(guarded.ref, { ...setting, ...plan.current, notice, pending: plan.pending });
+      // Not sent: kept as it was. Switched on or changed: a warning given before now is set aside (idleStep).
+      // Never while the program credits memberships, whose sales are not written down (idleRemovalAllowed).
+      const idle = !idleRemovalAllowed(setting) ? 0 : body.idle === undefined ? (before?.idle ?? 0) : readIdleDays(body.idle);
+      // Switched on, changed, or the program switched back on after a pause (when no link could earn): the count starts now.
+      const restart = idle !== (before?.idle ?? 0) || (setting.enabled && before?.enabled === false);
+      const idleOn = idle > 0 ? (restart ? Math.floor(Date.now() / 1000) : (before?.idleOn ?? 0)) : 0;
+      const result = await setAffiliateSetting(guarded.ref, { ...setting, ...plan.current, notice, pending: plan.pending, idle, idleOn });
       if (!result.ok) return fail(result.reason);
       return Response.json({ ok: true });
     }

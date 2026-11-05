@@ -4,6 +4,7 @@ import { readProducts } from "@/lib/catalog";
 import { currencyRule, isCurrency } from "@/lib/money";
 import { chargeableCurrencies, runningSubscriptions } from "@/lib/payment-methods";
 import { noticeCreator } from "@/lib/account-notice";
+import { runningSeries } from "@/lib/call-series-open";
 import { guardStoreWrite, text } from "@/lib/store-request";
 
 /**
@@ -22,6 +23,10 @@ import { guardStoreWrite, text } from "@/lib/store-request";
  *     the store's pages would then state its price in the wrong one. That is
  *     the safe choice over letting the two disagree; it is lifted when the
  *     last one ends or is cancelled. Stripe not answering counts as running;
+ *   - a series of calls is still running ("series", with how many): each is
+ *     charged in the currency it was booked in until its last session
+ *     (lib/call-series-open.ts), so the change waits until the last one is
+ *     over or canceled;
  *   - the store has prices and the creator has not yet agreed that every
  *     saved amount keeps its number ("confirm", with how many products).
  */
@@ -59,6 +64,9 @@ export async function POST(request: NextRequest) {
       if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
       if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
     }
+
+    const series = await runningSeries(store);
+    if (series > 0) return Response.json({ ok: false, error: "series", running: series }, { status: 409 });
 
     if (priced > 0 && guarded.body.confirm !== true) {
       return Response.json({ ok: false, error: "confirm", priced }, { status: 409 });

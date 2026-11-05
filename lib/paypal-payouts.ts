@@ -33,7 +33,7 @@ import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
-import { withLock } from "@/lib/redis-lock";
+import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId } from "@/lib/store";
 
@@ -247,7 +247,7 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       return { ok: true, batch, people: lines.length, cents: batchTotal(lines) };
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "LockBusyError") return { ok: false, reason: "busy" };
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     console.error("paying affiliates with PayPal failed", error);
     return { ok: false, reason: "error" };
   }

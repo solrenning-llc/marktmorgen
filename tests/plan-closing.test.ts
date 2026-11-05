@@ -93,7 +93,8 @@ const stripeAsked: string[] = [];
 
 type Sent = { to: string[]; subject: string; text: string; reply_to?: string };
 const sent: Sent[] = [];
-let mail: "up" | "down" = "up";
+let mail: "up" | "down" | "uncertain" = "up";
+let mailAttempts = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -142,7 +143,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
 
   if (url.hostname === "api.resend.com") {
-    if (mail === "down") return json({ message: "unavailable" }, 500);
+    mailAttempts += 1;
+    if (mail === "down") return json({ message: "unavailable" }, 429);
+    if (mail === "uncertain") return json({ message: "acceptance unknown" }, 500);
     sent.push(JSON.parse(String(init?.body)) as Sent);
     return json({ id: `email-${sent.length}` });
   }
@@ -598,6 +601,19 @@ async function main(): Promise<void> {
   const walked = await eraseClosed(Date.now() + 20_000, finishClosed, Z + (C + 1) * DAY + 3_600_000);
   is("the walk deletes its records, and nobody else's", [walked.done, walked.finished, await storeForEmail(zoe.email), (await storeForEmail(ana.email))?.handle, (await storeForEmail(ben.email))?.handle], [true, 1, null, "ana", "ben"]);
   is("and its owner, told three times before, is not written to again", [told, mailTo(zoe.email).length], [3, 3]);
+
+  part("Unknown acceptance never authorizes a second provider attempt");
+  const unknownOwner = await storeWith("uncertain");
+  await productWith(unknownOwner, "Kept source", 6 * GB);
+  await endPlan(unknownOwner.email);
+  const unknownEnd = await endedAt(unknownOwner.email);
+  const attemptsBefore = mailAttempts, sentBefore = sent.length;
+  mail = "uncertain";
+  const unknownFirst = await closeOne(unknownOwner.email, unknownEnd + 60_000, hands);
+  mail = "up";
+  const unknownRetry = await closeOne(unknownOwner.email, unknownEnd + 120_000, hands);
+  is("a server error may follow acceptance: hold the notice without another POST", [unknownFirst.state, unknownRetry.state, mailAttempts - attemptsBefore, sent.length - sentBefore], ["held", "held", 1, 0]);
+  is("the ended-plan source and recovery entry remain available", [await endedAt(unknownOwner.email), await inLine(unknownOwner.email), (await storeForEmail(unknownOwner.email))?.handle], [unknownEnd, unknownEnd, unknownOwner.handle]);
 
   done();
 }

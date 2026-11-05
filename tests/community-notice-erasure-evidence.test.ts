@@ -68,6 +68,22 @@ test("community notice erasure accepts only possible two-key DEL counts", async 
   }
 });
 
+test("community notice erasure rejects an acknowledgement inherited from Object.prototype", async () => {
+  const originalPipeline: typeof store.pipeline = store.pipeline.bind(store);
+  const originalValue = Object.getOwnPropertyDescriptor(Object.prototype, "value");
+  const accessorReply: unknown[] = [];
+  Object.defineProperty(accessorReply, 0, { get() { return 2; } });
+  Object.defineProperty(Object.prototype, "value", { configurable: true, value: 2 });
+  try {
+    store.pipeline = async () => accessorReply;
+    await assert.rejects(forgetNoticesPerson(COMMUNITY, MEMBER));
+  } finally {
+    store.pipeline = originalPipeline;
+    if (originalValue) Object.defineProperty(Object.prototype, "value", originalValue);
+    else delete (Object.prototype as { value?: unknown }).value;
+  }
+});
+
 test("an applied notice deletion with a lost acknowledgement stays unknown without replay", async () => {
   store.clear();
   const original: typeof store.pipeline = store.pipeline.bind(store);

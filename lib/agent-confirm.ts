@@ -29,7 +29,8 @@ export async function confirmFor(store: Store & { statsId: string }, ref: string
     ids,
     AGENT_KINDS,
     (p) => (now.has(p.id) ? (now.get(p.id) as Json) : null),
-    async (p) => (await AGENT_KINDS.get(p.kind)?.write(store, ref, p.target, p.after)) ?? false,
+    // Written only over what the proposal was made on (`before`), checked in the write itself.
+    async (p) => (await AGENT_KINDS.get(p.kind)?.write(store, ref, p.target, p.after, p.before)) ?? false,
     who,
   );
 }
@@ -47,7 +48,11 @@ export async function undoFor(store: Store & { statsId: string }, ref: string, i
     store,
     id,
     (d) => (now.has(d.id) ? (now.get(d.id) as Json) : null),
-    async (d, value) => (await AGENT_KINDS.get(d.kind)?.write(store, ref, d.target, value)) === true,
+    // Put back only over what was confirmed (`after`), checked in the write itself.
+    async (d, value) => {
+      const written = await AGENT_KINDS.get(d.kind)?.write(store, ref, d.target, value, d.after);
+      return written === "changed" ? "changed" : written === true;
+    },
     who,
   );
 }

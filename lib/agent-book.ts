@@ -183,7 +183,7 @@ export function confirmProposals(
   ids: string[],
   kinds: ReadonlyMap<string, ProposalKind>,
   current: (proposal: Proposal) => Json,
-  apply: (proposal: Proposal) => Promise<boolean | "terms">,
+  apply: (proposal: Proposal) => Promise<boolean | "terms" | "changed">,
   who: string,
   now = Date.now(),
 ): Promise<Confirmed> {
@@ -198,7 +198,7 @@ export function confirmProposals(
         if (applied === true) {
           next = recordDone(next, proposal, kinds.get(proposal.kind)!, who, now);
           result.done.push(proposal.id);
-        } else result.refused.push({ id: proposal.id, why: applied === "terms" ? "terms" : "failed" });
+        } else result.refused.push({ id: proposal.id, why: applied === "terms" ? "terms" : applied === "changed" ? "changed_since" : "failed" });
       }
       return { book: result.done.length ? next : null, result };
     },
@@ -211,7 +211,7 @@ export function undoDone(
   store: DataStore & { statsId: string },
   id: string,
   current: (done: Done) => Json,
-  restore: (done: Done, value: Json) => Promise<boolean>,
+  restore: (done: Done, value: Json) => Promise<boolean | "changed">,
   who: string,
   now = Date.now(),
 ): Promise<{ ok: true } | { ok: false; error: UndoRefusal | "failed" }> {
@@ -220,7 +220,10 @@ export function undoDone(
     async (book) => {
       const plan = planUndo(book, id, current, now);
       if (!plan.ok) return { book: null, result: plan };
-      if (!(await restore(plan.done, plan.restore))) return { book: null, result: { ok: false as const, error: "failed" as const } };
+      const restored = await restore(plan.done, plan.restore);
+      // Changed again between the check and the write: refused as the rules refuse it, nothing put back.
+      if (restored === "changed") return { book: null, result: { ok: false as const, error: "changed_since" as const } };
+      if (!restored) return { book: null, result: { ok: false as const, error: "failed" as const } };
       return { book: recordUndone(book, id, who, now), result: { ok: true as const } };
     },
     now,

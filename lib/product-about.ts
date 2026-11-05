@@ -71,6 +71,45 @@ export async function writeAbout(statsId: string, productId: string, text: strin
   await redisPipeline([text ? ["SET", aboutKey(statsId, productId), text] : ["DEL", aboutKey(statsId, productId)]]);
 }
 
+/**
+ * Writes `text` over the description only while it still reads `expected`
+ * ("" for none), in one step: {1} when written, {0, the length it holds now}
+ * when it changed meanwhile and nothing was written. Modelled by
+ * lib/redis-memory.ts.
+ */
+export const WRITE_ABOUT_IF = `-- marktmorgen:about-write-if:v1
+local now = redis.call('GET', KEYS[1]) or ''
+if now ~= ARGV[1] then return {0, string.len(now)} end
+if ARGV[2] == '' then redis.call('DEL', KEYS[1]) else redis.call('SET', KEYS[1], ARGV[2]) end
+return {1}`;
+
+/**
+ * A description written only over the one it was read as (an agent's
+ * proposal confirmed or undone, lib/agent-kinds.ts): true when written,
+ * "changed" when someone changed it since and nothing was written (Codex G
+ * on #1929). Its room moves by the difference: taken first when it grows,
+ * given back once a smaller one is written, and this step's own taking
+ * given back on "changed". An answer that is neither keeps what was taken
+ * and throws.
+ */
+export async function writeAboutIf(statsId: string, productId: string, expected: string, text: string, room: DataStore): Promise<true | "changed"> {
+  const weight = (t: string) => (t ? dataBytes([t], 1) : 0);
+  const grown = weight(text) - weight(expected);
+  const slot = `ab:${productId}`;
+  if (grown > 0) await needData(room, [{ slot, bytes: grown }]);
+  const reply: unknown = await redisPipeline([["EVAL", WRITE_ABOUT_IF, 1, aboutKey(statsId, productId), expected, text]]);
+  const answer = Array.isArray(reply) && reply.length === 1 && Array.isArray(reply[0]) ? (reply[0] as unknown[]) : null;
+  if (answer && answer.length === 1 && answer[0] === 1) {
+    if (grown < 0) await giveData(room, [{ slot, bytes: -grown }]);
+    return true;
+  }
+  if (answer && answer.length === 2 && answer[0] === 0 && Number.isSafeInteger(answer[1])) {
+    if (grown > 0) await giveData(room, [{ slot, bytes: grown }]);
+    return "changed";
+  }
+  throw new Error("a description's write could not be confirmed");
+}
+
 /** Forgets the description of a product that is gone, and gives back its room. */
 export async function dropAbout(statsId: string | null, productId: string, room: DataStore): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;

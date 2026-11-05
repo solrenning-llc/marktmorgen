@@ -358,6 +358,40 @@ for (const stage of ["review-ownKeys", "context-identity", "late-canonical"] as 
   });
 }
 
+for (const inherited of ["data", "getter"] as const) {
+  test(`missing own dispute evidence cannot use inherited ${inherited}`, () => {
+    const fixture = contractFixture();
+    assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
+    const disputes = fixture.review.planPaymentDisputes!;
+    delete fixture.review.planPaymentDisputes;
+    fixture.policy.financialSnapshot = canonicalFinancialSnapshot(fixture.review)!;
+    assert.equal(Object.hasOwn(fixture.review, "planPaymentDisputes"), false);
+
+    let reads = 0;
+    let actual: ReturnType<typeof contractFundingConfiguration>;
+    const previous = Object.getOwnPropertyDescriptor(Object.prototype, "planPaymentDisputes");
+    try {
+      Object.defineProperty(
+        Object.prototype,
+        "planPaymentDisputes",
+        inherited === "getter"
+          ? { configurable: true, get() { reads++; return disputes; } }
+          : { configurable: true, value: disputes },
+      );
+      actual = contractFundingConfiguration(fixture.policy, fixture.context, fixture.now);
+    } finally {
+      if (previous) {
+        Object.defineProperty(Object.prototype, "planPaymentDisputes", previous);
+      } else {
+        Reflect.deleteProperty(Object.prototype, "planPaymentDisputes");
+      }
+    }
+
+    assert.equal(reads, 0, "funding validation must not invoke inherited evidence getters");
+    assert.equal(actual, null, "required dispute evidence must be own enumerable data");
+  });
+}
+
 for (const boundary of ["context", "review"] as const) {
   test(`capture does not normalize an unsupported ${boundary} prototype`, () => {
     const fixture = contractFixture();

@@ -1,7 +1,7 @@
 /** Independent review: real notice worker and Redis, synthetic mail/Stripe only. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {sendReminders} from '@/lib/billing-reminders';
+import {sendReminders,sendFailedPlanNotices} from '@/lib/billing-reminders';
 import {store as redis} from './redis-stub';
 
 const now=1791700000,day=86400;
@@ -26,5 +26,21 @@ for(const near of [false,true])for(const reply of [[],[undefined],['unconfirmed'
    assert.equal(sends,0,'an absent/invalid Redis acknowledgement is not an admission');
    assert.equal(counts.missed,0,'unknown state is not proof that a notice was missed');
    assert.equal(counts.failed,1,'the unconfirmed claim must remain visible');
+ }finally{globalThis.fetch=oldFetch;redis.pipeline=oldPipeline;}
+});
+
+for(const reply of [[],[undefined],['unconfirmed'],[0]])test('unconfirmed failed-payment notice claim / '+String(reply[0])+' / '+reply.length,async()=>{
+ process.env.STRIPE_SECRET_KEY='sk_test_notice_review_only';process.env.RESEND_API_KEY='re_test_notice_review_only';
+ const oldFetch=globalThis.fetch,oldPipeline=redis.pipeline.bind(redis);redis.clear();let writes=0;
+ try{
+  globalThis.fetch=async(input,init)=>{
+   const url=new URL(String(input));
+   if(url.origin==='https://api.stripe.com'&&url.pathname==='/v1/subscriptions')return Response.json({data:[{id:'sub_I2ClaimProof0001',status:'past_due',created:now-400*day,customer:{email:'notice-review@example.test'},latest_invoice:{id:'in_I2ClaimProof0001',status:'open',amount_due:1000,hosted_invoice_url:'https://invoice.stripe.com/i/synthetic-review',billing_reason:'subscription_cycle'},items:{data:[{current_period_start:now-20*day,current_period_end:now+10*day,price:{lookup_key:'nimbus_labs_creator_month',unit_amount:2900,recurring:{interval:'month'}}}]}}],has_more:false});
+   if(init?.method==='POST'&&['https://api.stripe.com','https://api.resend.com'].includes(url.origin)){writes++;return Response.json({id:'re_I2ClaimProof0001'});}
+   throw Error('Unexpected synthetic failed-plan operation');
+  };
+  redis.pipeline=async commands=>{if(commands.length===1&&commands[0][0]==='SET'&&String(commands[0][1]).startsWith('nl:remind:failed:'))return reply;return oldPipeline(commands);};
+  const counts=await sendFailedPlanNotices();console.log(JSON.stringify({reply,writes,counts}));
+  assert.equal(writes,0,'unconfirmed admission authorizes neither a card-settings update nor an email');assert.equal(counts.failed,1);
  }finally{globalThis.fetch=oldFetch;redis.pipeline=oldPipeline;}
 });

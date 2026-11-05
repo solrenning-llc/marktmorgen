@@ -293,6 +293,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:fresh:@lib/auth.ts": company("A fresh sign-in", "An account's, minutes."),
   "nl:auth:second:@lib/auth.ts": company("The second step a session was opened with", "An account's, as long as its session."),
   "nl:auth:link:@lib/auth.ts": company("A sign-in link", "An account's, minutes."),
+  "nl:auth:link:@lib/provider-signin-state.ts": company("Provider-separated OAuth verifier/nonce and sign-in context, no person or provider token; default off", "At most 1024 UTF-8 value bytes plus key and Redis overhead, EX 600, one SET NX and one atomic GETDEL. No funded global allowance or provider cost verified; cannot activate."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
   "nl:auth:moving:@lib/auth.ts": company("An address in the middle of a move", "An account's, minutes."),
   "nl:auth:move-broken:@lib/auth.ts": company("A move that could be neither finished nor undone", "An account's, until it is repaired at the next login or move."),

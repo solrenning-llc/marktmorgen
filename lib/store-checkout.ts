@@ -707,7 +707,7 @@ export async function createCheckout(
     product.priceCents > 0 && !product.bundle && !product.course && !product.podcast && !product.keys && !product.note &&
     !product.callPackage && !product.recurring && !product.plan && !product.pwyw && product.options.length === 0 &&
     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&
-    !extras.buyerKey && !extras.upsellKey && !extras.held && !extras.remind && !recovering && !named &&
+    !extras.buyerKey && !extras.upsellKey && !extras.held && !recovering && !named &&
     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&
     !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
   if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated") {

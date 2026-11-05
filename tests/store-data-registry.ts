@@ -291,7 +291,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:link:@lib/auth.ts": company("A sign-in link", "An account's, minutes."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
   "nl:auth:moving:@lib/auth.ts": company("An address in the middle of a move", "An account's, minutes."),
-  "nl:auth:move-broken:@lib/auth.ts": company("A move that could be neither finished nor undone", "An account's, until it is repaired at the next login or move."),
+  "nl:auth:move-broken:@lib/auth.ts": company("A move that could be neither finished nor undone", "An account's, until it is repaired at the next login or move. One record under each of the two addresses: the two addresses, its time, the move's own token of 64 hex (markBrokenMove) and, once noted, the store copy's fingerprint of 64 hex. The copy is noted by NOTE_MOVE_COPY, one EVAL: five commands when both records still carry the move's token (the EVAL, two GET, two SET), four when one does, three when neither does (Codex H, #2271). Its monthly cost in full is not known: no count of moves bounds it."),
   "nl:auth:session:@lib/auth.ts": company("A session", "An account's."),
   "nl:auth:sessions:@lib/auth.ts": company("An account's sessions", "An account's."),
   "nl:rl:address:@lib/auth.ts": company("Sign-in links per address", "An account's, an hour."),

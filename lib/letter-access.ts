@@ -33,6 +33,7 @@ import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { holdsProducts } from "@/lib/community-access";
 import { TOKEN_PATTERN, learnerFrom, storeKey } from "@/lib/learn";
 import { LETTER_ID, type Letter, membersOnly } from "@/lib/letter-rules";
@@ -89,15 +90,27 @@ export async function letterReader(store: Store, letter: Letter, cookies: Cookie
  * again by INCR with no end; its TTL, read in the same round, says so (-1),
  * and only then is it given one, so a counting key never stays without an
  * end and a running window is never pushed back.
+ *
+ * The round is read only in its exact shape (CX-123 rule 24): three
+ * replies, the SET's "OK" or null, a whole count from one up and a whole
+ * TTL. Anything else is not a count under the limit: it throws
+ * UnknownReplyError, so the form says the email could not be sent (the
+ * route's "error") and an emailed link opens nothing, and nothing after the
+ * count is done. A TTL of another shape leaves the key as it is: whether it
+ * has an end is not known, and giving it one could push a running window
+ * back.
  */
 async function count(key: string): Promise<number> {
-  const [, counted, ttl] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["SET", key, "0", "EX", LETTER_LINK_SECONDS, "NX"],
     ["INCR", key],
     ["TTL", key],
-  ]);
-  if (Number(ttl) === -1) await redisPipeline([["EXPIRE", key, LETTER_LINK_SECONDS]]);
-  return Number(counted);
+  ]), 3);
+  const counted = replies && (replies[0] === "OK" || replies[0] === null) ? countOf(replies[1]) : null;
+  const ttl = replies?.[2];
+  if (counted === null || counted < 1 || typeof ttl !== "number" || !Number.isSafeInteger(ttl)) throw new UnknownReplyError("a count of links asked for or opened");
+  if (ttl === -1) await redisPipeline([["EXPIRE", key, LETTER_LINK_SECONDS]]);
+  return counted;
 }
 
 async function within(key: string, limit: number): Promise<boolean> {
@@ -189,7 +202,7 @@ export async function readLetterGrant(token: string): Promise<LetterGrant | null
   }
 }
 
-/** Spends one open of a link already read; false past MAX_LINK_OPENS. */
+/** Spends one open of a link already read; false past MAX_LINK_OPENS; throws UnknownReplyError when the count could not be read. */
 export async function spendLetterOpen(token: string): Promise<boolean> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return false;
   return (await count(opensKey(token))) <= MAX_LINK_OPENS;

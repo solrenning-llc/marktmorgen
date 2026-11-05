@@ -18,6 +18,7 @@
  * they review, when they approve it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { markLesson } from "@/lib/learn";
@@ -127,12 +128,24 @@ export async function submissionsOf(courseId: string, rows: { lessonId: string; 
  * Room for a file of this size in what this store's students keep: taken
  * now, given back when the file is no longer kept (releaseBytes). `limit`
  * is the store's own (lib/assignment-rules.ts, taskRoomFor).
+ *
+ * The total is read only in its exact shape (CX-123 rule 24): one reply, a
+ * whole number at least the bytes just added. Anything else throws
+ * UnknownReplyError, so the work is not handed in and the student is told
+ * something went wrong (the route's "server_error"), never that the room is
+ * full. Nothing is given back then: whether the INCRBY was applied is not
+ * known, and a DECRBY of bytes that never entered would leave room for
+ * more than the store's limit. Bytes that did enter stay counted, which
+ * only ever refuses sooner (releaseBytes never takes the total below zero).
  */
 export async function takeRoom(room: string, bytes: number, limit: number = MAX_STORE_TASK_BYTES): Promise<boolean> {
   if (!isRedisConfigured() || !Number.isFinite(bytes) || bytes <= 0 || !Number.isSafeInteger(limit) || limit <= 0) return false;
-  const [used] = await redisPipeline([["INCRBY", bytesKey(room), Math.ceil(bytes)]]);
-  if (Number(used) > limit) {
-    await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]);
+  const added = Math.ceil(bytes);
+  const replies = repliesFor(await redisPipeline([["INCRBY", bytesKey(room), added]]), 1);
+  const used = replies ? countOf(replies[0]) : null;
+  if (used === null || used < added) throw new UnknownReplyError("the room taken by handed-in files");
+  if (used > limit) {
+    await redisPipeline([["DECRBY", bytesKey(room), added]]);
     return false;
   }
   return true;

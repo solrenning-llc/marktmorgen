@@ -253,6 +253,7 @@ def main():
         assert int(db.command("HGET", keys[5], "items")) == before_items - 1
         assert db.command("SISMEMBER", keys[7], held["id"]) == 0
         print("PASS:origin cancellation erases its actual paid-person index and protected row, releases one shared reservation and retains only the400day matching source")
+        print(json.dumps({"proof": "CX121-parent-integration-red", "observed_paid_profiles": {k: profiles[k] for k in ["paid", "dispatch", "accepted_unsettled", "settlement_retry", "cancel_paid"]}}), flush=True)
         assert {k: profiles[k] for k in ["paid", "dispatch", "accepted_unsettled", "settlement_retry", "cancel_paid"]} == {"paid": 20, "dispatch": 16, "accepted_unsettled": 19, "settlement_retry": 19, "cancel_paid": 25}
         print(json.dumps({"paid_worker_commands_including_eval_and_redis_call": {k: profiles[k] for k in ["paid", "dispatch", "accepted_unsettled", "settlement_retry", "cancel_paid"]}, "supplier_invoice": False}))
 

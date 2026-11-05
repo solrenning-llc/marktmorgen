@@ -334,6 +334,7 @@ test("native Redis: INFO measures the exact twelve-key app Lua without observer 
       const operation = String(command[3 + Number(command[2])]);
       const ceilings: Record<string, number> = { "enqueue:queued": 35, "enqueue:duplicate": 18, "cancel:canceled": 32, "claim:preparing": 20, "renewal-prepare:prepared": 19, "dispatch:dispatching": 20, "accepted:accepted": 33 };
       const ceiling = ceilings[`${operation}:${result[0]}`]; assert.ok(Number.isSafeInteger(ceiling));
+      console.log(JSON.stringify({ proof: "CX121-parent-integration-red", operation, result: result[0], observed: total, ceiling, calls }));
       assert.ok(total <= ceiling, `${operation}/${result[0]} observed ${total} commands, above the measured ${ceiling} ceiling`);
       profiles.push({ operation, result: String(result[0]), total, calls });
       answers.push(result);

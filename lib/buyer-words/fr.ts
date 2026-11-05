@@ -92,7 +92,7 @@ export const fr: BuyerWords = {
   buyAsGift: "Offrir en cadeau",
   buyAsGiftFor: (price) => `Offrir en cadeau — ${price}`,
   giftNote: (store) =>
-    `Vous payez sur la page de Stripe. Juste après, la personne reçoit un seul e-mail de ${store} avec votre nom, votre message et un lien pour l'ouvrir avec sa propre adresse. Vous recevez le reçu, pas une copie.`,
+    `Vous payez sur la page de Stripe. Après le paiement, le cadeau est associé à son adresse. Si l'e-mail unique de ${store} lui parvient, il contient votre nom, votre message et un lien pour l'ouvrir. Vous recevez le reçu, pas une copie.`,
   giftProblems: {
     email: "Cela ne ressemble pas à une adresse e-mail. Vérifiez l'adresse du destinataire et réessayez.",
     option: "Choisissez ce que vous offrez, puis réessayez. Rien n'a été débité.",

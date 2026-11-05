@@ -1,5 +1,6 @@
 import { del, head } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf } from "@/lib/redis-reply";
 
 /**
  * Pictures let in through the picture door (app/api/store/image/upload) and
@@ -87,10 +88,15 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
     return [["ZSCORE", key, path], ["ZREM", key, path]];
   }));
   if (!Array.isArray(answers) || answers.length !== 2 * unique.length) throw new Error("could not confirm the pictures taken from the door");
+  // Each reply only in its exact shape (CX-123, rule 24): ZREM the whole number 0 or 1, ZSCORE null or a score (a
+  // number, or the numeric string the REST API sends). Anything else is unknown and throws, never "taken".
   unique.forEach((path, i) => {
-    const at = Number(answers[2 * i]);
-    const fresh = Number.isFinite(at) && at > 0 && at >= now - PICTURE_DOOR_SECONDS * 1000;
-    if (Number(answers[2 * i + 1]) === 1 && fresh) taken.set(path, at);
+    const removed = countOf(answers[2 * i + 1]);
+    const score = answers[2 * i];
+    const at = score === null ? null : typeof score === "number" ? score : typeof score === "string" && /^\d+(\.\d+)?$/.test(score) ? Number(score) : NaN;
+    if (removed === null || removed > 1 || (at !== null && !Number.isFinite(at))) throw new Error("could not confirm the pictures taken from the door");
+    const fresh = at !== null && at > 0 && at >= now - PICTURE_DOOR_SECONDS * 1000;
+    if (removed === 1 && fresh) taken.set(path, at);
   });
   return taken;
 }

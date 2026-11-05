@@ -22,6 +22,11 @@
  *     of the addresses to email as "nobody left" and finished the import, or
  *     started the mail ramp at 0. Each now leaves the job as it was, to start
  *     again from the last saved place.
+ *   - studentPage (lib/learn.ts) also read a page of rows of another shape
+ *     (no list, an odd list, a row that is not a kept row) as fewer or no
+ *     students, a done list of another shape as 0 lessons, and an unknown
+ *     blocked list or answer as "not blocked" (Codex G, review 5793821629
+ *     of #2717). Each is now null, the page unknown.
  *   - studentDates and lastSeenMany (lib/learn.ts) read an HGET or HMGET of
  *     another shape, or a kept row whose times are not whole numbers, as
  *     "never opened" (null or 0). Each now throws UnknownReplyError.
@@ -37,6 +42,7 @@ import { withinAddressLimit, withinRateLimit } from "@/lib/auth";
 import { forgetLearnerPerson, lastSeenMany, openCourseLink, requestCourseLink, studentDates, studentPage } from "@/lib/learn";
 import { addRows, finishUpload, readJob, runImport, startImport } from "@/lib/imports";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -250,6 +256,77 @@ void (async () => {
     const [left] = await pipeline([["SCARD", `nl:import:${id}:mail`]]);
     is(`runImport, the addresses to email ${label}: still mailing, the address kept`, [(await readJob(id))?.state, left], ["mailing", 1]);
   }
+  const row = (email: string) => JSON.stringify({ e: email, s: 1_700_000_000, l: 1_700_000_500 });
+  const BAD_PAGES: [string, unknown][] = [
+    ["rows that are null", ["0", null]],
+    ["rows that are an object", ["0", { a: 1 }]],
+    ["an odd list of rows", ["0", ["k1"]]],
+    ["a row that is not JSON", ["0", ["k1", "{"]]],
+    ["a row without its address", ["0", ["k1", JSON.stringify({ s: 1, l: 2 })]]],
+    ["a row whose times are text", ["0", ["k1", JSON.stringify({ e: "a@sg2-l3.example", s: "1", l: 2 })]]],
+    ["a row that is a number", ["0", ["k1", 7]]],
+    ["a cursor that is a number", [0, ["k1", row("a@sg2-l3.example")]]],
+    ["a third part", ["0", ["k1", row("a@sg2-l3.example")], "x"]],
+  ];
+  for (const [label, page] of BAD_PAGES) {
+    rule = { when: studentsPage, reply: [page, 1, 0] };
+    is(`studentPage, ${label}: unknown`, await outcome(() => studentPage(course, "0", 10, async () => true)), null);
+  }
+  // The second pipeline: each row's done list, then the blocked list (whole) or one answer a row.
+  const second = (commands: (string | number)[][]) => commands.length >= 1 && commands[0]?.[0] === "SMEMBERS" && String(commands[0]?.[1]).startsWith("nl:course:c_sg2l3:done:");
+  const pageOf = (emails: string[], blocked: number) => [["0", emails.flatMap((email, i) => [`k${i}`, row(email)])], emails.length, blocked];
+  for (const [label, done, blocked] of [
+    ["a done list that is null", [null, ["k"]], 1],
+    ["a done list that is an object", [{ a: 1 }, ["k"]], 1],
+    ["a done list holding a number", [[7], ["k"]], 1],
+    ["a blocked list that is null", [[], null], 1],
+    ["a blocked list that is an object", [[], { a: 1 }], 1],
+    ["a blocked list holding a number", [[], [7]], 1],
+    ["a reply one short", [[]], 1],
+  ] as [string, unknown[], number][]) {
+    let call = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (studentsPage(commands) || second(commands)) {
+        call += 1;
+        return (call === 1 ? pageOf(["blocked@sg2-l3.example"], blocked) : done) as unknown[];
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    is(`studentPage, ${label}: unknown, never "not blocked" or 0 lessons`, await outcome(() => studentPage(course, "0", 10, async () => true)), null);
+  }
+  // Past BLOCKED_READ_MAX, one SISMEMBER a row: only 0 or 1.
+  for (const [label, answer] of [["null", null], ["text", "1"], ["two", 2], ["true", true]] as [string, unknown][]) {
+    let call = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (studentsPage(commands) || second(commands)) {
+        call += 1;
+        return (call === 1 ? pageOf(["blocked@sg2-l3.example"], BLOCKED_READ_MAX + 1) : [[], answer]) as unknown[];
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    is(`studentPage, past the whole list, a blocked answer that is ${label}: unknown`, await outcome(() => studentPage(course, "0", 10, async () => true)), null);
+  }
+  {
+    let call = 0;
+    const lessonCourse = { id: "c_sg2l3", modules: [{ id: "m1", title: "M", lessons: [{ id: "l1", title: "L" }] }] } as never;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (studentsPage(commands) || second(commands)) {
+        call += 1;
+        if (call === 1) return pageOf(["blocked@sg2-l3.example"], BLOCKED_READ_MAX + 1) as unknown[];
+        return [["l1"], 1];
+      }
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    const ok = await studentPage(lessonCourse, "0", 10, async () => true);
+    is("studentPage: exact replies still read a blocked student with a lesson done", ok && ok.students.map((st) => [st.email, st.done, st.blocked]), [["blocked@sg2-l3.example", 1, true]]);
+  }
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (rule && rule.when(commands)) {
+      if (rule.reply === "throw") throw new Error("the database did not answer");
+      return rule.reply as unknown[];
+    }
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
   rule = null;
 
   part("forgetLearnerPerson: a person's passes and records are said as removed only on exact replies");

@@ -14,7 +14,8 @@ import { type CrmField, crmPhone, crmUrl, MAX_FIELD_VALUE, severalPicked, whatsa
  * kept in its international form and, once saved, offers a link that opens a
  * chat with that number in the creator's own WhatsApp; nothing is sent for them.
  */
-export function PersonFields({ person, fields, initial }: { person: string; fields: CrmField[]; initial: Record<string, string> }) {
+/** `mark`: the person as the page read them (lib/crm.ts, pageMark), signed by the server and sent with every save, so a person deleted since is never written again, nor from a page read too long ago. */
+export function PersonFields({ person, fields, initial, mark }: { person: string; fields: CrmField[]; initial: Record<string, string>; mark: string }) {
   const [values, setValues] = useState(initial);
   const [saved, setSaved] = useState(initial);
 
@@ -38,7 +39,7 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
       const response = await fetch("/api/store/crm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "value", person, field: field.id, value }),
+        body: JSON.stringify({ action: "value", person, field: field.id, value, mark }),
       });
       const answer = crmAnswer(response.ok, await response.json().catch(() => null));
       if (answer.ok) {
@@ -52,7 +53,17 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
         setWriteUnconfirmed(true);
         setMessage("This change could not be confirmed and may already be saved. Keep a copy of your values, then reload and check the contact before trying again. Saving is paused until you reload.");
       } else {
-        setMessage(answer.error === "value" ? "This field cannot keep that value. Your entry is still here; correct it and try again." : "This change was refused. Your entry is still here; check your access and try again.");
+        setMessage(
+          answer.error === "value"
+            ? "This field cannot keep that value. Your entry is still here; correct it and try again."
+            : answer.error === "unknown"
+                ? "This person or this field is no longer in your store, so nothing was saved. Reload the page to see your contacts as they are now."
+                : answer.error === "studio_used"
+                  ? "Your studio has no requests left this month, so nothing was saved. Your entry is still here."
+                  : answer.error === "unavailable"
+                    ? "This could not be counted right now, so nothing was saved. Your entry is still here; try again in a minute."
+                    : "This change was refused. Your entry is still here; check your access and try again.",
+        );
       }
     } catch {
       uncertain.current = true;

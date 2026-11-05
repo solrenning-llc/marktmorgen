@@ -14,6 +14,7 @@
  * same through the studio's door, where their reviews and what an import
  * gave them stay, as that door promises.
  */
+import { ERASED_MARK_SECONDS } from "@/lib/crm";
 import { redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -49,8 +50,14 @@ const ALLOWED: { pattern: RegExp; why: string }[] = [
   { pattern: /^nl:data:/, why: "the store's data room, counting what a deletion gave back (lib/store-data.ts), never who" },
 ];
 
-/** What the registry keeps on purpose, so may still name them: their own stop presses, as one-way hashes. */
-const KEPT_ON_PURPOSE = [/^nl:recover:off:/, /^nl:upd:off:/, /^nl:rev:off:/];
+/**
+ * What the registry keeps on purpose, so may still name them: their own stop presses, as one-way hashes; and the CRM's
+ * mark that they were deleted, under their person key (a one-way hash), gone by itself after ERASED_MARK_SECONDS, so a
+ * field saved late never puts anything about them back (lib/crm.ts; lib/person-data.ts says so).
+ */
+const KEPT_ON_PURPOSE = [/^nl:recover:off:/, /^nl:upd:off:/, /^nl:rev:off:/, /^nl:crm:(erased|gen):/];
+/** The CRM's mark of a deletion: kept, with an end, and holding nothing but that it happened. */
+const CRM_ERASED = /^nl:crm:(erased|gen):/;
 
 function changes(before: Map<string, string>, after: Map<string, string>): string[] {
   const out: string[] = [];
@@ -114,10 +121,13 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
   const after = await snapshot();
   const allowed = changes(before, after).filter((key) => ALLOWED.some((a) => a.pattern.test(key)));
   console.log(`  (left as allowed: ${allowed.map((key) => key.replace(/[0-9a-f]{20,}/g, "…")).join(", ")})`);
-  const changed = changes(before, after).filter((key) => !ALLOWED.some((a) => a.pattern.test(key)));
+  const changed = changes(before, after).filter((key) => !ALLOWED.some((a) => a.pattern.test(key)) && !CRM_ERASED.test(key));
   is("everything is as it was before them, but what is allowed to change", changed, []);
   const left = [...after].filter(([key, value]) => marks(statsId, tess).some((m) => key.includes(m) || value.includes(m)));
-  is("no key or value names them, by address or by any key made from it", left.map(([key]) => key), []);
+  is("no key or value names them, by address or by any key made from it, but the CRM's mark that they were deleted and its count of deletions", left.map(([key]) => key).filter((key) => !CRM_ERASED.test(key)), []);
+  const crmMarks = left.filter(([key]) => CRM_ERASED.test(key));
+  is("the mark and the count hold nothing but a time and a number, never the address", [crmMarks.length, crmMarks.every(([, value]) => /^"\d{1,13}"$/.test(value))], [2, true]);
+  is("and goes by itself within ERASED_MARK_SECONDS", await Promise.all(crmMarks.map(async ([key]) => { const [ttl] = await redisPipeline([["TTL", key]]); return typeof ttl === "number" && ttl > 0 && ttl <= ERASED_MARK_SECONDS; })), [true, true]);
   const suppressionOnly = [...after].filter(([key]) => /^nl:erased:/.test(key));
   is("only a fingerprint is kept, under the store's list", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 1]]);
   is("which cannot be read back to the address", suppressionOnly.some(([, value]) => value.includes(tess) || value.includes("@")), false);
@@ -141,8 +151,8 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
   const afterSam = await snapshot();
   const samLeft = [...afterSam].filter(([key, value]) => marks(statsId, sam).some((m) => key.includes(m) || value.includes(m))).map(([key]) => key);
   is(
-    "what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them",
-    samLeft.filter((key) => !/^nl:imp:/.test(key)),
+    "what the studio's door keeps: what an import gave them, by a one-way hash, and the CRM's mark of the deletion; nothing else names them",
+    samLeft.filter((key) => !/^nl:imp:/.test(key) && !CRM_ERASED.test(key)),
     [],
   );
   const reviews = [...afterSam].filter(([key]) => key === `nl:rev:${statsId}:${world.plain}`);

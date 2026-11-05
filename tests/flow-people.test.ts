@@ -15,9 +15,9 @@
  *     from the quiz remembers that result too.
  */
 import { readAction } from "@/lib/flow-rules";
-import { enroll, saveFlow, sendDueSteps } from "@/lib/flows";
+import { enroll, forgetWorkflowPerson, saveFlow, sendDueSteps } from "@/lib/flows";
 import { upsertContact } from "@/lib/contacts";
-import { readDeals, readStages, readValues, writeDeal, writeFields } from "@/lib/crm";
+import { forgetCrmPerson, personReturned, readDeals, readStages, readValues, writeDeal, writeFields } from "@/lib/crm";
 import { writeForm } from "@/lib/form-store";
 import { parseForm } from "@/lib/forms";
 import { personKey } from "@/lib/person-key";
@@ -112,6 +112,30 @@ async function main(): Promise<void> {
   const told = mail.ses.filter((message) => message.to.includes(OWNER));
   is("the owner told once, with both of them", [told.length, told[0]?.subject, told[0]?.text.includes("ana@example.com") && told[0]?.text.includes("ben@example.com")], [1, "2 people reached step 4 of “Applicants”", true]);
   is("and the email goes to each, once", mail.ses.filter((message) => message.subject === "We got your application").flatMap((message) => message.to).sort(), ["ana@example.com", "ben@example.com"]);
+
+  part("A run under way when its person is deleted writes nothing, even if they come back before it reads them (Codex G, #2287)");
+  await upsertContact(list, "gus@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  store = (await storeForEmail(OWNER))!;
+  await enroll(store, "gus@example.com", { joined: false, form: "applyform1" });
+  const gus = personKey(statsId, "gus@example.com");
+  const passOn = redis.pipeline;
+  let raced = false;
+  redis.pipeline = async (commands) => {
+    // Right before the step reads his generation: deleted from the workflows and the CRM, then back by a later purchase.
+    if (!raced && commands.some((c) => c[0] === "GET" && c[1] === `nl:crm:gen:${statsId}:${gus}`)) {
+      raced = true;
+      redis.pipeline = passOn;
+      await forgetWorkflowPerson(store, "gus@example.com");
+      await forgetCrmPerson(statsId, gus, "gus@example.com", ROOM);
+      await personReturned(statsId, "gus@example.com", Date.now() + 1);
+    }
+    return passOn.call(redis, commands);
+  };
+  await run();
+  redis.pipeline = passOn;
+  is("the race ran, and the old run's field is not written", [raced, await value("gus@example.com")], [true, ""]);
+  for (let i = 0; i < 3; i += 1) await run();
+  is("nor anything after it: no deal, no note", [(await readDeals(statsId, stages)).some((d) => d.email === "gus@example.com"), (await readPersonNotes(statsId, gus)).length], [false, 0]);
 
   part("A sign-up asked from a form remembers it");
   mail.clearCaptured();

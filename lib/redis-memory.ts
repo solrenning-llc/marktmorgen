@@ -125,6 +125,17 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/buyer-profile.ts ADD_RUN_NOTE: a run's note, only while the run holds its take at its exact score.
+        if (key.startsWith("-- marktmorgen:person-run-note:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, notes, who, lease, id, json, seconds, member, score, person] = args;
+          const held = this.run(["ZSCORE", lease, member]);
+          if (held === null || Number(held) !== Number(score)) return 3;
+          this.run(["HSET", notes, id, json]);
+          this.run(["EXPIRE", notes, seconds]);
+          this.run(["SADD", who, person]);
+          this.run(["EXPIRE", who, seconds]);
+          return 1;
+        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;
@@ -493,7 +504,15 @@ export class MemoryRedis {
           return 1;
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
-        if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
+        if (key.startsWith("-- marktmorgen:crm-deal-move:v4\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+          if (args[0] === "2") {
+            const held = this.run(["ZSCORE", args[2], args[6]]);
+            if (held === null || Number(held) !== Number(args[7])) {
+              const kept = this.run(["HGET", args[1], args[3]]);
+              return typeof kept === "string" ? [3, new TextEncoder().encode(kept).length] : [3];
+            }
+            return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5]]);
+          }
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
@@ -504,11 +523,22 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[4]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
-          const [, lease, queue, member, score, next] = args;
-          if (this.run(["ZSCORE", lease, member]) === null) return 0;
+        if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, lease, queue, member, score, next, take] = args;
+          const held = this.run(["ZSCORE", lease, member]);
+          if (held === null || Number(held) !== Number(take)) return 0;
           this.run(["ZADD", queue, score, next]);
           return 1;
+        }
+        // lib/flows.ts DROP_OWN_LEASES: each member taken away only while it is held at the take's own score.
+        if (key.startsWith("-- marktmorgen:flow-lease-drop-own:v1\n") && args[0] === "1") {
+          const [, lease, take, ...members] = args;
+          return members.map((member) => {
+            const held = this.run(["ZSCORE", lease, member]);
+            if (held === null || Number(held) !== Number(take)) return 0;
+            this.run(["ZREM", lease, member]);
+            return 1;
+          });
         }
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
           const target = args[1];
@@ -519,7 +549,15 @@ export class MemoryRedis {
           this.data.set(target, args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
+        if (key.startsWith("-- marktmorgen:crm-deal-save:v5\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
+          if (args[0] === "2") {
+            const held = this.run(["ZSCORE", args[2], args[7]]);
+            if (held === null || Number(held) !== Number(args[8])) {
+              const kept = this.run(["HGET", args[1], args[3]]);
+              return typeof kept === "string" ? [3, new TextEncoder().encode(kept).length] : [3];
+            }
+            return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5], args[6]]);
+          }
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
@@ -527,8 +565,9 @@ export class MemoryRedis {
           const there = held instanceof Map && held.has(args[2]);
           if (!there && args[5] === "edit") return 2;
           if (!there && held instanceof Map && held.size >= Number(args[4])) return 0;
+          const was = there ? (held as Map<string, string>).get(args[2]) : undefined;
           this.hash(target).set(args[2], args[3]);
-          return 1;
+          return typeof was === "string" ? [1, new TextEncoder().encode(was).length] : [1];
         }
         if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {
           // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step.
@@ -590,6 +629,27 @@ export class MemoryRedis {
           if (value === undefined) return null;
           held.delete(args[2]);
           return value;
+        }
+        // lib/crm.ts MARK_RETURNED: a deletion mark taken away only by an act after the deletion it records.
+        if (key.startsWith("-- marktmorgen:crm-erased-returned:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, target, at] = args;
+          const raw = this.run(["GET", target]);
+          const mark = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : null;
+          if (mark === null || !(mark < Number(at))) return 0;
+          this.run(["DEL", target]);
+          return 1;
+        }
+        // lib/crm.ts SET_CRM_VALUE: a person's value written unless they are marked deleted or the save carries another generation, answering what it replaced.
+        if (key.startsWith("-- marktmorgen:crm-value-set:v6\n") && ((args[0] === "3" && args.length === 7) || (args[0] === "4" && args.length === 10))) {
+          const leased = args[0] === "4";
+          const [, target, erased, generation] = args;
+          const [person, value, carried, member, score] = args.slice(leased ? 5 : 4);
+          if (Number(this.run(["EXISTS", erased])) === 1) return 2;
+          if (leased && Number(this.run(["ZSCORE", args[4], member]) ?? "-1") !== Number(score)) return 2;
+          if (Number(this.run(["GET", generation]) ?? "0") !== Number(carried)) return 2;
+          const before = this.run(["HGET", target, person]);
+          this.run(value === "" ? ["HDEL", target, person] : ["HSET", target, person, value]);
+          return typeof before === "string" ? [1, before] : [1];
         }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
         // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
@@ -1017,6 +1077,10 @@ export class MemoryRedis {
         return this.hash(key).get(args[0]) ?? null;
       case "HEXISTS":
         return this.hash(key).has(args[0]) ? 1 : 0;
+      case "HSTRLEN": {
+        const value = this.hash(key).get(args[0]);
+        return typeof value === "string" ? new TextEncoder().encode(value).length : 0;
+      }
       case "HMGET":
         return args.map((field) => this.hash(key).get(field) ?? null);
       case "HDEL": {

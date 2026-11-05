@@ -16,6 +16,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { noteProduct, orderRoom, upsertContact } from "@/lib/contacts";
 import { enroll } from "@/lib/flows";
 import type { Store } from "@/lib/store";
+import { personReturned } from "@/lib/crm";
 
 const listedKey = (sessionId: string) => `nl:listed:${sessionId}`;
 const DONE_SECONDS = 8 * 86_400;
@@ -60,6 +61,9 @@ export async function listOrder(store: Store, order: ListedOrder): Promise<"done
   }
   const products = order.products.filter((p, i) => order.products.findIndex((q) => q.id === p.id) === i);
   try {
+    // A paid order: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125),
+    // only if it was paid after they were deleted: one listed late is not a return (Codex D, #2287).
+    await personReturned(store.statsId, order.email, order.created * 1000);
     if (order.news) {
       const [first, ...rest] = products;
       const added = await upsertContact(store.listId, order.email, {

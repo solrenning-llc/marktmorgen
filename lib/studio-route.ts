@@ -173,6 +173,8 @@ export async function studioAccess(
   request: NextRequest,
   need: Need,
   action = "",
+  /** How many of the studio's requests this one is counted as (guardStoreWrite's `units`). */
+  units = 1,
 ): Promise<{ ok: true; access: Access } | { ok: false; reason: Refusal; store?: Store; message?: string; why?: "used" | "unknown" | "pool" | "daily" }> {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
   const email = await emailForSession(session);
@@ -190,7 +192,7 @@ export async function studioAccess(
   // (lib/store-allowance-rules.ts). Moving to a larger plan, cancelling,
   // deleting the store, downloading its data and leaving a team are never
   // refused for it: they have a small daily bound of their own instead.
-  const counted = await countStudio(access.store, need);
+  const counted = await countStudio(access.store, need, units);
   // Its message already says which: the figure used, no place this month, or no count just now.
   if (!counted.ok) return { ok: false, reason: "used", store: access.store, message: counted.message, why: counted.reason };
   if (counted.store) result.access = { ...result.access, store: counted.store };

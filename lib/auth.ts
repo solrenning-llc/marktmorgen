@@ -53,7 +53,7 @@ export const MAX_EMAIL_LENGTH = 254;
 export const SESSION_COOKIE = "nl_session";
 
 const LINK_TTL_SECONDS = 15 * 60;
-const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 const RATE_LIMIT = 5;
 // Deliberately higher than RATE_LIMIT, so one machine that has spent its own
 // five cannot, by itself, lock a creator out of their address for an hour.

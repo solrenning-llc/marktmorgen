@@ -38,7 +38,7 @@ import { can } from "@/lib/team-roles";
  */
 import { emitEvent } from "@/lib/webhooks";
 import { hasPlaceholder } from "@/lib/mail-body";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
@@ -67,7 +67,7 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { CrmDealReadUnavailable, CrmPersonGone, readGenerations, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
 import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
@@ -163,18 +163,64 @@ const QUEUE = "nl:mail:flowq";
  * returns those whose time is up to the queue, so no contact is dropped.
  */
 const LEASE = "nl:mail:flowq:lease";
-const LEASE_SECONDS = 15 * 60;
+export const LEASE_SECONDS = 15 * 60;
 /**
- * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
- * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
- * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
+ * The score one take of the queue writes in the lease: its time up, plus a fraction of a second drawn for that take
+ * alone (k/2^21, kept exactly at this size of number). A write checked at it (lib/crm.ts, setValue's lease) is this
+ * take's only: the same entry taken again by a later run, after a deletion took it from this one and the person came
+ * back, has another score (Codex G2, #2287).
  */
-const QUEUE_IF_LEASED = `-- marktmorgen:flow-queue-if-leased:v1
-if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
+export function leaseScore(now: number): number {
+  return now + LEASE_SECONDS + randomInt(1, 2 ** 20) / 2 ** 21;
+}
+/**
+ * Queues a run's next attempt only while this step's lease entry is still there at the score this run's take wrote
+ * (leaseScore), in one command: a stop step of another workflow removes that entry (act, "stop"), and a later run that
+ * took the same entry again wrote its own score, and then nothing of this run is queued again (Codex G2, #2287: an
+ * old run went on with the steps of the run that took over). KEYS: the lease, the queue; ARGV: the lease member, the
+ * queue score, the queue member, the take's score. 1 when queued, 0 when the run was taken out or taken over.
+ */
+const QUEUE_IF_LEASED = `-- marktmorgen:flow-queue-if-leased:v2
+local held = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if held and tonumber(held) == tonumber(ARGV[4]) then
   redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
   return 1
 end
 return 0`;
+
+/**
+ * Takes this run's own lease entries away: each member of ARGV[2..] only while it is held at the score this run's take
+ * wrote (ARGV[1]), never one a later run took over. KEYS: the lease. The answer: 1 or 0 for each member, in order.
+ */
+const DROP_OWN_LEASES = `-- marktmorgen:flow-lease-drop-own:v1
+local out = {}
+for i = 2, #ARGV do
+  local held = redis.call('ZSCORE', KEYS[1], ARGV[i])
+  if held and tonumber(held) == tonumber(ARGV[1]) then
+    redis.call('ZREM', KEYS[1], ARGV[i])
+    out[#out + 1] = 1
+  else
+    out[#out + 1] = 0
+  end
+end
+return out`;
+
+/** Who of `emails` this take of `group` still holds at its own score; nobody when the answer is not exact. */
+async function stillHeld(group: string, emails: string[], score: number): Promise<string[]> {
+  if (!emails.length) return [];
+  const reply: unknown = await redisPipeline(emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])).catch(() => null);
+  if (!Array.isArray(reply) || reply.length !== emails.length) return [];
+  return emails.filter((_, i) => (typeof reply[i] === "string" || typeof reply[i] === "number") && Number(reply[i]) === score);
+}
+
+/** Which of `members` this take held and took away (DROP_OWN_LEASES); none when the answer is not exactly one 0 or 1 each. */
+async function dropOwnLeases(members: string[], score: number): Promise<boolean[]> {
+  if (!members.length) return [];
+  const reply: unknown = await redisPipeline([["EVAL", DROP_OWN_LEASES, 1, LEASE, String(score), ...members]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  if (!Array.isArray(answer) || answer.length !== members.length || answer.some((one) => one !== 0 && one !== 1)) return members.map(() => false);
+  return answer.map((one) => one === 1);
+}
 const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const enrolledKey = (flowId: string, email: string) =>
   `nl:mail:enr:${flowId}:${createHash("sha256").update(`nimbus-flow:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
@@ -598,7 +644,7 @@ export function runGoneBy(flow: Pick<Flow, "steps">, nowSeconds: number): number
 }
 
 /** What came of an action for one person, for the run's history (lib/flow-runs.ts). */
-type Acted = { email: string; state: "confirmed" | "failed" | "deferred" | "uncertain"; note: string; /** Confirmed, and something was actually changed (not "already had it"): what the "actions done" count counts. */ changed?: boolean; /** Why it waits, for a deferred one (lib/flow-retry.ts). */ wait?: WaitReason };
+type Acted = { email: string; state: "confirmed" | "failed" | "deferred" | "uncertain" | "superseded"; note: string; /** Confirmed, and something was actually changed (not "already had it"): what the "actions done" count counts. */ changed?: boolean; /** Why it waits, for a deferred one (lib/flow-retry.ts). */ wait?: WaitReason };
 const each = (emails: string[], state: Acted["state"], note: string): Acted[] => emails.map((email) => ({ email, state, note }));
 
 /**
@@ -611,7 +657,7 @@ const each = (emails: string[], state: Acted["state"], note: string): Acted[] =>
  * sequence that starts with it, and nobody is started twice. A write whose
  * answer is lost is "uncertain": the run is held, never repeated by itself.
  */
-async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number }): Promise<Acted[]> {
+async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => { member: string; score: number } }): Promise<Acted[]> {
   const listId = store.listId;
   if (!listId || !emails.length) return [];
   if (action.do === "wait") return each(emails, "confirmed", "Waited.");
@@ -732,7 +778,7 @@ async function actOnPeople(
   store: Store,
   action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number },
+  at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => { member: string; score: number } },
 ): Promise<Acted[]> {
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
@@ -740,12 +786,23 @@ async function actOnPeople(
     const field = (await readFields(statsId)).find((f) => f.id === action.field);
     if (!field) return each(emails, "failed", "The field was removed from your store.");
     const out: Acted[] = [];
-    for (const email of emails) {
+    // Their generations, read once as the step starts (lib/crm.ts): one deleted since is never written about, even if
+    // they came back meanwhile; one deleted and not come back is refused whatever it reads.
+    let generations: number[];
+    try {
+      generations = await readGenerations(statsId, emails.map((email) => personKey(statsId, email)));
+    } catch {
+      return each(emails, "failed", `“${field.name}” was not set: the people could not be read just now.`);
+    }
+    for (const [i, email] of emails.entries()) {
       try {
-        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
+        // And only while this run still holds its lease, checked in the write itself: a deletion takes it away (Codex G, #2287).
+        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, generations[i], at.lease ? { key: LEASE, ...at.lease(email) } : undefined)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: `“${field.name}” was not set: the store's data room is full.` });
+        // The person was deleted from the store, and has not come back, or since this step started (lib/crm.ts, setValue).
+        else if (error instanceof CrmPersonGone) out.push({ email, state: "failed", note: `“${field.name}” was not set: this person was deleted from your store.` });
         else out.push({ email, state: "uncertain", note: `Whether “${field.name}” was set could not be confirmed.` });
       }
     }
@@ -753,12 +810,14 @@ async function actOnPeople(
   }
   if (action.do === "note") {
     // Read when needed: the buyer's page reads the sequences too (lib/buyer-profile.ts), so not at the top.
-    const { addPersonNote } = await import("@/lib/buyer-profile");
+    const { addPersonNote, addRunNote } = await import("@/lib/buyer-profile");
     const out: Acted[] = [];
     for (const email of emails) {
       try {
-        const kept = await addPersonNote(statsId, personKey(statsId, email), "sequence", `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`, store);
-        out.push(kept ? { email, state: "confirmed", changed: true, note: "Note written on their page." } : { email, state: "failed", note: "The note could not be written." });
+        const words = `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`;
+        // Under this run's own take, checked in the note's own write: a run taken over writes nothing (C3-141).
+        const kept = at.lease ? await addRunNote(statsId, personKey(statsId, email), "sequence", words, store, { key: LEASE, ...at.lease(email) }) : (await addPersonNote(statsId, personKey(statsId, email), "sequence", words, store)) ? "written" : null;
+        out.push(kept === "superseded" ? { email, state: "superseded", note: "Taken over by a later run." } : kept ? { email, state: "confirmed", changed: true, note: "Note written on their page." } : { email, state: "failed", note: "The note could not be written." });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: "The note was not written: the store's data room is full." });
@@ -826,7 +885,7 @@ async function actOnDeals(
   statsId: string,
   action: Extract<FlowAction, { do: "deal" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number },
+  at: { flow: Flow; step: FlowStep; index: number; lease?: (email: string) => { member: string; score: number } },
   held: Held | null,
 ): Promise<Acted[]> {
   const pipelines = await readPipelines(statsId);
@@ -937,7 +996,14 @@ async function actOnDeals(
         : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
     }
     try {
-      const outcome = before === null ? ((await writeDeal(statsId, deal, store)) ? "saved" : "full") : await writeDealOver(statsId, deal, before, store);
+      // Under this run's own take, checked in the deal's own write: a run taken over writes nothing (C3-141).
+      const take = at.lease ? { key: LEASE, ...at.lease(email) } : undefined;
+      const made = before === null ? (take ? await writeDeal(statsId, deal, store, undefined, take) : await writeDeal(statsId, deal, store)) : null;
+      const outcome = before === null ? (made === "superseded" ? "superseded" : made ? "saved" : "full") : await writeDealOver(statsId, deal, before, store, take);
+      if (outcome === "superseded") {
+        out.push({ email, state: "superseded", note: "Taken over by a later run." });
+        continue;
+      }
       if (outcome === "changed") {
         out.push({ email, state: "failed", note: CHANGED_ON_BOARD });
         continue;
@@ -1068,7 +1134,8 @@ export async function sendDueSteps(
     // Whoever removes a member from the queue is the one who sends it.
     const taken = await redisPipeline(members.map((m) => ["ZREM", QUEUE, m]));
     const owned = members.filter((_, i) => Number(taken[i]) === 1);
-    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, now + LEASE_SECONDS, m]));
+    const score = leaseScore(now);
+    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, score, m]));
     const groups = new Map<string, string[]>();
     members.forEach((member, i) => {
       if (Number(taken[i]) !== 1) return;
@@ -1082,9 +1149,10 @@ export async function sendDueSteps(
       // Back in the queue for a later run, but only for whoever still holds this step's lease entry: a stop step of
       // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
       // orphans above, whoever removes the lease entry is the one who puts it back.
+      // Only this take's own entries: one a later run took over is that run's (Codex G2, #2287).
       const putBack = async (at: number) => {
-        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
-        const held = emails.filter((_, i) => Number(back[i]) === 1);
+        const back = await dropOwnLeases(emails.map((email) => `${group}|${email}`), score);
+        const held = emails.filter((_, i) => back[i]);
         if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
       };
       if (Date.now() > deadline) {
@@ -1093,8 +1161,8 @@ export async function sendDueSteps(
         continue;
       }
       try {
-        await sendGroup(group, emails);
-        await redisPipeline([["ZREM", LEASE, ...emails.map((email) => `${group}|${email}`)]]);
+        await sendGroup(group, emails, score);
+        await dropOwnLeases(emails.map((email) => `${group}|${email}`), score);
       } catch (error) {
         // Put back for a later run rather than lost; the send's own key keeps
         // anybody it already reached from getting it twice.
@@ -1105,7 +1173,7 @@ export async function sendDueSteps(
   }
   return counts;
 
-  async function sendGroup(group: string, emails: string[]): Promise<void> {
+  async function sendGroup(group: string, emails: string[], score: number): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
     const [listId, handle, flowId, stepRaw] = group.split("|");
     const index = Number(stepRaw);
@@ -1116,7 +1184,7 @@ export async function sendDueSteps(
     const queueHeld = async (commands: (string | number)[][], extra: (string | number)[][] = []): Promise<Set<string>> => {
       const out = new Set<string>();
       if (!commands.length && !extra.length) return out;
-      const sent = [...commands.map((c) => ["EVAL", QUEUE_IF_LEASED, 2, LEASE, QUEUE, `${group}|${personIn(c)}`, c[2], String(c[3])]), ...extra];
+      const sent = [...commands.map((c) => ["EVAL", QUEUE_IF_LEASED, 2, LEASE, QUEUE, `${group}|${personIn(c)}`, c[2], String(c[3]), String(score)]), ...extra];
       const reply = await redisPipeline(sent);
       if (!Array.isArray(reply) || reply.length !== sent.length) throw new FlowWriteUnconfirmed();
       commands.forEach((c, i) => {
@@ -1150,7 +1218,8 @@ export async function sendDueSteps(
     // the step's condition says.
     const [rows, ...scores] = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
     const found = Array.isArray(rows) ? rows : [];
-    const held = new Set(emails.filter((_, i) => scores[i] !== null && scores[i] !== undefined));
+    // Held at this take's own score: an entry a later run took over is not this run's (Codex G2, #2287).
+    const held = new Set(emails.filter((_, i) => (typeof scores[i] === "string" || typeof scores[i] === "number") && Number(scores[i]) === score));
     counts.dropped += emails.length - held.size;
     // Who is still on the list, and of them, who has reached the sequence's
     // end and who this step is not for (lib/flow-rules.ts) — read from the
@@ -1222,13 +1291,19 @@ export async function sendDueSteps(
     if (claim.open.length) {
       await settleAttempts(listId, flow.id, index, step.id, kind, claim.open.map((email) => ({ email, state: "uncertain", note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index })), now).catch(() => {});
     }
-    const going = claim.claimed;
+    // Read again right before the step does anything: someone this run's take no longer holds (taken out, or taken
+    // over by a later run that took the same entry) is that run's, and this one does nothing for them, not even a
+    // note in the run's history (Codex G2 on #2287, C3-141). A write about a person also checks it, or their
+    // generation, in its own script (lib/crm.ts, SET_CRM_VALUE); an email cannot be sent in the same step as a check.
+    const going = await stillHeld(group, claim.claimed, score);
+    counts.dropped += claim.claimed.length - going.length;
     if (!going.length) return;
     const to = afterIndex(flow.steps, index);
     const queueNext = (people: string[]): (string | number)[][] =>
       to < 0 ? [] : people.map((email) => ["ZADD", QUEUE, now + flow.steps[to].delayHours * 3600, `${listId}|${handle}|${flowId}|${to}|${email}`]);
+    // Never someone a later run took over (C3-141): they are left out before this, and never settled here.
     const settled = (people: Acted[], stay: Set<string>): Settled[] =>
-      people.map((p) => (stay.has(p.email) || p.state === "deferred" ? { ...p, to: p.state === "deferred" ? index : to } : { ...p, to: -1, status: "ended" as const, note: `${p.note} Taken out by another workflow, so nothing after this step is sent.` }));
+      people.flatMap((p) => (p.state === "superseded" ? [] : [{ ...p, state: p.state }])).map((p) => (stay.has(p.email) || p.state === "deferred" ? { ...p, to: p.state === "deferred" ? index : to } : { ...p, to: -1, status: "ended" as const, note: `${p.note} Taken out by another workflow, so nothing after this step is sent.` }));
     // The next step is queued before the attempt is cleared. If clearing then
     // fails, the attempt stays open and the next step holds the run rather
     // than letting anything happen twice; if queueing fails, the run is held here.
@@ -1237,10 +1312,13 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const acted = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, lease: (email) => ({ member: `${group}|${email}`, score }) }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        // Someone a later run took over is that run's: nothing is noted, queued or settled for them here (C3-141).
+        const superseded = new Set(acted.filter((o) => o.state === "superseded").map((o) => o.email));
+        const outcomes = acted.filter((o) => o.state !== "superseded");
         // Anybody act did not answer for has no known outcome.
-        const answered = new Set(outcomes.map((o) => o.email));
-        const all = [...outcomes, ...each(going.filter((e) => !answered.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];
+        const answered = new Set(acted.map((o) => o.email));
+        const all = [...outcomes, ...each(going.filter((e) => !answered.has(e) && !superseded.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];
         const confirmed = all.filter((o) => o.state === "confirmed" && o.changed).map((o) => o.email);
         // A failed action is written down and the run goes on: one missing deal does not stop the emails after it.
         const onwards = all.filter((o) => o.state === "confirmed" || o.state === "failed").map((o) => o.email);

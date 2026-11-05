@@ -12,7 +12,8 @@ import { PersonTasks } from "@/components/person-tasks";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
-import { readFields, readPersonTasks, readValues } from "@/lib/crm";
+import { readFields, readGeneration, readPersonTasks, readValues, pageMark } from "@/lib/crm";
+import { personKey } from "@/lib/person-key";
 import { PERSON_KEY, addressForPerson } from "@/lib/person-agenda";
 import { agendaData, countLedger } from "@/lib/person-agenda-read";
 import { type PersonTask, taskAssignees } from "@/lib/person-tasks";
@@ -110,6 +111,11 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
     });
   }
   const asked = Boolean(token || sale || who);
+  // The person's generation, read before anything about them (lib/crm.ts, readGeneration): a field saved from this page
+  // is refused if they are deleted after, even once they come back.
+  const generation = email && store.statsId ? await readGeneration(store.statsId, personKey(store.statsId, email)) : 0;
+  // Signed with when it was read (lib/crm.ts, pageMark): a save from this page after PAGE_MARK_SECONDS is refused.
+  const mark = email && store.statsId ? pageMark(store.statsId, personKey(store.statsId, email), generation) : "";
   const profile = email ? await buyerProfile(store, email) : null;
   // The store's own fields about each person (lib/crm-rules.ts), and this one's answers.
   const fields = profile ? await readFields(store.statsId) : [];
@@ -136,7 +142,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <p className="eyebrow">Buyers</p>
           {profile ? (
-            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} />
+            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} mark={mark} />
           ) : (
             <>
               {erased ? (
@@ -279,7 +285,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, mark }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null; mark: string }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -457,7 +463,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
             {fields.length ? "Change the fields" : "Make your first field"}
           </Link>
         </p>
-        {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} /> : null}
+        {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} mark={mark} /> : null}
       </section>
 
       <section aria-labelledby="tasks-title" className="card mt-8 p-6 sm:p-8">

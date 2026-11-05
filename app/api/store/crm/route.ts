@@ -10,7 +10,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CrmFieldsKept, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
+import { CRM_VALUE_SAVE_UNITS, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -21,7 +21,10 @@ const MAX_BODY_BYTES = 20_000;
  *
  *   { action: "fields", fields }               saves the fields; a field taken away takes its answers
  *                                              (not from a session let in without its second step)
- *   { action: "value", person, field, value }   one person's answer to one field; "" clears it
+ *   { action: "value", person, field, value, generation }
+ *                                              one person's answer to one field; "" clears it. generation is the
+ *                                              person's as the page read it: a person deleted since, or while
+ *                                              they are deleted, is 404 unknown
  *   { action: "stages", stages }               saves the first pipeline's stages (older studio pages)
  *   { action: "pipeline", pipeline, moves }     saves one pipeline, or adds one with a new id;
  *                                              `moves` names where each removed stage's deals go
@@ -34,7 +37,9 @@ const MAX_BODY_BYTES = 20_000;
  *   { action: "undeal", id }                    removes one
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "orders", MAX_BODY_BYTES);
+  // A field saved is counted as CRM_VALUE_SAVE_UNITS studio requests, all taken with the first, before anything is
+  // read or written (tests/plan-cost-registry.ts, CRM_VALUE_SAVE); every other action as one.
+  const guarded = await guardStoreWrite(request, "orders", MAX_BODY_BYTES, undefined, (body) => (body.action === "value" ? CRM_VALUE_SAVE_UNITS : 1));
   if (!guarded.ok) return guarded.response;
   const { body } = guarded;
   const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
@@ -44,7 +49,8 @@ export async function POST(request: NextRequest) {
     const statsId = store.statsId;
     // Which pipelines this person may change (639 [GL7](7)): the owner and Admins every one, a teammate as the store set.
     const restricted = guarded.role !== "owner" && guarded.role !== "admin";
-    const access = restricted ? await readPipelineAccess(statsId, guarded.email) : {};
+    // A field's value touches no pipeline: its save reads no access (one trip fewer, C3-125).
+    const access = restricted && body.action !== "value" ? await readPipelineAccess(statsId, guarded.email) : {};
     const mayEdit = (pipelineId: string | null) => pipelineId !== null && accessOf(guarded.role, access, pipelineId) === "edit";
     const noAccess = () => Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
 
@@ -60,7 +66,17 @@ export async function POST(request: NextRequest) {
     if (body.action === "value") {
       const field = (await readFields(statsId)).find((f) => f.id === body.field);
       if (!field) return refuse("unknown", 404);
-      const ok = await setValue(statsId, typeof body.person === "string" ? body.person : "", field, body.value, store);
+      // The person's generation as the page read it (lib/crm.ts, readGeneration): a page read before they were deleted
+      // is refused, as is any save while they are deleted. A page drawn before generations were sent sends none, read
+      // as 0, every person's until a deletion: refused for anyone deleted since. A time the page sends proves nothing
+      // and is not read.
+      // The page's mark of the person (lib/crm.ts, pageMark), signed by the server when the page was read: one not signed
+      // here, or older than PAGE_MARK_SECONDS, saves nothing (Codex G2, #2287), so a page read before a deletion never
+      // outlives the generation that refuses it, however the session was renewed.
+      const person = typeof body.person === "string" ? body.person : "";
+      const generation = readPageMark(statsId, person, body.mark);
+      if (generation === null) return refuse("stale", 409);
+      const ok = await setValue(statsId, person, field, body.value, store, generation);
       return ok ? Response.json({ ok: true }) : refuse("value");
     }
     if (body.action === "stages") {
@@ -163,6 +179,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof CrmFieldsKept) return refusedJson("locked");
     if (error instanceof CrmDealReadUnavailable) return refuse("crm_deal_read_unavailable", 503);
     if (error instanceof CrmDealWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
+    // A person deleted from the store (and not come back), or a page read before: nothing written, as for anything gone.
+    if (error instanceof CrmPersonGone) return refuse("unknown", 404);
     console.error("saving a store's fields or deals failed", error);
     return refuse("server_error", 500);
   }

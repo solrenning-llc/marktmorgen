@@ -1,0 +1,56 @@
+{
+  "head": "ebd5f2727f28f859e7cf3092e3313d7f6b725b58",
+  "tree": "6bd0141ef3e42e0ceab0687c8f4406b1401c81bf",
+  "red": "4e511a5551b130fab0275bad47f8f9ecc3ab1bc5",
+  "native": {
+    "version": "Redis7.4.12",
+    "tests": 28,
+    "passed": 28,
+    "skipped": 0,
+    "malformedCommandComparisons": 23,
+    "redFinal": {
+      "tests": 28,
+      "passed": 2,
+      "failed": 26,
+      "skipped": 0
+    }
+  },
+  "fullAudit": {
+    "selectedFiles": 1169,
+    "passedFiles": 1168,
+    "failedFiles": [
+      {
+        "file": "wordpress-plugin.test.ts",
+        "cause": "spawnSync php ENOENT",
+        "baselineWithoutArityGuard": "same failure",
+        "sourceBlob": "1a35bbbfa8a250ee0d0ae5c51190122db04af3b5"
+      }
+    ],
+    "nodeTestTotals": {
+      "tests": 2233,
+      "passed": 2221,
+      "failed": 0,
+      "skipped": 12
+    },
+    "customPassedCheckLines": 34290,
+    "clientBundles": {
+      "total": 268,
+      "passed": 268,
+      "failed": 0
+    },
+    "newInvalidArityCallers": [],
+    "logSHA256": "dd6a96d00ccdb924d065001e4eed9d55f60b093f21ec78edfc88091b98eb337c",
+    "method": "Same sorted test list, testAliases/testEnvironment and isolated serial Node processes as tests/run.mjs; write:false bundles compiled from stdin because disk was exhausted. Existing optional native skips are included, not declared passing. No assertion/timeout/file removed. Dedicated Redis native proof passes separately with no skips."
+  },
+  "verification": {
+    "typegen": true,
+    "globalTypeScript": true,
+    "eslintErrors": 0,
+    "scanner": {
+      "tracked": 3703,
+      "corrections": 0
+    },
+    "diffCheck": true
+  },
+  "limits": "No full-green local-suite claim because PHP is absent. Hosted complete suite and nine successful aggregate checks on the final head remain mandatory."
+}

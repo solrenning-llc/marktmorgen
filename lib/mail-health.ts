@@ -144,18 +144,50 @@ export async function noteSent(id: string, n: number, now = Date.now()): Promise
 export async function listHealth(id: string, now = Date.now()): Promise<Health> {
   const days: string[] = [];
   for (let i = 0; i < HEALTH_WINDOW_DAYS; i += 1) days.push(dayOf(now - i * 86_400_000));
-  const [from, ...rows] = await redisPipeline([["GET", fromKey(id)], ...days.map((day) => ["HMGET", `nl:mail:health:${id}:${day}`, "s", "b", "c"])]);
+  const exact = (value: unknown, length: number): unknown[] | null => {
+    if (!Array.isArray(value)) return null;
+    const size = Object.getOwnPropertyDescriptor(value, "length");
+    if (!size || !("value" in size) || size.value !== length) return null;
+    const out: unknown[] = [];
+    for (let i = 0; i < length; i += 1) {
+      const item = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!item || !("value" in item)) return null;
+      out.push(item.value);
+    }
+    return out;
+  };
+  const count = (value: unknown): number | undefined => {
+    if (value === null) return 0;
+    if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return undefined;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  };
+  const reply = exact(
+    await redisPipeline([["GET", fromKey(id)], ...days.map((day) => ["HMGET", `nl:mail:health:${id}:${day}`, "s", "b", "c"])]),
+    HEALTH_WINDOW_DAYS + 1,
+  );
+  if (!reply) throw new Error("The mail health read is unconfirmed");
+  const [from, ...rows] = reply;
+  if (from !== null && (typeof from !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(from) || dayOf(Date.parse(`${from}T00:00:00Z`)) !== from)) {
+    throw new Error("The mail health read is unconfirmed");
+  }
   const total: Health = { sent: 0, bounced: 0, complained: 0 };
-  rows.forEach((row, i) => {
-    if (!Array.isArray(row)) return;
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = exact(rows[i], 3);
+    if (!row) throw new Error("The mail health read is unconfirmed");
+    const values = row.map(count);
+    if (values.some(value => value === undefined)) throw new Error("The mail health read is unconfirmed");
     // A store that has served a pause starts its count again from the day
     // the pause ends: the bounces it was paused for, and the ones that came
     // in late from the same emails, are not held against it twice.
-    if (typeof from === "string" && days[i] < from) return;
-    total.sent += Number(row[0]) || 0;
-    total.bounced += Number(row[1]) || 0;
-    total.complained += Number(row[2]) || 0;
-  });
+    if (typeof from === "string" && days[i] < from) continue;
+    total.sent += values[0]!;
+    total.bounced += values[1]!;
+    total.complained += values[2]!;
+    if (!Number.isSafeInteger(total.sent) || !Number.isSafeInteger(total.bounced) || !Number.isSafeInteger(total.complained)) {
+      throw new Error("The mail health read is unconfirmed");
+    }
+  }
   return total;
 }
 

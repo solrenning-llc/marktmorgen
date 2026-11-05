@@ -85,7 +85,7 @@ function memberEvidence(raw: Raw) {
   const product = productOfSub(raw);
   const item = Array.isArray(raw.items?.data) ? raw.items.data[0] : undefined;
   const unitAmount = item?.price?.unit_amount;
-  const quantity = item?.quantity == null ? 1 : item.quantity;
+  const quantity = item?.quantity;
   const interval = item?.price?.recurring?.interval;
   const intervalCount = item?.price?.recurring?.interval_count;
   const periodEnd = positive(item?.current_period_end) ? item.current_period_end : positive(raw.current_period_end) ? raw.current_period_end : 0;

@@ -43,6 +43,7 @@ import {
 import { SessionsUnknownError, dropSecondStep, normaliseEmail, sessionMark } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf } from "@/lib/redis-reply";
 import { SITE_URL } from "@/lib/site-url";
 import { type Held, LockBusyError, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
 import { removalWhen } from "@/lib/removal-time";
@@ -295,6 +296,8 @@ export async function addPasskey(
 export const REMOVAL_DAYS = 7;
 
 const dropKey = (email: string) => `nl:pk:drop:${sha(`nimbus-passkey-drop:${normaliseEmail(email)}`).slice(0, 40)}`;
+/** The passkeys set to be removed whose browsers could not be logged out when it was asked (scheduleRemovalSaid). */
+const openKey = (email: string) => `${dropKey(email)}:open`;
 
 /**
  * Passkeys waiting to be removed, each with its own moment in ms
@@ -435,6 +438,15 @@ export class MoveSplitError extends Error {
  * Answers the passkey's moment, or null when the account has no such passkey.
  */
 export async function scheduleRemoval(email: string, id: string, session: string, appOn = false, now = Date.now()): Promise<number | null> {
+  return (await scheduleRemovalSaid(email, id, session, appOn, now))?.at ?? null;
+}
+
+/**
+ * The same, answering also whether the browsers the passkey opened were
+ * logged out (review of #2556): false when they could not be read when it
+ * was first asked, so that is what the studio and the email say.
+ */
+export async function scheduleRemovalSaid(email: string, id: string, session: string, appOn = false, now = Date.now()): Promise<{ at: number; loggedOut: boolean } | null> {
   const address = normaliseEmail(email);
   let gone: Due = NONE;
   const asked = await withPasskeys(address, async (held) => {
@@ -447,20 +459,6 @@ export async function scheduleRemoval(email: string, id: string, session: string
     if (before?.telling && now - before.telling.since < TELLING_MS) return "busy" as const;
     const atOf = { ...(before?.atOf ?? {}) };
     const isNew = atOf[id] === undefined;
-    // Logged out under the same lock, the first time it is asked, before anything is set: nothing P opened stays
-    // open past this request (asked again, the owner's own sessions are not logged out again). Sessions that cannot
-    // be read leave nothing set, and the request fails, to be asked again (audit SG2, finding 6): the email that
-    // says they were logged out is never sent for a request that did not log them out.
-    if (isNew) {
-      const dropped = await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session).then(
-        () => true,
-        (error: unknown) => {
-          if (error instanceof SessionsUnknownError) return false;
-          throw error;
-        },
-      );
-      if (!dropped) return "sessions" as const;
-    }
     if (isNew) atOf[id] = now + REMOVAL_DAYS * 86_400_000;
     // A notice marked as going out long ago was never confirmed: this request sends it.
     const tellNow = isNew || !before || now - before.told >= RETELL_MS || !!before.telling;
@@ -468,14 +466,26 @@ export async function scheduleRemoval(email: string, id: string, session: string
     // A new passkey is untold until a delivery is confirmed; one already waiting keeps what it was.
     const untold = [...(before?.untold ?? []), ...(isNew ? [id] : [])];
     await writeDrop(held, address, dropOf(atOf, before?.told ?? 0, { telling: tellNow ? { token, since: now } : undefined, untold }));
+    // Logged out under the same lock, the first time it is asked, once the removal is kept: nothing P opened stays
+    // open past this request (asked again, the owner's own sessions are not logged out again). Sessions that could
+    // not be read (audit SG2, finding 6) are noted, so every notice about this passkey says they were not logged
+    // out; the removal stands (review of #2556: never a logout without the removal kept, nor the other way round said).
+    let loggedOut: boolean;
+    if (isNew) {
+      loggedOut = await dropPasskeySessions(address, (mark) => mark === `passkey:${id}`, session);
+      await redisPipeline([loggedOut ? ["SREM", openKey(address), id] : ["SADD", openKey(address), id], ["EXPIRE", openKey(address), (REMOVAL_DAYS + 1) * 86_400]]);
+    } else {
+      // Asked again: what the first request could do. Unknown is never said as logged out.
+      const [open] = await redisPipeline([["SISMEMBER", openKey(address), id]]);
+      loggedOut = countOf(open) === 0;
+    }
     // Whether a second step is left that can still keep it: another passkey not set to go, or the app.
     const another = list.some((p) => atOf[p.id] === undefined);
     const waiting = list.filter((p) => atOf[p.id] !== undefined).map((p) => ({ name: p.name, at: atOf[p.id] }));
-    return { at: atOf[id], name: row.name, tellNow, another, waiting, isNew, token };
+    return { at: atOf[id], name: row.name, tellNow, another, waiting, isNew, token, loggedOut };
   });
   await afterDue(address, gone);
   if (asked === "busy") throw new RemovalBusyError();
-  if (asked === "sessions") throw new SessionsUnknownError("the sessions a passkey set to be removed opened");
   if (!asked) return null;
   if (asked.tellNow) {
     // Owner C3-96 and the reviews of 3467adf6d and 693f44f0b: when each goes, and what to do if it was not them, in plain words.
@@ -483,7 +493,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
     const canStop = asked.another || appOn;
     const subject = "A passkey is set to be removed from your Marktmorgen account";
     const all = asked.waiting.length > 1 ? `\n\nEvery passkey set to be removed now, each on its own day:\n${asked.waiting.map((p) => `- “${headerText(p.name, 60)}”: ${removalWhen(p.at)}`).join("\n")}` : "";
-    const line = `Somebody logged in to your Marktmorgen account (${address}) and asked to remove the passkey called “${headerText(asked.name, 60)}”. Every browser that logged in with it was logged out.\n\nIt will be removed on ${when}.${all}`;
+    const line = `Somebody logged in to your Marktmorgen account (${address}) and asked to remove the passkey called “${headerText(asked.name, 60)}”. ${asked.loggedOut ? "Every browser that logged in with it was logged out." : PASSKEY_SESSIONS_OPEN}\n\nIt will be removed on ${when}.${all}`;
     const own = {
       ifYou: "If this was you, there is nothing to do: each is removed on its day.",
       ifNotYou: canStop
@@ -526,7 +536,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
     // The email listed every passkey set to go: none is untold any more.
     await settle((record) => dropOf(record.atOf, now)).catch(() => {});
   }
-  return asked.at;
+  return { at: asked.at, loggedOut: asked.loggedOut };
 }
 
 /**

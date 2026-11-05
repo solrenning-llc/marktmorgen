@@ -72,16 +72,17 @@ export async function POST(request: NextRequest) {
       }
       // Asked again under the record's lock, just before it is written (lib/second-step-gate.ts mayAddNow).
       const done = await finishSetup(email, session, code, typeof body.backupCode === "string" ? body.backupCode.slice(0, 20) : "", Date.now(), () => mayAddNow(email, session));
-      return typeof done === "string" ? refuse(done, done === "second_step" ? 403 : 400) : Response.json({ ok: true, codes: done.codes }, { headers: { "Cache-Control": "no-store" } });
+      return typeof done === "string" ? refuse(done, done === "second_step" ? 403 : done === "sessions" ? 503 : 400) : Response.json({ ok: true, codes: done.codes }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "cancel") {
       // A session opened with a passkey that is set to be removed, or gone, calls off nothing
       // (lib/second-step-gate.ts liveSecondStep): whoever holds that passkey may not be the owner.
       const step = await liveSecondStep(email, session);
       if (step === null && (await sessionMark(session, email))?.startsWith("passkey")) return refuse("second_step", 403);
-      await cancelReset(email, "studio");
+      const canceled = await cancelReset(email, "studio");
       // Passkey removals stay: only "Keep it", next to the passkey, calls one off (lib/passkeys.ts).
-      return Response.json({ ok: true });
+      // Canceled either way; browsers that could not be logged out are said as such (review of #2556).
+      return Response.json({ ok: true, loggedOut: canceled !== "kept-locked" });
     }
     if (body.action === "off") {
       const done = await turnOff(email, code);

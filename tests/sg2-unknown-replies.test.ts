@@ -26,20 +26,25 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { forgetNoted, noteForErasure } from "@/lib/erasure-index";
 import { ERASERS } from "@/lib/person-erasure";
-import { SessionsUnknownError, dropSecondStep, emailForSession, endAllSessions, isMoving, moveRunning, openSession } from "@/lib/auth";
-import { hasSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
-import { STILL_LOCKED, cancelReset, endRecoveryAccess, finishSetup, lockedUntil, openLockedSession, startSetup } from "@/lib/two-step";
+import { SessionsUnknownError, dropSecondStep, emailForSession, endAllSessions, isMoving, moveRunning, openSession, sendMoveLink } from "@/lib/auth";
+import { hasSecondStep, liveSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
+import { RESET_DAYS, STILL_LOCKED, endRecoveryAccess, finishSetup, lockedUntil, openLockedSession, startSetup, twoStepOn, twoStepStatus } from "@/lib/two-step";
 import { alignRecoveryLock } from "@/lib/recovery-address";
-import { PASSKEY_SESSIONS_OPEN, listPasskeys, removePasskey } from "@/lib/passkeys";
+import { PASSKEY_SESSIONS_OPEN, cancelRemoval, listPasskeys, pendingNow, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_KEYS, listKeys, makeKey, resolveKey, revokeAllKeys } from "@/lib/api-keys";
 import { ApiKeyEditor, KEYS_UNREAD } from "@/components/api-key-editor";
 import { POST as signOutAll } from "@/app/api/auth/signout-all/route";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
+import { POST as twoStepRoute } from "@/app/api/auth/two-step/route";
+import { POST as passkeyRoute } from "@/app/api/auth/passkey/route";
+import { POST as moveRoute } from "@/app/api/auth/move/route";
+import { CANCEL_NOT_LOGGED_OUT } from "@/components/two-step-manager";
+import { claimHandle, storeForEmail } from "@/lib/store";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { makePasskey } from "./passkey-world";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
@@ -94,6 +99,8 @@ async function linkFor(email: string): Promise<string> {
   return token;
 }
 const lastTo = (to: string) => [...mails].reverse().find((m) => m.to === to);
+const json = (url: string, body: Record<string, unknown>, session: string) =>
+  new NextRequest(url, { method: "POST", headers: { "content-type": "application/json", host: "marktmorgen.com", origin: "https://marktmorgen.com", cookie: `nl_session=${session}` }, body: JSON.stringify(body) });
 
 async function main(): Promise<void> {
   redis.clear();
@@ -151,14 +158,21 @@ async function main(): Promise<void> {
   const locked = cookieOf(await codeRoute(post("https://marktmorgen.com/api/auth/code", { action: "reset" }, `nl_2fa=${hold}`)), "nl_session");
   const lockedSet = `nl:2fa:lockedset:${sha(`nimbus-2fa-lockedset:${LOST}`).slice(0, 40)}`;
   is("a session let in without the second step, locked", [await emailForSession(locked), (await lockedUntil(locked)) > 0, await exists(lockedSet)], [LOST, true, true]);
+  // The owner's own browser, opened with the app's code, presses Cancel in the studio (the real route).
+  const ownerBrowser = await openSession(LOST, "app");
   malform(on("SMEMBERS", "nl:2fa:lockedset:"), { 0: locked });
-  const canceled = await cancelReset(LOST, "studio");
+  const canceledAnswer = (await (await twoStepRoute(json("https://marktmorgen.com/api/auth/two-step", { action: "cancel" }, ownerBrowser))).json()) as { ok?: boolean; loggedOut?: boolean };
   restore();
   const canceledMail = lastTo(LOST);
   is(
-    "Cancel with the set read in another shape: canceled, the session still listed and still locked",
-    [canceled, await emailForSession(locked), (await lockedUntil(locked)) > 0, await exists(lockedSet)],
-    [true, LOST, true, true],
+    "Cancel with the set read in another shape: canceled, said as not logged out; the session still listed and still locked",
+    [canceledAnswer, (await twoStepStatus(LOST)).reset, await emailForSession(locked), (await lockedUntil(locked)) > 0, await exists(lockedSet)],
+    [{ ok: true, loggedOut: false }, 0, LOST, true, true],
+  );
+  is(
+    "and still locked once the day it would have lifted is past (a week, and nearly the session's thirty days)",
+    [(await lockedUntil(locked, Date.now() + (RESET_DAYS + 1) * 86_400_000)) > 0, (await lockedUntil(locked, Date.now() + 29 * 86_400_000)) > 0],
+    [true, true],
   );
   is(
     "and the email says they could not be logged out, never that they were",
@@ -166,6 +180,30 @@ async function main(): Promise<void> {
     ["Two-step login stays on for your Marktmorgen account", true, true, false],
   );
   is("what it says stays locked is the one list of what a locked session cannot do", STILL_LOCKED.includes("passkeys and two-step login stay locked"), true);
+  const twoStepManager = readFileSync("components/two-step-manager.tsx", "utf8");
+  is(
+    "the studio says it inline, never in a passing toast, and no longer promises they are logged out at once",
+    [twoStepManager.includes("if (answer.loggedOut === false) setError(CANCEL_NOT_LOGGED_OUT);"), CANCEL_NOT_LOGGED_OUT.includes("could not be logged out just now"), readFileSync("app/studio/page.tsx", "utf8").includes("they are logged out at once")],
+    [true, true, false],
+  );
+
+  // That locked session asks for the owner's passkey to go (the real route): the removal is kept, and the
+  // browsers it opened, unread, are said as not logged out, in the answer and in the email.
+  await makePasskey(LOST, "pk-lost").keep();
+  const byLostKey = await openSession(LOST, "passkey", "pk-lost");
+  malform(on("SMEMBERS", "nl:auth:sessions:"), [7]);
+  const asked = (await (await passkeyRoute(json("https://marktmorgen.com/api/auth/passkey", { action: "remove", id: "pk-lost" }, locked))).json()) as { ok?: boolean; removeOn?: number; loggedOut?: boolean };
+  restore();
+  const askedMail = mails.filter((m) => m.to === LOST && m.subject === "A passkey is set to be removed from your Marktmorgen account").pop();
+  is(
+    "a removal set with the sessions unread: kept, its browser still open, said as not logged out",
+    [asked.ok, typeof asked.removeOn, asked.loggedOut, (await pendingNow(LOST))?.ids.includes("pk-lost"), await emailForSession(byLostKey)],
+    [true, "number", false, true, LOST],
+  );
+  is("and the email says so, never that they were", [askedMail?.text.includes(PASSKEY_SESSIONS_OPEN), askedMail?.text.includes("Every browser that logged in with it was logged out")], [true, false]);
+  const again = await scheduleRemovalSaid(LOST, "pk-lost", locked, true, Date.now() + 2 * 3_600_000);
+  is("asked again later: still said as not logged out", again?.loggedOut, false);
+  await cancelRemoval(LOST, "pk-lost", byLostKey).catch(() => null);
 
   await alignRecoveryLock(LOST, Date.now() + 86_400_000);
   malform(on("SMEMBERS", "nl:2fa:lockedset:"), null);
@@ -256,22 +294,49 @@ async function main(): Promise<void> {
   const doneOut = await signOutAll(new NextRequest("https://marktmorgen.com/api/auth/signout-all", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", cookie: `nl_session=${two}` } }));
   is("read in its shape: done, and said as done", [doneOut.headers.get("location"), await emailForSession(two), await exists(allKey)], ["https://marktmorgen.com/signin?status=out-everywhere", null, false]);
 
-  const twoStepRoute = readFileSync("app/api/auth/two-step/route.ts", "utf8");
-  const twoStepManager = readFileSync("components/two-step-manager.tsx", "utf8");
-  const passkeyRoute = readFileSync("app/api/auth/passkey/route.ts", "utf8");
+  // The app turned off from the studio (the real route), with a recovery code, while the sessions cannot be read.
+  const offBrowser = await openSession(LOST);
+  const appBrowser = await openSession(LOST, "app");
+  malform(on("SMEMBERS", "nl:auth:sessions:"), null);
+  const offAnswer = (await (await twoStepRoute(json("https://marktmorgen.com/api/auth/two-step", { action: "off", code: finished.codes[5] }, offBrowser))).json()) as { ok?: boolean; loggedOut?: boolean };
+  restore();
+  is("the app turned off with its sessions unread: off, said as not logged out", [offAnswer, await twoStepOn(LOST), await emailForSession(appBrowser)], [{ ok: true, loggedOut: false }, false, LOST]);
   const passkeyManager = readFileSync("components/passkey-manager.tsx", "utf8");
-  const moveRoute = readFileSync("app/api/auth/move/route.ts", "utf8");
   is(
-    "the studio says the app is off but its browsers were not logged out, inline, never in a passing toast",
-    [twoStepRoute.includes("return Response.json({ ok: true, loggedOut });"), twoStepManager.includes("if (answer.loggedOut === false) setError(OFF_NOT_LOGGED_OUT);"), twoStepManager.includes("could not be logged out just now")],
+    "the studio says each inline, never in a passing toast",
+    [
+      readFileSync("components/two-step-manager.tsx", "utf8").includes("if (answer.loggedOut === false) setError(OFF_NOT_LOGGED_OUT);"),
+      passkeyManager.includes("if (done.loggedOut === false) setError(REMOVED_NOT_LOGGED_OUT);"),
+      passkeyManager.includes("if (done.loggedOut === false) setError(`“${row.name}” will be removed on ${onDay(at)}. ${SET_NOT_LOGGED_OUT}`);"),
+    ],
     [true, true, true],
   );
-  is(
-    "and the same for a passkey removed at once",
-    [passkeyRoute.includes('loggedOut: removed === "removed"'), passkeyManager.includes("if (done.loggedOut === false) setError(REMOVED_NOT_LOGGED_OUT);"), passkeyManager.includes("could not be logged out just now")],
-    [true, true, true],
-  );
-  is("an undone move whose sessions could not be read is left marked to repair", moveRoute.includes('if ((await endAllSessions(from)) === null) throw new Error("the sessions could not be read");'), true);
+  // A new app turned on takes what the old one left first: its mark never holds again (review of #2556, C).
+  const again2 = await startSetup(LOST, offBrowser, "backup-lost@example.org");
+  if (typeof again2 === "string") throw new Error(again2);
+  malform(on("SMEMBERS", "nl:auth:sessions:"), "x");
+  const refused = await finishSetup(LOST, offBrowser, nowCode(again2.secret), "");
+  restore();
+  is("unread, the new app is not turned on", [refused, await twoStepOn(LOST), await emailForSession(appBrowser)], ["sessions", false, LOST]);
+  const turnedOn = await finishSetup(LOST, offBrowser, nowCode(again2.secret), "");
+  is("read in their shape: on, and the old app's browser is logged out", [typeof turnedOn === "object", await emailForSession(appBrowser), await liveSecondStep(LOST, appBrowser)], [true, null, null]);
+
+  // A move whose sessions could not be read (the real route): it stands, and is never said as every session closed.
+  const FROM = "move-from@example.com";
+  const TO = "move-to@example.com";
+  await claimHandle(FROM, "sg2-move-from", "Sg2", "");
+  const asker = await openSession(FROM);
+  const stray = await openSession(FROM);
+  mails.length = 0;
+  await sendMoveLink(FROM, TO, "https://marktmorgen.com", asker);
+  const moveToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === TO)?.text ?? "")?.[1] ?? "";
+  malform(on("SMEMBERS", "nl:auth:sessions:"), { 0: "x" });
+  const moved = (await moveRoute(post("https://marktmorgen.com/api/auth/move", { token: moveToken }))).headers.get("location");
+  restore();
+  is("a move with the sessions unread: it stands, and says other sessions may still be open", [Boolean(await storeForEmail(TO)), moved, await emailForSession(stray)], [true, "https://marktmorgen.com/studio?address=moved-sessions-open", FROM]);
+  const studioPage = readFileSync("app/studio/page.tsx", "utf8");
+  is("the studio has words for it", [studioPage.includes('"moved-sessions-open": {'), studioPage.includes("We could not close every session that was open before the move.")], [true, true]);
+  is("an undone move whose sessions could not be read is left marked to repair", readFileSync("app/api/auth/move/route.ts", "utf8").includes('if ((await endAllSessions(from)) === null) throw new Error("the sessions could not be read");'), true);
 
   part("22: unknown counts as moving");
   const MOVER = "mover@example.com";
@@ -347,6 +412,28 @@ async function main(): Promise<void> {
   is("(the words)", KEYS_UNREAD, "We could not read your keys just now, so they are not listed here. Reload the page to try again.");
   is("(read in its shape, the key is listed)", (await listKeys(SID)).map((k) => k.name), ["Zapier"]);
   is("(and a deleted store's keys go)", [await revokeAllKeys(SID), await resolveKey(made.key)], [1, null]);
+
+  // Last, as it moves the stand-in's clock past every session above.
+  part("5 (review of #2556): a lock that could not be lifted by logging out outlasts its day, never the session");
+  const LATE = "late@example.com";
+  const DAY = 86_400_000;
+  const lateUntil = Date.now() + RESET_DAYS * DAY;
+  const before = await openLockedSession(LATE, lateUntil);
+  await alignRecoveryLock(LATE, lateUntil);
+  malform(on("SMEMBERS", "nl:2fa:lockedset:"), null);
+  await endRecoveryAccess(LATE);
+  restore();
+  // Opened after its account's locked sessions could not be logged out: its own day sets it free as before.
+  const after = await openLockedSession(LATE, Date.now() + 60_000, Date.now() + 1_000);
+  advance((RESET_DAYS + 1) * DAY);
+  const pastDay = Date.now() + (RESET_DAYS + 1) * DAY;
+  is(
+    "RESET_DAYS + 1 later: the session it could not log out is still locked; one opened after it is not",
+    [(await lockedUntil(before, pastDay)) > pastDay, await emailForSession(before), await lockedUntil(after, pastDay)],
+    [true, LATE, 0],
+  );
+  advance((30 - RESET_DAYS - 1) * DAY + 60_000);
+  is("thirty days on: the session itself is over, so there is nothing left to lock", [await emailForSession(before), await lockedUntil(before, Date.now() + 31 * DAY)], [null, 0]);
 
   done();
 }

@@ -66,15 +66,18 @@ test("AA: unknown recipient queue must not be discarded as completed",async()=>{
 });
 
 
-test("Q: a waiting job renews its recipient list with its own lifetime",async()=>{
+test("Q: an expired recipient list fails terminally instead of waiting forever",async()=>{
  const r=await setup();const recipients=`nl:upd:job:${r.job.id}:to`;redis.advance(59*86_400_000);
  redis.pipeline=async cs=>{if(cs.some(c=>c[0]==="HEXISTS"&&c[1]===`nl:erased:${r.shop.listId}`))throw new Error("synthetic pause before recipient proof");return r.original(cs);};
  try{
   const held=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
   assert.deepEqual([held?.status,held?.done,held?.sent,r.batches.length],["waiting",0,0,0]);
-  assert.ok(Number(redis.run(["TTL",recipients]))>59*86_400,"the recipient list follows the renewed job lifetime");
-  redis.pipeline=r.original;redis.advance(2*86_400_000);
-  const recovered=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
-  assert.deepEqual([recovered?.status,recovered?.done,recovered?.sent,r.batches.flat().length],["sent",1,1,1]);
+  redis.advance(2*86_400_000);
+  // Real Redis answers a missing LRANGE with an empty list without recreating
+  // the key; avoid the test double's list helper materialising an empty key.
+  redis.pipeline=async cs=>cs.length===1&&cs[0][0]==="LRANGE"&&cs[0][1]===recipients&&redis.run(["EXISTS",recipients])===0?[[]]:r.original(cs);
+  const expired=await advanceUpdate(r.job.id,storeForHandle,Date.now()+20000);
+  assert.deepEqual({status:expired?.status,done:expired?.done,sent:expired?.sent,mail:r.batches.flat().length,queued:redis.run(["SISMEMBER","nl:updq",r.job.id]),recipients:redis.run(["EXISTS",recipients])},{status:"failed",done:0,sent:0,mail:0,queued:0,recipients:0});
+  assert.match(expired?.note??"",/expired/i);
  }finally{redis.pipeline=r.original;}
 });

@@ -88,8 +88,13 @@ export async function membershipStatus(store: Store, subscription: unknown): Pro
   const account = store.stripeAccountId;
   if (typeof subscription !== "string" || !SUBSCRIPTION_PATTERN.test(subscription) || !account) return null;
   if (isRedisConfigured()) {
-    const [cached] = await redisPipeline([["GET", statusKey(account, subscription)]]);
+    const reply = await redisPipeline([["GET", statusKey(account, subscription)]]);
+    if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0)) return null;
+    const [cached] = reply;
     if (typeof cached === "string" && cached) return cached;
+    // Only an explicit missing key permits the provider lookup. A partial
+    // read does not prove either a live membership or an absent cache.
+    if (cached !== null) return null;
   }
   const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}`);
   const status = memberState(sub);

@@ -98,7 +98,7 @@ async function main() {
     failOn = "";
     is("never says the store is not closing", unknownClosing.includes(NOT_CLOSING), false);
     is("says it could not check, and to try again in a minute", unknownClosing.includes(CLOSING_UNKNOWN), true);
-    is("says what still holds: nothing refunded here, the closing day's refunds still made", unknownClosing.includes("Nothing has been refunded from this page. If your store is closing, any refund a member is owed is still made for you on its closing day."), true);
+    is("says what still holds: the closing day's refunds, as far as the balance covers them", unknownClosing.includes("If your store is closing, the refunds your members are owed are still made for you on its closing day, as far as your Stripe balance covers them."), true);
     is("never says no member paid for time after it", unknownClosing.includes("No member has paid"), false);
     is("no refund button", unknownClosing.includes(BUTTON), false);
 
@@ -119,7 +119,7 @@ async function main() {
     is("never says no member paid for time after the closing day", unknownPayments.includes("No member has paid"), false);
     is("never says the store is not closing", unknownPayments.includes(NOT_CLOSING), false);
     is("says it could not read the payments, and to try again in a minute", unknownPayments.includes(PAYMENTS_UNKNOWN), true);
-    is("says what still holds: the closing day, and its refunds made on it", unknownPayments.includes(`Nothing has been refunded from this page. Your store still closes on ${day}, and if you do nothing, any refund a member is owed is made for you on that day.`), true);
+    is("says what still holds: the closing day, and its refunds as far as the balance covers them", unknownPayments.includes(`Your store still closes on ${day}. If you do nothing, the refunds your members are owed are made for you on that day, as far as your Stripe balance covers them.`), true);
     is("no refund button", unknownPayments.includes(BUTTON), false);
 
     part("Closing, payments read, none owed");

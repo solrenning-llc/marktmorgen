@@ -15,6 +15,14 @@ export const metadata: Metadata = { title: "Refund unused time — Marktmorgen",
 export const dynamic = "force-dynamic";
 type Params = { searchParams: Promise<{ store?: string | string[] }> };
 
+/** A read that either answered or could not be made: a failure is never taken for "nothing" (audit SG2). */
+type Read<T> = { ok: true; value: T } | { ok: false };
+const read = <T,>(work: Promise<T>, what: string): Promise<Read<T>> =>
+  work.then((value) => ({ ok: true as const, value }), (error: unknown) => {
+    console.error(`reading ${what} for the refund review failed`, error);
+    return { ok: false as const };
+  });
+
 const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
 /**
@@ -36,8 +44,11 @@ export default async function ClosingRefundsPage({ searchParams }: Params) {
   if (found.fellBack) redirect(studioPath(found.view.store));
   const { view } = found, { store } = view;
   const back = `${studioPath(store)}#closing`;
-  const closing = await closingOf(store).catch(() => null);
-  const summary = closing ? await unusedSummary(store, closing.day).catch(() => null) : null;
+  // closingOf answers null only when the store is not closing; a failed read is told apart from that.
+  const closingRead = await read(closingOf(store), "the store's closing");
+  const closing = closingRead.ok ? closingRead.value : null;
+  const summaryRead = closing ? await read(unusedSummary(store, closing.day), "the members' payments") : null;
+  const summary = summaryRead?.ok ? summaryRead.value : null;
   const rows = summary ? summary.rows.slice(0, REFUNDS_PER_REQUEST) : [];
   const total = summary ? summary.totals.map((t) => formatMoney(t.amount, t.cur)).join(" and ") : "";
   return <div className="min-h-screen bg-paper text-ink">
@@ -51,8 +62,12 @@ export default async function ClosingRefundsPage({ searchParams }: Params) {
           </ol>
         </nav>
         <h1 className="t-h2 mt-3">Refund the time your members paid for after your store closes</h1>
-        {!closing ? (
+        {!closingRead.ok ? (
+          <p className="mt-4 max-w-2xl text-ink-soft">We could not check whether your store is closing just now, so no refunds are shown. Please reload this page in a minute to try again. If your store is closing, the refunds your members are owed are still made for you on its closing day, as far as your Stripe balance covers them.</p>
+        ) : !closing ? (
           <p className="mt-4 max-w-2xl text-ink-soft">Your store is not closing, so there is nothing to refund here.</p>
+        ) : !summaryRead?.ok ? (
+          <p className="mt-4 max-w-2xl text-ink-soft">{`We could not read your members' payments just now, so no refunds are shown. Please reload this page in a minute to try again. Your store still closes on ${dayWords(closing.day)}. If you do nothing, the refunds your members are owed are made for you on that day, as far as your Stripe balance covers them.`}</p>
         ) : !rows.length ? (
           <p className="mt-4 max-w-2xl text-ink-soft">{`No member has paid for time after ${dayWords(closing.day)}, the day your store closes, that is still to be refunded.`}</p>
         ) : (

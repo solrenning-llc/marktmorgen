@@ -31,7 +31,7 @@
  */
 import { MAX_LESSONS } from "@/lib/course";
 import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
-import { DELIVERY_MAX_BYTES, LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
+import { DELIVERY_MAX_BYTES, LOG_SIZE, READ_DELIVERIES_CALLS_EACH, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
 import { MAX_FLOWS } from "@/lib/flow-limits";
 import { MOVE_BYTES, MOVE_KEY_BYTES, moveReads } from "@/lib/call-moves-read";
@@ -449,14 +449,22 @@ export const EVENTS_MOST: EventsSize = {
 
 /**
  * What the recent events do: the store's log read (LRANGE), each delivery in
- * it measured (STRLEN) before anything is taken, then each read (GET) and the
- * messages of the type asked for sent. Set aside at the measured sizes and
- * the most that can be sent (eventsSentMost), then settled at what was read
- * and sent (lib/api-guard.ts, holdMoreApi). Without an argument, its most.
+ * it measured (STRLEN), then all read in one script (lib/webhooks.ts,
+ * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH)
+ * and the messages of the type asked for sent. Without an argument, its most.
  */
 export function eventsWork(s: EventsSize = EVENTS_MOST): ReadWork {
-  return { commands: 1 + 2 * s.deliveries, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 3 : 1 };
+  return { commands: s.deliveries > 0 ? 2 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 3 : 1 };
 }
+
+/**
+ * The measuring alone at its most, set aside before the log is read (Codex
+ * G2, #2192: fifty sizes were looked up before any request beyond the first
+ * was taken): the log and a size for each delivery it can hold. Part of
+ * eventsWork, which the whole reading is settled at (lib/api-read.ts,
+ * recentEvents).
+ */
+export const EVENTS_PROBE_MOST: ReadWork = { commands: 1 + LOG_SIZE, bytes: LOG_SIZE * LOG_ENTRY_BYTES, sent: 0, stripePages: 0, roundTrips: 2 };
 
 /**
  * The most a reading of the recent events can send, from the sizes looked up

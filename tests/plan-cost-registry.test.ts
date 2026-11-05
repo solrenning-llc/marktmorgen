@@ -13,7 +13,7 @@ import {
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
   codesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
   API_PAGE_ROWS, EMAILS_PROBE_WORK, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, boughtNextWork, keptNumbersWork, listPageMost, settledUnits,
-  LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
+  EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
 } from "@/lib/api-read-rules";
 import { DELIVERY_MAX_BYTES, LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
@@ -528,9 +528,12 @@ test("an API reading that reads more than a page takes further requests that cov
   before("app/api/v1/stats/route.ts", "const read = await apiNumbers(store,", "summaryOf(read.data");
   before("app/api/v1/stats/route.ts", "const refused = await read.settle(", "apiOk(body)");
   before("app/api/v1/events/route.ts", "await recentEvents(store, type, limit, (most) => holdMoreApi(store, most));", "apiOk({ data: found })");
-  before("lib/api-read.ts", "const sized = await recentDeliverySizes(store);", "const settle = await hold(held);");
-  before("lib/api-read.ts", "const settle = await hold(held);", "await recentMessagesOf(store, type, sized.ids, most);");
-  before("lib/api-read.ts", "await recentMessagesOf(store, type, sized.ids, most);", "const refused = await settle(settledUnits(eventsWork(");
+  // The measuring paid for before it is done, the rest before any delivery is read, all settled before anything is sent (Codex G2, #2192).
+  before("lib/api-read.ts", "const settleProbe = await hold(probeHeld);", "const sized = await recentDeliverySizes(store);");
+  before("lib/api-read.ts", "const sized = await recentDeliverySizes(store);", "const settleRest = await hold(restHeld);");
+  before("lib/api-read.ts", "const settleRest = await hold(restHeld);", "await recentMessagesOf(store, type, sized.ids, bounds, most);");
+  before("lib/api-read.ts", "await recentMessagesOf(store, type, sized.ids, bounds, most);", "const refused = await settleRest(");
+  assert.ok(apiReadUnits(eventsWork()) >= apiReadUnits(EVENTS_PROBE_MOST), "the most a reading of events takes holds its measuring");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codesWork()));", "listCodes(");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeMakeWork()));", "createCode(");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));", "const before = await listCodes(account);");

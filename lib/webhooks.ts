@@ -721,14 +721,60 @@ export async function recentDeliverySizes(store: Store): Promise<{ ids: string[]
 }
 
 /**
+ * The most a delivery measured at `size` bytes can be when it is read a moment
+ * later: what its tries may still write on it (DELIVERY_UPDATE_ROOM_BYTES), never
+ * past DELIVERY_MAX_BYTES; nothing for one that was not there (Codex G2, #2192:
+ * an ordinary try between the measuring and the reading grew it past what was
+ * set aside).
+ */
+export function deliveryReadBound(size: number): number {
+  return size > 0 ? Math.min(DELIVERY_MAX_BYTES, size + DELIVERY_UPDATE_ROOM_BYTES) : 0;
+}
+
+/** Inside READ_DELIVERIES, at the most, each delivery: its size, then the delivery (billed one by one beside the EVAL). */
+export const READ_DELIVERIES_CALLS_EACH = 2;
+
+/**
+ * Reads the deliveries KEYS each only while it is no larger than its bound
+ * (ARGV, in bytes): {1, values} with each value or nothing for one that is
+ * gone; {0} as soon as one is larger, with nothing of it sent back. So what
+ * a reading takes out of the database is never more than what it set aside.
+ * Modelled by lib/redis-memory.ts.
+ */
+export const READ_DELIVERIES = `-- marktmorgen:webhook-deliveries-read:v1
+local out = {}
+for i = 1, #KEYS do
+  local n = redis.call('STRLEN', KEYS[i])
+  if n > tonumber(ARGV[i]) then return {0} end
+  if n > 0 then out[i] = redis.call('GET', KEYS[i]) else out[i] = false end
+end
+return {1, out}`;
+
+/** A reading of the deliveries whose answer did not come back whole, or one of which was larger than set aside. */
+export class DeliveriesUnreadable extends Error {
+  constructor() {
+    super("the recent deliveries could not be read within what was set aside");
+  }
+}
+
+/**
  * The messages of one event among the deliveries `ids` (the store's log, as
  * recentDeliverySizes read it), newest first, each once, at most `most`; and
  * the bytes the deliveries were read at, which a reading that pays for them
- * settles at.
+ * settles at. Each delivery is read only up to its bound (READ_DELIVERIES),
+ * and the answer only as it is exactly: a value or nothing for each, never a
+ * missing or extra one. Anything else, or a delivery larger than its bound,
+ * is DeliveriesUnreadable, never an empty history (Codex G2, #2192).
  */
-export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: string[], most: number): Promise<{ messages: Record<string, unknown>[]; readBytes: number }> {
+export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: string[], bounds: readonly number[], most: number): Promise<{ messages: Record<string, unknown>[]; readBytes: number }> {
   if (!store.statsId || !ids.length || !isRedisConfigured()) return { messages: [], readBytes: 0 };
-  const raws = await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)]));
+  if (bounds.length !== ids.length || bounds.some((b) => !Number.isSafeInteger(b) || b < 0)) throw new DeliveriesUnreadable();
+  const reply: unknown = await redisPipeline([["EVAL", READ_DELIVERIES, ids.length, ...ids.map(deliveryKey), ...bounds.map(String)]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  if (!Array.isArray(answer) || answer[0] !== 1 || answer.length !== 2 || !Array.isArray(answer[1])) throw new DeliveriesUnreadable();
+  const raws = answer[1] as unknown[];
+  // One value or nothing for each delivery, as long as its bound: a missing, extra or other answer is not a history.
+  if (raws.length !== ids.length || raws.some((raw, i) => raw !== null && (typeof raw !== "string" || Buffer.byteLength(raw) > bounds[i]))) throw new DeliveriesUnreadable();
   const readBytes = raws.reduce((n: number, raw) => n + (typeof raw === "string" ? Buffer.byteLength(raw) : 0), 0);
   const seen = new Set<string>();
   const messages: Record<string, unknown>[] = [];
@@ -756,7 +802,8 @@ export async function recentMessages(store: Store, type: WebhookEvent, limit = 3
   if (!store.statsId || !isRedisConfigured()) return [];
   const [rawLog] = await redisPipeline([["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]]);
   const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
-  return (await recentMessagesOf(store, type, ids, recentLimit(limit))).messages;
+  // Not paid for by the size: every delivery read whole, as before (a failed one kept before DELIVERY_MAX_BYTES may be larger).
+  return (await recentMessagesOf(store, type, ids, ids.map(() => Number.MAX_SAFE_INTEGER), recentLimit(limit))).messages;
 }
 
 /** Whether a word is one of the events an endpoint can hear. */

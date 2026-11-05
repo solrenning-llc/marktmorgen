@@ -16,13 +16,13 @@ import { readFileSync } from "node:fs";
 import { GET as eventsRead } from "@/app/api/v1/events/route";
 import { POST as mcp } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
-import { EMAILS_PROBE_WORK, MAIL_REVENUE_BYTES, addWork, apiReadUnits, emailsWork, eventsSentMost, eventsWork, settledUnits } from "@/lib/api-read-rules";
+import { EMAILS_PROBE_WORK, EVENTS_PROBE_MOST, MAIL_REVENUE_BYTES, addWork, apiReadUnits, emailsWork, eventsSentMost, eventsWork, settledUnits } from "@/lib/api-read-rules";
 import { bundleMeta } from "@/lib/bundle-rules";
 import { broadcastSizes } from "@/lib/broadcasts";
 import { flowsBytes } from "@/lib/flows";
 import { keptMailRevenueBytes } from "@/lib/mail-revenue";
 import {
-  DELIVERY_MAX_BYTES, DELIVERY_WRITE_MAX_BYTES, LOG_SIZE, MESSAGE_TEXT_MAX, QUEUE_KEY, SKIPPED_LINES_PER_DAY, TOO_LARGE_WORDS, addEndpoint, cleanText, deliverDue, emitEvent, recentMessages, resendDelivery,
+  DELIVERY_MAX_BYTES, DELIVERY_WRITE_MAX_BYTES, LOG_SIZE, MESSAGE_TEXT_MAX, QUEUE_KEY, deliveryReadBound, SKIPPED_LINES_PER_DAY, TOO_LARGE_WORDS, addEndpoint, cleanText, deliverDue, emitEvent, recentMessages, resendDelivery,
   setSendHooksForTests, watchStripe, webhooksView,
 } from "@/lib/webhooks";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
@@ -159,13 +159,16 @@ async function main(): Promise<void> {
   part("GET /api/v1/events: measured, set aside, settled at what was read and sent");
   const logBytes = logIds.reduce((n, id) => n + Buffer.byteLength(id), 0);
   const kept = sizes.reduce((a, b) => a + b, 0);
-  const heldTen = apiReadUnits(eventsWork({ deliveries: LOG_SIZE, bytes: logBytes + kept, sent: eventsSentMost(sizes, 10) }));
+  // Set aside at each delivery's bound (what its tries may still write on it), never less than the measuring alone (Codex G2, #2192).
+  const bounds = sizes.map(deliveryReadBound);
+  const heldTen = Math.max(apiReadUnits(EVENTS_PROBE_MOST), apiReadUnits(eventsWork({ deliveries: LOG_SIZE, bytes: logBytes + bounds.reduce((a, b) => a + b, 0), sent: eventsSentMost(bounds, 10) })));
+  const reads = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:webhook-deliveries-read");
   let before = await used();
   commands = [];
   const answer = await eventsRead(get(key, "/api/v1/events?type=sale.completed&limit=10"));
   const body = (await answer.json()) as { data: unknown[] };
   const sent = Buffer.byteLength(JSON.stringify(body.data));
-  const read = commands.filter((c) => c[0] === "GET" && /^nl:hooks:d:/.test(String(c[1]))).length;
+  const read = commands.filter(reads).reduce((n, c) => n + Number(c[2]), 0);
   const took = (await used()) - before;
   const due = 1 + settledUnits(eventsWork({ deliveries: LOG_SIZE, bytes: logBytes + kept, sent }), heldTen);
   console.log(`  limit=10: ${(logBytes + kept).toLocaleString("en-US")} bytes read, ${sent.toLocaleString("en-US")} sent, ${took} requests taken (priced at 4 KB a delivery it was 5)`);
@@ -173,7 +176,7 @@ async function main(): Promise<void> {
   is("every delivery in the log read once", read, LOG_SIZE);
   is("the requests taken are what the bytes read and sent cost, with the door's", took, due);
   is("more than the flat 5 the 4 KB price took for this", took > 5, true);
-  is("each delivery measured before any was read", commands.findIndex((c) => c[0] === "STRLEN" && /^nl:hooks:d:/.test(String(c[1]))) < commands.findIndex((c) => c[0] === "GET" && /^nl:hooks:d:/.test(String(c[1]))), true);
+  is("each delivery measured before any was read", commands.findIndex((c) => c[0] === "STRLEN" && /^nl:hooks:d:/.test(String(c[1]))) < commands.findIndex(reads), true);
 
   before = await used();
   const one = await eventsRead(get(key, "/api/v1/events?type=sale.completed&limit=1"));
@@ -186,21 +189,21 @@ async function main(): Promise<void> {
   const other = await eventsRead(get(key, "/api/v1/events?type=refund.issued"));
   is("a type none of them is: the deliveries read, nothing sent", [other.status, ((await other.json()) as { data: unknown[] }).data.length, (await used()) - before], [200, 0, 1 + apiReadUnits(eventsWork({ deliveries: LOG_SIZE, bytes: logBytes + kept, sent: 2 }))]);
 
-  part("Too few requests left for what was measured: refused, no delivery read, only the door's request kept");
+  part("Too few requests left for what was measured: refused, no delivery read, only the door's request and the measuring kept");
   await leave(heldTen);
   commands = [];
   const refused = await eventsRead(get(key, "/api/v1/events?type=sale.completed&limit=10"));
   const words = (await refused.json()) as { error: string; message: string };
   is("refused with the whole count it may take", [refused.status, words.error, words.message.includes(`up to ${(heldTen + 1).toLocaleString("en-US")} of your store's API requests`)], [429, "monthly_limit", true]);
-  is("no delivery read", commands.some((c) => c[0] === "GET" && /^nl:hooks:d:/.test(String(c[1]))), false);
-  is("only the door's request kept", await used(), allowanceFor(await mine(), "api") - heldTen + 1);
+  is("no delivery read", commands.some(reads), false);
+  is("only the door's request and the measuring done kept", await used(), allowanceFor(await mine(), "api") - heldTen + 1 + apiReadUnits({ commands: 1 + LOG_SIZE, bytes: logBytes, roundTrips: 2 }));
   await leave(heldTen + 1);
   const fits = await eventsRead(get(key, "/api/v1/events?type=sale.completed&limit=10"));
   is("with exactly what it may take left, answered", fits.status, 200);
   is("and what it did not need given back", await used(), allowanceFor(await mine(), "api") - (heldTen + 1 - due));
   await leave(1_000);
 
-  part("A log or sizes answered broken: unavailable before any delivery is read, nothing taken past the door's (C3-124)");
+  part("A log or sizes answered broken: unavailable before any delivery is read; the measuring set aside is kept (C3-124, Codex G2)");
   for (const kind of ["partial-sizes", "empty-sizes", "text-sizes", "null-log", "not-ids", "one-not-id"] as const) {
     const was = await used();
     commands = [];
@@ -208,7 +211,7 @@ async function main(): Promise<void> {
     const broken = await eventsRead(get(key, "/api/v1/events?type=sale.completed&limit=10"));
     fault = null;
     const brokenBody = (await broken.json()) as { error?: string; data?: unknown[] };
-    is(`${kind}: unavailable, never a list (empty or not), no delivery read, only the door's request taken`, [broken.status, brokenBody.error, brokenBody.data, commands.some((c) => c[0] === "GET" && /^nl:hooks:d:/.test(String(c[1]))), (await used()) - was], [502, "unavailable", undefined, false, 1]);
+    is(`${kind}: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken`, [broken.status, brokenBody.error, brokenBody.data, commands.some(reads), (await used()) - was], [502, "unavailable", undefined, false, 1 + apiReadUnits(EVENTS_PROBE_MOST)]);
   }
 
   part("Every text cleaned where the message is made: the worst a text can escape is a quotation mark, four bytes kept");

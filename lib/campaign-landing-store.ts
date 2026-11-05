@@ -159,6 +159,22 @@ return landingsRoom(ARGV[1], '1', ARGV[2], ARGV[3], '0')`;
 const WRITE_TRIES = 3;
 
 /**
+ * WRITE_LANDINGS' answer, read exactly: a pipeline of that one script answering {state, total}, the state the number
+ * 0 (full), 1 (written) or 3 (changed since it was read), the total a whole number of bytes, 0 or more. Anything else
+ * (a true for 1, a total missing, negative, fractional or past what a number holds exactly, an extra item) is no
+ * receipt: null, and the save is LandingsWriteUnconfirmed (Codex J, #1950).
+ */
+function landingsReceipt(reply: unknown): { state: 0 | 1 | 3; total: number } | null {
+  if (!Array.isArray(reply) || reply.length !== 1) return null;
+  const answer = reply[0];
+  if (!Array.isArray(answer) || answer.length !== 2) return null;
+  const [state, total] = answer;
+  if (state !== 0 && state !== 1 && state !== 3) return null;
+  if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) return null;
+  return { state, total };
+}
+
+/**
  * Reads the record, works out the new list, and writes it only over what was read, its room set in the same step
  * (WRITE_LANDINGS); read again and tried again when another change came in between. The answer is checked exactly:
  * written, full (DataRoomError, nothing written) or changed; anything else is LandingsWriteUnconfirmed, and no room is
@@ -174,15 +190,13 @@ async function changeLandings(statsId: string, productId: string, room: DataStor
     const json = next.length ? JSON.stringify(next) : "";
     const now = Date.now();
     const reply: unknown = await redisPipeline([["EVAL", WRITE_LANDINGS, 2, key, landingKey(statsId, productId), contentRoomFor(room, now / 1000), monthOf(now), LANDING_SLOT(productId), json ? dataBytes([json], 1) : 0, raw ?? "", json]]);
-    const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
-    const [state, total] = Array.isArray(answer) && answer.length === 2 ? answer.map(Number) : [NaN, NaN];
+    const receipt = landingsReceipt(reply);
+    if (!receipt) throw new LandingsWriteUnconfirmed();
+    const { state, total } = receipt;
     if (state === 3) continue;
-    if (state === 1 && Number.isFinite(total)) return "saved";
-    if (state === 0 && Number.isFinite(total)) {
-      const limit = dataRoomFor(room, now / 1000);
-      throw new DataRoomError({ ok: false, reason: "full", used: total, room: limit, message: dataFullWords(total, limit, largerPlanFor(room, now / 1000)) });
-    }
-    throw new LandingsWriteUnconfirmed();
+    if (state === 1) return "saved";
+    const limit = dataRoomFor(room, now / 1000);
+    throw new DataRoomError({ ok: false, reason: "full", used: total, room: limit, message: dataFullWords(total, limit, largerPlanFor(room, now / 1000)) });
   }
   throw new LandingsWriteUnconfirmed();
 }

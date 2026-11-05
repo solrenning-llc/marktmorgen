@@ -10,7 +10,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dropLandings, readLandings, removeLanding, saveLanding } from "../lib/campaign-landing-store";
+import { LandingsWriteUnconfirmed, dropLandings, readLandings, removeLanding, saveLanding } from "../lib/campaign-landing-store";
 import { dataKey, dataUsed, needData } from "../lib/store-data";
 import { contentRoomFor, dataBytes } from "../lib/store-data-rules";
 import { store as redis } from "./redis-stub";
@@ -88,6 +88,34 @@ test("a write whose answer is not the expected one is never said saved (Codex G)
   assert.equal(stored(), null);
   assert.notEqual(outcome, "saved");
 });
+
+// Codex J on #1950: an answer that only looks like a receipt (a true for 1, a missing or negative or unsafe total) is
+// not one: never said saved, nothing written, and the full case is never told from it either.
+for (const reply of [[true, null], [1, null], [1, false], [1, -1], [1, 0.5], [1, Number.MAX_SAFE_INTEGER + 1], ["1", 5], [0, null], [3, 0, 1], [2, 5]]) {
+  test(`a write answered ${JSON.stringify(reply)} is never said saved, nor full (Codex J)`, async () => {
+    redis.clear();
+    const pipeline = redis.pipeline;
+    let intercepted = false;
+    redis.pipeline = async (commands) => {
+      if (commands.some(writes)) {
+        intercepted = true;
+        return [reply];
+      }
+      return pipeline(commands);
+    };
+    let outcome: unknown;
+    try {
+      outcome = await saveLanding(stats, product, landing("first"), room);
+    } catch (error) {
+      outcome = error;
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    assert.equal(intercepted, true);
+    assert.equal(stored(), null);
+    assert.ok(outcome instanceof LandingsWriteUnconfirmed, `said ${String(outcome)}`);
+  });
+}
 
 test("a delete whose answer is not the expected one gives no room back while the record is kept (Codex G)", async () => {
   redis.clear();

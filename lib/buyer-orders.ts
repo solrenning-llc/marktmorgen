@@ -33,6 +33,7 @@ import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
@@ -953,12 +954,28 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   return kept.slice(0, MAX_LISTED);
 }
 
-async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+/** A whole number from one up after INCR, or null when the reply is not exactly that. */
+function incremented(reply: unknown): number | null {
+  const count = countOf(reply);
+  return count !== null && count >= 1 ? count : null;
+}
+
+/**
+ * Whether one more request fits in the hour: true or false on a count read in
+ * its exact shape, null when the answer is missing, cut short or of another
+ * shape, which is never taken as room (CX-123 rule 24).
+ */
+async function within(key: string, limit: number): Promise<boolean | null> {
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
+  const count = incremented(both[1]);
+  return count === null ? null : count <= limit;
 }
 
 /** A name that can sit inside the quotes of an email's From line. */
@@ -978,7 +995,7 @@ type Grant = {
   e: string;
 };
 
-export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable";
+export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable" | "error";
 
 /**
  * Emails a way back to what the address bought here.
@@ -1019,8 +1036,14 @@ export async function requestOrdersLink(input: {
   const email = normaliseEmail(raw);
   if (!canRecover(store)) return "unavailable";
 
-  if (!(await within(ipKey(ip, store.handle), IP_LIMIT))) return "limited";
-  if (!(await within(addressKey(email), ADDRESS_LIMIT))) return "limited";
+  // A count that could not be read takes, reads and sends nothing, for every address alike, so saying so tells nobody
+  // who bought here; it is said as an error on our side, never as too many requests (CX-123 rule 24).
+  const byConnection = await within(ipKey(ip, store.handle), IP_LIMIT);
+  if (byConnection === null) return "error";
+  if (!byConnection) return "limited";
+  const byAddress = await within(addressKey(email), ADDRESS_LIMIT);
+  if (byAddress === null) return "error";
+  if (!byAddress) return "limited";
 
   if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return "busy";
   // From here the answer is "sent" whatever happens, and at once: the reading, the grant and the email run after it,

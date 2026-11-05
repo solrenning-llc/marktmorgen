@@ -51,6 +51,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { communityWords } from "@/lib/buyer-words/community";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type DataStore, DataRoomError } from "@/lib/store-data";
 import { onAccount } from "@/lib/stripe-account";
@@ -401,12 +402,28 @@ function senderAddress(): string {
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
 
-async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+/** A whole number from one up after INCR, or null when the reply is not exactly that. */
+function incremented(reply: unknown): number | null {
+  const count = countOf(reply);
+  return count !== null && count >= 1 ? count : null;
+}
+
+/**
+ * Whether one more request fits in the hour: true or false on a count read in
+ * its exact shape, null when the answer is missing, cut short or of another
+ * shape, which is never taken as room (CX-123 rule 24).
+ */
+async function within(key: string, limit: number): Promise<boolean | null> {
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
+  const count = incremented(both[1]);
+  return count === null ? null : count <= limit;
 }
 
 export type LinkRequest = "sent" | "email" | "limited" | "error";
@@ -427,8 +444,13 @@ export async function requestCommunityLink(input: {
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   const id = store.community?.id;
   if (!id || !store.community?.on || !isRedisConfigured()) return "error";
-  if (!(await within(`nl:rl:cm:ip:${sha(`${ip}|${store.handle}`).slice(0, 32)}`, IP_LIMIT))) return "limited";
-  if (!(await within(`nl:rl:cm:addr:${emailKey(raw)}`, ADDRESS_LIMIT))) return "limited";
+  // A count that could not be read sends nothing; it is said as the email not sent, never as too many requests.
+  const byConnection = await within(`nl:rl:cm:ip:${sha(`${ip}|${store.handle}`).slice(0, 32)}`, IP_LIMIT);
+  if (byConnection === null) return "error";
+  if (!byConnection) return "limited";
+  const byAddress = await within(`nl:rl:cm:addr:${emailKey(raw)}`, ADDRESS_LIMIT);
+  if (byAddress === null) return "error";
+  if (!byAddress) return "limited";
 
   const config = await readConfig(id);
   if (!config) return "error";
@@ -449,15 +471,25 @@ export async function requestCommunityLink(input: {
   return sent ? "sent" : "error";
 }
 
-/** Spends one open of an emailed link, and says who it was for. */
+/**
+ * Spends one open of an emailed link, and says who it was for. An answer
+ * not in its exact shape gives no pass and is thrown: it is neither an
+ * expired link nor one used too many times (CX-123 rule 24).
+ */
 export async function openCommunityLink(token: string): Promise<LinkGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw, , opens] = await redisPipeline([
-    ["GET", linkKey(token)],
-    ["SET", opensKey(token), "0", "EX", LINK_SECONDS, "NX"],
-    ["INCR", opensKey(token)],
-  ]);
-  if (typeof raw !== "string" || Number(opens) > MAX_LINK_OPENS) return null;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["GET", linkKey(token)],
+      ["SET", opensKey(token), "0", "EX", LINK_SECONDS, "NX"],
+      ["INCR", opensKey(token)],
+    ]),
+    3,
+  );
+  const raw = replies?.[0];
+  const opens = replies && (replies[1] === "OK" || replies[1] === null) ? incremented(replies[2]) : null;
+  if (!replies || (typeof raw !== "string" && raw !== null) || opens === null) throw new UnknownReplyError("a community link's opens");
+  if (typeof raw !== "string" || opens > MAX_LINK_OPENS) return null;
   try {
     const grant = JSON.parse(raw) as LinkGrant;
     return typeof grant.e === "string" && typeof grant.h === "string" && typeof grant.k === "string" ? grant : null;

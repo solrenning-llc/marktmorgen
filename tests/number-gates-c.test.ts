@@ -1,0 +1,329 @@
+/**
+ * Counters read in their exact shape before what they guard (audit SG2,
+ * CX-123 rule 24; the margin rule's ceiling before every cost), third batch.
+ *
+ * Counters were read with Number(...): a reply that was missing, cut short,
+ * of another shape or never came read as NaN (never past a ceiling) or as
+ * 0/1 (always within it), so the email, the write or the access behind it
+ * went ahead on a count nobody had. Each is called here as its route calls
+ * it, on the in-memory store, with only the counter's own pipeline answered
+ * differently:
+ *
+ *   - lib/community-access.ts requestCommunityLink: requests an hour, before the access email;
+ *   - lib/community-access.ts openCommunityLink: opens of an emailed link, before the pass is given;
+ *   - lib/affiliates.ts requestAffiliateLink: requests an hour, before the application email;
+ *   - lib/affiliates.ts recordClick: clicks an hour from one connection, before a click is counted;
+ *   - lib/buyer-orders.ts requestOrdersLink: requests an hour, before the purchases email;
+ *   - lib/community.ts within: posts, comments, likes and messages an hour, before each is written;
+ *   - app/api/creators/route.ts POST: answers an hour, before the answer is kept.
+ *
+ * An unknown reply is refused with the answer the code already gives when
+ * something failed, and nothing behind the counter happens. A confirmed
+ * count within the ceiling still goes through, and one past it is refused as
+ * before.
+ */
+import { NextRequest } from "next/server";
+import { POST as creatorsRoute } from "@/app/api/creators/route";
+import { RESPONSES_KEY } from "@/lib/creator-research-store";
+import { openCommunityLink, requestCommunityLink } from "@/lib/community-access";
+import { freshConfig, saveConfig, within } from "@/lib/community";
+import { NO_AFFILIATES } from "@/lib/affiliate-setting";
+import { recordClick, requestAffiliateLink } from "@/lib/affiliates";
+import { requestOrdersLink } from "@/lib/buyer-orders";
+import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+type Command = (string | number)[];
+
+/** Which pipeline is the counter's, and what it answers instead ("throw" for one that never answers). */
+let counter: { match: (commands: Command[]) => boolean; reply: unknown } | null = null;
+let counterCalls = 0;
+/** Every command that reached the store, to see what was written after the counter. */
+const seen: Command[] = [];
+const pipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: Command[]) => {
+  if (counter && counter.match(commands)) {
+    counterCalls++;
+    if (counter.reply === "throw") throw new Error("the database did not answer");
+    return counter.reply;
+  }
+  seen.push(...commands);
+  return pipeline(commands);
+}) as typeof redis.pipeline;
+
+const mails: string[] = [];
+let stripeCalls = 0;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (url.hostname === "api.resend.com") {
+    mails.push(String(init?.body ?? ""));
+    return answer({ id: `email_${mails.length}` });
+  }
+  if (url.hostname === "api.stripe.com") stripeCalls++;
+  return answer({ object: "list", data: [], has_more: false });
+}) as typeof fetch;
+
+/** What a call answered, or that it threw and with what. */
+async function outcome<T>(call: () => Promise<T>): Promise<T | string> {
+  try {
+    return await call();
+  } catch (error) {
+    return `threw ${error instanceof Error ? error.name : "something"}`;
+  }
+}
+
+/** Replies of a SET ... NX then INCR pipeline that are not a confirmed count. */
+const SET_INCR_UNKNOWN: [string, unknown][] = [
+  ["a SET answered false", [false, 1]],
+  ["a SET answered as a number", [1, 1]],
+  ["a count that is null", ["OK", null]],
+  ["a count written as text", ["OK", "1"]],
+  ["a count of zero after INCR", ["OK", 0]],
+  ["a count that is true", ["OK", true]],
+  ["a count that is not whole", ["OK", 1.5]],
+  ["a count that is negative", ["OK", -1]],
+  ["a count written as empty text", ["OK", ""]],
+  ["a reply that is not a list", { x: 1 }],
+  ["a reply cut short", ["OK"]],
+  ["an empty reply", []],
+  ["a reply too long", ["OK", 1, 1]],
+  ["a counter that never answers", "throw"],
+];
+
+const key = (command: Command | undefined) => String(command?.[1] ?? "");
+/** A SET ... NX then INCR pipeline on a key starting with `prefix`. */
+const setIncr = (prefix: string) => (commands: Command[]) =>
+  commands.length === 2 && commands[0]?.[0] === "SET" && key(commands[0]).startsWith(prefix) && commands[1]?.[0] === "INCR";
+const wroteSince = (from: number, test: (c: Command) => boolean) => seen.slice(from).filter(test).length;
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
+  process.env.STRIPE_SECRET_KEY = "sk_test_number_gates_c_only_a_stand_in";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
+  const OWNER = "owner@numbergatesc.example";
+  const made = await claimHandle(OWNER, "numbergatesc", "Number Gates C", "");
+  if (!made.ok) throw new Error("no store");
+  await ensureStatsId(OWNER);
+  await ensureStoreId(OWNER);
+  await ensureListId(OWNER);
+  await setStripeAccount(OWNER, "acct_1NumberGatesCCC", true);
+  await setSubscription(OWNER, { customerId: "cus_NumberGatesC1", subscriptionId: "sub_NumberGatesC1", active: true, tier: "creator", period: paidPeriod() });
+  await setAffiliateSetting(OWNER, { ...NO_AFFILIATES, enabled: true, percent: 30 });
+  const base: Store = (await storeForEmail(OWNER))!;
+  const ORIGIN = "https://marktmorgen.com";
+  /** A connection of its own for each request, so only the counter under test decides. */
+  let host = 0;
+  const ip = () => `203.0.${Math.floor((host += 1) / 250)}.${host % 250}`;
+
+  part("Community posts, comments, likes and messages counted before each is written (lib/community.ts within)");
+  {
+    const id = "c".repeat(32);
+    const isRate = setIncr(`nl:cm:rl:${id}:`);
+    for (const [label, reply] of SET_INCR_UNKNOWN) {
+      counter = { match: isRate, reply };
+      const calls = counterCalls;
+      const got = await outcome(() => within(id, "member-one", "post"));
+      const want = reply === "throw" ? "threw Error" : "threw UnknownReplyError";
+      is(`${label}: never taken as room, thrown to the route's "error"`, [got, counterCalls - calls], [want, 1]);
+    }
+    counter = { match: isRate, reply: ["OK", 1] };
+    is("a confirmed first post is allowed", await within(id, "member-one", "post"), true);
+    counter = { match: isRate, reply: [null, 5] };
+    is("a confirmed fifth post in the hour is allowed", await within(id, "member-one", "post"), true);
+    counter = { match: isRate, reply: [null, 6] };
+    is("a confirmed sixth post is refused as before", await within(id, "member-one", "post"), false);
+    counter = null;
+  }
+
+  part("Asking for a community link: requests counted before the access email (lib/community-access.ts)");
+  {
+    const id = "d".repeat(32);
+    await saveConfig(id, freshConfig(base.name));
+    const store: Store = { ...base, community: { id, on: true } };
+    let n = 0;
+    const ask = () => outcome(() => requestCommunityLink({ store, email: `member${(n += 1)}@numbergatesc.example`, ip: ip(), origin: ORIGIN }));
+    const linkWrites = (from: number) => wroteSince(from, (c) => c[0] === "SET" && key(c).startsWith("nl:cm:link:"));
+    for (const [which, prefix] of [["per connection", "nl:rl:cm:ip:"], ["per address", "nl:rl:cm:addr:"]] as const) {
+      for (const [label, reply] of SET_INCR_UNKNOWN) {
+        counter = { match: setIncr(prefix), reply };
+        const [calls, sent, from] = [counterCalls, mails.length, seen.length];
+        const got = await ask();
+        const want = reply === "throw" ? "threw Error" : "error";
+        is(`${which}, ${label}: "error", no email, no link kept`, [got, counterCalls - calls, mails.length - sent, linkWrites(from)], [want, 1, 0, 0]);
+      }
+    }
+    counter = { match: setIncr("nl:rl:cm:ip:"), reply: ["OK", 1] };
+    is("a confirmed count within both ceilings goes on to the ticket check, as before", await ask(), "sent");
+    counter = { match: setIncr("nl:rl:cm:ip:"), reply: [null, 11] };
+    is("a confirmed count past the connection's ceiling is limited, as before", await ask(), "limited");
+    counter = { match: setIncr("nl:rl:cm:addr:"), reply: [null, 6] };
+    is("a confirmed count past the address's ceiling is limited, as before", await ask(), "limited");
+    counter = null;
+  }
+
+  part("Opening a community link: opens counted before the pass is given (lib/community-access.ts)");
+  {
+    const token = "e".repeat(64);
+    const grant = JSON.stringify({ e: "member@numbergatesc.example", k: "storekey", h: base.handle });
+    const isOpen = (commands: Command[]) =>
+      commands.length === 3 && commands[0]?.[0] === "GET" && key(commands[0]).startsWith("nl:cm:link:") && commands[2]?.[0] === "INCR";
+    const unknown: [string, unknown][] = [
+      ...SET_INCR_UNKNOWN.map(([label, reply]): [string, unknown] => [label, Array.isArray(reply) ? [grant, ...reply] : reply]),
+      ["the grant answered as a number", [5, "OK", 1]],
+      ["the grant answered as a list", [[], "OK", 1]],
+    ];
+    for (const [label, reply] of unknown) {
+      counter = { match: isOpen, reply };
+      const calls = counterCalls;
+      const got = await outcome(() => openCommunityLink(token));
+      const want = reply === "throw" ? "threw Error" : "threw UnknownReplyError";
+      is(`${label}: no pass given, thrown to the route`, [got, counterCalls - calls], [want, 1]);
+    }
+    counter = { match: isOpen, reply: [grant, "OK", 1] };
+    is("a confirmed first open gives the grant", await openCommunityLink(token), JSON.parse(grant));
+    counter = { match: isOpen, reply: [grant, null, 10] };
+    is("a confirmed tenth open still gives it", await openCommunityLink(token), JSON.parse(grant));
+    counter = { match: isOpen, reply: [grant, null, 11] };
+    is("a confirmed eleventh open is refused as used, as before", await openCommunityLink(token), null);
+    counter = { match: isOpen, reply: [null, "OK", 1] };
+    is("a link that is gone is refused as expired, as before", await openCommunityLink(token), null);
+    counter = null;
+  }
+
+  part("Applying as an affiliate: requests counted before the email (lib/affiliates.ts requestAffiliateLink)");
+  {
+    let n = 0;
+    const ask = () => outcome(() => requestAffiliateLink({ store: base, email: `applicant${(n += 1)}@numbergatesc.example`, note: "", ip: ip(), origin: ORIGIN }));
+    const linkWrites = (from: number) => wroteSince(from, (c) => c[0] === "SET" && key(c).startsWith("nl:aff:link:"));
+    for (const [which, prefix] of [["per connection", "nl:rl:aff:ip:"], ["per address", "nl:rl:aff:addr:"]] as const) {
+      for (const [label, reply] of SET_INCR_UNKNOWN) {
+        counter = { match: setIncr(prefix), reply };
+        const [calls, sent, from] = [counterCalls, mails.length, seen.length];
+        const got = await ask();
+        const want = reply === "throw" ? "threw Error" : "error";
+        is(`${which}, ${label}: "error", no email, no link kept`, [got, counterCalls - calls, mails.length - sent, linkWrites(from)], [want, 1, 0, 0]);
+      }
+    }
+    counter = { match: setIncr("nl:rl:aff:ip:"), reply: ["OK", 1] };
+    {
+      const sent = mails.length;
+      is("a confirmed count within both ceilings: the link is emailed", [await ask(), mails.length - sent], ["sent", 1]);
+    }
+    counter = { match: setIncr("nl:rl:aff:ip:"), reply: [null, 11] };
+    is("a confirmed count past the connection's ceiling is limited, as before", await ask(), "limited");
+    counter = { match: setIncr("nl:rl:aff:addr:"), reply: [null, 6] };
+    is("a confirmed count past the address's ceiling is limited, as before", await ask(), "limited");
+    counter = null;
+  }
+
+  part("A click on an affiliate's link: clicks an hour counted before it is (lib/affiliates.ts recordClick)");
+  {
+    const statsId = base.statsId!;
+    const ANA = "aaaaaaaaaaaa";
+    await redis.pipeline([
+      ["HSET", `nl:aff:${statsId}:people`, ANA, JSON.stringify({ id: ANA, email: "ana@numbergatesc.example", code: "ana", status: "approved", appliedAt: 1, decidedAt: 1, note: "" })],
+      ["HSET", `nl:aff:${statsId}:codes`, "ana", ANA],
+      ["HSET", `nl:aff:${statsId}:emails`, "ana@numbergatesc.example", ANA],
+    ]);
+    const isClick = setIncr("nl:rl:aff:click:");
+    let n = 0;
+    const click = () => outcome(() => recordClick(base, "ana", { ip: "198.51.100.4", userAgent: `agent-${(n += 1)}`, session: undefined }));
+    const counted = (from: number) => wroteSince(from, (c) => (c[0] === "HINCRBY" && key(c).endsWith(":clicks")) || key(c).startsWith("nl:aff:seen:"));
+    for (const [label, reply] of SET_INCR_UNKNOWN) {
+      counter = { match: isClick, reply };
+      const [calls, from] = [counterCalls, seen.length];
+      const got = await click();
+      const want = reply === "throw" ? "threw Error" : "threw UnknownReplyError";
+      is(`${label}: not counted, thrown to the visit's log`, [got, counterCalls - calls, counted(from)], [want, 1, 0]);
+    }
+    counter = { match: isClick, reply: ["OK", 1] };
+    {
+      const from = seen.length;
+      is("a confirmed first click is counted", [await click(), counted(from) > 0], [true, true]);
+    }
+    counter = { match: isClick, reply: [null, 31] };
+    {
+      const from = seen.length;
+      is("a confirmed count past the hour's clicks is not counted, as before", [await click(), counted(from)], [false, 0]);
+    }
+    counter = null;
+  }
+
+  part("Asking for a purchases link: requests counted before anything is read or emailed (lib/buyer-orders.ts)");
+  {
+    let n = 0;
+    const ask = () => outcome(() => requestOrdersLink({ store: base, email: `buyer${(n += 1)}@numbergatesc.example`, ip: ip(), origin: ORIGIN }));
+    const after = (from: number) => wroteSince(from, (c) => key(c).startsWith("nl:orders:"));
+    for (const [which, prefix] of [["per connection", "nl:rl:orders:ip:"], ["per address", "nl:rl:orders:addr:"]] as const) {
+      for (const [label, reply] of SET_INCR_UNKNOWN) {
+        counter = { match: setIncr(prefix), reply };
+        const [calls, sent, stripe, from] = [counterCalls, mails.length, stripeCalls, seen.length];
+        const got = await ask();
+        const want = reply === "throw" ? "threw Error" : "error";
+        is(`${which}, ${label}: "error", nothing taken, read or emailed`, [got, counterCalls - calls, mails.length - sent, stripeCalls - stripe, after(from)], [want, 1, 0, 0, 0]);
+      }
+    }
+    counter = { match: setIncr("nl:rl:orders:ip:"), reply: ["OK", 1] };
+    {
+      const got = await ask();
+      is("a confirmed count within both ceilings goes on past the limits, as before", got === "sent" || got === "busy", true);
+    }
+    counter = { match: setIncr("nl:rl:orders:ip:"), reply: [null, 11] };
+    is("a confirmed count past the connection's ceiling is limited, as before", await ask(), "limited");
+    counter = { match: setIncr("nl:rl:orders:addr:"), reply: [null, 6] };
+    is("a confirmed count past the address's ceiling is limited, as before", await ask(), "limited");
+    counter = null;
+  }
+
+  part("Answering the creator research: answers an hour counted before one is kept (app/api/creators/route.ts)");
+  {
+    const payload = {
+      name: "Synthetic Creator", email: "creator@numbergatesc.example", platform: "Other",
+      country: "Test country", problem: "A synthetic research answer for a regression test.",
+      link: "", tools: "", cost: "", consentResearch: true, consentFollowUp: false, consentUpdates: false, website: "",
+    };
+    const ask = async () => {
+      const response = await creatorsRoute(
+        new NextRequest("https://marktmorgen.com/api/creators", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Origin: ORIGIN, Host: "marktmorgen.com", "x-forwarded-for": "192.0.2.40" },
+          body: JSON.stringify(payload),
+        }),
+      );
+      return [response.status, ((await response.json()) as { error?: string }).error ?? "ok"];
+    };
+    const isRate = setIncr("nl:rl:creators:");
+    const kept = (from: number) => wroteSince(from, (c) => c[0] === "LPUSH" && key(c) === RESPONSES_KEY);
+    const quiet = console.error;
+    console.error = () => {};
+    for (const [label, reply] of SET_INCR_UNKNOWN) {
+      counter = { match: isRate, reply };
+      const [calls, from] = [counterCalls, seen.length];
+      const got = await ask();
+      is(`${label}: 500 server_error, nothing kept`, [got, counterCalls - calls, kept(from)], [[500, "server_error"], 1, 0]);
+    }
+    console.error = quiet;
+    counter = { match: isRate, reply: ["OK", 1] };
+    {
+      const from = seen.length;
+      is("a confirmed first answer is kept", [await ask(), kept(from)], [[201, "ok"], 1]);
+    }
+    counter = { match: isRate, reply: [null, 6] };
+    {
+      const from = seen.length;
+      is("a confirmed sixth answer in the hour is refused as before", [await ask(), kept(from)], [[429, "rate_limited"], 0]);
+    }
+    counter = null;
+  }
+
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

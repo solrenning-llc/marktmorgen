@@ -157,7 +157,9 @@ async function call(method: "GET" | "POST", path: string, auth: string, body?: s
     // A success whose answer is not a JSON object is not known (CX-123 rule 24): never read as an empty answer.
     if (response.ok && !object) throw new PayPalError(response.status, "UNREADABLE");
     if (!response.ok) {
-      const name = typeof data.name === "string" ? data.name : typeof data.error === "string" ? data.error : "UNKNOWN";
+      // PayPal's own error name, trimmed; an empty or blank one is no name (review of Codex G on #2681).
+      const named = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
+      const name = named(data.name) || named(data.error) || "UNKNOWN";
       throw new PayPalError(response.status, name, duplicateOf(response.status, data), linkedBatch(data));
     }
     return data;

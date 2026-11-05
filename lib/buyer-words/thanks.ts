@@ -75,8 +75,8 @@ const en = {
     `, ${sessions} sessions, from ${store} for ${price}. Book each one whenever you like; nothing more is charged.`,
   bookBy: (date: string) => `Book them by ${date}.`,
   bookFirst: "Book your first session",
-  noBookingLink: "We could not get your booking link just now. Refresh this page in a moment; it is also on its way to your email.",
-  packageSameLink: (email: string) => `The same link is in the email sent to ${email}: keep it, it is how you book the rest.`,
+  noBookingLink: "We could not get your booking link just now. Refresh this page in a moment. If the link was made, we also tried to email it.",
+  packageSameLink: (email: string) => `We also tried to email the same link to ${email}. If it arrives, keep it: it is how you book the rest.`,
 
   // ---- A gift ----------------------------------------------------------------------------------------
   giftOnWay: "Your gift is on its way",
@@ -283,8 +283,8 @@ const es: ThanksWords = {
     `, ${sessions} sesiones, a ${store} por ${price}. Reserva cada una cuando quieras; no se cobra nada más.`,
   bookBy: (date) => `Resérvalas antes del ${date}.`,
   bookFirst: "Reservar tu primera sesión",
-  noBookingLink: "Ahora mismo no pudimos obtener tu enlace de reserva. Actualiza esta página en un momento; también va de camino a tu email.",
-  packageSameLink: (email) => `El mismo enlace está en el email enviado a ${email}: guárdalo, es como reservas las demás.`,
+  noBookingLink: "No pudimos obtener tu enlace de reserva ahora mismo. Actualiza esta página en un momento. Si se creó el enlace, también intentamos enviártelo por email.",
+  packageSameLink: (email) => `También intentamos enviar el mismo enlace por email a ${email}. Si llega, guárdalo: es como reservas las demás.`,
 
   giftOnWay: "Tu regalo está en camino",
   giftBoughtFor: (store, price, to) => ` a ${store} por ${price}, como regalo para ${to}.`,
@@ -479,8 +479,8 @@ const fr: ThanksWords = {
     `, ${sessions}${S}séances, auprès de ${store} pour ${price}. Réservez chacune quand vous le souhaitez${S}; rien de plus n'est débité.`,
   bookBy: (date) => `À réserver avant le ${date}.`,
   bookFirst: "Réserver votre première séance",
-  noBookingLink: `Nous n'avons pas pu obtenir votre lien de réservation pour l'instant. Actualisez cette page dans un instant${S}; il est aussi en route vers votre boîte e-mail.`,
-  packageSameLink: (email) => `Le même lien se trouve dans l'e-mail envoyé à ${email}${S}: gardez-le, c'est avec lui que vous réservez les autres.`,
+  noBookingLink: "Nous n'avons pas pu obtenir votre lien de réservation pour l'instant. Actualisez cette page dans un instant. Si le lien a été créé, nous avons aussi essayé de vous l'envoyer par e-mail.",
+  packageSameLink: (email) => `Nous avons aussi essayé d'envoyer le même lien par e-mail à ${email}. S'il arrive, gardez-le${S}: c'est avec lui que vous réservez les autres.`,
 
   giftOnWay: "Votre cadeau est en route",
   giftBoughtFor: (store, price, to) => ` auprès de ${store} pour ${price}, en cadeau pour ${to}.`,
@@ -676,8 +676,8 @@ const de: ThanksWords = {
     `, ${sessions} Termine, bei ${store} für ${price}. Buchen Sie jeden, wann Sie möchten; es wird nichts weiter berechnet.`,
   bookBy: (date) => `Buchen Sie sie bis zum ${date}.`,
   bookFirst: "Ersten Termin buchen",
-  noBookingLink: "Wir konnten Ihren Buchungslink gerade nicht abrufen. Laden Sie diese Seite gleich neu; er ist auch per E-Mail unterwegs.",
-  packageSameLink: (email) => `Derselbe Link steht in der E-Mail an ${email}: Bewahren Sie ihn auf, damit buchen Sie die übrigen.`,
+  noBookingLink: "Wir konnten Ihren Buchungslink gerade nicht abrufen. Laden Sie diese Seite gleich neu. Falls der Link erstellt wurde, haben wir auch versucht, ihn Ihnen per E-Mail zu senden.",
+  packageSameLink: (email) => `Wir haben auch versucht, denselben Link per E-Mail an ${email} zu senden. Falls er ankommt, bewahren Sie ihn auf: Damit buchen Sie die übrigen.`,
 
   giftOnWay: "Ihr Geschenk ist unterwegs",
   giftBoughtFor: (store, price, to) => ` bei ${store} für ${price}, als Geschenk für ${to}.`,
@@ -873,8 +873,8 @@ const it: ThanksWords = {
     `, ${sessions} sessioni, da ${store} per ${price}. Prenota ciascuna quando vuoi; non viene addebitato altro.`,
   bookBy: (date) => `Prenotale entro il ${date}.`,
   bookFirst: "Prenota la tua prima sessione",
-  noBookingLink: "Al momento non siamo riusciti a ottenere il tuo link di prenotazione. Aggiorna questa pagina tra un momento; è anche in arrivo nella tua email.",
-  packageSameLink: (email) => `Lo stesso link è nell'email inviata a ${email}: conservalo, è così che prenoti le altre.`,
+  noBookingLink: "Al momento non siamo riusciti a ottenere il tuo link di prenotazione. Aggiorna questa pagina tra un momento. Se il link è stato creato, abbiamo anche provato a inviartelo via email.",
+  packageSameLink: (email) => `Abbiamo anche provato a inviare lo stesso link via email a ${email}. Se arriva, conservalo: è così che prenoti le altre.`,
 
   giftOnWay: "Il tuo regalo è in arrivo",
   giftBoughtFor: (store, price, to) => ` da ${store} per ${price}, come regalo per ${to}.`,
@@ -1070,8 +1070,8 @@ const nl: ThanksWords = {
     `, ${sessions} sessies, bij ${store} voor ${price}. Boek ze elk wanneer je wilt; er wordt niets meer afgeschreven.`,
   bookBy: (date) => `Boek ze vóór ${date}.`,
   bookFirst: "Boek je eerste sessie",
-  noBookingLink: "We konden je boekingslink nu niet ophalen. Vernieuw deze pagina zo meteen; hij is ook onderweg naar je e-mail.",
-  packageSameLink: (email) => `Dezelfde link staat in de e-mail naar ${email}: bewaar hem, daarmee boek je de rest.`,
+  noBookingLink: "We konden je boekingslink nu niet ophalen. Vernieuw deze pagina zo meteen. Als de link is gemaakt, hebben we ook geprobeerd hem naar je te e-mailen.",
+  packageSameLink: (email) => `We hebben ook geprobeerd dezelfde link naar ${email} te e-mailen. Als hij aankomt, bewaar hem: daarmee boek je de rest.`,
 
   giftOnWay: "Je cadeau is onderweg",
   giftBoughtFor: (store, price, to) => ` bij ${store} voor ${price}, als cadeau voor ${to}.`,
@@ -1267,8 +1267,8 @@ const pt: ThanksWords = {
     `, ${sessions} sessões, a ${store} por ${price}. Marque cada uma quando quiser; nada mais é cobrado.`,
   bookBy: (date) => `Marque-as até ${date}.`,
   bookFirst: "Marcar a primeira sessão",
-  noBookingLink: "Não conseguimos obter a sua ligação de marcação neste momento. Atualize esta página daqui a pouco; também vai a caminho do seu email.",
-  packageSameLink: (email) => `A mesma ligação está no email enviado para ${email}: guarde-a, é com ela que marca as restantes.`,
+  noBookingLink: "Não conseguimos obter a sua ligação de marcação neste momento. Atualize esta página daqui a pouco. Se a ligação foi criada, também tentámos enviá-la por email.",
+  packageSameLink: (email) => `Também tentámos enviar a mesma ligação por email para ${email}. Se chegar, guarde-a: é com ela que marca as restantes.`,
 
   giftOnWay: "O seu presente está a caminho",
   giftBoughtFor: (store, price, to) => ` a ${store} por ${price}, como presente para ${to}.`,

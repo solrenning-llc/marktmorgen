@@ -214,7 +214,7 @@ is("any other remise is a discount and is refused (C3-107)", ["Profitez de la re
 // is a discount or a waiver, refused whatever follows, by both the facts' check and the reminder's line.
 const monetary = ["Profitez de la remise de la boutique.", "La remise de la totalité du prix est disponible.", "Profitez de la remise de votre abonnement.", "Profitez de la remise du prix.", "La remise des droits est disponible."];
 const pottery = "Cours de poterie. Le prix est affiché sur la page.";
-is("a remise of the shop, the price, a subscription or rights is refused (Codex H)", monetary.filter((reply) => heldToFacts(reply, pottery) || !DEAL_WORDS.test(reply) || neutralLine(reply) === reply), []);
+is("a remise of the shop, the price, a subscription or rights is refused (Codex H)", monetary.filter((reply) => heldToFacts(reply, pottery) || !DEAL_WORDS.test(reply) || neutralLine(reply, pottery) === reply), []);
 is("while handing over a certificate, diplomas, a key or an order still passes", ["La remise de votre certificat se fait en ligne.", "La remise des diplômes est en juin.", "La remise en main propre est possible.", "La remise de l'attestation suit le cours.", "La remise des clés se fait sur place.", "La remise de votre commande est rapide."].filter((reply) => !heldToFacts(reply, course)), []);
 is("while the deal words are still caught", caught([
   "promoção", "promo", "promocional", "promoción", "código promocional", "promo code",

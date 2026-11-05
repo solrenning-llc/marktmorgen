@@ -97,6 +97,9 @@ export async function membershipStatus(store: Store, subscription: unknown): Pro
     if (cached !== null) return null;
   }
   const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}`);
+  // A status from a different or unidentified subscription cannot authorize
+  // access or populate the cache for the subscription that was requested.
+  if (!sub || !Object.hasOwn(sub, "id") || sub.id !== subscription) return null;
   const status = memberState(sub);
   if (status && isRedisConfigured()) {
     await redisPipeline([["SET", statusKey(account, subscription), status, "EX", STATUS_SECONDS]]);

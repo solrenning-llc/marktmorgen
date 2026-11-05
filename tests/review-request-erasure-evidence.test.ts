@@ -49,7 +49,22 @@ async function setup() {
   const shop = (await storeForEmail(owner))!;
   assert.equal(await scheduleReviewAsk(shop, reference, paidAt), true);
   const member = askMember({ statsId: shop.statsId!, handle: shop.handle, reference, paidAt });
-  return { shop, now, member, batches, original: redis.pipeline.bind(redis) };
+  const base = redis.pipeline.bind(redis);
+  // MemoryRedis lacks ZADD XX. Match native Redis 7.4.2's existing-member
+  // update here, without changing the worker or weakening the retry assertion.
+  const original: typeof redis.pipeline = async commands => {
+    if (!commands.some(c => c[0] === "ZADD" && c[1] === ASK_DUE_KEY && c[2] === "XX")) return base(commands);
+    const replies: unknown[] = [];
+    for (const c of commands) {
+      if (c[0] === "ZADD" && c[1] === ASK_DUE_KEY && c[2] === "XX" && c.length === 5) {
+        if (redis.run(["ZSCORE", ASK_DUE_KEY, c[4]]) !== null) redis.run(["ZADD", ASK_DUE_KEY, c[3], c[4]]);
+        replies.push(0);
+      } else replies.push(...await base([c]));
+    }
+    return replies;
+  };
+  redis.pipeline = original;
+  return { shop, now, member, batches, original, base };
 }
 
 const unknown: [string, unknown[] | "throw"][] = [
@@ -87,7 +102,7 @@ for (const [name, reply] of unknown) {
       const recovered = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 3601);
       assert.deepEqual(recovered, { sent: 0, dropped: 1, waiting: 0 });
       assert.equal(r.batches.length, 0, "confirmed erasure still excludes the buyer after recovery");
-    } finally { redis.pipeline = r.original; globalThis.fetch = oldFetch; }
+    } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
   });
 }
 
@@ -99,5 +114,5 @@ test("complete evidence still sends a permitted buyer one review request", async
     assert.deepEqual(r.batches.flat().flatMap(m => m.to), [person]);
     assert.deepEqual(await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 1), { sent: 0, dropped: 0, waiting: 0 });
     assert.equal(r.batches.flat().length, 1);
-  } finally { redis.pipeline = r.original; globalThis.fetch = oldFetch; }
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });

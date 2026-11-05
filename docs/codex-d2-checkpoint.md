@@ -1,8 +1,18 @@
+# D2 latest continuation — November 5, 2026
+
+Fresh five own PR heads confirmed unchanged and OPEN, each8success plus cancelled/failed product. No sixth product, retry, head move or merge.2632 remains OPEN/f183; C3 explained that deleting V's row inside that PR cannot resolve the checker because it reads BASE reservations and enforces owner scope. C1/V must remove the released row on main through normal PR incorporation; D2 must not edit their branches or bypass the checker.
+
+2692 latest35e670e3cf35a9997821bd5e47bb104afb9f6453 was rechecked: immutable2ff8feda/ce1670bf9/9; new RED5b262cb304da3c93930a0aa60fe851581721bdf7 author95/5, same test159cae2a final95/95. Fresh277/277 counts, scoped strict types/lint/scanner3801/0/diff pass. D2 review5793265992; durable reporta753ea193181623891bef33587f106b70f9336af, proofs/d2/review-2692-return-35e.md on codex/d-review-2692-refund-evidence. No overall clearance: R2's four studio-page outage MEDIUM still OPEN, waiting nominal permission/owner delivery. R2 independently reported the foreign-row compatibility issue resolved; D2 verified synthetic regression cases and did not certify Stripe documentation.
+
+New E2 focal request discovered:2605/b18bea42f0042401900c9a885103e318f80bda0e, RED4e77e73c07ee1accdc76d22b29459c4df4378fce, lexical duplicate-member detection. D2 is the previous reviewer and the fresh channel/reviews showed no competing return. The channel announcement hit409; wait2min, re-read FULL and claim only if still unclaimed. No proof/test code written yet; only metadata/source reads and isolated checkout preparation. Proposed NEW opt-in tests/d2-review-2605-json.proof.ts, no author product/CI/branch edits. This is a review, not a sixth product. Initial direct source read finds a bounded Set-per-object scanner with escaped-key decoding; no grade/clearance is inferred before tests.
+
+The fiscal MEDIUM37a8d453 remains OPEN; no nominal assignment yet. Preserve all historical proofs, five heads and retry counters below.
+
 # Codex D2 checkpoint — November 5, 2026, 22:37 UTC
 
 Read this checkpoint first, then the fresh Codex inbox, channel and GitHub state. Preserve heads, proofs and retry counters. Conversation/channel: PT-BR. Code, commits and PRs: English. Coordinator: Claude1. Lane: 474 TX4 / 473 TX3, with E2 cross-reviews.
 
-## Latest return — November 5, 2026, 22:37 UTC
+## Previous return — November 5, 2026, 22:37 UTC
 
 Applied the owner's Pro continuation order C1-1900, C1-1857 and C4-1859. The actual full channel instructions are C1-1809 (AV12, referenced as1808) and C1-1843 (default lane audit, referenced as1846). Existing hourly continuation was re-enabled exactly once; no duplicate automation or repeated model polling. Five own products remain at the exact heads below, each8/9; no retry, cancellation, product edit, head move or merge.
 

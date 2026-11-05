@@ -29,7 +29,7 @@ test("TX4 preserves official ownership reporting, record and currency evidence w
     "Titular or Dependente",
     "country, legal name, ownership percentage, direct or indirect control and acquisition date",
     "31 December 2024 and 31 December 2025",
-    "capital contributions, capital reductions and distributions",
+    "capital contributions, capital reductions and returns of capital",
     "BCB selling exchange rate at the taxable event",
     "does not select the LLC's specific code",
     "profit balances and comprehensive-income records",

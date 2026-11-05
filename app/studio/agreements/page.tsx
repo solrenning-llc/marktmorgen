@@ -38,7 +38,7 @@ export default async function StudioAgreementsPage({ searchParams }: Params) {
   const { view } = found;
   const { store } = view;
   const now = new Date().getTime();
-  const [rows, used, requests] = await Promise.all([listAgreements(store), allowanceUsed(store, "email", now), listRequests(store, now)]);
+  const [rows, used, requests] = await Promise.all([listAgreements(store), allowanceUsed(store, "email", now).catch(() => null), listRequests(store, now)]);
   const payChoices = (requests ?? [])
     .filter((r) => requestStatus(r, now) === "open")
     .slice(0, 50)

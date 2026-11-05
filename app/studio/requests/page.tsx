@@ -40,7 +40,7 @@ export default async function StudioRequestsPage({ searchParams }: Params) {
   const { store } = view;
   const now = new Date().getTime();
   const listed = await listRequests(store, now);
-  const [requests, used, openNow] = await Promise.all([listed === null ? Promise.resolve([]) : refreshRefunds(store, listed, now), allowanceUsed(store, "email", now), openCount(store.sid, now).catch(() => null)]);
+  const [requests, used, openNow] = await Promise.all([listed === null ? Promise.resolve([]) : refreshRefunds(store, listed, now), allowanceUsed(store, "email", now).catch(() => null), openCount(store.sid, now).catch(() => null)]);
   const open = requestsOpen(store);
   const read = (name: string, max: number) => (typeof query[name] === "string" ? (query[name] as string).slice(0, max) : "");
   const typed = read("amount", 20);

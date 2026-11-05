@@ -68,7 +68,7 @@ export function AgreementsStudio({
   currency: Currency;
   canSend: boolean;
   open: boolean;
-  emails: { used: number; limit: number };
+  emails: { used: number | null; limit: number };
   payChoices: PayChoice[];
 }) {
   const router = useRouter();
@@ -304,8 +304,8 @@ export function AgreementsStudio({
               <span className="mt-1 block text-xs text-ink-soft">One of your open payment requests. Signing never charges anything; they pay only if they open it and pay.</span>
             </label>
           ) : null}
-          <p className="mt-5 text-sm text-ink-soft">
-            {`Each email, the link, a new version and each signed copy (one to them, one to you), is one of your store's emails for this month: ${emails.used.toLocaleString("en-US")} of ${emails.limit.toLocaleString("en-US")} used. The link takes a signature for ${SIGN_DAYS} days.`}
+          <p className="mt-5 text-sm text-ink-soft" role={emails.used === null ? "status" : undefined}>
+            {emails.used === null ? "Email use is unavailable right now. Reload to check it; your agreements remain available." : `Each email, the link, a new version and each signed copy (one to them, one to you), is one of your store's emails for this month: ${emails.used.toLocaleString("en-US")} of ${emails.limit.toLocaleString("en-US")} used. The link takes a signature for ${SIGN_DAYS} days.`}
           </p>
           {!editing ? (
             <label className="mt-4 flex items-start gap-3">

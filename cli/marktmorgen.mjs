@@ -45,6 +45,9 @@ Options:
 Examples:
   marktmorgen get_revenue_by_channel --days 7
   marktmorgen list_products
+
+Text results are printed as text. Other content is printed as JSON.
+Linked resources are never opened or downloaded.
 `;
 
 /** The server's address, refused unless it is https (or a local server for a test). */
@@ -90,6 +93,39 @@ export function parseArguments(args) {
 let nextId = 1;
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const unconfirmed = () => ({ error: "The server did not confirm this request. Nothing was retried." });
+const ownString = (value, key) => Object.hasOwn(value, key) && typeof value[key] === "string";
+const optional = (value, key, check) => !Object.hasOwn(value, key) || check(value[key]);
+const string = (value) => typeof value === "string";
+
+/** MCP 2025-06-18 content schema, read November 4, 2026:
+ * https://modelcontextprotocol.io/specification/2025-06-18/schema
+ * These are data checks only; no resource URI is followed or media executed.
+ */
+function contentMetadata(value) {
+  return optional(value, "_meta", object) && optional(value, "annotations", (notes) =>
+    object(notes) && optional(notes, "audience", (roles) => Array.isArray(roles) && roles.every((role) => role === "user" || role === "assistant")) &&
+    optional(notes, "priority", (n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1) &&
+    optional(notes, "lastModified", string));
+}
+
+function contentBlock(item) {
+  if (!object(item) || !ownString(item, "type") || !contentMetadata(item)) return false;
+  if (item.type === "text") return ownString(item, "text");
+  if (item.type === "image" || item.type === "audio") return ownString(item, "data") && ownString(item, "mimeType");
+  if (item.type === "resource_link") {
+    return ownString(item, "uri") && ownString(item, "name") &&
+      ["title", "description", "mimeType"].every((key) => optional(item, key, string)) &&
+      optional(item, "size", (n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
+  }
+  if (item.type === "resource") {
+    const resource = item.resource;
+    return Object.hasOwn(item, "resource") && object(resource) && ownString(resource, "uri") &&
+      optional(resource, "mimeType", string) && optional(resource, "_meta", object) &&
+      Object.hasOwn(resource, "text") !== Object.hasOwn(resource, "blob") &&
+      (ownString(resource, "text") || ownString(resource, "blob"));
+  }
+  return false;
+}
 
 /**
  * One JSON-RPC call to the MCP server. A successful HTTP status and a matching
@@ -125,14 +161,11 @@ async function call(fetchImpl, url, key, method, params) {
       (tool.description === undefined || typeof tool.description === "string") && object(tool.inputSchema) &&
       tool.inputSchema.type === "object" && (tool.inputSchema.properties === undefined || object(tool.inputSchema.properties)))) return unconfirmed();
   } else {
-    if (!Array.isArray(body.result.content) ||
+    if (!Object.hasOwn(body.result, "content") || !Array.isArray(body.result.content) ||
       (Object.hasOwn(body.result, "isError") && typeof body.result.isError !== "boolean")) return unconfirmed();
-    // This CLI presents text only. Validate the entire answer before printing
-    // any of it: neither an unknown type nor an unsupported image/audio/resource
-    // block can silently become an empty or partial successful answer.
-    if (!body.result.content.every((item) => object(item) && item.type === "text" && typeof item.text === "string")) {
-      return { error: "The server returned unsupported or invalid content. This CLI displays text only. Nothing was retried." };
-    }
+    // Validate the whole response before any output. Empty content is not a
+    // confirmed success (owner decision CX-109); an explicit tool error stays one.
+    if ((!body.result.content.length && body.result.isError !== true) || !body.result.content.every(contentBlock)) return unconfirmed();
   }
   return { result: body.result };
 }
@@ -194,9 +227,11 @@ export async function run(argv, { env = {}, fetchImpl = globalThis.fetch, write 
       return 2;
     }
     const content = Array.isArray(answered.result?.content) ? answered.result.content : [];
-    const text = content.filter((c) => c && c.type === "text").map((c) => c.text).join("\n");
+    const text = content.every((item) => item.type === "text")
+      ? content.map((item) => item.text).join("\n")
+      : JSON.stringify(answered.result);
     if (answered.result?.isError) {
-      warn(`${text}\n`);
+      warn(`${text || "The tool reported an error without details."}\n`);
       return 1;
     }
     write(`${text}\n`);

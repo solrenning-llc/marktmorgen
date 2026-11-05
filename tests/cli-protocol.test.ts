@@ -50,10 +50,19 @@ async function main() {
     ["incomplete image content (Codex G)", (id) => ({ ...success(id), result: { content: [{ type: "image" }] } })],
     ["partial text before an unknown content type (Codex G)", (id) => ({ ...success(id), result: { content: [{ type: "text", text: "partial" }, { type: "not_a_content_type" }] } })],
     ["image data must be a string", (id) => ({ ...success(id), result: { content: [{ type: "image", data: 5, mimeType: "image/png" }] } })],
+    ["image needs its MIME type", (id) => ({ ...success(id), result: { content: [{ type: "image", data: "eA==" }] } })],
     ["audio needs its MIME type", (id) => ({ ...success(id), result: { content: [{ type: "audio", data: "eA==" }] } })],
+    ["audio data must be a string", (id) => ({ ...success(id), result: { content: [{ type: "audio", data: 5, mimeType: "audio/wav" }] } })],
     ["resource needs content", (id) => ({ ...success(id), result: { content: [{ type: "resource", resource: { uri: "file:///example.txt" } }] } })],
     ["resource text must be a string", (id) => ({ ...success(id), result: { content: [{ type: "resource", resource: { uri: "file:///example.txt", text: 5 } }] } })],
     ["resource link needs a name", (id) => ({ ...success(id), result: { content: [{ type: "resource_link", uri: "file:///example.txt" }] } })],
+    ["resource link needs its URI", (id) => ({ ...success(id), result: { content: [{ type: "resource_link", name: "example" }] } })],
+    ["blob resource needs its URI", (id) => ({ ...success(id), result: { content: [{ type: "resource", resource: { blob: "eA==" } }] } })],
+    ["binary resource data must be a string", (id) => ({ ...success(id), result: { content: [{ type: "resource", resource: { uri: "file:///example.bin", blob: 5 } }] } })],
+    ["a resource cannot ambiguously claim both text and binary", (id) => ({ ...success(id), result: { content: [{ type: "resource", resource: { uri: "file:///example.txt", text: "A", blob: "eA==" } }] } })],
+    ["annotations must be an object", (id) => ({ ...success(id), result: { content: [{ type: "text", text: "A", annotations: null }] } })],
+    ["annotation audiences must be recognized", (id) => ({ ...success(id), result: { content: [{ type: "text", text: "A", annotations: { audience: ["unknown"] } }] } })],
+    ["annotation priority must be between zero and one", (id) => ({ ...success(id), result: { content: [{ type: "text", text: "A", annotations: { priority: 2 } }] } })],
     ["empty content without error status is not confirmation (CX-109)", (id) => ({ ...success(id), result: { content: [] } })],
     ["empty content with false error status is not confirmation", (id) => ({ ...success(id), result: { content: [], isError: false } })],
   ];
@@ -97,6 +106,8 @@ async function main() {
   is("a valid mixed response is presented whole", [mixedResult.code, mixedResult.out, mixedResult.calls], [0, JSON.stringify(mixed) + "\n", 1]);
   const emptyError = await invoke((id) => ({ ...success(id), result: { content: [], isError: true } }));
   is("an explicit empty tool error stays an error with a clear message", [emptyError.code, emptyError.out, emptyError.err.trim().length > 0], [1, "", true]);
+  const annotated = await invoke((id) => ({ ...success(id), result: { content: [{ type: "text", text: "Annotated", annotations: { audience: ["user", "assistant"], priority: 1, lastModified: "2026-11-04T00:00:00Z" }, _meta: {} }] } }));
+  is("valid optional content metadata is accepted", [annotated.code, annotated.out], [0, "Annotated\n"]);
   done();
 }
 void main();

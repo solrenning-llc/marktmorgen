@@ -173,9 +173,10 @@ export async function pendingInvitesOnOptions(store: Store, productId: string, o
   // at all is a proved 0; more bytes than the bound, or invitations with no count of their bytes (written before it
   // was kept), are unknown, and the list is not read.
   const room = dataKey(store);
+  let many: number | null;
   try {
     const sized = repliesFor(await redisPipeline([["HLEN", invitesKey(store.statsId)], ...(room ? [["HGET", room, INVITES_SLOT]] : [])]), room ? 2 : 1);
-    const many = sized ? countOf(sized[0]) : null;
+    many = sized ? countOf(sized[0]) : null;
     if (many === null) return unknown;
     if (many === 0) return Object.fromEntries(optionIds.map((id) => [id, 0])) as Record<string, number | null>;
     const counted = sized && room && typeof sized[1] === "string" && /^\d{1,12}$/.test(sized[1]) ? Number(sized[1]) : null;
@@ -191,7 +192,9 @@ export async function pendingInvitesOnOptions(store: Store, productId: string, o
   } catch {
     return unknown;
   }
-  if (!Array.isArray(reply)) return unknown;
+  // The list read must be the whole of what was counted (Codex T on #2690): a list shorter or longer than HLEN said
+  // (an empty list for invitations that exist, a cut reply, a write between the two reads) is unknown, never a count.
+  if (!Array.isArray(reply) || reply.length !== many) return unknown;
   const counts = Object.fromEntries(optionIds.map((id) => [id, 0])) as Record<string, number | null>;
   for (let at = 0; at < reply.length; at += 1) {
     const slot = Object.getOwnPropertyDescriptor(reply, String(at));

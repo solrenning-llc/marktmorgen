@@ -150,6 +150,33 @@ async function main(): Promise<void> {
   is("the studio is not told it is off sale", [dropped[0] === 200, dropped[1].ok === true], [false, false]);
   is("and the price is still offered, as it really is", sellableOptions((await read()) as never).map((o) => o.id).includes(plus), true);
 
+  part("Every write answered as it should be, or not done (Codex T on #2690)");
+  for (const [name, answer] of [["a nil for every command", (n: number) => Array.from({ length: n }, () => null)], ["an error text", (n: number) => Array.from({ length: n }, () => "ERR")], ["counts as text", (n: number) => Array.from({ length: n }, (_, i) => (i === 0 ? "OK" : "1"))]] as const) {
+    redis.pipeline = (async (commands: (string | number)[][]) => (commands.length > 1 && commands.every((c) => c[0] === "SET" || c[0] === "HSET" || c[0] === "DEL") && commands.some((c) => String(c[1] ?? "").includes(pid)) ? answer(commands.length) : realPipe(commands))) as typeof redis.pipeline;
+    let said: readonly [number, Record<string, unknown>];
+    try {
+      said = await post(session, { action: "sale", id: plus, onSale: false });
+    } finally {
+      redis.pipeline = realPipe;
+    }
+    is(`${name}: the studio is not told it is done`, [said[0] === 200, said[1].ok === true], [false, false]);
+  }
+
+  part("A list of invitations that does not match its count is unknown (Codex T on #2690)");
+  const invitations = `nl:mv:${statsId}`;
+  const listedNow = (redis.run(["HLEN", invitations]) as number);
+  for (const [name, values] of [["an empty list for invitations that exist", () => []], ["a list shorter than the count", () => [String(redis.run(["HVALS", invitations]) && (redis.run(["HVALS", invitations]) as string[])[0])]]] as const) {
+    if (listedNow < 2) break;
+    redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "HVALS" ? [values()] : realPipe(commands))) as typeof redis.pipeline;
+    let counted: readonly [number, Record<string, unknown>];
+    try {
+      counted = await post(session, { action: "invited", id: pid });
+    } finally {
+      redis.pipeline = realPipe;
+    }
+    is(`${name}: unknown, never a count`, counted[1].invited, { [basic]: null, [plus]: null });
+  }
+
   part("The counts never read more than they can pay for (Codex Z on #2690)");
   const many = numbersFrom(Array.from({ length: 2000 }, (_, i) => ({ id: `sub_many${i}`, status: "active", product: pid, option: i % 2 ? basic : plus, amount: 1000, currency: "usd", interval: "month", count: 1, start: 1, ended: 0, trialEnd: 0, channel: "direct", canceledAt: 0, cancelCause: "", feedback: "", comment: "" })), "usd", Date.now());
   // What members wrote when leaving is kept with the numbers (lib/membership-numbers.ts), so a real cache runs to

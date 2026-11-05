@@ -76,11 +76,29 @@ export function verifiedFrom(data: StatsData, titles: Map<string, string>, now: 
   };
 }
 
+function recordWith(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field)));
+}
+
+function count(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function parse(raw: unknown): Verified | null {
   if (typeof raw !== "string") return null;
   try {
-    const value = JSON.parse(raw) as Verified;
-    return value && typeof value.day === "string" && value.windows?.d30 ? value : null;
+    const value: unknown = JSON.parse(raw);
+    if (!recordWith(value, ["day", "at", "currency", "salesRead", "windows", "channels", "products", "countries"])) return null;
+    if (typeof value.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.day) || !count(value.at) || !Number.isSafeInteger(value.at * 1000) || new Date(value.at * 1000).toISOString().slice(0, 10) !== value.day) return null;
+    if (typeof value.currency !== "string" || !/^[a-z]{3}$/.test(value.currency) || typeof value.salesRead !== "boolean") return null;
+    const money = (v: unknown) => value.salesRead ? count(v) : v === null;
+    if (!recordWith(value.windows, ["d7", "d30", "d90"]) || !Object.values(value.windows).every(w => recordWith(w, ["visitors", "views", "checkouts", "sales", "cents"]) && count(w.visitors) && count(w.views) && count(w.checkouts) && money(w.sales) && money(w.cents))) return null;
+    // These are the existing writer's list ceilings, not a new display limit.
+    if (!Array.isArray(value.channels) || value.channels.length > 8 || !value.channels.every(c => recordWith(c, ["source", "visits", "sales", "cents"]) && typeof c.source === "string" && count(c.visits) && money(c.sales) && money(c.cents))) return null;
+    if (!Array.isArray(value.products) || value.products.length > 8 || !value.products.every(p => recordWith(p, ["title", "sales", "cents"]) && typeof p.title === "string" && count(p.sales) && count(p.cents))) return null;
+    if (!Array.isArray(value.countries) || value.countries.length > 6 || !value.countries.every(c => recordWith(c, ["country", "share"]) && typeof c.country === "string" && typeof c.share === "number" && Number.isFinite(c.share) && c.share >= 0 && c.share <= 1)) return null;
+    if (!value.salesRead && (value.products.length || value.countries.length)) return null;
+    return value as Verified;
   } catch {
     return null;
   }
@@ -89,8 +107,10 @@ function parse(raw: unknown): Verified | null {
 /** The record kept for a store, or null before the first one. */
 export async function readVerified(store: Pick<Store, "statsId">): Promise<Verified | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", key(store.statsId)]]);
-  return parse(raw);
+  const reply = await redisPipeline([["GET", key(store.statsId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) return null;
+  const slot = Object.getOwnPropertyDescriptor(reply, "0");
+  return slot && Object.hasOwn(slot, "value") ? parse(slot.value) : null;
 }
 
 /** Reads the numbers again and keeps them: from the daily job, and when the creator first turns one on. */

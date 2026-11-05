@@ -81,6 +81,14 @@ async function main() {
     parent[parts.at(-1)!] = value;
     is("sales not read cannot carry known " + path, await roundtrip(copy), null);
   }
+  for (const raw of [
+    JSON.stringify(known).replace('"salesRead":true', '"salesRead":false,"salesRead":true'),
+    JSON.stringify(known).replace('"sales":2', '"sales":null,"sales":2'),
+  ]) {
+    override = null;
+    await pipeline([["SET", key, raw]]);
+    is("conflicting duplicate JSON members remain unavailable", await readVerified(owner), null);
+  }
 
   part("The actual GET requires one own inert reply");
   for (const reply of [[], [JSON.stringify(known), null], [undefined], [{ day: known.day, windows: known.windows }]]) {
@@ -97,6 +105,19 @@ async function main() {
   Object.setPrototypeOf(inherited, Object.assign(Object.create(Array.prototype), { 0: JSON.stringify(known) }));
   override = inherited;
   is("inherited GET reply is unavailable", await readVerified(owner), null);
+  let traps = 0;
+  let transportThenReads = 0;
+  override = new Proxy([JSON.stringify(known)], {
+    get(target, field, receiver) {
+      if (field === "then") { transportThenReads++; return undefined; }
+      traps++;
+      return Reflect.get(target, field, receiver);
+    },
+    getOwnPropertyDescriptor(target, field) { traps++; return Reflect.getOwnPropertyDescriptor(target, field); },
+  });
+  is("executable GET response remains unavailable", await readVerified(owner), null);
+  is("no consumer response trap ran", traps, 0);
+  is("the async transport's Promise probe is explicitly accounted for", transportThenReads, 1);
   override = null;
   await pipeline([["DEL", key]]);
   is("a confirmed absent copy remains unavailable", await readVerified(owner), null);

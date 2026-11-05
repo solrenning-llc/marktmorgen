@@ -37,6 +37,7 @@ try {
         "@": root,
         "@/lib/redis": join(root, "lib", "redis.ts"),
         "@/lib/blob": join(here, "blob.ts"),
+        ...(["access-email-reserve.redis-run.ts", "agreement-signature.redis-run.ts", "erasure-request-asked.redis-run.ts", "payment-request-state.redis-run.ts"].includes(file) ? { "@/lib/resend-fallback-transport": join(root, "tests/e2e/reviewed-resend-transport.ts") } : {}),
         "next/headers": join(here, "next-headers.ts"),
         "next/og": join(here, "next-og.ts"),
       },

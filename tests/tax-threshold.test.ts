@@ -57,6 +57,97 @@ test("inherited fields and getters are not evidence and are never executed", () 
   assert.equal(reads,0);
   assert.equal(assessTaxThreshold(Object.create(value),NOW).status,"unknown");
 });
+test("threshold snapshots reject extra symbol evidence without evaluating it", () => {
+  let reads = 0;
+  for (const id of ["ca-specified-supplies", "no-remote-services"] as const) {
+    for (const enumerable of [true, false]) {
+      for (const accessor of [true, false]) {
+        const value = row(id, 0);
+        Object.defineProperty(value, Symbol("unreviewed amount"), {
+          enumerable,
+          ...(accessor ? { get() { reads++; return null; } } : { value: null }),
+        });
+        assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null });
+      }
+    }
+  }
+  assert.equal(reads, 0);
+});
+test("threshold snapshots reject custom prototypes even with every required own field", () => {
+  let reads = 0;
+  const prototype = Object.create(null);
+  Object.defineProperty(prototype, "unreviewedAmount", { get() { reads++; return null; } });
+  class Snapshot {
+    constructor() { Object.assign(this, row("ca-specified-supplies", 0)); }
+  }
+  for (const value of [Object.assign(Object.create(prototype), row("ca-specified-supplies", 0)), new Snapshot()]) {
+    assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null });
+  }
+  assert.equal(reads, 0);
+});
+test("uninspectable threshold evidence is unknown instead of below the threshold", () => {
+  const value = new Proxy(row("ca-specified-supplies", 0), {
+    getPrototypeOf() { throw new Error("evidence unavailable"); },
+  });
+  assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null });
+});
+test("revoked direct threshold evidence returns unknown without an exception", () => {
+  for (const value of [{}, []]) {
+    const { proxy, revoke } = Proxy.revocable(value, {});
+    revoke();
+    assert.deepEqual(assessTaxThreshold(proxy, NOW), { status: "unknown", projectedApplicableMinor: null });
+  }
+});
+test("revoked ledger threshold evidence returns unknown without an exception", async () => {
+  const { assessTaxSalesThreshold } = await import("@/lib/tax-threshold");
+  for (const value of [{}, []]) {
+    const { proxy, revoke } = Proxy.revocable(value, {});
+    revoke();
+    assert.deepEqual(assessTaxSalesThreshold(proxy, NOW), { status: "unknown", projectedApplicableMinor: null });
+  }
+});
+test("exact plain and null-prototype snapshots keep their complete own amounts", () => {
+  for (const id of ["ca-specified-supplies", "no-remote-services"] as const) {
+    const value = row(id, TAX_THRESHOLD_RULES[id].thresholdMinor + 1);
+    for (const prototype of [Object.prototype, null]) {
+      const snapshot = Object.create(prototype, Object.fromEntries(
+        Object.entries(value).map(([key, amount]) => [key, { value: amount, enumerable: true }]),
+      ));
+      assert.deepEqual(assessTaxThreshold(snapshot, NOW), {
+        status: "treatment-required", projectedApplicableMinor: TAX_THRESHOLD_RULES[id].thresholdMinor + 1,
+      });
+    }
+  }
+});
+test("threshold snapshots cannot lose required amounts or evidence during serialization", () => {
+  for (const id of ["ca-specified-supplies", "no-remote-services"] as const) {
+    for (const key of Object.keys(row(id, 0))) {
+      const value = row(id, 0);
+      Object.defineProperty(value, key, { enumerable: false });
+      assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null }, `hidden ${key}`);
+    }
+    const complete = Object.freeze(row(id, TAX_THRESHOLD_RULES[id].thresholdMinor + 1));
+    assert.equal(assessTaxThreshold(complete, NOW).status, "treatment-required");
+  }
+});
+test("threshold ledger evidence cannot hide a required review field", async () => {
+  const { assessTaxSalesThreshold } = await import("@/lib/tax-threshold");
+  const complete = () => ({
+    ruleId: "ca-specified-supplies", completeRollingCoverage: true, applicableScopeReviewed: true,
+    ledger: {
+      place: { country: "CA", state: null }, currency: "CAD",
+      periodStart: "2025-10-28", periodEnd: "2026-10-27",
+      coverageFrom: "2025-10-28", coverageThrough: "2026-10-27", complete: true,
+      entries: [{ id: "own", country: "CA", state: "ON", currency: "CAD", supplyOn: "2026-10-27", position: "settled", amountMinor: 3_000_001, applicable: true }],
+    },
+  });
+  for (const key of Object.keys(complete())) {
+    const value = complete();
+    Object.defineProperty(value, key, { enumerable: false });
+    assert.deepEqual(assessTaxSalesThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null }, `hidden ${key}`);
+  }
+  assert.deepEqual(assessTaxSalesThreshold(Object.freeze(complete()), NOW), { status: "treatment-required", projectedApplicableMinor: 3_000_001 });
+});
 test("threshold arithmetic creates no actual registration, treatment record or permission to sell", () => {
   assert.equal(assessTaxThreshold(row("ca-specified-supplies",0),NOW).status,"below-threshold");
   assert.equal(DEEMED_SUPPLIER_RECORDS.length,0);

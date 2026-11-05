@@ -36,6 +36,8 @@
  * would let one buyer reloading the page use it up and stop every other
  * buyer's actions at the store.
  */
+import { moveReads } from "@/lib/call-moves-read";
+
 export const ORDERS_OPEN_UNITS = 17;
 /** How long one opening may run at the most: the page's maxDuration (app/[handle]/orders/page.tsx). */
 export const ORDERS_OPEN_SECONDS = 30;
@@ -98,13 +100,23 @@ export const DOWNLOAD_LOOKUP_MS = 10_000;
 /** Commands a download's lookup makes besides its metered reads: the grant; for one brought over, how many ids there are, the ids and the one entry. */
 export const DOWNLOAD_LOOKUP_COMMANDS = 4;
 /**
- * Moves an opening of a store that sells calls takes before its bookings are
- * read: lib/calls.ts (paidCalls) reads the move of every booking on its pages,
- * at most five pages of a hundred checkouts, before their number is known
- * outside it (tests/orders-open.test.ts holds it to that file). What they do
- * not use pays the same opening's next reads.
+ * One read of the moves of up to MOVES_PER_MGET bookings (lib/call-records.ts,
+ * readMoves) counted in commands: the MGET, and its keys and moves through the
+ * database (tests/plan-cost-registry.test.ts holds it above what it costs).
  */
-export const ORDERS_CALL_MOVES = 5 * 100;
+export const ORDERS_MOVES_READ_COMMANDS = 2;
+/** Commands the moves of this many bookings count as, read MOVES_PER_MGET at a command. */
+export function ordersMovesCommands(bookings: number): number {
+  return moveReads(bookings) * ORDERS_MOVES_READ_COMMANDS;
+}
+/**
+ * Commands an opening of a store that sells calls takes before its bookings
+ * are read: lib/calls.ts (paidCalls) reads the move of every booking on its
+ * pages, at most five pages of a hundred checkouts, before their number is
+ * known outside it (tests/orders-open.test.ts holds it to that file), a
+ * hundred at a command. What they do not use pays the same opening's next reads.
+ */
+export const ORDERS_CALL_MOVES = ordersMovesCommands(5 * 100);
 
 /**
  * The most calls one opening of the orders page, or one request for its link,

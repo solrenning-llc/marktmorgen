@@ -17,7 +17,7 @@ test("the real company report deducts all categories and measures the 60% target
   assert.deepEqual(result, { schema: 1, month: "2026-10", currency: "USD", basis: "reconciled_actual",
     status: "complete", reason: "complete", revenueCents: 9000, variableCostsCents: 900,
     fixedCostsCents: 900, taxesCents: 1800, refundsCents: 450, reservesCents: 450,
-    netProfitCents: 4500, netMarginBps: 5000, targetBps: 6000, targetMet: false });
+    netProfitCents: 4500, netMarginBps: 5000, targetBps: 6000, targetMet: false, heldStores: null, heldStoresPeak: null });
   assert.equal(COMPANY_NET_MARGIN_TARGET_BPS, 6000);
   assert.equal(commercialPlansMayOpen(true), false);
 });
@@ -108,4 +108,19 @@ test("unsafe inputs and aggregate overflow fail without partial totals", () => {
   for (const source of COMMERCIAL_PROFIT_SOURCES) huge.sources[source]!.revenueCents = Number.MAX_SAFE_INTEGER;
   const result = companyMonthlyMarginReport(huge, NOW);
   assert.equal(result.status, "unknown"); assert.equal(result.revenueCents, null);
+});
+
+test("held counts are monthly private aggregates and do not certify unknown money", () => {
+  const result = companyMonthlyMarginReport(null, NOW, { month: "2026-10", count: 2, peak: 5, privateEmail: "private@example.test" });
+  assert.equal(result.heldStores, 2); assert.equal(result.heldStoresPeak, 5);
+  assert.equal(result.status, "unknown"); assert.equal(result.netProfitCents, null);
+  assert.doesNotMatch(JSON.stringify(result), /private|example/);
+  for (const held of [null, {}, { month: "2026-09", count: 2, peak: 5 }, { month: "2026-10", count: 2, peak: 1 }, { month: "2026-10", count: -1, peak: 5 }, Object.create({ month: "2026-10", count: 2, peak: 5 })]) {
+    assert.equal(companyMonthlyMarginReport(fixture(), NOW, held).heldStores, null);
+  }
+  let reads = 0;
+  const held = { month: "2026-10", peak: 5, get count() { reads++; return 2; } };
+  assert.equal(companyMonthlyMarginReport(fixture(), NOW, held).heldStores, null);
+  assert.equal(reads, 0);
+  assert.equal(companyMonthlyMarginReport(null, NOW, { month: "2026-10", count: 0, peak: 0 }).heldStores, 0);
 });

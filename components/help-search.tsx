@@ -3,13 +3,21 @@
 import { useEffect, useId, useState } from "react";
 
 /** Opens the answer a link points at (#can-i-sell-a-course). */
-function openFromHash() {
-  const id = decodeURIComponent(window.location.hash.slice(1));
+function openFromHash(resetSearch: () => void) {
+  let id: string;
+  try {
+    id = decodeURIComponent(window.location.hash.slice(1));
+  } catch {
+    return;
+  }
   const target = id ? document.getElementById(id) : null;
+  if (!target?.matches("details[data-help-item], section[data-help-section]")) return;
+  // A link must remain reachable even when the current search hid its section.
+  resetSearch();
   if (target instanceof HTMLDetailsElement) {
     target.open = true;
-    target.scrollIntoView({ block: "start" });
   }
+  target.scrollIntoView({ block: "start" });
 }
 
 /** Shows only the answers that mention every word typed, opened, and says how many. */
@@ -39,9 +47,27 @@ export function HelpSearch() {
   const hint = useId();
 
   useEffect(() => {
-    openFromHash();
-    window.addEventListener("hashchange", openFromHash);
-    return () => window.removeEventListener("hashchange", openFromHash);
+    const reveal = () => openFromHash(() => {
+      setQuery("");
+      setShown(narrow(""));
+    });
+    const followCurrentHash = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!link || link.hasAttribute("download")) return;
+      const target = link.getAttribute("target");
+      if (target && target !== "_self") return;
+      const href = link.getAttribute("href");
+      // The browser does not emit hashchange when the same link is followed twice.
+      if (href?.startsWith("#") && href === window.location.hash) reveal();
+    };
+    reveal();
+    window.addEventListener("hashchange", reveal);
+    document.addEventListener("click", followCurrentHash);
+    return () => {
+      window.removeEventListener("hashchange", reveal);
+      document.removeEventListener("click", followCurrentHash);
+    };
   }, []);
 
   const search = (value: string) => {

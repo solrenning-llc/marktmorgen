@@ -8,7 +8,7 @@ import { DealAgenda } from "@/components/deal-agenda";
 import { crmAnswer, type CrmAnswer, type CrmCurrentDeal } from "@/lib/crm-response";
 import { MOVE_HINT, PIPELINE_NAME_ID, moveConflictWords, PIPELINE_REMOVE_TO_ID, SHOWN_SAY_AFTER_MS, VIEW_ONLY_WORDS, crmFieldChoicesId, crmFieldNameId, dealErrorField, fieldProblems, neighborAfterRemoval, pausedWords, pipelineProblems, shownWords, stageKindId, stageMovesId, stageNameId } from "@/lib/deal-board-focus";
 import { DEAL_SAVE_ID, DRAFT_UNITS, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, savedNowId, stageMoveStep, stageChosenText, livePending, announce, focusWasLost, takeSaved, typedText, unitOf, DEAL_HIDDEN, DEAL_HIDDEN_ID, type DealDraft, type DraftField, type DraftConflict, type DraftUnit } from "@/lib/deal-draft";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
@@ -165,7 +165,10 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const [focusTick, setFocusTick] = useState(0);
   const focusLater = (...ids: (string | null | undefined)[]) => { focusTo.current = ids.filter((id): id is string => !!id); focusForce.current = false; setFocusTick(t => t + 1); };
   const moveFocus = (...ids: (string | null | undefined)[]) => { focusLater(...ids); focusForce.current = true; };
-  useEffect(() => {
+  // A layout effect, so focus moves in the same commit that draws its target (an error's words, aria-invalid):
+  // a passive effect runs after the paint in a later task when the update came from a server answer, so for a
+  // moment the error was on the page while focus was still on Save, and a browser (WebKit) could keep it there.
+  useLayoutEffect(() => {
     if (locked || !focusTo.current.length) return;
     const target = focusTo.current.map(id => document.getElementById(id)).find(el => el !== null);
     const force = focusForce.current;

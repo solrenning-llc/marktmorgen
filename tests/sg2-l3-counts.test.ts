@@ -22,6 +22,9 @@
  *     of the addresses to email as "nobody left" and finished the import, or
  *     started the mail ramp at 0. Each now leaves the job as it was, to start
  *     again from the last saved place.
+ *   - studentDates and lastSeenMany (lib/learn.ts) read an HGET or HMGET of
+ *     another shape, or a kept row whose times are not whole numbers, as
+ *     "never opened" (null or 0). Each now throws UnknownReplyError.
  *   - forgetLearnerPerson (lib/learn.ts) read an unknown SMEMBERS of the
  *     person's passes as "no passes", so their pass records were not deleted,
  *     and counted an unknown DEL or HDEL as 0 records removed. Both now throw,
@@ -31,7 +34,7 @@
  */
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { withinAddressLimit, withinRateLimit } from "@/lib/auth";
-import { forgetLearnerPerson, openCourseLink, requestCourseLink, studentPage } from "@/lib/learn";
+import { forgetLearnerPerson, lastSeenMany, openCourseLink, requestCourseLink, studentDates, studentPage } from "@/lib/learn";
 import { addRows, finishUpload, readJob, runImport, startImport } from "@/lib/imports";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { paidPeriod } from "./billing-period-fixture";
@@ -167,6 +170,39 @@ void (async () => {
   is("studentPage: no students is 0", (await studentPage(course, "0", 10, async () => true))?.total, 0);
   rule = { when: studentsPage, reply: [["0", []], 3, 0] };
   is("studentPage: three is three", (await studentPage(course, "0", 10, async () => true))?.total, 3);
+  rule = null;
+
+  part("studentDates and lastSeenMany: a reply or a kept row of another shape is never \"never opened\"");
+  const one = (name: string) => (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === name && String(commands[0]?.[1]).startsWith("nl:course:c_sg2l3:students");
+  const goodRow = JSON.stringify({ e: "buyer@sg2-l3.example", s: 1_700_000_000, l: 1_700_000_500 });
+  const BAD_ROWS: [string, unknown][] = [
+    ["a reply that is a number", 7],
+    ["a reply that is a list", [goodRow]],
+    ["a reply that is true", true],
+    ["a row that is not JSON", "{"],
+    ["a row whose start is text", JSON.stringify({ e: "buyer@sg2-l3.example", s: "1700000000", l: 1_700_000_500 })],
+    ["a row whose last visit is missing", JSON.stringify({ e: "buyer@sg2-l3.example", s: 1_700_000_000 })],
+    ["a row whose start is negative", JSON.stringify({ e: "buyer@sg2-l3.example", s: -1, l: 1_700_000_500 })],
+    ["a row that is a list", JSON.stringify([1, 2])],
+  ];
+  for (const [label, bad] of BAD_ROWS) {
+    rule = { when: one("HGET"), reply: [bad] };
+    is(`studentDates, ${label}: unknown`, await outcome(() => studentDates("c_sg2l3", "buyer@sg2-l3.example")), "rejected: UnknownReplyError");
+    rule = { when: one("HMGET"), reply: [[bad]] };
+    is(`lastSeenMany, ${label}: unknown`, await outcome(() => lastSeenMany("c_sg2l3", ["buyer@sg2-l3.example"])), "rejected: UnknownReplyError");
+  }
+  for (const [label, bad] of [["not a list", { result: [] }], ["a list one short", []], ["a list one too long", [null, null]], ["null", null]] as [string, unknown][]) {
+    rule = { when: one("HMGET"), reply: [bad] };
+    is(`lastSeenMany, an HMGET that is ${label}: unknown`, await outcome(() => lastSeenMany("c_sg2l3", ["buyer@sg2-l3.example"])), "rejected: UnknownReplyError");
+  }
+  rule = { when: one("HMGET"), reply: [] };
+  is("lastSeenMany, a pipeline with no reply: unknown", await outcome(() => lastSeenMany("c_sg2l3", ["buyer@sg2-l3.example"])), "rejected: UnknownReplyError");
+  rule = { when: one("HGET"), reply: [null] };
+  is("studentDates: a student never seen is null", await studentDates("c_sg2l3", "buyer@sg2-l3.example"), null);
+  rule = { when: one("HGET"), reply: [goodRow] };
+  is("studentDates: a kept row is read", await studentDates("c_sg2l3", "buyer@sg2-l3.example"), { since: 1_700_000_000, lastSeen: 1_700_000_500 });
+  rule = { when: one("HMGET"), reply: [[goodRow, null]] };
+  is("lastSeenMany: one seen, one never", [...(await lastSeenMany("c_sg2l3", ["buyer@sg2-l3.example", "other@sg2-l3.example"])).values()], [1_700_000_500, 0]);
   rule = null;
 
   part("runImport: an unknown length or count leaves the import as it was");

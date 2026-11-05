@@ -53,6 +53,11 @@ async function main() {
         if (kind === "fin") await markLesson(course.id, email, lesson, true, ROOM);
         return email;
       }
+      const email = await person();
+      is(`${kind}: an actual confirmed claim starts the event`, await note(store, made.product.id, course.id, email), true);
+      const queued = await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+      is(`${kind}: the real enrollment queued one step for that student`, (queued[0] as string[]).filter(item => item.endsWith(`|${email}`)).length, 1);
+      is(`${kind}: an ordinary repeated event does not start again`, await note(store, made.product.id, course.id, email), false);
       const variants: { name: string; reply: unknown; apply?: boolean; fail?: boolean }[] = [
         { name: "missing reply", reply: [] }, { name: "missing slot", reply: [undefined] },
         { name: "false", reply: [false] }, { name: "zero", reply: [0] },
@@ -84,11 +89,7 @@ async function main() {
         is(`${kind}/${variant.name}: one claim, no enrollment IO or queue`, [claims, readsAfterClaim, queued], [1, 0, 0]);
         if (variant.apply) is(`${kind}/${variant.name}: an applied unknown claim is retained`, await original([["GET", key]]), ["1"]);
       }
-      const email = await person();
-      is(`${kind}: an actual confirmed claim starts the event`, await note(store, made.product.id, course.id, email), true);
-      const queued = await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
-      is(`${kind}: the real enrollment queued one step for that student`, (queued[0] as string[]).filter(item => item.endsWith(`|${email}`)).length, 1);
-      is(`${kind}: an ordinary repeated event does not start again`, await note(store, made.product.id, course.id, email), false);
+
     }
     is("only the two injected transport failures were logged", errors.length, 2);
     is("a reply getter is never executed as confirmation", getterReads, 0);

@@ -25,7 +25,7 @@ import { ProductUpdateBox } from "@/components/product-update-box";
 import { ShippingEditor } from "@/components/shipping-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
 import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
-import { membersOn, readOptionMembers, type OptionMembers } from "@/lib/option-members";
+import { membersOn, readOptionInvited, readOptionMembers, type OptionMembers } from "@/lib/option-members";
 import Link from "next/link";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
 import { ProductImageEditor } from "@/components/product-image-editor";
@@ -942,6 +942,30 @@ function OptionsBlock({
       live = false;
     };
   }, [recurring, offSaleIds, product.id]);
+  // Members invited to move here from another platform on a price keep it even off sale (lib/move-members.ts,
+  // openMove), so the studio says how many invitations not yet kept name each price, before and after taking it
+  // off sale (Revisor 1, C4-20261105-1945-C2-2). Unknown is said as unknown, never as 0.
+  const optionIds = product.options.map((option) => option.id).join(",");
+  const [invited, setInvited] = useState<OptionMembers | null>(null);
+  useEffect(() => {
+    if (!recurring || !optionIds) return;
+    let live = true;
+    fetch("/api/store/option", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "invited", id: product.id }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (live) setInvited(readOptionInvited(data));
+      })
+      .catch(() => {
+        if (live) setInvited(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [recurring, optionIds, offSaleIds, product.id]);
   const allOffSale = product.options.length > 0 && product.options.every((option) => option.offSale);
 
   async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string) {
@@ -1264,9 +1288,20 @@ function OptionsBlock({
                           </p>
                         )
                       ) : null}
+                      {recurring && membersOn(invited, option.id) === null ? (
+                        <p className="mt-1">We couldn’t count the invitations to move here that name this price. Anyone you invited on it still gets it.</p>
+                      ) : null}
                     </div>
                   );
                 })() : null}
+
+                {recurring && (membersOn(invited, option.id) ?? 0) > 0 ? (
+                  <p className="mt-1 text-sm font-semibold text-ink">
+                    {membersOn(invited, option.id) === 1
+                      ? "1 person invited to move here on this price hasn’t moved yet. They keep this price even if you take it off sale."
+                      : `${membersOn(invited, option.id)} people invited to move here on this price haven’t moved yet. They keep this price even if you take it off sale.`}
+                  </p>
+                ) : null}
 
                 {!opens && !option.file && !option.link ? (
                   /*

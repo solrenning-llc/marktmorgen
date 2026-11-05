@@ -107,6 +107,21 @@ async function main(): Promise<void> {
   redis.run(["HSET", invites, "f".repeat(32) + ":broken", "not json"]);
   is("one invitation that cannot be read: unknown for every price, never 0", (await post(session, { action: "invited", id: pid }))[1].invited, { [basic]: null, [plus]: null });
   redis.run(["HDEL", invites, "f".repeat(32) + ":broken"]);
+  // Replies the stand-in never gives by itself, as Upstash could: only the HVALS of the invitations is replaced.
+  const realPipeline = redis.pipeline.bind(redis);
+  const hostile = async (reply: () => unknown) => {
+    redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "HVALS" ? reply() : realPipeline(commands))) as typeof redis.pipeline;
+    try {
+      return (await post(session, { action: "invited", id: pid }))[1].invited;
+    } finally {
+      redis.pipeline = realPipeline;
+    }
+  };
+  const unknownBoth = { [basic]: null, [plus]: null };
+  is("the read fails (a WRONGTYPE error, a timeout): unknown, never 0", await hostile(() => { throw new Error("Redis error: WRONGTYPE"); }), unknownBoth);
+  is("a reply that is not a list: unknown", await hostile(() => ["not a list"]), unknownBoth);
+  is("an envelope with an extra reply: unknown", await hostile(() => [[], []]), unknownBoth);
+  is("a record behind a getter: unknown, and the getter is never called", await hostile(() => [Object.defineProperty([], "0", { enumerable: true, get: () => { throw new Error("read"); } })]), unknownBoth);
   is("an id that is no product is a 404", (await post(session, { action: "invited", id: basic }))[0], 404);
   is("the studio reads it strictly too", [readOptionInvited({ ok: true, invited: { a: 2, b: null, c: -1 } }), readOptionInvited({ ok: true, members: { a: 1 } })], [Object.assign(Object.create(null), { a: 2, b: null, c: null }), null]);
   is("Stripe was never called", stripeCalls, 0);

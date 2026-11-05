@@ -135,6 +135,36 @@ export async function moveCounts(store: Store): Promise<{ invited: number; kept:
   return { invited: invites.length, kept: invites.filter((i) => i.kept > 0).length };
 }
 
+/**
+ * How many invitations to move here, not yet kept, name each of these price options of one product (642 [WG2]):
+ * the studio says them apart from the members already paying, so a price taken off sale never reads as nobody on
+ * their way. One HVALS of the store's invitations, read in its exact shape: a list of records every one of which
+ * reads as an invitation. Anything else (no reading, a reply that is not a list, a record that does not read)
+ * makes every count unknown (null), never 0; 0 only when the whole list was read and none names the option.
+ */
+export async function pendingInvitesOnOptions(store: Store, productId: string, optionIds: string[]): Promise<Record<string, number | null>> {
+  const unknown = Object.fromEntries(optionIds.map((id) => [id, null])) as Record<string, number | null>;
+  if (!store.statsId || !isRedisConfigured()) return unknown;
+  let reply: unknown;
+  try {
+    const receipt: unknown = await redisPipeline([["HVALS", invitesKey(store.statsId)]]);
+    if (!Array.isArray(receipt) || receipt.length !== 1) return unknown;
+    reply = receipt[0];
+  } catch {
+    return unknown;
+  }
+  if (!Array.isArray(reply)) return unknown;
+  const counts = Object.fromEntries(optionIds.map((id) => [id, 0])) as Record<string, number | null>;
+  for (let at = 0; at < reply.length; at += 1) {
+    const slot = Object.getOwnPropertyDescriptor(reply, String(at));
+    const invite = slot && Object.hasOwn(slot, "value") ? parseInvite(slot.value) : null;
+    if (!invite) return unknown;
+    if (invite.p !== productId || invite.kept > 0 || !Object.hasOwn(counts, invite.o)) continue;
+    counts[invite.o] = (counts[invite.o] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** Marks an invitation kept: the member paid, or their membership was found live. */
 export async function noteKept(store: Store, email: string, productId: string, now = Date.now()): Promise<void> {
   if (!store.statsId || !store.sid || !isRedisConfigured()) return;

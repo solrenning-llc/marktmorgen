@@ -11,13 +11,14 @@ import {
 } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { membersOnOption, membershipNumbersPaid } from "@/lib/membership-numbers";
+import { pendingInvitesOnOptions } from "@/lib/move-members";
 import { MAX_OPTION_DETAILS, MAX_OPTION_DETAIL_LENGTH, MAX_OPTION_LABEL_LENGTH } from "@/lib/product-option";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { readOptionDirection } from "@/lib/option-request";
 
-const ACTIONS = new Set(["add", "edit", "remove", "move", "sale", "count"]);
+const ACTIONS = new Set(["add", "edit", "remove", "move", "sale", "count", "invited"]);
 
 /** How firmly to answer when a change is refused. */
 const STATUS: Record<string, number> = {
@@ -67,6 +68,14 @@ export async function POST(request: NextRequest) {
       const numbers = kept === "refused" ? null : kept;
       const members = Object.fromEntries(product.options.map((option) => [option.id, membersOnOption(numbers, product.id, option.id)]));
       return Response.json({ ok: true, members });
+    }
+    // How many invitations to move here, not yet kept, name each option (642 [WG2], Revisor 1): said apart from
+    // the members, read exactly (lib/move-members.ts, pendingInvitesOnOptions); unknown is null, never 0.
+    if (action === "invited") {
+      const product = await readProduct(guarded.store, id);
+      if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      const invited = await pendingInvitesOnOptions(guarded.store, product.id, product.options.map((option) => option.id));
+      return Response.json({ ok: true, invited });
     }
 
     let result: OptionResult;

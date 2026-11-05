@@ -1,7 +1,7 @@
 /**
- * A package booking link is kept before its email is attempted. The thanks
- * page must therefore describe the email as an attempt, in every buyer
- * language, even when the sender refuses it.
+ * A package booking link is kept before its email is attempted, but the
+ * thanks page can also render when no attempt was made. Its unconditional
+ * copy must therefore describe email as a possibility in every language.
  */
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -15,38 +15,38 @@ const address = "dana@example.com";
 const expected = {
   en: {
     missing:
-      "We could not get your booking link just now. Refresh this page in a moment. If the link was made, we also tried to email it.",
-    sent: `We also tried to email the same link to ${address}. If it arrives, keep it: it is how you book the rest.`,
+      "We could not get your booking link just now. Refresh this page in a moment. If an email with the link reaches you, keep it to book the rest.",
+    sent: `The same link may reach ${address} by email. If it does, keep it: it is how you book the rest.`,
   },
   es: {
     missing:
-      "No pudimos obtener tu enlace de reserva ahora mismo. Actualiza esta página en un momento. Si se creó el enlace, también intentamos enviártelo por email.",
-    sent: `También intentamos enviar el mismo enlace por email a ${address}. Si llega, guárdalo: es como reservas las demás.`,
+      "No pudimos obtener tu enlace de reserva ahora mismo. Actualiza esta página en un momento. Si recibes un email con el enlace, guárdalo para reservar las demás.",
+    sent: `El mismo enlace puede llegar por email a ${address}. Si llega, guárdalo: es como reservas las demás.`,
   },
   fr: {
     missing:
-      "Nous n'avons pas pu obtenir votre lien de réservation pour l'instant. Actualisez cette page dans un instant. Si le lien a été créé, nous avons aussi essayé de vous l'envoyer par e-mail.",
-    sent: `Nous avons aussi essayé d'envoyer le même lien par e-mail à ${address}. S'il arrive, gardez-le : c'est avec lui que vous réservez les autres.`,
+      "Nous n'avons pas pu obtenir votre lien de réservation pour l'instant. Actualisez cette page dans un instant. Si vous recevez un e-mail contenant le lien, gardez-le pour réserver les autres séances.",
+    sent: `Le même lien peut arriver par e-mail à ${address}. S'il arrive, gardez-le : c'est avec lui que vous réservez les autres.`,
   },
   de: {
     missing:
-      "Wir konnten Ihren Buchungslink gerade nicht abrufen. Laden Sie diese Seite gleich neu. Falls der Link erstellt wurde, haben wir auch versucht, ihn Ihnen per E-Mail zu senden.",
-    sent: `Wir haben auch versucht, denselben Link per E-Mail an ${address} zu senden. Falls er ankommt, bewahren Sie ihn auf: Damit buchen Sie die übrigen.`,
+      "Wir konnten Ihren Buchungslink gerade nicht abrufen. Laden Sie diese Seite gleich neu. Falls Sie eine E-Mail mit dem Link erhalten, bewahren Sie ihn auf, um die übrigen Termine zu buchen.",
+    sent: `Derselbe Link kann per E-Mail an ${address} ankommen. Falls er ankommt, bewahren Sie ihn auf: Damit buchen Sie die übrigen.`,
   },
   it: {
     missing:
-      "Al momento non siamo riusciti a ottenere il tuo link di prenotazione. Aggiorna questa pagina tra un momento. Se il link è stato creato, abbiamo anche provato a inviartelo via email.",
-    sent: `Abbiamo anche provato a inviare lo stesso link via email a ${address}. Se arriva, conservalo: è così che prenoti le altre.`,
+      "Al momento non siamo riusciti a ottenere il tuo link di prenotazione. Aggiorna questa pagina tra un momento. Se ricevi un'email con il link, conservalo per prenotare le altre sessioni.",
+    sent: `Lo stesso link potrebbe arrivare via email a ${address}. Se arriva, conservalo: è così che prenoti le altre.`,
   },
   nl: {
     missing:
-      "We konden je boekingslink nu niet ophalen. Vernieuw deze pagina zo meteen. Als de link is gemaakt, hebben we ook geprobeerd hem naar je te e-mailen.",
-    sent: `We hebben ook geprobeerd dezelfde link naar ${address} te e-mailen. Als hij aankomt, bewaar hem: daarmee boek je de rest.`,
+      "We konden je boekingslink nu niet ophalen. Vernieuw deze pagina zo meteen. Als je een e-mail met de link ontvangt, bewaar hem dan om de rest te boeken.",
+    sent: `Dezelfde link kan per e-mail aankomen op ${address}. Als hij aankomt, bewaar hem: daarmee boek je de rest.`,
   },
   pt: {
     missing:
-      "Não conseguimos obter a sua ligação de marcação neste momento. Atualize esta página daqui a pouco. Se a ligação foi criada, também tentámos enviá-la por email.",
-    sent: `Também tentámos enviar a mesma ligação por email para ${address}. Se chegar, guarde-a: é com ela que marca as restantes.`,
+      "Não conseguimos obter a sua ligação de marcação neste momento. Atualize esta página daqui a pouco. Se receber um email com a ligação, guarde-a para marcar as restantes sessões.",
+    sent: `A mesma ligação pode chegar por email a ${address}. Se chegar, guarde-a: é com ela que marca as restantes.`,
   },
 } as const;
 
@@ -96,6 +96,24 @@ async function main(): Promise<void> {
   });
   is("the sender refused once", refused, 1);
   is("the booking link still exists", Boolean(bought?.token), true);
+
+  const noAddress = await recordPackage({
+    store,
+    product,
+    base: "https://marktmorgen.com/@harbor",
+    from: '"Harbor Kitchen" <hello@marktmorgen.com>',
+    session: {
+      id: `cs_test_${"n".repeat(24)}`,
+      status: "complete",
+      payment_status: "paid",
+      amount_total: 50000,
+      currency: "usd",
+      metadata: { store: "harbor", product: product.id, kind: "package", sessions: "5", days: "90" },
+      customer_details: null,
+    },
+  });
+  is("no package record is made without a buyer address", noAddress, null);
+  is("the missing-address path does not attempt the sender", refused, 1);
 
   part("The complete page phrases say only what that behavior proves");
   is("all seven buyer languages are covered", Object.keys(expected).sort(), ["de", "en", "es", "fr", "it", "nl", "pt"]);

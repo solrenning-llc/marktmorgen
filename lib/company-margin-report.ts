@@ -20,6 +20,8 @@ export type CompanyMonthlyMarginReport = {
   netMarginBps: number | null;
   targetBps: typeof COMPANY_NET_MARGIN_TARGET_BPS;
   targetMet: boolean | null;
+  heldStores: number | null;
+  heldStoresPeak: number | null;
 };
 
 /** Last complete UTC calendar month, not a rolling 30-day estimate. */
@@ -44,7 +46,7 @@ const safe = (n: bigint): number | null =>
  * This pure calculation has no IO, email, persistence or release permission.
  * Scheduling, reconciled ingestion and owner presentation remain separate work.
  */
-export function companyMonthlyMarginReport(input: CommercialProfitMixInput | null, now = Date.now()): CompanyMonthlyMarginReport {
+export function companyMonthlyMarginReport(input: CommercialProfitMixInput | null, now = Date.now(), held: unknown = null): CompanyMonthlyMarginReport {
   const month = lastCompleteCompanyMonth(now);
   const report: CompanyMonthlyMarginReport = {
     schema: 1, month, currency: "USD", basis: "reconciled_actual", status: "unknown",
@@ -52,8 +54,18 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
     revenueCents: null, variableCostsCents: null, fixedCostsCents: null,
     taxesCents: null, refundsCents: null, reservesCents: null, netProfitCents: null,
     netMarginBps: null, targetBps: COMPANY_NET_MARGIN_TARGET_BPS, targetMet: null,
+    heldStores: null, heldStoresPeak: null,
   };
   if (month === null) return report;
+  // Aggregate observation is independent of financial reconciliation. Never
+  // execute supplied getters or copy a store identifier/provenance into output.
+  const aggregate = canonicalFinancialSnapshot(held);
+  const observed = aggregate === null ? null : JSON.parse(aggregate);
+  if (observed && typeof observed === "object" && !Array.isArray(observed) && observed.month === month &&
+      Number.isSafeInteger(observed.count) && observed.count >= 0 &&
+      Number.isSafeInteger(observed.peak) && observed.peak >= observed.count) {
+    report.heldStores = observed.count; report.heldStoresPeak = observed.peak;
+  }
   const encoded = canonicalFinancialSnapshot(input);
   if (encoded === null) return report;
   const data = JSON.parse(encoded) as CommercialProfitMixInput | null;
@@ -81,4 +93,12 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
     // Exact comparison; a displayed rounded percentage never meets the target.
     targetMet: revenue > 0 ? BigInt(mix.totalNetProfitCents) * BigInt(10_000) >= BigInt(revenue) * BigInt(COMPANY_NET_MARGIN_TARGET_BPS) : null,
   };
+}
+
+/** Read the completed monthly operational observation, without inventing actual
+ * reconciled money inputs or scheduling/sending any owner communication. */
+export async function companyMonthlyMarginReportWithHeld(input: CommercialProfitMixInput | null, now = Date.now()): Promise<CompanyMonthlyMarginReport> {
+  const month = lastCompleteCompanyMonth(now);
+  const held = month === null ? null : await (await import("./held-stores")).readHeldMonth(month);
+  return companyMonthlyMarginReport(input, now, held);
 }

@@ -1,4 +1,3 @@
-import { Fragment } from "react";
 import { EmailField } from "@/components/email-field";
 import { placeLine } from "@/lib/call-place";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -7,30 +6,30 @@ import { discordFor } from "@/lib/discord-store";
 import { discordWords } from "@/lib/buyer-words/discord";
 import { SITE_URL } from "@/lib/site-url";
 import { isHouseStore } from "@/lib/house-store";
-import { feedToken } from "@/lib/podcast-access";
-import { preorderWords } from "@/lib/buyer-words/preorder";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { linkHost } from "@/lib/product-link";
-import { type AddedPurchase, type BookedCall, type Delivery, type Purchase, callsFor, canRecover, ordersGrant, purchasesFor } from "@/lib/buyer-orders";
-import type { BumpKey } from "@/lib/bundle-rules";
+import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
-import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
-import { renewPath } from "@/lib/membership-access";
-import { LicenceKeyBox } from "@/components/licence-key-box";
-import { readListing, readListings } from "@/lib/catalog";
-import { reviewable } from "@/lib/review-proof";
-import { takesReviews } from "@/lib/house-store";
-import { type PurchaseItems } from "@/lib/buyer-orders";
+import { type Extras, askBundle, askOlder, cardOf, extrasFor, ordersShared } from "@/lib/purchase-cards";
+import { PurchaseCard } from "@/components/purchase-card";
+import { OlderPurchases } from "@/components/older-purchases";
+import { OrdersKey, OrdersSharedProvider } from "@/components/orders-shared";
 import { BundleDelivery } from "@/components/bundle-delivery";
-import { speech } from "@/lib/buyer-words";
+import { speech, speechFor } from "@/lib/buyer-words";
 import { type OrdersWords, ordersWords } from "@/lib/buyer-words/orders";
 import { NewTab } from "@/components/new-tab";
+import { type Waiting, waitingFor } from "@/lib/buyer-waiting";
+import { requestWords } from "@/lib/buyer-words/requests";
+import { agreementWords } from "@/lib/buyer-words/agreements";
+import { requestsOpen } from "@/lib/payment-requests";
+
+// The longest one opening may run (lib/buyer-orders.ts, ORDERS_OPEN_SECONDS): what bounds every call to Stripe it waits on.
+export const maxDuration = 30;
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -66,44 +65,6 @@ function readableTime(ms: number, tz: string, locale: string): string {
 function zoneName(ms: number, tz: string, locale: string): string {
   const parts = new Intl.DateTimeFormat(locale, { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date(ms));
   return parts.find((p) => p.type === "timeZoneName")?.value ?? tz;
-}
-
-function DeliveryButton({
-  handle,
-  token,
-  purchase,
-  delivery,
-  item,
-  words,
-  language,
-}: {
-  handle: string;
-  token: string;
-  purchase: Purchase;
-  delivery: Delivery;
-  /** The product bought, or one ticked at checkout by the key its order names it under. */
-  item: "main" | BumpKey;
-  words: OrdersWords;
-  /** The store's language, for what a screen reader is told about the new tab. */
-  language: unknown;
-}) {
-  if (delivery.link) {
-    return (
-      <span className="block">
-        <a href={delivery.link} rel="noopener noreferrer" target="_blank" className="btn st-btn btn-block">
-          {item !== "main" ? words.openTitle(delivery.title) : words.openIt}
-        <NewTab language={language} /></a>
-        <span className="st-muted mt-2 block break-all text-xs">{words.keptOn(linkHost(delivery.link), delivery.link)}</span>
-      </span>
-    );
-  }
-  const query = new URLSearchParams({ handle, ref: purchase.reference, token });
-  if (item !== "main") query.set("item", item);
-  return (
-    <a href={`/api/store/download?${query}`} className="btn st-btn btn-block">
-      {item !== "main" ? words.downloadTitle(delivery.title) : words.downloadIt}
-    </a>
-  );
 }
 
 /**
@@ -164,142 +125,85 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   if (!store) notFound();
   const said = speech(store);
   const words = ordersWords(store.language);
-  const pre = preorderWords(store.language);
 
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token : "";
   const status = typeof query.status === "string" ? query.status : "";
-  const email = token ? await ordersGrant(store, token) : null;
+  // Without JavaScript, a bundle's button and the older purchases' button send their forms here: the page draws what they
+  // ask for on a page of its own, read and paid for exactly as the button's own request is (lib/purchase-cards.ts,
+  // askBundle and askOlder: the link's limit and the request's call, then their units before anything is read), never
+  // the whole list again.
+  const bundleAsked = typeof query.bundle === "string" ? query.bundle : "";
+  const olderAsked = typeof query.older === "string" ? query.older : "";
+  if (token && (bundleAsked || olderAsked)) {
+    return (
+      <Frame store={store}>
+        {bundleAsked ? await BundleView({ store, token, asked: bundleAsked }) : await OlderView({ store, token, asked: olderAsked })}
+      </Frame>
+    );
+  }
+  // Each opening with a link takes ORDERS_OPEN_UNITS of the store's buyer requests before anything is read
+  // (lib/buyer-orders.ts, openOrders), so a link reloaded in a loop has a ceiling; without room, nothing is read and the
+  // page says to come back. What it reads past them, in proportion to what the buyer has, is taken through its meter
+  // before each read, and a store with no room left for it is said the same way. A token that is not shaped like one
+  // takes nothing: it is said as expired, with no read.
+  const opened = token ? await openOrders(store, token) : null;
+  let admitted = opened?.admitted ?? true;
+  const email = opened?.email ?? null;
+  const meter = opened?.meter;
   const available = canRecover(store);
 
   let purchases: Purchase[] | null = null;
   let calls: BookedCall[] = [];
+  let waiting: Waiting = { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: false };
   let failed = false;
-  if (email) {
+  // Older purchases whose refund did not fit in the opening's calls to Stripe (ORDERS_STRIPE_CALLS), and what was added to
+  // an order in one click that could not be checked: said as not checked yet, never as not bought, with a button that checks
+  // them a batch at a time (components/older-purchases.tsx), from where `older.cursor` says.
+  let older: ReturnType<typeof olderOf> = { cursor: null, count: 0, added: false };
+  let discordProducts: Set<string> | null = null;
+  // What the purchases need besides themselves: podcast feeds, license keys and what can be reviewed (lib/purchase-cards.ts).
+  let extras: Extras = { feeds: new Map(), keys: new Map(), reviewing: new Set() };
+  if (email && meter) {
     try {
-      [purchases, calls] = await Promise.all([purchasesFor(store, email), callsFor(store, email)]);
+      // Waited on ORDERS_READ_MS at the most (lib/buyer-orders.ts, withinOpening): past it nothing more is read and the
+      // page says the purchases could not be read, before the platform would cut it off.
+      const reading = (async () => {
+        // A request is read and shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen);
+        // a failure nobody expected is said as "could not be read", never as nothing waiting.
+        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
+
+        // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
+        const discord = isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;
+        // Each read through the meter before it is made: feeds, listings and keys (lib/purchase-cards.ts, extrasFor).
+        const more = await extrasFor(store, email, listed, meter);
+        return { listed, booked, waits, discord, more, older: olderOf(meter) };
+      })();
+      const outcome = await withinOpening(reading, meter);
+      if (outcome === "late") failed = true;
+      else ({ listed: purchases, booked: calls, waits: waiting, discord: discordProducts, more: extras, older } = outcome);
     } catch (error) {
-      console.error("listing purchases failed", error);
-      failed = true;
+      purchases = null;
+      calls = [];
+      if (error instanceof OrdersBusy) admitted = false;
+      else {
+        console.error("listing purchases failed", error);
+        failed = true;
+      }
     }
   }
   const NOTICES = words.notices;
-  const notice = token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
-  const on = (seconds: number) => said.date(seconds * 1000);
+  const notice = token && !admitted ? NOTICES.busy : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
 
-  // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
-  const discordProducts = email && purchases && isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;
   const opensDiscord = Boolean(
     discordProducts &&
       purchases?.some(
         (p) =>
           !p.ended &&
-          [p.productId, ...p.added.map((a) => a.id), ...(p.items?.lines ?? []).map((line) => line.productId)].some((id) => discordProducts.has(id)),
+          [p.productId, ...p.added.map((a) => a.id), ...(p.items?.ids ?? [])].some((id) => discordProducts!.has(id)),
       ),
   );
   const dw = discordWords(store.language);
-
-  // A private podcast opens as this address's own feed (lib/podcast-access.ts).
-  const feeds = new Map<string, string>();
-  if (email && purchases) {
-    for (const pid of new Set(purchases.filter((p) => p.podcastProduct && !p.ended).map((p) => p.podcastProduct as string))) {
-      const feed = await feedToken(store, pid, email).catch(() => null);
-      if (feed) feeds.set(pid, feed);
-    }
-  }
-
-  // The license key of each purchase that has one, read — or given, if the
-  // thanks page and the confirmation email never got the chance — per sale.
-  const keys = new Map<string, SaleKey | "error">();
-  if (email && purchases) {
-    const wanted: { slot: string; productId: string; reference: string }[] = [];
-    for (const purchase of purchases) {
-      // Nothing brought over from another platform was sold here, so no key is given for it.
-      if (purchase.ended || purchase.kind === "imported") continue;
-      wanted.push({ slot: `${purchase.reference}|main`, productId: purchase.productId, reference: purchase.reference });
-      for (const added of purchase.added) wanted.push({ slot: `${purchase.reference}|${added.key}`, productId: added.id, reference: purchase.reference });
-      // Each product of a bundle has its own key, under the same order.
-      for (const line of [...(purchase.items?.lines ?? []), ...purchase.added.flatMap((added) => added.items?.lines ?? [])]) {
-        wanted.push({ slot: `${purchase.reference}|item|${line.productId}`, productId: line.productId, reference: purchase.reference });
-      }
-    }
-    await Promise.all(
-      wanted.map(async ({ slot, productId, reference }) => {
-        const product = await readListing(store, productId);
-        if (!product || !activeKeys(product)) return;
-        try {
-          const key = await keyForSale(store, product, reference, email);
-          if (key) keys.set(slot, key);
-        } catch (error) {
-          console.error("reading a license key failed", error);
-          keys.set(slot, "error");
-        }
-      }),
-    );
-  }
-  // Which of them can be reviewed, their products read in one go (lib/catalog.ts):
-  // what was bought, what was ticked with it and what a bundle held. Not what
-  // was brought over from another platform: no payment here proves it.
-  const inOrder = (purchase: Purchase) => [
-    purchase.productId,
-    ...purchase.added.map((added) => added.id),
-    ...(purchase.items?.lines ?? []).map((line) => line.productId),
-    ...purchase.added.flatMap((added) => (added.items?.lines ?? []).map((line) => line.productId)),
-  ];
-  const canReview = new Set(
-    email && purchases && takesReviews(store)
-      ? (await readListings(store, purchases.filter((p) => p.kind !== "imported").flatMap(inOrder))).filter(reviewable).map((p) => p.id)
-      : [],
-  );
-  const reviewableIn = (purchase: Purchase) => purchase.kind !== "imported" && inOrder(purchase).some((id) => canReview.has(id));
-  /** A bundle's products: the one bought (`added` null), or one ticked at checkout. */
-  const contents = (purchase: Purchase, items: PurchaseItems | null, added: AddedPurchase | null) =>
-    items ? (
-      <BundleDelivery
-        storeName={store.name}
-        missing={items.missing}
-        heading={added ? words.insideTitle(added.title) : words.whatIsInside}
-        words={{
-          openCourse: words.openCourse,
-          startCourse: words.startCourse,
-          openIt: words.openIt,
-          keptOn: words.keptOn("{host}", "{link}"),
-          downloadIt: words.downloadIt,
-          nothingAttached: words.nothingAttached(store.name),
-          missing: items.missing > 0 ? words.bundleMissing(items.missing, store.name) : null,
-        }}
-        lines={items.lines.map((line) => ({
-          product: { id: line.productId, title: line.title, link: line.delivery?.link ?? null },
-          download: line.delivery?.file
-            ? `/api/store/download?${new URLSearchParams({ handle: store.handle, ref: purchase.reference, token, pid: line.productId, ...(added ? { item: added.key } : {}) })}`
-            : null,
-          course: line.courseProduct ? { href: `/@${store.handle}/course/${line.courseProduct}` } : null,
-          keyBox: keyBox(`${purchase.reference}|item|${line.productId}`, line.title),
-        }))}
-      />
-    ) : null;
-  const keyBox = (slot: string, title?: string) => {
-    const found = keys.get(slot);
-    if (!found) return null;
-    return (
-      <LicenceKeyBox
-        title={title}
-        storeName={store.name}
-        value={found !== "error" && found.state === "issued" ? found.key : null}
-        revoked={found !== "error" && found.state === "issued" && found.revoked}
-        waiting={found !== "error" && found.state === "waiting"}
-        words={{
-          label: title ? words.yourKeyFor(title) : words.yourKey,
-          copy: words.copy,
-          copied: words.copied,
-          revoked: words.keyRevoked(store.name),
-          yours: words.keyYours,
-          waiting: words.keyWaiting(store.name),
-          failed: words.keyNotShown,
-        }}
-      />
-    );
-  };
 
   const form = (
     <form action="/api/store/orders" method="post" className="mt-7 space-y-3">
@@ -322,30 +226,18 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   );
 
   return (
-    <div
-      lang={said.lang.locale}
-      className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
-      style={lookStyle(store.look) as React.CSSProperties}
-    >
-      <main id="content" className="relative mx-auto max-w-xl px-4 py-14 sm:py-20">
-        <div className="text-center">
-          {store.photoId ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={photoUrl(store.photoId)} alt="" width={72} height={72} className="st-avatar" style={{ width: 72, height: 72 }} />
-          ) : (
-            <p aria-hidden="true" className="st-avatar st-avatar-initial" style={{ width: 72, height: 72, fontSize: "1.75rem" }}>
-              {store.name.slice(0, 1).toUpperCase()}
-            </p>
-          )}
-          <p className="st-muted mt-4 text-sm font-semibold">{store.name}</p>
-        </div>
-
-        <div className="st-card mt-6 p-6 sm:p-9">
+    <Frame store={store}>
           {email && purchases ? (
             <>
               <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">
                 {words.pageTitle}
               </h1>
+              {waiting.requests.length + waiting.agreements.length > 0 ? <WaitingList waiting={waiting} store={store} words={words} /> : null}
+              {waiting.unread ? (
+                <p role="status" className="st-muted mt-4">
+                  {words.waitingUnread}
+                </p>
+              ) : null}
               {calls.length > 0 ? (
                 <section aria-labelledby="calls-title" className="mt-6">
                   <h2 id="calls-title" className="font-display text-xl font-semibold">
@@ -358,7 +250,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   </ul>
                 </section>
               ) : null}
-              {purchases.length === 0 && calls.length > 0 ? null : purchases.length === 0 ? (
+              {purchases.length === 0 && !older.cursor && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 && !older.cursor ? (
                 <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
               ) : (
                 <>
@@ -374,118 +266,18 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                       </form>
                     </div>
                   ) : null}
-                  <ul className="mt-7 space-y-4">
-                    {purchases.map((purchase) => (
-                      <li key={purchase.reference} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
-                        <p className="font-semibold">{purchase.title}</p>
-                        <p className="st-muted mt-1 text-sm">
-                          {[
-                            purchase.option,
-                            purchase.member ? words.memberRunning : null,
-                            purchase.ended ? words.memberEnded : null,
-                            purchase.kind === "upsell" ? words.addedAfterPaying : null,
-                            purchase.preorder
-                              ? pre.preorderedOn(on(purchase.paidAt))
-                              : purchase.kind === "imported" && purchase.giftFrom
-                              ? words.giftFrom(
-                                  // lib/gifts.ts names a giver who gave no name "someone".
-                                  purchase.giftFrom === "someone" ? words.someone : purchase.giftFrom,
-                                  purchase.paidAt ? on(purchase.paidAt) : "",
-                                )
-                              : purchase.place
-                              ? words.placeFor(purchase.paidAt ? on(purchase.paidAt) : "")
-                              : purchase.paidWith === "paypal"
-                              ? words.boughtWithPayPal(on(purchase.paidAt))
-                              : purchase.givenByStore
-                              ? words.givenByStore(store.name, purchase.paidAt ? on(purchase.paidAt) : "")
-                              : purchase.kind === "imported"
-                              ? words.broughtOver(purchase.paidAt ? on(purchase.paidAt) : "")
-                              : purchase.paidAt
-                                ? words.boughtOn(on(purchase.paidAt))
-                                : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-                        <div className="mt-4 space-y-3">
-                          {purchase.preorder && !purchase.preorder.given ? (
-                            <p className="st-muted text-sm">
-                              {purchase.preorder.day ? pre.ordersLine(on(Date.parse(`${purchase.preorder.day}T00:00:00Z`) / 1000)) : pre.receiptLater}
-                            </p>
-                          ) : null}
-                          {purchase.ended ? (
-                            <>
-                              <p className="st-muted text-sm">{words.endedNote}</p>
-                              <Link href={renewPath(store, { id: purchase.productId })} className="btn st-btn btn-block">
-                                {words.renew}
-                              </Link>
-                            </>
-                          ) : null}
-                          {purchase.courseProduct ? (
-                            <Link href={`/@${store.handle}/course/${purchase.courseProduct}`} className="btn st-btn btn-block">
-                              {words.openCourse}
-                            </Link>
-                          ) : null}
-                          {typeof purchase.packageLeft === "number" ? (
-                            purchase.packageBook ? (
-                              <Link href={purchase.packageBook} className="btn st-btn btn-block">
-                                {words.bookSession(purchase.packageLeft)}
-                              </Link>
-                            ) : (
-                              <p className="st-muted text-sm">{purchase.packageExpired ? words.packageExpired : words.packageAllBooked}</p>
-                            )
-                          ) : null}
-                          {purchase.podcastProduct && feeds.has(purchase.podcastProduct) ? (
-                            <Link href={`/@${store.handle}/podcast/${purchase.podcastProduct}?t=${feeds.get(purchase.podcastProduct)}`} className="btn st-btn btn-block">
-                              {words.addPodcast}
-                            </Link>
-                          ) : null}
-                          {/* A course or podcast bought at one of several prices: what that price includes besides the way in. */}
-                          {purchase.main && purchase.option && (purchase.courseProduct || purchase.podcastProduct) ? (
-                            <p className="st-label">{words.alsoIn(purchase.option)}</p>
-                          ) : null}
-                          {purchase.main ? (
-                            <DeliveryButton handle={store.handle} token={token} purchase={purchase} delivery={purchase.main} item="main" words={words} language={store.language} />
-                          ) : null}
-                          {purchase.added.map((added) => (
-                            <Fragment key={added.key}>
-                              {/* A course anywhere in a cart opens on its own page, named, as the first one does (lib/order-courses.ts). */}
-                              {added.courseProduct ? (
-                                <Link href={`/@${store.handle}/course/${added.courseProduct}`} className="btn st-btn btn-block">
-                                  {words.openTitle(added.title)}
-                                </Link>
-                              ) : null}
-                              {added.delivery ? (
-                                <DeliveryButton handle={store.handle} token={token} purchase={purchase} delivery={added.delivery} item={added.key} words={words} language={store.language} />
-                              ) : null}
-                            </Fragment>
-                          ))}
-                        </div>
-                        {purchase.kind === "imported" && !purchase.giftFrom && !purchase.paidWith && !purchase.place && !purchase.preorder ? (
-                          <p className="st-muted mt-3 text-xs leading-relaxed">{words.importedNote(store.name)}</p>
-                        ) : null}
-                        {contents(purchase, purchase.items, null)}
-                        {purchase.added.map((added) => (
-                          <span key={added.key} className="contents">{contents(purchase, added.items, added)}</span>
+                  {/* The words every bundle, key and batch shares, sent once for the whole list (components/orders-shared.tsx). */}
+                  <OrdersSharedProvider value={ordersShared(store, token)}>
+                    {purchases.length > 0 ? (
+                      <ul className="mt-7 space-y-4">
+                        {/* Each purchase drawn by the same card the batch of older purchases draws (components/purchase-card.tsx). */}
+                        {purchases.map((purchase) => (
+                          <PurchaseCard key={purchase.reference} card={cardOf(store, purchase, token, extras)} language={store.language} />
                         ))}
-                        {keyBox(`${purchase.reference}|main`, purchase.added.some((added) => keys.has(`${purchase.reference}|${added.key}`)) ? purchase.title : undefined)}
-                        {purchase.added.map((added) => (
-                          <span key={added.key} className="contents">{keyBox(`${purchase.reference}|${added.key}`, added.title)}</span>
-                        ))}
-                        {!purchase.ended && reviewableIn(purchase) ? (
-                          <p className="mt-4 text-sm">
-                            <Link
-                              prefetch={false}
-                              href={`/@${store.handle}/review?${new URLSearchParams({ token, ref: purchase.reference })}`}
-                              className="st-footer-link font-semibold underline underline-offset-4"
-                            >
-                              {purchase.added.length || purchase.items ? words.reviewAll : words.reviewTitle(purchase.title)}
-                            </Link>
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
+                      </ul>
+                    ) : null}
+                    {older.cursor ? <OlderPurchases older={older.cursor} left={words.olderNotChecked(older.count, older.added)} /> : null}
+                  </OrdersSharedProvider>
                   <p className="st-muted mt-6 text-sm">{words.worksFor24}</p>
                 </>
               )}
@@ -516,6 +308,39 @@ export default async function OrdersPage({ params, searchParams }: Params) {
               {available ? form : null}
             </>
           )}
+    </Frame>
+  );
+}
+
+/**
+ * The page around what it shows: the store's look and language, its picture
+ * and name, the card, and the way back to the store. The same for the list
+ * and for what its buttons draw without JavaScript.
+ */
+function Frame({ store, children }: { store: Store; children: React.ReactNode }) {
+  const said = speech(store);
+  const words = ordersWords(store.language);
+  return (
+    <div
+      lang={said.lang.locale}
+      className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
+      style={lookStyle(store.look) as React.CSSProperties}
+    >
+      <main id="content" className="relative mx-auto max-w-xl px-4 py-14 sm:py-20">
+        <div className="text-center">
+          {store.photoId ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photoUrl(store.photoId)} alt="" width={72} height={72} className="st-avatar" style={{ width: 72, height: 72 }} />
+          ) : (
+            <p aria-hidden="true" className="st-avatar st-avatar-initial" style={{ width: 72, height: 72, fontSize: "1.75rem" }}>
+              {store.name.slice(0, 1).toUpperCase()}
+            </p>
+          )}
+          <p className="st-muted mt-4 text-sm font-semibold">{store.name}</p>
+        </div>
+
+        <div className="st-card mt-6 p-6 sm:p-9">
+          {children}
         </div>
 
         <div className="mt-8 text-center">
@@ -536,5 +361,138 @@ export default async function OrdersPage({ params, searchParams }: Params) {
         </div>
       </main>
     </div>
+  );
+}
+
+/**
+ * What the store waits on from this buyer (lib/buyer-waiting.ts): each open
+ * payment request and each proposal or agreement still to sign, linked to
+ * the page that was emailed to them.
+ */
+function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store; words: OrdersWords }) {
+  const said = speech(store);
+  const rw = requestWords(store.language);
+  const aw = agreementWords(store.language);
+  const day = (d: string) => said.date(Date.parse(`${d}T12:00:00Z`));
+  return (
+    <section aria-labelledby="waiting-title" className="mt-6">
+      <h2 id="waiting-title" className="font-display text-xl font-semibold">
+        {words.waiting}
+      </h2>
+      <ul className="mt-4 space-y-4">
+        {waiting.requests.map((request) => (
+          <li key={request.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
+            {/* In the request's own currency, as its page and Stripe charge it: never the store's currency now. */}
+            <p className="font-semibold">{`${rw.pageTitle}: ${speechFor(store.language, request.currency).money(request.total)}`}</p>
+            <p className="st-muted mt-1 text-sm">{request.dueDate ? rw.due(day(request.dueDate)) : rw.until(said.date(request.expiresAt))}</p>
+            <Link href={`/@${store.handle}/pay/${request.id}`} className="btn st-btn btn-wrap mt-3 inline-flex min-h-11 items-center [overflow-wrap:anywhere]">
+              {words.openRequest(speechFor(store.language, request.currency).money(request.total), request.dueDate ? day(request.dueDate) : "")}
+            </Link>
+          </li>
+        ))}
+        {waiting.agreements.map((agreement) => (
+          <li key={agreement.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
+            <p className="font-semibold [overflow-wrap:anywhere]">{`${aw.pageTitle(agreement.kind)}: ${agreement.title}`}</p>
+            <p className="st-muted mt-1 text-sm">{aw.until(said.date(agreement.expiresAt))}</p>
+            <Link href={`/@${store.handle}/sign/${agreement.id}`} className="btn st-btn btn-wrap mt-3 inline-flex min-h-11 items-center [overflow-wrap:anywhere]">
+              {words.openToSign(agreement.title)}
+            </Link>
+          </li>
+        ))}
+      </ul>
+      {waiting.requestsTotal + waiting.agreementsTotal > waiting.requests.length + waiting.agreements.length ? (
+        <p className="st-muted mt-4">{words.waitingMore(waiting.requestsTotal + waiting.agreementsTotal - waiting.requests.length - waiting.agreements.length)}</p>
+      ) : null}
+    </section>
+  );
+}
+
+/** The way back from what a button drew without JavaScript to the whole list: an opening of its own, as any reload is. */
+function BackToList({ store, token }: { store: Store; token: string }) {
+  return (
+    <p className="mt-8">
+      <a href={`/@${store.handle}/orders?${new URLSearchParams({ token })}`} className="st-footer-link inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+        {ordersWords(store.language).backToList}
+      </a>
+    </p>
+  );
+}
+
+/**
+ * A bundle's products, as its button shows them, on a page of their own for a
+ * browser without JavaScript (`bundle=<reference>:<item>`): read by askBundle
+ * (lib/purchase-cards.ts), the button's own request, so it takes the same
+ * units before anything is read and refuses the same way, with nothing read.
+ */
+async function BundleView({ store, token, asked }: { store: Store; token: string; asked: string }) {
+  const words = ordersWords(store.language);
+  const cut = asked.lastIndexOf(":");
+  const answer = await askBundle(store, token, cut > 0 ? asked.slice(0, cut) : "", cut > 0 ? asked.slice(cut + 1) : "");
+  const shared = ordersShared(store, token);
+  return (
+    <>
+      <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
+        {answer.ok ? words.insideTitle(answer.value.title) : words.pageTitle}
+      </h1>
+      {answer.ok ? (
+        <OrdersSharedProvider value={shared}>
+          <BundleDelivery
+            storeName={store.name}
+            heading={words.insideTitle(answer.value.title)}
+            showHeading={false}
+            missing={answer.value.missing ? 1 : 0}
+            words={{ ...shared.words.bundle, missing: answer.value.missing }}
+            lines={answer.value.lines.map((line) => ({
+              product: { id: line.id, title: line.title, link: line.link },
+              download: line.download,
+              course: line.course ? { href: line.course } : null,
+              kept: line.kept,
+              keyBox: line.key ? <OrdersKey title={line.title} label={line.key.label} value={line.key.value} revoked={line.key.revoked} waiting={line.key.waiting} /> : null,
+            }))}
+          />
+        </OrdersSharedProvider>
+      ) : (
+        <p role="alert" className="mt-4 leading-relaxed" style={{ color: "var(--st-text)" }}>
+          {answer.message}
+        </p>
+      )}
+      <BackToList store={store} token={token} />
+    </>
+  );
+}
+
+/**
+ * The next batch of older purchases, as its button adds them, on a page of its
+ * own for a browser without JavaScript (`older=<where it starts>`): read by
+ * askOlder (lib/purchase-cards.ts), the button's own request, so it takes the
+ * same units before anything is read, shows ORDERS_OLDER_MOST at the most,
+ * and refuses the same way, with nothing read. The next batch is one more
+ * press of the same button.
+ */
+async function OlderView({ store, token, asked }: { store: Store; token: string; asked: string }) {
+  const words = ordersWords(store.language);
+  const answer = await askOlder(store, token, asked);
+  return (
+    <>
+      <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{words.olderTitle}</h1>
+      {answer.ok ? (
+        <OrdersSharedProvider value={ordersShared(store, token)}>
+          <p className="st-muted mt-4 leading-relaxed">{answer.value.said}</p>
+          {answer.value.cards.length ? (
+            <ul className="mt-7 space-y-4">
+              {answer.value.cards.map((card) => (
+                <PurchaseCard key={card.reference} card={card} language={store.language} />
+              ))}
+            </ul>
+          ) : null}
+          {answer.value.older ? <OlderPurchases older={answer.value.older} left={answer.value.left} /> : null}
+        </OrdersSharedProvider>
+      ) : (
+        <p role="alert" className="mt-4 leading-relaxed" style={{ color: "var(--st-text)" }}>
+          {answer.message}
+        </p>
+      )}
+      <BackToList store={store} token={token} />
+    </>
   );
 }

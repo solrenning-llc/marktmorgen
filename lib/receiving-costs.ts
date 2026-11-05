@@ -81,19 +81,28 @@ export type MostCorrectTaxes = {
  */
 export function mostCorrectTaxesOf(value: MostCorrectTaxBases | null): MostCorrectTaxes | null {
   try {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return null;
+    const fields = ["currency", "annualProfitCents", "incomingExchangeCents"];
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== fields.length || keys.some(key => typeof key !== "string" || !fields.includes(key))) return null;
     const own = (record: object, key: string): unknown => {
       const field = Object.getOwnPropertyDescriptor(record, key);
-      return field && Object.prototype.hasOwnProperty.call(field, "value") ? field.value : undefined;
+      return field && field.enumerable && Object.prototype.hasOwnProperty.call(field, "value") ? field.value : undefined;
     };
     const currency = own(value, "currency");
     const annualProfit = own(value, "annualProfitCents");
     const entries = own(value, "incomingExchangeCents");
     if (currency !== "BRL" || typeof annualProfit !== "number" ||
-        !Number.isSafeInteger(annualProfit) || !Array.isArray(entries)) return null;
-    const length = own(entries, "length");
+        !Number.isSafeInteger(annualProfit) || !Array.isArray(entries) ||
+        Object.getPrototypeOf(entries) !== Array.prototype) return null;
+    // Array length is the sole non-enumerable field. Bound it before inspecting
+    // keys, then require the complete dense book: no hidden or extra operations
+    // may disappear while producing a known (possibly zero) exchange total.
+    const length = Object.getOwnPropertyDescriptor(entries, "length")?.value;
     if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0 ||
         length > MAX_INCOMING_EXCHANGE_ENTRIES) return null;
+    if (Reflect.ownKeys(entries).length !== length + 1) return null;
     const ceiling = (cents: bigint, bps: number) =>
       (cents * BigInt(bps) + BigInt(9_999)) / BigInt(10_000);
     const maximum = BigInt(Number.MAX_SAFE_INTEGER);

@@ -39,6 +39,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const RealDate = Date;
 // Reproduce the near-midnight boundary without depending on the CI clock.
@@ -54,20 +55,10 @@ globalThis.Date = new Proxy(RealDate, {
   },
 });
 
-const sent: string[] = [];
-let resendDown = false;
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (url.hostname === "api.resend.com") {
-    const body = JSON.parse(String(init?.body)) as { subject: string } | { subject: string }[];
-    const all = Array.isArray(body) ? body : [body];
-    for (const m of all) sent.push(m.subject);
-    if (resendDown) return json({ error: "unavailable" }, 503);
-    return json(Array.isArray(body) ? { data: all.map((_, i) => ({ id: `email_${sent.length}_${i}` })) } : { id: `email_${sent.length}` });
-  }
-  return json({ object: "list", data: [], has_more: false });
-}) as typeof fetch;
+const mail = installSesMailFixture({
+  fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
+});
+const sent = mail.sesAttempts;
 
 // Every command the code sends, counted.
 let commands = 0;
@@ -90,6 +81,8 @@ const dayKey = () => `nl:mail:day:${new Date(Date.now()).toISOString().slice(0, 
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   process.env.STRIPE_SECRET_KEY = "sk_test_workflows_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_workflows_only_a_stand_in";
   process.env.MARKETING_DAILY_CAP = "1";
@@ -140,11 +133,12 @@ async function main(): Promise<void> {
     ["left", null],
     ["paused", null],
     ["refused", null],
+    ["taken_out", null],
     ["waits", null],
     ["held", null],
   ]);
   is("the bounds are the code's numbers", [rules.find((r) => r.kind === "waits")!.text.includes(`${MAX_WAITS_PER_RUN} times`), rules.find((r) => r.kind === "held")!.text.includes(`up to ${MAX_RETRIES_BY_YOU} times`)], [true, true]);
-  is("a workflow with no goal and no conditions still lists the engine's stops", stopRules({ steps: [{ id: "a" }] }, { condition: () => "", product: () => "" }).map((r) => r.kind), ["last", "left", "paused", "refused", "waits", "held"]);
+  is("a workflow with no goal and no conditions still lists the engine's stops", stopRules({ steps: [{ id: "a" }] }, { condition: () => "", product: () => "" }).map((r) => r.kind), ["last", "left", "paused", "refused", "taken_out", "waits", "held"]);
 
   part("The preview writes nothing");
   const before = commands;
@@ -215,7 +209,7 @@ async function main(): Promise<void> {
   await upsertContact(list, "lia@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   await enroll(store, "lia@example.com", { joined: false, tag: "once" });
   const lia = personOf("lia@example.com");
-  resendDown = true;
+  mail.setSesOutcome("lost");
   await run();
   is("a lost answer holds the run", (await readRun(flowId, lia))?.run.status, "held");
   const answers: string[] = [];
@@ -223,11 +217,12 @@ async function main(): Promise<void> {
     answers.push(await resolveHeldRun(store, flowId, lia, "retry"));
     await run();
   }
-  resendDown = false;
+  mail.setSesOutcome("ok");
   is(`taken ${MAX_RETRIES_BY_YOU} times, then refused`, answers, [...Array(MAX_RETRIES_BY_YOU).fill("ok"), "retry_limit"]);
   is("the run says how often it was tried again", (await readRun(flowId, lia))?.run.retries, MAX_RETRIES_BY_YOU);
   is("refused, it stays held for the creator's other choices", [(await readRun(flowId, lia))?.run.status, await resolveHeldRun(store, flowId, lia, "end")], ["held", "ok"]);
 
+  mail.restore();
   done();
 }
 

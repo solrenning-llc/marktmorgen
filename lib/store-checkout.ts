@@ -7,6 +7,10 @@
  * and leaves Marktmorgen with nothing to hold, skim or lose. The 0% on the home
  * page is this file.
  */
+import { randomBytes } from "node:crypto";
+import { prepareOrderConfirmationPreintent } from "@/lib/orders";
+import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
+import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
@@ -30,9 +34,13 @@ import { readListing, readListings } from "@/lib/catalog";
 import type { ProductFile } from "@/lib/product-file";
 import {
   type ProductOption,
+  handsOver,
   lowestPriceCents,
-  optionDelivers,
+  sellableOptions,
 } from "@/lib/product-option";
+
+// Read here for years; it now lives beside the option rules, so the studio can read it too.
+export { sellableOptions };
 import { isPaidUp } from "@/lib/billing";
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { StripeError, checkoutClosesAt, onAccount, platformKey } from "@/lib/stripe-account";
@@ -52,6 +60,7 @@ import { purchaseRefunded } from "@/lib/refunds";
 import { BUMP_KEYS, type BumpKey, MIN_BUNDLE_ITEMS, bumpsFromMeta, bundleFromMeta, bundleMeta, chosenItems, deliverableItems, picks } from "@/lib/bundle-rules";
 import { type BundleContents, contentsOf } from "@/lib/bundles";
 import { isHouseStore } from "@/lib/house-store";
+import { DEMO_CONNECTED_ACCOUNT } from "@/lib/demo-account";
 import { preorderProblem } from "@/lib/preorder-rules";
 import { type MayComeOff, applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
@@ -70,6 +79,10 @@ const SESSION_ID_PATTERN = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 
 /** The name printed at the top of Stripe's page (Stripe API 2025-09-30.clover and later). */
 const DISPLAY_NAME = "branding_settings[display_name]";
+
+// Keep newly created memberships/plans on the classic semantics used by our
+// renewal changes, independently of the platform account default. CX-47.
+const SUBSCRIPTION_CHECKOUT_VERSION = "2025-09-30.clover";
 
 export function isSellingConfigured(): boolean {
   return platformKey() !== null;
@@ -98,20 +111,6 @@ export function canSell(store: Store): boolean {
 }
 
 /**
- * The options a buyer may actually be offered.
- *
- * An option with nothing behind it is left off the page rather than sold and
- * apologised for afterward. The creator is told about it in the studio, which
- * is where it can be fixed; the buyer never meets it.
- */
-export function sellableOptions(product: Listing): ProductOption[] {
-  // A course or a private podcast is its own delivery: every option opens it,
-  // and a file or link on one is something extra that option includes.
-  const opens = Boolean(product.course || product.podcast || product.shipping);
-  return product.options.filter((option) => optionDelivers(option, opens));
-}
-
-/**
  * A product can only be sold once there is something to hand over.
  *
  * Either kind counts: a file we host, or a link to wherever the creator keeps
@@ -128,20 +127,9 @@ export function canSellProduct(store: Store, product: Listing): boolean {
   // A draft is not on sale until the creator publishes it.
   if (product.hidden) return false;
   if (!canSell(store)) return false;
-  // A bundle hands over its products: it is ready once it holds two. Whether
-  // each can still be handed over is read when the checkout opens.
-  if (product.bundle) return product.options.length === 0 && product.recurring === null && product.bundle.length >= MIN_BUNDLE_ITEMS;
-  // A call delivers a time, not a file: it is ready once it has hours set.
-  if (product.call) return product.options.length === 0 && product.recurring === null;
-  // A course delivers its lessons: it is ready once it has one, at one price
-  // or at several (each option opens the same course).
-  if (product.course) return product.course.lessons > 0;
-  // A private podcast delivers its episodes: it is ready once it has one.
-  if (product.podcast) return product.podcast.episodes > 0;
-  // A physical product delivers what the creator ships (lib/shipping.ts).
-  if (activeShipping(product)) return true;
-  if (product.options.length > 0) return sellableOptions(product).length > 0;
-  return product.file !== null || product.link !== null;
+  // What it hands over is read from the product alone (lib/product-option.ts,
+  // handsOver), which the studio also reads to say what removing a price does.
+  return handsOver(product);
 }
 
 /** The figure a product card leads with: the cheapest way in. */
@@ -284,6 +272,8 @@ export async function createCheckout(
      */
     digitalConsent?: DigitalConsent | null;
   } = {},
+  /** Internal integration dependency; never populated from HTTP or environment flags. */
+  confirmationRuntime: ConfirmationOriginRuntime = {},
 ): Promise<{ url: string; id: string }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");
   if (extras.gift) extras = { ...extras, bumps: [], plan: false, upsellKey: undefined, group: undefined };
@@ -364,6 +354,8 @@ export async function createCheckout(
     success_url: `${origin}/@${store.handle}/thanks?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/@${store.handle}`,
   });
+
+  if (recurring) body.set("subscription_data[billing_mode][type]", "classic");
 
   // Which option was bought decides which file is handed over later, so it
   // travels with the charge rather than being worked out again afterward.
@@ -707,6 +699,20 @@ export async function createCheckout(
     else body.set(`subscription_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, kind));
   }
 
+  // This ordinary origin has no verified original-file access recipe yet.
+  // Funding alone cannot authorize taking payment. In particular, never_activated
+  // must not route these new purchases through the legacy unprotected POST.
+  // Its protected reservation/reconciliation adapter is constructed separately;
+  // dispatch and hosted payment creation stay closed until rights are proved.
+  const singleDigital = Boolean(store.stripeAccountId !== DEMO_CONNECTED_ACCOUNT && product.file && !product.link && !shipping &&
+    product.priceCents > 0 && !product.bundle && !product.course && !product.podcast && !product.keys && !product.note &&
+    !product.callPackage && !product.recurring && !product.plan && !product.pwyw && product.options.length === 0 &&
+    product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&
+    !extras.buyerKey && !extras.upsellKey && !extras.news && !extras.held && !extras.remind && !recovering && !named &&
+    !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&
+    !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
+  if (singleDigital) throw new Error("The payment page could not be opened");
+
   // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
   // admitted here, before Stripe's page opens, so nobody is stopped while paying.
   // A purchase for several people holds its places too.
@@ -720,6 +726,38 @@ export async function createCheckout(
   // never be what stops a sale.
   if (extras.embedSite && /^https:\/\//.test(extras.embedSite) && [...body.keys()].filter((key) => key.startsWith("metadata[")).length < 49) {
     body.set("metadata[embed_site]", extras.embedSite.slice(0, 300));
+  }
+
+  // First durable category: a single physical item without expiring access,
+  // mutable checkout variants or coupled fulfillment. Other producers remain
+  // explicit follow-up work; none are silently relabeled as durable here.
+  const simplePhysical = Boolean(store.stripeAccountId !== DEMO_CONNECTED_ACCOUNT && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated" && shipping && !product.bundle && !product.course && !product.podcast && !product.keys && !product.note &&
+    !product.callPackage && !product.recurring && !product.plan && !product.pwyw && !product.file && !product.link && product.options.length === 0 &&
+    product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email && !extras.buyerKey &&
+    !extras.upsellKey && !extras.news && !extras.held && !extras.remind && !recovering && !named && !store.tax.ids && !store.tax.invoices &&
+    !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) && !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
+  if (simplePhysical) {
+    if ([...body.keys()].filter(key => key.startsWith("metadata[")).length > 47) throw new Error("The payment page could not be opened");
+    const nonce = randomBytes(32).toString("hex");
+    body.set("metadata[mm_order_intent]", nonce);
+    body.set("metadata[mm_order_origin]", "physical-v1");
+    const bodyDigest = confirmationBodyDigest(body.toString());
+    body.set("metadata[mm_order_hash]", bodyDigest);
+    const accountId = store.stripeAccountId;
+    const preintent = await prepareOrderConfirmationPreintent(store, admitted, { nonce, accountId, bodyDigest }, { now: confirmationRuntime.now });
+    if (!preintent) throw new Error("The payment page could not be opened");
+    const reserved = await reserveConfirmationOrigin({ statsId: store.statsId, nonce, accountId, body: body.toString(), preintent,
+      snapshot: { store: { handle: store.handle, name: store.name, email: store.email, sid: store.sid, extra: store.extra,
+        previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], stripeAccountId: accountId,
+        statsId: store.statsId, currency: store.currency, language: store.language, domain: null,
+        affiliates: { enabled: false, buyers: false }, tax: { enabled: store.tax.enabled, included: store.tax.included } },
+        product: { id: product.id, title: product.title, priceCents: product.priceCents, options: [], call: null,
+          recurring: null, course: null, podcast: null, shipping: product.shipping, bundle: null, note: false, keys: null } },
+    }, confirmationRuntime);
+    if (!reserved.ok) throw new Error("The payment page could not be opened");
+    const ready = await openConfirmationOrigin(reserved.id, confirmationRuntime);
+    if (!ready) throw new Error("The payment page could not be confirmed");
+    return ready;
   }
 
   const open = async (fresh: boolean) => {
@@ -736,7 +774,7 @@ export async function createCheckout(
     // Set just before the request, because Stripe counts its minimum from then.
     if (extras.held) body.set("expires_at", String(checkoutClosesAt()));
     else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
-    return onAccount("POST", store.stripeAccountId as string, "/checkout/sessions", body);
+    return onAccount("POST", store.stripeAccountId as string, "/checkout/sessions", body, recurring ? SUBSCRIPTION_CHECKOUT_VERSION : undefined);
   };
 
   // Each of the two things Stripe may refuse is put right once, whichever it

@@ -30,7 +30,7 @@ import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { fileUrl } from "@/lib/file-store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
@@ -51,6 +51,7 @@ import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
 import { readKind, readListing } from "@/lib/catalog";
 import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
+import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
 
@@ -569,6 +570,60 @@ export async function studentsOf(course: Course, limit = 500): Promise<{ student
   };
 }
 
+/**
+ * One page of a course's students, for the API (lib/api-read.ts): about
+ * `count` rows from `cursor`, in the order Redis keeps them, and how many
+ * there are in all. What each marked done and whether each is blocked is read
+ * only after `allow` said yes to the page's size (its rows, and how many are
+ * blocked in all), so what that reading costs can be taken first; null when
+ * it said no, with nothing more read. The blocked list is read whole up to
+ * BLOCKED_READ_MAX, past it one question a student. Null too when the counts
+ * did not come back: unknown is never read as small.
+ */
+export async function studentPage(
+  course: Course,
+  cursor: string,
+  count: number,
+  allow: (rows: number, blocked: number) => Promise<boolean>,
+): Promise<{ students: Student[]; total: number; next: string } | null> {
+  if (!isRedisConfigured()) return { students: [], total: 0, next: "0" };
+  const [reply, total, blockedCount] = await redisPipeline([
+    ["HSCAN", studentsKey(course.id), cursor, "COUNT", count],
+    ["HLEN", studentsKey(course.id)],
+    ["SCARD", blockedKey(course.id)],
+  ]);
+  const blockedAll = Number(blockedCount);
+  if (!Array.isArray(reply) || reply.length < 2 || !Number.isSafeInteger(blockedAll) || blockedAll < 0) return null;
+  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  const rows: StudentRow[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    try {
+      const row = JSON.parse(String(flat[i + 1])) as StudentRow;
+      if (typeof row?.e === "string") rows.push(row);
+    } catch {}
+  }
+  // Accepted race: the blocked list can grow between SCARD and SMEMBERS and be read past what was paid for,
+  // bounded by how fast the store blocks students.
+  if (!(await allow(rows.length, blockedAll))) return null;
+  const whole = blockedAll <= BLOCKED_READ_MAX;
+  const blockedReads: (string | number)[][] =
+    blockedAll === 0 ? [] : whole ? [["SMEMBERS", blockedKey(course.id)]] : rows.map((row) => ["SISMEMBER", blockedKey(course.id), emailKey(row.e)]);
+  const replies = rows.length ? await redisPipeline([...rows.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]), ...blockedReads]) : [];
+  const blockedSet = new Set(blockedAll > 0 && whole && Array.isArray(replies[rows.length]) ? (replies[rows.length] as string[]) : []);
+  const lessonIds = new Set(lessonsInOrder(course).map(({ lesson }) => lesson.id));
+  return {
+    total: Number(total) || 0,
+    next: String(reply[0]),
+    students: rows.map((row, i) => ({
+      email: row.e,
+      since: row.s,
+      lastSeen: row.l,
+      done: Array.isArray(replies[i]) ? (replies[i] as string[]).filter((id) => lessonIds.has(id)).length : 0,
+      blocked: blockedAll === 0 ? false : whole ? blockedSet.has(emailKey(row.e)) : Number(replies[rows.length + i]) === 1,
+    })),
+  };
+}
+
 /** Takes a student off a course, or lets them back on. */
 export async function setBlocked(store: Store, courseId: string, email: string, blocked: boolean): Promise<void> {
   await redisPipeline([
@@ -710,6 +765,9 @@ export async function requestCourseLink(input: {
   if (!isRedisConfigured() || !product.course) return "error";
   if (!(await within(`nl:learn:rate:ip:${sha(`${ip}|${store.handle}`).slice(0, 32)}`, IP_LIMIT))) return "limited";
   if (!(await within(`nl:learn:rate:addr:${emailKey(raw)}`, ADDRESS_LIMIT))) return "limited";
+  // A global known refusal must not reveal course ownership or consume a link.
+  // False is unknown; the original rights and final sender checks still apply.
+  if (serviceMailKnownUnavailable()) return "error";
 
   const paid = await paidCourses(store, raw);
   if (!paid.has(product.id)) return "sent";
@@ -718,6 +776,7 @@ export async function requestCourseLink(input: {
 
 /** Sends the link itself. Also used when a buyer pays in another browser. */
 export async function sendCourseLink(store: Store, product: Listing, email: string, origin: string): Promise<boolean> {
+  if (serviceMailKnownUnavailable()) return false;
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { e: normaliseEmail(email), k: storeKey(store), h: store.handle, p: product.id };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]);

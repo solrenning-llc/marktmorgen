@@ -457,6 +457,31 @@ async function main(): Promise<void> {
   restore();
   is("another account's session: one command; the kept account's own: four at most; the locked one: still locked", [forOther, forKept, forLocked, answers], [1, 4, 1, [0, 0, 1]]);
 
+  part("Review of #2556 at c6267d1e: the list of kept accounts never grows past its ceiling, nor twice for one account");
+  const KEPT_LIST = `nl:2fa:lockedset:${sha("nimbus-2fa-lockedset:any account").slice(0, 40)}:kept`;
+  const keptFail = async (email: string) => {
+    await alignRecoveryLock(email, Date.now() + 86_400_000);
+    malform(on("SMEMBERS", "nl:2fa:lockedset:"), null);
+    await endRecoveryAccess(email);
+    restore();
+  };
+  const lengthOf = async () => Number((await real([["STRLEN", KEPT_LIST]]))[0]);
+  const once = await lengthOf();
+  await keptFail(KEPT);
+  await keptFail(KEPT);
+  is("the same account failing again adds nothing", await lengthOf(), once);
+  for (let n = 0; n < 101; n += 1) await keptFail(`many-${n}@example.com`);
+  const full = await lengthOf();
+  is("past 100 accounts it never grows: at most 100 tags of 41 bytes", full <= 100 * 41, true);
+  await keptFail("one-more@example.com");
+  is("and one more adds nothing", await lengthOf(), full);
+  sent = 0;
+  redis.pipeline = counting;
+  const overflowAnswers = [(await lockedUntil(keptLocked)) > 0, await lockedUntil(elsewhere)];
+  restore();
+  is("over the ceiling: a kept locked session stays locked, a session never locked is not, at four commands", [overflowAnswers, sent <= 1 + 3 + 1 + 3], [[true, 0], true]);
+  await real([["DEL", KEPT_LIST]]);
+
   part("Review of #2556 at df8030300: a move refused because the new address's sessions are unread says so");
   const FROM2 = "move2-from@example.com";
   const TO2 = "move2-to@example.com";

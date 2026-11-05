@@ -1296,6 +1296,7 @@
     "components/customer-voice.tsx",
     "components/daily-cashflow.tsx",
     "components/deal-agenda.tsx",
+    "components/deal-channels-table.tsx",
     "components/deals-board.tsx",
     "components/deals-unavailable.tsx",
     "components/demo-notes.tsx",

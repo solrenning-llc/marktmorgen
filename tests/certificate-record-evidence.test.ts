@@ -1,5 +1,5 @@
 /** Stored validity evidence must not be silently turned into a standing certificate. */
-import { certificateOf, certKey, readCertificate, standingOf } from "@/lib/certificate";
+import { allKey, certificateOf, certificatesOf, certKey, forgetCertificatesPerson, readCertificate, standingOf } from "@/lib/certificate";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -35,6 +35,14 @@ async function main() {
   await put({ validUntil: "1800000000" });
   await redis.pipeline([["HSET", `nl:course:${base.courseId}:certs`, "student", id]]);
   is("the student's real certificate lookup never returns malformed evidence", await certificateOf(base.courseId, "student"), null);
+  part("Privacy rights do not depend on a certificate standing");
+  redis.clear();
+  const malformed = { ...base, validUntil: "1800000000", withdrawnAt: null };
+  const otherId = "otherstudent0001";
+  await redis.pipeline([["SET", certKey(id), JSON.stringify(malformed)], ["SET", certKey(otherId), JSON.stringify({ ...malformed, id: otherId, email: "other@example.com" })], ["SADD", allKey(base.courseId), id, otherId]]);
+  is("legacy privacy export includes malformed evidence exactly as stored", await certificatesOf([base.courseId], base.email), [malformed]);
+  is("legacy erasure still finds a record with malformed status by its own email", await forgetCertificatesPerson([base.courseId], base.email), 1);
+  is("the erased record is gone and another student's record stays", await redis.pipeline([["GET", certKey(id)], ["EXISTS", certKey(otherId)]]), [null, 1]);
   done();
 }
 void main();

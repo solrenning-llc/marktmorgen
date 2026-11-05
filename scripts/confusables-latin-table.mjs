@@ -56,6 +56,9 @@ export const EXTRA = [
   [0x03c7, "x", "GREEK SMALL LETTER CHI"], [0x0275, "o", "LATIN SMALL LETTER BARRED O"],
   // Letters with a stroke that have no decomposition, so the accent folding leaves them: read as their base letter (Danish, Croatian, Polish).
   [0x00f8, "o", "LATIN SMALL LETTER O WITH STROKE"], [0x0111, "d", "LATIN SMALL LETTER D WITH STROKE"], [0x0142, "l", "LATIN SMALL LETTER L WITH STROKE"],
+  // Their capitals too, read before the text is lowercased (Codex T on #2579), and the capital eth, drawn as the capital D with stroke.
+  [0x00d8, "o", "LATIN CAPITAL LETTER O WITH STROKE"], [0x0110, "d", "LATIN CAPITAL LETTER D WITH STROKE"], [0x0141, "l", "LATIN CAPITAL LETTER L WITH STROKE"],
+  [0x00d0, "d", "LATIN CAPITAL LETTER ETH"],
 ];
 
 /** The header lines that name the copy: its version and date. */

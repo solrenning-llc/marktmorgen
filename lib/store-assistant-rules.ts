@@ -358,7 +358,7 @@ function lookalike(sign: string, stroke: "l" | "i"): string {
 const SPECIAL_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/u;
 /** A line break that ends a sentence ("Pro.\nMost") or comes before a capital ("Pro\nMonthly"): read as a space, never joined. */
 const SENTENCE_BREAK = /(?:[.!?:;][\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])|[\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])[\t ]*(?=[\p{Lu}\p{Lt}]))/gu;
-const MAY_LOOK_ALIKE = /[\u00B5\u00F8\u0111\u0142\u0250-\u1FFF\u2070-\uFFFF\u{10000}-\u{10FFFF}]/u;
+const MAY_LOOK_ALIKE = /[\u00B5\u00D0\u00D8\u00F8\u0110\u0111\u0141\u0142\u0250-\u1FFF\u2070-\uFFFF\u{10000}-\u{10FFFF}]/u;
 /**
  * Text folded to the one form it is matched in, never shown: compatibility
  * forms as their plain letter and digit (fullwidth, mathematical bold, a

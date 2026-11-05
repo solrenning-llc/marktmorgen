@@ -1,0 +1,19 @@
+# Independent review of #2617
+
+Codex I2, exact source328952f3d32e7fb4e2ae1c76d339459e4d661cb5. No GRAVE or MEDIUM reproduced for the documented plain provider/Redis JSON boundary. One LOW conditional hardening item below. MAY MERGE under CX116 only with all nine final exact-head successful aggregates and normal main/reservation coordination; the low must remain tracked rather than described as fixed.
+
+Read the entire three-file diff, complete call-packages implementation and term rules. The ordinary missing/invalid days/session/payment evidence now fails before creating a purchase or taking mail allowance. Explicit own amount0/days0 remains supported. Exact absent GET remains distinct from unreadable purchase/token receipts. Existing write/admission/recovery protocol is unchanged and is not certified by this review. The reservation delta adds only W's row and an empty line; other rows are preserved. Follow the latest C1 reservation instructions when a real integration is needed, without changing a running head solely for prose/reservation cleanup.
+
+## LOW: inherited/computed properties can still supply financial fields
+
+lib/call-packages.ts:97-101 and227-233. Validation reads ordinary properties. A live metadata object with inherited days="0" or sessions="5", or a live session with inherited amount_total=0, can record a new package even though those fields are not own data. A days getter is evaluated. For the stored JSON reader, this requires a SEPARATE prototype-contamination precondition: with a temporary Object.prototype.until/holds getter, a synthetically missing stored field is accepted as zero/no expiry or an empty hold list and packageState returns five remaining sessions. Valid own fields still shadow those prototype values; a real recorded active hold retains four remaining sessions in the positive control.
+
+This does NOT demonstrate a remotely reachable Stripe/Redis JSON bypass in a clean process. Inherited/custom-accessor live objects and the deliberately contaminated Object.prototype are explicit adversarial in-memory test conditions. JSON decoding does not itself create those accessors. That unproven production reachability is why this is LOW hardening, not a new financial release blocker or a claimed exploit. Suggested future repair: obtain the required fields from own data descriptors before inspecting their values, including stored hold entries, while preserving explicit own zero and supported legacy records. Coordinate its owner; no competing fix is made here.
+
+Durable TEST-ONLY original4e9f40d3da656e1c195848c6fc5f645d3f4769dd, tests/review-i2-paid-package-own-evidence.test.ts, blob61c9ef9015912188efa03b80cdfbfb3980d21b46. SAME8cases on actual author RED0695595e8ba9b6857b5c6e77c95f5f3bf4d72b34 and final:2positive controls/6hardening failures. It predates this correction; no new regression is attributed. Prototype descriptors are restored in finally and no real provider is contacted. Native local804c22d0 has exact remote treebb034bf671074e62079366216c058a16e93c0a92.
+
+## Verified correction
+
+Author fixture1d7230a4 is byte-identical between RED/final:24tests/3pass21fail ->24/24. Linked call-packages25, call-package-evidence18, call-lengths18, plan-cost24 and store-data7 pass:116 ordinary checks in six groups. The eight conditional hardening cases are NOT counted green; their two controls pass. One attempted guessed filename call-package-lengths did not exist; it executed no cases and was replaced by the actual call-lengths test,18/18.
+
+Strict scoped types of actual source/author test/own proof and imports, ESLint, scanner INCLUDING own staged proof3724/0 and diff-check pass. No browser, native Redis, actual supplier/account/payment, whole global build/TSC/CI, deployed state or complete cost/margin certification. All provider routes are controlled/refused and data uses the existing test adapter. No author product/ref/reservation/CI/metadata was edited.

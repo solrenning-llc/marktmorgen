@@ -36,8 +36,9 @@ async function main(): Promise<void> {
     let calls=0;
     redis.pipeline=async commands=>{calls++;return commands[0][0]==="HLEN"?shape() as never:pipeline(commands);};
     try{
-      const saved=await savePost("evidence-"+label,null,{title:"Count evidence",body:"Synthetic words.",product:null,draft:true},nextId,ROOM);
-      is("unknown admission refused: "+label,saved.ok?"saved":saved.reason,"unknown");
+      let state="threw";
+      try{const saved=await savePost("evidence-"+label,null,{title:"Count evidence",body:"Synthetic words.",product:null,draft:true},nextId,ROOM);state=saved.ok?"saved":saved.reason;}catch{}
+      is("unknown admission refused: "+label,state,"unknown");
       is("no data reservation or write after unreadable count: "+label,calls,1);
     }finally{redis.pipeline=pipeline;}
     redis.pipeline=async()=>shape() as never;

@@ -108,8 +108,8 @@ export const FRESH_LOGIN_SECONDS = 15 * 60;
 /** Whether this session was opened in the last FRESH_LOGIN_SECONDS. */
 export async function isFreshSession(id: string | undefined): Promise<boolean> {
   if (!id || !isRedisConfigured() || !/^[0-9a-f]{64}$/.test(id)) return false;
-  const [found] = await redisPipeline([["EXISTS", await freshKey(id)]]);
-  return Number(found) === 1;
+  // EXISTS answers 1 or 0; anything else is unknown, and the session is not taken as fresh (CX-123 rule 24).
+  return countOf(repliesFor(await redisPipeline([["EXISTS", await freshKey(id)]]), 1)?.[0]) === 1;
 }
 
 /**
@@ -323,11 +323,13 @@ const addressKey = async (email: string) =>
 export async function withinRateLimit(ip: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const key = await rateKey(ip);
-  const [, count] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  return Number(count) <= RATE_LIMIT;
+  ]), 2);
+  // A count in any other shape is unknown (CX-123 rule 24): no sign-in email is sent on it.
+  const count = countOf(replies?.[1]);
+  return count !== null && count <= RATE_LIMIT;
 }
 
 /**
@@ -449,11 +451,13 @@ export async function openSession(email: string, second?: SecondStep, passkeyId?
 export async function withinAddressLimit(email: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const key = await addressKey(normaliseEmail(email));
-  const [, count] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  return Number(count) <= ADDRESS_LIMIT;
+  ]), 2);
+  // A count in any other shape is unknown (CX-123 rule 24): no sign-in email is sent on it.
+  const count = countOf(replies?.[1]);
+  return count !== null && count <= ADDRESS_LIMIT;
 }
 
 /** Creates the one-time link and emails it. Returns false if nothing was sent. */
@@ -707,21 +711,26 @@ export async function noteSignIn(
   try {
     const key = await devicesKey(email);
     const seen = (await sha256Hex(`nimbus-device:${id}`)).slice(0, 40);
-    const [known, count] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["SISMEMBER", key, seen],
       ["SCARD", key],
-    ]);
-    if (Number(known) === 1) {
+    ]), 2);
+    const known = countOf(replies?.[0]);
+    const count = countOf(replies?.[1]);
+    // SISMEMBER's 0 or 1 and SCARD's count, each in its exact shape (CX-123 rule 24). Unknown, nothing is noted
+    // and no email goes out, as when Redis does not answer (the catch below); the login itself goes on.
+    if (known === null || known > 1 || count === null) throw new UnknownReplyError("the browsers seen with an account");
+    if (known === 1) {
       await redisPipeline([["EXPIRE", key, DEVICE_TTL_SECONDS]]);
       return cookie;
     }
-    if (Number(count) < MAX_DEVICES) {
+    if (count < MAX_DEVICES) {
       await redisPipeline([
         ["SADD", key, seen],
         ["EXPIRE", key, DEVICE_TTL_SECONDS],
       ]);
     }
-    if (Number(count) > 0 && !options.quiet && isSenderConfigured()) {
+    if (count > 0 && !options.quiet && isSenderConfigured()) {
       const when = new Date().toISOString().replace("T", " ").slice(0, 16);
       await sendEmail({ meter: { by: "company" },
         from: NIMBUS_FROM,

@@ -61,6 +61,7 @@ import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import {
   type DraftProduct,
   type Store,
@@ -527,8 +528,11 @@ type Problem = { line: number; column: string; problem: string; value: string };
 async function note(job: ImportJob, problems: Problem[], kind: "errors" | "skipped"): Promise<void> {
   if (!problems.length) return;
   job.counts[kind] += problems.length;
-  const [length] = await redisPipeline([["LLEN", errorsKey(job.id)]]);
-  const room = Math.max(0, MAX_REPORT_ROWS - (Number(length) || 0));
+  // LLEN in its exact shape (CX-123 rule 24): an unknown length is not an empty report. Thrown, the step is left
+  // as it was and starts again from the last saved place (runImport).
+  const length = countOf(repliesFor(await redisPipeline([["LLEN", errorsKey(job.id)]]), 1)?.[0]);
+  if (length === null) throw new UnknownReplyError("the length of an import's report");
+  const room = Math.max(0, MAX_REPORT_ROWS - length);
   const kept = problems.slice(0, room).map((p) => JSON.stringify([p.line, p.column, `${kind === "skipped" ? "Left out: " : ""}${p.problem}`, p.value.slice(0, 300)]));
   if (kept.length) await redisPipeline([["RPUSH", errorsKey(job.id), ...kept], ["EXPIRE", errorsKey(job.id), KEEP_SECONDS]]);
 }
@@ -1141,8 +1145,11 @@ export async function movedEmail(store: Store, job: ImportJob, email: string): P
 }
 
 async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" | "retry"> {
-  const [waiting] = await redisPipeline([["SCARD", mailKey(job.id)]]);
-  if (!(Number(waiting) > 0)) return "done";
+  // SCARD in its exact shape (CX-123 rule 24): an unknown count is not "nobody left to email". Thrown, the step is
+  // left as it was (runImport).
+  const waiting = countOf(repliesFor(await redisPipeline([["SCARD", mailKey(job.id)]]), 1)?.[0]);
+  if (waiting === null) throw new UnknownReplyError("the addresses an import still has to email");
+  if (waiting <= 0) return "done";
   // These addresses are the creator's word alone. Once too many of them have
   // bounced, or been answered with a spam report, the rest are not written
   // to (lib/mail-health.ts): they are counted as not emailed, and the report
@@ -1151,7 +1158,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   // And until then they go out in portions that double, a hundred buyers
   // first, so that a file of dead addresses is found while few have been
   // written to. A portion not yet open is waited for; nobody is dropped.
-  const portion = paused ? MAIL_CHUNK : await rampRoom(job.sid, Math.min(MAIL_CHUNK, Number(waiting)));
+  const portion = paused ? MAIL_CHUNK : await rampRoom(job.sid, Math.min(MAIL_CHUNK, waiting));
   if (portion <= 0) return "retry";
   const [popped] = await redisPipeline([["SPOP", mailKey(job.id), portion]]);
   const emails = (Array.isArray(popped) ? popped : typeof popped === "string" ? [popped] : []).map(String);
@@ -1260,8 +1267,10 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
       if (holder === id) await redisPipeline([["EXPIRE", busyKey(job.sid), KEEP_SECONDS]]);
       return job;
     }
-    const [batches] = await redisPipeline([["LLEN", rowsKey(id)]]);
-    const count = Number(batches) || 0;
+    // LLEN in its exact shape (CX-123 rule 24): read as 0, an unknown length failed the import as rows let go and
+    // deleted the rows still to bring in. Thrown, the job is left as it was (the catch below).
+    const count = countOf(repliesFor(await redisPipeline([["LLEN", rowsKey(id)]]), 1)?.[0]);
+    if (count === null) throw new UnknownReplyError("the batches of an import");
     while (Date.now() < deadline) {
       if (job.state === "queued") job.state = "running";
       if (job.state === "running") {
@@ -1282,8 +1291,10 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
           // past buyers, when they are to be emailed, by how many those are.
           if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);
           else if (job.options.email) {
-            const [toMail] = await redisPipeline([["SCARD", mailKey(job.id)]]);
-            await startRamp(job.sid, Number(toMail) || 0);
+            // SCARD in its exact shape (CX-123 rule 24); thrown, the job is left as it was.
+            const toMail = countOf(repliesFor(await redisPipeline([["SCARD", mailKey(job.id)]]), 1)?.[0]);
+            if (toMail === null) throw new UnknownReplyError("the addresses an import is to email");
+            await startRamp(job.sid, toMail);
           }
           await redisPipeline([saveJob(job)]);
           continue;

@@ -674,11 +674,11 @@ export async function watchPayPal(
       continue;
     }
     const { capture, payee, email } = captureIn(done);
-    // Approved and never taken: nothing was charged, and nothing is taken now. An order whose status is not
-    // PayPal's word is not known: kept, and asked again (CX-123 rule 24).
+    // No capture in the answer. Only PayPal's word that the order was voided means nothing will be charged; any
+    // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again
+    // (CX-123 rule 24; review of Codex G on #2681). A kept order is let go when its record ends (30 days).
     if (!capture) {
-      if (typeof done.status !== "string") continue;
-      if (done.status !== "APPROVED" && done.status !== "CREATED" && done.status !== "SAVED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
+      if (done.status === "VOIDED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
       continue;
     }
     if (capture.status === "PENDING" || typeof capture.status !== "string") continue;

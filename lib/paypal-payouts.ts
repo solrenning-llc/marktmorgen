@@ -263,7 +263,26 @@ export type PayResult =
  * no batch) may have made it.
  */
 function refusedBeforeMade(error: unknown): boolean {
-  return error instanceof PayPalError && error.status >= 400 && error.status < 500 && error.status !== 408 && !error.duplicate;
+  // Only PayPal's own refusal: a 4xx that names its error. One without a name (or unreadable) is not known.
+  return error instanceof PayPalError && error.status >= 400 && error.status < 500 && error.status !== 408 && !error.duplicate &&
+    error.code !== "UNKNOWN" && error.code !== "UNREADABLE";
+}
+
+/**
+ * Writes a batch PayPal named under its id, then, only once Redis said it
+ * holds it, takes the "?" field away (review of Codex G on #2681, GRAVE).
+ * If the first write is not confirmed, the "?" field stays: its people stay
+ * on their way, and the settling sends the same request again, which PayPal
+ * answers with this same batch. If only the second fails, both stay; the
+ * settling then finds the "?" one, gets the same batch back and writes it
+ * again, and an item already written into the book is never written twice
+ * (nl:pp:item). True when the batch is held under its id.
+ */
+async function promoteBatch(statsId: string, field: string, batch: string, entry: OpenBatch): Promise<boolean> {
+  const held: unknown = await redisPipeline([["HSET", openKey(statsId), batch, JSON.stringify({ at: entry.at, currency: entry.currency, lines: entry.lines })]]).catch(() => null);
+  if (!Array.isArray(held) || held.length !== 1 || (held[0] !== 0 && held[0] !== 1)) return false;
+  await redisPipeline([["HDEL", openKey(statsId), field]]).catch(() => undefined);
+  return true;
 }
 
 /** At most one try a day at a batch whose answer was not known. */
@@ -367,10 +386,9 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
         await countUnknown("unknown");
         return { ok: false, reason: "unknown" };
       }
-      await redisPipeline([
-        ["HSET", openKey(statsId), batch, JSON.stringify(open)],
-        ["HDEL", openKey(statsId), unknownField],
-      ]);
+      // PayPal named the batch: it is made. Held under its id, or, if Redis did not confirm that, still under "?",
+      // which the settling sends again with the same key (PayPal gives this batch back).
+      await promoteBatch(statsId, unknownField, batch, open);
       return { ok: true, batch, people: lines.length, cents: batchTotal(lines) };
     });
   } catch (error) {
@@ -510,10 +528,7 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
       batch = error.original;
     }
     if (!BATCH_ID.test(batch)) return "waiting";
-    await redisPipeline([
-      ["HSET", openKey(statsId), batch, JSON.stringify({ at: sent.at, currency: sent.currency, lines: sent.lines })],
-      ["HDEL", openKey(statsId), field],
-    ]);
+    if (!(await promoteBatch(statsId, field, batch, sent))) return "waiting";
     await countUnknown("settled");
     return "settled";
   });

@@ -392,6 +392,38 @@ for (const inherited of ["data", "getter"] as const) {
   });
 }
 
+for (const inherited of ["data", "getter"] as const) {
+  test(`missing own reserved funds cannot use inherited ${inherited}`, () => {
+    const fixture = contractFixture();
+    assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
+    const funds = fixture.policy.reservedFundsCents;
+    delete (fixture.policy as Partial<typeof fixture.policy>).reservedFundsCents;
+
+    let reads = 0;
+    let actual: ReturnType<typeof contractFundingConfiguration>;
+    const previous = Object.getOwnPropertyDescriptor(Object.prototype, "reservedFundsCents");
+    try {
+      Object.defineProperty(
+        Object.prototype,
+        "reservedFundsCents",
+        inherited === "getter"
+          ? { configurable: true, get() { reads++; return funds; } }
+          : { configurable: true, value: funds },
+      );
+      actual = contractFundingConfiguration(fixture.policy, fixture.context, fixture.now);
+    } finally {
+      if (previous) {
+        Object.defineProperty(Object.prototype, "reservedFundsCents", previous);
+      } else {
+        Reflect.deleteProperty(Object.prototype, "reservedFundsCents");
+      }
+    }
+
+    assert.equal(reads, 0, "funding validation must not invoke inherited policy getters");
+    assert.equal(actual, null, "required policy money must be own data in the snapshot");
+  });
+}
+
 for (const boundary of ["context", "review"] as const) {
   test(`capture does not normalize an unsupported ${boundary} prototype`, () => {
     const fixture = contractFixture();

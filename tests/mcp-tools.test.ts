@@ -57,7 +57,8 @@ async function main(): Promise<void> {
       cancellation_details: { reason: "cancellation_requested", feedback: "too_expensive", comment: "Write to me at cy.private@example.com instead" },
     }),
   ];
-  const memberships = await membershipsTool(store);
+  const memberships = await membershipsTool(store, async () => null);
+  if (memberships instanceof Response) throw new Error("not charged here");
   const text = JSON.stringify(memberships);
   is("MRR, members and the membership by name", [memberships.mrr, memberships.paying, (memberships.by_product as { product: string }[] | undefined)?.[0]?.product], [4000, 2, "Weeknight Club"]);
   is("why members left, counted and never quoted", [text.includes("too_expensive") || text.includes("expensive"), text.includes("Write to me"), /@/.test(text)], [true, false, false]);
@@ -69,7 +70,8 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${store.statsId}:people`, "0123456789ab", JSON.stringify({ id: "0123456789ab", email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 1, note: "" })],
     ["HSET", `nl:aff:${store.statsId}:clicks`, "0123456789ab", "12"],
   ]);
-  const affiliates = await affiliatesTool(store);
+  const affiliates = await affiliatesTool(store, async () => null);
+  if (affiliates instanceof Response) throw new Error("not charged here");
   is("each by their code, with their clicks", (affiliates.affiliates ?? []).map((a) => [a.code, a.clicks, a.status]), [["sara", 12, "approved"]]);
   is("and never their address", /@/.test(JSON.stringify(affiliates)), false);
 

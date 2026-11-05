@@ -9,11 +9,14 @@
  * questions and answers, button words, a comparison's cells, the lines under
  * pictures and their descriptions, the search title and line, a headline
  * being tested, and every word of a second version of the page being
- * tested. Never an id, a picture's file, a video, a product picked for
- * a card, a review picked, a date, a layout, or a comparison's tick or cross.
+ * tested, and each part of a row of columns in reading order (its words,
+ * list points, an icon's words, a button's words, a picture's description
+ * and line, a video's title). Never an id, a picture's file, a video, a
+ * button's address, a product picked for a card, a review picked, a date,
+ * a layout, or a comparison's tick or cross.
  * Browser-safe.
  */
-import { CELL_NO, CELL_YES, type PageBlock, type SalesPage } from "@/lib/sales-page";
+import { CELL_NO, CELL_YES, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";
 
 /** A block's own words. */
 const TEXT = ["headline", "sub", "heading", "body", "label", "note", "caption", "yesLabel", "noLabel", "columnA", "columnB"] as const;
@@ -48,6 +51,8 @@ export function mapPageWords(page: SalesPage, change: (words: string) => string)
       };
     }
     if (out.picture && typeof out.picture === "object") out = { ...out, picture: fields(out.picture as Record<string, unknown>, PARTS) };
+    // A row's parts, column by column, as a reader meets them.
+    if (block.kind === "row") out = { ...out, columns: block.columns.map((column) => column.map((element) => rowElementWords(element, one))) };
     return out as unknown as PageBlock;
   });
   return {
@@ -59,6 +64,27 @@ export function mapPageWords(page: SalesPage, change: (words: string) => string)
     // A second version of the whole page, after the first, in its own order.
     variant: page.variant ? { ...page.variant, blocks: words(page.variant.blocks) } : null,
   };
+}
+
+/** One part of a row with its words passed through `one`; a button's address and a video are never words. */
+function rowElementWords(element: RowElement, one: <T>(value: T) => T): RowElement {
+  switch (element.kind) {
+    case "heading":
+    case "subheading":
+    case "paragraph":
+      return { ...element, text: one(element.text) };
+    case "list":
+      return { ...element, items: element.items.map((item) => one(item)) };
+    case "icon":
+    case "button":
+      return { ...element, label: one(element.label) };
+    case "image": {
+      const alt = one(element.picture.alt);
+      return { ...element, picture: { ...element.picture, alt, caption: one(element.picture.caption) } };
+    }
+    case "video":
+      return { ...element, title: one(element.title) };
+  }
 }
 
 /** Every word a reader reads on the page, in order. */
@@ -79,6 +105,35 @@ export function withWords(page: SalesPage, words: string[]): SalesPage {
     at += 1;
     return typeof next === "string" && next.trim() ? next : original;
   });
+}
+
+/**
+ * The translated page, with every block the original had, read once at the
+ * end (inbox C4-17). `translated` is withWords' answer, not yet read again:
+ * each of its blocks is read alone, and a block kept whole or not at all (a
+ * booking, a row of columns) that a longer word would refuse comes back as
+ * it was, untranslated, and is counted, so the creator can be told. Only
+ * then is the page read: a second version that the translation made the same
+ * as the first is dropped there, as it always was, rather than coming back
+ * whole in the old language beside a translated first one.
+ */
+export function keepEveryBlock(original: SalesPage, translated: SalesPage): { page: SalesPage; untranslated: number } {
+  let untranslated = 0;
+  const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1;
+  const fit = (from: PageBlock[], to: PageBlock[]): PageBlock[] =>
+    to.map((block, at) => {
+      if (reads(block)) return block;
+      const before = from[at];
+      if (before && before.id === block.id && reads(before)) {
+        untranslated += 1;
+        return before;
+      }
+      return block;
+    });
+  const variant = translated.variant
+    ? { ...translated.variant, blocks: fit(original.variant?.blocks ?? [], translated.variant.blocks) }
+    : translated.variant;
+  return { page: parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks), variant }), untranslated };
 }
 
 /** The words split into parts of at most TRANSLATE_PART_CHARS characters (a longer single one is a part of its own). */

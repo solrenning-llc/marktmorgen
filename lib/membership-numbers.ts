@@ -487,8 +487,36 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
 
 const cacheKey = (store: Store) => `nl:mnum:${store.statsId}`;
 
+/**
+ * How many bytes this store's kept membership numbers hold, 0 when none are
+ * kept, looked up before they are read by a reading that pays for its size
+ * (lib/mcp-tools.ts, membershipsTool); null when it did not come back.
+ */
+export async function keptMembershipBytes(store: Store): Promise<number | null> {
+  if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["STRLEN", cacheKey(store)]]);
+  const bytes = Number(n);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+}
+
 /** This store's membership numbers, from its Stripe account, kept a few minutes. */
 export async function membershipNumbers(store: Store, fresh = false, now = Date.now()): Promise<Numbers | null> {
+  const read = await membershipNumbersPaid(store, null, fresh, now);
+  return read === "refused" ? null : read;
+}
+
+/**
+ * membershipNumbers, asking `beforeStripe` first when they are not kept and
+ * the creator's Stripe account is about to be read, so a reading that pays
+ * for its size (lib/mcp-tools.ts, membershipsTool) takes it then: "refused"
+ * when it says no, with nothing read from Stripe.
+ */
+export async function membershipNumbersPaid(
+  store: Store,
+  beforeStripe: (() => Promise<boolean>) | null,
+  fresh = false,
+  now = Date.now(),
+): Promise<Numbers | null | "refused"> {
   if (!store.stripeAccountId || !store.statsId) return null;
   if (!fresh && isRedisConfigured()) {
     const [cached] = await redisPipeline([["GET", cacheKey(store)]]);
@@ -500,6 +528,7 @@ export async function membershipNumbers(store: Store, fresh = false, now = Date.
       }
     }
   }
+  if (beforeStripe && !(await beforeStripe())) return "refused";
   const handles = saleHandles(store);
   const subs: Sub[] = [];
   let after = "";

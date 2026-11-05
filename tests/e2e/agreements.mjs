@@ -11,7 +11,9 @@
  * studio's form, the email, the page a stranger opens, its plain form post
  * and the answer it lands on. This walks that path.
  *
- * What runs: the real app (`next build`, then `next start`), pointed at the
+ * What runs: the production build first, then a separate disposable copy
+ * using an explicit synthetic reviewed-account transport fixture and the real
+ * transport guard (budget Lua is proved separately on Redis), pointed at the
  * stand-in database and email sender of tests/e2e/services.mjs through the
  * addresses the code already accepts (the database's own, RESEND_API_BASE).
  * No real email is sent and no real service is reached.
@@ -56,6 +58,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { startServices } from "./services.mjs";
+import { prepareReviewedMailApp } from "./reviewed-mail-app.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
@@ -71,6 +74,7 @@ const env = {
   UPSTASH_REDIS_REST_URL: FAKE,
   UPSTASH_REDIS_REST_TOKEN: "local",
   RESEND_API_KEY: "re_local_only_a_stand_in",
+  RESEND_READ_API_KEY: "re_local_only_a_stand_in",
   RESEND_API_BASE: FAKE,
   // The one-way code of the signer's address is made under this key (lib/agreement-store.ts).
   NIMBUS_DATA_KEY: "local_only_a_stand_in_data_key_0000000000000000",
@@ -121,6 +125,7 @@ const sha = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
 const services = await startServices(SERVICES);
 let app = null;
+let reviewedApp = null;
 let browser = null;
 let appLog = "";
 const run = (cmd, args) =>
@@ -146,11 +151,12 @@ try {
     const built = await run("npx", ["next", "build"]);
     if (built.status !== 0) throw new Error(`the app did not build:\n${built.said.slice(-3000)}`);
   }
-  app = spawn("npx", ["next", "start", "-p", String(APP)], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  reviewedApp = await prepareReviewedMailApp(root, env);
+  app = spawn(process.execPath, [join(reviewedApp.root, "node_modules/next/dist/bin/next"), "start", "-H", "127.0.0.1", "-p", String(APP)], { cwd: reviewedApp.root, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
   app.stdout.on("data", (chunk) => (appLog += chunk));
   app.stderr.on("data", (chunk) => (appLog += chunk));
   const started = Date.now();
-  while (!(await fetch(`${LOCAL}/@signshop`).then((r) => r.status === 200).catch(() => false))) {
+  while (!(await fetch(`${LOCAL}/@signshop`, { signal: AbortSignal.timeout(5_000) }).then((r) => r.status === 200).catch(() => false))) {
     if (Date.now() - started > 120_000) throw new Error(`the app did not start:\n${appLog.slice(-2000)}`);
     await new Promise((wait) => setTimeout(wait, 1000));
   }
@@ -344,13 +350,21 @@ try {
   console.error(error);
   console.error(appLog.slice(-3000));
 } finally {
+  // The production .next and its closed review are never replaced.
   await browser?.close().catch(() => {});
   if (app?.pid && app.exitCode === null) {
     try {
       process.kill(-app.pid, "SIGTERM");
     } catch {}
   }
+  if (app?.pid && app.exitCode === null) {
+    const closed = new Promise(resolve => app.once("exit", resolve));
+    const forced = setTimeout(() => { try { process.kill(-app.pid, "SIGKILL"); } catch {} }, 5_000);
+    await closed;
+    clearTimeout(forced);
+  }
   await services.close().catch(() => {});
+  if (reviewedApp) await reviewedApp.cleanup();
 }
 console.log(failed ? `\n${failed} failed` : "\nall passed");
 process.exit(failed ? 1 : 0);

@@ -13,7 +13,7 @@
  */
 import { createHash } from "node:crypto";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { type WindowFields, allowanceWindow, keepSecondsFor, resetWords } from "@/lib/allowance-window";
+import { LONGEST_WINDOW_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
 import { poolPlace } from "@/lib/free-pool";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { standingOf } from "@/lib/plan-standing";
@@ -21,11 +21,16 @@ import { planAboveSold } from "@/lib/larger-plan";
 import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type AllowanceKind, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
+import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
 
-export type Taken = { ok: true; left: number } | { ok: false; reason: "used" | "unknown" | "pool"; limit: number; message: string };
+/**
+ * What taking from a figure answered. A refusal for being used says, when
+ * the count was read, how many were `left` before this asked (from the
+ * figure's own count, never read again) and when they come back (`reset`).
+ */
+export type Taken = { ok: true; left: number } | { ok: false; reason: "used" | "unknown" | "pool"; limit: number; message: string; left?: number; reset?: string };
 
 const key = (kind: AllowanceKind, id: string, window: string) => `nl:allow:${kind}:${id}:${window}`;
 
@@ -88,9 +93,107 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
     if (counted <= limit) return { ok: true, left: limit - counted };
     // Over: what this asked for is given back, so a refused use costs the figure nothing.
     await redisPipeline([["DECRBY", k, n]]).catch(() => {});
-    return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")));
+    const reset = resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0);
+    return { ok: false, reason: "used", limit, message: usedWords(kind, limit, reset, standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")), left: Math.max(0, limit - (counted - n)), reset };
   } catch {
     return refuse("unknown", "This can't be counted right now. Try again in a minute.");
+  }
+}
+
+/**
+ * Gives back `n` of a kind that this same use took at `now` and did not need
+ * (lib/api-guard.ts, holdMoreApi: a reading set aside at its most, then
+ * measured). Only ever what was taken a moment before, in the same window;
+ * best effort: a give-back that fails leaves the figure counted higher, never
+ * lower.
+ */
+export async function giveAllowance(store: AllowanceStore, kind: AllowanceKind, n: number, now = Date.now()): Promise<void> {
+  if (!Number.isSafeInteger(n) || n < 1) return;
+  const window = allowanceWindow(store, now);
+  const id = idOf(store);
+  if (!window || !id || !isRedisConfigured()) return;
+  await redisPipeline([["DECRBY", key(kind, id, window.id), n]]).catch(() => {});
+}
+
+/** What holding for a later moment answered: the window it is held in, or why nothing was held. */
+export type Held = { ok: true; window: string } | { ok: false; reason: "used" | "unknown" | "pool" | "ended"; message: string };
+
+/**
+ * Holds `n` of a kind for a use written down now and made at `atMs`
+ * (lib/broadcasts.ts: a scheduled email's readings of its buyers), in the
+ * window the store will be in then (windowAt): the window running now is
+ * taken from as takeAllowance takes; a later one is counted in that window's
+ * own figure, by the same key and the same two commands, so all that is held
+ * for one month never passes that month's figure and the month's other uses
+ * find it taken. Refused, nothing held, when that month is not one the plan
+ * pays for as it stands (set to end before it, its period unknown) or it
+ * would pass the figure, with the sentence to show.
+ */
+export async function holdAllowanceAt(store: AllowanceStore, kind: AllowanceKind, n: number, atMs: number, now = Date.now()): Promise<Held> {
+  const unknown: Held = { ok: false, reason: "unknown", message: "This can't be counted right now. Try again in a minute." };
+  if (!Number.isSafeInteger(n) || n < 1 || !Number.isFinite(atMs)) return unknown;
+  const current = allowanceWindow(store, now);
+  if (!current) return { ok: false, reason: "unknown", message: resetWords(store, now) };
+  const target = atMs < current.end ? current : windowAt(store, atMs);
+  if (!target || (target.id !== current.id && standingOf(store, atMs / 1000) !== "paid")) {
+    const dayOf = (ms: number) => opensAgainWords({ ...current, end: ms }, now);
+    // In a trial, the day it ends (what comes after is a month not paid for yet); a plan set to end, its last day.
+    if (standingOf(store, now / 1000) === "trial") return { ok: false, reason: "ended", message: `Your trial ends on ${dayOf(store.trialEnds * 1000)} (UTC), so this can only be set for a day before then.` };
+    const ends = store.period && !store.period.renews && store.subscriptionActive ? dayOf(store.period.end * 1000) : null;
+    return { ok: false, reason: "ended", message: ends ? `Your plan ends on ${ends} (UTC), so this can only be set for a day before then.` : "This can only be set for a month your plan pays for." };
+  }
+  if (target.id === current.id) {
+    const taken = await takeAllowance(store, kind, n, now);
+    if (taken.ok) return { ok: true, window: current.id };
+    // How many this needs and how many are left, when the count was read; otherwise the figure's own words.
+    if (taken.reason === "used" && taken.left !== undefined) {
+      const left = taken.left === 0 ? "none are left" : taken.left === 1 ? "only 1 is left" : `only ${taken.left.toLocaleString("en-US")} are left`;
+      return { ok: false, reason: "used", message: `This needs ${n.toLocaleString("en-US")} of your ${KIND_WORDS[kind].many} this month, and ${left}.${taken.reset ? ` ${taken.reset}` : ""}` };
+    }
+    return { ok: false, reason: taken.reason, message: taken.message };
+  }
+  const limit = allowanceFor(store, kind, atMs / 1000);
+  const id = idOf(store);
+  if (!id || !isRedisConfigured()) return unknown;
+  const from = opensAgainWords({ ...target, end: target.start }, now);
+  if (!Number.isSafeInteger(limit) || limit < n) return { ok: false, reason: "used", message: `This needs ${n.toLocaleString("en-US")} of your ${KIND_WORDS[kind].many} in the month it is set for (from ${from}, UTC), more than that month has.` };
+  try {
+    const k = key(kind, id, target.id);
+    const reply: unknown = await redisPipeline([
+      ["SET", k, "0", "NX", "EX", keepSecondsFor(target, now)],
+      ["INCRBY", k, n],
+    ]);
+    const counted = acknowledgedAllowanceCount(reply, n);
+    if (counted === null) return unknown;
+    if (counted <= limit) return { ok: true, window: target.id };
+    await redisPipeline([["DECRBY", k, n]]).catch(() => {});
+    const left = Math.max(0, limit - (counted - n));
+    return { ok: false, reason: "used", message: `This needs ${n.toLocaleString("en-US")} of your ${KIND_WORDS[kind].many} in the month it is set for (from ${from}, UTC), and ${left === 0 ? "none are left" : left === 1 ? "only 1 is left" : `only ${left.toLocaleString("en-US")} are left`} for that month after what is already set aside in it. Choose another day.` };
+  } catch {
+    return unknown;
+  }
+}
+
+/**
+ * Gives back `n` of a kind held in the window named `window` (holdAllowanceAt)
+ * that no use drew: a hold called off, or one whose moment came in another
+ * window. Best effort: a give-back that fails leaves the figure counted
+ * higher, never lower.
+ */
+export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind, n: number, window: string, now = Date.now()): Promise<void> {
+  if (!Number.isSafeInteger(n) || n < 1 || !WINDOW_ID.test(window)) return;
+  // A window long over has no counter left to give back to: one would be made, below zero and kept for ever.
+  if (now > Date.parse(window.length === 7 ? `${window}-01T00:00:00Z` : `${window}T00:00:00Z`) + (LONGEST_WINDOW_DAYS + 1) * 86_400_000) return;
+  const id = idOf(store);
+  if (!id || !isRedisConfigured()) return;
+  const k = key(kind, id, window);
+  try {
+    // Only a counter that is there: one gone (expired, erased) is not made again below zero, with no expiry.
+    const [left] = await redisPipeline([["DECRBY", k, n]]);
+    const after = Number(left);
+    if (Number.isSafeInteger(after) && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
+  } catch {
+    // Best effort: counted higher, never lower.
   }
 }
 

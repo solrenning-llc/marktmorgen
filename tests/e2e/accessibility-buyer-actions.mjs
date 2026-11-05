@@ -4,6 +4,7 @@ import {readFileSync,mkdtempSync,rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {build} from "esbuild";
 import {startServices} from "./services.mjs";
+import {prepareReviewedMailApp} from "./reviewed-mail-app.mjs";
 import {resolve,join} from "node:path";
 const root=resolve(".");
 const require=createRequire(join(root,"package.json"));
@@ -22,6 +23,7 @@ const env = {
   UPSTASH_REDIS_REST_URL: FAKE,
   UPSTASH_REDIS_REST_TOKEN: "local",
   RESEND_API_KEY: "re_local_only_a_stand_in",
+  RESEND_READ_API_KEY: "re_local_only_a_stand_in",
   RESEND_API_BASE: FAKE,
   ANTHROPIC_API_KEY: "sk-ant-local_only_"+"x".repeat(30),
   ANTHROPIC_API_BASE: FAKE,
@@ -42,13 +44,15 @@ try{
  ids=JSON.parse(seeded.trim().split("\n").at(-1)).ids;
  if(!ids?.["Weeknight Dinners"])throw Error("Synthetic product missing");
 }catch(error){await services.close();throw error;}finally{rmSync(folder,{recursive:true,force:true});}
-const app=spawn(process.execPath,[join(root,"node_modules/next/dist/bin/next"),"start","-p",String(port)],{env,stdio:["ignore","pipe","pipe"]});
-let output="";for(const stream of [app.stdout,app.stderr])stream.on("data",chunk=>output=(output+chunk).slice(-6000));
+let app,reviewedApp,output="";
 let browser,cases=0,audits=0,failed=0,libraryLink=null;const gaps=[];
 const redact=value=>String(value).replace(/token=[^&\s"']+/g,"token=redacted");
 const localLink=value=>String(value).replace("https://marktmorgen.com",origin);
 try{
- let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error("Local app exited");try{up=(await fetch(origin)).ok;}catch{}if(up)break;await new Promise(r=>setTimeout(r,500));}
+ reviewedApp=await prepareReviewedMailApp(root,env);
+ app=spawn(process.execPath,[join(reviewedApp.root,"node_modules/next/dist/bin/next"),"start","-H","127.0.0.1","-p",String(port)],{cwd:reviewedApp.root,env,stdio:["ignore","pipe","pipe"]});
+ for(const stream of [app.stdout,app.stderr])stream.on("data",chunk=>output=(output+chunk).slice(-6000));
+ let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error("Local app exited");try{up=(await fetch(origin,{signal:AbortSignal.timeout(5_000)})).ok;}catch{}if(up)break;await new Promise(r=>setTimeout(r,500));}
  if(!up)throw Error("Local app did not start");
  browser=await driver.launch();console.log("BUYER_MATRIX_ENGINE:"+JSON.stringify({requested:engine,actual:driver.name(),version:browser.version()}));
  for(const width of [320,390,768,1280,1920])for(const mode of ["baseline","text-spacing","reduced-motion","forced-colors","reflow-320",...(process.env.AX2_PUBLIC_STANDARD==="true"?["dark"]:[])]){
@@ -166,5 +170,5 @@ try{
  }
  console.log("BUYER_MATRIX_OPEN_GAPS:"+JSON.stringify(gaps));
  console.log("BUYER_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,audits,failed,scope:"Real local app checkout against fake Stripe paid return; local captured inbox/library/orders. No real checkout/payment/provider/message/account or external download."}));
-}finally{await browser?.close();app.kill("SIGTERM");await services.close();}
+}finally{await browser?.close();if(app&&app.exitCode===null){const closed=new Promise(resolve=>app.once("exit",resolve));const forced=setTimeout(()=>app.kill("SIGKILL"),5_000);app.kill("SIGTERM");await closed;clearTimeout(forced);}await services.close();if(reviewedApp)await reviewedApp.cleanup();}
 process.exitCode=failed?1:0;

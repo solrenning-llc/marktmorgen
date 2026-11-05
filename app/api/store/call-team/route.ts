@@ -80,6 +80,8 @@ export async function POST(request: NextRequest) {
       await writeTeam(store, id, null);
       return Response.json({ ok: true, ...(await teamView(store, id)) });
     }
+    // A call with several lengths (637 [GL5], lib/call-lengths.ts) is booked on one calendar: its hosts' times are read at one length.
+    if (product.call.lengths?.length) return Response.json({ ok: false, error: "team_lengths" }, { status: 400 });
     const limits = teamLimitsFor(store);
     if (limits.eventTypes === 0) return Response.json({ ok: false, error: "team_plan" }, { status: 400 });
     const read = readTeamSetup(body.team, product.call, 6);

@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "reviewer": "Codex J",
+  "observed_at": "2026-11-05T09:21:19.548Z",
+  "repository": "solrenning-llc/marktmorgen",
+  "pull_request": 2594,
+  "head_sha": "99de6fc718bac69fb822573c051d75c71b6d91f2",
+  "workflow_run": 41989954230,
+  "run_attempt": 2,
+  "job": 127138631257,
+  "job_conclusion": "cancelled",
+  "workflow_conclusion": "cancelled",
+  "retry_policy": {
+    "original_job": 127120398071,
+    "only_retry_accepted_at": "2026-11-05T08:36:50.882Z",
+    "consumed": true,
+    "repeat_permitted": false,
+    "head_changed": false,
+    "ci_cancelled_by_reviewer": false
+  },
+  "log": {
+    "retrieved_full": true,
+    "decoded_utf16_code_units": 6577969,
+    "lines": 78757,
+    "runner_first_line": "2026-11-05T08:43:39.1290416Z",
+    "error_markers": [
+      "2026-11-05T09:18:52.1216403Z ##[error]The operation was canceled."
+    ],
+    "assertion_error_or_timeout_error_lines": 0,
+    "lint_summary": "30 problems (0 errors, 30 warnings)",
+    "last_passing_assertion": "2026-11-05T09:18:51.1708067Z   ok    reviewed affiliate copy omits British forms"
+  },
+  "timeline": {
+    "lint_start": "2026-11-05T08:43:56.5168814Z",
+    "behavior_start": "2026-11-05T08:45:38.2982316Z",
+    "build_start": "2026-11-05T09:01:24.8162557Z",
+    "runtime_dependency_check_start": "2026-11-05T09:03:34.1046773Z",
+    "agreements_start": "2026-11-05T09:03:34.3109976Z",
+    "store_copy_start": "2026-11-05T09:06:23.0420376Z",
+    "cancellation": "2026-11-05T09:18:52.1216403Z"
+  },
+  "configured_verify_timeout_minutes": 35,
+  "successful_steps": [
+    "Lint",
+    "Behavior regressions",
+    "Production build and route types",
+    "Verify reviewed development dependencies stay outside runtime",
+    "Agreements signed with a link, in a browser"
+  ],
+  "cancelled_step": "Copying a whole store, in a browser",
+  "other_aggregate_successes": 8,
+  "product_aggregate_success": false,
+  "interpretation": "The sole workflow error marker is global cancellation at approximately the configured 35-minute job deadline, with a passing assertion less than one second before it. No assertion failure or per-test TimeoutError was found. Store-copy remainder is unverified. This is not a fully green CI result or permission to merge.",
+  "requested_coordination": "Claude1/Codex V to decide the existing verify-structure work; no second retry, timeout increase, workflow edit, job cancellation or product-head change by J.",
+  "privacy": "Only selected non-personal timestamps, counters and generic assertions are retained; the full raw log is not published.",
+  "intervals_ms": {
+    "runner_to_cancel": 2112992,
+    "behavior_to_build": 946518,
+    "build_to_dependency": 129288,
+    "agreements_to_storecopy": 168732,
+    "storecopy_before_cancel": 749079,
+    "last_pass_before_cancel": 951
+  }
+}

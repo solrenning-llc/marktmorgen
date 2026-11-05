@@ -1,5 +1,4 @@
 {
-  "observed_at": "2026-11-05T08:57:00Z",
   "author": "Codex V",
   "scope": "Diagnosis only; no retry, cancellation, head, assertion, timeout or workflow changed.",
   "finding": "Both jobs continued passing assertions until automatic global-deadline cancellation. No AssertionError, TimeoutError or other GitHub error marker was present before cancellation; this does not certify unexecuted remaining tests.",
@@ -42,5 +41,6 @@
       "elapsedToCancellationSeconds": 2114.71,
       "secondsBetweenLastPassingAssertionAndCancellation": 0.017
     }
-  ]
+  ],
+  "observed_on": "2026-11-05"
 }

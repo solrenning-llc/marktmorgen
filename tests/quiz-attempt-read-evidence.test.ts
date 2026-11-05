@@ -52,6 +52,26 @@ test("quiz attempt reads require the exact two-answer Redis envelope", async () 
   assert.equal(accessorReads, 0, "an accessor reply must be refused without executing it");
 });
 
+test("quiz attempt reads refuse wrong slot types and malformed stored attempts", async () => {
+  redis.clear();
+  const malformedReplies: unknown[][] = [
+    [0, null],
+    [{}, null],
+    ["{", null],
+    [null, 0],
+    [null, 1],
+    [null, {}],
+  ];
+
+  for (const reply of malformedReplies) {
+    await assert.rejects(
+      () => attemptWith(reply),
+      /attempt evidence is unavailable/i,
+      `wrong Redis slot evidence must not become a known attempt: ${JSON.stringify(reply)}`,
+    );
+  }
+});
+
 test("unknown attempt evidence stops a submission before reservations, counters, or writes", async () => {
   redis.clear();
   const original = redis.pipeline.bind(redis);
@@ -67,6 +87,39 @@ test("unknown attempt evidence stops a submission before reservations, counters,
   }) as typeof redis.pipeline;
   try {
     const current = quiz();
+    const result = await submitQuiz(
+      COURSE,
+      LESSON,
+      LEARNER,
+      current,
+      { [current.questions[0].id]: [1] },
+      undefined,
+      undefined,
+      ROOM,
+    );
+    assert.deepEqual(result, { ok: false, reason: "unavailable" });
+    assert.deepEqual(commands.map(command => command[0]), ["GET", "GET"]);
+  } finally {
+    redis.pipeline = original;
+  }
+});
+
+test("wrong attempt slot types stop a submission before later IO", async () => {
+  redis.clear();
+  const original = redis.pipeline.bind(redis);
+  const commands: (string | number)[][] = [];
+  let first = true;
+  redis.pipeline = (async batch => {
+    commands.push(...batch);
+    if (first) {
+      first = false;
+      return [0, null];
+    }
+    return original(batch);
+  }) as typeof redis.pipeline;
+  try {
+    const current = quiz();
+    delete current.usagePolicy;
     const result = await submitQuiz(
       COURSE,
       LESSON,

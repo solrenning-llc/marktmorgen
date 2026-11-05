@@ -160,3 +160,184 @@ test("detached own sales fields do not invoke inherited setters or replacement g
     }
   }
 });
+
+
+test("hidden ledger, place and supply fields are unknown at every evidence layer", () => {
+  for (const key of Object.keys(ledger())) {
+    const value = ledger([entry("kept")]);
+    Object.defineProperty(value, key, { enumerable: false });
+    assert.deepEqual(countTaxSales(value), { status: "unknown" }, `hidden ledger ${key}`);
+  }
+  for (const key of ["country", "state"]) {
+    const value = ledger([entry("kept")]);
+    Object.defineProperty(value.place, key, { enumerable: false });
+    assert.deepEqual(countTaxSales(value), { status: "unknown" }, `hidden place ${key}`);
+  }
+  for (const key of Object.keys(entry("shape"))) {
+    const value = ledger([entry("kept")]);
+    Object.defineProperty(value.entries[0], key, { enumerable: false });
+    assert.deepEqual(countTaxSales(value), { status: "unknown" }, `hidden supply ${key}`);
+  }
+});
+
+test("a hidden array slot is not a persistable complete sales ledger", () => {
+  const entries = [entry("kept")];
+  Object.defineProperty(entries, "0", { enumerable: false });
+  assert.deepEqual(countTaxSales(ledger(entries)), { status: "unknown" });
+  const ordinary = ledger([entry("kept")]);
+  const frozen = Object.freeze({ ...ordinary, entries: Object.freeze([...ordinary.entries]) });
+  const nullPrototype = Object.assign(Object.create(null), ordinary);
+  assert.deepEqual(countTaxSales(frozen), countTaxSales(ordinary));
+  assert.deepEqual(countTaxSales(nullPrototype), countTaxSales(ordinary));
+});
+
+test("an inherited array serialization hook cannot erase known sales in a captured ledger", () => {
+  const value = ledger([entry("above-threshold", { amountMinor: 3_000_001 })]);
+  const before = countTaxSales(value);
+  assert.equal(before.status, "known");
+  let calls = 0;
+  let result: ReturnType<typeof countTaxSales>;
+  let captured: ReturnType<typeof countTaxSales>;
+  Object.defineProperty(Array.prototype, "toJSON", {
+    configurable: true, value() { calls++; return []; },
+  });
+  try {
+    result = countTaxSales(value);
+    assert.equal(calls, 0);
+    captured = countTaxSales(JSON.parse(JSON.stringify(value)));
+  } finally { Reflect.deleteProperty(Array.prototype, "toJSON"); }
+  assert.equal(calls, 1);
+  assert.deepEqual(result, { status: "unknown" });
+  assert.deepEqual(captured, { status: "unknown" });
+  assert.deepEqual(countTaxSales(value), before);
+});
+
+test("inherited object serialization cannot replace ledger, place or supply evidence", () => {
+  for (const boundary of ["ledger", "place", "entry"] as const) {
+    const value = ledger([entry("real", { amountMinor: 3_000_001 })]);
+    const victim = boundary === "ledger" ? value : boundary === "place" ? value.place : value.entries[0];
+    let calls = 0;
+    let result: ReturnType<typeof countTaxSales>;
+    Object.defineProperty(Object.prototype, "toJSON", {
+      configurable: true, value(this: object) {
+        calls++;
+        if (this !== victim) return this;
+        return boundary === "ledger" ? { ...value, entries: [] }
+          : boundary === "place" ? { country: "US", state: null }
+          : { ...value.entries[0], amountMinor: 0 };
+      },
+    });
+    try { result = countTaxSales(value); }
+    finally { Reflect.deleteProperty(Object.prototype, "toJSON"); }
+    assert.equal(calls, 0, boundary);
+    assert.deepEqual(result, { status: "unknown" }, boundary);
+  }
+});
+
+test("inherited serialization accessors are refused without invoking the getter", () => {
+  for (const prototype of [Object.prototype, Array.prototype]) {
+    const value = ledger([entry("real")]);
+    let reads = 0;
+    let result: ReturnType<typeof countTaxSales>;
+    Object.defineProperty(prototype, "toJSON", {
+      configurable: true, get() { reads++; throw new Error("serialization hook"); },
+    });
+    try { result = countTaxSales(value); }
+    finally { Reflect.deleteProperty(prototype, "toJSON"); }
+    assert.equal(reads, 0);
+    assert.deepEqual(result, { status: "unknown" });
+  }
+});
+
+for (const accessor of [false, true]) {
+  test(`an intermediate array ancestor cannot hide sales with a ${accessor ? "computed" : "data"} serialization hook`, () => {
+    const previous = Object.getPrototypeOf(Array.prototype);
+    const ancestor = Object.create(previous);
+    const value = ledger([entry("above-threshold", { amountMinor: 3_000_001 })]);
+    const before = countTaxSales(value);
+    let calls = 0, reads = 0;
+    let result: ReturnType<typeof countTaxSales>;
+    let captured: TaxSalesLedger;
+    Object.defineProperty(ancestor, "toJSON", accessor ? {
+      configurable: true, get() { reads++; return () => { calls++; return []; }; },
+    } : { configurable: true, value() { calls++; return []; } });
+    try {
+      Object.setPrototypeOf(Array.prototype, ancestor);
+      result = countTaxSales(value);
+      assert.equal(reads, 0);
+      assert.equal(calls, 0);
+      captured = JSON.parse(JSON.stringify(value));
+    } finally { Object.setPrototypeOf(Array.prototype, previous); }
+    assert.equal(reads, accessor ? 1 : 0);
+    assert.equal(calls, 1);
+    const after = countTaxSales(captured);
+    assert.equal(after.status, "known");
+    if (after.status === "known") assert.equal(after.settledApplicableMinor, 0);
+    assert.deepEqual(result, { status: "unknown" });
+    assert.deepEqual(countTaxSales(value), before);
+  });
+}
+
+
+test("an array Proxy cannot hide a settled supply behind a shorter descriptor length", () => {
+  const original = [entry("kept", { amountMinor: 1 }), entry("hidden", { amountMinor: 3_000_001 })];
+  const entries = new Proxy(original, {
+    ownKeys(target) { return Reflect.ownKeys(target).filter(key => key !== "1"); },
+    getOwnPropertyDescriptor(target, key) {
+      const field = Reflect.getOwnPropertyDescriptor(target, key);
+      return key === "length" && field ? { ...field, value: 1 } : field;
+    },
+  });
+  const value = ledger(entries);
+  const persisted = countTaxSales(JSON.parse(JSON.stringify(value)));
+  assert.equal(persisted.status, "known");
+  if (persisted.status === "known") {
+    assert.equal(persisted.settledApplicableMinor, 3_000_002);
+    assert.equal(persisted.applicableEntries, 2);
+  }
+  assert.deepEqual(countTaxSales(value), { status: "unknown" });
+});
+
+test("transparent and hidden-field Proxies fail at each original evidence layer", () => {
+  for (const boundary of ["ledger", "place", "entry", "entries"] as const) {
+    for (const hidden of [false, true]) {
+      const value = ledger([entry("kept")]);
+      const original = boundary === "ledger" ? value : boundary === "place" ? value.place
+        : boundary === "entry" ? value.entries[0] : value.entries;
+      if (hidden) Object.defineProperty(original, "unreviewed", { configurable: true, enumerable: true, value: null });
+      let reads = 0;
+      const proxy = new Proxy(original, {
+        ownKeys(target) { return Reflect.ownKeys(target).filter(key => !hidden || key !== "unreviewed"); },
+        get(target, key, receiver) { reads++; return Reflect.get(target, key, receiver); },
+      });
+      if (boundary === "place") value.place = proxy as TaxSalesLedger["place"];
+      else if (boundary === "entry") (value.entries as TaxSalesEntry[])[0] = proxy as TaxSalesEntry;
+      else if (boundary === "entries") value.entries = proxy as TaxSalesEntry[];
+      assert.deepEqual(countTaxSales(boundary === "ledger" ? proxy : value), { status: "unknown" }, `${boundary}/${hidden}`);
+      assert.equal(reads, 0);
+    }
+  }
+  const revoked = Proxy.revocable(ledger(), {});
+  revoked.revoke();
+  assert.deepEqual(countTaxSales(revoked.proxy), { status: "unknown" });
+});
+
+test("a later Proxy cannot make a native parent probe execute an earlier supply getter", () => {
+  for (const boundary of ["place", "entry"] as const) {
+    const first = entry("first");
+    const value = ledger([first, entry("second")]);
+    let reads = 0;
+    const proxy = new Proxy(boundary === "place" ? value.place : value.entries[1], {
+      ownKeys(target) {
+        Object.defineProperty(first, "amountMinor", {
+          configurable: true, enumerable: true, get() { reads++; return 0; },
+        });
+        return Reflect.ownKeys(target);
+      },
+    });
+    if (boundary === "place") value.place = proxy as TaxSalesLedger["place"];
+    else (value.entries as TaxSalesEntry[])[1] = proxy as TaxSalesEntry;
+    assert.deepEqual(countTaxSales(value), { status: "unknown" });
+    assert.equal(reads, 0);
+  }
+});

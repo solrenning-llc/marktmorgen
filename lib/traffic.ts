@@ -280,14 +280,18 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
  * `units` is how many requests it counts as: more than one for a request
  * that sends a file's bytes through us (a community picture, since 18
  * October 2026), so each is priced at what it costs (tests/plan-cost-registry.ts).
+ * `shared` is for work done once for everybody, not for the connection that
+ * happens to ask (an affiliate program's book refreshed for all its
+ * affiliates, lib/affiliate-page-admission.ts): it counts against the
+ * store's window alone, not the connection's share of the day.
  */
-export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1): Promise<boolean> {
+export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1, from: { shared?: boolean } = {}): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   try {
     const window = allowanceWindow(store, now);
     if (!window) return false;
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, await askingConnection());
+    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, from.shared ? null : await askingConnection());
   } catch {
     return false;
   }

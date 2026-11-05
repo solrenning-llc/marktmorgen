@@ -1,3 +1,4 @@
+import {ownedRepositoryEnv} from "./owned-repository.mjs";
 import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
 const CLI=fileURLToPath(new URL("./node_modules/@guidepup/setup/bin/guidepup",import.meta.url));
@@ -5,7 +6,7 @@ const CLI=fileURLToPath(new URL("./node_modules/@guidepup/setup/bin/guidepup",im
 export async function setupOwnedReader(options={}){
  const {env=process.env,platform=process.platform,run=spawnSync,
   wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))}=options;
- if(env.GITHUB_ACTIONS!=="true"||env.GITHUB_REPOSITORY!=="viniciussucupira/marktmorgen"||
+ if(env.GITHUB_ACTIONS!=="true"||!ownedRepositoryEnv(env)||
     env.AX2_PUBLIC_DISPOSABLE_RUNNER!=="true"||!["darwin","win32"].includes(platform))
   throw Error("Reader setup requires the owned disposable public CI runner");
  function attempt(){

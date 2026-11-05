@@ -23,6 +23,8 @@ const en = {
   // ---- The tab's title ----------------------------------------------------------
   metaCourse: "Course — Marktmorgen",
   metaLesson: "Lesson — Marktmorgen",
+  /** The name a screen reader gives a block of code in a lesson (components/lesson-text.tsx). */
+  codeBlock: "Code",
   metaPodcast: "Your private podcast — Marktmorgen",
   metaCertNotFound: "Certificate not found — Marktmorgen",
   metaCert: (name: string, title: string) => `${name}: ${title} — certificate of completion`,
@@ -207,6 +209,7 @@ const en = {
     posted: "Posted.",
     noroom: "This store has no room for that right now, so it was not saved. Try again later.",
     deleted: "Deleted.",
+    locked: "You got in without your second step, so deleting waits until two-step login turns off. Log in with your app's code or a passkey to do it now.",
     hidden: "Hidden. Only you and whoever wrote it can see it now.",
     shown: "Shown again to every student.",
     empty: "Write something first.",
@@ -250,6 +253,10 @@ const en = {
   sampleTitle: "A sample",
   sampleBody:
     "This is what a student who finishes the course gets, with the name they type. Theirs has an address of its own that anyone can open to check it.",
+  /** A certificate that stays valid for a time (639 [GL7](32)). */
+  validUntil: (date: string) => `Valid until ${date}.`,
+  expiredOn: (date: string) => `This certificate expired on ${date}.`,
+  expiredBody: (creator: string) => `It certified the course until that day. To renew it, ask ${creator}.`,
   withdrawnOn: (date: string) => `This certificate was withdrawn on ${date}.`,
   withdrawnBody: (creator: string) =>
     `${creator} withdrew it, so it no longer certifies anything. If it is yours, the course page lets you issue it again.`,
@@ -333,6 +340,7 @@ export type CoursesWords = typeof en;
 const es: CoursesWords = {
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Lección — Marktmorgen",
+  codeBlock: "Código",
   metaPodcast: "Tu pódcast privado — Marktmorgen",
   metaCertNotFound: "Certificado no encontrado — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificado de finalización`,
@@ -502,6 +510,7 @@ const es: CoursesWords = {
     posted: "Publicado.",
     noroom: "Esta tienda no tiene espacio para eso ahora mismo, así que no se guardó. Inténtalo más tarde.",
     deleted: "Eliminado.",
+    locked: "Entraste sin tu segundo paso, así que borrar espera hasta que el inicio de sesión en dos pasos se desactive. Inicia sesión con el código de tu app o una llave de acceso para hacerlo ahora.",
     hidden: "Oculto. Ahora solo lo ven tú y quien lo escribió.",
     shown: "Visible de nuevo para todos los estudiantes.",
     empty: "Escribe algo primero.",
@@ -543,6 +552,9 @@ const es: CoursesWords = {
   sampleTitle: "Un ejemplo",
   sampleBody:
     "Esto es lo que recibe un estudiante que termina el curso, con el nombre que escriba. El suyo tiene su propia dirección, que cualquiera puede abrir para comprobarlo.",
+  validUntil: (date) => `Válido hasta el ${date}.`,
+  expiredOn: (date) => `Este certificado venció el ${date}.`,
+  expiredBody: (creator) => `Certificó el curso hasta ese día. Para renovarlo, pregunta a ${creator}.`,
   withdrawnOn: (date) => `Este certificado se retiró el ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} lo retiró, así que ya no certifica nada. Si es tuyo, desde la página del curso puedes volver a emitirlo.`,
@@ -621,6 +633,7 @@ const frPlural = (n: number, one: string, many: string) => (n < 2 ? one : many);
 const fr: CoursesWords = {
   metaCourse: "Formation — Marktmorgen",
   metaLesson: "Leçon — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Votre podcast privé — Marktmorgen",
   metaCertNotFound: "Certificat introuvable — Marktmorgen",
   metaCert: (name, title) => `${name}${S}: ${title} — certificat de fin de formation`,
@@ -791,6 +804,7 @@ const fr: CoursesWords = {
     posted: "Publié.",
     noroom: "Cette boutique n'a pas de place pour cela en ce moment, donc rien n'a été enregistré. Réessayez plus tard.",
     deleted: "Supprimé.",
+    locked: "Vous êtes entré sans votre deuxième étape : la suppression attend que la connexion en deux étapes se désactive. Connectez-vous avec le code de votre application ou une clé d'accès pour le faire maintenant.",
     hidden: "Masqué. Seuls vous et la personne qui l'a écrit pouvez le voir désormais.",
     shown: "De nouveau visible par tous les participants.",
     empty: "Écrivez d'abord quelque chose.",
@@ -831,6 +845,9 @@ const fr: CoursesWords = {
   sampleTitle: "Un exemple",
   sampleBody:
     "Voici ce que reçoit un participant qui termine la formation, avec le nom qu'il saisit. Le sien a sa propre adresse, que n'importe qui peut ouvrir pour le vérifier.",
+  validUntil: (date) => `Valable jusqu'au ${date}.`,
+  expiredOn: (date) => `Ce certificat a expiré le ${date}.`,
+  expiredBody: (creator) => `Il a certifié la formation jusqu'à ce jour. Pour le renouveler, adressez-vous à ${creator}.`,
   withdrawnOn: (date) => `Ce certificat a été retiré le ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'a retiré, il ne certifie donc plus rien. S'il est à vous, la page de la formation vous permet de le délivrer à nouveau.`,
@@ -903,6 +920,7 @@ const fr: CoursesWords = {
 const de: CoursesWords = {
   metaCourse: "Kurs — Marktmorgen",
   metaLesson: "Lektion — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Ihr privater Podcast — Marktmorgen",
   metaCertNotFound: "Zertifikat nicht gefunden — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — Abschlusszertifikat`,
@@ -1074,6 +1092,7 @@ const de: CoursesWords = {
     posted: "Veröffentlicht.",
     noroom: "Dieser Shop hat gerade keinen Platz dafür, deshalb wurde nichts gespeichert. Versuchen Sie es später erneut.",
     deleted: "Gelöscht.",
+    locked: "Sie sind ohne Ihren zweiten Schritt hereingekommen. Löschen wartet, bis die Anmeldung in zwei Schritten sich abschaltet. Melden Sie sich mit dem Code Ihrer App oder einem Passkey an, um es jetzt zu tun.",
     hidden: "Ausgeblendet. Nur Sie und die Person, die ihn geschrieben hat, können ihn jetzt sehen.",
     shown: "Wieder für alle Teilnehmenden sichtbar.",
     empty: "Schreiben Sie zuerst etwas.",
@@ -1115,6 +1134,9 @@ const de: CoursesWords = {
   sampleTitle: "Ein Muster",
   sampleBody:
     "So sieht das Zertifikat aus, das Teilnehmende erhalten, wenn sie den Kurs abschließen, mit dem Namen, den sie eingeben. Ihres hat eine eigene Adresse, die jeder öffnen kann, um es zu prüfen.",
+  validUntil: (date) => `Gültig bis ${date}.`,
+  expiredOn: (date) => `Dieses Zertifikat ist am ${date} abgelaufen.`,
+  expiredBody: (creator) => `Es hat den Kurs bis zu diesem Tag bestätigt. Für eine Erneuerung wende dich an ${creator}.`,
   withdrawnOn: (date) => `Dieses Zertifikat wurde am ${date} zurückgezogen.`,
   withdrawnBody: (creator) =>
     `${creator} hat es zurückgezogen, es bescheinigt also nichts mehr. Wenn es Ihres ist, können Sie es auf der Kursseite erneut ausstellen.`,
@@ -1190,6 +1212,7 @@ const de: CoursesWords = {
 const it: CoursesWords = {
   metaCourse: "Corso — Marktmorgen",
   metaLesson: "Lezione — Marktmorgen",
+  codeBlock: "Codice",
   metaPodcast: "Il tuo podcast privato — Marktmorgen",
   metaCertNotFound: "Attestato non trovato — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — attestato di completamento`,
@@ -1359,6 +1382,7 @@ const it: CoursesWords = {
     posted: "Pubblicato.",
     noroom: "Questo negozio non ha spazio per questo in questo momento, quindi non è stato salvato. Riprova più tardi.",
     deleted: "Eliminato.",
+    locked: "Sei entrato senza il secondo passaggio: l'eliminazione aspetta finché l'accesso in due passaggi non si disattiva. Accedi con il codice della tua app o una passkey per farlo ora.",
     hidden: "Nascosto. Ora possono vederlo solo tu e chi l'ha scritto.",
     shown: "Di nuovo visibile a tutti gli studenti.",
     empty: "Scrivi prima qualcosa.",
@@ -1400,6 +1424,9 @@ const it: CoursesWords = {
   sampleTitle: "Un esempio",
   sampleBody:
     "Questo è ciò che riceve uno studente che completa il corso, con il nome che scrive. Il suo ha un indirizzo proprio che chiunque può aprire per verificarlo.",
+  validUntil: (date) => `Valido fino al ${date}.`,
+  expiredOn: (date) => `Questo attestato è scaduto il ${date}.`,
+  expiredBody: (creator) => `Ha attestato il corso fino a quel giorno. Per rinnovarlo, chiedi a ${creator}.`,
   withdrawnOn: (date) => `Questo attestato è stato revocato il ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'ha revocato, quindi non attesta più nulla. Se è tuo, dalla pagina del corso puoi farlo rilasciare di nuovo.`,
@@ -1475,6 +1502,7 @@ const it: CoursesWords = {
 const nl: CoursesWords = {
   metaCourse: "Cursus — Marktmorgen",
   metaLesson: "Les — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Je privépodcast — Marktmorgen",
   metaCertNotFound: "Certificaat niet gevonden — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificaat van voltooiing`,
@@ -1645,6 +1673,7 @@ const nl: CoursesWords = {
     posted: "Geplaatst.",
     noroom: "Deze winkel heeft daar nu geen ruimte voor, dus het is niet bewaard. Probeer het later opnieuw.",
     deleted: "Verwijderd.",
+    locked: "Je bent binnengekomen zonder je tweede stap. Verwijderen wacht tot inloggen in twee stappen uitgaat. Log in met de code van je app of een passkey om het nu te doen.",
     hidden: "Verborgen. Alleen jij en wie het schreef kunnen het nu zien.",
     shown: "Weer zichtbaar voor alle cursisten.",
     empty: "Schrijf eerst iets.",
@@ -1686,6 +1715,9 @@ const nl: CoursesWords = {
   sampleTitle: "Een voorbeeld",
   sampleBody:
     "Dit krijgt een cursist die de cursus afrondt, met de naam die hij of zij invult. Dat certificaat heeft een eigen adres dat iedereen kan openen om het te controleren.",
+  validUntil: (date) => `Geldig tot ${date}.`,
+  expiredOn: (date) => `Dit certificaat is verlopen op ${date}.`,
+  expiredBody: (creator) => `Het certificeerde de cursus tot die dag. Vraag ${creator} om het te vernieuwen.`,
   withdrawnOn: (date) => `Dit certificaat is ingetrokken op ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} heeft het ingetrokken, dus het bevestigt niets meer. Is het van jou, dan kun je het via de cursuspagina opnieuw laten uitreiken.`,
@@ -1761,6 +1793,7 @@ const nl: CoursesWords = {
 const pt: CoursesWords = {
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Aula — Marktmorgen",
+  codeBlock: "Código",
   metaPodcast: "O seu podcast privado — Marktmorgen",
   metaCertNotFound: "Certificado não encontrado — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificado de conclusão`,
@@ -1931,6 +1964,7 @@ const pt: CoursesWords = {
     posted: "Publicado.",
     noroom: "Esta loja não tem espaço para isso neste momento, por isso não foi guardado. Tente mais tarde.",
     deleted: "Eliminado.",
+    locked: "Entrou sem a sua segunda etapa, por isso apagar aguarda até que o início de sessão em duas etapas se desligue. Inicie sessão com o código da sua aplicação ou uma chave de acesso para o fazer já.",
     hidden: "Ocultado. Agora só é visível para si e para quem o escreveu.",
     shown: "Novamente visível para todos os alunos.",
     empty: "Escreva primeiro alguma coisa.",
@@ -1972,6 +2006,9 @@ const pt: CoursesWords = {
   sampleTitle: "Um exemplo",
   sampleBody:
     "É isto que recebe um aluno que conclui o curso, com o nome que introduzir. O dele tem um endereço próprio que qualquer pessoa pode abrir para o verificar.",
+  validUntil: (date) => `Válido até ${date}.`,
+  expiredOn: (date) => `Este certificado caducou a ${date}.`,
+  expiredBody: (creator) => `Certificou o curso até esse dia. Para o renovar, contacte ${creator}.`,
   withdrawnOn: (date) => `Este certificado foi retirado a ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} retirou-o, por isso já não certifica nada. Se for seu, pode voltar a emiti-lo na página do curso.`,

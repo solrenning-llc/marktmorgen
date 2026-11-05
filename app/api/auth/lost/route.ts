@@ -3,6 +3,8 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { clientIp } from "@/lib/visit";
 import { sendLostEmailLink } from "@/lib/recovery-address";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH } from "@/lib/auth";
+import { serviceMailKnownUnavailable } from "@/lib/email";
 
 /**
  * /signin/lost's form (lib/recovery-address.ts): a link to the recovery
@@ -19,6 +21,13 @@ export async function POST(request: NextRequest) {
     email = typeof value === "string" ? value.slice(0, 300) : "";
   } catch {
     email = "";
+  }
+  // Check only a global, synchronous lack of a sending route before any
+  // recipient-dependent recovery lookup. Both known and unknown addresses
+  // receive the same answer; no quota or readiness is inferred otherwise.
+  const address = email.trim();
+  if (address && address.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(address) && serviceMailKnownUnavailable()) {
+    return new Response(null, { status: 303, headers: { Location: `${origin}/signin/lost?status=unavailable`, "Cache-Control": "no-store" } });
   }
   try {
     await sendLostEmailLink(email, clientIp(request), linkOrigin(request));

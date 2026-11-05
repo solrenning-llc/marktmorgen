@@ -15,6 +15,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { affiliateCookieName, changeIdentity, partnerChangeFor, readAffiliate } from "@/lib/affiliates";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
 import { offerWords } from "@/lib/partner-invites";
+import { serviceMailKnownUnavailable } from "@/lib/email";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { POST as answerRoute } from "@/app/api/store/affiliates/partner-answer/route";
 import { advance, store as redis } from "./redis-stub";
@@ -29,8 +30,9 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   if (url.hostname === "api.resend.com") {
-    const body = JSON.parse(String(init?.body)) as { to: string | string[]; text: string };
-    mails.push({ to: [body.to].flat()[0], text: body.text });
+    // Main's Resend transport also asks Resend without a body (its usage check): read only what was sent as an email.
+    const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; text?: string };
+    if (body.to !== undefined) mails.push({ to: [body.to].flat()[0] as string, text: String(body.text) });
     return new Response(JSON.stringify({ id: `email_${mails.length}` }));
   }
   return realFetch(input, init);
@@ -141,10 +143,17 @@ async function main(): Promise<void> {
   const sentBefore = mails.length;
   const invited = await post({ action: "invite", email: "newpartner@example.com", percent: 10, products: [A], ends: future(90) });
   const mail = mails.slice(sentBefore).find((m) => m.to === "newpartner@example.com");
-  is("sent, and the email states the last day", [invited.ok, /It runs through [A-Z][a-z]+ \d{1,2}, \d{4}\./.test(mail?.text ?? "")], [true, true]);
   const open = await post({ action: "invite", email: "openpartner@example.com", percent: 10, products: [A] });
   const openMail = mails.find((m) => m.to === "openpartner@example.com");
-  is("without one, it says it runs until either side ends it", [open.ok, (openMail?.text ?? "").includes("It runs until you or the store end it.")], [true, true]);
+  if (!serviceMailKnownUnavailable()) {
+    is("sent, and the email states the last day", [invited.ok, /It runs through [A-Z][a-z]+ \d{1,2}, \d{4}\./.test(mail?.text ?? "")], [true, true]);
+    is("without one, it says it runs until either side ends it", [open.ok, (openMail?.text ?? "").includes("It runs until you or the store end it.")], [true, true]);
+  } else {
+    // Main sends service mail only through Amazon or a reviewed Resend fallback (lib/resend-fallback-transport.ts); with
+    // neither, as here, no invitation goes and none is said sent. The words each invitation carries are the same.
+    is("with no mail route, neither invitation is said sent, and none went", [invited.ok, open.ok, mail === undefined, openMail === undefined], [false, false, true, true]);
+    is("the words an invitation carries: the last day, or until either side ends it", [/^It runs through [A-Z][a-z]+ \d{1,2}, \d{4}\.$/.test(AFFILIATES_WORDS.en.partnerRuns("December 1, 2026")), AFFILIATES_WORDS.en.partnerRuns(null)], [true, "It runs until you or the store end it."]);
+  }
   is("a creator already here reads the same in their studio", offerWords({ id: "a1b2c3d4e5f6", sid: "s", storeName: "Terms Wired", handle: "termswired", share: { percent: 10, products: [A], until: Date.UTC(2027, 2, 5) / 1000 }, titles: ["Book"], at: 0 }).endsWith("It runs through March 4, 2027."), true);
 
   part("The screens");

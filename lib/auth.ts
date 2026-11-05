@@ -16,6 +16,10 @@
  *   nl:auth:fresh:<hash>    -> that the session was opened in the last 15
  *                              minutes, for the few changes that ask for a
  *                              recent login (adding a passkey)
+ *   nl:auth:second:<hash>   -> the second step this session was opened with
+ *                              ("app", "recovery" or "passkey:<its id>"), as long as
+ *                              the session; none for an emailed link, Google,
+ *                              a recovery address or a move (sessionSecondStep)
  *   nl:auth:sessions:<hash> -> the set of a creator's live sessions, so that
  *                              they can close every one of them at once
  *   nl:auth:move:<hash>     -> a move from one address to another, 15 minutes,
@@ -39,6 +43,7 @@
  * cannot see a flood that arrives from many machines at once.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { deleteIfHeldOnly } from "@/lib/redis-lock";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
 import { withPrefill } from "@/lib/handle-prefill";
@@ -101,6 +106,174 @@ export async function isFreshSession(id: string | undefined): Promise<boolean> {
   if (!id || !isRedisConfigured() || !/^[0-9a-f]{64}$/.test(id)) return false;
   const [found] = await redisPipeline([["EXISTS", await freshKey(id)]]);
   return Number(found) === 1;
+}
+
+/**
+ * Named after the session's own key rather than its id, so the account's set
+ * of sessions (which holds those keys) reaches every mark: taking a passkey
+ * or the app away takes the marks it made (dropSecondStep).
+ */
+const secondKeyOf = async (opened: string) =>
+  `nl:auth:second:${(await sha256Hex(`nimbus-auth-second:${opened}`)).slice(0, 40)}`;
+const secondKey = async (id: string) => secondKeyOf(await sessionKey(id));
+
+/**
+ * The second step a session was opened with: a code from the authenticator
+ * app, one of its recovery codes, or a passkey used to log in. An emailed
+ * link, Google, a recovery address, a move or a team invite proves only the
+ * inbox, so a session they open has none, even when the account owns a
+ * passkey or an app; so has every session opened before this was written down.
+ */
+export type SecondStep = "app" | "recovery" | "passkey";
+
+const SECOND_STEPS: readonly SecondStep[] = ["app", "recovery", "passkey"];
+
+/**
+ * What this session was opened with, for `email` only: a session that is
+ * gone, or that belongs to somebody else, has none. Read by what asks for the
+ * second step of a session rather than of an account (lib/team.ts).
+ */
+export async function sessionSecondStep(id: string | undefined, email: string): Promise<SecondStep | null> {
+  const mark = await sessionMark(id, email);
+  return SECOND_STEPS.find((step) => step === stepOf(mark)) ?? null;
+}
+
+const movingKey = async (email: string) =>
+  `nl:auth:moving:${(await sha256Hex(`nimbus-auth-moving:${normaliseEmail(email)}`)).slice(0, 40)}`;
+
+/** How long an address stays marked as moving: far longer than a move takes; a move that died midway lets go by itself. */
+export const MOVING_SECONDS = 5 * 60;
+
+/**
+ * Marks both addresses of a move while it runs (app/api/auth/move): its
+ * passkeys and app have left one and not yet settled, so an address that is
+ * moving counts as having a second step, and nobody adds a passkey or an app
+ * to it until the move is over (lib/second-step-gate.ts, security review of
+ * 8b4ddf6ee). Answers the move's own token, or null when either address is
+ * already moving or holds a broken move.
+ */
+export async function markMoving(from: string, to: string): Promise<string | null> {
+  if (!isRedisConfigured()) return null;
+  if ((await readBrokenMove(from)) || (await readBrokenMove(to))) return null;
+  const token = randomToken();
+  const [a, b] = await redisPipeline([
+    ["SET", await movingKey(from), token, "NX", "EX", MOVING_SECONDS],
+    ["SET", await movingKey(to), token, "NX", "EX", MOVING_SECONDS],
+  ]);
+  if (a === "OK" && b === "OK") return token;
+  // Only what this call set is taken back: the other move's mark stays.
+  await endMovingOne(from, token);
+  await endMovingOne(to, token);
+  return null;
+}
+
+/** Takes an address's mark away only when it is still this move's (`token`), in one script (lib/redis-lock.ts). */
+async function endMovingOne(email: string, token: string): Promise<void> {
+  const key = await movingKey(email);
+  await deleteIfHeldOnly({ key, token, ttlSeconds: MOVING_SECONDS }, [key]);
+}
+
+export async function endMoving(from: string, to: string, token: string): Promise<void> {
+  await endMovingOne(from, token);
+  await endMovingOne(to, token);
+}
+
+const brokenKey = async (email: string) =>
+  `nl:auth:move-broken:${(await sha256Hex(`nimbus-auth-move-broken:${normaliseEmail(email)}`)).slice(0, 40)}`;
+
+/**
+ * A move that could not be finished nor undone (app/api/auth/move): its two
+ * addresses, written on both with no expiry until it is repaired
+ * (lib/move-repair.ts). While it is there, both count as moving: nothing is
+ * added to them, a second move waits, and a login without a second step is
+ * refused (lib/signin-finish.ts and the recovery routes).
+ */
+export async function markBrokenMove(from: string, to: string): Promise<void> {
+  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now() });
+  await redisPipeline([
+    ["SET", await brokenKey(from), value],
+    ["SET", await brokenKey(to), value],
+  ]);
+}
+
+export async function readBrokenMove(email: string): Promise<{ from: string; to: string } | null> {
+  if (!isRedisConfigured()) return null;
+  const [raw] = await redisPipeline([["GET", await brokenKey(email)]]);
+  try {
+    const value = typeof raw === "string" ? (JSON.parse(raw) as { from?: unknown; to?: unknown }) : null;
+    return value && typeof value.from === "string" && typeof value.to === "string" ? { from: value.from, to: value.to } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearBrokenMove(from: string, to: string): Promise<void> {
+  await redisPipeline([["DEL", await brokenKey(from), await brokenKey(to)]]);
+}
+
+/** Whether a move of this address is running now (its mark), not counting a broken one. */
+export async function moveRunning(email: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const [found] = await redisPipeline([["EXISTS", await movingKey(email)]]);
+  return Number(found) === 1;
+}
+
+/** Whether this address is in a move: running now, or broken and not yet repaired. */
+export async function isMoving(email: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const [running, broken] = await redisPipeline([["EXISTS", await movingKey(email)], ["EXISTS", await brokenKey(email)]]);
+  return Number(running) === 1 || Number(broken) === 1;
+}
+
+/**
+ * The mark itself ("app", "recovery" or "passkey:<id>"), for what has to know
+ * which passkey opened the session (lib/second-step-gate.ts liveSecondStep,
+ * which every check of a session's second step goes through).
+ */
+export async function sessionMark(id: string | undefined, email: string): Promise<string | null> {
+  if (!id || !isRedisConfigured() || !/^[0-9a-f]{64}$/.test(id)) return null;
+  const [owner, mark] = await redisPipeline([
+    ["GET", await sessionKey(id)],
+    ["GET", await secondKey(id)],
+  ]);
+  if (typeof owner !== "string" || !owner || owner !== normaliseEmail(email)) return null;
+  return typeof mark === "string" && mark ? mark : null;
+}
+
+/** The step a mark names: "passkey:<id>" is a passkey. */
+function stepOf(mark: unknown): string {
+  return typeof mark === "string" ? mark.split(":")[0] : "";
+}
+
+/**
+ * Takes away what a second step that is gone had opened: every session of
+ * the account whose mark `gone` matches is logged out, except `keep` (the
+ * session making the change), which only loses its mark and stays logged in
+ * as an emailed link would leave it. Answers how many were logged out.
+ * Called when a passkey is removed ("passkey:<id>") and when the app is
+ * turned off ("app" and "recovery").
+ */
+export async function dropSecondStep(email: string, gone: (mark: string) => boolean, keep?: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const owned = await sessionsKey(normaliseEmail(email));
+  const [members] = await redisPipeline([["SMEMBERS", owned]]);
+  const keys = (Array.isArray(members) ? members : []).filter((key): key is string => typeof key === "string");
+  if (!keys.length) return 0;
+  const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
+  const read = await redisPipeline(marks.map((mark) => ["GET", mark]));
+  const kept = keep && /^[0-9a-f]{64}$/.test(keep) ? await sessionKey(keep) : "";
+  const commands: (string | number)[][] = [];
+  let ended = 0;
+  keys.forEach((key, i) => {
+    const mark = read[i];
+    if (typeof mark !== "string" || !gone(mark)) return;
+    commands.push(["DEL", marks[i]]);
+    if (key === kept) return;
+    commands.push(["DEL", key], ["SREM", owned, key]);
+    ended += 1;
+  });
+  if (commands.length) await redisPipeline(commands);
+  return ended;
 }
 
 const sessionsKey = async (email: string) =>
@@ -222,14 +395,19 @@ export async function spendMoveLink(
   }
 }
 
-/** Opens a session for an address that has just proved it holds the inbox. */
-export async function openSession(email: string): Promise<string> {
+/**
+ * Opens a session for an address that has just proved it holds the inbox,
+ * and, when it was opened with one, the second step it was opened with
+ * (SecondStep), kept exactly as long as the session.
+ */
+export async function openSession(email: string, second?: SecondStep, passkeyId?: string): Promise<string> {
   const id = randomToken();
   const opened = await sessionKey(id);
   const owned = await sessionsKey(normaliseEmail(email));
   await redisPipeline([
     ["SET", opened, normaliseEmail(email), "EX", SESSION_TTL_SECONDS],
     ["SET", await freshKey(id), "1", "EX", FRESH_LOGIN_SECONDS],
+    ...(second ? [["SET", await secondKey(id), second === "passkey" && passkeyId ? `passkey:${passkeyId}` : second, "EX", SESSION_TTL_SECONDS]] : []),
     ["SADD", owned, opened],
     ["EXPIRE", owned, SESSION_TTL_SECONDS + 86_400],
   ]);
@@ -367,7 +545,7 @@ export async function endSession(id: string | undefined): Promise<void> {
   try {
     const key = await sessionKey(id);
     const [email] = await redisPipeline([["GET", key]]);
-    const commands: (string | number)[][] = [["DEL", key]];
+    const commands: (string | number)[][] = [["DEL", key], ["DEL", await secondKeyOf(key)]];
     if (typeof email === "string" && email) {
       commands.push(["SREM", await sessionsKey(email), key]);
     }
@@ -392,8 +570,10 @@ export async function endAllSessions(email: string): Promise<number> {
     const keys = Array.isArray(members)
       ? members.filter((key): key is string => typeof key === "string")
       : [];
+    const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
     await redisPipeline([
       ...keys.map((key) => ["DEL", key] as (string | number)[]),
+      ...marks.map((mark) => ["DEL", mark] as (string | number)[]),
       ["DEL", owned],
     ]);
     return keys.length;

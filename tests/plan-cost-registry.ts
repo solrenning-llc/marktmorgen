@@ -215,7 +215,8 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * key family or public limit. Strict Lua snapshots precede value transfer;
  * personal copy/erasure and full-pool fulfillment add bounded operations.
  * Redis7.4.12 isolated EVAL+internal observed maxima: enqueue27, claim16,
- * dispatch16, refusal32; these are component measurements, not full lifetime
+ * dispatch16, refusal32, explicit no-POST16; these are component measurements,
+ * not full lifetime
  * costs, supplier invoices, reviewed funding or an amendment to ORDER.
  * Refusal-field copies, failure tails and erasure/trigger costs remain
  * UNKNOWN/rejected until a complete independent admission precedes IO.

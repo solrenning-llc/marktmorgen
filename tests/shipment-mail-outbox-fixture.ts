@@ -69,7 +69,13 @@ export function shipmentOutboxFixture() {
           answer = ["queued", supplied];
         }
       } else if (!raw) answer = ["missing"];
-      else if (raw !== expected) answer = ["changed"];
+      else if (raw !== expected && !(op === "not-posted" && (() => {
+        try {
+          const current = JSON.parse(raw), prior = JSON.parse(expected);
+          return current.state === "dispatching" && current.owner === owner && prior.state === "preparing" && prior.owner === owner &&
+            ["id", "statsId", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "checks", "reviewId"].every(key => prior[key] === current[key]);
+        } catch { return false; }
+      })())) answer = ["changed"];
       else {
         const value = JSON.parse(raw);
         if (op === "accepted" || op === "cancel" || op === "refused") {
@@ -92,6 +98,7 @@ export function shipmentOutboxFixture() {
         else {
           value.state = op === "dispatch" ? "dispatching" : op === "refused" ? "refused" : "queued";
           value.leaseUntil = op === "dispatch" ? now + 60000 : 0;
+          if (op === "not-posted") value.owner = "";
           value.next = value.state === "queued" ? now + policy!.retryMilliseconds : 0;
           const next = JSON.stringify(value); store.run(["SET", k[0], next]);
           if (value.next) store.run(["ZADD", k[2], value.next, value.id]); else store.run(["ZREM", k[2], value.id]);

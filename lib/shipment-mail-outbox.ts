@@ -286,7 +286,19 @@ if op == 'enqueue' then
  return {'queued',supplied}
 end
 if not r then return {'missing'} end
-if raw ~= expected then return {'changed'} end
+-- Only an explicit no-POST result may repair its own lost dispatch ACK.
+-- Bind it to the original preparation's complete immutable content/identity.
+local samePreparation=false
+if op=='not-posted' and r.state=='dispatching' and r.owner==ARGV[7] and #expected<=maxbytes then
+ local valid,e=pcall(cjson.decode,expected)
+ if valid and type(e)=='table' and e.state=='preparing' and e.owner==ARGV[7] then
+  samePreparation=true
+  for _,k in ipairs({'id','statsId','session','person','sourceValue','sealed','fingerprint','bytes','created','authorizedAt','checks','reviewId'}) do
+   if e[k]~=r[k] then samePreparation=false end
+  end
+ end
+end
+if raw ~= expected and not samePreparation then return {'changed'} end
 if op == 'cancel' then drop(); return {'canceled'} end
 -- This construction has no claim, dispatch or acceptance protocol for courses.
 if r.originKind~=nil and r.originKind~='single_digital' then return {'unknown'} end
@@ -323,6 +335,9 @@ elseif op == 'dispatch' then
  r.state='dispatching'; r.leaseUntil=now+60000; r.next=0
 elseif op == 'defer' then
  if r.state~='preparing' or r.owner~=ARGV[7] then return {'held',raw} end
+ r.state='queued'; r.owner=''; r.leaseUntil=0; r.next=now+p.retryMilliseconds
+elseif op == 'not-posted' then
+ if (r.state~='preparing' and r.state~='dispatching') or r.owner~=ARGV[7] then return {'held',raw} end
  r.state='queued'; r.owner=''; r.leaseUntil=0; r.next=now+p.retryMilliseconds
 elseif op == 'not-accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
@@ -799,7 +814,7 @@ export async function enqueueShipmentMail(input: { statsId: string | null; sessi
   } catch { return { ok: false, reason: "unknown" }; }
 }
 
-export type ShipmentMailDispatch = (message: ShipmentMailMessage, beforePost: () => Promise<boolean>, context: { id: string }) => Promise<"accepted" | "waiting" | "not_accepted" | "refused" | "unknown">;
+export type ShipmentMailDispatch = (message: ShipmentMailMessage, beforePost: () => Promise<boolean>, context: { id: string }) => Promise<"accepted" | "waiting" | "not_accepted" | "not_posted" | "refused" | "unknown">;
 export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDispatch, runtime: ShipmentMailRuntime = {}, onlyId?: string): Promise<{ accepted: number; waiting: number; unknown: number }> {
   if (lifecycle(runtime) !== "active") return { accepted: 0, waiting: 0, unknown: 1 };
   const counts = { accepted: 0, waiting: 0, unknown: 0 };
@@ -858,11 +873,18 @@ export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDi
       const result = await mutate("dispatch", row, raw, p, runtime, owner);
       const next = result?.[0] === "dispatching" ? parseRow(result[1]) : null;
       if (!next || next.id !== row.id || next.owner !== owner) return false;
-      raw = String(result![1]); row = next; barrier = true; return true;
+      raw = String(result![1]); row = next;
+      if (now() >= deadline || now() >= next.leaseUntil) return false;
+      barrier = true; return true;
     };
     let outcome: Awaited<ReturnType<ShipmentMailDispatch>> = "waiting";
     if (message) {
       try { outcome = await dispatch(message, beforePost, { id: row.id }); } catch { outcome = "unknown"; }
+    }
+    if (outcome === "not_posted") {
+      const restored = await mutate("not-posted", row, raw, p, runtime, owner);
+      if (restored?.[0] === "queued") counts.waiting++; else counts.unknown++;
+      continue;
     }
     // A provider result without this call's confirmed barrier is never proof.
     if (!barrier) {

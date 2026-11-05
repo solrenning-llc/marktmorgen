@@ -70,7 +70,7 @@ export function MarkShipped({
         <div className="mt-2">
           <p className="font-semibold text-ink" role="status">{`Marked as shipped on ${day(done.at)}.`}</p>
           {!mail ? (
-            <p className="mt-1">The email&apos;s status has not been confirmed here. Reload to check.</p>
+            <p className="mt-1">The email&apos;s status has not been confirmed here.</p>
           ) : mail.state === "not_recorded" ? (
             <p className="mt-1">The email&apos;s acceptance was not recorded. No automatic resend is scheduled.</p>
           ) : null}

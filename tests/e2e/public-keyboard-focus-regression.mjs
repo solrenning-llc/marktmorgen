@@ -33,6 +33,15 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
   assert.ok(await wrapped.locator("a").evaluate(node=>node.getClientRects().length>1),"wrapped fixture has multiple rendered fragments");
   await checkPublicKeyboardCycle({page:wrapped,path:"synthetic-wrapped-inline-link",is});
   await wrapped.close();
+  for(const color of ["rgb(0, 0, 0)","rgb(255, 255, 0)","rgba(0, 0, 0, 0)"]){
+   const radio=await context.newPage();
+   try{
+    await radio.setContent(`<style>input{width:44px;height:44px}input:focus-visible{outline:3px solid ${color};outline-offset:2px}</style><input type="radio" name="choice" aria-label="First" checked><input type="radio" name="choice" aria-label="Second">`);
+    const journey=()=>checkPublicKeyboardCycle({page:radio,path:"synthetic-radio-outline-"+color,is});
+    if(color.startsWith("rgba"))await assert.rejects(journey,/native keyboard focus is visible/);
+    else await journey();
+   }finally{await radio.close();}
+  }
   console.log("AX2_KEYBOARD_FOCUS_REGRESSIONS:"+JSON.stringify({coveredThirteenthRejected:true,clearThirteenPassed:true,wrappedInlinePassed:true,scope:"Native focus and fragment-center hit tests in disposable documents; not a visual contrast or full obstruction audit."}));
  } finally {await context.close();}
 }

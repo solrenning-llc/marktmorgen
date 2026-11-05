@@ -102,6 +102,18 @@ function historicalFeeReference(value: unknown): string | null {
   return id;
 }
 
+function membershipPercent(row: Record<string, unknown>): number | null {
+  const value = row.application_fee_percent === null ? 0 : row.application_fee_percent;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+}
+
+/** HSET/HDEL of exactly one marker has one integer acknowledgement. */
+function confirmedMarkerWrite(reply: unknown): void {
+  if (!Array.isArray(reply) || reply.length !== 1) throw new UnknownFeeList("Settlement progress write was not confirmed");
+  const slot = Object.getOwnPropertyDescriptor(reply, "0");
+  if (!slot || !("value" in slot) || (slot.value !== 0 && slot.value !== 1)) throw new UnknownFeeList("Settlement progress write was not confirmed");
+}
+
 function historicalEvent(raw: unknown): { id: string; fee: string | null; charge: string | null } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new UnknownFeeList("Historical settlement event was not confirmed");
   const row = raw as Record<string, unknown>, id = str(row.id);
@@ -345,7 +357,7 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
   }
   // Progress is committed only after the full reading and all its fees settle.
   if (!completeRead || !allSettled) return false;
-  await redisPipeline([["HSET", READ_UNTIL, ref, String(Math.floor(nowSeconds))]]);
+  confirmedMarkerWrite(await redisPipeline([["HSET", READ_UNTIL, ref, String(Math.floor(nowSeconds))]]));
   return true;
 }
 
@@ -382,11 +394,13 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
       if (status === "canceled" || status === "incomplete_expired") continue;
       try {
         // Stripe's explicit null means that no fee is set; absence is unknown.
-        const written = subscription.application_fee_percent === null ? 0 : subscription.application_fee_percent;
-        if (typeof written !== "number" || !Number.isFinite(written) || written < 0 || written > 100) throw new Error("Membership fee percent is unknown");
+        const written = membershipPercent(subscription);
+        if (written === null) throw new Error("Membership fee percent is unknown");
         if (written === target / 100) continue;
         const body = new URLSearchParams({ application_fee_percent: percentOf(target), "metadata[share_bps]": String(target) });
-        await onAccount("POST", account, `/subscriptions/${encodeURIComponent(str(subscription.id))}`, body);
+        const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(str(subscription.id))}`, body);
+        if (!updated || typeof updated !== "object" || Array.isArray(updated) || updated.object !== "subscription"
+          || updated.id !== subscription.id || membershipPercent(updated) !== target / 100) throw new Error("Membership fee update was not confirmed");
         counts.memberships += 1;
       } catch (error) {
         allApplied = false;
@@ -399,7 +413,7 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
     cursors.add(page);
   }
   if (!completeRead || !allApplied) return false;
-  await redisPipeline([target > 0 ? ["HSET", APPLIED, ref, String(target)] : ["HDEL", APPLIED, ref]]);
+  confirmedMarkerWrite(await redisPipeline([target > 0 ? ["HSET", APPLIED, ref, String(target)] : ["HDEL", APPLIED, ref]]));
   return true;
 }
 

@@ -87,7 +87,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       updated.push({ id: sub[1], percent });
       const row = subscriptions.find((s) => s.id === sub[1]);
       if (row) row.application_fee_percent = Number(percent);
-      return json(row ?? {});
+      return json(row ? { ...row, object: "subscription" } : {});
     }
   }
   return json({ error: { message: `not stood in for: ${method} ${path}` } }, 404);

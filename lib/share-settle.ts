@@ -57,6 +57,7 @@ class UnknownAmount extends Error {
   }
 }
 
+/** A settlement list, its cursor or its selecting index was not confirmed. */
 class UnknownFeeList extends Error {}
 
 function countSettlementFailure(counts: SettleCounts, error: unknown): void {
@@ -86,6 +87,32 @@ function readFee(raw: Record<string, unknown>): Fee | null {
   const charge = typeof raw.charge === "string" ? raw.charge : str((raw.charge as { id?: unknown } | null)?.id);
   if (!/^fee_[A-Za-z0-9]+$/.test(id) || !/^acct_[A-Za-z0-9]+$/.test(account) || !/^(ch|py)_[A-Za-z0-9]+$/.test(charge)) return null;
   return { id, account, charge, amount: num(raw.amount), refunded: num(raw.amount_refunded), currency: str(raw.currency).toLowerCase() || undefined };
+}
+
+function providerReference(value: unknown, pattern: RegExp): string {
+  const id = typeof value === "string" ? value : value && typeof value === "object" && !Array.isArray(value) ? str((value as Record<string, unknown>).id) : "";
+  return pattern.test(id) ? id : "";
+}
+
+/** Null is a confirmed absence; missing or malformed is never no fee. */
+function historicalFeeReference(value: unknown): string | null {
+  if (value === null) return null;
+  const id = providerReference(value, /^fee_[A-Za-z0-9]+$/);
+  if (!id) throw new UnknownFeeList("Historical application fee reference was not confirmed");
+  return id;
+}
+
+function historicalEvent(raw: unknown): { id: string; fee: string | null; charge: string | null } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new UnknownFeeList("Historical settlement event was not confirmed");
+  const row = raw as Record<string, unknown>, id = str(row.id);
+  const data = row.data && typeof row.data === "object" && !Array.isArray(row.data) ? row.data as Record<string, unknown> : null;
+  const object = data?.object;
+  if (!/^evt_[A-Za-z0-9]+$/.test(id) || !object || typeof object !== "object" || Array.isArray(object)) throw new UnknownFeeList("Historical settlement event was not confirmed");
+  const evidence = object as Record<string, unknown>;
+  if (Object.hasOwn(evidence, "application_fee")) return { id, fee: historicalFeeReference(evidence.application_fee), charge: null };
+  const charge = providerReference(evidence.charge, /^(ch|py)_[A-Za-z0-9]+$/);
+  if (!charge) throw new UnknownFeeList("Historical settlement charge reference was not confirmed");
+  return { id, fee: null, charge };
 }
 
 /** What was paid for the goods on a payment made through a checkout: after discounts, without tax or shipping. */
@@ -261,10 +288,15 @@ async function settleRecent(nowSeconds: number, deadline: number, counts: Settle
 async function settleGivenBack(store: Store, ref: string, nowSeconds: number, deadline: number, counts: SettleCounts, live: boolean): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account) return true;
-  const [saved] = await redisPipeline([["HGET", READ_UNTIL, ref]]);
+  const saved = await redisPipeline([["HGET", READ_UNTIL, ref]]);
+  if (!Array.isArray(saved) || saved.length !== 1) throw new UnknownFeeList("Historical settlement cursor was not confirmed");
+  const readUntil = saved[0] === null ? 0 : metadataInteger(saved[0]);
+  if (readUntil === null) throw new UnknownFeeList("Historical settlement cursor was not confirmed");
   // A day's overlap: what was settled already settles to nothing.
-  const since = Math.max(Number(saved) || 0, nowSeconds - 120 * 86_400) - 86_400;
+  const since = Math.max(readUntil, nowSeconds - 120 * 86_400) - 86_400;
   let after = "";
+  let completeRead = false, allSettled = true;
+  const cursors = new Set<string>();
   for (let page = 0; page < 20; page += 1) {
     if (Date.now() > deadline) return false;
     const list = await onAccount(
@@ -272,22 +304,28 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
       account,
       `/events?limit=100&types[0]=charge.refunded&types[1]=charge.dispute.closed&created[gte]=${Math.floor(since)}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
     );
-    const rows = Array.isArray(list.data) ? (list.data as { id?: unknown; data?: { object?: Record<string, unknown> } }[]) : [];
+    if (list.object !== "list" || typeof list.has_more !== "boolean" || !Array.isArray(list.data)
+      || list.data.length > 100 || (list.has_more && list.data.length === 0)) throw new UnknownFeeList("Historical settlement page was not confirmed");
+    const ids = new Set<string>();
+    const rows = list.data.map((raw: unknown) => {
+      const row = historicalEvent(raw);
+      if (ids.has(row.id) || row.id === after) throw new UnknownFeeList("Historical settlement event was repeated");
+      ids.add(row.id);
+      return row;
+    });
+    const last = rows.length ? rows[rows.length - 1].id : "";
+    if (list.has_more && cursors.has(last)) throw new UnknownFeeList("Historical settlement cursor did not advance");
     for (const event of rows) {
-      const object = event.data?.object ?? {};
       // A refund names its charge's fee; a dispute names its charge, whose fee is read.
-      let feeId = str(object.application_fee);
-      if (!feeId && str(object.charge)) {
-        try {
-          feeId = str((await onAccount("GET", account, `/charges/${encodeURIComponent(str(object.charge))}`, undefined, READ_VERSION)).application_fee);
-        } catch {
-          feeId = "";
-        }
+      let feeId = event.fee;
+      if (event.charge) {
+        const charge = await onAccount("GET", account, `/charges/${encodeURIComponent(event.charge)}`, undefined, READ_VERSION);
+        feeId = historicalFeeReference(charge.application_fee);
       }
-      if (!feeId) continue;
+      if (feeId === null) continue;
       try {
         const fee = readFee(await onPlatform("GET", `/application_fees/${encodeURIComponent(feeId)}`));
-        if (!fee) continue;
+        if (!fee || fee.id !== feeId || fee.account !== account) throw new UnknownAmount(feeId, "Historical application fee identity was not confirmed");
         counts.fees += 1;
         const back = await settleFee(fee, nowSeconds, live);
         if (back > 0) {
@@ -296,14 +334,17 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
         }
       } catch (error) {
         if (error instanceof BillingError && error.status === 404) continue;
+        allSettled = false;
         countSettlementFailure(counts, error);
         console.error(`settling a refunded share on ${account} failed`, error);
       }
     }
-    const last = rows.length ? str(rows[rows.length - 1].id) : "";
-    if (list.has_more !== true || !last) break;
+    if (!list.has_more) { completeRead = true; break; }
+    cursors.add(last);
     after = last;
   }
+  // Progress is committed only after the full reading and all its fees settle.
+  if (!completeRead || !allSettled) return false;
   await redisPipeline([["HSET", READ_UNTIL, ref, String(Math.floor(nowSeconds))]]);
   return true;
 }
@@ -352,8 +393,17 @@ export async function settleShares(deadline: number, nowSeconds = Date.now() / 1
     counts.complete = false;
     console.error("reading the recent shares failed", error);
   }
-  const [members, applied] = await redisPipeline([["SMEMBERS", SHARING_INDEX], ["HKEYS", APPLIED]]);
-  const refs = [...new Set([...(Array.isArray(members) ? members : []), ...(Array.isArray(applied) ? applied : [])].filter((r): r is string => typeof r === "string"))];
+  const indexes = await redisPipeline([["SMEMBERS", SHARING_INDEX], ["HKEYS", APPLIED]]);
+  if (!Array.isArray(indexes) || indexes.length !== 2 || !Array.isArray(indexes[0]) || !Array.isArray(indexes[1])
+    || ![...indexes[0], ...indexes[1]].every(ref => typeof ref === "string" && ref.trim() !== "")) {
+    const error = new UnknownFeeList("Historical settlement store indexes were not confirmed");
+    countSettlementFailure(counts, error);
+    counts.complete = false;
+    console.error("reading historical settlement stores failed", error);
+    return counts;
+  }
+  const [members, applied] = indexes as [string[], string[]];
+  const refs = [...new Set([...members, ...applied])];
   for (const ref of refs) {
     if (Date.now() > deadline) {
       counts.complete = false;
@@ -369,7 +419,7 @@ export async function settleShares(deadline: number, nowSeconds = Date.now() / 1
       if (!(await settleGivenBack(store, ref, nowSeconds, deadline, counts, live))) counts.complete = false;
       if (!(await keepMemberships(store, ref, deadline, counts, live))) counts.complete = false;
     } catch (error) {
-      counts.failed += 1;
+      countSettlementFailure(counts, error);
       console.error(`keeping the share of ${store.handle} failed`, error);
     }
   }

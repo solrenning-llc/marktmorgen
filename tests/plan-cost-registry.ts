@@ -1,4 +1,5 @@
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
+import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 /**
  * Every metered feature's per-store worst month, in one registry (added 17
  * October 2026). tests/plan-cost-model.ts sums COST_LINES into worstCost,
@@ -90,6 +91,7 @@ import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
+import { MAX_BUMPS } from "@/lib/product-extras";
 import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
@@ -104,7 +106,7 @@ import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/li
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
-  UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
+  PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
@@ -133,6 +135,68 @@ export const STREAM_STORAGE_PER_GB = 0.02;
 export const STREAM_DELIVERY_PER_GB = 0.005;
 export const FETCHED_AHEAD = 1.25;
 export const PER_EMAIL = 0.0009;
+/** DR1 unit 1 components. A priced successful delivery is not evidence of
+ * the live retry policy, total provider publications or admission funding.
+ * Lua includes EVAL and every internal command. These are disconnected
+ * sizing components, not an active plan coefficient: CX-112 keeps report
+ * reads/writes without admission and without Redis IO. Future activation
+ * must fund the entire callback lifecycle and add its retained bytes. */
+export const MAIL_REPORT_COST_COMPONENTS = {
+  firstOutcomeCommands: 8,
+  duplicateOutcomeCommands: 4,
+  reportReadCommands: 1,
+  reportReadFields: 4,
+  outcomeKindsPerSentEmail: 4,
+  bytesPerSentEmail: 2048,
+  retentionDays: 10,
+  callbackAttemptsPerEmailCeiling: null,
+  snsAndHostingMonthlyUsd: null,
+  completeMonthlyUsd: null,
+  reviewedAdmission: CURRENT_MAIL_REPORT_ADMISSION,
+} as const;
+/** One published delivery notice, without supplier free-tier credit:
+ * SNS $0.50/million publishes + $0.60/million HTTPS deliveries, each 64 KiB
+ * chunk charged. Read 2026-11-04: aws.amazon.com/sns/faqs/ and /sns/pricing/.
+ * The caller MUST supply its regional data-out ceiling; null is unknown.
+ * This is an explicit sizing calculation, never a current account review.
+ * A retry is charged the full route envelope even when deduplication wins.
+ * Thirty CPU seconds and 2 GB held for all 30 seconds use maxDuration, not
+ * an observed fast callback. Eleven Redis commands = SET/INCR rate guard,
+ * SET SNS receipt, EVAL plus its seven internal report commands. Storage
+ * includes two report fields kept ten days and two 256-byte transport/guard
+ * records per attempt kept a full day (above the actual minute-long guard).
+ * Report fields are also in the data-family model: deliberately overlapping
+ * reserves, never a discount to another feature's existing storage budget.
+ */
+export function mailReportCallbackCost(deliveries: number, attempts: number, snsTransferPerGb: number | null) {
+  if (!Number.isSafeInteger(deliveries) || deliveries < 0 ||
+      !Number.isSafeInteger(attempts) || attempts < 1 || attempts > 101 ||
+      typeof snsTransferPerGb !== "number" || !Number.isFinite(snsTransferPerGb) || snsTransferPerGb <= 0 ||
+      !Number.isSafeInteger(deliveries * attempts)) return null;
+  const invocations = deliveries * attempts;
+  const redisCommands = invocations * 11;
+  if (!Number.isSafeInteger(redisCommands)) return null;
+  // Five chunks for an accepted 300,000-byte envelope, plus transport
+  // headers. An oversized/rejected publication is outside this delivery
+  // scenario; it does not become a free event or funded company expense.
+  // Count a cold certificate fetch's 20,000 bytes on every attempt as well.
+  const snsPerNotice = 5 * 0.5 / 1_000_000;
+  const snsPerAttempt = 5 * 0.6 / 1_000_000 + 320_000 * snsTransferPerGb / 1e9;
+  // Include CDN request and BOTH incoming and outgoing Fast Origin/Data
+  // Transfer; model 32 KiB of headers plus 300,000 request/128 response bytes.
+  // Regional account coverage still needs an independent review.
+  const networkBytes = 300_000 + 128 + 32_768;
+  const hostingPerAttempt = CALL + 30 * CPU_SECOND + 30 * MEMORY_SECOND + 2 / 1_000_000
+    + networkBytes * (ORIGIN_PER_BYTE + 0.15 / 1e9);
+  const redisPerAttempt = 11 * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
+  const retainedPerNotice = 512 * 10 / 30 * DB_BYTE_MONTH;
+  const snsUsd = deliveries * (snsPerNotice + attempts * snsPerAttempt);
+  const hostingUsd = invocations * hostingPerAttempt;
+  const redisUsd = deliveries * (attempts * redisPerAttempt + retainedPerNotice);
+  const totalUsd = deliveries * ((snsPerNotice + attempts * (snsPerAttempt + hostingPerAttempt + redisPerAttempt) + retainedPerNotice) * (1 + PROVIDER_CHARGES_BPS / 10_000));
+  if (!Number.isFinite(totalUsd)) return null;
+  return { notices: deliveries, invocations, redisCommands, snsUsd, hostingUsd, redisUsd, providerAllowanceUsd: totalUsd - snsUsd - hostingUsd - redisUsd, totalUsd };
+}
 /** An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). */
 export const ORDER_COMPUTE = 0.0003;
 /**
@@ -605,6 +669,24 @@ export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
 export const PATH_READ = request("heavy", 26, LIFE_WRITE_MAX * 96 + 20_480) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 
 /**
+ * Review ceilings for a collection page's reads, paid for since 4 November 2026
+ * (lib/page-read-rules.ts). What working through a body costs past what a
+ * request's shape holds, a heavy request's CPU and wait for each megabyte.
+ */
+const bodyWork = (bytes: number) => bytes * DB_BYTE + (bytes / 1e6) * (SHAPES.heavy.cpu * CPU_SECOND + SHAPES.heavy.seconds * MEMORY_SECOND);
+/** A product's listing. */
+export const READ_LISTING_BYTES = 16_384;
+/** One product on a collection page past its drawing: its stock, its keys and the bundles holding it (four commands), and its listing, those its checkout boxes offer and a bundle's. */
+export function collectionRead(products: number): number {
+  return products * (4 * COMMAND + bodyWork((2 + MAX_BUMPS) * READ_LISTING_BYTES));
+}
+
+/** The items the bundles on a collection page hold, read to show them (lib/bundles.ts, offeredItems): each one's listing, one command each. */
+export function bundleItemRead(items: number): number {
+  return items * (COMMAND + bodyWork(READ_LISTING_BYTES));
+}
+
+/**
  * Review ceilings for a community search and the walk of its archive, paid
  * for since 4 November 2026 (lib/community-read-rules.ts). What working
  * through a body costs past what a request's shape holds, a heavy request's
@@ -965,6 +1047,10 @@ export const COST_LINES: CostLine[] = [
     },
     sources: [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
+      // A collection's products paid before they are read, and a license check before it reads the product (4 November 2026).
+      { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
+      { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
+      { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },

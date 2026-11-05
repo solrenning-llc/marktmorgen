@@ -22,5 +22,5 @@ Não liberado por causa do MÉDIO acima; exige retorno no head corrigido, duas r
 - 28 ligados:1154 verificações/testes reportados, todos verdes. Arquivos:blob-download-attachment,closing-cost,closing-families,closing-plan-guard,closing-plan-routes,closing-refunds-unknown,delivery-check-rules,delivery-faq,delivery-watch,file-download-refusals,order-data,outreach-faq,outreach,plan-closing-news,plan-closing,plan-cost-registry,plan-margin,store-closing-fair,store-data-registry,store-data,stream-measurement,stream,traffic-admission,traffic,usage-meter,vault-upload,vault,watch.
 - ESLint de18 caminhos e prova/runner:zero. Scanner público3807 rastreados/zero; git diff --check zero.
 - Comando:node tests/g-2697-run.mjs g-2697-outreach-snapshot.proof.ts. Launcher usa mkdtemp distinto por execução, evitando colisões.
-- TSC global ainda em execução na gravação inicial deste relatório; resultado será registrado separadamente, sem alegar aprovação antecipada.
+- TSC global executado, exit2: somente seis TS2304 Cannot find name LayoutProps em app/[handle]/layout.tsx (3), app/layout.tsx, app/signin/layout.tsx e app/studio/layout.tsx, todos fora dos18caminhos do delta. Não declaro tsc global verde nem geração de tipos Next/browser/build executada.
 - Sem Redis nativo, browser, fornecedor real, pagamento ou CI do autor.

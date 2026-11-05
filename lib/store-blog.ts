@@ -56,10 +56,15 @@ function blogReplies(reply: unknown, size: number): unknown[] | null {
 }
 
 /** Each mutation changes at most one member; the last reply is the confirmed total. */
-function changedTotal(reply: unknown): number | null {
+function confirmedMutation(reply: unknown): { total: number | null } | null {
   const values = blogReplies(reply, 4);
   if (!values || values.slice(0, 3).some((value) => value !== 0 && value !== 1)) return null;
-  return countOf(values[3]);
+  return { total: countOf(values[3]) };
+}
+
+/** The write may have happened; callers must ask the creator to check before repeating it. */
+export class BlogWriteUnconfirmed extends Error {
+ constructor() { super("The blog change could not be confirmed"); this.name = "BlogWriteUnconfirmed"; }
 }
 
 export type PostMeta = {
@@ -237,7 +242,7 @@ export async function readPosts(statsId: string | null, metas: PostMeta[]): Prom
   return out;
 }
 
-export type SaveResult = { ok: true; post: Post; published: number } | { ok: false; reason: "title" | "body" | "full" | "unknown" | "off" };
+export type SaveResult = { ok: true; post: Post; published: number | null } | { ok: false; reason: "title" | "body" | "full" | "unknown" | "unconfirmed" | "off" };
 
 /**
  * Writes a post: a new one when `id` is null, else the one with that id. A
@@ -274,27 +279,28 @@ export async function savePost(
   // Its room first: the post's two records and its place among the published, counted as it now is.
   const bodyJson = JSON.stringify({ body: input.body, product: input.product });
   await needData(room, [{ slot: `bl:${postId}`, bytes: dataBytes([JSON.stringify(meta), bodyJson], 3), set: true }]);
-  const total = changedTotal(await redisPipeline([
+  const changed = confirmedMutation(await redisPipeline([
     ["HSET", metaKey(statsId), postId, JSON.stringify(meta)],
     ["HSET", bodyKey(statsId), postId, bodyJson],
     input.draft ? ["ZREM", pubKey(statsId), postId] : ["ZADD", pubKey(statsId), publishedAt, postId],
     ["ZCARD", pubKey(statsId)],
   ]));
   // The write may have happened: retain its room and report uncertainty, never a fabricated count.
-  if (total === null) return { ok: false, reason: "unknown" };
-  return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: total };
+  if (changed === null) return { ok: false, reason: "unconfirmed" };
+  return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: changed.total };
 }
 
 /** Removes a post for good. Says how many are published after it. */
 export async function deletePost(statsId: string | null, id: string, room: DataStore): Promise<number | null> {
   if (!statsId || !isRedisConfigured() || !POST_ID.test(id)) return null;
-  const total = changedTotal(await redisPipeline([
+  const changed = confirmedMutation(await redisPipeline([
     ["HDEL", metaKey(statsId), id],
     ["HDEL", bodyKey(statsId), id],
     ["ZREM", pubKey(statsId), id],
     ["ZCARD", pubKey(statsId)],
   ]));
-  if (total === null) return null;
+  if (changed === null) throw new BlogWriteUnconfirmed();
   await giveData(room, [{ slot: `bl:${id}`, bytes: 0, set: true }]);
-  return total;
+  if (changed.total === null) throw new BlogWriteUnconfirmed();
+  return changed.total;
 }

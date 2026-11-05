@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { ensureStatsId, setPostCount } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_POST_BODY, cleanPost, deletePost, savePost } from "@/lib/store-blog";
+import { BlogWriteUnconfirmed, MAX_POST_BODY, cleanPost, deletePost, savePost } from "@/lib/store-blog";
 import { outlinePromptsLeft } from "@/lib/blog-outline";
 
 /**
@@ -35,10 +35,11 @@ export async function POST(request: NextRequest) {
     if (input.product && !(await readListing(store, input.product))) input.product = null;
     const id = typeof body.id === "string" && body.id ? text(body.id, 20) : null;
     const saved = await savePost(store.statsId, id, input, () => randomBytes(5).toString("hex"), store);
-    if (!saved.ok) return fail(saved.reason, saved.reason === "unknown" ? 404 : 400);
-    await setPostCount(guarded.ref, saved.published);
-    return Response.json({ ok: true, post: saved.post });
+    if (!saved.ok) return fail(saved.reason, saved.reason === "unknown" || saved.reason === "unconfirmed" ? 503 : 400);
+    if (saved.published !== null) await setPostCount(guarded.ref, saved.published);
+    return Response.json({ ok: true, post: saved.post, countUnavailable: saved.published === null });
   } catch (error) {
+    if (error instanceof BlogWriteUnconfirmed) return fail("unconfirmed", 503);
     // What does not fit in the store's data room is not written (lib/store-data.ts).
     if (error instanceof StoreFullError) return fail("store_full", 409);
     console.error("saving a blog post failed", error);

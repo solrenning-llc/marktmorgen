@@ -1971,8 +1971,16 @@
       "status": "not yet reviewed for this programme"
     },
     {
+      "source": "app/help/layout.tsx",
+      "status": "AAA review not completed"
+    },
+    {
       "source": "app/layout.tsx",
       "status": "not yet reviewed for this programme"
+    },
+    {
+      "source": "app/platform/[slug]/layout.tsx",
+      "status": "AAA review not completed"
     },
     {
       "source": "app/signin/layout.tsx",

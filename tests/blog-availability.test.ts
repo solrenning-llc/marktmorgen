@@ -107,6 +107,7 @@ async function main(){
   is(`unreadable ${field}:${String(value)} is not projected as published`,refused,true);
   const changed=await savePost(metadataStats,keptId,input,()=>{throw Error("no new id on update");},ROOM);
   is(`unreadable ${field}:${String(value)} cannot authorize an edit`,changed.ok,false);
+  is(`unknown ${field}:${String(value)} keeps its original stored bytes`,await redis.pipeline([["HGET",key,keptId]]),[JSON.stringify({...valid,[field]:value})]);
  }
  await redis.pipeline([["HSET",key,keptId,String(raw)]]);
  await savePost(metadataStats,null,{...input,title:"Other confirmed post",body:"Other content stays."},()=>otherId,ROOM);

@@ -930,7 +930,8 @@ export class MemoryRedis {
       case "DEL": {
         // DEL takes several keys.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        // The key's expiry goes with it, as in Redis: a key made again has none.
+        for (const one of [key, ...args]) if (this.data.delete(one)) { gone += 1; this.until.delete(String(one)); }
         return gone;
       }
       case "EXISTS":

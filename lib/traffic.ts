@@ -280,10 +280,13 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
   // set as it is.
   const reply = await redisPipeline([["INCRBY", key, units], ["EXPIRE", key, keepSecondsFor(window, now), "NX"]]);
   // Only Redis's own answer to these two commands counts (Codex G2 on #2583):
-  // two replies, the first an integer at least `units`, the second 0 or 1.
-  // Anything else, a `true`, a text or a missing item, is a count that cannot
-  // be made: the request is refused.
-  const n = Array.isArray(reply) && reply.length === 2 && typeof reply[0] === "number" && (reply[1] === 0 || reply[1] === 1) ? reply[0] : NaN;
+  // two replies, the first an integer at least `units`, the second 0 or 1,
+  // and 1 when the count was just made (a key INCRBY creates has no expiry,
+  // so NX sets one; nothing else writes this key). Anything else, a `true`,
+  // a text, a missing item or a new count Redis says kept an expiry, is a
+  // count that cannot be made: the request is refused.
+  const ok = Array.isArray(reply) && reply.length === 2 && typeof reply[0] === "number" && (reply[0] === units ? reply[1] === 1 : reply[1] === 0 || reply[1] === 1);
+  const n = ok ? (reply[0] as number) : NaN;
   if (!Number.isSafeInteger(n) || n < units) return false;
   return n <= limit;
 }
@@ -362,8 +365,12 @@ export async function takeSignal(store: Store, write: () => Promise<boolean> = a
     if (client && (await overShare(signalShareKey, pool === "paid" ? "paid" : "signal", folder, window, clientDayShare(limit), client, 1, now))) return refuse();
     key = (pool === "paid" ? paidArrivalsKey : signalsKey)(folder, window.id);
     keep = keepSecondsFor(window, now);
-    const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, keep, "NX"]]);
-    const n = Number(count);
+    const reply = await redisPipeline([["INCR", key], ["EXPIRE", key, keep, "NX"]]);
+    // Only Redis's own answer to these two commands counts (CX-123, rule 24):
+    // two replies, an integer of at least one and 0 or 1. A count that went
+    // back to nothing keeps its expiry, so a new one may answer 0 here.
+    // Anything else is a count that cannot be made: nothing is written.
+    const n = Array.isArray(reply) && reply.length === 2 && (reply[1] === 0 || reply[1] === 1) && typeof reply[0] === "number" ? reply[0] : NaN;
     if (!Number.isSafeInteger(n) || n < 1) return refuse();
     if (n > limit) {
       const [left] = await redisPipeline([["DECR", key], ["EXPIRE", key, keep, "NX"]]);

@@ -582,7 +582,7 @@ async function main(): Promise<void> {
     },
     "notes": { add: "open:adds", remove: "act:stats" },
     "numbers-links": "need:settings",
-    "option": { add: "open:adds", edit: "open:edits", remove: "act:products" },
+    "option": { add: "open:adds", count: "open:reads", edit: "open:edits", remove: "act:products", sale: "open:reversible" },
     "outreach": { draft: "open:adds", drop: "act:draft", edit: "open:edits", find: "open:reads", sender: "open:edits", status: "open:edits" },
     "page-funnels": { "from-type": "open:adds", remove: "act:products" },
     "path": { forget: "need:delete", remind: "need:settings", start: "need:settings", wording: "need:settings" },

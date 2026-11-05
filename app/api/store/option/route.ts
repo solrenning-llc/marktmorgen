@@ -6,15 +6,18 @@ import {
   editOption,
   moveOption,
   removeOption,
+  setOptionOnSale,
   type OptionResult,
 } from "@/lib/store";
+import { readProduct } from "@/lib/catalog";
+import { membersOnOption, membershipNumbersPaid } from "@/lib/membership-numbers";
 import { MAX_OPTION_DETAILS, MAX_OPTION_DETAIL_LENGTH, MAX_OPTION_LABEL_LENGTH } from "@/lib/product-option";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { readOptionDirection } from "@/lib/option-request";
 
-const ACTIONS = new Set(["add", "edit", "remove", "move"]);
+const ACTIONS = new Set(["add", "edit", "remove", "move", "sale", "count"]);
 
 /** How firmly to answer when a change is refused. */
 const STATUS: Record<string, number> = {
@@ -24,7 +27,9 @@ const STATUS: Record<string, number> = {
 };
 
 /**
- * Adds, changes, reorders or removes one price option on a product.
+ * Adds, changes, reorders or removes one price option on a product, takes
+ * one off sale or puts it back ("sale"), or says how many members are on
+ * each of a product's options ("count").
  *
  * A price is set here and read back on the server at checkout, never sent by
  * the buyer, so this route is the only place an amount enters. The file an
@@ -52,6 +57,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // How many members are on each option, from the kept membership reading only
+    // (642 [WG2]): Stripe is never read here, so a store with nothing kept, or a
+    // reading kept before options were counted, gets null (unknown), never 0.
+    if (action === "count") {
+      const product = await readProduct(guarded.store, id);
+      if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      const kept = await membershipNumbersPaid(guarded.store, async () => false).catch(() => null);
+      const numbers = kept === "refused" ? null : kept;
+      const members = Object.fromEntries(product.options.map((option) => [option.id, membersOnOption(numbers, product.id, option.id)]));
+      return Response.json({ ok: true, members });
+    }
+
     let result: OptionResult;
     // What the option includes arrives as one block of lines. Bounded here
     // before it reaches the store, which bounds it again as it saves.
@@ -71,6 +88,12 @@ export async function POST(request: NextRequest) {
       result = await addOption(ref, id, label, price, { details, best, sku });
     } else if (action === "edit") {
       result = await editOption(ref, id, label, price, { details, best, sku });
+    } else if (action === "sale") {
+      // Exactly a boolean: anything else could put an option on sale by mistake.
+      if (typeof body.onSale !== "boolean") {
+        return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      }
+      result = await setOptionOnSale(ref, id, body.onSale);
     } else if (action === "remove") {
       result = await removeOption(ref, id);
     } else {

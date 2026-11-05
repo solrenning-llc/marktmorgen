@@ -25,6 +25,8 @@ import { ProductUpdateBox } from "@/components/product-update-box";
 import { ShippingEditor } from "@/components/shipping-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
 import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
+import { membersOn, readOptionMembers, type OptionMembers } from "@/lib/option-members";
+import Link from "next/link";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
 import { ProductImageEditor } from "@/components/product-image-editor";
 import type { CoverLook } from "@/components/cover-maker";
@@ -915,6 +917,32 @@ function OptionsBlock({
   // Shipped by the creator (lib/shipping.ts): each price is a size or a version of the same thing, with nothing to attach.
   const shipped = Boolean(product.shipping);
   const [error, setError] = useState<string | null>(null);
+  // A membership on a price taken off sale goes on being billed (642 [WG2]); the
+  // studio says how many still pay on each, from the kept reading only (never
+  // Stripe). Asked only when one is off sale; unknown is never shown as 0.
+  const recurring = Boolean(product.recurring);
+  const offSaleIds = product.options.filter((option) => option.offSale).map((option) => option.id).join(",");
+  const [members, setMembers] = useState<OptionMembers | null>(null);
+  useEffect(() => {
+    if (!recurring || !offSaleIds) return;
+    let live = true;
+    fetch("/api/store/option", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "count", id: product.id }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => {
+        if (live) setMembers(readOptionMembers(data));
+      })
+      .catch(() => {
+        if (live) setMembers(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [recurring, offSaleIds, product.id]);
+  const allOffSale = product.options.length > 0 && product.options.every((option) => option.offSale);
 
   async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string) {
     if (inFlight.current) return;
@@ -1108,6 +1136,12 @@ function OptionsBlock({
         </p>
       )}
 
+      {allOffSale ? (
+        <p className="mt-2 text-sm font-semibold text-danger">
+          Every price is off sale, so nobody can buy this now. Put one back on sale to sell it again.
+        </p>
+      ) : null}
+
       <ul className="mt-3 space-y-2">
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
@@ -1189,6 +1223,9 @@ function OptionsBlock({
                     {option.best ? (
                       <span className="ml-2 rounded-full bg-lilac px-2 py-0.5 text-xs font-bold text-violet-deep">Recommended</span>
                     ) : null}
+                    {option.offSale ? (
+                      <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs font-bold text-ink">Off sale</span>
+                    ) : null}
                   </p>
                   <p className="font-semibold tabular-nums text-ink">
                     {formatMoney(option.priceCents, currency)}
@@ -1204,6 +1241,32 @@ function OptionsBlock({
                     ))}
                   </ul>
                 ) : null}
+
+                {option.offSale ? (() => {
+                  const count = membersOn(members, option.id);
+                  return (
+                    <div className="mt-1 text-sm text-ink">
+                      <p>
+                        {recurring
+                          ? "New buyers can’t pick this price. Members who already pay on it keep it and are billed as before. An invite to move a member onto it from another platform can’t be used while it is off sale."
+                          : "New buyers can’t pick this price. People who already bought it keep what they bought."}
+                      </p>
+                      {recurring ? (
+                        count === null ? (
+                          <p className="mt-1">
+                            <Link href="/studio/memberships" className="font-bold underline underline-offset-4">
+                              See who still pays on this price in Memberships
+                            </Link>
+                          </p>
+                        ) : (
+                          <p className="mt-1 font-semibold">
+                            {count === 1 ? "1 member still pays on it here." : `${count} members still pay on it here.`}
+                          </p>
+                        )
+                      ) : null}
+                    </div>
+                  );
+                })() : null}
 
                 {!opens && !option.file && !option.link ? (
                   /*
@@ -1256,6 +1319,21 @@ function OptionsBlock({
                     className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     Move down
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      run(
+                        { action: "sale", id: option.id, onSale: option.offSale === true },
+                        () => {},
+                        option.offSale ? `${option.label} is back on sale.` : `${option.label} is off sale. Anyone who already has it keeps it.`,
+                      )
+                    }
+                    className="inline-flex min-h-12 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                  >
+                    {option.offSale ? "Put back on sale" : "Take off sale"}
+                    <span className="sr-only">{`: ${option.label}`}</span>
                   </button>
                   {removingId === option.id ? null : (
                     <button

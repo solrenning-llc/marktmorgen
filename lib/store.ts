@@ -4397,3 +4397,25 @@ export async function setExitOffer(email: string, productId: string | null): Pro
   });
   return result ?? { ok: false, reason: "none" };
 }
+
+/**
+ * Takes one price option off sale, or puts it back (642 [WG2]). Only the
+ * flag changes: the option keeps its id, price, file, link and lines, so
+ * whoever already bought it keeps what they have and a membership on it is
+ * billed exactly as before (Stripe is never called here). Off sale, it leaves
+ * every page and checkout (sellableOptions); back on sale, the flag is gone.
+ * Asking for what it already is changes nothing.
+ */
+export async function setOptionOnSale(email: string, id: string, onSale: boolean): Promise<OptionResult> {
+  return onOption(email, id, (product, at) => {
+    if ((product.options[at].offSale === true) !== onSale) return null;
+    const options = product.options.map((option, index) => {
+      if (index !== at) return option;
+      if (!onSale) return { ...option, offSale: true as const };
+      const kept = { ...option };
+      delete kept.offSale;
+      return kept;
+    });
+    return { product: { ...product, options }, removed: [] };
+  });
+}

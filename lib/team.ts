@@ -76,6 +76,16 @@ function withTeam<T>(sid: string, work: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * Runs work with the team's lock held, for what must see the team as no
+ * change half done leaves it (lib/api-key-pause.ts leftTeam: a move between
+ * rewriting its keys and saving the team). Never from inside another change
+ * to the same team, which already holds the lock.
+ */
+export function withTeamLock<T>(sid: string, work: () => Promise<T>): Promise<T> {
+  return withTeam(sid, work);
+}
+
+/**
  * The same lock, for a change outside this file that must see the team as it
  * is while it writes (639 [GL7](7): a teammate's pipeline access, so a
  * sign-in moving at the same moment never leaves the new address without
@@ -132,7 +142,8 @@ export type LogLine = {
 
 const EMPTY: Team = { members: [], invites: [] };
 
-function parseTeam(raw: unknown): Team {
+/** A team record as read, keeping only members and invitations the studio accepts (a valid address and role, MAX_TEAM at most); lib/api-keys.ts reads the team with it too. */
+export function parseTeam(raw: unknown): Team {
   if (typeof raw !== "string" || !raw) return { members: [], invites: [] };
   try {
     const value = JSON.parse(raw) as { members?: unknown; invites?: unknown };
@@ -445,16 +456,32 @@ export async function setMemberRole(store: Store, email: string, rawRole: unknow
   const role = parseTeamRole(rawRole);
   if (!role) return { ok: false, reason: "role" };
   const address = normaliseEmail(email);
+  // Loaded here, as lib/api-key-pause.ts reads the team through this file.
+  const { roleChanged, tellOwnerOfRole, undoPause } = await import("@/lib/api-key-pause");
   return withTeam(store.sid, async () => {
     const team = await readTeam(store.sid);
     const member = team.members.find((m) => m.email === address);
     if (!member) return { ok: false as const, reason: "unknown" as const };
     if (member.role === role) return { ok: false as const, reason: "same" as const };
-    await saveTeam(store.sid, {
-      members: team.members.map((m) => (m.email === address ? { ...m, role } : m)),
-      invites: team.invites,
-    });
-    return { ok: true as const, before: member.role, role };
+    // API keys the new role may not hand out wait for the owner (owner C3-100), paused before the role is
+    // saved, under the same lock: if this fails, the role is not changed; if the save fails, the pause is undone.
+    const paused = await roleChanged(store, address, role);
+    try {
+      await saveTeam(store.sid, {
+        members: team.members.map((m) => (m.email === address ? { ...m, role } : m)),
+        invites: team.invites,
+      });
+    } catch (error) {
+      await undoPause(store, paused).catch((undo: unknown) => console.error("undoing the API keys paused for a role change failed", undo));
+      throw error;
+    }
+    return { ok: true as const, before: member.role, role, unrecorded: paused.filter((p) => p.kind === "unrecorded").map((p) => p.name), unmatched: paused.filter((p) => p.kind === "unmatched").map((p) => p.name) };
+  }).then(async (result) => {
+    // Keys nobody is recorded as making, paused as they may be this teammate's, may be the owner's own: told.
+    if (!result.ok) return result;
+    const { unrecorded, unmatched, ...done } = result;
+    if (unrecorded.length || unmatched.length) await tellOwnerOfRole(store, address, unrecorded, unmatched).catch((error: unknown) => console.error("telling the owner which API keys a role change paused failed", error));
+    return done;
   });
 }
 
@@ -490,18 +517,62 @@ export async function putMember(store: Store, email: string, role: TeamRole): Pr
   return added;
 }
 
-/** Takes someone off the team, whether the owner does it or they leave. */
-export async function removeMember(store: Store, email: string): Promise<boolean> {
+/** A teammate was taken off the team but their API keys could not all be paused after: the removal is to be repeated. */
+export class KeysNotSwept extends Error {
+  constructor() {
+    super("The API keys of a teammate taken off the team could not all be paused; repeat the removal.");
+    this.name = "KeysNotSwept";
+  }
+}
+
+/**
+ * Takes someone off the team, whether the owner does it or they leave. Every
+ * API key they made is paused, whatever the team's two-step rule (owner
+ * C3-100, lib/api-key-pause.ts leftTeam): a key outlives the person who made
+ * it, and only the owner may revoke it now. Done before the team is written,
+ * and again after, so a key they made in between is caught too (one written
+ * after that is checked by the route that made it, lib/api-key-pause.ts
+ * afterMake). If the first cannot be done, nobody is taken off. If the
+ * second cannot, they are off the team but the sweep is not finished: this
+ * throws KeysNotSwept, and the route asks for the removal to be repeated,
+ * which runs the sweep again even for an address no longer on the team (it
+ * then answers false). The owner is emailed which keys were paused and why.
+ */
+export async function removeMember(store: Store, email: string, options: { repeat?: boolean } = {}): Promise<boolean> {
   const address = normaliseEmail(email);
-  const removed = await withTeam(store.sid, async () => {
-    const team = await readTeam(store.sid);
-    if (!team.members.some((m) => m.email === address)) return false;
-    await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
-    // What they could do with each pipeline (639 [GL7](7)) goes with them, under the same lock, so someone
-    // added back at once and restricted again never has that new restriction deleted by this removal.
-    await forgetPipelineAccess(store, address).catch(() => {});
-    return true;
-  });
+  // Somebody not on the team is swept only for a removal being repeated (the route reads that from the log):
+  // a mistyped address pauses nothing and emails nobody.
+  if (!options.repeat && !(await readTeam(store.sid)).members.some((m) => m.email === address)) return false;
+  // Loaded here, as lib/api-key-pause.ts reads the team through this file.
+  const { leftTeam, tellOwnerOfExit, undoExit } = await import("@/lib/api-key-pause");
+  const first = await leftTeam(store, address);
+  let removed: boolean;
+  try {
+    removed = await withTeam(store.sid, async () => {
+      const team = await readTeam(store.sid);
+      if (!team.members.some((m) => m.email === address)) return false;
+      await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
+      // What they could do with each pipeline (639 [GL7](7)) goes with them, under the same lock, so someone
+      // added back at once and restricted again never has that new restriction deleted by this removal.
+      await forgetPipelineAccess(store, address).catch(() => {});
+      return true;
+    });
+  } catch (error) {
+    // The team was not written: if they are still on it (read again, under the lock), the first sweep is undone,
+    // so nobody stays on the team with keys held for good (owner C3-121). Unreadable, nothing is assumed.
+    await undoExit(store, address, first.attempt).catch((undo: unknown) => console.error("undoing the sweep of a removal that did not happen failed", undo));
+    throw error;
+  }
+  let second: Awaited<ReturnType<typeof leftTeam>>;
+  try {
+    second = await leftTeam(store, address);
+  } catch (error) {
+    console.error("pausing a former teammate's API keys after taking them off failed; the removal is to be repeated", error);
+    throw new KeysNotSwept();
+  }
+  await tellOwnerOfExit(store, address, { left: [...first.left, ...second.left], unmatched: [...first.unmatched, ...second.unmatched], unrecorded: [...first.unrecorded, ...second.unrecorded] }).catch((error: unknown) =>
+    console.error("telling the owner which API keys a teammate leaving paused failed", error),
+  );
   if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
   return removed;
 }
@@ -621,12 +692,26 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
       // its restrictions.
       try {
         await copyPipelineAccess(store, before, after);
+        // The API keys they made follow them (owner C3-100); left behind, they would read as a former teammate's.
+        // Cut short, the keys already moved are moved back, so they and the membership stay on the old address together.
+        const { movedMaker } = await import("@/lib/api-key-pause");
+        await movedMaker(sid, before, after).catch(async (error: unknown) => {
+          await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
+          throw error;
+        });
       } catch (error) {
-        console.error("copying pipeline access failed; the membership stays on the old address", error);
+        console.error("copying pipeline access or the maker of their API keys failed; the membership stays on the old address", error);
         stayed.push(sid);
         return null;
       }
-      await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
+      try {
+        await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
+      } catch (error) {
+        // Not saved: the keys go back to the old address with the membership.
+        const { movedMaker } = await import("@/lib/api-key-pause");
+        await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
+        throw error;
+      }
       // The old address's restrictions go only once the team names the new one, still under the lock, so
       // someone who joins on the old address at once and is restricted never has that restriction deleted.
       await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));

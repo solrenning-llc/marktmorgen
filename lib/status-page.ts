@@ -14,14 +14,21 @@
  * that cannot be read is dropped (never counted as a pass), and a database
  * that does not answer makes every check Unknown.
  *
- * Its cost is the company's (a fixed cost, MR item 2): the page is put
- * together ahead of time and again at most once every
- * STATUS_REVALIDATE_SECONDS, whoever opens it, so its reads are bounded by
- * that schedule (STATUS_REBUILDS_MONTH_MAX a month, STATUS_READ_COMMANDS
- * each), not by its visitors. tests/status-page.test.ts prices the month.
+ * Its cost is the company's (MR item 2). The page is drawn for each request,
+ * with no host page cache (no source in this repository prices one). Each
+ * request first counts itself in its hour (STATUS_COUNT_COMMANDS); only the
+ * first STATUS_VIEWS_PER_HOUR of an hour read the runs
+ * (STATUS_READ_COMMANDS more). Past that, a request reads nothing more and
+ * the page says the results were not read and from when they are read
+ * again. tests/status-page.test.ts prices both kinds of request at the
+ * rates of lib/spend-cost-table.ts and tests/traffic-cost.ts: the reading
+ * ones are bounded by the hour's count, the counted-only ones cost a fixed
+ * amount each, and their number past that is the host firewall's to stop,
+ * as for every store page (lib/traffic-rules.ts, clientDayShare).
  *
- *   nl:mail-check:runs     list  {"at":<ms>,"ok":<bool>}, newest first
- *   nl:stripe-check:runs   list  the same, for the Stripe check
+ *   nl:mail-check:runs       list    {"at":<ms>,"ok":<bool>}, newest first
+ *   nl:stripe-check:runs     list    the same, for the Stripe check
+ *   nl:status:views:<hour>   string  the hour's requests, kept two hours
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
@@ -41,12 +48,18 @@ export const STATUS_RUNS_SECONDS = 70 * 86_400;
 export const STATUS_WINDOW_DAYS = 30;
 /** A result older than this is not today's: the check is Unknown. Daily runs, with half a day of room. */
 export const STATUS_STALE_HOURS = 36;
-/** The page is put together again at most this often (app/status/page.tsx, revalidate). */
-export const STATUS_REVALIDATE_SECONDS = 3600;
-/** Rebuilds in a month at the most: one an hour for 31 days. */
-export const STATUS_REBUILDS_MONTH_MAX = (31 * 86_400) / STATUS_REVALIDATE_SECONDS;
-/** Commands one rebuild sends: one read of each check's runs, in one pipeline. */
+/** Requests in an hour (UTC) that read the runs; past it, a request is counted and reads nothing more. */
+export const STATUS_VIEWS_PER_HOUR = 60;
+/** How long an hour's count is kept: past its hour, so a late request still finds it. */
+export const STATUS_VIEW_KEY_SECONDS = 2 * 3600;
+/** Commands every request sends to count itself: INCR and EXPIRE, in one pipeline. */
+export const STATUS_COUNT_COMMANDS = 2;
+/** Commands a reading request sends after that: one read of each check's runs, in one pipeline. */
 export const STATUS_READ_COMMANDS = STATUS_CHECKS.length;
+
+const HOUR_MS = 3_600_000;
+/** The key an hour's requests are counted in. */
+export const statusViewKey = (now: number) => `nl:status:views:${Math.floor(now / HOUR_MS)}`;
 
 export type StatusRun = { at: number; ok: boolean };
 
@@ -117,27 +130,40 @@ export function summarizeRuns(all: StatusRun[], now: number): StatusSummary {
 
 export type StatusReading = {
   builtAt: number;
+  /** True when the hour's reads were used up, so the runs were not read. */
+  busy: boolean;
   /** Whether the database answered the page's read; "unset" where no database is set up (a build without one). */
   database: "answered" | "no-answer" | "unset";
   checks: { id: (typeof STATUS_CHECKS)[number]["id"]; name: string; summary: StatusSummary }[];
 };
 
-/** One read of every check's runs, in one pipeline of STATUS_READ_COMMANDS commands. */
+/**
+ * The request counted in its hour (STATUS_COUNT_COMMANDS), then, for the
+ * first STATUS_VIEWS_PER_HOUR of the hour only, one read of every check's
+ * runs (STATUS_READ_COMMANDS), each in its own pipeline.
+ */
 export async function readStatus(now: number = Date.now()): Promise<StatusReading> {
-  const empty = (database: StatusReading["database"]): StatusReading => ({
+  const empty = (database: StatusReading["database"], busy = false): StatusReading => ({
     builtAt: now,
+    busy,
     database,
     checks: STATUS_CHECKS.map((c) => ({ id: c.id, name: c.name, summary: summarizeRuns([], now) })),
   });
   if (!isRedisConfigured()) return empty("unset");
   let answers: unknown[];
   try {
+    const key = statusViewKey(now);
+    const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, STATUS_VIEW_KEY_SECONDS]]);
+    // A count that cannot be read is not room to read.
+    const seen = Number(count);
+    if (!Number.isSafeInteger(seen) || seen < 1 || seen > STATUS_VIEWS_PER_HOUR) return empty("answered", true);
     answers = await redisPipeline(STATUS_CHECKS.map((c) => ["LRANGE", c.key, 0, STATUS_RUNS_KEPT - 1]));
   } catch {
     return empty("no-answer");
   }
   return {
     builtAt: now,
+    busy: false,
     database: "answered",
     checks: STATUS_CHECKS.map((c, i) => ({ id: c.id, name: c.name, summary: summarizeRuns(parseRuns(answers[i]), now) })),
   };
@@ -159,7 +185,11 @@ export function describeStatus(reading: StatusReading): { builtAt: string; rows:
     : reading.database === "no-answer"
       ? { what: "Database", result: "Did not answer", when: builtAt }
       : { what: "Database", result: "Unknown", when: "No database is set up where this page was put together" };
+  const nextHour = statusTime((Math.floor(reading.builtAt / HOUR_MS) + 1) * HOUR_MS);
   const rows = reading.checks.map(({ name, summary }): StatusRow => {
+    if (reading.busy) {
+      return { what: name, result: "Unknown", when: `Not read: this page was opened more than ${STATUS_VIEWS_PER_HOUR} times this hour. It reads the results again from ${nextHour}` };
+    }
     if (summary.state === "unknown") {
       return { what: name, result: "Unknown", when: `No result in the last ${STATUS_STALE_HOURS} hours` };
     }

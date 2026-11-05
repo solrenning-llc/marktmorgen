@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import {
-  STATUS_STALE_HOURS, STATUS_WINDOW_DAYS, type StatusSummary, describeStatus, readStatus, statusDate, statusTime,
+  STATUS_STALE_HOURS, STATUS_VIEWS_PER_HOUR, STATUS_WINDOW_DAYS, type StatusSummary, describeStatus, readStatus, statusDate, statusTime,
 } from "@/lib/status-page";
 
 export const metadata: Metadata = {
@@ -12,13 +12,11 @@ export const metadata: Metadata = {
 };
 
 /**
- * Put together ahead of time and again at most once an hour, whoever opens
- * it (247 [SP4] unit 2): its reads are bounded by that schedule, not by its
- * visitors (lib/status-page.ts, tests/status-page.test.ts). It shows the time
- * it was put together, so an older copy is never taken for a newer one.
+ * Drawn for each request (247 [SP4] unit 2), with no host page cache: every
+ * request is priced, and only the first STATUS_VIEWS_PER_HOUR of an hour
+ * read the results (lib/status-page.ts, tests/status-page.test.ts).
  */
-export const dynamic = "force-static";
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 const link = "text-black underline underline-offset-2 hover:no-underline";
 
@@ -53,7 +51,7 @@ export default async function StatusPage() {
         no recent result, it says &ldquo;Unknown&rdquo;, not &ldquo;Passed&rdquo;.
       </p>
       <p>
-        {`This page was put together on ${view.builtAt}. UTC is Coordinated Universal Time. The page is put together again at most once an hour, when someone opens it, so it can be older than that.`}
+        {`This page was put together on ${view.builtAt}, when you opened it. UTC is Coordinated Universal Time.`}
       </p>
 
       <LegalSection title="Results" id="results">
@@ -102,7 +100,11 @@ export default async function StatusPage() {
 
       <LegalSection title={`The last ${STATUS_WINDOW_DAYS} days`} id="history">
         <p>Every recorded run is counted. Nothing is rounded.</p>
-        {reading.checks.map((check) => <History key={check.id} name={check.name} summary={check.summary} />)}
+        {reading.busy ? (
+          <p>{`Not read this time: to keep its cost down, this page reads the results for the first ${STATUS_VIEWS_PER_HOUR} visits of each hour only.`}</p>
+        ) : (
+          reading.checks.map((check) => <History key={check.id} name={check.name} summary={check.summary} />)
+        )}
       </LegalSection>
 
       <LegalSection title="What this page does not measure" id="not-measured">

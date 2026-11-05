@@ -80,7 +80,7 @@ function ChannelRows({ result, currency }: { result: DealChannels; currency: str
           </thead>
           <tbody>
             {result.rows.map((row) => (
-              <tr key={row.channel} className="border-t border-line">
+              <tr key={row.key} className="border-t border-line">
                 <th scope="row" className="py-2 pr-4 font-semibold text-ink [overflow-wrap:anywhere]">
                   {row.name}
                 </th>
@@ -109,7 +109,7 @@ function ChannelRows({ result, currency }: { result: DealChannels; currency: str
       <p className="mt-2 text-sm text-ink-soft">
         {`Each figure is the number of deals, then the values recorded on them, in ${currency.toUpperCase()}. Nothing is weighted or forecast. A buyer's channel is the tag on the page of their first checkout, not every visit before it.`}
         {result.unplaced > 0 ? ` ${result.unplaced} ${result.unplaced === 1 ? "deal is" : "deals are"} on a stage that no longer exists and ${result.unplaced === 1 ? "is" : "are"} not counted.` : ""}
-        {result.partial ? " Some of your sales could not be read, so a buyer's channel may be missing here." : ""}
+        {result.partial ? " Some of your sales could not be read, so a buyer's channel may be missing here, and someone not found among them is counted under \u201cNot known yet\u201d, not as not having bought." : ""}
       </p>
     </>
   );

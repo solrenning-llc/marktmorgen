@@ -4,7 +4,7 @@
  * deal's email and a buyer's first channel in the ledger. Nobody is given a
  * channel they do not have; every deal is counted somewhere.
  */
-import { NOT_A_BUYER, NO_PERSON, dealChannelName, dealTotals, dealsByChannel } from "@/lib/deal-channels";
+import { dealChannelName, dealTotals, dealsByChannel } from "@/lib/deal-channels";
 import { DEFAULT_STAGES, type Deal } from "@/lib/crm-rules";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -30,7 +30,9 @@ const deals = [
 
 part("Each deal under its person's first channel");
 const result = dealsByChannel(deals, DEFAULT_STAGES, channelOf);
-const row = (channel: string) => result.rows.find((one) => one.channel === channel);
+const row = (channel: string) => result.rows.find((one) => (one.kind === "channel" ? one.channel === channel : one.kind === channel));
+const NOT_A_BUYER = "not_a_buyer";
+const NO_PERSON = "no_person";
 is("a buyer's deals under where they first came from, whatever the address's case", [row("newsletter")?.won, row("newsletter")?.open], [{ deals: 1, cents: 50_000 }, { deals: 2, cents: 20_000 }]);
 is("won and lost apart", [row("instagram")?.won, row("instagram")?.lost, row("instagram")?.open], [{ deals: 1, cents: 10_000 }, { deals: 1, cents: 9_000 }, { deals: 0, cents: 0 }]);
 is("a buyer with no channel is direct", row("direct")?.won, { deals: 1, cents: 1_000 });
@@ -40,9 +42,22 @@ is("a value that is not one counts as nothing, the deal still counted", row("new
 is("a deal on a stage that is gone is left out and counted", result.unplaced, 1);
 
 part("In an order a creator can read");
-is("the most won first", result.rows.map((one) => one.channel), ["newsletter", "instagram", "direct", NOT_A_BUYER, NO_PERSON]);
+is("the most won first", result.rows.map((one) => one.key), ["channel:newsletter", "channel:instagram", "channel:direct", NOT_A_BUYER, NO_PERSON]);
 is("names in plain words", [row("instagram")?.name, row("direct")?.name, row(NOT_A_BUYER)?.name, row(NO_PERSON)?.name], ["Instagram", "Direct or unknown", "Has not bought yet", "Nobody named on the deal"]);
-is("a tag with no name of its own is shown as it was written", [dealChannelName("podcast-ep12"), row("newsletter")?.name], ["podcast-ep12", "newsletter"]);
+is("a tag with no name of its own is shown as it was written", [dealChannelName("channel", "podcast-ep12"), row("newsletter")?.name], ["podcast-ep12", "newsletter"]);
+
+part("Codex J (#1952) 1: a campaign called like a row that is not a channel keeps its own row");
+for (const odd of ["not-a-buyer", "no-person", "not_a_buyer", "no_person", "not_known"]) {
+  const mixed = dealsByChannel([deal("e1", "fay@example.com", "won000", 10_000), deal("e2", "gus@example.com", "won000", 10_000)], DEFAULT_STAGES, (email) => (email === "fay@example.com" ? odd : null));
+  is(`a buyer from "${odd}" and someone who has not bought: two rows, never one`, mixed.rows.map((one) => [one.kind, one.channel, one.won.deals]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), [["channel", odd, 1], ["not_a_buyer", "", 1]]);
+}
+
+part("Codex J (#1952) 2: with a partial ledger, someone not found is not known, never \"has not bought\"");
+const partialRead = dealsByChannel([deal("p1", "hal@example.com", "won000", 10_000)], DEFAULT_STAGES, () => null, true);
+is("counted under Not known yet", partialRead.rows.map((one) => [one.kind, one.name, one.won.deals]), [["not_known", "Not known yet", 1]]);
+const partialHtml = renderToStaticMarkup(createElement(DealChannelsTable, { result: partialRead, currency: "usd" }));
+is("the table never says Has not bought yet then, and says why", [partialHtml.includes("Has not bought yet"), partialHtml.includes("Not known yet"), partialHtml.includes("not as not having bought")], [false, true, true]);
+is("with every sale read, the same person has not bought", dealsByChannel([deal("p1", "hal@example.com", "won000", 10_000)], DEFAULT_STAGES, () => null).rows.map((one) => one.name), ["Has not bought yet"]);
 
 part("Totals");
 is("every placed deal, by kind", dealTotals(result), { open: { deals: 4, cents: 55_000 }, won: { deals: 3, cents: 61_000 }, lost: { deals: 1, cents: 9_000 } });

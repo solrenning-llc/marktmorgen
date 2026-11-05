@@ -11,7 +11,9 @@
  *   - a deal whose person has bought here counts under that person's first
  *     channel ("Newsletter", "Instagram", "Direct or unknown"…);
  *   - a deal whose person has not bought yet counts under "Has not bought
- *     yet", never under a channel guessed for them;
+ *     yet", never under a channel guessed for them, and only when every sale
+ *     was read: with a partial ledger, one not found counts under "Not known
+ *     yet", as absence there proves nothing (Codex J, #1952);
  *   - a deal with nobody named counts under "Nobody named on the deal".
  *
  * Each row adds up open, won and lost deals by their stage's kind, the count
@@ -23,21 +25,25 @@
 import { channelName } from "@/lib/channel-names";
 import type { Deal, Stage } from "@/lib/crm-rules";
 
-/** The row of deals whose person has not bought here yet. */
-export const NOT_A_BUYER = "not-a-buyer";
-/** The row of deals with nobody named on them. */
-export const NO_PERSON = "no-person";
+/**
+ * What a row is: a buyer's first channel, or one of the rows that are not a
+ * channel. Kept apart from the channel's own text, so a campaign that happens
+ * to be called like one of them never shares its row (Codex J, #1952).
+ */
+export type RowKind = "channel" | "not_a_buyer" | "not_known" | "no_person";
 
 export type DealTally = { deals: number; cents: number };
-export type ChannelDeals = { channel: string; name: string; open: DealTally; won: DealTally; lost: DealTally };
+/** `channel` is the buyer's first channel for a channel row, "" for the others; `key` is unique among the rows. */
+export type ChannelDeals = { key: string; kind: RowKind; channel: string; name: string; open: DealTally; won: DealTally; lost: DealTally };
 export type DealChannels = { rows: ChannelDeals[]; unplaced: number; partial: boolean };
 
 const zero = (): DealTally => ({ deals: 0, cents: 0 });
 
 /** The name a row is shown under, in plain US English. */
-export function dealChannelName(channel: string): string {
-  if (channel === NOT_A_BUYER) return "Has not bought yet";
-  if (channel === NO_PERSON) return "Nobody named on the deal";
+export function dealChannelName(kind: RowKind, channel = ""): string {
+  if (kind === "not_a_buyer") return "Has not bought yet";
+  if (kind === "not_known") return "Not known yet";
+  if (kind === "no_person") return "Nobody named on the deal";
   return channelName(channel);
 }
 
@@ -63,12 +69,15 @@ export function dealsByChannel(
     }
     const email = deal.email.trim().toLowerCase();
     const first = email ? channelOf(email) : null;
-    const channel = !email ? NO_PERSON : first === null ? NOT_A_BUYER : first || "direct";
-    const row = rows.get(channel) ?? { channel, name: dealChannelName(channel), open: zero(), won: zero(), lost: zero() };
+    // Not found in a ledger that could not read every sale: not known, never "has not bought".
+    const rowKind: RowKind = !email ? "no_person" : first === null ? (partial ? "not_known" : "not_a_buyer") : "channel";
+    const channel = rowKind === "channel" ? first || "direct" : "";
+    const key = rowKind === "channel" ? `channel:${channel}` : rowKind;
+    const row = rows.get(key) ?? { key, kind: rowKind, channel, name: dealChannelName(rowKind, channel), open: zero(), won: zero(), lost: zero() };
     const cents = Number.isSafeInteger(deal.cents) && deal.cents > 0 ? deal.cents : 0;
     row[kind].deals += 1;
     row[kind].cents += cents;
-    rows.set(channel, row);
+    rows.set(key, row);
   }
   const sorted = [...rows.values()].sort((a, b) => b.won.cents - a.won.cents || b.open.cents - a.open.cents || a.name.localeCompare(b.name));
   return { rows: sorted, unplaced, partial };

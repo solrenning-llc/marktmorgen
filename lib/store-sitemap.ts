@@ -26,12 +26,51 @@ import { KIND, readListings, visibleCount } from "@/lib/catalog";
 import { collectionSegment, shownCollections } from "@/lib/store-collections";
 import { productSegment } from "@/lib/product-slug";
 import { pageOut } from "@/lib/site-page-rules";
-import { POSTS_PER_PAGE, postSegment, publishedPosts } from "@/lib/store-blog";
+import { POSTS_PER_PAGE, postSegment, publishedPosts, publishedTotal } from "@/lib/store-blog";
+import { type SitemapSize, sitemapUnits } from "@/lib/public-read-rules";
+import { takePublicRequest } from "@/lib/traffic";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 
 /** The most posts listed: far past what a store's blog holds. */
-const MAX_POSTS = 1_000;
+export const MAX_POSTS = 1_000;
+/** The most pages of posts read for them. */
+export const MAX_POST_PAGES = Math.ceil(MAX_POSTS / POSTS_PER_PAGE);
+
+/** The products a visitor can see, in the creator's order: the ones the map names. */
+function visibleIds(store: Store): string[] {
+  return store.catalog.items.filter((item) => (item.kind & KIND.hidden) === 0).map((item) => item.id);
+}
+
+/**
+ * What drawing the map reads, counted before it is read (4 November 2026,
+ * lib/public-read-rules.ts): the visible products, from the record itself,
+ * those whose listing it does not carry (read) apart from those it does (a
+ * line of the answer each, nothing read), and the pages of published posts,
+ * from one count. Null when the posts cannot be counted.
+ */
+export async function sitemapSize(store: Store): Promise<SitemapSize | null> {
+  const total = await publishedTotal(store.statsId);
+  if (total === null) return null;
+  const visible = visibleIds(store);
+  const carried = new Set(store.catalog.inline ? visible : store.catalog.head.map((listing) => listing.id));
+  const listings = visible.filter((id) => !carried.has(id)).length;
+  return { listings, carried: visible.length - listings, postPages: Math.min(MAX_POST_PAGES, Math.ceil(total / POSTS_PER_PAGE)) };
+}
+
+/**
+ * The map, paid for first: sitemapUnits of the store's public requests,
+ * taken before any listing or post is read, and no more pages of posts read
+ * than were paid for. Null when the window has no room for it (or it cannot
+ * be counted), and then nothing more is read.
+ */
+export async function paidStoreSitemap(store: Store, now = Date.now()): Promise<SitemapEntry[] | null> {
+  if (store.suspended) return [];
+  const size = await sitemapSize(store);
+  if (!size) return null;
+  if (!(await takePublicRequest(store, "public", now, sitemapUnits(size)))) return null;
+  return storeSitemap(store, Math.floor(now / 1000), size.postPages);
+}
 
 export type SitemapEntry = { url: string; lastModified?: string };
 
@@ -41,14 +80,15 @@ export function storeRoot(store: Store): string {
 }
 
 /** Every address of a store a search engine is asked to keep, in the order a visitor meets them. */
-export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.now() / 1000)): Promise<SitemapEntry[]> {
+export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.now() / 1000), postPages = MAX_POST_PAGES): Promise<SitemapEntry[]> {
   if (store.suspended) return [];
   const root = storeRoot(store);
   const own = root !== `${SITE_URL}/@${store.handle}`;
   const out: SitemapEntry[] = [];
   // The front page asks to be kept once it has something on it (app/[handle]/page.tsx).
   if (visibleCount(store) > 0 || store.links.length > 0) out.push({ url: own ? `${root}/` : root });
-  for (const product of await readListings(store)) {
+  // Only the products a visitor can see are read; the hidden ones are known from the record.
+  for (const product of await readListings(store, visibleIds(store))) {
     if (product.hidden) continue;
     out.push({ url: `${root}/p/${productSegment(product)}` });
   }
@@ -59,7 +99,7 @@ export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.no
     if (pageOut(page, nowSeconds)) out.push({ url: `${root}/${page.slug}` });
   }
   const posts = [];
-  for (let page = 1; posts.length < MAX_POSTS; page += 1) {
+  for (let page = 1; posts.length < MAX_POSTS && page <= Math.min(postPages, MAX_POST_PAGES); page += 1) {
     const { posts: some, total } = await publishedPosts(store.statsId, page);
     posts.push(...some);
     if (!some.length || page * POSTS_PER_PAGE >= total) break;

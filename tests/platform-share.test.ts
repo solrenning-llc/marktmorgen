@@ -71,6 +71,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   } else {
     const charge = path.match(/^\/charges\/([^/]+)$/);
     if (charge && method === "GET") return json(charges.get(charge[1]) ?? {});
+    if (path === "/disputes" && method === "GET") {
+      const chargeId=url.searchParams.get("charge");
+      return json({ object: "list", has_more: false, data: chargeId === "ch_E" ? [{ id: "du_ShareLost01", object: "dispute", charge: chargeId, currency: "usd", status: "lost" }] : [] });
+    }
     if (path === "/checkout/sessions" && method === "GET") {
       const found = sessions.get(url.searchParams.get("payment_intent") ?? "");
       return json({ object: "list", data: found ? [found] : [], has_more: false });
@@ -171,7 +175,7 @@ async function main(): Promise<void> {
   charges.set("ch_D", { id: "ch_D", amount: 2_000, amount_refunded: 0, disputed: false, invoice: { created: NOW - 20 * 86_400, total_excluding_tax: 2_000, subscription_details: { metadata: { store: "maker", share_bps: "625" } } } });
   // E: a $60 sale whose dispute was lost.
   fees.set("fee_E", { id: "fee_E", account: A, charge: "ch_E", amount: 375, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
-  charges.set("ch_E", { id: "ch_E", amount: 6_000, amount_refunded: 0, disputed: true, dispute: { status: "lost" }, payment_intent: { id: "pi_E", metadata: { share_bps: "625", share_base: "6000" } } });
+  charges.set("ch_E", { id: "ch_E", amount: 6_000, amount_refunded: 0, currency: "usd", disputed: true, payment_intent: { id: "pi_E", metadata: { share_bps: "625", share_base: "6000" } } });
   // F: an old sale, refunded in half yesterday, found through the refund itself.
   fees.set("fee_F", { id: "fee_F", account: A, charge: "ch_F", amount: 625, amount_refunded: 0, currency: "usd", created: NOW - 40 * 86_400 });
   charges.set("ch_F", { id: "ch_F", amount: 10_000, amount_refunded: 5_000, disputed: false, payment_intent: { id: "pi_F", metadata: { share_bps: "625", share_base: "10000" } } });

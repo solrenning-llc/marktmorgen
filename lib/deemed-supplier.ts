@@ -96,8 +96,11 @@ function ownTreatmentRecords(value: unknown): DeemedSupplierRecord[] | null {
       if (!record || typeof record !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(record))
         || Reflect.ownKeys(record).length !== keys.length) return null;
       const fields = Object.getOwnPropertyDescriptors(record);
-      const data: Record<string, unknown> = {};
+      const data: Record<string, unknown> = Object.create(null);
       for (const key of keys) {
+        // Descriptor maps have Object.prototype too: a missing field must never
+        // resolve to inherited data or execute an inherited getter.
+        if (!Object.hasOwn(fields, key)) return null;
         const field = fields[key];
         if (!field || !Object.hasOwn(field, "value")) return null;
         data[key] = field.value;

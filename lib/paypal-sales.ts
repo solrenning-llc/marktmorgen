@@ -78,7 +78,8 @@ const DECLINED = new Set(["INSTRUMENT_DECLINED", "PAYER_ACTION_REQUIRED", "ORDER
 const ownKey = (statsId: string, email: string, productId: string) => `nl:ppsell:own:${statsId}:${addressHash(email)}:${productId}`;
 /** Every paid order, scored by when it was paid, and those refunded in full: what the store's numbers read. */
 const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
-const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
+/** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
+export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
 const SALES_KEPT_SECONDS = 400 * 86_400;
 
 type Partner = { client: string; secret: string; merchant: string; bn: string };
@@ -746,6 +747,13 @@ export async function watchPayPal(
   }
   result.revoked = revoked;
   return result;
+}
+
+/** How many PayPal sales and refunds a store keeps, before they are read (lib/api-read.ts, the numbers); null when a count did not come back. */
+export async function paypalCounts(statsId: string | null): Promise<{ sales: number; refunds: number } | null> {
+  if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };
+  const [sales, refunds] = (await redisPipeline([["ZCARD", salesKey(statsId)], ["ZCARD", refundedKey(statsId)]])).map(Number);
+  return [sales, refunds].every((n) => Number.isSafeInteger(n) && n >= 0) ? { sales, refunds } : null;
 }
 
 /**

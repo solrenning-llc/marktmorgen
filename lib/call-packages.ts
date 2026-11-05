@@ -77,6 +77,17 @@ const keep = (bought: Bought): string[] => (bought.until ? ["EX", String(Math.ma
 
 const unconfirmedPackage = () => new Error("The package purchase could not be confirmed.");
 
+/** Capture paid evidence without inheriting fields or evaluating computed values. */
+function ownPackageValue(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const field = Object.getOwnPropertyDescriptor(value, key);
+  return field && Object.hasOwn(field, "value") ? field.value : undefined;
+}
+
+function ownPackageFields(value: unknown, keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.map(key => [key, ownPackageValue(value, key)]));
+}
+
 /** Only an explicit null confirms absence; a partial read cannot replace a purchase. */
 function packageReply(reply: unknown): string | null {
   if (!Array.isArray(reply) || reply.length !== 1) throw unconfirmedPackage();
@@ -94,11 +105,15 @@ export async function readBought(checkout: string): Promise<Bought | null> {
   if (raw === null) return null;
   try {
     const value = JSON.parse(raw) as Bought;
-    if (!value || [value.s, value.h, value.p, value.e].some((field) => typeof field !== "string" || !field) ||
+    if (!value || ["s", "h", "p", "e", "total", "at", "until", "token", "holds"].some(key => ownPackageValue(value, key) === undefined) ||
+      [value.s, value.h, value.p, value.e].some((field) => typeof field !== "string" || !field) ||
       !Number.isSafeInteger(value.total) || value.total < 1 || value.total > MAX_PACKAGE_SESSIONS ||
       !seconds(value.at) || !seconds(value.until) || (value.until !== 0 && value.until < value.at) ||
       typeof value.token !== "string" || !PACKAGE_TOKEN.test(value.token) || !Array.isArray(value.holds) ||
-      !value.holds.every((hold) => hold && typeof hold.session === "string" && SESSION_ID.test(hold.session) && seconds(hold.until))) throw unconfirmedPackage();
+      !value.holds.every((hold) => {
+        const session = ownPackageValue(hold, "session"), until = ownPackageValue(hold, "until");
+        return typeof session === "string" && SESSION_ID.test(session) && seconds(until);
+      })) throw unconfirmedPackage();
     return value;
   } catch {
     throw unconfirmedPackage();
@@ -211,13 +226,15 @@ type Session = {
  * its sessions. Returns the package, or null when this checkout is not one.
  */
 export async function recordPackage(input: { store: Store; session: Session; product: Listing; base: string; from: string }): Promise<Bought | null> {
-  const { store, session, product, base } = input;
-  const meta = session.metadata ?? {};
+  const { store, product, base } = input;
+  const session = ownPackageFields(input.session, ["id", "status", "payment_status", "created", "amount_total", "currency", "metadata", "customer_details"]) as Session;
+  const meta = ownPackageFields(session.metadata, ["kind", "days", "sessions"]);
+  const emailValue = ownPackageValue(session.customer_details, "email");
   const checkout = typeof session.id === "string" ? session.id : "";
   if (meta.kind !== "package" || !SESSION_ID.test(checkout) || !isSettled(session) || !store.statsId) return null;
   const existing = await readBought(checkout);
   if (existing) return existing;
-  const email = typeof session.customer_details?.email === "string" ? normaliseEmail(session.customer_details.email) : "";
+  const email = typeof emailValue === "string" ? normaliseEmail(emailValue) : "";
   if (!email) return null;
   const integer = (value: unknown): number | null => {
     if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;

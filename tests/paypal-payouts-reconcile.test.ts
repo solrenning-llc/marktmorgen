@@ -21,6 +21,7 @@
  * Synthetic only: a stand-in for PayPal that keeps idempotency keys and
  * sender_batch_ids as PayPal says it does.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { connectPayPal, onTheirWay, payWithPayPal, payoutUnknownMonth, settlePayPal } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
@@ -283,6 +284,10 @@ async function main(): Promise<void> {
     const held = JSON.parse(String((rawHeld as string[])[1])) as { m?: unknown; lines?: Record<string, unknown>[] };
     is("left for the creator's own check", held.m, 1);
     is("the address itself is never kept in the batch, only its fingerprint", JSON.stringify(held).includes("@"), false);
+    // A plain SHA-256 of an address is turned back by guessing addresses; the fingerprint is keyed with the
+    // server's own secret (Revisor 2's privacy note on #2681).
+    const plain = createHash("sha256").update("sara@example.com").digest("hex");
+    is("the fingerprint is keyed, never a plain hash of the address", JSON.stringify(held).includes(plain), false);
   }
 
   part("The same address: the retry sends the same recipients");
@@ -337,7 +342,7 @@ async function main(): Promise<void> {
 
   part("The studio says it, with the way to look in PayPal");
   const panel = readFileSync("components/paypal-payouts.tsx", "utf8");
-  is("words for a batch being checked and one that needs a manual check, and PayPal's activity page", [/being checked with PayPal/.test(panel), /check them in your PayPal activity/.test(panel), panel.includes("https://www.paypal.com/myaccount/activities/")], [true, true, true]);
+  is("words for a batch being checked and one that needs a manual check, and PayPal's activity page", [/being checked with PayPal/.test(panel), /check them in your PayPal activity/.test(panel), /href="https:\/\/www\.paypal\.com\/myaccount\/activities\/"/.test(panel)], [true, true, true]);
   const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
   is("the studio page passes both counts", [/checking=\{/.test(page), /manualCheck=\{/.test(page)], [true, true]);
   done();

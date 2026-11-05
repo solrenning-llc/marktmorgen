@@ -73,6 +73,31 @@ type Raw = PauseSub & {
 };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const natural = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+const positive = (v: unknown): v is number => natural(v) && v > 0;
+const INTERVALS = new Set(["day", "week", "month", "year"]);
+
+/** Facts needed to count and price one known running member. */
+function memberEvidence(raw: Raw) {
+  const email = raw.customer && typeof raw.customer === "object" && !Array.isArray(raw.customer) && typeof raw.customer.email === "string"
+    ? normaliseEmail(raw.customer.email)
+    : "";
+  const product = productOfSub(raw);
+  const item = Array.isArray(raw.items?.data) ? raw.items.data[0] : undefined;
+  const unitAmount = item?.price?.unit_amount;
+  const quantity = item?.quantity == null ? 1 : item.quantity;
+  const interval = item?.price?.recurring?.interval;
+  const intervalCount = item?.price?.recurring?.interval_count;
+  const periodEnd = positive(item?.current_period_end) ? item.current_period_end : positive(raw.current_period_end) ? raw.current_period_end : 0;
+  const currency = raw.currency;
+  const startDate = raw.start_date;
+  const amount = natural(unitAmount) && positive(quantity) ? unitAmount * quantity : NaN;
+  if (!email || !product || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency) ||
+      !natural(amount) || typeof interval !== "string" || !INTERVALS.has(interval) || !positive(intervalCount) ||
+      !positive(startDate) || !periodEnd || (raw.cancel_at_period_end !== undefined && typeof raw.cancel_at_period_end !== "boolean") ||
+      (raw.cancel_at != null && !natural(raw.cancel_at))) throw new Error("Membership reporting evidence could not be confirmed");
+  return { raw, email, product, amount, interval, intervalCount, periodEnd, currency };
+}
 
 /** A payment turned into a month: a year counts a twelfth, a week 52 twelfths. */
 export function monthlyOf(amount: number, interval: string, count: number): number {
@@ -117,12 +142,7 @@ export async function runningMembers(store: Store): Promise<{ rows: Raw[]; compl
 /** Every running member with a score, the lowest first. */
 export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()): Promise<MemberRow[]> {
   const nowSeconds = Math.floor(now / 1000);
-  const members = rows
-    .map((raw) => {
-      const email = raw.customer && typeof raw.customer === "object" && typeof raw.customer.email === "string" ? normaliseEmail(raw.customer.email) : "";
-      return { raw, email, product: productOfSub(raw) };
-    })
-    .filter((m) => m.email && m.product);
+  const members = rows.map(memberEvidence);
   const ids = [...new Set(members.map((m) => m.product))];
   const listings = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p]));
 
@@ -146,14 +166,10 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
   }
 
   return members
-    .map(({ raw, email, product }) => {
+    .map(({ raw, email, product, amount, interval, intervalCount, periodEnd, currency }) => {
       const listing = listings.get(product);
       const course = listing?.course?.id ?? "";
       const meta = raw.metadata ?? {};
-      const item = raw.items?.data?.[0];
-      const amount = num(item?.price?.unit_amount) * (num(item?.quantity) || 1);
-      const interval = typeof item?.price?.recurring?.interval === "string" ? item.price.recurring.interval : "month";
-      const count = num(item?.price?.recurring?.interval_count) || 1;
       // A membership sold to end after a set number of payments has its end from the start: that is not a choice to leave.
       const ending = !meta.ends_after && (raw.cancel_at_period_end === true || num(raw.cancel_at) > 0);
       const { score, factors } = scoreOf(
@@ -163,13 +179,12 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
           paused: pausedNow(raw, nowSeconds),
           courseSeen: course ? (courseSeen.get(`${course}|${email}`) ?? 0) : null,
           communitySeen: opens.has(product) ? (communitySeen.get(email) ?? 0) : null,
-          since: num(raw.start_date),
+          since: raw.start_date as number,
         },
         nowSeconds,
       );
-      // The currency it pays in, lowercased; the store's when Stripe says none, so a missing one is never counted apart.
-      const currency = typeof raw.currency === "string" && raw.currency ? raw.currency.toLowerCase() : store.currency;
-      const cents = monthlyOf(amount, interval, count);
+      const cents = monthlyOf(amount, interval, intervalCount);
+      if (!natural(cents)) throw new Error("Membership reporting amount could not be confirmed");
       return {
         sub: String(raw.id),
         email,
@@ -180,7 +195,7 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
         score,
         band: bandOf(score),
         factors,
-        periodEnd: num(item?.current_period_end) || num(raw.current_period_end),
+        periodEnd,
         ending,
         status: String(raw.status),
       };

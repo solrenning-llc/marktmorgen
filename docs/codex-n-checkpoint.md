@@ -208,3 +208,26 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 2. Integrar `main` uma vez somente depois da fronteira coordenada, preservar todos os blobs próprios, rodar contrato/ligados/tipos/lint/scanner, pedir revisão independente do head exato e exigir nove agregadores finais novos.
 3. Sem liberação, não editar helper reservado, não fazer workaround booleano/retorno parcial, não retry e não promover #2674. Continuar monitorando #2451/#2544/#2608 sem repetir jobs consumidos.
 4. Merge próprio somente `expected_head_sha` + UMA revisão aplicável sem grave/médio + NOVE agregadores exatos SUCCESS. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração proibida.
+
+
+## Retomada AV12 — 2026-11-05 21:27 UTC
+
+- Base lida PRIMEIRO e integralmente: checkpoint exato `572bd3593dd9a5012fcffb698955a98673cc3d3c`, blob `2c9c62c4834df06758d08226ae54ede8fc512b3f`. Todos os heads, REDs e retries consumidos foram preservados.
+- `main` fresco no encerramento: `fca02e475950863ea1891ff695311dfe482943a0`. Desde `c88ffeed` entraram somente os lotes documentais de reservas #2678/#2680; produto N não modificou reservas.
+- CLAUDE.md, AGENTS.md, todas as reservas e CX-104–CX-126 foram relidos. O canal integral foi lido por `fetch_file` SHA `430fe819f0d4d391feaf9e19113294a1289c5d60` + `fetch_blob`, 403904 bytes; após rotação e append, a leitura AV12 final usou SHA `1d6d435295545703173453014903d158e65a0f3c`, 64892 bytes.
+- Regra nova C1/AV12, publicada no canal às18h09 Fortaleza: quando não se conhece o próximo item, não reler a fila inteira; registrar `BLOQUEADO: preciso do próximo item`. A regra foi aplicada. O PR documental #2679 ainda não estava no main nesta leitura, mas a ordem do canal já prevalece.
+- #2451 permanece OPEN no head EXATO `bf6840e04371e0c8bcaa27674989532ff5b0ec96`, L aplicável, 8/9. Retry ÚNICO `127163240735` esgotado; nunca repetir.
+- #2544 permanece OPEN no head EXATO `447e97287e9bec0062e7878186495cb92cbdc277`, G sem achado. Nenhuma liberação A3 para `cancel_paid`25→27; não editar/retry.
+- #2608 permanece OPEN no head EXATO `8ac8975679fcb9a9c81bed065fc52a501c01904e`, oito SUCCESS. Retry ÚNICO `127378763596` CANCELLED no teto; nunca segunda. Continua faltando qualificação explícita R2 aos 11 blobs.
+- #2674 permanece OPEN no head EXATO `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3` e BLOQUEADO. R2 reiterou às17h56 que continuam abertos: `inbound-mail.ts` unknown→`skipped`/200 com e-mail perdido, e takedown/erasure over real→`error`. Nenhuma liberação/entrega Claude1/Claude4 para triestado apareceu.
+- REDs #2674 preservados: `f8911772`, `8dfabf5`; `2421674d` é inválido e não conta; RED legal válido test-only `73a1745db1b7d57c14844cccd91d2f5a2111feda`, blob `60aa1ba0`; teste produto/API `17f4f4c47031f41dfed95b887deda34ccfc34191`, blob `255aae86`. Nenhum helper reservado foi tocado, nenhum retry/merge/head move ocorreu.
+- SG2(27/30) continua somente prova test-only `3d4cb847`, bloqueado por #2270/#1969; não editar/reservar.
+- Pedido curto ao Claude1 publicado no canal no commit `846fdb47f31aed43dfe6b74248a5840d219de112`: há quinta vaga, mas nenhum item conhecido livre/acionável; pedido de próximo item ou liberação/entrega do triestado. Depois do intervalo mínimo AV12 de 60 s, uma única releitura não encontrou resposta específica para N. Não houve nova sondagem.
+- O controlador compartilhado #2632 avançou para `42e50cf6dfd52fd2b09602595dfa5a794a800885` após integrar #2678 e iniciou nove workflows novos, mas não estava incorporado; N não consultou CI em rodada nem moveu seus heads.
+
+### Próximo exato
+
+1. Reler apenas linhas novas do canal/caixa e estados próprios conforme AV12. Se houver liberação/entrega do triestado, escrever RED antes do produto para `within/over/unknown`, sem readback ou segundo incremento, e preservar o wrapper booleano.
+2. Se Claude1 atribuir item livre, anunciar e publicar `RESERVA:` no canal antes do RED; não reler a fila inteira nem inventar quinta unidade.
+3. #2544 somente após liberação nominal A3. #2451/#2608 sem repetir jobs consumidos. #2674 sem workaround booleano, revisão final ou CI novo até o head realmente corrigido.
+4. Merge próprio somente `expected_head_sha` + UMA revisão aplicável sem grave/médio + NOVE agregadores exatos SUCCESS. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração proibida.

@@ -36,7 +36,10 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
   for(const color of ["rgb(0, 0, 0)","rgb(255, 255, 0)","rgba(0, 0, 0, 0)"]){
    const radio=await context.newPage();
    try{
-    await radio.setContent(`<style>input{width:44px;height:44px}input:focus-visible{outline:3px solid ${color};outline-offset:2px}</style><input type="radio" name="choice" aria-label="First" checked><input type="radio" name="choice" aria-label="Second">`);
+    // Match the product's native-radio rule: WebKit can focus an option after
+    // an arrow without matching :focus-visible. The painted ring is required
+    // by the helper in either case, including the transparent negative control.
+    await radio.setContent(`<style>input{width:44px;height:44px}input:focus{outline:3px solid ${color};outline-offset:2px}</style><input type="radio" name="choice" aria-label="First" checked><input type="radio" name="choice" aria-label="Second">`);
     const journey=()=>checkPublicKeyboardCycle({page:radio,path:"synthetic-radio-outline-"+color,is});
     if(color.startsWith("rgba"))await assert.rejects(journey,/native keyboard focus is visible/);
     else await journey();

@@ -65,7 +65,15 @@ export async function checkPublicKeyboardCycle({page,path,is}) {
     },target,{timeout:3000});
     focusChecks++;
    } catch(error) {
-    const geometry=await target.evaluate(node=>({tag:node.tagName,id:node.id,text:node.textContent?.trim().slice(0,100),scrollY,viewport:{width:innerWidth,height:innerHeight},fragments:[...node.getClientRects()].map(rect=>{const x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);return {left:rect.left,top:rect.top,width:rect.width,height:rect.height,hitTag:hit?.tagName,hitId:hit?.id,hitClass:typeof hit?.className==="string"?hit.className:"",inside:Boolean(hit&&(hit===node||node.contains(hit)))};})}));
+    const geometry=await target.evaluate(node=>{
+     const describe=element=>{
+      const rect=element.getBoundingClientRect(),style=getComputedStyle(element);
+      return {tag:element.tagName,id:element.id,classes:typeof element.className==="string"?element.className.slice(0,250):"",top:rect.top,height:rect.height,opacity:style.opacity,transform:style.transform,overflowY:style.overflowY,scrollTop:element.scrollTop,scrollHeight:element.scrollHeight,clientHeight:element.clientHeight,scrollMarginTop:style.scrollMarginTop,scrollMarginBottom:style.scrollMarginBottom,scrollPaddingTop:style.scrollPaddingTop,scrollPaddingBottom:style.scrollPaddingBottom};
+     };
+     const parents=[];
+     for(let parent=node.parentElement;parent&&parents.length<10;parent=parent.parentElement)parents.push(describe(parent));
+     return {tag:node.tagName,id:node.id,text:node.textContent?.trim().slice(0,100),scrollY,viewport:{width:innerWidth,height:innerHeight},target:describe(node),children:[...node.children].slice(0,4).map(describe),parents,fragments:[...node.getClientRects()].map(rect=>{const x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);return {left:rect.left,top:rect.top,width:rect.width,height:rect.height,hitTag:hit?.tagName,hitId:hit?.id,hitClass:typeof hit?.className==="string"?hit.className:"",inside:Boolean(hit&&(hit===node||node.contains(hit)))};})};
+    });
     console.log("AX2_KEYBOARD_OBSCURED:"+JSON.stringify({path,key,actual:await read(),geometry}));
     throw new Error("Keyboard focus obscured on "+path+" at target "+key,{cause:error});
    } finally {await target.dispose();}

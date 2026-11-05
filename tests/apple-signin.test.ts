@@ -4,6 +4,11 @@ import { generateKeyPairSync, sign, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { appleClientSecret, appleSignInOffered, beginAppleSignIn, finishAppleSignIn, APPLE_SIGNIN_APPROVED } from "@/lib/apple-signin";
 import { store } from "./redis-stub";
+import { NextRequest } from "next/server";
+import { POST as startRoute } from "@/app/api/auth/apple/route";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AppleSignIn } from "@/components/apple-signin";
 const client="com.example.fixture.signin";
 const ec=generateKeyPairSync("ec",{namedCurve:"prime256v1"});
 const rsa=generateKeyPairSync("rsa",{modulusLength:2048});
@@ -67,4 +72,22 @@ test("no provider token, subject or profile is written to Redis",async()=>{
  const real=store.pipeline.bind(store);const values:string[]=[];store.pipeline=async cs=>{for(const c of cs)if(c[0]==="SET")values.push(String(c[2]));return real(cs);};
  try{assert.equal((await finish(await start())).ok,true);}finally{store.pipeline=real;}
  assert.equal(values.length,1);for(const value of values){assert.equal(value.includes(email),false);assert.equal(value.includes("fixture-refresh"),false);assert.equal(value.includes("fixture-subject"),false);}
+});
+
+test("native form explains the separate relay account and retains the emailed-link alternative",()=>{
+ const html=renderToStaticMarkup(createElement(AppleSignIn,{handle:"my-store"}));
+ assert.match(html,/Continue with Apple/);assert.match(html,/different account/);assert.match(html,/use its emailed link/);assert.match(html,/<form[^>]*action="\/api\/auth\/apple"[^>]*method="post"/);
+});
+test("start route is absent while off; start limit and unknown counter refuse before state",async()=>{
+ const req=()=>new NextRequest("https://marktmorgen.com/api/auth/apple",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded","x-forwarded-for":"203.0.113.101"},body:"handle=my-store"});
+ delete process.env.TEST_APPLE_SIGNIN;
+ const real=store.pipeline.bind(store);let commands=0;
+ store.pipeline=async cs=>{commands+=cs.length;return real(cs);};
+ try{assert.equal((await startRoute(req())).status,404);assert.equal(commands,0);}finally{store.pipeline=real;}
+ process.env.TEST_APPLE_SIGNIN="1";
+ assert.equal((await startRoute(new NextRequest("https://marktmorgen.com/api/auth/apple",{method:"POST",headers:{origin:"https://other.example.test",host:"marktmorgen.com"}}))).status,403);
+ for(let i=0;i<20;i++)assert.ok((await startRoute(req())).headers.get("location")?.startsWith("https://appleid.apple.com/auth/authorize?"));
+ assert.match((await startRoute(req())).headers.get("location")!,/apple-slow/);
+ commands=0;store.pipeline=async cs=>{commands+=cs.length;return[null,null];};
+ try{assert.match((await startRoute(req())).headers.get("location")!,/apple-slow/);assert.equal(commands,2);}finally{store.pipeline=real;}
 });

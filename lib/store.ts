@@ -3110,16 +3110,21 @@ export async function editProduct(
  * everything else stay exactly as they are. Empty is refused, as on the
  * studio's own form. The words checks are the caller's (descriptionRefusal).
  */
-export async function setProductTitle(email: string, id: string, rawTitle: string): Promise<ProductResult> {
+export async function setProductTitle(email: string, id: string, rawTitle: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
   const title = rawTitle.trim().slice(0, MAX_TITLE_LENGTH);
-  const result = await onProduct<"title">(email, id, (product) => (title ? { ...product, title } : { ok: false, reason: "title" }));
+  // `only.expected`: written only while the title is still that, checked under the store's lock (an agent's
+  // proposal confirmed or undone, lib/agent-kinds.ts); "changed" when it is not, and nothing is written.
+  const result = await onProduct<"title" | "changed">(email, id, (product) =>
+    only && product.title !== only.expected ? { ok: false, reason: "changed" } : title ? { ...product, title } : { ok: false, reason: "title" },
+  );
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
 /** A product's short summary alone, as setProductTitle: everything else stays. Empty is allowed, as on the studio's form. */
-export async function setProductSummary(email: string, id: string, rawSummary: string): Promise<ProductResult> {
+export async function setProductSummary(email: string, id: string, rawSummary: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
   const summary = rawSummary.trim().slice(0, MAX_SUMMARY_LENGTH);
-  const result = await onProduct<never>(email, id, (product) => ({ ...product, summary }));
+  // `only.expected`, as setProductTitle: written only while the summary is still that.
+  const result = await onProduct<"changed">(email, id, (product) => (only && (product.summary ?? "") !== only.expected ? { ok: false, reason: "changed" } : { ...product, summary }));
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 

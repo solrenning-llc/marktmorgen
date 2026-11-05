@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
 import {spawn,spawnSync} from "node:child_process";
-import {mkdtempSync,rmSync} from "node:fs";
-import {tmpdir} from "node:os";
-import {dirname,join} from "node:path";
+import {createConnection,createServer} from "node:net";
 import {once} from "node:events";
 import {MemoryRedis} from "@/lib/redis-memory";
 
@@ -67,19 +65,28 @@ test("Redis 7 independently confirms every invalid command and error",{skip:!pro
  const binary=process.env.REDIS_ARITY_SERVER!;
  const version=spawnSync(binary,["--version"],{encoding:"utf8"});
  assert.equal(version.status,0);assert.match(version.stdout,/Redis server v=7\./);
- const directory=mkdtempSync(join(tmpdir(),"redis-arity-")),socket=join(directory,"redis.sock");
- const child=spawn(binary,["--port","0","--unixsocket",socket,"--save","","--appendonly","no"],{stdio:["ignore","pipe","pipe"]});
+ const reservation=createServer();
+ await new Promise<void>(resolve=>reservation.listen(0,"127.0.0.1",resolve));
+ const address=reservation.address();assert.ok(address&&typeof address!=="string");
+ const port=address.port;
+ await new Promise<void>((resolve,reject)=>reservation.close(error=>error?reject(error):resolve()));
+ const child=spawn(binary,["--bind","127.0.0.1","--port",String(port),"--save","","--appendonly","no"],{stdio:["ignore","pipe","pipe"]});
  const closed=once(child,"close");
  try{
   await new Promise<void>((resolve,reject)=>{
    const timer=setTimeout(()=>reject(Error("Redis did not report readiness")),5000);
    child.once("error",error=>{clearTimeout(timer);reject(error);});
    child.once("exit",()=>{clearTimeout(timer);reject(Error("Redis exited before readiness"));});
-   child.stdout.on("data",chunk=>{if(String(chunk).includes("ready to accept connections")){clearTimeout(timer);resolve();}});
+   child.stdout.on("data",chunk=>{if(/ready to accept connections/i.test(String(chunk))){clearTimeout(timer);resolve();}});
   });
   for(const [command,message] of invalid){
-   const native=spawnSync(join(dirname(binary),"redis-cli"),["-s",socket,"--raw",...command.map(String)],{encoding:"utf8"});
-   assert.equal(native.status,0);assert.equal(native.stdout.trim(),message,JSON.stringify(command));
+   const native=await new Promise<string>((resolve,reject)=>{
+    const socket=createConnection({host:"127.0.0.1",port});let reply="";
+    socket.once("error",reject);
+    socket.once("connect",()=>socket.write(`*${command.length}\r\n`+command.map(value=>{const text=String(value);return `$${Buffer.byteLength(text)}\r\n${text}\r\n`;}).join("")));
+    socket.on("data",chunk=>{reply+=String(chunk);if(reply.endsWith("\r\n")){socket.end();resolve(reply);}});
+   });
+   assert.equal(native,"-"+message+"\r\n",JSON.stringify(command));
   }
- }finally{child.kill("SIGTERM");await closed;rmSync(directory,{recursive:true,force:true});}
+ }finally{child.kill("SIGTERM");await closed;}
 });

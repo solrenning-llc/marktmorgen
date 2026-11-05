@@ -509,14 +509,40 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
   };
 }
 
+/** An own data property of a plain object, never through a getter or the prototype; undefined when absent or odd. */
+function ownValue(record: unknown, key: string): { value: unknown } | undefined {
+  if (typeof record !== "object" || record === null || Array.isArray(record)) return undefined;
+  const field = Object.getOwnPropertyDescriptor(record, key);
+  return field && Object.hasOwn(field, "value") ? { value: field.value } : undefined;
+}
+
 /**
  * How many live members (paying or in a trial) are on one price option, read from a reading already made (642 [WG2]):
- * no Stripe call of its own. Null when it cannot be said: no reading, a reading that did not read every membership,
- * or one from before members were counted by option. Never 0 for "unknown".
+ * no Stripe call of its own. The reading may come back from the cache (JSON), so it is read in its exact shape
+ * (Codex T on #2690): complete and optionsCounted exactly true, byProduct a list of objects with one row at most
+ * for the product, its byOption absent or a plain table, and the count a safe whole number. Null when it cannot be
+ * said: no reading, one that did not read every membership, one from before members were counted by option, or any
+ * other shape. 0 only when the whole reading proves it: no row for the product, or none of its members on the option.
  */
 export function membersOnOption(numbers: Numbers | null, productId: string, optionId: string): number | null {
-  if (!numbers || !numbers.complete || numbers.optionsCounted !== true) return null;
-  return numbers.byProduct.find((row) => row.product === productId)?.byOption?.[optionId] ?? 0;
+  if (ownValue(numbers, "complete")?.value !== true || ownValue(numbers, "optionsCounted")?.value !== true) return null;
+  const rows = ownValue(numbers, "byProduct")?.value;
+  if (!Array.isArray(rows)) return null;
+  let found: unknown = undefined;
+  for (const row of rows) {
+    const product = ownValue(row, "product");
+    if (!product || typeof product.value !== "string") return null;
+    if (product.value !== productId) continue;
+    if (found !== undefined) return null;
+    found = row;
+  }
+  if (found === undefined) return 0;
+  const table = ownValue(found, "byOption");
+  if (!table) return Object.hasOwn(found as object, "byOption") ? null : 0;
+  if (typeof table.value !== "object" || table.value === null || Array.isArray(table.value)) return null;
+  if (!Object.hasOwn(table.value, optionId)) return 0;
+  const count = ownValue(table.value, optionId);
+  return count && typeof count.value === "number" && Number.isSafeInteger(count.value) && count.value >= 0 ? count.value : null;
 }
 
 /** The store's membership numbers kept CACHE_SECONDS; a person's erasure deletes it (lib/store-readings.ts, forgetReadingsPerson). */

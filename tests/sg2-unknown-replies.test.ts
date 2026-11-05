@@ -28,7 +28,7 @@ import { forgetNoted, noteForErasure } from "@/lib/erasure-index";
 import { ERASERS } from "@/lib/person-erasure";
 import { SessionsUnknownError, dropSecondStep, emailForSession, endAllSessions, isMoving, moveRunning, openSession, sendMoveLink } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
-import { RESET_DAYS, STILL_LOCKED, endRecoveryAccess, finishSetup, lockedUntil, openLockedSession, startSetup, twoStepOn, twoStepStatus } from "@/lib/two-step";
+import { RESET_DAYS, STILL_LOCKED, endRecoveryAccess, finishSetup, lockedUntil, moveTwoStep, openLockedSession, startSetup, twoStepOn, twoStepStatus } from "@/lib/two-step";
 import { alignRecoveryLock } from "@/lib/recovery-address";
 import { PASSKEY_SESSIONS_OPEN, cancelRemoval, listPasskeys, pendingNow, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
@@ -413,6 +413,21 @@ async function main(): Promise<void> {
   is("(read in its shape, the key is listed)", (await listKeys(SID)).map((k) => k.name), ["Zapier"]);
   is("(and a deleted store's keys go)", [await revokeAllKeys(SID), await resolveKey(made.key)], [1, null]);
 
+  part("C (review of #2556): two-step login moved onto an address takes the marks an earlier app of it left");
+  const HOME = "home@example.com";
+  const AWAY = "away@example.com";
+  const homeSetup = await startSetup(AWAY, "d".repeat(64), "backup-away@example.org");
+  if (typeof homeSetup === "string") throw new Error(homeSetup);
+  if (typeof (await finishSetup(AWAY, "d".repeat(64), nowCode(homeSetup.secret), codeTo("backup-away@example.org"))) === "string") throw new Error("not on");
+  // A browser of HOME still marked by an app HOME once had, its logout unread when that app was turned off.
+  const oldMark = await openSession(HOME, "app");
+  malform(on("SMEMBERS", "nl:auth:sessions:"), null);
+  const refusedMove = await rejects(() => moveTwoStep(AWAY, HOME));
+  restore();
+  is("unread, nothing moves", [refusedMove, await twoStepOn(AWAY), await twoStepOn(HOME), await emailForSession(oldMark)], ["SessionsUnknownError", true, false, HOME]);
+  await moveTwoStep(AWAY, HOME);
+  is("read in their shape: it moves, and the old mark's browser is logged out", [await twoStepOn(HOME), await emailForSession(oldMark), await liveSecondStep(HOME, oldMark)], [true, null, null]);
+
   // Last, as it moves the stand-in's clock past every session above.
   part("5 (review of #2556): a lock that could not be lifted by logging out outlasts its day, never the session");
   const LATE = "late@example.com";
@@ -432,6 +447,26 @@ async function main(): Promise<void> {
     [(await lockedUntil(before, pastDay)) > pastDay, await emailForSession(before), await lockedUntil(after, pastDay)],
     [true, LATE, 0],
   );
+  // A lock written before 5 November 2026 ("<until>" alone, lapsing on its day): still listed, so still locked.
+  const OLDER = "older@example.com";
+  const olderUntil = Date.now() + RESET_DAYS * DAY;
+  const legacy = await openLockedSession(OLDER, olderUntil);
+  await redis.pipeline([["SET", `nl:2fa:locked:${sha(`nimbus-2fa-locked:${legacy}`).slice(0, 40)}`, String(olderUntil), "EX", RESET_DAYS * 86_400]]);
+  const unlisted = await openSession(OLDER);
+  await alignRecoveryLock(OLDER, olderUntil);
+  malform(on("SMEMBERS", "nl:2fa:lockedset:"), null);
+  await endRecoveryAccess(OLDER);
+  restore();
+  advance((RESET_DAYS + 1) * DAY);
+  const pastOlder = Date.now() + (RESET_DAYS + 1) * DAY;
+  is(
+    "a lock in the old format, its key lapsed: still locked while listed; a session never locked is not",
+    [(await lockedUntil(legacy, pastOlder)) > pastOlder, await lockedUntil(unlisted, pastOlder)],
+    [true, 0],
+  );
+  malform((command) => command[0] === "SISMEMBER" && String(command[1]).startsWith("nl:2fa:lockedset:"), "1");
+  is("(whether it is listed answered in another shape: locked)", (await lockedUntil(legacy, pastOlder)) > 0, true);
+  restore();
   advance((30 - RESET_DAYS - 1) * DAY + 60_000);
   is("thirty days on: the session itself is over, so there is nothing left to lock", [await emailForSession(before), await lockedUntil(before, Date.now() + 31 * DAY)], [null, 0]);
 

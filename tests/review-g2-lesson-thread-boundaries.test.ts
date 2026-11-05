@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { addComment, deleteComment, readComment } from '@/lib/lesson-comments';
 import { CREATOR_AUTHOR } from '@/lib/lesson-comments-rules';
+import { COURSE_ID_PATTERN } from '@/lib/course';
 import { dataKey } from '@/lib/store-data';
 import { store as redis } from './redis-stub';
 import { ROOM } from './data-room';
-const course='g'.repeat(32), lesson='lessonone001', hash=`nl:lc:${course}:c`,slot=`lc:${course}`;
+const course='e'.repeat(32), lesson='lessonone001', hash=`nl:lc:${course}:c`,slot=`lc:${course}`;
 async function seed(){
- redis.clear();
+ redis.clear();assert.match(course,COURSE_ID_PATTERN);
  const p=await addComment({room:ROOM,courseId:course,lessonId:lesson,by:CREATOR_AUTHOR,text:'Parent to remove',now:100});assert.ok(p.ok);
  const r=await addComment({room:ROOM,courseId:course,lessonId:lesson,by:CREATOR_AUTHOR,text:'Answer to remove',parent:p.comment.id,now:101});assert.ok(r.ok);
  return {parent:p.comment,reply:r.comment};

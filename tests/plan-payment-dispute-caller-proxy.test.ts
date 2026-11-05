@@ -107,6 +107,58 @@ for (const boundary of ["context", "review"] as const) {
   });
 }
 
+for (const change of ["disputes-reference", "review-reference", "review-prototype"] as const) {
+  test(`final observation cannot change unchecked original ${change}`, () => {
+    const fixture = contractFixture();
+    assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
+    let visits = 0;
+    let installed = 0;
+    let gets = 0;
+    const unknownDisputes = () => new Proxy(
+      { ...fixture.review.planPaymentDisputes, unreviewedPlan: null },
+      {
+        ownKeys: (target) =>
+          Reflect.ownKeys(target).filter((key) => key !== "unreviewedPlan"),
+        get() {
+          gets++;
+          throw new Error("must not execute ordinary reads");
+        },
+      },
+    );
+    fixture.review.scenarios = new Proxy(fixture.review.scenarios, {
+      getOwnPropertyDescriptor(target, key) {
+        if (key === "review" && ++visits === 3) {
+          installed++;
+          if (change === "disputes-reference") {
+            fixture.review.planPaymentDisputes = unknownDisputes();
+          } else if (change === "review-reference") {
+            fixture.context.review = {
+              ...fixture.review,
+              planPaymentDisputes: unknownDisputes(),
+            };
+          } else {
+            Object.setPrototypeOf(fixture.review, { unreviewedLiability: null });
+          }
+        }
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+
+    const actual = contractFundingConfiguration(fixture.policy, fixture.context, fixture.now);
+    assert.equal(installed, 1, "the third traversal must trigger the late mutation");
+    if (change === "review-prototype") {
+      assert.equal(canonicalFinancialSnapshot(fixture.context), null);
+    } else {
+      assert.equal(
+        assessPlanPaymentDisputeCosts(fixture.context.review!.planPaymentDisputes),
+        null,
+      );
+    }
+    assert.equal(gets, 0, "validation must not execute ordinary Proxy reads");
+    assert.equal(actual, null, "there must be no unchecked final observation");
+  });
+}
+
 for (const wrapper of ["context", "review"] as const) {
   for (const hidden of ["outer", "row"] as const) {
     test(`${wrapper} wrapper cannot replace validated evidence with a hidden ${hidden} liability`, () => {

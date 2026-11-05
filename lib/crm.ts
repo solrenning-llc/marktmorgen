@@ -683,9 +683,11 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
  * Capacity and save share one Redis operation, including alongside form
  * conversions. An edit (ARGV[4] "edit") writes only a deal that is still
  * there: one deleted since it was read (by its person's deletion, or by
- * someone else) answers 2 and is never written back.
+ * someone else) answers 2 and is never written back. Written: {1, the length
+ * of the record it replaced} ({1} when there was none), measured in the same
+ * step, so the room moves by exactly what the write changed (Codex G2 on #2287).
  */
-export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v4
+export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v5
 if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[5]) or "-1") ~= tonumber(ARGV[6]) then
   local kept = redis.call("HGET", KEYS[1], ARGV[1])
   if kept then return {3, string.len(kept)} end
@@ -694,8 +696,10 @@ end
 local there = redis.call("HEXISTS", KEYS[1], ARGV[1])
 if there == 0 and ARGV[4] == "edit" then return 2 end
 if there == 0 and redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+local was = redis.call("HGET", KEYS[1], ARGV[1])
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
-return 1`;
+if was then return {1, string.len(was)} end
+return {1}`;
 
 /** Where a deal is counted in the store's data room (lib/store-data.ts): one slot a deal, at what it weighs. */
 export const dealSlot = (id: string) => `dl:${id}`;
@@ -720,28 +724,38 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore, ed
 export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit", take?: RunTake): Promise<boolean | "gone" | "superseded"> {
   let preflight: unknown;
   try {
-    preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
+    preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)], ["HSTRLEN", dealsKey(statsId), deal.id]]);
   } catch { throw new CrmDealReadUnavailable(); }
-  if (!Array.isArray(preflight) || preflight.length !== 2 || (preflight[0] !== 0 && preflight[0] !== 1) || typeof preflight[1] !== "number" || !Number.isSafeInteger(preflight[1]) || preflight[1] < preflight[0]) throw new CrmDealReadUnavailable();
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (!Array.isArray(preflight) || preflight.length !== 3 || (preflight[0] !== 0 && preflight[0] !== 1) || !whole(preflight[1]) || preflight[1] < preflight[0] || !whole(preflight[2])) throw new CrmDealReadUnavailable();
   // An edit of a deal deleted since it was read is "gone", full board or not, and its room is not touched.
   if (preflight[0] === 0 && edit) return "gone";
   if (preflight[0] === 0 && preflight[1] >= MAX_DEALS) return false;
-  await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
+  // The room moves by what this write changes, never set to a total (Codex G2 on #2287: a total set from an answer
+  // that came late cut a newer record's room). Taken first by what it grows past the record there now; once written,
+  // put right by what it really replaced, as the script measured it; refused, only this write's own taking goes back;
+  // an answer that is not Redis's own keeps what it took.
+  const weight = (length: number) => dataBytesOfLength(utf8Length(deal.id) + length, 1);
+  const taken = Math.max(0, dealBytes(deal) - (preflight[0] === 1 ? weight(preflight[2]) : 0));
+  if (taken > 0) await needData(room, [{ slot: dealSlot(deal.id), bytes: taken }]);
+  let saved: unknown;
   try {
     const keys = take ? [dealsKey(statsId), take.key] : [dealsKey(statsId)];
-    const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, keys.length, ...keys, deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? "", ...(take ? [take.member, String(take.score)] : [])]]);
-    const kept = take && Array.isArray(saved) && saved.length === 1 ? changedLength(saved[0], 3) : undefined;
-    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1 && !(edit && saved[0] === 2) && kept === undefined)) throw new CrmDealWriteUnconfirmed();
-    // The run taken over: nothing written, and the deal's room goes back to the record kept there now, as the script
-    // measured it in the same step (none when there is none), never to nothing under a record that stays.
-    if (kept !== undefined) {
-      await giveData(room, [{ slot: dealSlot(deal.id), bytes: kept === null ? 0 : dataBytesOfLength(utf8Length(deal.id) + kept, 1), set: true }]);
-      return "superseded";
-    }
-    // Full after all, or deleted since it was read: the deal's room goes back.
-    if (saved[0] !== 1) await giveData(room, [{ slot: dealSlot(deal.id), bytes: 0, set: true }]);
-    return saved[0] === 2 ? "gone" : saved[0] === 1;
+    saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, keys.length, ...keys, deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? "", ...(take ? [take.member, String(take.score)] : [])]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
+  const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
+  const written = Array.isArray(answer) && answer[0] === 1 && (answer.length === 1 || (answer.length === 2 && whole(answer[1]))) ? answer : null;
+  const kept = take ? changedLength(answer, 3) : undefined;
+  if (!written && answer !== 0 && !(edit && answer === 2) && kept === undefined) throw new CrmDealWriteUnconfirmed();
+  if (written) {
+    const change = dealBytes(deal) - (written.length === 2 ? weight(written[1] as number) : 0) - taken;
+    if (change > 0) await noteData(room, [{ slot: dealSlot(deal.id), bytes: change }]);
+    if (change < 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: -change }]);
+    return true;
+  }
+  // Nothing written (taken over, full after all, or deleted since it was read): only this write's taking goes back.
+  if (taken > 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: taken }]);
+  return kept !== undefined ? "superseded" : answer === 2 ? "gone" : false;
 }
 
 /**
@@ -768,7 +782,9 @@ export async function readDealExact(statsId: string, id: string, stages: readonl
  * and put back as it was when nothing was written.
  */
 export async function writeDealOver(statsId: string, deal: Deal, before: string, room: DataStore, take?: RunTake): Promise<"saved" | "changed" | "superseded"> {
-  await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
+  // It writes only over `before`, so what it changes is known here: the room moves by that, never set to a total.
+  const grown = dealBytes(deal) - dataBytes([deal.id, before], 1);
+  if (grown > 0) await needData(room, [{ slot: dealSlot(deal.id), bytes: grown }]);
   let saved: unknown;
   try {
     const keys = take ? [dealsKey(statsId), take.key] : [dealsKey(statsId)];
@@ -778,19 +794,14 @@ export async function writeDealOver(statsId: string, deal: Deal, before: string,
   const lost = changedLength(answer);
   const kept = take ? changedLength(answer, 3) : undefined;
   if (answer !== 1 && answer !== 0 && kept === undefined && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
-  if (answer === 1) return "saved";
-  // The run was taken over: nothing written, and the room goes back to the record kept there now, as the script
-  // measured it in the same step (none when there is none): never to the record read, which a newer edit may have
-  // made bigger (Codex G2 on #2287).
-  if (kept !== undefined) {
-    await giveData(room, [{ slot: dealSlot(deal.id), bytes: kept === null ? 0 : dataBytesOfLength(utf8Length(deal.id) + kept, 1), set: true }]);
-    return "superseded";
+  if (answer === 1) {
+    if (grown < 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: -grown }]);
+    return "saved";
   }
-  // Nothing written: its room put back to what the record kept there now weighs (the board's own write sized it to
-  // that), as the script measured it in the same step, or none when it is gone. So a record the board made bigger is
-  // never counted at its old size, and no second read can fail in between.
-  await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof lost === "number" ? dataBytesOfLength(utf8Length(deal.id) + lost, 1) : 0, set: true }]);
-  return "changed";
+  // Nothing written (the run taken over, or the record changed or gone): only this write's own taking goes back, by
+  // difference, so the room a newer write counted for itself is never undone, however late this answer arrives.
+  if (grown > 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: grown }]);
+  return kept !== undefined ? "superseded" : "changed";
 }
 
 export async function readDeal(statsId: string, id: string, stages: readonly Stage[]): Promise<Deal | null> {

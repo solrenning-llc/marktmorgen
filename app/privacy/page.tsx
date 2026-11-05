@@ -905,7 +905,10 @@ export default function PrivacyPage() {
           email from the store&apos;s name, through our email provider, saying
           what they were given, within the same 20,000 in 30 days as the
           emails above. We keep how many of these a store made each day, for a
-          day, to hold them to their limits.
+          day, to hold them to their limits. Any key of a store, one that only
+          reads included, can also list the store&apos;s sales with each
+          buyer&apos;s email address and name, read from the creator&apos;s own
+          Stripe account when the tool asks; we do not keep that list.
         </p>
         <p id="code-links">
           <strong className="text-black">
@@ -1135,7 +1138,10 @@ export default function PrivacyPage() {
           creator also gets a private address of their own that lists their
           upcoming calls and sessions with the name and email address of each
           buyer, for the calendar app they subscribe with; replacing that
-          address turns the old one off.
+          address turns the old one off. We keep the last copy of that list
+          made for their calendar app for up to 40 days; once the store is
+          deleted or closed, that copy is never shown again, and it is erased
+          within those 40 days.
         </p>
         <p id="webhooks">
           <strong className="text-black">Webhooks a creator adds.</strong> A

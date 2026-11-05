@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"noEmit":true,"incremental":false},"include":["lib/paypal-payouts.ts","tests/paypal-payouts-reconcile.test.ts","tests/g-2681-month-proxy.proof.ts","tests/g-2681-hmac.proof.ts"],"exclude":["node_modules"]}

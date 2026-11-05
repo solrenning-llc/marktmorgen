@@ -1,4 +1,4 @@
-import { EmailField } from "@/components/email-field";
+import { LinkRequestForm } from "@/components/link-request-form";
 import Link from "next/link";
 import { photoUrl } from "@/lib/photo-limits";
 import { isFree, type Listing, type Store } from "@/lib/store";
@@ -674,15 +674,16 @@ export function Gate({
       ) : null}
 
       {state !== "removed" ? (
-        <form action="/api/store/community/link" method="post" className="mt-6 rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>
-          <input type="hidden" name="handle" value={store.handle} />
-          <label htmlFor="community-email" className="st-label">{state === "closed" ? w.tryAnotherAddress : w.alreadyMember}</label>
-          <p className="st-muted mt-1 text-sm">{w.linkExplain}</p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
-            <EmailField id="community-email" name="email" className="st-field w-full" wrapClassName="min-w-0 flex-1" required autoComplete="email" placeholder={speech(store).w.emailPlaceholder} language={store.language} />
-            <button type="submit" className="btn st-btn">{w.sendLink}</button>
-          </div>
-        </form>
+        <LinkRequestForm
+          action="/api/store/community/link"
+          hidden={{ handle: store.handle }}
+          id="community-email"
+          label={state === "closed" ? w.tryAnotherAddress : w.alreadyMember}
+          explain={w.linkExplain}
+          button={w.sendLink}
+          placeholder={speech(store).w.emailPlaceholder}
+          language={store.language}
+        />
       ) : null}
     </div>
   );

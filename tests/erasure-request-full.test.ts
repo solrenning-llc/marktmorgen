@@ -37,9 +37,13 @@ import DeletePage from "@/app/privacy/delete/page";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 
-/** The email goes after the answer (lib/erasure-request.ts, afterAnswer): wait for it before reading what was sent. */
-const settled = async () => {
-  for (let i = 0; i < 50; i += 1) await new Promise((resolve) => setImmediate(resolve));
+/** Work goes after the answer: observe its delivery or refusal before checking what was sent. */
+const settled = async (observed: () => boolean, what: string): Promise<void> => {
+  for (let i = 0; i < 200; i += 1) {
+    if (observed()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Timed out waiting for ${what}`);
 };
 import { done, is, part } from "./check";
 
@@ -108,21 +112,44 @@ async function main(): Promise<void> {
   await fill(first);
   const usedBefore = [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")];
   const from = sent.length;
-  is("the link is sent", await requestErasureLink({ email: TESS, ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
-  await settled();
-  const link = sent.slice(from).find((m) => m.to === TESS);
-  is("to the address, naming both stores", [Boolean(link), link?.text.includes(one.name), link?.text.includes(two.name)], [true, true, true]);
-  is("taken from the second store's share, nothing more from the first", [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")], [usedBefore[0], usedBefore[1] + 1]);
+  // Real asynchronous work must finish even when the Redis stand-in takes 5 ms.
+  const originalPipeline = redis.pipeline;
+  const pipelineDescriptor = Object.getOwnPropertyDescriptor(redis, "pipeline");
+  redis.pipeline = async (commands) => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return originalPipeline.call(redis, commands);
+  };
+  try {
+    is("the link is sent", await requestErasureLink({ email: TESS, ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
+    await settled(() => sent.slice(from).some((message) => message.to === TESS), "the mock deletion email");
+    const link = sent.slice(from).find((m) => m.to === TESS);
+    is("to the address, naming both stores", [Boolean(link), link?.text.includes(one.name), link?.text.includes(two.name)], [true, true, true]);
+    is("taken from the second store's share, nothing more from the first", [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")], [usedBefore[0], usedBefore[1] + 1]);
+  } finally {
+    if (pipelineDescriptor) Object.defineProperty(redis, "pipeline", pipelineDescriptor);
+    else Reflect.deleteProperty(redis, "pipeline");
+  }
 
   part("(b) Asked for every store, no store has room: the same answer as an unknown address");
   await fill(second);
   const before = sent.length;
-  const whereAll = new URL((await ask({ email: TESS, scope: "all" })).headers.get("location") ?? "https://x.invalid/");
-  const whereNobody = new URL((await ask({ email: "nobody@example.com", scope: "all" })).headers.get("location") ?? "https://x.invalid/");
-  is("nothing is sent", sent.length, before);
-  is("the known address is told what an unknown one is: 'sent', no day", [whereAll.search, whereAll.searchParams.get("status")], [whereNobody.search, "sent"]);
-  const sentPage = walk(await DeletePage({ searchParams: Promise.resolve({ status: "sent" }) }));
-  is("and that page gives the privacy contact", [sentPage.hrefs.includes("mailto:support@marktmorgen.com"), sentPage.text.includes("support@marktmorgen.com")], [true, true]);
+  let fullForAllFinished = false;
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    if (typeof args[0] === "string" && args[0].startsWith("a deletion link asked for every store was not emailed: full")) fullForAllFinished = true;
+    originalWarn(...args);
+  };
+  try {
+    const whereAll = new URL((await ask({ email: TESS, scope: "all" })).headers.get("location") ?? "https://x.invalid/");
+    const whereNobody = new URL((await ask({ email: "nobody@example.com", scope: "all" })).headers.get("location") ?? "https://x.invalid/");
+    await settled(() => fullForAllFinished, "the full-store completion log");
+    is("nothing is sent", sent.length, before);
+    is("the known address is told what an unknown one is: 'sent', no day", [whereAll.search, whereAll.searchParams.get("status")], [whereNobody.search, "sent"]);
+    const sentPage = walk(await DeletePage({ searchParams: Promise.resolve({ status: "sent" }) }));
+    is("and that page gives the privacy contact", [sentPage.hrefs.includes("mailto:support@marktmorgen.com"), sentPage.text.includes("support@marktmorgen.com")], [true, true]);
+  } finally {
+    console.warn = originalWarn;
+  }
 
   part("(c) Asked from one store that has no room: the page says so honestly, the same for every address");
   const answer = await ask({ email: TESS, scope: "store", store: first.handle });

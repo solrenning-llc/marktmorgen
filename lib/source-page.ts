@@ -114,7 +114,7 @@ export async function readSourcePage(raw: string, hooks: SourceHooks = {}): Prom
     if (!text) return { ok: false, reason: "unreadable" };
     return { ok: true, title, text, url: answer.url };
   } catch (error) {
-    if (!(error instanceof SafeFetchError)) console.error("reading a creator's page failed", error);
+    if (!(error instanceof SafeFetchError)) console.error("SOURCE_PAGE_READ_FAILED");
     return { ok: false, reason: error instanceof SafeFetchError && error.problem === "scheme" ? "address" : "unreadable" };
   }
 }

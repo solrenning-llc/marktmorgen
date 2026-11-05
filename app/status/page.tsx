@@ -97,8 +97,8 @@ export default async function StatusPage() {
         <p>
           <strong>Checkout.</strong> Once a day, the site works through Stripe&rsquo;s test mode: it starts test
           memberships and changes their tiers, and it opens checkouts for session packages, tax documents and a cart that
-          ships. Stripe&rsquo;s test mode is a copy of Stripe for trying payments with test cards. No real card is
-          charged. The run passes only when Stripe answers every step as expected.
+          ships. Stripe&rsquo;s test mode is a copy of Stripe for trying payments with test cards.
+          No real card is charged. The run passes only when Stripe answers every step as expected.
         </p>
         <p>
           {`A check is “Unknown” when it has no result in the last ${STATUS_STALE_HOURS} hours. A failed run means at least one step did not work as expected. It does not always mean that emails or payments were lost.`}

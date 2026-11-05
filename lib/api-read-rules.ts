@@ -30,6 +30,10 @@
  * every size. Pure: no reads here.
  */
 import { MAX_LESSONS } from "@/lib/course";
+import { MAX_PAGE_BYTES, MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
+import { AB_RECORD_BYTES, MAX_VERSIONS } from "@/lib/sales-page-store";
+import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
+import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
@@ -430,12 +434,6 @@ export function codesWork(): ReadWork {
 
 // ---------------------------------------------------------------- the MCP tools of the creator's own records (631 [AA1])
 
-/**
- * What a tool past the door reads and sends, metered as it reads (app/api/mcp/route.ts, `paid`): it is set aside at
- * its most before anything is read, and settled at what was read and sent before it is sent.
- */
-export type ReadMeter = { bytes: number; commands: number };
-
 /** A product's cached card as kept for searching (title, price, page), read whole: a review ceiling, as LISTING_BYTES. */
 export const CARD_READ_BYTES = 1_024;
 /** One page of list_bundle_choices as sent: a product each, PRODUCT_SENT_BYTES, and the note. */
@@ -451,3 +449,25 @@ export const IMPORT_JOB_BYTES = 16_384;
 export const IMPORT_SENT_BYTES = 1_024;
 /** get_imports at its most: the index (IMPORTS_LIST_SIZE, 10, ids of 64 bytes at most) and each import's record, in two trips. */
 export const IMPORTS_MOST: ReadWork = { commands: 1 + 10, bytes: 10 * 64 + 10 * IMPORT_JOB_BYTES, sent: 10 * IMPORT_SENT_BYTES + 2_048, stripePages: 0, roundTrips: 2 };
+
+/**
+ * A record of text read whole, as the REST API answers it: JSON, in which a character may be escaped to six bytes.
+ * What a record of `chars` characters at its most can weigh read.
+ */
+export const readAtMost = (chars: number) => 6 * chars;
+/** A product's long description read (lib/product-about.ts, MAX_ABOUT_LENGTH characters). */
+export const ABOUT_READ_BYTES = readAtMost(MAX_ABOUT_LENGTH);
+/** A sales page read (lib/sales-page-store.ts): it is never kept longer than MAX_STORED_PAGE_BYTES characters. */
+export const PAGE_READ_BYTES = readAtMost(MAX_STORED_PAGE_BYTES);
+/** A sales page as get_sales_page and get_page_versions send it: blocks of a page of MAX_PAGE_BYTES, each character escaped. */
+export const PAGE_SENT_BYTES = readAtMost(MAX_PAGE_BYTES);
+/** get_product_description at its most: the product's listing (when the store's record does not hold it), then its description. */
+export const PRODUCT_TEXT_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + ABOUT_READ_BYTES, sent: ABOUT_READ_BYTES + 4_096, stripePages: 0, roundTrips: 2 };
+/** get_sales_page at its most: the listing, then the page. */
+export const SALES_PAGE_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + PAGE_READ_BYTES, sent: PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };
+/** get_page_test at its most: the listing, the page, then the test's counts (AB_RECORD_BYTES). */
+export const PAGE_TEST_MOST: ReadWork = { commands: 3, bytes: LISTING_BYTES + PAGE_READ_BYTES + readAtMost(AB_RECORD_BYTES), sent: 8_192, stripePages: 0, roundTrips: 3 };
+/** get_page_reading at its most: the listing, then the page and how far it is read (DEPTH_RECORD_BYTES) side by side. */
+export const PAGE_READING_MOST: ReadWork = { commands: 3, bytes: LISTING_BYTES + PAGE_READ_BYTES + readAtMost(DEPTH_RECORD_BYTES), sent: 64_000, stripePages: 0, roundTrips: 2 };
+/** get_page_versions at its most: the listing, then the MAX_VERSIONS versions kept, each a page at its most. */
+export const PAGE_VERSIONS_MOST: ReadWork = { commands: 2, bytes: LISTING_BYTES + MAX_VERSIONS * PAGE_READ_BYTES, sent: PAGE_SENT_BYTES, stripePages: 0, roundTrips: 2 };

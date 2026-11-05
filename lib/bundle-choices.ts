@@ -104,19 +104,19 @@ export const SEARCH_PAGE = PICKER_PAGE - 1;
  * null at the end; `matches` is how many may go in by their kind, without a
  * search, and null with one (each stretch is searched as it comes).
  */
-export async function bundleChoicesPage(store: Store, input: { owner: string; query: string; after: number }, meter?: { bytes: number; commands: number }): Promise<{ products: BundleChoice[]; matches: number | null; next: number | null; unsearched: number } | null> {
+export async function bundleChoicesPage(store: Store, input: { owner: string; query: string; after: number }): Promise<{ products: BundleChoice[]; matches: number | null; next: number | null; unsearched: number } | null> {
   const ruledOut = new Set([...idsOfKind(store, "recurring"), ...idsOfKind(store, "call")]);
   const withOptions = new Set(store.catalog.items.filter((item) => item.options.length > 0).map((item) => item.id));
   const ids = productIds(store).filter((id) => id !== input.owner && !ruledOut.has(id) && !withOptions.has(id));
   const from = Math.min(Math.max(0, input.after), ids.length);
   if (!input.query) {
     // Read on exact answers only: a page that could not be read whole is unknown, never a page with products left out.
-    const listed = await readListingsExact(store, ids.slice(from, from + PICKER_PAGE), meter);
+    const listed = await readListingsExact(store, ids.slice(from, from + PICKER_PAGE));
     if (!listed) return null;
     return { products: listed.map(choiceOf), matches: ids.length, next: from + PICKER_PAGE < ids.length ? from + PICKER_PAGE : null, unsearched: 0 };
   }
   const stretch = ids.slice(from, from + SEARCH_STRETCH);
-  const cards = await cachedCards(store, stretch, meter);
+  const cards = await cachedCards(store, stretch);
   const found: string[] = [];
   let unsearched = 0;
   let at = from;
@@ -127,7 +127,7 @@ export async function bundleChoicesPage(store: Store, input: { owner: string; qu
     if (!card) unsearched += 1;
     else if (card.title.toLowerCase().includes(input.query)) found.push(id);
   }
-  const listed = await readListingsExact(store, found, meter);
+  const listed = await readListingsExact(store, found);
   if (!listed) return null;
   return { products: listed.map(choiceOf), matches: null, next: at < ids.length ? at : null, unsearched };
 }

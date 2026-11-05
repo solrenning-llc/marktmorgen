@@ -2,7 +2,8 @@ import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { proposeDescription, proposeSummary, proposeTitle } from "@/lib/agent-propose";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
-import { BUNDLE_CHOICES_MOST, IMPORTS_MOST, type ReadMeter, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
+import { BUNDLE_CHOICES_MOST, IMPORTS_MOST, PAGE_READING_MOST, PAGE_TEST_MOST, PAGE_VERSIONS_MOST, PRODUCT_TEXT_MOST, SALES_PAGE_MOST, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
+import { metered } from "@/lib/read-meter";
 import { apiNumbers } from "@/lib/api-numbers";
 import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
@@ -131,14 +132,14 @@ export async function POST(request: Request) {
     const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
     // A tool of the creator's own records (631 [AA1]): set aside at its most before it reads anything, metered as it
     // reads, and settled at what it read and sends before it is sent (Codex G2 on #1933). Not read, nothing is shown.
-    const paid = async (most: ReadWork, read: (meter: ReadMeter) => Promise<unknown>, unavailable: string) => {
+    const paid = async (most: ReadWork, read: () => Promise<unknown>, unavailable: string | (() => string)) => {
       const held = apiReadUnits(most);
       const settle = await hold(held);
       if (settle instanceof Response) return refusedWith(settle);
-      const meter: ReadMeter = { bytes: 0, commands: 0 };
-      const value = await read(meter);
-      const out = value === null || value === undefined ? said({ error: unavailable }, true) : said(value);
-      const work = { commands: meter.commands, bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: Math.min(most.roundTrips, meter.commands) };
+      // Every database call the tool makes is counted (lib/read-meter.ts): commands, trips and the bytes answered.
+      const { value, meter } = await metered(read);
+      const out = value === null || value === undefined ? said({ error: typeof unavailable === "function" ? unavailable() : unavailable }, true) : said(value);
+      const work = { commands: meter.commands, bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: meter.trips };
       const refused = await settle(settledUnits(work, held));
       return refused ? refusedWith(refused) : result(id, out);
     };
@@ -184,8 +185,8 @@ export async function POST(request: Request) {
     }
     if (params.name === "get_product_description" || params.name === "get_sales_page") {
       const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
-      const found = product ? await (params.name === "get_sales_page" ? readSalesPageTool(store, product) : productTextTool(store, product)) : null;
-      return result(id, found ? said(found) : said({ error: "There is no product with that id in this store. Use list_products for the ids." }, true));
+      const page = params.name === "get_sales_page";
+      return paid(page ? SALES_PAGE_MOST : PRODUCT_TEXT_MOST, async () => (product ? await (page ? readSalesPageTool(store, product) : productTextTool(store, product)) : null), "There is no product with that id in this store. Use list_products for the ids.");
     }
     if (params.name === "get_course_outline" || params.name === "get_lesson") {
       const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
@@ -195,25 +196,30 @@ export async function POST(request: Request) {
     }
     if (params.name === "get_page_test" || params.name === "get_page_reading") {
       const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
-      const unknown = { error: "There is no product with that id in this store. Use list_products for the ids." };
-      if (params.name === "get_page_reading") {
-        const reading = product ? await readPageReadingTool(store, product) : null;
-        return result(id, reading ? said(reading) : said(unknown, true));
-      }
-      const tested = product ? await readPageTestTool(store, product) : { found: false as const, error: unknown.error };
-      return result(id, tested.found ? said(tested.value) : said({ error: tested.error }, true));
+      const unknown = "There is no product with that id in this store. Use list_products for the ids.";
+      if (params.name === "get_page_reading") return paid(PAGE_READING_MOST, async () => (product ? readPageReadingTool(store, product) : null), unknown);
+      let refusal = unknown;
+      return paid(PAGE_TEST_MOST, async () => {
+        const tested = product ? await readPageTestTool(store, product) : { found: false as const, error: unknown };
+        if (!tested.found) refusal = tested.error;
+        return tested.found ? tested.value : null;
+      }, () => refusal);
     }
     if (params.name === "get_page_versions") {
       const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
       const raw = params.arguments?.version;
       const version = raw === undefined || raw === null ? null : Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) < 100 ? (raw as number) : -1;
       if (version === -1) return result(id, said({ error: "version is a whole number from the list, 0 for the newest." }, true));
-      const found = product ? await readPageVersionsTool(store, product, version) : { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
-      return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
+      let refusal = "There is no product with that id in this store. Use list_products for the ids.";
+      return paid(PAGE_VERSIONS_MOST, async () => {
+        const found = product ? await readPageVersionsTool(store, product, version) : { found: false as const, error: refusal };
+        if (!found.found) refusal = found.error;
+        return found.found ? found.value : null;
+      }, () => refusal);
     }
     if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
-    if (params.name === "list_bundle_choices") return paid(BUNDLE_CHOICES_MOST, (meter) => bundleChoicesTool(store, params.arguments ?? {}, meter), "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment.");
-    if (params.name === "get_imports") return paid(IMPORTS_MOST, (meter) => importsTool(store, meter), "Your imports could not be read just now. This is not an empty history; try again in a moment.");
+    if (params.name === "list_bundle_choices") return paid(BUNDLE_CHOICES_MOST, () => bundleChoicesTool(store, params.arguments ?? {}), "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment.");
+    if (params.name === "get_imports") return paid(IMPORTS_MOST, () => importsTool(store), "Your imports could not be read just now. This is not an empty history; try again in a moment.");
     if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
     if (params.name === "get_emails") return answer(await emailsTool(store, charge));
     if (params.name === "get_affiliates") return answer(await affiliatesTool(store, charge));

@@ -686,10 +686,10 @@ export async function savedBlocksTool(store: Store) {
  * (lib/bundle-choices.ts), so an agent preparing a bundle never offers what
  * the store would refuse. Prices in the smallest unit of the store's currency.
  */
-export async function bundleChoicesTool(store: Store, args: Record<string, unknown>, meter?: { bytes: number; commands: number }) {
+export async function bundleChoicesTool(store: Store, args: Record<string, unknown>) {
   const owner = typeof args.bundle === "string" ? args.bundle.slice(0, 40) : "";
   // A page at a time, each inside the one API request it pays for (Codex A3, #1933): never the whole catalog in one call.
-  const listed = await bundleChoicesPage(store, { owner, query: choiceQuery(args.search), after: choiceCursor(args.cursor) }, meter);
+  const listed = await bundleChoicesPage(store, { owner, query: choiceQuery(args.search), after: choiceCursor(args.cursor) });
   // A page that could not be read whole is said so by the route, never shown with products left out (Codex G2, #1933).
   if (!listed) return null;
   return {
@@ -707,9 +707,9 @@ export async function bundleChoicesTool(store: Store, args: Record<string, unkno
  * the file's name nor who started it, which may name a person; not the rows
  * themselves, and not the report of rows left out, which holds addresses.
  */
-export async function importsTool(store: Store, meter?: { bytes: number; commands: number }) {
+export async function importsTool(store: Store) {
   // Only Redis's exact answers: anything else is unknown, said so by the route, never an empty history (Codex A3, #1933).
-  const jobs = await storeImportsRead(store, meter);
+  const jobs = await storeImportsRead(store);
   if (jobs === null) return null;
   return {
     note: "Newest first, at most ten. started_at and finished_at are in milliseconds since 1970 (UTC); finished_at is 0 while it runs. added were brought in, already were there, skipped were left out on purpose (no consent, unsubscribed, a repeated row), errors could not be brought in: the creator downloads that report in the studio.",

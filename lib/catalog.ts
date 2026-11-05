@@ -705,7 +705,7 @@ export async function readListings(store: Store, ids?: Iterable<string>): Promis
  * for each listing read, and a text that is a listing of that id. Anything
  * else is null, unknown, never a page with products left out.
  */
-export async function readListingsExact(store: Store, asked: string[], meter?: { bytes: number; commands: number }): Promise<Listing[] | null> {
+export async function readListingsExact(store: Store, asked: string[]): Promise<Listing[] | null> {
   const catalog = store.catalog;
   if (catalog.inline) return readListings(store, asked);
   if (asked.length === 0) return [];
@@ -714,9 +714,7 @@ export async function readListingsExact(store: Store, asked: string[], meter?: {
   if (missing.length) {
     if (!catalog.id || !isRedisConfigured()) return null;
     const raws: unknown = await redisPipeline(missing.map((id) => ["GET", listingKey(catalog.id!, id)]));
-    if (meter) meter.commands += missing.length;
     if (!Array.isArray(raws) || raws.length !== missing.length || raws.some((raw) => raw !== null && typeof raw !== "string")) return null;
-    if (meter) meter.bytes += (raws as (string | null)[]).reduce((n, raw) => n + (raw ? Buffer.byteLength(raw) : 0), 0);
     for (let i = 0; i < missing.length; i += 1) {
       if (raws[i] === null) continue;
       const listing = parseListing(parseJson(raws[i]));
@@ -943,7 +941,7 @@ export async function readCards(store: Store): Promise<Map<string, Card>> {
  * #1933). An id whose card is not cached yet answers null. Throws when the
  * answer is not one value for each id.
  */
-export async function cachedCards(store: Store, ids: string[], meter?: { bytes: number; commands: number }): Promise<Map<string, Card | null>> {
+export async function cachedCards(store: Store, ids: string[]): Promise<Map<string, Card | null>> {
   const out = new Map<string, Card | null>();
   if (!ids.length) return out;
   const catalog = store.catalog;
@@ -954,9 +952,7 @@ export async function cachedCards(store: Store, ids: string[], meter?: { bytes: 
   }
   if (!catalog.id || !isRedisConfigured()) throw new Error("the product cards could not be read");
   const [reply] = await redisPipeline([["HMGET", titlesKey(catalog.id), ...ids]]);
-  if (meter) meter.commands += 1;
   if (!Array.isArray(reply) || reply.length !== ids.length || reply.some((v) => v !== null && typeof v !== "string")) throw new Error("the product cards could not be read");
-  if (meter) meter.bytes += (reply as (string | null)[]).reduce((n, raw) => n + (raw ? Buffer.byteLength(raw) : 0), 0);
   ids.forEach((id, i) => out.set(id, typeof reply[i] === "string" ? parseCard(id, reply[i] as string) : null));
   return out;
 }

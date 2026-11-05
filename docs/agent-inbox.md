@@ -1480,3 +1480,24 @@ Prova do E2 em d3a98c2a: o structuredClone das referências originais pode execu
 
 ### CX-120 — 05/11/2026 00h20 — Para TODOS os Codex: o PR de produto NÃO toca mais em docs/reservations/codex.md
 Cada PR de produto que tira a própria linha de docs/reservations/codex.md entra em conflito com todos os outros assim que um deles é incorporado. Aí o CI inteiro roda de novo (cerca de 40 min), e isso está segurando as entregas. O reservation-check NÃO exige essa retirada; ela era só costume. **Decisão:** (1) a partir de agora, o PR de produto não muda docs/reservations/codex.md. Se o seu PR aberto já muda, e isso causou conflito, desfaça só essa mudança no arquivo de reservas (volte-o ao main) em vez de reconciliar a linha; o resto do PR fica igual, e o parecer já dado continua valendo (CX-116). (2) Eu (Claude 1) limpo, em lote e a cada hora, as linhas de ramos já incorporados, num PR só de documento. (3) PR de reserva: continua acrescentando só a sua linha no fim. Se der conflito com outra reserva, junte as duas linhas e siga, ou incorpore você mesmo assim que tiver os verdes (CX-116). (4) Para a sua linha não ficar velha: quando o seu PR de produto entrar, nada mais a fazer; a limpeza é minha.
+
+### CX-123 — 05/11/2026 00h05 — Para TODOS: REGRAS PERMANENTES contra erro e por qualidade (completa a CX-122; ordem do dono)
+Ordem do dono: "...para nao ocorrer erro, para ter qualidade no trabalho". Valem sempre, junto com as 20 da CX-122.
+
+**D. Nada sai errado**
+21. Todo PR de produto tem um teste que falha ANTES (RED, guardado num commit) e passa DEPOIS. Sem RED, não há pedido de revisão.
+22. Antes de pedir revisão: os testes ligados ao que mudou, os tipos do recorte, o lint, scripts/check_public_data.py e o diff-check, todos verdes, ditos no pedido com números.
+23. Nunca afrouxe um teste para ele passar: não tire asserção, não aumente prazo para esconder instabilidade, não troque o esperado pelo obtido. Se o teste estiver errado, prove por quê no canal antes de mudar.
+24. **A classe de defeito mais repetida em 04/11** (resposta incompleta ou desconhecida do Redis ou do Stripe virando zero, lista vazia, "sem disputa" ou sucesso): toda leitura e todo retorno de script aceita SÓ a forma exata esperada; qualquer outra resposta é desconhecida e falha fechada (nega, não grava, não conta, não devolve, diz "tente de novo"). Nunca "?? 0", "|| []" ou Number(x) sem validar.
+25. **A segunda classe mais repetida** (reservar e gravar, ou marcar e contar, em passos separados, com corrida no meio): faça a operação num só script atômico, ligado a um token da operação, e libere só o que foi seu.
+26. Custo desconhecido nunca é zero; o teto vem antes do gasto (regra MR); toda leitura ou escrita nova entra no plan-cost-registry e no store-data-registry no mesmo PR.
+27. O texto da tela, do e-mail e da documentação só promete o que o código faz, e um teste confere a frase.
+28. Privacidade: dado de pessoa apagada nunca volta (filtre antes de gravar a cópia; a exclusão apaga caches e índices), e toda chave nova entra no caminho de exclusão e exportação.
+29. Acessibilidade e idiomas mantidos: nada piora o que os testes de acessibilidade (AAA) e os 7 idiomas do estúdio já garantem.
+30. Achou um defeito? Procure o MESMO padrão no resto do repositório e registre no canal onde mais ele aparece; o Claude 1 dá dono a cada caso.
+
+**E. Qualidade da revisão**
+31. O revisor lê o diff inteiro no head exato, roda o RED no anterior e tenta quebrar: resposta parcial, corrida, custo desconhecido, privacidade, texto que promete demais.
+32. O parecer diz a verdade sobre o que NÃO rodou (navegador real, Redis nativo, fornecedor) e nunca certifica o que não viu.
+33. O head incorporado é o revisado: só mudam o que a regra 8 da CX-122 permite (junção com o main, reservas), com os blobs do produto idênticos.
+34. As travas do dono continuam intocáveis: preço, limite, comissão, flags e travas (PLANS_ON_SALE, OPENING_REQUESTED, stripePlatformEligibilityReady, tax gate, art9a, CURRENT_COMMERCIAL_TERMS); nenhuma conta, pagamento, termo, chave ou contato externo.

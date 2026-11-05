@@ -123,8 +123,8 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return { status: "email" };
   if (!isRedisConfigured() || !isSenderConfigured()) return { status: "error" };
   const email = normaliseEmail(raw);
-  if (!(await withinEssentialLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "limited" };
-  if (!(await withinEssentialLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "limited" };
+  if (!(await withinEssentialLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "error" };
+  if (!(await withinEssentialLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "error" };
   if (input.handle) {
     const store = await storeForHandle(input.handle).catch(() => null);
     if (store?.sid) {

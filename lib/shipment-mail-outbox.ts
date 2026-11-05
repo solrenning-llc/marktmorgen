@@ -30,6 +30,9 @@ export type ShipmentMailPolicy = {
   singleDigitalAccessEvidence?: string;
   /** Explicit same-review lifetime and trigger/send funding for renewal intents. */
   singleDigitalRenewalEvidence?: string;
+  /** Explicit same-review funding for the full selected-option pending lifetime.
+   * Retention only: never grants provider, delivery or access coverage. */
+  digitalOptionRetentionEvidence?: string;
   ongoingStorageFunded: boolean;
   emptyInitializationVerified: boolean;
   globalItems: number;
@@ -43,7 +46,7 @@ export type ShipmentMailPolicy = {
   continuedReviewIds?: string[];
   /** Explicit extra source coverage in this same funded envelope; absence
    * preserves legacy physical/shipment coverage, never admits extra origins. */
-  coveredOrigins?: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal" | "physical-option-confirmation")[];
+  coveredOrigins?: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal" | "physical-option-confirmation" | "digital-option-retention")[];
   /** Separate quantified discovery/trigger coverage in this SAME review.
    * Storage funding is not recovery funding. Actual review remains NULL. */
   recovery?: PendingMailRecoveryGrant;
@@ -91,7 +94,7 @@ function data(value: unknown): Record<string, unknown> | null {
 export function shipmentMailPolicy(value: unknown, now = Date.now(), admission = true): ShipmentMailPolicy | null {
   try {
   const p = data(value);
-  const allowed = ["reviewId", "evidence", "ongoingStorageFunded", "emptyInitializationVerified", "globalItems", "globalBytes", "storeItems", "storeBytes", "maxPayloadBytes", "maximumChecks", "retryMilliseconds", "admissionsUntil", "continuedReviewIds", "coveredOrigins", "recovery", "singleDigitalAccessEvidence", "singleDigitalRenewalEvidence"];
+  const allowed = ["reviewId", "evidence", "ongoingStorageFunded", "emptyInitializationVerified", "globalItems", "globalBytes", "storeItems", "storeBytes", "maxPayloadBytes", "maximumChecks", "retryMilliseconds", "admissionsUntil", "continuedReviewIds", "coveredOrigins", "recovery", "singleDigitalAccessEvidence", "singleDigitalRenewalEvidence", "digitalOptionRetentionEvidence"];
   if (p && Object.keys(p).some(key => !allowed.includes(key))) return null;
   if (!p || !integer(now) || typeof p.reviewId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId) ||
       typeof p.evidence !== "string" || !p.evidence.trim() || p.ongoingStorageFunded !== true || p.emptyInitializationVerified !== true) return null;
@@ -146,15 +149,16 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
   }
   if (p.singleDigitalAccessEvidence !== undefined && (typeof p.singleDigitalAccessEvidence !== "string" || !p.singleDigitalAccessEvidence.trim() || p.singleDigitalAccessEvidence.length > 2000)) return null;
   if (p.singleDigitalRenewalEvidence !== undefined && (typeof p.singleDigitalRenewalEvidence !== "string" || !p.singleDigitalRenewalEvidence.trim() || p.singleDigitalRenewalEvidence.length > 2000)) return null;
+  if (p.digitalOptionRetentionEvidence !== undefined && (typeof p.digitalOptionRetentionEvidence !== "string" || !p.digitalOptionRetentionEvidence.trim() || p.digitalOptionRetentionEvidence.length > 2000)) return null;
   if (p.coveredOrigins !== undefined) {
     const input = p.coveredOrigins;
     if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) return null;
     const length = Object.getOwnPropertyDescriptor(input, "length")?.value;
-    if (!Number.isSafeInteger(length) || length < 1 || length > 4 || Reflect.ownKeys(input).length !== length + 1) return null;
-    const origins: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal" | "physical-option-confirmation")[] = [];
+    if (!Number.isSafeInteger(length) || length < 1 || length > 5 || Reflect.ownKeys(input).length !== length + 1) return null;
+    const origins: NonNullable<ShipmentMailPolicy["coveredOrigins"]> = [];
     for (let i = 0; i < length; i++) {
       const field = Object.getOwnPropertyDescriptor(input, String(i));
-      if (!field || !Object.hasOwn(field, "value") || !["course-confirmation", "single-digital-confirmation", "single-digital-access-renewal", "physical-option-confirmation"].includes(field.value) || origins.includes(field.value)) return null;
+      if (!field || !Object.hasOwn(field, "value") || !["course-confirmation", "single-digital-confirmation", "single-digital-access-renewal", "physical-option-confirmation", "digital-option-retention"].includes(field.value) || origins.includes(field.value)) return null;
       origins.push(field.value);
     }
     p.coveredOrigins = origins;
@@ -265,14 +269,21 @@ if op == 'enqueue' then
  -- Courses are a reserve/readback construction only. Funding must explicitly
  -- cover this origin in the SAME policy; no physical funding inheritance.
  if n.originKind~=nil then
-  if type(p.coveredOrigins)~='table' or #p.coveredOrigins<1 or #p.coveredOrigins>4 then return {'unknown'} end
+  if type(p.coveredOrigins)~='table' or #p.coveredOrigins<1 or #p.coveredOrigins>5 then return {'unknown'} end
   local covered={}
   for _,purpose in ipairs(p.coveredOrigins) do
-   if (purpose~='course-confirmation' and purpose~='single-digital-confirmation' and purpose~='single-digital-access-renewal' and purpose~='physical-option-confirmation') or covered[purpose] then return {'unknown'} end
+   if (purpose~='course-confirmation' and purpose~='single-digital-confirmation' and purpose~='single-digital-access-renewal' and purpose~='physical-option-confirmation' and purpose~='digital-option-retention') or covered[purpose] then return {'unknown'} end
    covered[purpose]=true
   end
   if n.originKind=='course' then
    if n.phase~='course_reserved' or n.state~='queued' or n.next~=0 or type(n.courseBindingFingerprint)~='string' or #n.courseBindingFingerprint~=64 or string.find(n.courseBindingFingerprint,'[^a-f0-9]') or not covered['course-confirmation'] then return {'unknown'} end
+  elseif n.originKind=='digital_option' then
+   -- Reservation happens after a network hop. An earlier client TIME cannot
+   -- extend either the original preintent or its financial admission cutoff.
+   local clock=redis.call('TIME')
+   local executed=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
+   if math.abs(executed-now)>60000 or n.authorizedAt>executed or executed-n.authorizedAt>300000 or executed>p.admissionsUntil or
+      n.kind~='confirmation' or n.phase~='digital_option_reserved' or n.state~='queued' or n.next~=0 or n.session~='' or n.bindingFingerprint~='' or n.owner~='' or n.leaseUntil~=0 or n.createAttempts~=0 or n.checks~=0 or type(n.expiresAt)~='number' or n.expiresAt<=executed or not covered['digital-option-retention'] or type(p.digitalOptionRetentionEvidence)~='string' or not string.find(p.digitalOptionRetentionEvidence,'%S') or #p.digitalOptionRetentionEvidence>2000 or p.ongoingStorageFunded~=true then return {'unknown'} end
   elseif n.originKind=='single_digital' then
    if n.kind~='confirmation' or n.phase~='awaiting_creation' or n.state~='queued' or not covered['single-digital-confirmation'] then return {'unknown'} end
   elseif n.originKind=='single_digital_renewal' then
@@ -308,7 +319,7 @@ if op == 'enqueue' then
  redis.call('SET',KEYS[2],n.sourceValue)
  -- Reserve-only courses have no worker stage. Keep their protected source
  -- in the existing ownership indices, without an unbounded polling member.
- if n.originKind~='course' then redis.call('ZADD',KEYS[3],now,n.id) end
+ if n.originKind~='course' and n.originKind~='digital_option' then redis.call('ZADD',KEYS[3],now,n.id) end
  redis.call('SADD',KEYS[4],n.id); redis.call('SADD',KEYS[5],n.id); redis.call('SADD',KEYS[8],n.id)
  if n.originKind=='single_digital_renewal' then
   redis.call('SET',KEYS[11],n.id,'NX'); redis.call('SADD',KEYS[12],n.id)

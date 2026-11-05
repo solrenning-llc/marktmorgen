@@ -1,5 +1,7 @@
 /** Detached paid-file selection only. No original catalog/owner proof,
  * financial grant, immutable persisted source, payment or download permission. */
+import {types} from "node:util";
+import {MAX_OPTIONS} from "@/lib/product-option";
 import {ownsPath,type ProductFile} from '@/lib/product-file';
 
 export type SelectedDigitalOption=Readonly<{
@@ -7,14 +9,14 @@ export type SelectedDigitalOption=Readonly<{
 }>;
 function own(value:unknown):Record<string,unknown>|null{
  try{
-  if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))return null;
+  if(!value||typeof value!=='object'||types.isProxy(value)||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))return null;
   const keys=Reflect.ownKeys(value);if(keys.length>128)return null;const result:Record<string,unknown>=Object.create(null);
   for(const key of keys){const d=Object.getOwnPropertyDescriptor(value,key);if(typeof key!=='string'||!d||!Object.hasOwn(d,'value'))return null;result[key]=d.value;}return result;
  }catch{return null;}
 }
 function list(value:unknown,maximum:number):unknown[]|null{
  try{
-  if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)return null;
+  if(types.isProxy(value)||!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)return null;
   const n=Object.getOwnPropertyDescriptor(value,'length')?.value;
   if(typeof n!=='number'||!Number.isSafeInteger(n)||n<0||n>maximum||Reflect.ownKeys(value).length!==n+1)return null;
   const result=[];for(let i=0;i<n;i++){const d=Object.getOwnPropertyDescriptor(value,String(i));if(!d||!Object.hasOwn(d,'value'))return null;result.push(d.value);}return result;
@@ -45,4 +47,20 @@ export function selectedDigitalOptionForFolder(product:unknown,optionId:unknown,
  if(!text(storeFolder,320)||storeFolder!==storeFolder.trim()||storeFolder.includes('/')||storeFolder.includes('\\'))return null;
  const selected=selectedDigitalOption(product,optionId);
  return selected&&ownsPath(selected.file.pathname,storeFolder,selected.id)?selected:null;
+}
+
+/** Pure projection from the caller's independently authenticated ORIGINAL
+ * catalog record. Explicit selection only; never current-catalog fallback,
+ * source authentication, permission to charge, or a funding/access proof. */
+export function selectedDigitalOptionFromOriginal(product:unknown,optionId:unknown,storeFolder:unknown):SelectedDigitalOption|null{
+ const p=own(product),options=list(p?.options,MAX_OPTIONS);
+ if(!options?.length||typeof optionId!=="string"||!optionId)return null;
+ const ids=new Set<string>();let selected:Record<string,unknown>|null=null;
+ for(const raw of options){
+  const option=own(raw);
+  if(!option||typeof option.id!=="string"||!/^[A-Za-z0-9_-]{1,24}$/.test(option.id)||ids.has(option.id))return null;
+  ids.add(option.id);
+  if(option.id===optionId)selected=option;
+ }
+ return selected?selectedDigitalOptionForFolder({options:[selected]},optionId,storeFolder):null;
 }

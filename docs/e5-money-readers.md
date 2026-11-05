@@ -36,9 +36,9 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | NEW-CHARGE | 20 |
 | TOTALS | 34 |
 | PAST-SALE | 11 |
-| SETTING | 42 |
+| SETTING | 43 |
 | OTHER | 3 |
-| All | 120 |
+| All | 121 |
 
 ## The files
 
@@ -164,3 +164,4 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/api-numbers.ts` | OTHER | 64: the store's currency is part of the kept numbers' key, so a copy read under another currency is never reused; no amount is formatted or summed here | n/a |
 | `lib/digital-consent-email.ts` | OTHER | 37: speechFor only formats a date; no money | n/a |
 | `lib/physical-option-confirmation.ts` | OTHER | compares the protected original snapshot currency with the exact original checkout body | yes: no conversion, repricing or financial approval; original rights, account and funding must still be proved |
+| `lib/digital-option-body.ts` | SETTING | pure original-setting snapshot and exact selected original checkout-body comparison | yes: no conversion, repricing, new charge or financial approval; trusted original reads, admission and separately funded persistence remain required |

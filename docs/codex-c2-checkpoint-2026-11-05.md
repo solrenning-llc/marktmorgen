@@ -1,3 +1,23 @@
+# Latest C2 continuation — 2026-11-05 15:05 Fortaleza
+
+This supersedes historical sections below. #2601 exact a12c62f9 remains unchanged, eight successes plus the known deterministic pricing document failure; #2632/4c92c6f4 is still OPEN. No retry consumed, no head movement/merge/cancellation. Main602db6c8 rules were fetched with no change to CLAUDE/AGENTS/Codex inbox. Await upstream correction, never bypass nine successful workflows.
+
+## Active independent financial review: #2654
+
+Claude4 explicitly requested external financial review at14h53. C2 claim posted channelbddb739952098727edc56803e0d38a373aab1561 before task execution; no other external controller/review then existed. Exact reviewed head d2bf979790df5bee12e5a0163e59efabcba1ec33, branch claude4/sg2-number-gates-a. Do NOT modify this branch or product.
+
+Blocking MEDIUM review5789543846: lib/group-buy.ts givenBy maps malformed serialized grant to a truthy `{job:"",at:0}`; takeOpened calls it confirmed other ownership, removes the pending paid-place mark and returns has. Broken JSON and JSONnull produce zero purchases in actual importedFor, yet mark is gone. This is on the newly changed exact HGET/recovery boundary.
+
+Permanent C2 proof `codex/c-review-2654-grant-evidence/f89b626c5b794673ecadc6d158587d852ca9b7dd`, treefcffaca28ca0526aa90fbcaf5f90bf4d3a2b5d98. Four tests:3 causal failures and1 positive control on exact head. Bad values `{broken`, `null`, `[]`; valid complete other-source grant still returns has/removes mark as intended. Real takePlace/importedFor and MemoryRedis, synthetic seeded paid group/token/records. Run `node tests/review-c2-2654-grant-evidence-run.mjs`; file .proof.ts is intentionally opt-in (not default CI). Author linked132/132 number-gates-a +61/61group-buy pass. Directed TypeScript/imports0, lint0, scanner3799/0,diff and native/GitHub tree equality pass. No nativeRedis/browser/provider/realpayment/global certification.
+
+Required correction: explicit absent HGETnull differs from malformed record; only valid grant origin may authorize has/already/removal. Unknown must refuse without freeing pending mark. Same strict check required for fallback HGET after grantImported returnsfalse. Repeat proof UNCHANGED, check real grant writer schema for legacy compatibility. This finding does not approve the rest of the PR.
+
+REVIEW STILL IN PROGRESS: complete adversarial cost/lease audit for added SETlock/HLEN/DEL, verify original author RED on prior source, remaining linked groups and all diff/test details before whole opinion. In particular the new opening lock is constant value1/30s and unconditionallyDEL in finally; examine successor-owner release risk with evidence, do not label unproved pattern a finding. Additional work must stay read-only in C4 product; durable probes go only in own review branch. Existing author tests cover lost responses; do not replace assertions or claim native effects. Product includes card/free/group changes and page wording, all5files need final coverage. The blocking MEDIUM is already proven; await corrective delta if it arrives before repeating code.
+
+Local reviewer worktree `/workspace/scratch/554244210079/c2-review-2654`, own local branch codex/c-review-2654-grant-evidence. Only two own proof files added. C2 own product count remains1 (#2601); review does not count. No new implementation reservation. Commercial-margin/J and threshold/explicitC1 assignment restrictions unchanged. Continue current checkpoint task, do not recreate any PR/branch or re-review already controlled2655/2632.
+
+---
+
 # Latest C2 continuation — 2026-11-05 13:59 Fortaleza
 
 This section supersedes all historical sections below.

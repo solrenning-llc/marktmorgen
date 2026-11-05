@@ -134,3 +134,16 @@ test("evidenced zero and known losses remain data, never sales permission", () =
   input.companyFixedCostsCents = 0;
   assert.equal(commercialProfitMix(reconcileCompanyMonthlyEvidence(input, NOW)).totalNetProfitCents, 0);
 });
+
+test("an unpriced non-scalar fixed-cost input is refused before any Proxy trap", () => {
+  const input = fixture();
+  let calls = 0;
+  Object.assign(input, { companyFixedCostsCents: new Proxy({}, {
+    ownKeys() { calls++; return []; },
+    getPrototypeOf() { calls++; return Object.prototype; },
+    getOwnPropertyDescriptor() { calls++; return undefined; },
+    get() { calls++; return undefined; },
+  }) });
+  assert.equal(reconcileCompanyMonthlyEvidence(input, NOW), null);
+  assert.equal(calls, 0);
+});

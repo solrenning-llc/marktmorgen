@@ -6,7 +6,7 @@ The boundary does not contact a supplier, read an invoice, authenticate a refere
 
 ## Input and output
 
-Input is only a JSON string of at most 65,536 UTF-16 characters. Objects, getters, proxies and callbacks are never inspected. The root and every row have exact schemas. A packet contains at most 64 invoice rows, one `YYYY-MM` period and USD throughout. Counts and monetary fields are nonnegative safe integers. Usage multiplication is performed with `BigInt`, rounded upward from microcents, and refused if any row or total cannot be represented safely.
+Input is only a JSON string of at most 65,536 UTF-16 characters. Objects, getters, proxies and callbacks are never inspected. The root and every row have exact schemas; duplicate object members are rejected from the serialized text before `JSON.parse` can normalize them to the last value. A packet contains at most 64 invoice rows, one `YYYY-MM` period and USD throughout. Counts and monetary fields are nonnegative safe integers. Usage multiplication is performed with `BigInt`, rounded upward from microcents, and refused if any row or total cannot be represented safely.
 
 Supplier identifiers and opaque invoice references are used only to count unique suppliers and repeated references. They are not copied into the result. The detached frozen result contains the period, status, supplier count, three aggregate cent totals and four separate exception counts. Duplicate invoice rows remain in the invoiced total so a repeated charge cannot disappear from the reported amount. Exception counts are not added together because one row may belong to more than one group.
 

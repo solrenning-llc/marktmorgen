@@ -42,7 +42,7 @@ const APPLIED = "nl:share:applied";
 /** When step 2 last read each account's refunds, by store key. */
 const READ_UNTIL = "nl:share:read-until";
 
-export type SettleCounts = { fees: number; gaveBack: number; cents: number; stores: number; memberships: number; failed: number; complete: boolean; unknownDisputes: number; unknownDisputeFees: string[]; unknownAmounts: number; unknownAmountFees: string[] };
+export type SettleCounts = { fees: number; gaveBack: number; cents: number; stores: number; memberships: number; failed: number; complete: boolean; unknownDisputes: number; unknownDisputeFees: string[]; unknownAmounts: number; unknownAmountFees: string[]; listUnknown: number };
 
 /** A separate diagnostic, never permission to refund from unknown evidence. */
 class UnknownDisputeStatus extends Error {
@@ -57,8 +57,11 @@ class UnknownAmount extends Error {
   }
 }
 
+class UnknownFeeList extends Error {}
+
 function countSettlementFailure(counts: SettleCounts, error: unknown): void {
   counts.failed += 1;
+  if (error instanceof UnknownFeeList) counts.listUnknown += 1;
   if (error instanceof UnknownDisputeStatus) {
     counts.unknownDisputes += 1;
     if (!counts.unknownDisputeFees.includes(error.feeId)) counts.unknownDisputeFees.push(error.feeId);
@@ -221,18 +224,18 @@ async function settleRecent(nowSeconds: number, deadline: number, counts: Settle
     );
     if (list.object !== "list" || typeof list.has_more !== "boolean" || !Array.isArray(list.data)
       || list.data.length > 100 || (list.has_more && list.data.length === 0)) {
-      throw new Error("Recent application fee page was not confirmed");
+      throw new UnknownFeeList("Recent application fee page was not confirmed");
     }
     // Confirm the entire page before any of its rows can authorize a refund.
     const ids = new Set<string>();
     const fees = list.data.map((raw: unknown): Fee => {
       const fee = raw && typeof raw === "object" && !Array.isArray(raw) ? readFee(raw as Record<string, unknown>) : null;
-      if (!fee || ids.has(fee.id) || fee.id === after) throw new Error("Recent application fee row was not confirmed");
+      if (!fee || ids.has(fee.id) || fee.id === after) throw new UnknownFeeList("Recent application fee row was not confirmed");
       ids.add(fee.id);
       return fee;
     });
     const last = fees.length ? fees[fees.length - 1].id : "";
-    if (list.has_more && cursors.has(last)) throw new Error("Recent application fee cursor did not advance");
+    if (list.has_more && cursors.has(last)) throw new UnknownFeeList("Recent application fee cursor did not advance");
     for (const fee of fees) {
       if (Date.now() > deadline) return false;
       counts.fees += 1;
@@ -341,11 +344,11 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
  * those whose memberships still carry one written earlier.
  */
 export async function settleShares(deadline: number, nowSeconds = Date.now() / 1000, live = COMMISSION_LIVE): Promise<SettleCounts> {
-  const counts: SettleCounts = { fees: 0, gaveBack: 0, cents: 0, stores: 0, memberships: 0, failed: 0, complete: true, unknownDisputes: 0, unknownDisputeFees: [], unknownAmounts: 0, unknownAmountFees: [] };
+  const counts: SettleCounts = { fees: 0, gaveBack: 0, cents: 0, stores: 0, memberships: 0, failed: 0, complete: true, unknownDisputes: 0, unknownDisputeFees: [], unknownAmounts: 0, unknownAmountFees: [], listUnknown: 0 };
   try {
     if (!(await settleRecent(nowSeconds, deadline, counts, live))) counts.complete = false;
   } catch (error) {
-    counts.failed += 1;
+    countSettlementFailure(counts, error);
     counts.complete = false;
     console.error("reading the recent shares failed", error);
   }

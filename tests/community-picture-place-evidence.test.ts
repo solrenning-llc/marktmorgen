@@ -61,6 +61,24 @@ async function main(): Promise<void> {
   is("an accessor slot cannot open the door", (await take([accessor])).opened, false);
   is("validation does not execute the accessor", getterReads, 0);
 
+  const inheritedDescriptorValue = Object.getOwnPropertyDescriptor(Object.prototype, "value");
+  const pollutedAccessor = Array(1) as unknown[];
+  Object.defineProperty(pollutedAccessor, "0", {
+    get() {
+      getterReads += 1;
+      return 1;
+    },
+    enumerable: true,
+  });
+  try {
+    Object.defineProperty(Object.prototype, "value", { configurable: true, value: 1 });
+    is("an inherited descriptor value cannot open the door", (await take([pollutedAccessor])).opened, false);
+    is("validation still does not execute the polluted accessor", getterReads, 0);
+  } finally {
+    if (inheritedDescriptorValue) Object.defineProperty(Object.prototype, "value", inheritedDescriptorValue);
+    else delete (Object.prototype as { value?: unknown }).value;
+  }
+
   let proxyPayloadReads = 0;
   const proxy = new Proxy([1], {
     get(target, property, receiver) {

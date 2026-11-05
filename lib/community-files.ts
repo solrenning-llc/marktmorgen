@@ -85,7 +85,7 @@ export async function takePicturePlace(path: string, limit: number): Promise<boo
     const keys = Reflect.ownKeys(reply);
     if (keys.length !== 2 || !keys.includes("0") || !keys.includes("length")) return false;
     const slot = Object.getOwnPropertyDescriptor(reply, "0");
-    if (!slot || !("value" in slot)) return false;
+    if (!slot || !Object.hasOwn(slot, "value")) return false;
     const count = slot.value;
     if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= 0) return false;
     if (count <= limit) return true;

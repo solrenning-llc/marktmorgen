@@ -68,6 +68,11 @@ is("for those who may change the store's pages, as the route", studio.includes('
 is("the link to the card is the editor's, not the page's (it follows a save or a delete)", [studio.includes("Open your card at"), editor.includes("{shown && kept ? (") && editor.includes("{`Open your card at ${address}`}")], [false, true]);
 is("shown for a card kept on, not for one kept off or not kept", [draw(card).includes("Open your card at marktmorgen.com/@anapottery/contact"), draw({ ...card, on: false }).includes("Open your card at"), empty.includes("Open your card at")], [true, false, false]);
 is("says whether visitors can leave their details under it, and where to turn that on", studio.includes("{contactOpen(store) ? (") && studio.includes("your store&apos;s contact form lets visitors leave their name") && studio.includes('<Link href={`${studioPath(store)}#contact`}') && studio.includes("Turn on the contact form"), true);
+// Independent review of #1965: "off" is only the creator's own switch; switched on but unable to take messages (the store
+// switched off, no email, sending unavailable) says so, and never offers to turn on what is already on.
+is("the form said off only when its switch is off", studio.includes(") : !store.contact.on ? ("), true);
+const unavailable = studio.slice(studio.indexOf("function contactUnavailableWords"), studio.indexOf("export default"));
+is("switched on but unavailable: said so, with why, and no turning it on", [unavailable.includes("contact form is on, but"), unavailable.includes("is off"), unavailable.includes("Turn on"), unavailable.includes("switched off"), unavailable.includes("email address")], [true, false, false, true, true]);
 is("said when it cannot be read", studio.includes("Your card could not be read just now. Nothing was changed."), true);
 const site = readFileSync("app/studio/site/page.tsx", "utf8");
 is("reached from Your pages, for the same people", site.includes('"page");') && site.includes('<Link href={studioPath(store, "", "card")}') && site.includes("Set up your business card"), true);

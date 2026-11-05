@@ -45,7 +45,9 @@ async function main(): Promise<void> {
         ? "Cleared, and both addresses logged out."
         : answer === "split"
           ? "Not cleared: the store is on one address and its passkeys or app on the other. Clearing would let the emailed link in with no second step; repair it, or move the ways in by hand first."
-          : answer === "confirm"
+          : answer === "running"
+            ? "Not cleared: a move of one of these addresses is running now. Wait for it to end."
+            : answer === "confirm"
             ? "Not cleared: type the same address after --clear=."
             : "Nothing to clear: this address has no broken move.",
     );

@@ -9,7 +9,7 @@ import { store as redis } from "./redis-stub";
 const statsId = "jreviewledger";
 const key = `nl:stats:${statsId}:ledger`;
 const shop = { statsId, currency: "usd", pastBuyers: true } as Store;
-const cached = JSON.stringify({ c: "usd", p: false, r: [["buyer@example.com", 1200, 1, "direct", 1]], v: 6 });
+const cached = JSON.stringify({ c: "usd", p: false, r: [["buyer@example.com", 1200, 1, "direct", 1]], t: Date.now(), v: 6 });
 const pipeline = redis.pipeline.bind(redis);
 
 async function readWith(reply: unknown[], empty = false) {

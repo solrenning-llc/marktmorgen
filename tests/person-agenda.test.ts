@@ -206,7 +206,7 @@ async function main() {
   const tasksHash = `nl:crm:tasks:${shared.statsId}`;
   await redisPipeline([["DEL", tasksHash]]);
   for (const who of ["ann", "ben"]) await redisPipeline([["HSET", tasksHash, personKey(shared.statsId!, `${who}@example.com`), JSON.stringify([{ id: "abcdefghij", text: `Call ${who}`, due: "", assignee: "", done: false, createdAt: 1, doneAt: 0 }])]]);
-  const copyOf = (rows: number) => JSON.stringify({ c: shared.currency, p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: rows }, (_, i) => [`f${String(i).padStart(5, "0")}@example.com`, 0, 0, "direct", 0])], v: 6 });
+  const copyOf = (rows: number) => JSON.stringify({ c: shared.currency, p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: rows }, (_, i) => [`f${String(i).padStart(5, "0")}@example.com`, 0, 0, "direct", 0])], t: Date.now(), v: 6 });
   let filler = 0;
   while (copyOf(filler).length < 30_000) filler += 1;
   const sharedCopy = copyOf(filler);

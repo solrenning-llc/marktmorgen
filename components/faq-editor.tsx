@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -22,6 +22,17 @@ export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left
   const [drafting, setDrafting] = useState(false);
   const [note, setNote] = useState("");
   const [left, setLeft] = useState(ai.left);
+  const questionFields = useRef(new Map<number, HTMLInputElement>());
+  const addButton = useRef<HTMLButtonElement>(null);
+  const pendingFocus = useRef<number | "add" | null>(null);
+  // Apply only an explicit local edit's destination, after its row is mounted.
+  // Ordinary typing, server replies and AI drafts never move the focus.
+  useLayoutEffect(() => {
+    const target = pendingFocus.current;
+    pendingFocus.current = null;
+    if (target === "add") addButton.current?.focus();
+    else if (target !== null) questionFields.current.get(target)?.focus();
+  }, [rows]);
   // What is saved: the page's list, or, once a save is confirmed, what was saved, until the page brings the new list.
   const [base, setBase] = useState<FaqItem[]>(faq);
   const [seen, setSeen] = useState(faq);
@@ -36,18 +47,23 @@ export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left
   const add = (items: FaqItem[], dropEmpty = true) => {
     let key = next;
     const added = items.map((item) => ({ ...item, key: key++ }));
+    if (!dropEmpty && rows.length < MAX_FAQ && added.length) pendingFocus.current = added[0].key;
     setNext(key);
     setRows((now) => [...(dropEmpty ? now.filter((r) => r.q.trim() || r.a.trim()) : now), ...added].slice(0, MAX_FAQ));
   };
   const change = (key: number, part: Partial<FaqItem>) => setRows((now) => now.map((r) => (r.key === key ? { ...r, ...part } : r)));
-  const move = (index: number, by: -1 | 1) =>
-    setRows((now) => {
-      const to = index + by;
-      if (to < 0 || to >= now.length) return now;
-      const copy = [...now];
-      [copy[index], copy[to]] = [copy[to], copy[index]];
-      return copy;
-    });
+  const move = (index: number, by: -1 | 1) => {
+    const to = index + by;
+    if (to < 0 || to >= rows.length) return;
+    pendingFocus.current = rows[index].key;
+    const copy = [...rows];
+    [copy[index], copy[to]] = [copy[to], copy[index]];
+    setRows(copy);
+  };
+  const remove = (index: number) => {
+    pendingFocus.current = rows[index + 1]?.key ?? rows[index - 1]?.key ?? "add";
+    setRows((now) => now.filter((row) => row.key !== rows[index].key));
+  };
 
   async function draft() {
     if (saving || drafting) return;
@@ -119,13 +135,13 @@ export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left
         {rows.map((row, index) => (
           <li key={row.key} className="rounded-2xl bg-paper p-4 ring-1 ring-line">
             <label htmlFor={`faq-q-${row.key}`} className="field-label">{`Question ${index + 1}`}</label>
-            <input id={`faq-q-${row.key}`} value={row.q} disabled={saving || drafting} maxLength={MAX_FAQ_Q} onChange={(e) => change(row.key, { q: e.target.value })} className="field mt-1" />
+            <input ref={(node) => { if (node) questionFields.current.set(row.key, node); else questionFields.current.delete(row.key); }} id={`faq-q-${row.key}`} value={row.q} disabled={saving || drafting} maxLength={MAX_FAQ_Q} onChange={(e) => change(row.key, { q: e.target.value })} className="field mt-1" />
             <label htmlFor={`faq-a-${row.key}`} className="field-label mt-3 block">Its answer</label>
             <textarea id={`faq-a-${row.key}`} value={row.a} disabled={saving || drafting} maxLength={MAX_FAQ_A} rows={3} onChange={(e) => change(row.key, { a: e.target.value })} className="field mt-1" />
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
-              <button type="button" disabled={saving || drafting || index === 0} onClick={() => move(index, -1)} className="text-ink-soft underline underline-offset-4 disabled:opacity-40">Move up</button>
-              <button type="button" disabled={saving || drafting || index === rows.length - 1} onClick={() => move(index, 1)} className="text-ink-soft underline underline-offset-4 disabled:opacity-40">Move down</button>
-              <button type="button" disabled={saving || drafting} onClick={() => setRows((now) => now.filter((r) => r.key !== row.key))} className="text-ink-soft underline underline-offset-4 hover:text-danger">Remove</button>
+              <button type="button" aria-label={`Move up question ${index + 1}`} disabled={saving || drafting || index === 0} onClick={() => move(index, -1)} className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 disabled:opacity-40">Move up</button>
+              <button type="button" aria-label={`Move down question ${index + 1}`} disabled={saving || drafting || index === rows.length - 1} onClick={() => move(index, 1)} className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 disabled:opacity-40">Move down</button>
+              <button type="button" aria-label={`Remove question ${index + 1}`} disabled={saving || drafting} onClick={() => remove(index)} className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-danger">Remove</button>
             </div>
           </li>
         ))}
@@ -133,7 +149,7 @@ export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left
       {note ? <p className="mt-4 text-sm text-ink-soft" role="status">{note}</p> : null}
       <div className="mt-5 flex flex-wrap gap-2">
         {rows.length < MAX_FAQ ? (
-          <button type="button" disabled={saving || drafting} onClick={() => add([{ q: "", a: "" }], false)} className="btn btn-secondary btn-sm">
+          <button ref={addButton} type="button" disabled={saving || drafting} onClick={() => add([{ q: "", a: "" }], false)} className="btn btn-secondary btn-sm">
             <Icon name="plus" size={16} />
             Add a question
           </button>

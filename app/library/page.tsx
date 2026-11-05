@@ -52,7 +52,7 @@ export default async function LibraryPage({ searchParams }: Params) {
       // read, and the card says it will show again soon. Payment requests are read only where they take payment.
       let waiting = "";
       if (open) {
-        const paid = await takePublicRequest(store, "buyer", Date.now(), LIBRARY_WAITING_UNITS).catch(() => false);
+        const paid = await takePublicRequest(store, "buyer", undefined, LIBRARY_WAITING_UNITS).catch(() => false);
         const found = paid ? await waitingFor(store, email, undefined, requestsOpen(store)).catch(() => null) : null;
         waiting = !paid ? WAITING_LATER : waitingLine(found ?? { requestsTotal: 0, agreementsTotal: 0, unread: true });
       }

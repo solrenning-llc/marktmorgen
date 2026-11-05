@@ -105,7 +105,7 @@ async function main(): Promise<void> {
 
   part("On the library");
   const page = readFileSync("app/library/page.tsx", "utf8");
-  is("the requests are taken before the read, at LIBRARY_WAITING_UNITS", page.indexOf(`takePublicRequest(store, "buyer", Date.now(), LIBRARY_WAITING_UNITS)`) < page.indexOf("await waitingFor(") && page.includes("LIBRARY_WAITING_UNITS"), true);
+  is("the requests are taken before the read, at LIBRARY_WAITING_UNITS", page.indexOf(`takePublicRequest(store, "buyer", undefined, LIBRARY_WAITING_UNITS)`) < page.indexOf("await waitingFor(") && page.includes("LIBRARY_WAITING_UNITS"), true);
   is("payment requests read only where they take payment", page.includes("waitingFor(store, email, undefined, requestsOpen(store))"), true);
   is("said on the store's card, beside the way to open it", page.includes('{waiting ? <p className="mt-4 text-sm font-semibold text-ink">{waiting}</p> : null}'), true);
   is("no extra reading of the creator's Stripe account per store", !page.includes("callsFor("), true);

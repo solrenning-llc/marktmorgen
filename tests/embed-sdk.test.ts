@@ -219,9 +219,9 @@ async function main(): Promise<void> {
   const href = scriptHref({ handle: "harbor", productId: "k3j9x2p1ab", place: "blog", campaign: "spring", back: "https://www.example.com/thanks" });
   is("the card as a page of its own, tagged, with the way back", href, "https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=page&utm_source=blog&utm_medium=checkout-script&utm_campaign=spring&return=https%3A%2F%2Fwww.example.com%2Fthanks");
   is("the sign-up form's", scriptHref({ handle: "harbor", productId: null, place: "" }), "https://marktmorgen.com/embed/harbor/join?mm=page&utm_source=website&utm_medium=checkout-script");
-  const code = scriptCode({ handle: "harbor", productId: "k3j9x2p1ab", place: "blog", text: '</a><script>alert(1)</script>', mode: "overlay", fill: "#5a36ee", onFill: "#ffffff" });
+  const code = scriptCode({ handle: "harbor", productId: "k3j9x2p1ab", place: "blog", text: '</a><script>alert(1)</script>', mode: "overlay", fill: "#4f2acc", onFill: "#ffffff" });
   is("what the creator typed cannot leave the link", [code.includes("<script>alert"), code.split("<script>").length - 1], [false, 1]);
-  is("the link says how it opens and asks for the site's origin only", /^<a href="https:\/\/marktmorgen\.com\/embed\/harbor\/k3j9x2p1ab\?mm=page&amp;[^"]+" data-mm="overlay" referrerpolicy="origin" style="[^"]*background:#5a36ee;color:#ffffff[^"]*">/.test(code), true);
+  is("the link says how it opens and asks for the site's origin only", /^<a href="https:\/\/marktmorgen\.com\/embed\/harbor\/k3j9x2p1ab\?mm=page&amp;[^"]+" data-mm="overlay" referrerpolicy="origin" style="[^"]*background:#4f2acc;color:#ffffff[^"]*">/.test(code), true);
   is("a color that is not one never reaches the style", scriptCode({ handle: "h", productId: "abcdef", place: "", text: "Buy", mode: "page", fill: "red;background:url(x)", onFill: "#fff" }).includes("url(x)"), false);
   is("and the script follows, exactly as its hash was made", code.endsWith(`\n${loaderTag()}`) && loaderTag() === `<script>${loaderSource()}</script>`, true);
   is("no key, no secret, no store record in it", /nl_live|sk_|secret|statsId/i.test(code), false);

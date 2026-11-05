@@ -30,7 +30,7 @@ part("Unsafe color pairs still produce readable checkout text");
 const unsafe: [string, string][] = [
   ["#ffffff", "#ffffff"], ["#15112e", "#15112e"],
   ["#ffffff", "#aaaaaa"], ["#ff0000", "#000000"],
-  ["#ffffff", "#5a5a5a"], ["#777777", "#ffffff"],
+  ["#ffffff", "#5a5a5a"], ["#777777", "#ffffff"], ["#5a36ee", "#ffffff"],
   ["#15112e", "invalid"], ["#15112e", ""],
   ["invalid", "invalid"], ["red;background:url(x)", "red"],
 ];

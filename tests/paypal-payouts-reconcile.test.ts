@@ -162,6 +162,7 @@ async function main(): Promise<void> {
   is("one batch in all, now known by PayPal's id", [batches, await fields()], [1, ["BATCH1REC"]]);
   await settlePayPal(store);
   is("paid once, and nobody on their way any more", [await paidCents(store), (await onTheirWay(store)).size], [4500, 0]);
+  is("counted for the month: one unknown, one settled", [(await counts()).unknown, (await counts()).settled], [1, 1]);
 
   part("The first request never reached PayPal: the retry makes it, once");
   await seed(store);
@@ -225,7 +226,7 @@ async function main(): Promise<void> {
 
   part("Counted by month for the owner's report, with no store or person");
   const c = await counts();
-  is("unknown, settled, manual", [c.unknown >= 1, c.settled >= 1, c.manual >= 1], [true, true, true]);
+  is("unknown and manual (settled is counted in the first part)", [c.unknown >= 1, c.manual >= 1], [true, true]);
   const [names] = await redis.pipeline([["HKEYS", `nl:pp:unk:month:${month()}`]]);
   is("only those three counts", (names as string[]).every((n) => ["unknown", "settled", "manual"].includes(n)), true);
 

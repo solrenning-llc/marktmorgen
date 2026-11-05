@@ -1,5 +1,13 @@
 /** Strictly reads the saved exposure before any new payout batch is allowed. */
-export type PendingPayoutBatch = { at: number; currency: string; lines: { a: string; c: number }[] };
+export type PendingPayoutBatch = {
+  at: number;
+  currency: string;
+  lines: { a: string; c: number }[];
+  /** A batch whose answer was not known (lib/paypal-payouts.ts): when it was last sent again, ms. */
+  t?: number;
+  /** 1: it could not be confirmed with PayPal and needs the creator's own check; it is not sent again. */
+  m?: 1;
+};
 
 const unavailable = (): never => { throw new Error("Pending payout records are unavailable"); };
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -36,7 +44,14 @@ export function readPendingPayoutBatches(results: unknown): Map<string, PendingP
       seen.add(line.a);
       lines.push({ a: line.a, c: line.c as number });
     }
-    out.set(id, { at: value.at as number, currency: value.currency, lines });
+    // The two marks of a batch whose answer was not known, each only in its own shape.
+    if (value.t !== undefined && (!Number.isSafeInteger(value.t) || (value.t as number) < 0)) return unavailable();
+    if (value.m !== undefined && value.m !== 1) return unavailable();
+    out.set(id, {
+      at: value.at as number, currency: value.currency, lines,
+      ...(value.t !== undefined ? { t: value.t as number } : {}),
+      ...(value.m === 1 ? { m: 1 as const } : {}),
+    });
   }
   return out;
 }

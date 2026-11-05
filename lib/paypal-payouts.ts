@@ -87,9 +87,51 @@ class PayPalError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    /** PayPal refused a sender_batch_id it already has (400, the batch exists). */
+    readonly duplicate = false,
+    /** The id of the batch PayPal's refusal links to, when it gives one and only one. */
+    readonly original = "",
   ) {
     super(`PayPal ${status} ${code}`);
   }
+}
+
+const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * PayPal's refusal of a sender_batch_id used in the last 30 days: a 400
+ * whose details name the sender_batch_id as already there (PayPal's pages,
+ * read through search on 05/11/2026; the developer pages themselves were not
+ * reachable from this session).
+ */
+function duplicateOf(status: number, data: Record<string, unknown>): boolean {
+  if (status !== 400 || !Array.isArray(data.details)) return false;
+  return data.details.some((d) => record(d) &&
+    (d.field === "sender_batch_id" || /sender_batch_id/i.test(String(d.issue ?? ""))) &&
+    /already|duplicate/i.test(`${String(d.issue ?? "")} ${String(d.description ?? "")}`));
+}
+
+/** The one payout batch an answer links to (its links, or each detail's link), or "" when none or more than one. */
+function linkedBatch(data: Record<string, unknown>): string {
+  const hrefs: unknown[] = [];
+  const take = (v: unknown) => {
+    if (typeof v === "string") hrefs.push(v);
+    else if (record(v)) hrefs.push(v.href);
+    else if (Array.isArray(v)) v.forEach(take);
+  };
+  take(data.links);
+  if (Array.isArray(data.details)) for (const d of data.details) if (record(d)) { take(d.link); take(d.links); }
+  const ids = new Set<string>();
+  for (const href of hrefs) {
+    if (typeof href !== "string") continue;
+    try {
+      const id = /^\/v1\/payments\/payouts\/([A-Z0-9]{6,30})$/.exec(new URL(href).pathname)?.[1];
+      if (id) ids.add(id);
+    } catch {
+      // Not a link: left out.
+    }
+  }
+  return ids.size === 1 ? [...ids][0] : "";
 }
 
 async function call(method: "GET" | "POST", path: string, auth: string, body?: string | URLSearchParams, requestId?: string): Promise<Record<string, unknown>> {
@@ -115,7 +157,7 @@ async function call(method: "GET" | "POST", path: string, auth: string, body?: s
     if (response.ok && !object) throw new PayPalError(response.status, "UNREADABLE");
     if (!response.ok) {
       const name = typeof data.name === "string" ? data.name : typeof data.error === "string" ? data.error : "UNKNOWN";
-      throw new PayPalError(response.status, name);
+      throw new PayPalError(response.status, name, duplicateOf(response.status, data), linkedBatch(data));
     }
     return data;
   } finally {
@@ -221,7 +263,51 @@ export type PayResult =
  * no batch) may have made it.
  */
 function refusedBeforeMade(error: unknown): boolean {
-  return error instanceof PayPalError && error.status >= 400 && error.status < 500 && error.status !== 408;
+  return error instanceof PayPalError && error.status >= 400 && error.status < 500 && error.status !== 408 && !error.duplicate;
+}
+
+/** At most one try a day at a batch whose answer was not known. */
+export const UNKNOWN_RETRY_EVERY_MS = 86_400_000;
+/** After this long without PayPal's word, it needs the creator's own check and is not tried again. */
+export const UNKNOWN_MANUAL_AFTER_MS = 7 * 86_400_000;
+const unknownMonthKey = (month: string) => `nl:pp:unk:month:${month}`;
+const MONTH_SECONDS = 400 * 86_400;
+type UnknownCount = "unknown" | "settled" | "manual";
+
+/** One of the month's counts for the owner's report: numbers only, no store, no person. Never throws. */
+async function countUnknown(what: UnknownCount, now = Date.now()): Promise<void> {
+  const key = unknownMonthKey(new Date(now).toISOString().slice(0, 7));
+  await redisPipeline([["HINCRBY", key, what, 1], ["EXPIRE", key, MONTH_SECONDS]]).catch(() => undefined);
+}
+
+/**
+ * The month's counts of PayPal payout batches whose answer was not known, for
+ * the owner's monthly report (lib/company-margin-report.ts, 465 [MR2], wired
+ * by its owner): sent with no known answer, settled by sending the same
+ * request again, and left for the creator's own check. Null when not read.
+ */
+export async function payoutUnknownMonth(month: string): Promise<Record<UnknownCount, number> | null> {
+  if (!/^\d{4}-\d{2}$/.test(month) || !isRedisConfigured()) return null;
+  try {
+    const [raw] = await redisPipeline([["HMGET", unknownMonthKey(month), "unknown", "settled", "manual"]]);
+    if (!Array.isArray(raw) || raw.length !== 3) return null;
+    const [unknown, settled, manual] = raw.map((v) => (v === null ? 0 : typeof v === "string" && /^\d{1,15}$/.test(v) ? Number(v) : NaN));
+    return [unknown, settled, manual].every(Number.isSafeInteger) ? { unknown, settled, manual } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** People in batches whose answer is not known: being asked again, or left for the creator's own check. */
+export async function paypalChecks(store: Store): Promise<{ checking: number; manual: number }> {
+  if (!store.statsId || !isRedisConfigured()) throw new Error("Pending payout records are unavailable");
+  const out = { checking: 0, manual: 0 };
+  for (const [id, batch] of await readOpen(store.statsId)) {
+    if (!id.startsWith(UNKNOWN_BATCH_PREFIX)) continue;
+    if (batch.m === 1) out.manual += batch.lines.length;
+    else out.checking += batch.lines.length;
+  }
+  return out;
 }
 
 /** The open batch's field for a batch sent whose answer is not known yet: "?" and our own sender_batch_id. */
@@ -265,6 +351,7 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       } catch (error) {
         if (!refusedBeforeMade(error)) {
           console.error("a PayPal batch was sent and its answer is not known; kept on its way", error);
+          await countUnknown("unknown");
           return { ok: false, reason: "unknown" };
         }
         // PayPal refused it: nothing was made, so its people are owed again.
@@ -276,7 +363,10 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const header = (made.batch_header ?? {}) as { payout_batch_id?: unknown };
       const batch = typeof header.payout_batch_id === "string" ? header.payout_batch_id : "";
       // Made, but which batch is not said: kept on its way under our own id, never sent again.
-      if (!BATCH_ID.test(batch)) return { ok: false, reason: "unknown" };
+      if (!BATCH_ID.test(batch)) {
+        await countUnknown("unknown");
+        return { ok: false, reason: "unknown" };
+      }
       await redisPipeline([
         ["HSET", openKey(statsId), batch, JSON.stringify(open)],
         ["HDEL", openKey(statsId), unknownField],
@@ -310,8 +400,10 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   if (!auth) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {
-    // A batch whose answer is not known has no PayPal id to read: it stays on its way (CX-123 rule 24).
+    // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a
+    // day, and its people stay on their way whatever comes back (decision C1-20261105-1830-C5-1, option A).
     if (batch.startsWith(UNKNOWN_BATCH_PREFIX)) {
+      await settleUnknown(store, batch, sent, auth).catch((error) => console.error("sending an unknown PayPal batch again failed", error));
       out.waiting += sent.lines.length;
       continue;
     }
@@ -360,6 +452,71 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   }
   if (!out.waiting) await redisPipeline([["SREM", STORES, store.sid]]);
   return out;
+}
+
+/** Marks a batch whose answer is not known for the creator's own check, once, and counts it. */
+async function needsManualCheck(statsId: string, field: string, sent: OpenBatch): Promise<"manual"> {
+  if (sent.m === 1) return "manual";
+  await redisPipeline([["HSET", openKey(statsId), field, JSON.stringify({ ...sent, m: 1 })]]);
+  await countUnknown("manual");
+  return "manual";
+}
+
+/**
+ * One batch whose answer was not known, sent again with the SAME
+ * sender_batch_id and PayPal-Request-Id. PayPal gives back the batch the
+ * first request made, or makes it now if the first never reached it; either
+ * way there is one. A refusal that the sender_batch_id already exists is a
+ * batch sent: its id is kept when PayPal links it, and otherwise it is left
+ * for the creator's own check. Anything else leaves it on its way, to be
+ * tried again tomorrow; after UNKNOWN_MANUAL_AFTER_MS it is not tried again.
+ * Never sent under a new key, never paid twice.
+ */
+async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth: string): Promise<"settled" | "waiting" | "manual"> {
+  const statsId = store.statsId as string;
+  const now = Date.now();
+  if (seen.m === 1) return "manual";
+  if (now - seen.at >= UNKNOWN_MANUAL_AFTER_MS) return needsManualCheck(statsId, field, seen);
+  if (seen.t !== undefined && now - seen.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
+  return withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async () => {
+    // Read again under the payment's own lock: a press or another settling may have moved it.
+    const sent = (await readOpen(statsId)).get(field);
+    if (!sent || sent.m === 1) return sent ? "manual" : "waiting";
+    if (sent.t !== undefined && now - sent.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
+    // The try is counted before it is made, so a run that stops halfway never tries twice in a day.
+    const tried: unknown = await redisPipeline([["HSET", openKey(statsId), field, JSON.stringify({ ...sent, t: now })]]);
+    // HSET answers 0 for a field it changed (1 only if it was gone, which the read under the lock just ruled out).
+    if (!Array.isArray(tried) || tried.length !== 1 || (tried[0] !== 0 && tried[0] !== 1)) return "waiting";
+    // The same body: what was owed to whom, at the address each affiliate has now. Anyone no longer in the book,
+    // or a store whose currency changed, cannot be sent again as it was: left for the creator's own check.
+    const book = await readBook(store);
+    const people = new Map(book.rows.map((row) => [row.affiliate.id, row.affiliate]));
+    const lines: BatchLine[] = [];
+    for (const line of sent.lines) {
+      const affiliate = people.get(line.a);
+      if (!affiliate || sent.currency !== store.currency) return needsManualCheck(statsId, field, sent);
+      lines.push({ affiliate, cents: line.c });
+    }
+    const senderBatchId = field.slice(UNKNOWN_BATCH_PREFIX.length);
+    let batch = "";
+    try {
+      const made = await call("POST", "/v1/payments/payouts", auth, batchBody(store, lines, senderBatchId), senderBatchId);
+      const header = (made.batch_header ?? {}) as { payout_batch_id?: unknown };
+      batch = typeof header.payout_batch_id === "string" ? header.payout_batch_id : "";
+    } catch (error) {
+      if (!(error instanceof PayPalError && error.duplicate)) return "waiting";
+      // PayPal already has it: sent. Its id when the refusal links it; otherwise the creator's own check.
+      if (!BATCH_ID.test(error.original)) return needsManualCheck(statsId, field, { ...sent, t: now });
+      batch = error.original;
+    }
+    if (!BATCH_ID.test(batch)) return "waiting";
+    await redisPipeline([
+      ["HSET", openKey(statsId), batch, JSON.stringify({ at: sent.at, currency: sent.currency, lines: sent.lines })],
+      ["HDEL", openKey(statsId), field],
+    ]);
+    await countUnknown("settled");
+    return "settled";
+  });
 }
 
 /** The daily job: every store with a batch still open. */

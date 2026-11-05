@@ -23,9 +23,17 @@ const real = redis.pipeline;
 /** Each rule answers a command in place of Redis, or throws for it; `times` of them at the most. */
 type Rule = { when: (command: Command) => boolean; answer: (command: Command) => unknown; times: number; used: number };
 let rules: Rule[] = [];
+/** As Redis answers them: a command that needs a field or a key, sent with none, is an error (seventh review, N). Here for every section. */
+const ARITY: Record<string, number> = { HSET: 4, HSETNX: 4, HMSET: 4, HDEL: 3, DEL: 2, SADD: 3, SREM: 3, ZADD: 4, ZREM: 3, MGET: 2, HMGET: 3, SUNION: 2, LPUSH: 3, RPUSH: 3 };
+let emptySent = 0;
 redis.pipeline = async (commands: Command[]) => {
   const out: unknown[] = [];
   for (const command of commands) {
+    const least = ARITY[String(command[0]).toUpperCase()];
+    if (least && command.length < least) {
+      emptySent += 1;
+      throw new Error(`Redis error: ERR wrong number of arguments for '${String(command[0]).toLowerCase()}' command`);
+    }
     const rule = rules.find((r) => r.used < r.times && r.when(command));
     if (rule) {
       rule.used += 1;
@@ -564,15 +572,10 @@ async function main(): Promise<void> {
   const keptNow = await closedDataNow();
   is("its last try fails: what it owes leaves what the gap reads for the kept hash, and is counted", [(await real([["HLEN", PRUNE_KEY]]))[0], (await real([["HLEN", PRUNE_KEPT_KEY]]))[0], keptNow?.owedKept, keptNow?.unreadKept], [0, 4, 2, 1]);
   later();
-  const reads: string[] = [];
-  const before = redis.pipeline;
-  redis.pipeline = async (commands: Command[]) => {
-    for (const c of commands) if (c[0] === "HGETALL") reads.push(String(c[1]));
-    return before(commands);
-  };
   await quietly(run);
-  redis.pipeline = before;
-  is("the gap does not read it any more", reads.includes(PRUNE_KEPT_KEY), false);
+  // Seventh review, 2: a list given up on is tried again by itself, one a gap; still unreadable, what it owes stays kept.
+  const walkHash = (await real([["HGETALL", "nl:closed:walk"]]))[0] as string[];
+  is("tried again a gap later, still unreadable: what it owes stays kept, its tries unchanged", [(await real([["HLEN", PRUNE_KEPT_KEY]]))[0], walkHash[walkHash.indexOf("unread:nl:orders:folders:s") + 1]], [4, String(UNREAD_TRIES)]);
   await real([["DEL", PRUNE_KEPT_KEY], ["HDEL", "nl:closed:walk", "unread:nl:orders:folders:s"]]);
   });
 
@@ -592,10 +595,44 @@ async function main(): Promise<void> {
     // Ids no row owes by, with no list waiting at all.
     ["HSET", PRUNE_KEY, `marks|orphan@example.com|${"4".repeat(32)}`, JSON.stringify({ marks: ["e".repeat(32)], keyMarks: [] })],
   ]);
+  // The list stays unreadable, so its rows stay kept when it is tried again.
+  failing((c) => c[0] === "TYPE" && c[1] === "nl:orders:folders:t", () => "not-a-kind", 1_000);
   later();
   await quietly(run);
   is("the gap moves the rows again and lets the orphan ids go: nothing left in what it reads, the kept rows counted once", [(await real([["HLEN", PRUNE_KEY]]))[0], (await real([["HLEN", PRUNE_KEPT_KEY]]))[0], (await closedDataNow())?.owedKept], [0, 2, 1]);
   await real([["DEL", PRUNE_KEPT_KEY], ["HDEL", "nl:closed:walk", "unread:nl:orders:folders:t", "kept:nl:orders:folders:t"]]);
+  });
+
+  await section("Seventh review, 2: a list given up on that reads again with no walk passing it over is pruned of what it kept, one a gap", async () => {
+  await walkedOut([], 2);
+  const key = "abe@example.com";
+  const sid = "5".repeat(32);
+  const id = "f".repeat(32);
+  await real([
+    ["SADD", "nl:orders:folders:u", id, "someone-elses-folder"],
+    ["HSET", "nl:closed:walk", "unread:nl:orders:folders:u", UNREAD_TRIES, "kept:nl:orders:folders:u", 1],
+    ["HSET", PRUNE_KEPT_KEY, `nl:orders:folders:u|${key}|${sid}`, 1, `marks|${key}|${sid}`, JSON.stringify({ marks: [id], keyMarks: [] })],
+  ]);
+  later();
+  await quietly(run);
+  is("tried again by itself: its old member pruned, the others' kept, nothing kept or said any more", [(await real([["SISMEMBER", "nl:orders:folders:u", id]]))[0], (await real([["SISMEMBER", "nl:orders:folders:u", "someone-elses-folder"]]))[0], (await real([["HLEN", PRUNE_KEPT_KEY]]))[0], (await closedDataNow())?.unread], [0, 1, 0, 0]);
+  });
+
+  await section("Seventh review, N: every store sits the walk out and a list is passed over: nothing is written, the walk ends, and no command goes out empty", async () => {
+  await walkedOut([], 2);
+  later();
+  const nia = await closing("niaout");
+  await real([["ZADD", "nl:pause:due", 4102444800, "someone-else@example.com"]]);
+  // Its record's delete fails every time: it sits every walk out, so a walk has no store to walk.
+  failing((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:store:owner:"), timeout, 1_000);
+  failing((c) => c[0] === "TYPE" && c[1] === "nl:pause:due", () => "not-a-kind", 1_000);
+  later();
+  let report = await quietly(() => run().catch(() => ({ done: false })));
+  for (let i = 0; i < PAGE_TRIES + 3 && !report.done; i += 1) report = await quietly(() => run().catch(() => ({ done: false })));
+  is("the walk ends with nothing owed for the list, the store left", [report.done, (await real([["HLEN", PRUNE_KEY]]))[0], (await storeForEmail(nia))?.handle], [true, 0, "niaout"]);
+  rules = [];
+  await walkedOut([nia], 2);
+  is("and in every section of this file, no HSET, HDEL, DEL or other command went out with no field or key", emptySent, 0);
   });
 
   done();

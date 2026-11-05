@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { claimHandle, storeFolder, storeForEmail } from "@/lib/store";
+import { claimHandle, storeForEmail } from "@/lib/store";
 import { finishClosed } from "@/lib/plan-closing";
 import { WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
 

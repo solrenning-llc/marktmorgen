@@ -512,7 +512,12 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       });
       const listed = await listedAlready(ordinary.map((row) => row.id as string));
       for (let i = 0; i < ordinary.length && Date.now() < deadline; i += 1) {
-        if (listed[i]) continue;
+        if (listed[i] === true) continue;
+        // Not known whether it is on the list (CX-123 rule 24, L7): nothing done on it this run, and the run says so.
+        if (listed[i] === null) {
+          counts.failed += 1;
+          continue;
+        }
         const row = ordinary[i];
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
         if (!email) continue;

@@ -10,9 +10,11 @@
  * selling them what they already had. Now both call this, and whichever gets
  * there first does it, once per checkout.
  *
- *   nl:listed:<checkout id>   done (kept 8 days), or being done (2 minutes)
+ *   nl:listed:<checkout id>   done (kept 8 days), or being done (2 minutes, the claim's own value)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark } from "@/lib/claim-mark";
 import { noteProduct, orderRoom, upsertContact } from "@/lib/contacts";
 import { enroll } from "@/lib/flows";
 import type { Store } from "@/lib/store";
@@ -34,11 +36,23 @@ export type ListedOrder = {
   products: { id: string; title: string }[];
 };
 
-/** Which of these checkouts are already on the list, in one round trip. */
-export async function listedAlready(sessionIds: string[]): Promise<boolean[]> {
+/**
+ * Which of these checkouts are already on the list, in one round trip, read exactly (CX-123 rule 24, L7): true or
+ * false only from one reply per checkout that is 1 or 0. Anything else is null, never "not on the list yet", so the
+ * caller does nothing on it this run and says so.
+ */
+export async function listedAlready(sessionIds: string[]): Promise<(boolean | null)[]> {
   if (!sessionIds.length || !isRedisConfigured()) return sessionIds.map(() => false);
-  const marks = await redisPipeline(sessionIds.map((id) => ["EXISTS", listedKey(id)]));
-  return marks.map((m) => Number(m) === 1);
+  let marks: unknown[] | null = null;
+  try {
+    marks = repliesFor(await redisPipeline(sessionIds.map((id) => ["EXISTS", listedKey(id)])), sessionIds.length);
+  } catch {
+    marks = null;
+  }
+  return sessionIds.map((_, i) => {
+    const mark = marks ? countOf(marks[i]) : null;
+    return mark === 1 ? true : mark === 0 ? false : null;
+  });
 }
 
 /**
@@ -51,13 +65,11 @@ export async function listedAlready(sessionIds: string[]): Promise<boolean[]> {
 export async function listOrder(store: Store, order: ListedOrder): Promise<"done" | "already" | "skip"> {
   if (!store.listId || !order.email || !order.products.length || !isRedisConfigured()) return "skip";
   const key = listedKey(order.sessionId);
-  try {
-    const [claimed] = await redisPipeline([["SET", key, "working", "NX", "EX", WORKING_SECONDS]]);
-    if (claimed === null) return "already";
-  } catch (error) {
-    console.error("marking an order for the list failed", error);
-    return "skip";
-  }
+  // This run's own claim (lib/claim-mark.ts): OK, or answered in another shape with our value read back. Taken by
+  // another run, or there already: "already". Unknown: nothing is done now, and the next run asks again.
+  const claimed = await claimMark(key, WORKING_SECONDS);
+  if (claimed === "taken") return "already";
+  if (claimed === "unknown") return "skip";
   const products = order.products.filter((p, i) => order.products.findIndex((q) => q.id === p.id) === i);
   try {
     if (order.news) {

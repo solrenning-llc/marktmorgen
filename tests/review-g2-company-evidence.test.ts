@@ -46,9 +46,9 @@ test('G2 missing company read cannot become an empty completed data copy',async(
  try{await COPIERS['lib/crm-companies.ts']({store:s.store,statsId:s.store.statsId,person:s.person} as never);}catch{unknown=true;}finally{redis.pipeline=original;}
  assert.equal(unknown,true,'copy certified no company despite unreadable genuine personal record');
 });
-test('G2 applied company write with missing acknowledgement keeps the room it consumed',async()=>{
+for(const receipt of [[],[null]])test('G2 applied company write with unknown acknowledgement keeps its room '+JSON.stringify(receipt),async()=>{
  const s=await seed(),original=redis.pipeline.bind(redis);let ran=0;
- redis.pipeline=async commands=>{if(commands[0]?.[0]==='EVAL'&&String(commands[0][1]).startsWith('-- marktmorgen:crm-companies-write:')){ran++;await original(commands);return [] as never;}return original(commands);};
+ redis.pipeline=async commands=>{if(commands[0]?.[0]==='EVAL'&&String(commands[0][1]).startsWith('-- marktmorgen:crm-companies-write:')){ran++;await original(commands);return receipt as never;}return original(commands);};
  try{await changeCompanies(s.store.statsId!,s.store,c=>addCompany(c,{name:'Applied unknown company',website:'',note:'x'.repeat(300)},'bbbbbbbbbb',101));}finally{redis.pipeline=original;}
  assert.equal(ran,1);assert.equal((await readCompanies(s.store.statsId)).length,2);assert.ok(held(s)>=weight(s),JSON.stringify({held:held(s),required:weight(s)}));
 });

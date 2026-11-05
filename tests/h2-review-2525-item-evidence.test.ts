@@ -2,6 +2,7 @@ import { applyMemberDiscount, memberSubs } from "@/lib/member-discount";
 import { claimHandle, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as memory } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readFileSync } from "node:fs";
 
 const customer = "cus_review2525";
 const subscriptionId = "sub_review2525";
@@ -67,6 +68,8 @@ async function main(): Promise<void> {
     posts = 0;
     is("an incomplete or contradictory update receipt is unknown and never retried", [await applyMemberDiscount(store, "member@example.com", subscriptionId, promotion), posts], [{ ok: false, reason: "stripe" }, 1]);
   }
+  const route = readFileSync("app/api/store/member-discount/route.ts", "utf8");
+  is("the response after an uncertain POST does not promise that nothing changed", route.includes("This try may have changed the membership."), true);
 }
 
 void main().finally(() => {

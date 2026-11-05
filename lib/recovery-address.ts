@@ -159,7 +159,7 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
   if (!address) return;
   const token = randomBytes(32).toString("hex");
   await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]);
-  await mail(address, "Get back into your Marktmorgen account", [
+  const sent = await mail(address, "Get back into your Marktmorgen account", [
     `This is the recovery address of the Marktmorgen account ${email}. Somebody said they can no longer open that inbox and asked for a way in.`,
     "",
     "This link logs you in. It works once, for 15 minutes:",
@@ -169,8 +169,12 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
     "",
     "If you did not ask for this, ignore it: nothing changes unless the link is used.",
   ]);
+  // An uncertain first response may still have sent the link. Preserve the
+  // security warning, without claiming acceptance the sender did not confirm.
   await mail(email, "Somebody asked to log in to your Marktmorgen account through its recovery address", [
-    `A link was sent to your recovery address (${hideAddress(address)}) because somebody said they can no longer open this inbox.`,
+    sent === true
+      ? `A link was sent to your recovery address (${hideAddress(address)}) because somebody said they can no longer open this inbox.`
+      : `Somebody asked to log in through your recovery address (${hideAddress(address)}). We could not confirm that the email link was sent.`,
     "",
     `When: ${when()} UTC`,
     "",

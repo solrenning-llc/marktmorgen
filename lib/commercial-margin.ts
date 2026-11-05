@@ -136,14 +136,66 @@ export const CURRENT_COMMERCIAL_MARGIN_REVIEW:CommercialMarginReview|null=null;
  * The same bounded canonical representation already binds contract funding.
  * Keep real reviews absent until their evidence is established independently.
  */
+function commercialOwnReviewData(review:unknown):CommercialMarginReview|null{
+ if(!review||typeof review!=='object')return null;
+ try{
+  if(typeof process==='undefined'||typeof process.getBuiltinModule!=='function')return null;
+  const isProxy=process.getBuiltinModule('node:util').types.isProxy;
+  const active=new WeakSet<object>();
+  // Capture the whole original graph before any semantic reader can inspect
+  // it. A Proxy is rejected before reflection, including at nested fields.
+  function capture(value:unknown,depth:number):unknown{
+   if(depth>30)return undefined;
+   if(value===null||typeof value==='string'||typeof value==='boolean')return value;
+   if(typeof value==='number')return Number.isSafeInteger(value)?value:undefined;
+   if(!value||typeof value!=='object'||isProxy(value)||active.has(value))return undefined;
+   const list=Array.isArray(value),prototype=Object.getPrototypeOf(value);
+   if(list?(prototype!==Array.prototype&&prototype!==null):(prototype!==Object.prototype&&prototype!==null))return undefined;
+   const keys=Reflect.ownKeys(value);
+   if(keys.some(key=>typeof key!=='string'))return undefined;
+   active.add(value);
+   try{
+    if(list){
+     const descriptor=Object.getOwnPropertyDescriptor(value,'length');
+     if(!descriptor||!Object.hasOwn(descriptor,'value'))return undefined;
+     const length=descriptor.value;
+     if(typeof length!=='number'||!Number.isSafeInteger(length)||length<0||keys.length!==length+1)return undefined;
+     const copy:unknown[]=[];
+     for(let i=0;i<length;i++){
+      const item=Object.getOwnPropertyDescriptor(value,String(i));
+      if(!item||!Object.hasOwn(item,'value')||!item.enumerable)return undefined;
+      const child=capture(item.value,depth+1);
+      if(child===undefined)return undefined;
+      copy.push(child);
+     }
+     return copy;
+    }
+    const copy:Record<string,unknown>=Object.create(null);
+    for(const key of keys as string[]){
+     const descriptor=Object.getOwnPropertyDescriptor(value,key);
+     if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.enumerable)return undefined;
+     const child=capture(descriptor.value,depth+1);
+     if(child===undefined)return undefined;
+     copy[key]=child;
+    }
+    return copy;
+   }finally{active.delete(value);}
+  }
+  const data=capture(review,0);
+  return data&&typeof data==='object'&&!Array.isArray(data)?data as CommercialMarginReview:null;
+ }catch{return null;}
+}
 function commercialReviewData(review:CommercialMarginReview|null):CommercialMarginReview|null{
- if(!review||typeof review!=="object"||Array.isArray(review))return null;
- const taxState=customerTaxCollectionState(review);
+ const original=commercialOwnReviewData(review);
+ if(!original)return null;
+ const taxState=customerTaxCollectionState(original);
  if(taxState==='unknown')return null;
- const encoded=canonicalFinancialSnapshot(review);
+ const encoded=canonicalFinancialSnapshot(original);
  if(encoded===null)return null;
  const data=JSON.parse(encoded) as CommercialMarginReview;
- return customerTaxCollectionState(data)===taxState?data:null;
+ // Keep the detached null-prototype data for all later checks: parsing the
+ // encoding must not reintroduce inherited assertions into the calculation.
+ return customerTaxCollectionState(data)===taxState?original:null;
 }
 export function commercialMarginReady(review:CommercialMarginReview|null=CURRENT_COMMERCIAL_MARGIN_REVIEW):boolean{
  const data=commercialReviewData(review);

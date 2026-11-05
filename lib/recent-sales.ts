@@ -115,10 +115,18 @@ function parseKept(raw: unknown): Kept | null {
 async function refundedSince(account: string, since: number): Promise<Set<string> | null> {
   try {
     const listed = await onAccount("GET", account, `/refunds?limit=100&created[gte]=${since}`);
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    // More refunds than one page in a week: too many to be sure of any line.
-    if (listed.has_more === true) return null;
-    return new Set(rows.filter((r) => r.status !== "failed" && r.status !== "canceled").map((r) => String(r.payment_intent ?? "")));
+    // Only an explicitly complete list proves that no refund was omitted.
+    // More than the requested page, or unknown evidence, cannot certify a sale.
+    if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length > 100 || listed.has_more !== false) return null;
+    const refunded = new Set<string>();
+    for (const row of listed.data) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+      const refund = row as Record<string, unknown>;
+      if (typeof refund.status !== "string" || !["pending", "requires_action", "succeeded", "failed", "canceled"].includes(refund.status) ||
+          typeof refund.payment_intent !== "string" || !/^pi_[A-Za-z0-9]{6,}$/.test(refund.payment_intent)) return null;
+      if (refund.status !== "failed" && refund.status !== "canceled") refunded.add(refund.payment_intent);
+    }
+    return refunded;
   } catch (error) {
     console.error("reading refunds for recent purchases failed", error);
     return null;

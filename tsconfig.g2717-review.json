@@ -1,0 +1,1 @@
+{"extends": "./tsconfig.json", "compilerOptions": {"noEmit": true, "incremental": false}, "include": ["lib/auth.ts", "lib/learn.ts", "lib/imports.ts", "tests/sg2-l3-counts.test.ts", "tests/g-2717-boundaries.proof.ts"], "exclude": ["node_modules"]}

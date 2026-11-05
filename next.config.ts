@@ -95,6 +95,8 @@ const nextConfig: NextConfig = {
       ...to("/terms", "/terms-of-service", "/tos"),
       ...to("/privacy", "/privacy-policy"),
       ...to("/refunds", "/refund", "/refund-policy"),
+      // The security page lives among the feature pages, where security.txt points (508 [SG4]).
+      ...to("/platform/security", "/security"),
       ...to("/", "/home", "/index"),
     ];
   },

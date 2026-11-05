@@ -277,3 +277,67 @@ for (const accessor of [false, true]) {
     assert.deepEqual(countTaxSales(value), before);
   });
 }
+
+
+test("an array Proxy cannot hide a settled supply behind a shorter descriptor length", () => {
+  const original = [entry("kept", { amountMinor: 1 }), entry("hidden", { amountMinor: 3_000_001 })];
+  const entries = new Proxy(original, {
+    ownKeys(target) { return Reflect.ownKeys(target).filter(key => key !== "1"); },
+    getOwnPropertyDescriptor(target, key) {
+      const field = Reflect.getOwnPropertyDescriptor(target, key);
+      return key === "length" && field ? { ...field, value: 1 } : field;
+    },
+  });
+  const value = ledger(entries);
+  const persisted = countTaxSales(JSON.parse(JSON.stringify(value)));
+  assert.equal(persisted.status, "known");
+  if (persisted.status === "known") {
+    assert.equal(persisted.settledApplicableMinor, 3_000_002);
+    assert.equal(persisted.applicableEntries, 2);
+  }
+  assert.deepEqual(countTaxSales(value), { status: "unknown" });
+});
+
+test("transparent and hidden-field Proxies fail at each original evidence layer", () => {
+  for (const boundary of ["ledger", "place", "entry", "entries"] as const) {
+    for (const hidden of [false, true]) {
+      const value = ledger([entry("kept")]);
+      const original = boundary === "ledger" ? value : boundary === "place" ? value.place
+        : boundary === "entry" ? value.entries[0] : value.entries;
+      if (hidden) Object.defineProperty(original, "unreviewed", { configurable: true, enumerable: true, value: null });
+      let reads = 0;
+      const proxy = new Proxy(original, {
+        ownKeys(target) { return Reflect.ownKeys(target).filter(key => !hidden || key !== "unreviewed"); },
+        get(target, key, receiver) { reads++; return Reflect.get(target, key, receiver); },
+      });
+      if (boundary === "place") value.place = proxy as TaxSalesLedger["place"];
+      else if (boundary === "entry") (value.entries as TaxSalesEntry[])[0] = proxy as TaxSalesEntry;
+      else if (boundary === "entries") value.entries = proxy as TaxSalesEntry[];
+      assert.deepEqual(countTaxSales(boundary === "ledger" ? proxy : value), { status: "unknown" }, `${boundary}/${hidden}`);
+      assert.equal(reads, 0);
+    }
+  }
+  const revoked = Proxy.revocable(ledger(), {});
+  revoked.revoke();
+  assert.deepEqual(countTaxSales(revoked.proxy), { status: "unknown" });
+});
+
+test("a later Proxy cannot make a native parent probe execute an earlier supply getter", () => {
+  for (const boundary of ["place", "entry"] as const) {
+    const first = entry("first");
+    const value = ledger([first, entry("second")]);
+    let reads = 0;
+    const proxy = new Proxy(boundary === "place" ? value.place : value.entries[1], {
+      ownKeys(target) {
+        Object.defineProperty(first, "amountMinor", {
+          configurable: true, enumerable: true, get() { reads++; return 0; },
+        });
+        return Reflect.ownKeys(target);
+      },
+    });
+    if (boundary === "place") value.place = proxy as TaxSalesLedger["place"];
+    else (value.entries as TaxSalesEntry[])[1] = proxy as TaxSalesEntry;
+    assert.deepEqual(countTaxSales(value), { status: "unknown" });
+    assert.equal(reads, 0);
+  }
+});

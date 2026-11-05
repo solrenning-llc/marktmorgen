@@ -198,7 +198,8 @@ function hostPart(name: string, apex: string): string {
  * read as records that are wrong.
  */
 export async function domainStatus(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | null> {
-  const read = await readDomain(name, store);
+  // "Gone" and not known are the same null here, so the checkup's second request is not made (review of Codex P).
+  const read = await readDomain(name, store, false);
   return read === "gone" ? null : read;
 }
 
@@ -209,12 +210,13 @@ export async function domainStatus(name: string, store: Pick<Store, "sid">): Pro
  * not come, so a missing answer is never taken for records that are wrong.
  */
 export async function domainCheckup(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | "gone" | null> {
-  return readDomain(name, store);
+  return readDomain(name, store, true);
 }
 
-async function readDomain(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | "gone" | null> {
+async function readDomain(name: string, store: Pick<Store, "sid">, tellGone: boolean): Promise<DomainStatus | "gone" | null> {
   const project = await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`);
   if (project.status === 404) {
+    if (!tellGone) return null;
     // "Not found" is also every answer while the project's own name is wrong (see vercelProject):
     // the domain is gone only when the project itself is there.
     const own = await vercel("GET", `/v9/projects/${vercelProject()}`);

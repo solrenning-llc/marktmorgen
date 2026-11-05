@@ -7,7 +7,7 @@ function outline(video: string | null, files: string[]) {
 
 part("Different invalid UTF-16 names are not different UTF-8 files");
 const first = "assets/\ud800.bin", second = "assets/\ud801.bin";
-is("the source strings differ", first === second, false);
+is("the source strings differ", Object.is(first, second), false);
 is("the encoded filenames collide", [...new TextEncoder().encode(first)], [...new TextEncoder().encode(second)]);
 const ambiguous = previewCourseImport(outline(null, [first, second]));
 is("the preview refuses the whole ambiguous asset list", ambiguous.ok, false);

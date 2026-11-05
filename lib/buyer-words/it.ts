@@ -298,6 +298,7 @@ export const it: BuyerWords = {
   newer: "Più recenti",
   older: "Meno recenti",
   askUnknown: (store) => `Questa pagina non lo dice. Chiedi a ${store} prima di acquistare.`,
+  askTermsCut: () => "Qui non ho le condizioni complete. Chiedi al creatore prima di acquistare.",
 
   noLongerOnSale: "Questo prodotto non è più in vendita.",
   seeStore: (store) => `Vedi ${store}`,

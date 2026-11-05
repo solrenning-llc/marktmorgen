@@ -327,6 +327,7 @@ export const en = {
   newer: "Newer",
   older: "Older",
   askUnknown: (store: string) => `This page does not say. Ask ${store} before you buy.`,
+  askTermsCut: () => "I don't have the full terms here. Please ask the creator before you buy.",
 
   // ---- The card on the creator's own website ---------------------------------------------
   noLongerOnSale: "This product is no longer on sale.",

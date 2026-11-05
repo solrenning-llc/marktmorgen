@@ -52,6 +52,7 @@ import { assessCustomerWorstCase, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCa
 import { captureCustomerTaxInput, customerTaxCeiling, type CustomerTaxInput } from "@/lib/customer-tax-review";
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
 import { CONFUSABLE_LATIN_SOURCES } from "@/lib/confusables-latin";
+import { PAGE_GOES_ON } from "@/lib/answers-rules";
 import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_CORRECT_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf } from "@/lib/receiving-costs";
 
 /** The largest store record (lib/store.ts, MAX_STORE_BYTES), read once a message; held equal in tests/store-assistant.test.ts. */
@@ -299,6 +300,53 @@ export const DEAL_WORDS = new RegExp(
   `${WORD_EDGE_BEFORE}(?:${DEAL_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}|${DEAL_SIGNS.join("|")}`,
   "iu",
 );
+
+/**
+ * Words of terms a page may set a condition on — a refund, a return, money
+ * back, a guarantee, a warranty, a deadline, a trial, cancelling, a price's
+ * conditions — in English and every language a store speaks, written as
+ * they read folded (foldedText: lowercase, without accents). Only used while
+ * the facts say the page was cut short (PAGE_GOES_ON): the part left out may
+ * hold the condition, so a reply that speaks of these is never shown then
+ * (Revisor 1's light on #2177, Claude 1's decision of 05/11/2026). Broad on
+ * purpose: refusing an honest reply there costs a line pointing to the
+ * creator, showing half a promise costs the buyer.
+ */
+const TERMS_TERMS = [
+  // English
+  "refund\\p{L}*", "reimburs\\p{L}*", "money[- ]?back", "returns?", "returned", "returning", "returnable", "guarant\\p{L}*", "warrant(?:y|ies|ed)",
+  "deadlines?", "trials?", "expir\\p{L}*", "cancel\\p{L}*", "discount\\p{L}*", "coupons?", "introductory", "intro price",
+  "price (?:goes up|rises|increases|changes)",
+  // Spanish
+  "reembols\\p{L}*", "devoluci\\p{L}*", "devolv\\p{L}*", "devuelv\\p{L}*", "plazos?", "fecha limite", "periodo de prueba", "prueba gratis", "prueba gratuita",
+  "descuent\\p{L}*", "cupon\\p{L}*", "caduc\\p{L}*",
+  // French
+  "rembours\\p{L}*", "retour\\p{L}*", "delais?", "date limite", "essai\\p{L}*", "reductions?", "remises?", "annul\\p{L}*",
+  // German
+  "\\p{L}*erstatt\\p{L}*", "\\p{L}*ruckgab\\p{L}*", "geld[- ]?zuruck\\p{L}*", "\\p{L}*garantie\\p{L}*", "gewahrleist\\p{L}*", "\\p{L}*frist\\p{L}*",
+  "probe(?:zeit|monat|abo|phase)\\p{L}*", "test(?:phase|zeitraum|version)\\p{L}*", "(?:kostenlos|gratis) testen", "\\p{L}*rabatt\\p{L}*", "umtausch\\p{L}*",
+  "widerruf\\p{L}*", "\\p{L}*kundig(?:en|ung)\\p{L}*",
+  // Italian
+  "rimbors\\p{L}*", "restitu\\p{L}*", "res[oi]", "garanz\\p{L}*", "scadenz\\p{L}*", "periodo di prova", "prova gratuita", "scont[oi]", "scontat\\p{L}*",
+  "recesso", "disdett\\p{L}*", "annull\\p{L}*",
+  // Dutch
+  "terugbetal\\p{L}*", "\\p{L}*geld[- ]?terug\\p{L}*", "terugstur\\p{L}*", "gegarandeerd\\p{L}*", "termijn\\p{L}*", "proefperiode\\p{L}*",
+  "gratis (?:proberen|uitproberen)", "\\p{L}*korting\\p{L}*", "herroep\\p{L}*", "opzeg\\p{L}*",
+  // Portuguese
+  "devolu\\p{L}*", "prazos?", "data limite", "teste gratis", "periodo de (?:teste|avaliacao|garantia)", "descont\\p{L}*", "cup(?:om|ons)", "cup(?:ao|oes)",
+  "arrependimento",
+].filter((term, i, all) => all.indexOf(term) === i);
+const TERMS_WORDS = new RegExp(`${WORD_EDGE_BEFORE}(?:${TERMS_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}`, "u");
+/**
+ * Whether a text speaks of terms (TERMS_TERMS) in any language a store
+ * speaks. Read folded, with look-alike letters as Latin and with visible
+ * hyphens joined, so a mark, an invisible character, another script's
+ * look-alike or "Rück-erstattung" cannot hide one.
+ */
+export function speaksOfTerms(text: string): boolean {
+  const folded = foldedText(text);
+  return [folded, hyphenJoined(folded), foldedText(text, "l"), foldedText(text, "i")].some((reading) => TERMS_WORDS.test(reading));
+}
 
 const NUMBERS = /\d+(?:[.,]\d+)*/g;
 /** A number as digits, and without decimals that are all zeros: "$27.00" and "$27" are the same price. */
@@ -560,6 +608,8 @@ export function heldToFacts(raw: string, facts: string): boolean {
   const store = new Readings(facts);
   const folded = reply.folded;
   if (!folded.trim() || LINK.test(folded)) return false;
+  // A page cut short may have left out the condition of a promise it tells: then no reply speaks of terms at all.
+  if (facts.includes(PAGE_GOES_ON) && speaksOfTerms(raw)) return false;
   const factsFolded = store.folded;
   const factEmails = new Set(emailsIn(factsFolded));
   for (const email of emailsIn(folded)) {

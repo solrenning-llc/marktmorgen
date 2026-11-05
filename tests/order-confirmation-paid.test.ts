@@ -7,7 +7,7 @@ import { COMMIT_ORDER_CONFIRMATION, prepareOrderConfirmationPreintent } from "@/
 import { createCheckout } from "@/lib/store-checkout";
 import { confirmationFor, confirmPurchase, originalPhysicalConfirmation } from "@/lib/purchase-email";
 import { confirmationOriginRowKey, forgetOrderConfirmationMail, readConfirmationOrigin, reserveConfirmationOrigin, runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
-import { enqueueShipmentMail, runShipmentMail } from "@/lib/shipment-mail-outbox";
+import { enqueueShipmentMail, runShipmentMail, type ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
 import { store as redis } from "./redis-stub";
 import { physicalPaidFixture, originId, confirmationLocalPipeline } from "./order-confirmation-paid-fixture";
 
@@ -23,6 +23,28 @@ async function paid() {
   f.advance(61_000); // The bound source deliberately schedules its first payment check.
   return { ...f, id: originId(), session, checkout };
 }
+
+test("CX121: a paid confirmation with acknowledged dispatch but no provider POST remains queued", async () => {
+  const f = await paid();
+  let barriers = 0;
+  // Model the transport's new, explicit zero-POST result before extending its
+  // shared union. The real transport timeout has its own separate RED proof.
+  const noPost = async (_message: unknown, beforePost: () => Promise<boolean>) => {
+    assert.equal(await beforePost(), true);
+    barriers++;
+    return "not_posted" as unknown as Awaited<ReturnType<ShipmentMailDispatch>>;
+  };
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, noPost, f.runtime, f.id);
+  const saved = await readConfirmationOrigin(f.id, f.runtime);
+  assert.ok(saved, "zero POST cannot erase the paid confirmation");
+  assert.equal(saved.row.state, "queued", "zero POST is neither permanent uncertainty nor terminal refusal");
+  assert.ok(saved.payload.message);
+  assert.ok(saved.payload.settlementToken);
+  assert.equal(redis.run(["TTL", confirmationOriginRowKey(f.id)]), -1);
+  assert.deepEqual(result, { accepted: 0, waiting: 1, unknown: 0 });
+  assert.equal(barriers, 1);
+  assert.equal(f.calls.filter(call => call.method === "POST").length, 1, "only the original checkout creation");
+});
 
 test("a paid original physical source survives 73h and uses only its original contents", async () => {
   const f = await paid(); f.advance(73 * 3_600_000);

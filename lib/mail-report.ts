@@ -70,7 +70,7 @@ export async function noteMailReportEvent(
   const report = mailReportCampaign(campaign);
   if (!HEALTH_ID.test(store) || !report || !Number.isSafeInteger(count) || count <= 0 || count > 50 ||
       typeof providerIdentity !== "string" || providerIdentity.length < 3 || providerIdentity.length > 240 ||
-      typeof occurredAt !== "number" || !Number.isSafeInteger(occurredAt) || occurredAt < 0 || occurredAt > now ||
+      typeof occurredAt !== "number" || !Number.isSafeInteger(occurredAt) || occurredAt < 0 || occurredAt > now + 5_000 ||
       now - occurredAt >= MAIL_HEALTH_DAY_SECONDS * 1000 || !isRedisConfigured()) return false;
   const key = mailHealthDayKey(store, occurredAt);
   const expiresAt = Math.floor(occurredAt / 86_400_000) * 86_400 + MAIL_HEALTH_DAY_SECONDS;

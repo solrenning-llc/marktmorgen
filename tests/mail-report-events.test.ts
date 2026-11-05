@@ -142,9 +142,9 @@ async function main() {
   } finally {
     Date.now = originalNow;
   }
-  const keysBefore = redis.keys();
   const clockNow = Date.now();
   is("a signed provider clock three seconds ahead is retained at its own instant", await noteMailReportEvent(STORE, "b-clock-skew", "delivered", 1, "ses:clock-skew", clockNow + 3000, clockNow), true);
+  const keysBefore = redis.keys();
   for (const occurredAt of [undefined, NaN, Infinity, -1, Date.now() + 60_000, Date.now() - 11 * 86_400_000]) {
     is("an unconfirmed, future or expired event time authorizes no report write: " + String(occurredAt), await noteMailReportEvent(STORE, CAMPAIGN, "delivered", 1, "ses:time-invalid", occurredAt), false);
   }

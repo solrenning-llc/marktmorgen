@@ -134,10 +134,10 @@ export function readSesEvent(message: string): SesEvent | null {
   let v: {
     eventType?: unknown;
     notificationType?: unknown;
-    bounce?: { bounceType?: unknown; bouncedRecipients?: unknown };
-    complaint?: { complainedRecipients?: unknown };
-    delivery?: { recipients?: unknown };
-    deliveryDelay?: { delayedRecipients?: unknown };
+    bounce?: { bounceType?: unknown; bouncedRecipients?: unknown; timestamp?: unknown };
+    complaint?: { complainedRecipients?: unknown; timestamp?: unknown };
+    delivery?: { recipients?: unknown; timestamp?: unknown };
+    deliveryDelay?: { delayedRecipients?: unknown; timestamp?: unknown };
     mail?: { tags?: unknown; messageId?: unknown; timestamp?: unknown };
   };
   try {
@@ -163,7 +163,11 @@ export function readSesEvent(message: string): SesEvent | null {
     }
   }
   const messageId = typeof v.mail?.messageId === "string" && v.mail.messageId.length <= 200 ? v.mail.messageId : "";
-  const at = typeof v.mail?.timestamp === "string" ? Date.parse(v.mail.timestamp) : NaN;
+  // mail.timestamp is when SES accepted the send. Reports use the event's
+  // own time, just as Resend's created_at does, including across midnight.
+  const stamp = type === "Bounce" ? v.bounce?.timestamp : type === "Complaint" ? v.complaint?.timestamp
+    : type === "Delivery" ? v.delivery?.timestamp : type === "DeliveryDelay" ? v.deliveryDelay?.timestamp : undefined;
+  const at = typeof stamp === "string" ? Date.parse(stamp) : NaN;
   const occurred = Number.isSafeInteger(at) ? { occurredAt: at } : {};
   if (type === "Bounce") return { kind: "bounced", permanent: v.bounce?.bounceType === "Permanent", recipients: addresses(v.bounce?.bouncedRecipients), tags, messageId, ...occurred };
   if (type === "Complaint") return { kind: "complained", permanent: false, recipients: addresses(v.complaint?.complainedRecipients), tags, messageId, ...occurred };

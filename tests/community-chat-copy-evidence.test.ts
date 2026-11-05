@@ -95,6 +95,17 @@ async function main(): Promise<void> {
     is(`${name} is unknown`, await refuses([[row]]), true);
   }
 
+  is(
+    "other then member duplicate authors are unknown",
+    await refuses([[`{"i":3,"a":"${OTHER}","a":"${MEMBER}","text":"Ambiguous","at":125}`]]),
+    true,
+  );
+  is(
+    "member then other duplicate authors are unknown",
+    await refuses([[`{"i":4,"a":"${MEMBER}","a":"${OTHER}","text":"Ambiguous","at":126}`]]),
+    true,
+  );
+
   done();
 }
 

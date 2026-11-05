@@ -205,6 +205,14 @@ for i = 2, #ARGV do
 end
 return out`;
 
+/** Who of `emails` this take of `group` still holds at its own score; nobody when the answer is not exact. */
+async function stillHeld(group: string, emails: string[], score: number): Promise<string[]> {
+  if (!emails.length) return [];
+  const reply: unknown = await redisPipeline(emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])).catch(() => null);
+  if (!Array.isArray(reply) || reply.length !== emails.length) return [];
+  return emails.filter((_, i) => (typeof reply[i] === "string" || typeof reply[i] === "number") && Number(reply[i]) === score);
+}
+
 /** Which of `members` this take held and took away (DROP_OWN_LEASES); none when the answer is not exactly one 0 or 1 each. */
 async function dropOwnLeases(members: string[], score: number): Promise<boolean[]> {
   if (!members.length) return [];
@@ -1274,7 +1282,12 @@ export async function sendDueSteps(
     if (claim.open.length) {
       await settleAttempts(listId, flow.id, index, step.id, kind, claim.open.map((email) => ({ email, state: "uncertain", note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index })), now).catch(() => {});
     }
-    const going = claim.claimed;
+    // Read again right before the step does anything: someone this run's take no longer holds (taken out, or taken
+    // over by a later run that took the same entry) is that run's, and this one does nothing for them, not even a
+    // note in the run's history (Codex G2 on #2287, C3-141). A write about a person also checks it, or their
+    // generation, in its own script (lib/crm.ts, SET_CRM_VALUE); an email cannot be sent in the same step as a check.
+    const going = await stillHeld(group, claim.claimed, score);
+    counts.dropped += claim.claimed.length - going.length;
     if (!going.length) return;
     const to = afterIndex(flow.steps, index);
     const queueNext = (people: string[]): (string | number)[][] =>

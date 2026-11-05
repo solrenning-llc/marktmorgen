@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { measureKey, recountStep, RECOUNT_VERSION, STATE_KEY, SUM_KEY } from "@/lib/data-recount";
+import { measureKey, recountStep, RECOUNT_VERSION, STATE_KEY, SUM_KEY, IDS_KEY } from "@/lib/data-recount";
+import { dataKey } from "@/lib/store-data";
+import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 
 type Command = (string | number)[];
@@ -81,4 +83,57 @@ test("confirmed empty final pages complete without extra reads", async () => {
   redis.run(["HSET", STATE_KEY, "phase", "scan", "cursor", "0", "version", RECOUNT_VERSION]);
   const report = await recountStep(Date.now() + 100);
   assert.equal(report.done, true);
+});
+
+for (const reply of [[], [1, 2], [null], ["1"], [true], [[1]]]) test(`page EVAL ${JSON.stringify(reply)} cannot advance`, async () => {
+  redis.clear(); redis.run(["HSET", STATE_KEY, "phase", "scan", "cursor", "0", "version", RECOUNT_VERSION]);
+  await injected("EVAL", reply, async () => { await assert.rejects(recountStep(Date.now() + 100)); });
+  assert.equal(redis.run(["HGET", STATE_KEY, "phase"]), "scan");
+});
+
+for (const reply of [[], [null], [1], [1, null], [1, 0, "extra"], [false, 0]]) test(`completion ACK ${JSON.stringify(reply)} cannot report success`, async () => {
+  redis.clear(); redis.run(["HSET", STATE_KEY, "phase", "apply", "cursor", "0", "version", RECOUNT_VERSION]);
+  redis.pipeline = async commands => commands[0][0] === "HSET" ? reply : pipeline(commands);
+  try { await assert.rejects(recountStep(Date.now() + 100)); } finally { redis.pipeline = pipeline; }
+});
+
+test("a repeated collection cursor is incomplete, never a truncated measurement", async () => {
+  let reads = 0;
+  redis.pipeline = async commands => commands[0][0] === "TYPE" ? ["hash"] : (reads += 1, [["17", ["f", "v"]]]);
+  try { await assert.rejects(measureKey("nl:blog:body:evidence:post")); assert.equal(reads, 2); } finally { redis.pipeline = pipeline; }
+});
+
+for (const raw of [null, [], [null], ["owner@example.com", null]]) test(`owner HMGET ${JSON.stringify(raw)} cannot omit a key`, async () => {
+  redis.clear();
+  const id = "0123456789abcdef0123456789abcdef";
+  const key = `nl:blog:body:${id}:post`;
+  redis.run(["SET", key, "kept"]); redis.run(["HSET", STATE_KEY, "phase", "scan", "cursor", "0", "version", RECOUNT_VERSION]);
+  redis.pipeline = async commands => commands[0][0] === "HMGET" && commands[0][1] === IDS_KEY ? [raw] : pipeline(commands);
+  try { await assert.rejects(recountStep(Date.now() + 100)); } finally { redis.pipeline = pipeline; }
+  assert.equal(redis.run(["HGET", STATE_KEY, "phase"]), "scan");
+});
+
+for (const raw of [null, [], [null], [null, null, null], ["bad", null], ["-1", null]]) test(`room HMGET ${JSON.stringify(raw)} cannot consume a pending sum`, async () => {
+  redis.clear(); const owner = "recount-evidence@example.com";
+  await claimHandle(owner, "recount-evidence", "Evidence", ""); await ensureStatsId(owner);
+  const store = (await storeForEmail(owner))!; const key = dataKey(store)!;
+  redis.run(["HSET", STATE_KEY, "phase", "apply", "cursor", "0", "version", RECOUNT_VERSION]);
+  redis.run(["HSET", SUM_KEY, owner, 123]);
+  redis.pipeline = async commands => commands[0][0] === "HMGET" && commands[0][1] === key ? [raw] : pipeline(commands);
+  try { await assert.rejects(recountStep(Date.now() + 500)); } finally { redis.pipeline = pipeline; }
+  assert.equal(redis.run(["HGET", SUM_KEY, owner]), "123");
+});
+
+test("nonterminal empty sums and an invalid later sum cannot clear earlier measurements", async () => {
+  for (const page of [["17", []], ["0", ["first", "10", "second", "bad"]]]) {
+    redis.clear(); redis.run(["HSET", STATE_KEY, "phase", "apply", "cursor", "0", "version", RECOUNT_VERSION]);
+    redis.run(["HSET", SUM_KEY, "first", 10]);
+    await injected("HSCAN", [page], async () => { await assert.rejects(recountStep(Date.now() + 100)); });
+    assert.equal(redis.run(["HGET", SUM_KEY, "first"]), "10");
+  }
+});
+
+test("TYPE status objects and numeric strings from Redis are accepted without coercing null", async () => {
+  redis.pipeline = async commands => commands[0][0] === "TYPE" ? [{ ok: "string" }] : ["0"];
+  try { assert.ok((await measureKey("nl:blog:body:evidence:post"))! > 0); } finally { redis.pipeline = pipeline; }
 });

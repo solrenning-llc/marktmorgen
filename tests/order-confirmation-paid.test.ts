@@ -7,7 +7,7 @@ import { COMMIT_ORDER_CONFIRMATION, prepareOrderConfirmationPreintent } from "@/
 import { createCheckout } from "@/lib/store-checkout";
 import { confirmationFor, confirmPurchase, originalPhysicalConfirmation } from "@/lib/purchase-email";
 import { confirmationOriginRowKey, forgetOrderConfirmationMail, readConfirmationOrigin, reserveConfirmationOrigin, runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
-import { enqueueShipmentMail, runShipmentMail, type ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
+import { enqueueShipmentMail, runShipmentMail, SHIPMENT_MAIL_SCRIPT, type ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
 import { store as redis } from "./redis-stub";
 import { physicalPaidFixture, originId, confirmationLocalPipeline } from "./order-confirmation-paid-fixture";
 
@@ -44,6 +44,82 @@ test("CX121: a paid confirmation with acknowledged dispatch but no provider POST
   assert.deepEqual(result, { accepted: 0, waiting: 1, unknown: 0 });
   assert.equal(barriers, 1);
   assert.equal(f.calls.filter(call => call.method === "POST").length, 1, "only the original checkout creation");
+});
+
+test("CX121: an explicit no-POST result repairs only its own lost dispatch acknowledgement", async () => {
+  const f = await paid(), pipeline = f.runtime.pipeline!;
+  let lost = 0;
+  f.runtime.pipeline = async commands => {
+    const result = await pipeline(commands);
+    if (commands.some(c => c[0] === "EVAL" && c[1] === SHIPMENT_MAIL_SCRIPT && c[13] === "dispatch")) {
+      lost++;
+      return [];
+    }
+    return result;
+  };
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), false, "the dispatch took effect but its acknowledgement was lost");
+    return "not_posted";
+  }, f.runtime, f.id);
+  assert.equal(lost, 1);
+  assert.equal((await readConfirmationOrigin(f.id, f.runtime))?.row.state, "queued");
+  assert.deepEqual(result, { accepted: 0, waiting: 1, unknown: 0 });
+  assert.equal(f.calls.filter(call => call.method === "POST").length, 1);
+});
+
+test("CX121: a partial no-POST receipt cannot confirm the queued state", async () => {
+  const f = await paid(), pipeline = f.runtime.pipeline!;
+  let intercepted = 0;
+  f.runtime.pipeline = async commands => {
+    const result = await pipeline(commands);
+    if (commands.some(c => c[0] === "EVAL" && c[1] === SHIPMENT_MAIL_SCRIPT && c[13] === "not-posted")) {
+      intercepted++;
+      return [["queued"]];
+    }
+    return result;
+  };
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true);
+    return "not_posted";
+  }, f.runtime, f.id);
+  assert.equal((await readConfirmationOrigin(f.id, f.runtime))?.row.state, "queued", "the applied write is independently observed");
+  assert.equal(intercepted, 1);
+  assert.deepEqual(result, { accepted: 0, waiting: 0, unknown: 1 }, "the incomplete acknowledgement itself proves no success");
+});
+
+test("CX121: an unconfirmed defer cannot be reported as waiting", async () => {
+  const f = await paid(), pipeline = f.runtime.pipeline!;
+  let intercepted = 0;
+  f.runtime.pipeline = async commands => {
+    if (commands.some(c => c[0] === "EVAL" && c[1] === SHIPMENT_MAIL_SCRIPT && c[13] === "defer")) {
+      intercepted++;
+      return [];
+    }
+    return pipeline(commands);
+  };
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => "waiting", f.runtime, f.id);
+  assert.equal(intercepted, 1);
+  assert.equal((await readConfirmationOrigin(f.id, f.runtime))?.row.state, "preparing", "the omitted mutation was not applied");
+  assert.deepEqual(result, { accepted: 0, waiting: 0, unknown: 1 });
+});
+
+test("CX121: a partial not-accepted receipt cannot claim a retry was queued", async () => {
+  const f = await paid(), pipeline = f.runtime.pipeline!;
+  let intercepted = 0;
+  f.runtime.pipeline = async commands => {
+    if (commands.some(c => c[0] === "EVAL" && c[1] === SHIPMENT_MAIL_SCRIPT && c[13] === "not-accepted")) {
+      intercepted++;
+      return [["queued"]];
+    }
+    return pipeline(commands);
+  };
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true);
+    return "not_accepted";
+  }, f.runtime, f.id);
+  assert.equal(intercepted, 1);
+  assert.equal((await readConfirmationOrigin(f.id, f.runtime))?.row.state, "dispatching");
+  assert.deepEqual(result, { accepted: 0, waiting: 0, unknown: 1 });
 });
 
 test("a paid original physical source survives 73h and uses only its original contents", async () => {

@@ -106,3 +106,79 @@ for (const boundary of ["context", "review"] as const) {
     assert.ok(reads > 1, "the regression exercises distinct boundary captures");
   });
 }
+
+for (const wrapper of ["context", "review"] as const) {
+  for (const hidden of ["outer", "row"] as const) {
+    test(`${wrapper} wrapper cannot replace validated evidence with a hidden ${hidden} liability`, () => {
+      const fixture = contractFixture();
+      const original = fixture.review;
+      const later = structuredClone(original);
+
+      if (hidden === "outer") {
+        later.planPaymentDisputes = new Proxy(
+          { ...later.planPaymentDisputes, unreviewedPlan: null },
+          {
+            ownKeys: (target) =>
+              Reflect.ownKeys(target).filter((key) => key !== "unreviewedPlan"),
+          },
+        );
+      } else {
+        later.planPaymentDisputes!.creator_year = new Proxy(
+          {
+            ...later.planPaymentDisputes!.creator_year!,
+            additionalFeesCents: null,
+          },
+          {
+            ownKeys: (target) =>
+              Reflect.ownKeys(target).filter((key) => key !== "additionalFeesCents"),
+          },
+        );
+      }
+
+      assert.equal(
+        assessPlanPaymentDisputeCosts(later.planPaymentDisputes),
+        null,
+        "the actual later evidence is unknown at the direct boundary",
+      );
+      assert.equal(
+        canonicalFinancialSnapshot(later),
+        fixture.policy.financialSnapshot,
+        "projection discards the concealed liability without changing known totals",
+      );
+
+      let reads = 0;
+      const context = wrapper === "context"
+        ? new Proxy(fixture.context, {
+            getOwnPropertyDescriptor(target, key) {
+              const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+              return key === "review" && descriptor
+                ? { ...descriptor, value: ++reads === 1 ? original : later }
+                : descriptor;
+            },
+          })
+        : {
+            ...fixture.context,
+            review: new Proxy(fixture.review, {
+              getOwnPropertyDescriptor(target, key) {
+                const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+                return key === "planPaymentDisputes" && descriptor
+                  ? {
+                      ...descriptor,
+                      value: ++reads === 1
+                        ? original.planPaymentDisputes
+                        : later.planPaymentDisputes,
+                    }
+                  : descriptor;
+              },
+            }),
+          };
+
+      assert.equal(
+        contractFundingConfiguration(fixture.policy, context, fixture.now),
+        null,
+        "matching projected numeric totals cannot approve substituted unknown evidence",
+      );
+      assert.ok(reads > 1, "the entry point observes distinct original references");
+    });
+  }
+}

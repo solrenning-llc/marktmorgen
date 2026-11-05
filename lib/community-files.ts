@@ -71,8 +71,11 @@ export async function takePicturePlace(path: string, limit: number): Promise<boo
   const folder = folderOf(path);
   if (!folder || !Number.isSafeInteger(limit) || limit <= 0 || !isRedisConfigured()) return false;
   try {
-    const [count] = await redisPipeline([["INCR", countKey(folder)]]);
-    if (Number(count) <= limit) return true;
+    const reply = await redisPipeline([["INCR", countKey(folder)]]);
+    if (!Array.isArray(reply) || reply.length !== 1) return false;
+    const count = reply[0];
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= 0) return false;
+    if (count <= limit) return true;
     await redisPipeline([["DECR", countKey(folder)]]);
   } catch (error) {
     console.error("could not count a community picture", error);

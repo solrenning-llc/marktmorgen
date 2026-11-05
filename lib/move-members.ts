@@ -285,7 +285,10 @@ export async function readMove(store: Store, productId: string, token: string): 
   }
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" | "checking" };
+
+/** The open mark's value once a try's outcome is not known (a checkout may exist): later presses say so. */
+const OPEN_UNKNOWN = "unknown";
 
 /** The checkout a member's link opens: this membership, this address, first charged on the renewal date. */
 export async function openMove(
@@ -324,11 +327,15 @@ export async function openMove(
   if (taken[0] === null) {
     const open = repliesFor(await redisPipeline([["GET", key]]), 1);
     const url = open ? open[0] : null;
-    // The checkout already opened for it, or one still being opened: never a second.
-    return typeof url === "string" && url.startsWith("https://") ? { ok: true, url } : { ok: false, reason: "refused" };
+    // The checkout already opened for it, or one still being opened: never a second. A last try whose outcome is not
+    // known says so (Revisor 1 on #2685), rather than "try again in a few minutes" for up to a day.
+    if (typeof url === "string" && url.startsWith("https://")) return { ok: true, url };
+    return { ok: false, reason: url === OPEN_UNKNOWN ? "checking" : "refused" };
   }
   /** Let go only when nothing was made at Stripe, so the invitation may be pressed again. */
   const release = () => redisPipeline([["DEL", key]]).catch(() => {});
+  /** Kept for the longest a checkout lives, marked as an outcome not known, so later presses say so. */
+  const keepUnknown = () => redisPipeline([["SET", key, OPEN_UNKNOWN, "XX", "EX", OPEN_SECONDS]]).catch(() => {});
   // Paid already in a checkout the thanks page and the sweep never saw (B4): Stripe shows the membership live, so
   // the link opens nothing more and says it was moved. Not read whole: nothing opened, the next press asks again.
   const live = await liveMembership(store, invite.e, productId);
@@ -351,6 +358,7 @@ export async function openMove(
       // Refused before Stripe was asked (no unit left, or the hold not taken): nothing made. A hold not recorded
       // after the checkout was made keeps the mark, so a second is not made while the first may be open.
       if (!asked || held.reason === "soldout") await release();
+      else await keepUnknown();
       return { ok: false, reason: "unavailable" };
     }
     // The mark lives as long as Stripe keeps this checkout open, and a minute (B2): a checkout on a store with
@@ -366,6 +374,7 @@ export async function openMove(
     const nothingMade =
       !asked || error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || (error instanceof StripeError && error.status >= 400 && error.status < 500);
     if (nothingMade) await release();
+    else await keepUnknown();
     // The store's orders for the month are reached (lib/order-admission.ts): not open right now, nothing charged.
     if (error instanceof OrdersPausedError) return { ok: false, reason: "unavailable" };
     // The box to start access at once was not checked: said beside it, nothing opened.
@@ -392,6 +401,11 @@ async function checkoutCloses(store: Store, sessionId: string): Promise<number |
  * Whether Stripe shows this address a live membership to this product, read whole (B4): true or false only from
  * complete lists in their exact shape; anything else (an error, a list cut short, a reply that is not a list) is
  * null, never "not a member".
+ *
+ * Known limit (Revisor 1 on #2685): Stripe's email filter matches the spelling exactly. The invitation's address is
+ * kept in lower case, and every checkout this link opens is made with it, so a membership opened from the link is
+ * found here. One the member opened elsewhere under another spelling is not; for those the invitation's kept mark
+ * (noteKept, from the thanks page and the checkout sweep) is what closes the link.
  */
 async function liveMembership(store: Store, email: string, productId: string): Promise<boolean | null> {
   const account = store.stripeAccountId;

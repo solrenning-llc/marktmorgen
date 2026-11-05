@@ -1,3 +1,18 @@
+/** The actual guard must retain the typed profiles when navigation is declined. */
+export async function checkSocialDraftProtection({page,is,label}){
+ const before=page.url(),form=page.locator("form[data-socials-editor]");
+ const values=()=>form.locator("select,input").evaluateAll(nodes=>nodes.map(node=>node.value));
+ const draft=await values();
+ is("unsaved profiles protect unload "+label,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),true);
+ const notices=[];
+ const dismiss=async dialog=>{notices.push(dialog.message());await dialog.dismiss();};
+ page.on("dialog",dismiss);
+ try{const path=page.getByRole("link",{name:"Path",exact:true});await path.focus();await path.press("Enter");}finally{page.off("dialog",dismiss);}
+ is("unsaved profiles ask before leaving "+label,notices,["You have changes that are not saved. Leave without saving them?"]);
+ is("staying keeps profile document "+label,page.url(),before);
+ is("staying keeps exact profile draft "+label,await values(),draft);
+}
+
 /** All profile writes are intercepted. No account, message or external profile request. */
 export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource,is}){
  const profileCases=[
@@ -50,6 +65,7 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     await form.getByRole("textbox",{name:"Handle or address",exact:true}).first().fill("  @harborkitchenpreview  ");
     await form.getByRole("button",{name:"Add a profile",exact:true}).click();
     await form.getByRole("textbox",{name:"Handle or address",exact:true}).last().fill("@harborrecipes");
+    await checkSocialDraftProtection({page,is,label:"local draft/"+width});
    }
    await page.addScriptTag({content:axeSource});
    const scenarios=mode==="profiles"?profileCases:removalCases;
@@ -68,6 +84,7 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
     if(scenario.confirmed){
      await page.locator(".nb-toast-region [role=status]").getByText(success,{exact:true}).waitFor({state:"attached"});
      is("confirmed profile editor closes "+name,await form.count(),0);
+     is("confirmed profiles release unload protection "+name,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),false);
     }else{
      const alert=form.getByRole("alert");await alert.waitFor();
      is("profile errors stay honest "+name,(await alert.innerText()).includes(scenario.specific?"It is marked below":"Reload this page to check before trying again"),true);
@@ -75,6 +92,7 @@ export async function checkSocialAcknowledgment({browser,LOCAL,fixture,axeSource
      for(const field of await form.locator("select,input").all())is("profile fields unlock "+name,await field.isEnabled(),true);
      is("profile cancel unlocks "+name,await form.getByRole("button",{name:"Cancel",exact:true}).isEnabled(),true);
      if(mode==="profiles")is("profile input preserved after refusal "+name,await form.getByRole("textbox",{name:"Handle or address",exact:true}).first().inputValue(),"  @harborkitchenpreview  ");
+     if(mode==="profiles"&&["HTTP failure","malformed JSON","lost reply"].includes(scenario.name))await checkSocialDraftProtection({page,is,label:name});
      if(scenario.specific)is("known rejected row marked "+name,await form.locator('[aria-invalid="true"]').count(),1);
      if(scenario.badIndexes)is("invalid rejected indexes mark no rows "+name,await form.locator('[aria-invalid="true"]').count(),0);
      const contrast=await alert.evaluate(async node=>{const r=await window.axe.run(node,{runOnly:{type:"rule",values:["color-contrast-enhanced"]}});return{violations:r.violations.map(v=>v.id),incomplete:r.incomplete.map(v=>v.id),passed:r.passes.some(v=>v.id==="color-contrast-enhanced")};});

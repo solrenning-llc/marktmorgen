@@ -172,7 +172,8 @@ export async function readPersonNotes(statsId: string | null, person: string): P
  * in the same step. Inside: the mark and the generation read, the four writes
  * and the read (ADD_NOTE_CALLS).
  */
-export const ADD_PERSON_NOTE = `-- marktmorgen:person-note-add:v1
+export const ADD_PERSON_NOTE = `-- marktmorgen:person-note-add:v2
+if KEYS[5] and tonumber(redis.call("ZSCORE", KEYS[5], ARGV[6]) or "-1") ~= tonumber(ARGV[7]) then return 3 end
 ${erasedGuard(3, 4, 5, "0")}
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
 redis.call("EXPIRE", KEYS[1], ARGV[4])
@@ -217,6 +218,34 @@ export async function addPersonNote(statsId: string, person: string, by: string,
     return notes.slice(0, MAX_PERSON_NOTES);
   }
   return notes;
+}
+
+
+/**
+ * A note written by a workflow run's step under its own take (`take`, lib/crm.ts RunTake): "written", "superseded"
+ * (nothing written, its room given back) or null when it is not a note. Kept as addPersonNote keeps notes.
+ */
+export async function addRunNote(statsId: string, person: string, by: string, textRaw: unknown, room: DataStore, take: { key: string; member: string; score: number }, now = Date.now(), generation = 0): Promise<"written" | "superseded" | null> {
+  const text = personNoteText(textRaw);
+  if (!text || !PERSON_KEY.test(person) || !isRedisConfigured()) return null;
+  const id = randomBytes(4).toString("hex");
+  const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
+  const taken = dataBytes([id, json], 1) + dataBytes([person], 1);
+  await needData(room, [{ slot: NOTES_SLOT, bytes: taken }]);
+  // The same script as addPersonNote, with the run's take: its deletion guard and the take, in the same step as the write.
+  const [written] = await redisPipeline([["EVAL", ADD_PERSON_NOTE, 5, notesKey(statsId, person), whoKey(statsId), erasedKey(statsId, person), generationKey(statsId, person), take.key, id, json, person, NOTES_SECONDS, carriedGeneration(generation), take.member, String(take.score)]]);
+  if (written === 3 || written === 0) {
+    await giveData(room, [{ slot: NOTES_SLOT, bytes: taken }]).catch(() => {});
+    if (written === 0) throw new CrmPersonGone();
+    return "superseded";
+  }
+  const notes = Array.isArray(written) && written[0] === 1 && Array.isArray(written[1]) ? parsePersonNotes(written[1]) : await readPersonNotes(statsId, person);
+  if (notes.length > MAX_PERSON_NOTES) {
+    const dropped = notes.slice(MAX_PERSON_NOTES);
+    await redisPipeline([["HDEL", notesKey(statsId, person), ...dropped.map((n) => n.id)]]);
+    await giveData(room, [{ slot: NOTES_SLOT, bytes: dropped.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+  }
+  return "written";
 }
 
 /** Takes one note away, and gives back its room; the notes as they are after. */

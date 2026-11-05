@@ -14,7 +14,7 @@ import { forgetCrmPerson, personReturned, readDeals, readStages, readValues, wri
 import { writeForm } from "@/lib/form-store";
 import { parseForm } from "@/lib/forms";
 import { personKey } from "@/lib/person-key";
-import { readPersonNotes } from "@/lib/buyer-profile";
+import { forgetNotesPerson, readPersonNotes } from "@/lib/buyer-profile";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -148,6 +148,36 @@ async function main(): Promise<void> {
   resumedNewRun?.();if(newRun)await newRun;
   is("the legitimate new runner still completes its field after the old runner exits", await value("gus@example.com"), "Pro");
   redis.pipeline = passOn;
+
+  part("A run taken over between reading who it holds and the step's effect does nothing for that person (C3-141)");
+  await writeForm(statsId, parseForm({ id: "noteform01", name: "Waitlist", fields: [{ id: "q1mail", type: "email", label: "Email", required: true }] })!);
+  const noted = await saveFlow(store, { name: "Noted", trigger: "form", formId: "noteform01", active: true, steps: [{ delayHours: 0, action: { do: "note", text: "Joined the waitlist" } }] }, { activate: true });
+  is("(a workflow whose one step writes a note)", noted.ok, true);
+  await upsertContact(list, "hal@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  store = (await storeForEmail(OWNER))!;
+  await enroll(store, "hal@example.com", { joined: false, form: "noteform01" });
+  const hal = personKey(statsId, "hal@example.com");
+  let tookOver = false;
+  redis.pipeline = async (commands) => {
+    const answer = await passOn.call(redis, commands);
+    // Right after the old run read who it holds: deleted, back, enrolled again, and a later run does the step whole.
+    if (!tookOver && commands[0]?.[0] === "HMGET" && commands.some((c) => c[0] === "ZSCORE" && String(c[2]).endsWith("|hal@example.com"))) {
+      tookOver = true;
+      redis.pipeline = passOn;
+      await forgetWorkflowPerson(store, "hal@example.com");
+      await forgetCrmPerson(statsId, hal, "hal@example.com", ROOM);
+      await forgetNotesPerson(statsId, hal);
+      await personReturned(statsId, "hal@example.com", Date.now() + 1);
+      await enroll(store, "hal@example.com", { joined: false, form: "noteform01" });
+      await run();
+      redis.pipeline = async (next) => passOn.call(redis, next);
+    }
+    return answer;
+  };
+  await run();
+  redis.pipeline = passOn;
+  is("(taken over in between)", tookOver, true);
+  is("only the run that took over wrote its note", (await readPersonNotes(statsId, hal)).map((n) => n.text), ["Joined the waitlist (Sequence “Noted”, step 1.)"]);
   mail.restore();
   done();
 }

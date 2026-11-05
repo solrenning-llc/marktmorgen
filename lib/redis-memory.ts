@@ -421,7 +421,12 @@ export class MemoryRedis {
           return 1;
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
-        if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
+        if (key.startsWith("-- marktmorgen:crm-deal-move:v3\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+          if (args[0] === "2") {
+            const held = this.run(["ZSCORE", args[2], args[6]]);
+            if (held === null || Number(held) !== Number(args[7])) return 3;
+            return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5]]);
+          }
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
@@ -458,7 +463,12 @@ export class MemoryRedis {
           this.data.set(target, args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
+        if (key.startsWith("-- marktmorgen:crm-deal-save:v3\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
+          if (args[0] === "2") {
+            const held = this.run(["ZSCORE", args[2], args[7]]);
+            if (held === null || Number(held) !== Number(args[8])) return 3;
+            return this.run(["EVAL", key, "1", args[1], args[3], args[4], args[5], args[6]]);
+          }
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
@@ -554,8 +564,14 @@ export class MemoryRedis {
           return typeof before === "string" ? [1, before] : [1];
         }
         // lib/buyer-profile.ts ADD_PERSON_NOTE: a note and its person's place, unless the person is deleted or the note carries another generation.
-        if (key.startsWith("-- marktmorgen:person-note-add:v1\n") && args[0] === "4" && args.length === 10) {
-          const [, notes, who, erased, generation, id, value, person, seconds, carried] = args;
+        if (key.startsWith("-- marktmorgen:person-note-add:v2\n") && ((args[0] === "4" && args.length === 10) || (args[0] === "5" && args.length === 13))) {
+          const leased = args[0] === "5";
+          const [notes, who, erased, generation] = args.slice(1, 5);
+          const [id, value, person, seconds, carried, member, score] = args.slice(leased ? 6 : 5);
+          if (leased) {
+            const held = this.run(["ZSCORE", args[5], member]);
+            if (held === null || Number(held) !== Number(score)) return 3;
+          }
           if (this.erasedRefuses(erased, generation, carried)) return 0;
           this.run(["HSET", notes, id, value]);
           this.run(["EXPIRE", notes, seconds]);

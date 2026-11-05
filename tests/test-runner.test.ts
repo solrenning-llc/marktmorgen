@@ -108,5 +108,10 @@ test('real isolated child processes inherit the supplied environment, flush befo
     assert.equal(readFileSync(log, 'utf8'), 'first\nsecond\nthird\n');
     writeFileSync(worker, `process.kill(process.pid, 'SIGTERM');`);
     assert.equal(await runBundle(worker, process.env), 1);
+    writeFileSync(worker, 'process.exit(0);');
+    // A process that cannot start counted as failure under spawnSync too;
+    // it must not prevent the remaining files from running.
+    const missingExecutable = join(directory, 'missing-node');
+    assert.equal(await runBundle(worker, process.env, missingExecutable), 1);
   } finally { rmSync(directory, {recursive: true, force: true}); }
 });

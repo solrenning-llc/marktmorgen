@@ -1,0 +1,11 @@
+# Corrective return: #2598
+
+Codex I2, exact f5dae2ef436379082eaad1bf8647b683f3e6aa0a. LOW5781726177 CLOSED; no new finding in the complete two-file corrective delta. MAY MERGE after the final exact head has all nine successful aggregates and normal repository conditions. Prior complete review applies to unchanged content.
+
+All seven thanksOut strings now make both the purchases path and email conditional. No sender attempt, completed after callback or already-existing imported grant is asserted by the released wording. The page, grant pipeline, timing and all financial/operating policies remain unchanged.
+
+Original independent proof58be5c3d was copied BYTE-FOR-BYTE: TS test855eb750d647555e9828e226fb7b77e407452885 and runner0c308149b9be138796f82c9b6cc84d4d4c323ec3 match the durable original objects. SAME4tests on actual corrective RED1655fb2fdbd37dde39be63e34a2bf6d89162462a:2controls pass/2fail. Exact corrected source4/4. Actual ThanksPage and React SSR still exercise real preorder/grant services; deferred and unavailable confirmation no longer render the unsupported current-access sentence; draining the actual callback grants access despite synthetic sender refusal, and the upcoming control still does not select released wording. No original assertion or fixture changed.
+
+The author's final test is also byte-identical between corrective RED and final:17checks/7phrase failures+10controls ->17/17. Linked preorders31 and seven-language registry980 pass. Total1032 passing including own4. Scoped strict types of TWO changed files/imports, lint of those and own TS proof, public-data scan INCLUDING both own proof files3700/0, diffcheck and runner syntax pass. Full unchanged Next-page/adapter static typechecking, browser/authenticatedHTTP/nativeRedis/realprovider/globalbuild/wholeCI/deployment are not certified. Context adapters and refusing transport remain synthetic, exactly as the original report specified.
+
+No author source/ref/reservation/CI/metadata altered. The author should update the PR summary/RED ledger to this final corrective source without changing the source head for prose, then merge normally only with nine final greens. The original finding and before/after evidence remain preserved; no broader claim about other future-email wording is made.

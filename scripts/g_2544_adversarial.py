@@ -1,12 +1,14 @@
 """Independent G review: exact application Lua on owned loopback Redis only."""
-import hashlib, json, re
+import hashlib, json, os, re
 from pathlib import Path
 from test_shipment_mail_outbox_redis import LocalRedis
 
 source=(Path(__file__).resolve().parents[1]/'lib/shipment-mail-outbox.ts').read_text()
 lua=re.search(r'export const SHIPMENT_MAIL_SCRIPT = `([^`]+)`;',source)[1]
 reader=re.search(r'export const SHIPMENT_MAIL_REFUSED_SCRIPT = `([^`]+)`;',source)[1]
+assert os.environ.get('MARKTMORGEN_REDIS_INTEGRATION') == '1', 'Owned disposable loopback Redis required'
 r=LocalRedis(); now=1800000000000; owner='c'*48; checks=0
+assert r.command('EXISTS','nl:ship:mail:pool','nl:ship:mail:all','nl:ship:mail:due') == 0, 'Refuse a previously used namespace'
 policy=dict(reviewId='G_REVIEW',evidence='SYNTHETIC only',ongoingStorageFunded=True,emptyInitializationVerified=True,globalItems=100,globalBytes=10000000,storeItems=100,storeBytes=10000000,maxPayloadBytes=60000,maximumChecks=100,retryMilliseconds=60000,admissionsUntil=now+86400000)
 def check(name,got,want):
     global checks

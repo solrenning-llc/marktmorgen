@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { resendPurchase } from "@/lib/purchase-email";
 
 /** How often one sale's email may be sent again in a day, and one store's in an hour. */
@@ -26,8 +26,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   }
   if (
-    !(await withinLimit("resend-sale", reference, PER_SALE_PER_DAY, 24 * 60 * 60)) ||
-    !(await withinLimit("resend-store", store.sid || store.handle, PER_STORE_PER_HOUR, 60 * 60))
+    !(await withinEssentialLimit("resend-sale", reference, PER_SALE_PER_DAY, 24 * 60 * 60)) ||
+    !(await withinEssentialLimit("resend-store", store.sid || store.handle, PER_STORE_PER_HOUR, 60 * 60))
   ) {
     return Response.json({ ok: false, error: "limited" }, { status: 429 });
   }

@@ -13,7 +13,7 @@ const MESSAGES: Record<string, string> = {
   changed: "Your store changed while this was being read (for example, someone was deleted), or it could not be saved, so it was not kept. Read it again. This try counted as one of this month's AI jobs.",
   slow: "A few AI jobs a minute at most. Try again in a moment.",
   failed: "No summary came back. Try again. This try may have counted as one of this month's AI jobs.",
-  server_error: "Something went wrong on our side. Nothing was counted; try again in a moment.",
+  server_error: "Something went wrong on our side. Try again in a moment. If the summary had already started, this try may have counted as one of this month's AI jobs.",
 };
 
 const SOURCE_WORDS: Record<VoiceSource, [string, string]> = {

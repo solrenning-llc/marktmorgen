@@ -210,6 +210,12 @@ is("unless the store wrote the same word", heldToFacts("Garantizamos resultados.
 is("Dutch words for an abbreviation or a shortening", ["Een afkorting staat in de lijst.", "De afkortingen worden uitgelegd.", "Een verkorting van de les.", "De inkorting van het programma."].filter((reply) => !heldToFacts(reply, course)), []);
 is("French remise as handing over", ["La remise en main propre est possible.", "La remise du certificat a lieu en juin.", "La date de remise est sur la page.", "La remise des diplômes est en juin.", "La remise de votre certificat se fait en ligne.", "Un cours de remise en forme."].filter((reply) => !heldToFacts(reply, course)), []);
 is("any other remise is a discount and is refused (C3-107)", ["Profitez de la remise exclusive pour les abonnés.", "La remise réservée aux membres.", "La remise des frais d'inscription."].filter((reply) => heldToFacts(reply, course)), []);
+// Codex H on #2220: a determiner alone is not a handing over; "remise" of the shop, the price, a subscription or rights
+// is a discount or a waiver, refused whatever follows, by both the facts' check and the reminder's line.
+const monetary = ["Profitez de la remise de la boutique.", "La remise de la totalité du prix est disponible.", "Profitez de la remise de votre abonnement.", "Profitez de la remise du prix.", "La remise des droits est disponible."];
+const pottery = "Cours de poterie. Le prix est affiché sur la page.";
+is("a remise of the shop, the price, a subscription or rights is refused (Codex H)", monetary.filter((reply) => heldToFacts(reply, pottery) || !DEAL_WORDS.test(reply) || neutralLine(reply) === reply), []);
+is("while handing over a certificate, diplomas, a key or an order still passes", ["La remise de votre certificat se fait en ligne.", "La remise des diplômes est en juin.", "La remise en main propre est possible.", "La remise de l'attestation suit le cours.", "La remise des clés se fait sur place.", "La remise de votre commande est rapide."].filter((reply) => !heldToFacts(reply, course)), []);
 is("while the deal words are still caught", caught([
   "promoção", "promo", "promocional", "promoción", "código promocional", "promo code",
   "garantía", "garantías", "garantia", "garantias", "garantizado", "garantido", "garantie", "Garantie", "Garantiezeit", "garantiert", "garantito", "garanzia", "gegarandeerd",

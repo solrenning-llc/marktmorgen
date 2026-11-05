@@ -263,13 +263,19 @@ const GUARANTEE_WORDS_NL =
   `(?:(?<!toegang (?:te )?)garande\\p{L}*|garande\\p{L}*(?!${CLAUSE_END}))(?! (?:de |het )?toegang${ACCESS_COMPLEMENT}${CLAUSE_END})`;
 /**
  * The French "remise" is a discount ("la remise exclusive", "une remise de
- * 20 %"), but for the phrases of handing over, which pass: "remise en"
- * ("remise en main propre", "remise en forme"), "remise du", "de la", "de
- * l'", "des" (not "des frais", a waiver of fees), "de" before a possessive
- * ("remise de votre certificat") and "date de remise" (C3-107).
+ * 20 %", "la remise de la boutique", "la remise du prix", "la remise des
+ * droits"), but for the phrases of handing over, which pass: "remise en
+ * main(s) propre(s)", "remise en forme", "date de remise", and "remise"
+ * followed by "du", "de la", "de l'", "des" or "de", an optional possessive
+ * and a thing that is handed over (a certificate, a diploma, a key, an order,
+ * a file...). A determiner alone is not enough (C3-107; Codex H on #2220).
  */
+const HANDED_OVER =
+  "(?:certificats?|dipl[oô]mes?|attestations?|cl[eé]s?|clefs?|colis|commandes?|livrables?|documents?|badges?|fichiers?|travaux|copies?|devoirs?)";
 const REMISE_AS_DISCOUNT =
-  "(?<!dates? de )remises?(?! (?:(?:en|du|de la|des(?! frais)|de (?:votre|vos|ton|ta|tes|son|sa|ses|leur|leurs|notre|nos))(?!\\p{L})|de l'))";
+  "(?<!dates? de )remises?(?! (?:en mains? propres?|en forme|(?:du |de la |de l(?:['’] |['’]| )?|des |de )(?:(?:votre|vos|ton|ta|tes|son|sa|ses|leur|leurs|notre|nos) )?" +
+  HANDED_OVER +
+  ")(?!\\p{L}))";
 const DEAL_TERMS = [
   // English
   "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|u?v\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",

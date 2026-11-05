@@ -107,6 +107,36 @@ test('a Proxy cannot hide an additional source cost before the accounting snapsh
  }
 });
 
+test('transparent proxies at each accounting boundary are not financial evidence',()=>{
+ for(const location of ['root','sources','row'] as const){
+  const input=fixture();
+  if(location==='sources')input.sources=new Proxy(input.sources,{});
+  if(location==='row')input.sources.captions=new Proxy(input.sources.captions!,{});
+  const result=commercialProfitMix(location==='root'?new Proxy(input,{}):input);
+  assert.equal(result.reason,'unknown',location);
+  assert.equal(result.totalNetProfitCents,null);
+ }
+});
+
+test('an inherited amount cannot replace a required own cost category',()=>{
+ const descriptor=Object.getOwnPropertyDescriptor(Object.prototype,'taxesCents');
+ let calls=0;
+ try{
+  Object.defineProperty(Object.prototype,'taxesCents',{get(){calls++;return 200;},configurable:true});
+  const input=fixture();
+  const row=input.sources.captions! as unknown as Record<string,unknown>;
+  delete row.taxesCents;
+  Object.assign(row,{unreviewedSupplierCents:null});
+  const result=commercialProfitMix(input);
+  assert.equal(result.reason,'unknown');assert.equal(result.totalNetProfitCents,null);
+  assert.equal(result.rows.find(item=>item.source==='captions')!.netProfitCents,null);
+  assert.equal(calls,0);
+ }finally{
+  if(descriptor)Object.defineProperty(Object.prototype,'taxesCents',descriptor);
+  else Reflect.deleteProperty(Object.prototype,'taxesCents');
+ }
+});
+
 test('hidden, symbolic and executable source categories are rejected without reads',()=>{
  let calls=0;
  for(const kind of ['hidden','symbol','getter'] as const){

@@ -108,7 +108,7 @@ export const MAX_THEMES = 6;
 const MAX_TITLE = 60;
 export const KEEP_SECONDS = 70 * 86_400;
 /** One reading at a time: long enough for the texts to be gathered and the model's answer (45 seconds at most, lib/ai.ts). */
-const LOCK_SECONDS = 120;
+export const LOCK_SECONDS = 120;
 
 const monthOf = (ms: number) => new Date(ms).toISOString().slice(0, 7);
 const voiceKey = (statsId: string, month: string) => `nl:voice:${statsId}:${month}`;
@@ -118,8 +118,11 @@ const lockKey = (statsId: string) => `nl:voice:lock:${statsId}`;
 const QUOTED = (source: VoiceSource) => source !== "cancel";
 
 /**
- * The months a summary kept now may be of: every month from KEEP_SECONDS ago
- * to now, the newest first, at most four. Pure.
+ * The months a summary kept now may be of, the newest first, at most four. A
+ * summary's month is taken when its reading begins, and it is written up to
+ * LOCK_SECONDS later (perhaps in the next month), then kept KEEP_SECONDS from
+ * that write; a minute more covers the step before the lock and the clocks.
+ * Pure.
  */
 export function keptMonths(now: number): string[] {
   const out: string[] = [];
@@ -127,7 +130,7 @@ export function keptMonths(now: number): string[] {
   for (let back = 0; ; back += 1) {
     const first = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - back, 1);
     const end = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - back + 1, 1);
-    if (end <= now - KEEP_SECONDS * 1000) break;
+    if (end <= now - (KEEP_SECONDS + LOCK_SECONDS + 60) * 1000) break;
     out.push(monthOf(first));
   }
   return out;
@@ -337,8 +340,12 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     });
     if (!done.ok) return { ok: false, reason: done.reason === "notes" ? "failed" : done.reason };
     // Kept, and shown, only when nobody was deleted from the store while it was read (forgetVoicePerson took the lock).
-    const [kept] = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS]]);
-    if (kept !== 1) return { ok: false, reason: "changed" };
+    // The job is counted by now: a write that cannot be made says so with "changed", whose words say it counted.
+    const kept = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS]]).catch((error: unknown) => {
+      console.error("keeping the summary of what customers say failed", error);
+      return null;
+    });
+    if (!Array.isArray(kept) || kept[0] !== 1) return { ok: false, reason: "changed" };
     return { ok: true, summary: done.value, fresh: true, left: done.left };
   } finally {
     await releaseLock(held);

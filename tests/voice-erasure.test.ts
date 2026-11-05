@@ -16,7 +16,13 @@
  *   - what members wrote when leaving, which comes from the creator's Stripe
  *     account with nobody named beside it and so cannot be checked against
  *     the deleted, is counted but never kept as an example, not even in a
- *     summary written before this rule.
+ *     summary written before this rule;
+ *   - at the studio's door the reviews are kept (FTC rule), the summary read
+ *     again quotes them, and the lines each door shows say exactly that;
+ *   - a write that fails after the month's AI job was counted answers
+ *     "changed", whose words say it counted, and the "failed" words never
+ *     say nothing was counted, since a model that answered with an error
+ *     leaves the job counted.
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -28,6 +34,10 @@ import { keepAnswer } from "@/lib/answers";
 import { saveReview } from "@/lib/reviews";
 import { countSearchMiss } from "@/lib/stats";
 import { storeForEmail } from "@/lib/store";
+import { linesOf } from "@/lib/person-data";
+import { aiMonthKey } from "@/lib/ai";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const PERSON = "tess.voice@example.com";
 /** The person's review words, as lib/reviews.ts keeps them (tests/erasure-world.ts, seedPerson). */
@@ -35,6 +45,15 @@ const THEIR_WORDS = "Loved it";
 
 /** What the model is asked to sort; `during` runs while it "thinks", to put an erasure in the middle of a reading. */
 let during: (() => Promise<void>) | null = null;
+/** The model answering with an error status, as a provider outage does. */
+let modelDown = false;
+/** Whether the summary's one-step write throws, as a database that does not answer does. */
+let keepThrows = false;
+const pipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (keepThrows && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:voice-keep:v1\n"))) throw new Error("the database did not answer");
+  return pipeline(commands);
+}) as typeof redis.pipeline;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -46,6 +65,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const ids = [...text.matchAll(/^\[(\d+)\]/gm)].map((m) => Number(m[1]));
     const loved = [...text.matchAll(/^\[(\d+)\].*\b(?:Loved|Love)\b/gm)].map((m) => Number(m[1]));
     const rest = ids.filter((id) => !loved.includes(id));
+    if (modelDown) return json({}, 500);
     if (during) {
       const run = during;
       during = null;
@@ -152,6 +172,40 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:voice:${statsId2}:${month}`, JSON.stringify(old), "EX", 70 * 86_400]]);
   const shown = await readVoice((await storeForEmail(OWNER))!, now);
   is("a summary kept before this rule is read without them, its counts unchanged", [shown?.themes[0].examples.map((e) => e.text), shown?.themes[0].count], [["Good but costly"], 3]);
+
+  part("The studio's door keeps the reviews, and says the summary still quotes them (FTC rule, lib/reviews.ts)");
+  redis.clear();
+  const w3 = await makeWorld();
+  const statsId3 = w3.store.statsId as string;
+  await seedPerson(w3, PERSON, null);
+  await others(statsId3, w3.plain, now);
+  await makeVoice((await storeForEmail(OWNER))!, now);
+  const byTeam = await erasePerson((await storeForEmail(OWNER))!, PERSON, { kind: "team", who: OWNER, role: "owner" });
+  is("the team's erasure finished and took the summary", [byTeam.ok, (await summaries(statsId3)).size], [true, 0]);
+  const reread = await makeVoice((await storeForEmail(OWNER))!, now);
+  is("read again, it quotes the review they wrote, which is kept", reread.ok && JSON.stringify(reread.summary).includes(`"${THEIR_WORDS}"`), true);
+  const voiceLines = (door: "team" | "person") => linesOf("erased", door).filter((l) => l.startsWith("The month's summary of what your customers said"));
+  is("the person's door says the summary read again leaves them out", voiceLines("person").map((l) => [l.includes("read again, it leaves them out"), l.includes("still quotes")]), [[true, false]]);
+  is("the team's door says it still quotes the reviews they wrote, which are kept", voiceLines("team").map((l) => [l.includes("read again, it leaves them out"), l.includes("still quotes the reviews they wrote, which are kept")]), [[false, true]]);
+
+  part("What the creator is told is true about the month's AI jobs");
+  redis.clear();
+  const w4 = await makeWorld();
+  await seedPerson(w4, PERSON, null);
+  await others(w4.store.statsId as string, w4.plain, now);
+  const jobs = async () => String((await redis.pipeline([["GET", aiMonthKey((await storeForEmail(OWNER))!, new Date(now))!]]))[0]);
+  keepThrows = true;
+  const lost = await makeVoice((await storeForEmail(OWNER))!, now).catch((error: unknown) => ({ threw: String(error) }));
+  keepThrows = false;
+  is("the write failing after the job was counted says the store changed, never a server error that claims nothing was counted", [lost, await jobs()], [{ ok: false, reason: "changed" }, "1"]);
+  modelDown = true;
+  const failed = await makeVoice((await storeForEmail(OWNER))!, now);
+  modelDown = false;
+  is("a model that answered with an error: failed, and the try still counted (lib/ai.ts, counted)", [failed, await jobs()], [{ ok: false, reason: "failed" }, "2"]);
+  const words = readFileSync(join(process.cwd(), "components/customer-voice.tsx"), "utf8");
+  const said = (key: string) => (words.match(new RegExp(`\\n  ${key}: "([^"]*)"`)) ?? [])[1] ?? "";
+  is("so the failed message never says nothing was counted, and the changed one says it was", [/nothing was counted/i.test(said("failed")), /counted as one of this month's AI jobs/.test(said("changed"))], [false, true]);
+  is("the cancellation words' sentence says nothing kept with them says who wrote them", words.includes("nothing kept with it says who wrote it"), true);
 
   done();
 }

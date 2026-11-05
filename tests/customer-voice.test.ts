@@ -13,7 +13,7 @@
  *   - made only with enough to read, once a calendar month, as one of the
  *     month's AI jobs, and given back unchanged after that.
  */
-import { KEEP_SECONDS, MIN_TEXTS, cleanVoice, keptMonths, gatherVoice, makeVoice, readVoice, themesFrom, voicePrompt, type VoiceItem } from "@/lib/customer-voice";
+import { KEEP_SECONDS, LOCK_SECONDS, MIN_TEXTS, cleanVoice, keptMonths, gatherVoice, makeVoice, readVoice, themesFrom, voicePrompt, type VoiceItem } from "@/lib/customer-voice";
 import { keepAnswer } from "@/lib/answers";
 import { saveReview } from "@/lib/reviews";
 import { countSearchMiss } from "@/lib/stats";
@@ -83,7 +83,8 @@ async function main(): Promise<void> {
   const nov5 = Date.UTC(2026, 10, 5);
   is("every month a summary kept now may be of, from 70 days back", keptMonths(nov5), ["2026-11", "2026-10", "2026-09", "2026-08"]);
   is("one written on the last day of the oldest is still among them", keptMonths(Date.UTC(2026, 7, 31, 23) + KEEP_SECONDS * 1000 - 1).at(-1), "2026-08");
-  is("and none older than it can be kept", keptMonths(Date.UTC(2026, 9, 1) + KEEP_SECONDS * 1000).at(-1), "2026-10");
+  is("a reading begun on the last second of a month writes that month's key up to its lock's time later, kept 70 days from then", keptMonths(Date.UTC(2026, 8, 1) + (KEEP_SECONDS + LOCK_SECONDS) * 1000 - 1).at(-1), "2026-08");
+  is("and none older than it can be kept", keptMonths(Date.UTC(2026, 9, 1) + (KEEP_SECONDS + LOCK_SECONDS + 60) * 1000).at(-1), "2026-10");
 
   part("Read together, from the last 90 days");
   const OWNER = "owner@example.com";

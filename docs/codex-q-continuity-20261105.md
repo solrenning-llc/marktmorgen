@@ -308,3 +308,25 @@ Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated r
 - Updated durable proof is `codex/q-review-2686-return-proof@e21ce97a453a8d600467f924311f6702bd005183`, blob `bc3d59c7e9e6634f779a18e4ae0dc63a1539ba96`. It passes on the exact corrective head and checks all 25 numeric destinations, multi-part folding, zero numbered complements, 646-661 continuity, and the item656 cost phrase. Linked results: data-room 11/11, reservation-check 15 pass +1 expected skip, scanner 3798/0, diff-check clean.
 - Review `5793452687`: no new HIGH/MEDIUM. One LOW remains only in mutable PR metadata: title still says 646-687/WG6-WG47; body still references old 662, 683, and 692 despite the correct 646-661 table. Requested title/body corrections to 649, 657, and 661 respectively. Metadata correction does not move the code head; no second code review is needed, only a focal metadata confirmation.
 - #2709 remains exact `873a914e739d14a3e1deacbe85241ec5b6cbefac`; do not poll or retry. Own #2438/#2535 remain unchanged and blocked. Exact next action: confirm only a fresh #2686 metadata correction if requested, otherwise respond to a genuinely new #2709 review/terminal CI event. No merge, CI retry, cancellation, reservation edit, or product head movement occurred.
+
+
+## Retomada — 05/11/2026 20h50 Fortaleza
+
+### #2709 — dois LEVES de Z corrigidos no mesmo PR
+
+- Revisão independente Z `5793527209` no head anterior `873a914e739d14a3e1deacbe85241ec5b6cbefac`: nenhum novo GRAVE/MÉDIO; dois LEVES latentes, sem aprovação incondicional.
+- LEVE 1: a leitura mensal passou de três para quatro comandos Redis sem atribuição explícita no registro de custo da companhia.
+- LEVE 2: rejeição do transporte Redis escapava de `storeForgetMonth` em vez de retornar `null`/unknown.
+- RED corretivo remoto `fdc8cab5b3974caff4d80cfed1cf19fe4eec90ce` (equivalente local `a4a7c384bf54d99df773a2d0a4daefd328d4a4b0`): três falhas causais — rejeição escapava, teto de quatro comandos não tinha nome e atribuição da companhia estava ausente.
+- Head final remoto preservando o mesmo PR/ramo: `df8c44604d54560e046207f8e335c5297f5134fd`.
+- Correção: `STORE_FORGET_MONTH_READ_COMMANDS = 4`; transporte rejeitado devolve `null`; `NOT_A_COST` registra que o leitor ainda não tem chamador produtivo e exige frequência/custo não zero dentro do teto fixo revisado antes de ser ligado, nunca franquia de plano.
+- Validação local final: focal 8/8; SG2 ligado 125/125; plan-cost registry 24/24; TypeScript do recorte, ESLint dos três arquivos, scanner 3803/0 e diff-check verdes.
+- Comentário de retorno exato: `6672595409`. Nova revisão independente no head final e nove agregadores finais ainda obrigatórios.
+- CI do head anterior não foi repetido: leitor macOS falhou por OOM no typecheck a ~2051 MiB (job `127591094849`); product-checks falhou só em `pricing-optimization.test.ts`, documento histórico externo ao delta (`coefYear.ai` 7642 contra 7643, job `127591240932`). O novo head iniciou sua própria rodada normal; nenhum retry/cancelamento manual.
+
+### Demais estados preservados
+
+- #2438 continua OPEN em `6da1a24763a718e88e157703542c24957bfc6123`, `mergeable=false`; não forcei, integrei ou movi.
+- #2535 continua OPEN/mergeable em `2969557840c9fbb99f8ad01461121b33fa92bb94`; head, CI e ramo intactos.
+- #2686 continua no head `021ddc2d18b02e5b8ef292bac727401e6e55dd79`; o título já usa 646–661, mas o corpo ainda conserva três números antigos apontados no parecer Q `5793452687` (gap 649, estudo 657, quiz 661). Não editei metadado/ramo alheio nem repeti revisão.
+- Canal fresco `para-claude-1/messages.md` blob `506b40b7fe110ba3a939033e968ef1e87240dff7`, 102417 bytes: Z ainda registrava os dois LEVES do #2709 como pendentes; esta retomada os fechou com RED e novo head. Nenhuma direção nova do Claude1 para mover #2438/#2535.

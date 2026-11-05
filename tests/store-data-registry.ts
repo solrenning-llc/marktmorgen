@@ -479,6 +479,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:crm:pipes:@lib/crm.ts": { what: "The deals' pipelines and their stages (17 October 2026): one slot, at what the record weighs", room: ["lib/crm.ts"] },
   "nl:crm:pacc:@lib/pipeline-access.ts": { what: "What each teammate may do with each pipeline, only where restricted", room: ["lib/pipeline-access.ts"] },
   "nl:crm:v:@lib/crm.ts": { what: "People's values of the store's fields", room: ["lib/crm.ts"] },
+  "nl:vcard:@lib/creator-card.ts": { what: "The creator's business card, as they typed it", room: ["lib/creator-card.ts"] },
   "nl:voice:@lib/customer-voice.ts": { what: "What buyers said, summed up a month", parts: [capped(14 * 16 * KB, "One summary a month, 400 days.")] },
   "nl:voice:lock:@lib/customer-voice.ts": short("One summary at a time", "studio", 1, 128),
   "nl:rsum:@lib/review-ai-summary.ts": short("A product's AI summary of its reviews, kept eight days: its head (under 400 bytes) and its themes' sorted set (:themes), at most three entries of under 1,000 bytes each (the kept one, the one being kept, and one a failed clean-up left, taken out by the next try)", "studio", 8, 4 * KB),

@@ -9,8 +9,8 @@ import {store as redis} from './redis-stub';
 const fee={id:'fee_UnknownState0001',account:'acct_Receipt0001',charge:'ch_UnknownState0001',amount:625,amount_refunded:0,currency:'usd'};
 const row={id:'du_UnknownState0001',object:'dispute',charge:fee.charge,currency:'usd',status:'future_status'};
 const now=1800000000;
-type Diagnostic={unknownDisputes:number;unknownDisputeFees:string[]};
-async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown;unavailable?:boolean}={}){
+type Diagnostic={unknownDisputes:number;unknownDisputeFees:string[];unknownAmounts:number;unknownAmountFees:string[]};
+async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown;unavailable?:boolean;feePatch?:Record<string,unknown>;chargePatch?:Record<string,unknown>;metadataPatch?:Record<string,unknown>}={}){
  redis.clear();process.env.STRIPE_SECRET_KEY='sk_test_fee_refund_only_a_stand_in';
  const calls:{method:string;url:URL}[]=[];
  if(options.historical){
@@ -21,13 +21,15 @@ async function world(options:{recent?:boolean;historical?:boolean;reply?:unknown
   await redis.pipeline([['SADD',SHARING_INDEX,storeRef(shop)]]);
  }
  const oldFetch=globalThis.fetch;
+ const feeReply={...fee,...options.feePatch};
+ const chargeReply={id:fee.charge,currency:'usd',amount:10000,amount_refunded:0,disputed:true,payment_intent:{id:'pi_UnknownState0001',metadata:{share_bps:'625',share_base:'10000',buyer_email:'synthetic-buyer@example.test',...options.metadataPatch}},...options.chargePatch};
  globalThis.fetch=async(input,init)=>{
   const url=new URL(String(input)),method=init?.method??'GET';calls.push({method,url});
   assert.equal(url.origin,'https://api.stripe.com');
-  if(url.pathname==='/v1/application_fees')return Response.json({object:'list',has_more:false,data:options.recent===false?[]:[fee]});
+  if(url.pathname==='/v1/application_fees')return Response.json({object:'list',has_more:false,data:options.recent===false?[]:[feeReply]});
   if(url.pathname==='/v1/events')return Response.json({object:'list',has_more:false,data:[{id:'evt_UnknownState0001',data:{object:{application_fee:fee.id}}}]});
-  if(url.pathname==='/v1/application_fees/'+fee.id)return Response.json(fee);
-  if(url.pathname==='/v1/charges/'+fee.charge)return Response.json({id:fee.charge,currency:'usd',amount:10000,amount_refunded:0,disputed:true,payment_intent:{id:'pi_UnknownState0001',metadata:{share_bps:'625',share_base:'10000',buyer_email:'synthetic-buyer@example.test'}}});
+  if(url.pathname==='/v1/application_fees/'+fee.id)return Response.json(feeReply);
+  if(url.pathname==='/v1/charges/'+fee.charge)return Response.json(chargeReply);
   if(url.pathname==='/v1/disputes'){
    if(options.unavailable)throw Error('Synthetic dispute read unavailable');
    return Response.json(options.reply===undefined?{object:'list',has_more:false,data:[row]}:options.reply);
@@ -77,4 +79,41 @@ test('known states remain ordinary, including the confirmed lost-dispute refund'
   assert.equal(diagnostic.unknownDisputes,0);assert.deepEqual(diagnostic.unknownDisputeFees,[]);
  }
  assert.equal(COMMISSION_LIVE,false,'the live commission switch remains off');
+});
+
+for(const location of ['fee amount','fee refunded','charge amount','charge refunded'] as const){
+ test('CX-110: '+location+' must be explicitly known before any money mutation',async()=>{
+  for(const bad of [undefined,null,'100',NaN,-1,0.5,Number.MAX_SAFE_INTEGER+1]){
+   const patch=location.startsWith('fee')?{feePatch:{[location.endsWith('refunded')?'amount_refunded':'amount']:bad}}:{chargePatch:{[location.endsWith('refunded')?'amount_refunded':'amount']:bad}};
+   const {counts,calls}=await world({...patch,chargePatch:{disputed:false,...patch.chargePatch}}),diagnostic=counts as unknown as Diagnostic;
+   assert.equal(calls.filter(c=>c.method==='POST').length,0,location+' '+String(bad));
+   assert.equal(counts.failed,1);assert.equal(counts.complete,false);assert.equal(counts.gaveBack,0);assert.equal(counts.cents,0);
+   assert.equal(diagnostic.unknownAmounts,1);assert.deepEqual(diagnostic.unknownAmountFees,[fee.id]);
+   assert.equal(diagnostic.unknownDisputes,0);
+  }
+ });
+}
+test('CX-110: missing or invalid basis points cannot mean a zero rate',async()=>{
+ for(const bad of [undefined,null,'',NaN,-1,'-1','1.5','10001','1e3','invalid']){
+  const {counts,calls}=await world({chargePatch:{disputed:false},metadataPatch:{share_bps:bad}}),diagnostic=counts as unknown as Diagnostic;
+  assert.equal(calls.filter(c=>c.method==='POST').length,0,'share_bps '+String(bad));
+  assert.equal(counts.failed,1);assert.equal(counts.complete,false);
+  assert.equal(diagnostic.unknownAmounts,1);assert.deepEqual(diagnostic.unknownAmountFees,[fee.id]);
+ }
+});
+test('CX-110: missing, invalid or mismatched currency remains unknown in both paths',async()=>{
+ for(const side of ['feePatch','chargePatch'])for(const bad of [undefined,null,'','US','unknown',100,...(side==='chargePatch'?['eur']:[])]){
+  const {counts,calls}=await world({[side]:{currency:bad},historical:true,chargePatch:{disputed:false,...(side==='chargePatch'?{currency:bad}:{})}}),diagnostic=counts as unknown as Diagnostic;
+  assert.equal(calls.filter(c=>c.method==='POST').length,0);
+  assert.equal(counts.failed,2);assert.equal(counts.complete,false);
+  assert.equal(diagnostic.unknownAmounts,2);assert.deepEqual(diagnostic.unknownAmountFees,[fee.id]);
+ }
+});
+test('CX-110: explicit zero rate or goods base may authorize a known refund',async()=>{
+ for(const patch of [{share_bps:'0'},{share_base:'0'}]){
+  const {counts,calls}=await world({chargePatch:{disputed:false},metadataPatch:patch}),diagnostic=counts as unknown as Diagnostic;
+  assert.equal(counts.failed,0);assert.equal(counts.complete,true);assert.equal(counts.gaveBack,1);assert.equal(counts.cents,625);
+  assert.equal(calls.filter(c=>c.method==='POST').length,1);
+  assert.equal(diagnostic.unknownAmounts,0);assert.deepEqual(diagnostic.unknownAmountFees,[]);
+ }
 });

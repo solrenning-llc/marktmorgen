@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { memberHealth, runningMembers } from "@/lib/member-health";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -59,7 +60,7 @@ async function main() {
     is(name + ": no successful cache", await redis.pipeline([["GET", `nl:health:${store.statsId}`]]), [null]);
     is(name + ": no extra provider read", paths.length, 1);
   }
-  part("Owned running members need complete reporting evidence");
+  part("Incomplete owned rows are left out and disclosed as partial");
   for (const [name, row] of [
     ["missing expanded customer", scoredMember({ customer: undefined })],
     ["missing unit amount", scoredMember({ items: { data: [{ quantity: 1, current_period_end: 1_900_000_000, price: { recurring: { interval: "month", interval_count: 1 } } }] } })],
@@ -69,13 +70,19 @@ async function main() {
   ] as [string, unknown][]) {
     reset([page([row])]);
     let refused = false;
-    try { await memberHealth(store, true, 1_800_000_000_000); } catch { refused = true; }
-    is(name + ": incomplete owned row cannot certify a complete report", refused, true);
-    is(name + ": incomplete owned row is not cached as success", await redis.pipeline([["GET", `nl:health:${store.statsId}`]]), [null]);
+    let health = null;
+    try { health = await memberHealth(store, true, 1_800_000_000_000); } catch { refused = true; }
+    is(name + ": one bad row does not hide every evidenced member", refused, false);
+    is(name + ": the bad row is omitted and counted explicitly", health && [health.members.length, health.unscored, health.complete, health.counts, health.atRisk], [0, 1, true, { well: 0, slipping: 0, risk: 0 }, 0]);
   }
+  reset([page([scoredMember(), scoredMember({ id: "sub_partial", customer: null })])]);
+  const partial = await memberHealth(store, true, 1_800_000_000_000);
+  is("good evidence stays usable beside one incomplete row", partial && [partial.members.length, partial.members[0]?.email, partial.unscored], [1, "member@example.com", 1]);
+  const pageSource = readFileSync("app/studio/memberships/page.tsx", "utf8");
+  is("the creator is told that omitted rows make the figures partial", /could not be scored[\s\S]+figures[\s\S]+partial/i.test(pageSource), true);
   reset([page([scoredMember()])]);
   const scored = await memberHealth(store, true, 1_800_000_000_000);
-  is("fully evidenced owned row stays complete", [scored?.complete, scored?.members.length, scored?.members[0]?.monthly, scored?.atRisk], [true, 1, 2000, 2000]);
+  is("fully evidenced owned row stays complete", [scored?.complete, scored?.unscored, scored?.members.length, scored?.members[0]?.monthly, scored?.atRisk], [true, 0, 1, 2000, 2000]);
   reset([page([scoredMember({ items: { data: [{ quantity: 3, current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })])]);
   const quantity = await memberHealth(store, true, 1_800_000_000_000);
   is("confirmed item quantity remains exact", [quantity?.members[0]?.monthly, quantity?.atRisk], [6000, 6000]);

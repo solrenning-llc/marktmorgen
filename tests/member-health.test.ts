@@ -121,6 +121,24 @@ async function main(): Promise<void> {
   subs = kept;
   await memberHealth(store, true);
 
+  part("Unknown activity evidence never becomes 'never opened'");
+  const originalPipeline: typeof redis.pipeline = redis.pipeline.bind(redis);
+  let activityReads = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "HMGET" && String(command[1]).includes(":students"))) {
+      activityReads += 1;
+      return [[]];
+    }
+    return originalPipeline(commands);
+  };
+  let reportRefused = false;
+  try { await memberHealth(store, true); } catch { reportRefused = true; }
+  is("an incomplete course activity reply refuses the report", [reportRefused, activityReads], [true, 1]);
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "HMGET" && String(command[1]).includes(":students"))) throw new Error("synthetic activity read unavailable");
+    return originalPipeline(commands);
+  };
+
   part("The email back in");
   is("on only with an address", (await setNudge(OWNER, { on: true, address: "" })).ok, false);
   is("saved with one", (await setNudge(OWNER, { on: true, address: "1 Main St, Portland, OR 97201" })).ok, true);
@@ -128,6 +146,10 @@ async function main(): Promise<void> {
   for (const email of ["ana@example.com", "cy@example.com"]) {
     await upsertContact(store.listId as string, email, { agreed: true, explicit: true, source: "buyer", productId: club.product.id, title: "Weeknight Club" }, ROOM);
   }
+  let nudgeRefused = false;
+  try { await nudgeStore(store, Date.now() + 20_000); } catch { nudgeRefused = true; }
+  is("an unavailable activity read sends no come-back email", [nudgeRefused, mails.length], [true, 0]);
+  redis.pipeline = originalPipeline;
   await nudgeStore(store, Date.now() + 20_000);
   is("only the member away, who agreed; not the one whose payment failed", mails.map((m) => [m.to].flat()[0]), ["ana@example.com"]);
   const mail = mails[0];

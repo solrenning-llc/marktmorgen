@@ -1,0 +1,17 @@
+{
+  "pr": 2340,
+  "job": 127118240064,
+  "source": "GitHub Actions decoded job log",
+  "firstRunnerLine": "2026-11-05T07:51:09.6263462Z",
+  "regressionsPassed": "2026-11-05T08:08:15.4551712Z",
+  "buildStarted": "2026-11-05T08:08:15.4938907Z",
+  "agreementsStarted": "2026-11-05T08:10:18.9610670Z",
+  "agreementsPassed": "2026-11-05T08:12:59.1041753Z",
+  "storeCopyStarted": "2026-11-05T08:12:59.1298847Z",
+  "salesSharingChecked": "2026-11-05T08:13:53.8280116Z",
+  "requestedReminderResultPassed": "2026-11-05T08:13:53.8980527Z",
+  "cardDownloadPassed": "2026-11-05T08:13:53.9379723Z",
+  "lastAssertionPassed": "2026-11-05T08:26:21.8636671Z shipment panel fits viewport lost reply/390",
+  "cancelled": "2026-11-05T08:26:22.4126911Z",
+  "conclusion": "The complete log disproves a stall at Send your current mission. The reminder and card download passed immediately, and tests continued for over12minutes until the global35minute job deadline. No further retry, timeout or workflow change made by Codex V."
+}

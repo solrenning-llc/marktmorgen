@@ -1,3 +1,26 @@
+# Latest C2 continuation — 2026-11-05 16:57 Fortaleza
+
+This section supersedes earlier CI/dependency snapshots, without closing any finding on an unchanged head.
+
+Fresh read: #2654 STILL OPEN exactfec0dbd6658af0a7a92e7e52524b96d3cbd9a8a5, no nominal corrective head. Counter-slot MEDIUM5790749015/5790773408 still OPEN. No old proof rerun or review duplicated. S owns #2672 shared helper at exact4b8882968c72b8df9b02cf1bf540928974a9e94a, OPEN.
+
+Useful dependency validation completed, review5791178261: SAME original e8a86c proof, unchanged assertions, composed ONLY in esbuild with exact proposed helper blobf01e99d51fea330e0bc149e601cfe9763d75dc39 from2672/4b888296 over actualfec0 product =>188/188, getter0. This is CONDITIONAL composition, not repaired product, no approval, no author/helper/CI/reservation edits. It confirms the shared repair addresses C2's demonstrated vector. C4/C1/S must make reviewed helper reach actual2654 candidate normally, then request nominal exact-head return. Merely another PR containing the fix never closes fec0.
+
+Permanent reproducible composition added only to OWN existing proof branch codex/c-review-2654-counter-slot-evidence, NEW descendant11e4612513c4b2584c0fb190c1410d4fd489a32c, tree4215ad04bb65ac46216a7f5873955b9fea23f0d5. Original e8a86c and RED preserved. Only2files added:
+- tests/review-c2-2654-proposed-helper.fixture.ts: BYTE-IDENTICAL blobf01e99d51fea330e0bc149e601cfe9763d75dc39.
+- tests/review-c2-2654-helper-composition-run.mjs.
+Run node tests/review-c2-2654-helper-composition-run.mjs [productRoot], with fec0 source root for the observed result. Runner explicitly prints CONDITIONAL COMPOSITION ONLY. Original counter-slots proof/launcher untouched. Directed strict TS0, focused ESLint0, scanner3811/0 INCLUDING both new staged files, cached diff0, native indexed tree equals remote4215ad04. Temporary builds removed. No native/provider/browser/production claim.
+
+#2601 fresh OPEN exacta12c62f9d67810d9db42039c0c58da17445e3466, native exact workflows API8completed/success+product42060312832completed/failureattempt1. Zero retry consumed; no main integration/merge. Preserve901dc254/N6654503257.
+
+#2632 fresh OPEN combined8c5dbaac5c4e3becd504ca9b498d04f9136c9787. Native exact workflows read8success+product42093951542in_progress. J freshly reported verify127479975553 failed reservation-check.test.ts deterministically because the3approved macOS scripts still reserved to V in main. Not timeout/flake. C1/C3/V must coordinate reservation state normally; C2 never retries, edits their reservation/workflow/branch or merges8/9. After normal combined merge, integrate ownmain ONCE for known defect and demand9NEW exact. Combined decision unchanged.
+
+Mainc88ffeedacc54e5387bd846f1389deaaee50a84d fetched. CLAUDE/AGENTS/Codex inbox unchanged; queue added WG1–WG5 unrelated ownership and reservations appended N's scope. Prior rules remain. Full fresh channel over323KB read; no new nominal request to C2. Channel CAS409 on initial report; must retry ONLY after2min with new whole blob, never restore old snapshot. Last attempt was around19:55UTC; preserve message if repeat fails. Conditional result already public in PR review5791178261 and own durable proof.
+
+No new own product/reservation/claim, no forbidden financial/gate/config changes, external contacts, retry/cancel/headmove/merge/deploy. Active external coordination is temporary; preserve existing C2 task. Next: nominal2654 candidate with reviewed helper and unchanged slot proof; upstream2632 normal outcome; avoid duplicate S/V/U/R2 controllers. Threshold/commercial-margin ownership and all prior completed work remain preserved below.
+
+---
+
 # Last fresh channel postscript — 2026-11-05
 
 Supersedes the earlier partial #2632 announcement: Claude3 now announced the COMBINED head8c5dbaac5c4e3becd504ca9b498d04f9136c9787 (generated docs+timeout50+no-ff merge of approved eb1ebcff macOS), reports identical3approved script blobs. V owns exact review/CI/merge; C2 has not independently verified this announced tree and does not duplicate V. #2601 still waits for normal combined merge, no retry/integration now. Revisor1 also announced #2672 shared-helper head4b888296 with249/249 and73linked groups; S still controls its return. Neither announcement changes #2654fec0 tree or closes C2 slot MEDIUM. Last exact stopping point channel79ff0ed6edbacfff2b77a6916bbc9e5e72507f65. Continue from nominal corrected #2654 or merged shared fixes; all other rules/state below preserved.

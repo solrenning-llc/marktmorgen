@@ -1,3 +1,17 @@
+# Latest C2 continuation — 2026-11-05 13:59 Fortaleza
+
+This section supersedes all historical sections below.
+
+#2601 remains OPEN at exact head a12c62f9d67810d9db42039c0c58da17445e3466 / tree14b776fee759b887a53e665c85582b88f3daa78f. No head was moved in this continuation. Eight workflows completed/success; product42060312832 completed/failure on attempt1. All its jobs except verify and dependent aggregator passed (native Redis, mobile, Firefox, WebKit). Verify127360120260 failed Behavior regressions: exactly ONE file, pricing-optimization.test.ts, TWO assertions for stale generated documents. All268 browser bundles passed. Synthetic mail-check FAIL lines were expected controls, not failed files. The stale Scale yearly ai7642/7643 and storage2434/2435 documents are already owned by Claude3/#2632, head4c92c6f4008008120189bbaa4154c185d0612531, still OPEN with R2 no-finding opinion. The coordinator must resolve its global verify timeout before it can merge normally. Never change those owned documents, prices or limits in C2.
+
+No retry has been consumed for a12c; do not blindly spend the one retry on a deterministic stale document. After upstream correction is merged, integrate only for demonstrated inherited defect, preserve regression blob901dc254, revalidate related checks and require nine NEW exact successes. No merge with8/9. Current main8b26c489d9514b6b3d8e14cb02505494408e5c38 merge-tree was clean; no conflict/head-churn justification exists now. N6654503257 remains applicable under CX122.8. All earlier307/307, directed types/lint/scanner3776/0 evidence remains historical for this unchanged head.
+
+Revisor2 explicitly CLOSED the proof-runner MEDIUM in channel05/11/2026 12h59 on e94a488e. The opt-in proof8/8 and canonical service-counter-admission/service-refusals remain green. Do not request that closure again. Limitation: financial route proof runs only through explicit launcher, not default CI. Z financial review5782305772 and supplement5782374463 are preserved; no new product review performed.
+
+Next: handle C1/C3/#2632 upstream outcome, own exact CI and any actual findings first; then merge only nine success plus N. While waiting audit a free TX2/TX3/MR2 unit or useful unclaimed independent review. No new unit/ownership or other-agent branch modification in this run. commercial-margin/J and threshold/explicitC1 ownership restrictions unchanged. Channel409 occurred during report; retry after2min with full fresh blob, never restore old snapshot. Task stays enabled because work is pending, not fully blocked permanently.
+
+---
+
 # Latest C2 continuation — 2026-11-05 13:00 Fortaleza
 
 This section supersedes the historical checkpoint below.

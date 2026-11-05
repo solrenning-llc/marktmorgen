@@ -136,13 +136,17 @@ function parseMeta(raw: unknown): PostMeta | null {
   try {
     const v = JSON.parse(raw) as Partial<PostMeta>;
     if (typeof v.id !== "string" || !POST_ID.test(v.id) || typeof v.title !== "string") return null;
+    // Stored visibility and dates are evidence, not values to coerce before publishing.
+    // Date's range is narrower than the safe-integer range (these are seconds).
+    const date = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000;
+    if (typeof v.draft !== "boolean" || !date(v.publishedAt) || !date(v.updatedAt)) return null;
     return {
       id: v.id,
       title: v.title,
       excerpt: typeof v.excerpt === "string" ? v.excerpt : "",
-      draft: v.draft === true,
-      publishedAt: Number(v.publishedAt) || 0,
-      updatedAt: Number(v.updatedAt) || 0,
+      draft: v.draft,
+      publishedAt: v.publishedAt,
+      updatedAt: v.updatedAt,
       minutes: Math.max(1, Number(v.minutes) || 1),
     };
   } catch {
@@ -265,7 +269,7 @@ export async function savePost(
   if (id) {
     const reply = blogReplies(await redisPipeline([["HGET", metaKey(statsId), id]]), 1);
     before = parseMeta(reply?.[0]);
-    if (!before) return { ok: false, reason: "unknown" };
+    if (!before || before.id !== id) return { ok: false, reason: "unknown" };
   } else {
     const reply = blogReplies(await redisPipeline([["HLEN", metaKey(statsId)]]), 1);
     const count = reply ? countOf(reply[0]) : null;

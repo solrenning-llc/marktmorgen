@@ -822,6 +822,10 @@ async function ensurePost(store: Store, product: Listing, pending: string[]): Pr
     pending.push(refused("post", saved.reason));
     return store;
   }
+  if (saved.published === null) {
+    pending.push(refused("post", "count_unknown"));
+    return store;
+  }
   return (await setPostCount(REF, saved.published)) ?? store;
 }
 

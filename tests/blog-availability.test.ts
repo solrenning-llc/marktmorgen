@@ -64,6 +64,7 @@ async function main(){
   const html=renderToStaticMarkup(createElement(BlogUnavailable,{language:code,handle:store.handle,name:store.name}));
   is("localized reading notice: "+code,html.includes(words.unavailable.replace(/'/g,"&#x27;").replace(/"/g,"&quot;")),true);
   is("accessible retry keeps the actual blog address: "+code,[html.includes('role="status"'),html.includes(`/@${store.handle}/blog`),html.includes(words.retry)],[true,true,true]);
+  is("temporary unavailable content is not indexed: "+code,html.includes('name="robots" content="noindex"'),true);
  }
  part("Actual write route preserves a confirmed post when only its count is unknown");
  const cookie=`${SESSION_COOKIE}=${await openSession(email)}`;
@@ -127,6 +128,18 @@ async function main(){
   is("seed count uncertainty stays explicit: "+String(total),pending,total===null?["post:count_unknown"]:[]);
   is("seed cached count preserved when unknown: "+String(total),result.posts,total===null?store.posts:2);
  }
+ part("A confirmed deletion stays confirmed when only its count is unknown");
+ const deleteId="abcde23456";
+ await savePost(store.statsId,null,input,()=>deleteId,ROOM);
+ const cached=(await storeForEmail(email))?.posts;
+ redis.pipeline=async commands=>{const result=await pipeline(commands);return commands[0][0]==="HDEL"&&String(commands[0][1]).startsWith("nl:blog:meta:")?[result[0],result[1],result[2],null]:result;};
+ try{
+  const response=await POST(new NextRequest("https://marktmorgen.com/api/store/blog",{method:"POST",headers:{"content-type":"application/json","x-nimbus-store":store.sid,cookie},body:JSON.stringify({action:"delete",id:deleteId})}));
+  const data=await response.json() as {ok?:boolean;countUnavailable?:boolean};
+  is("three deletion ACKs retain the confirmed outcome",[response.status,data.ok,data.countUnavailable],[200,true,true]);
+  is("the acknowledged deletion removed the actual post",await readPost(store.statsId,deleteId),null);
+  is("unknown deletion total does not replace the cached count",(await storeForEmail(email))?.posts,cached);
+ }finally{redis.pipeline=pipeline;}
  done();
 }
 main().catch(error=>{console.error(error);process.exit(1);});

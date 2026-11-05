@@ -42,7 +42,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
 
@@ -107,8 +107,8 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
   const email = normaliseEmail(raw);
-  if (!(await withinLimit("library-ip", input.ip, 10, 3_600))) return "limited";
-  if (!(await withinLimit("library-address", sha(email), 5, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("library-ip", input.ip, 10, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("library-address", sha(email), 5, 3_600))) return "limited";
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
   let charged: Awaited<ReturnType<typeof storeForId>> = null;

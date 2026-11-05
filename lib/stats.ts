@@ -361,6 +361,8 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
 export type Live = {
   /** People who opened the store's page in the last LIVE_MINUTES minutes, each once. */
   visitors: number;
+  /** Set when only the newest views were read (readLive's `most`): visitors and sources are at least these. */
+  capped?: true;
   /** Where they came from. */
   sources: { source: string; visitors: number }[];
 };
@@ -377,15 +379,18 @@ export type Live = {
  * turned back into a person: ten characters of a fingerprint that changes
  * every day.
  */
-export async function readLive(store: Store, now = Date.now()): Promise<Live> {
+export async function readLive(store: Store, now = Date.now(), most?: number): Promise<Live> {
   const empty: Live = { visitors: 0, sources: [] };
   if (!store.statsId || !isRedisConfigured()) return empty;
   const key = liveKey(store.statsId);
+  // With `most` (an agent's read, LIVE_READ_MOST), only the newest views up to it, and one more to tell there were more.
   const [, members] = await redisPipeline([
     ["ZREMRANGEBYSCORE", key, 0, now - 30 * 60_000],
-    ["ZRANGEBYSCORE", key, now - LIVE_MINUTES * 60_000, "+inf", "WITHSCORES"],
+    most === undefined ? ["ZRANGEBYSCORE", key, now - LIVE_MINUTES * 60_000, "+inf", "WITHSCORES"] : ["ZREVRANGEBYSCORE", key, "+inf", now - LIVE_MINUTES * 60_000, "WITHSCORES", "LIMIT", 0, most + 1],
   ]);
-  const flat = Array.isArray(members) ? (members as unknown[]).map(String) : [];
+  const all = Array.isArray(members) ? (members as unknown[]).map(String) : [];
+  const capped = most !== undefined && all.length > 2 * most;
+  const flat = capped ? all.slice(0, 2 * most!) : all;
   const latest = new Map<string, { source: string; at: number }>();
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const [who, source] = flat[i].split("|");
@@ -402,7 +407,22 @@ export async function readLive(store: Store, now = Date.now()): Promise<Live> {
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 10)
       .map(([source, visitors]) => ({ source, visitors })),
+    ...(capped ? { capped: true } : {}),
   };
+}
+
+/**
+ * The views an agent's read of the live box reads at the most (get_live): the newest, each a member of at most 64
+ * bytes with its score; a store with more in the last LIVE_MINUTES minutes is said to have at least what was read.
+ */
+export const LIVE_READ_MOST = 2_000;
+
+/** How many days a stretch from `from` to `to` holds, and whether the same number of days before it is still kept (readRange). */
+export function rangeShape(from: string, to: string, now = Date.now()): { span: number; beforeKept: boolean } {
+  const span = datesBetween(from, to).length;
+  const beforeFrom = dayKey(Date.parse(`${from}T00:00:00Z`) - span * 86400_000);
+  const beforeTo = dayKey(Date.parse(`${from}T00:00:00Z`) - 86400_000);
+  return { span, beforeKept: !rangeProblem(beforeFrom, beforeTo, now) };
 }
 
 export type DayStats = { date: string; views: number; visitors: number; checkouts: number };

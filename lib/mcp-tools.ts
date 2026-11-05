@@ -20,7 +20,7 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
  * not quoted. Money is in the smallest unit of the store's currency.
  */
 import type { Store } from "@/lib/store";
-import { type Live, type RangeData, type StatsData, type Today, KEPT_DAYS, LIVE_MINUTES, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
+import { type Live, type RangeData, type StatsData, type Today, KEPT_DAYS, LIVE_MINUTES, LIVE_READ_MOST, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
 import { readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { readAbout } from "@/lib/product-about";
@@ -474,6 +474,7 @@ export function liveTool(live: Live, today: Today | null) {
     note: `Visitors in the last ${LIVE_MINUTES} minutes, each once. Today is the UTC day so far. Today's sales are null when Stripe is not connected or did not answer, never zero.`,
     last_minutes: LIVE_MINUTES,
     visitors_now: live.visitors,
+    ...(live.capped ? { visitors_now_at_least: true, capped_note: `More views came in than an assistant reads at once (${LIVE_READ_MOST}); the newest were counted, so the figures are at least these. See the live box in your studio for all of them.` } : {}),
     sources_now: live.sources.map((s) => ({ channel: s.source, visitors: s.visitors })),
     today: today
       ? { day: today.date, visitors: today.visitors, page_views: today.views, checkouts_started: today.checkouts, sales: today.sales?.sales ?? null, revenue: today.sales?.cents ?? null, sources: today.sources.map((s) => ({ channel: s.source, visits: s.visits })) }

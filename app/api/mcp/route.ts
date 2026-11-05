@@ -2,14 +2,14 @@ import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { proposeDescription, proposeSummary, proposeTitle } from "@/lib/agent-propose";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
-import { BUNDLE_CHOICES_MOST, COURSE_OUTLINE_MOST, IMPORTS_MOST, LESSON_MOST, SAVED_BLOCKS_MOST, PAGE_READING_MOST, PAGE_TEST_MOST, PAGE_VERSIONS_MOST, PRODUCT_TEXT_MOST, SALES_PAGE_MOST, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
+import { BUNDLE_CHOICES_MOST, COURSE_OUTLINE_MOST, RANGE_PRODUCTS_NAMED, SALES_PAGES, liveMost, rangeMost, IMPORTS_MOST, LESSON_MOST, SAVED_BLOCKS_MOST, PAGE_READING_MOST, PAGE_TEST_MOST, PAGE_VERSIONS_MOST, PRODUCT_TEXT_MOST, SALES_PAGE_MOST, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
 import { metered } from "@/lib/read-meter";
 import { CourseTooLarge, READ_COURSE_WITHIN_CALLS } from "@/lib/course";
 import { apiNumbers } from "@/lib/api-numbers";
 import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
-import { readTitles } from "@/lib/catalog";
-import { rangeProblem, readLive, readRange, readToday } from "@/lib/stats";
+import { type Card, cachedCards } from "@/lib/catalog";
+import { LIVE_READ_MOST, rangeProblem, rangeShape, readLive, readRange, readToday, readsSales } from "@/lib/stats";
 import {
   affiliatesTool,
   buyersTool,
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
     const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
     // A tool of the creator's own records (631 [AA1]): set aside at its most before it reads anything, metered as it
     // reads, and settled at what it read and sends before it is sent (Codex G2 on #1933). Not read, nothing is shown.
-    const paid = async (most: ReadWork, read: () => Promise<unknown>, unavailable: string | (() => string), scriptCalls = 0) => {
+    const paid = async (most: ReadWork, read: () => Promise<unknown>, unavailable: string | (() => string), scriptCalls = 0, stripePages = 0) => {
       const held = apiReadUnits(most);
       const settle = await hold(held);
       if (settle instanceof Response) return refusedWith(settle);
@@ -141,7 +141,8 @@ export async function POST(request: Request) {
       const { value, meter } = await metered(read);
       const out = value === null || value === undefined ? said({ error: typeof unavailable === "function" ? unavailable() : unavailable }, true) : said(value);
       // A script's own calls are billed one by one beside it: counted for each script the tool ran.
-      const work = { commands: meter.commands + (meter.commands > 0 ? scriptCalls : 0), bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: meter.trips };
+      // Stripe's pages are not counted by the meter: the tool's most of them is settled (more, never less, than read).
+      const work = { stripePages, commands: meter.commands + (meter.commands > 0 ? scriptCalls : 0), bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: meter.trips };
       const refused = await settle(settledUnits(work, held));
       return refused ? refusedWith(refused) : result(id, out);
     };
@@ -171,8 +172,11 @@ export async function POST(request: Request) {
       return refused ? refusedWith(refused) : result(id, answer);
     }
     if (params.name === "get_live") {
-      const [live, today] = await Promise.all([readLive(store), readToday(store).catch(() => null)]);
-      return result(id, said(liveTool(live, today)));
+      // At most LIVE_READ_MOST views are read, said as "at least" past it; Stripe's pages counted when sales are read.
+      return paid(liveMost(readsSales(store)), async () => {
+        const [live, today] = await Promise.all([readLive(store, Date.now(), LIVE_READ_MOST), readToday(store).catch(() => null)]);
+        return liveTool(live, today);
+      }, "Your live numbers could not be read just now. Try again in a moment.", 0, readsSales(store) ? 2 : 0);
     }
     if (params.name === "get_numbers_for_days") {
       const from = typeof params.arguments?.from === "string" ? params.arguments.from.slice(0, 10) : "";
@@ -182,8 +186,17 @@ export async function POST(request: Request) {
         const words = { dates: "Send from and to as YYYY-MM-DD.", order: "from must not be after to.", future: "to must not be after today (UTC).", kept: "Days are kept for 400 days; start later." } as const;
         return result(id, said({ error: words[problem] }, true));
       }
-      const [range, titles] = await Promise.all([readRange(store, from, to), readTitles(store).catch(() => new Map<string, string>())]);
-      return result(id, range ? said(rangeTool(range, titles)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      // Paid for by the stretch asked (rangeShape): its days, the days before when kept, its sales; then only the
+      // products it names are titled (their cached cards, one HMGET), never every card of the catalog (Codex G2, #1933).
+      const shape = rangeShape(from, to);
+      const sales = readsSales(store);
+      return paid(rangeMost(shape.span, shape.beforeKept, sales, Boolean(store.stripeAccountId)), async () => {
+        const range = await readRange(store, from, to);
+        if (!range) return null;
+        const cards = range.products.length ? await cachedCards(store, range.products.slice(0, RANGE_PRODUCTS_NAMED).map((p) => p.id)).catch(() => new Map<string, Card | null>()) : new Map<string, Card | null>();
+        const titles = new Map([...cards].flatMap(([key, card]) => (card ? [[key, card.title] as [string, string]] : [])));
+        return rangeTool(range, titles);
+      }, "Your numbers could not be read just now. Try again in a moment.", 0, sales && store.stripeAccountId ? 2 * SALES_PAGES : 0);
     }
     if (params.name === "get_product_description" || params.name === "get_sales_page") {
       const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";

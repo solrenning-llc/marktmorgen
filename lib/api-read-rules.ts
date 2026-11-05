@@ -39,7 +39,7 @@ import { MAX_QUESTIONS } from "@/lib/quiz";
 import { MAX_TASK_PROMPT } from "@/lib/assignment-rules";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
 import { SHARE_LIMITS } from "@/lib/funnel-share-rules";
-import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
+import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, LIVE_READ_MOST, STATS_DAYS } from "@/lib/stats";
 import { LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
 import { MAX_FLOWS } from "@/lib/flow-limits";
@@ -489,3 +489,35 @@ export const LESSON_TEXT_BYTES = readAtMost(MAX_BODY_LENGTH) + readAtMost(MAX_QU
 export const LESSON_MOST: ReadWork = { commands: 5 + READ_COURSE_WITHIN_CALLS, bytes: LISTING_BYTES + COURSE_READ_BYTES + LESSON_TEXT_BYTES, sent: LESSON_TEXT_BYTES + 4_096, stripePages: 0, roundTrips: 3 };
 /** list_saved_blocks at its most: every saved section of a store, never more than the largest plan keeps, each MAX_SECTION_BYTES, escaped once more. */
 export const SAVED_BLOCKS_MOST: ReadWork = { commands: 1, bytes: 2 * Math.max(...Object.values(SHARE_LIMITS).map((l) => l.savedBlocks)) * MAX_SECTION_BYTES, sent: 2 * Math.max(...Object.values(SHARE_LIMITS).map((l) => l.savedBlocks)) * MAX_SECTION_BYTES, stripePages: 0, roundTrips: 1 };
+/** One view kept for the live box (lib/stats.ts): who, where from and when, with its score, as answered. */
+export const LIVE_VIEW_BYTES = 128;
+/**
+ * get_live at its most: the live box pruned and read up to LIVE_READ_MOST newest views, and today's counts (a day's
+ * fields, its visitors and the kept sales); when today's sales are not kept, a page of PayPal sales (100) and one of
+ * each of Stripe's two walks (lib/stats.ts, readToday), and the sales kept again.
+ */
+export function liveMost(sales: boolean): ReadWork {
+  return {
+    commands: 2 + 3 + (sales ? 2 + 1 : 0),
+    bytes: LIVE_READ_MOST * LIVE_VIEW_BYTES + (DAY_FIELDS_MAX + 1) * STATS_FIELD_BYTES + 1_024 + (sales ? 100 * PAYPAL_PAID_BYTES : 0),
+    sent: 16_384,
+    stripePages: sales ? 2 : 0,
+    roundTrips: 2 + (sales ? 2 : 0),
+  };
+}
+/** The product titles get_numbers_for_days names (lib/stats.ts readRange: at most 15 products), from their cached cards in one HMGET. */
+export const RANGE_PRODUCTS_NAMED = 15;
+/**
+ * get_numbers_for_days at its most, for a stretch of `span` days (lib/stats.ts readRange): each day's counts and
+ * visitors and the stretch's visitors, the same days before when they are kept, then the sales of the stretch (PayPal,
+ * SALES_PAGES pages of 100, and Stripe's two walks of SALES_PAGES pages), then the titles of the products it names.
+ */
+export function rangeMost(span: number, beforeKept: boolean, sales: boolean, stripe: boolean): ReadWork {
+  return {
+    commands: 2 * span + 1 + (beforeKept ? 1 + span : 0) + (sales ? 2 : 0) + 1,
+    bytes: span * (DAY_FIELDS_MAX + 1) * STATS_FIELD_BYTES + (beforeKept ? span * 64 + 64 : 0) + (sales ? SALES_PAGES * 100 * PAYPAL_PAID_BYTES : 0) + RANGE_PRODUCTS_NAMED * CARD_READ_BYTES,
+    sent: span * 256 + 30 * 256 + 4_096,
+    stripePages: sales && stripe ? 2 * SALES_PAGES : 0,
+    roundTrips: 1 + (sales ? 2 : 0) + 1,
+  };
+}

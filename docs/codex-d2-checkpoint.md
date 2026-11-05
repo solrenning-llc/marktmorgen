@@ -1,8 +1,8 @@
-# Codex D2 checkpoint — November 5, 2026, 22:29 UTC
+# Codex D2 checkpoint — November 5, 2026, 22:30 UTC
 
 Read this checkpoint first, then the fresh Codex inbox, channel and GitHub state. Preserve heads, proofs and retry counters. Conversation/channel: PT-BR. Code, commits and PRs: English. Coordinator: Claude1. Lane: 474 TX4 / 473 TX3, with E2 cross-reviews.
 
-## Latest return — November 5, 2026, 22:29 UTC
+## Latest return — November 5, 2026, 22:30 UTC
 
 Applied the owner's Pro continuation order C1-1900, C1-1857 and C4-1859. The actual full channel instructions are C1-1809 (AV12, referenced as1808) and C1-1843 (default lane audit, referenced as1846). Existing hourly continuation was re-enabled exactly once; no duplicate automation or repeated model polling. Five own products remain at the exact heads below, each8/9; no retry, cancellation, product edit, head move or merge.
 
@@ -22,9 +22,9 @@ Immutable proof commit2ff8feda8e2b32d03d52e00708dcb88431c8312a on codex/d-review
 
 Report commit7460803497d03a70f0208e9e6ed3a9f490e2f98b, proofs/d2/review-2692.md. Channel result9eecb000d3875261325f40074f64c86bdb51e27c after409 and two-minute/full-CAS retry. Initial linked launcher used nonexistent essential-studio.test.ts; corrected to essential-studio-allowance and broadcast-allowance-window, all11 remaining groups then passed. No absent test counted.
 
-R2 independently reproduced D2's9/3 in the19:25 channel message. R2 also has a SEPARATE OPEN MEDIUM: allowanceUsed now throws, and app/studio/page.tsx:981, agreements:41, path:60, requests:43 do not catch it, so unknown counter/window causes whole-page failure. The author's error-boundary caveat does not waive this finding. D2 supplement6671182908 explicitly preserves it;531 valid-fixture checks do NOT certify outage rendering. H2's second financial review is in progress. Closing D2's replay finding alone is insufficient; R2's consumer disposition/focal return is also required. No author product/branch/CI was edited.
+R2 independently reproduced D2's9/3 in the19:25 channel message. R2 also has a SEPARATE OPEN MEDIUM: allowanceUsed now throws, and app/studio/page.tsx:981, agreements:41, path:60, requests:43 do not catch it, so unknown counter/window causes whole-page failure. The author's error-boundary caveat does not waive this finding. D2 supplement6671182908 explicitly preserves it;531 valid-fixture checks do NOT certify outage rendering. H2 claimed the second financial review in6671131708 at22:25:08UTC, durable fallback a35eda1b after channel CAS failures. G later claimed the same second review at19:28 in the channel, having not found the PR fallback. D2 coordination comment6671225500 informed both and C1 to reconcile one second-review controller before duplication. Do not invent a third-review requirement. The tested replay blocker is cross-page refund-ID uniqueness; D2 clarified that no untested extra required field is a separate clearance condition. Closing D2's replay finding alone is insufficient; R2's consumer disposition/focal return is also required. No author product/branch/CI was edited.
 
-Next focal action: when C2 posts a corrected head, repeat IMMUTABLE2ff8feda proof; only close the duplicate-refund MEDIUM after9/9 pass and reading the delta. Do not certify the separate page-error finding without R2/owner resolution. Two financial clearances and nine exact-head successful workflows remain necessary.
+Next focal action: when C2 posts a corrected head, repeat IMMUTABLE2ff8feda proof; only close the duplicate-refund MEDIUM after all9 immutable proof checks pass and reading the delta. Do not certify the separate page-error finding without R2/owner resolution. Two financial clearances and nine exact-head successful workflows remain necessary.
 
 
 ## Read-only fiscal audit: OPEN MEDIUM, no sixth product
@@ -114,3 +114,5 @@ Next:
 5. With five products waiting, only an unclaimed independent review, requested focal return or read-only default audit evidence; no sixth own product and no duplicate reviewer. The malformed persisted tax-setting MEDIUM remains OPEN, with immutable proof and C1 assignment requested. 2691 belongs to V; do not duplicate it.2692 D2 MEDIUM and the separate R2 page-error MEDIUM remain open; wait for the corrected head and re-run immutable proof2ff8feda before any clearance.
 
 Most recent CI record: PR#2647 comment6664184558. Channel CAS conflicts around17:05 were retried after two minutes; successful result/retry checkpoint append95e79b1ad8edb723bc5828f62e2411392e15bfa2. Before ending, append PONTO DE PARADA with all five exact heads, retry counters and next action. Keep all work durable at most30min.
+
+Latest channel PONTO DE PARADA append hit409; wait two minutes and retry using a fresh FULL channel and SHA CAS. Both financial findings remain open; do not end without publishing the exact five-head stopping point or recording an explicit durable fallback after repeated channel errors.

@@ -57,6 +57,22 @@ export type Profit = { state: "complete"; cents: number } | { state: "incomplete
 
 const known = (n: number | null): n is number => n !== null && Number.isSafeInteger(n) && n >= 0;
 
+/** Keep intermediate sums exact; only public amounts must fit a safe number. */
+type ExactProfit = { state: "complete"; cents: bigint } | Exclude<Profit, { state: "complete" }>;
+const exactProfit = (value: Profit): ExactProfit => value.state === "complete" ? { state: "complete", cents: BigInt(value.cents) } : value;
+function publicProfit(value: ExactProfit): Profit {
+  if (value.state !== "complete") return value;
+  if (value.cents < BigInt(Number.MIN_SAFE_INTEGER) || value.cents > BigInt(Number.MAX_SAFE_INTEGER)) return { state: "unavailable" };
+  return { state: "complete", cents: Number(value.cents) };
+}
+function addExact(before: ExactProfit | undefined, next: ExactProfit): ExactProfit {
+  const prior = before ?? { state: "complete", cents: BigInt(0) };
+  if (prior.state === "unavailable" || next.state === "unavailable") return { state: "unavailable" };
+  if (prior.state === "incomplete" || next.state === "incomplete") return { state: "incomplete", why: "cost not set" };
+  return { state: "complete", cents: prior.cents + next.cents };
+}
+
+
 /**
  * One order's profit before taxes. A refunded order keeps its cost: what
  * was made or sent is spent either way. A line that is not a whole number
@@ -67,9 +83,8 @@ export function orderProfit(order: OrderMoney): Profit {
   if (!known(order.paid) || !known(order.refunded) || !known(order.fee) || !known(order.otherCosts)) return { state: "unavailable" };
   if (order.lines.some((l) => !Number.isSafeInteger(l.units) || l.units < 0 || (l.costPerSale !== null && !known(l.costPerSale)))) return { state: "unavailable" };
   if (order.lines.some((l) => l.costPerSale === null)) return { state: "incomplete", why: "cost not set" };
-  const cost = order.lines.reduce((n, l) => n + (l.costPerSale as number) * l.units, 0);
-  const cents = order.paid - order.refunded - order.fee - cost - order.otherCosts;
-  return Number.isSafeInteger(cents) ? { state: "complete", cents: cents || 0 } : { state: "unavailable" };
+  const cost = order.lines.reduce((n, l) => n + BigInt(l.costPerSale as number) * BigInt(l.units), BigInt(0));
+  return publicProfit({ state: "complete", cents: BigInt(order.paid) - BigInt(order.refunded) - BigInt(order.fee) - cost - BigInt(order.otherCosts) });
 }
 
 /**
@@ -78,24 +93,26 @@ export function orderProfit(order: OrderMoney): Profit {
  * its currency's total so too, said as such.
  */
 export function periodProfit(orders: OrderMoney[], ads: Record<string, number | null>): Map<string, Profit> {
-  const out = new Map<string, Profit>();
+  const out = new Map<string, ExactProfit>();
   const lower = (currency: string) => currency.toLowerCase();
-  const spentIn = new Map(Object.entries(ads).map(([currency, cents]) => [lower(currency), cents] as const));
+  const spentIn = new Map<string, number | null>();
+  for (const [currency, cents] of Object.entries(ads)) {
+    const code = lower(currency);
+    // Two spellings cannot prove whether the same spend was repeated or two
+    // costs were supplied: neither an unknown cost nor a real cost may vanish.
+    spentIn.set(code, spentIn.has(code) ? null : cents);
+  }
   // A currency with ads and no order still has its spending: a loss, never lost.
-  for (const currency of spentIn.keys()) out.set(currency, { state: "complete", cents: 0 });
+  for (const currency of spentIn.keys()) out.set(currency, { state: "complete", cents: BigInt(0) });
   for (const order of orders) {
     const currency = lower(order.currency);
-    const so = out.get(currency) ?? { state: "complete", cents: 0 };
-    const one = orderProfit(order);
-    if (so.state === "unavailable" || one.state === "unavailable") out.set(currency, { state: "unavailable" });
-    else if (so.state === "incomplete" || one.state === "incomplete") out.set(currency, { state: "incomplete", why: "cost not set" });
-    else out.set(currency, { state: "complete", cents: so.cents + one.cents });
+    out.set(currency, addExact(out.get(currency), exactProfit(orderProfit(order))));
   }
   for (const [currency, profit] of out) {
     const spent = spentIn.has(currency) ? spentIn.get(currency)! : 0;
-    if (profit.state === "complete") out.set(currency, known(spent) ? { state: "complete", cents: profit.cents - spent || 0 } : { state: "unavailable" });
+    if (profit.state === "complete") out.set(currency, known(spent) ? { state: "complete", cents: profit.cents - BigInt(spent) } : { state: "unavailable" });
   }
-  return out;
+  return new Map([...out].map(([currency, profit]) => [currency, publicProfit(profit)] as const));
 }
 
 /** An order's line with what it was charged, for sharing the order's own figures between its products. */
@@ -120,14 +137,9 @@ export function productKey(currency: string, productId: string, optionId: string
  * Unknown stays unknown, a cost not set stays incomplete, line by line.
  */
 export function productProfit(orders: (Omit<OrderMoney, "lines"> & { lines: ChargedLine[] })[]): Map<string, Profit> {
-  const out = new Map<string, Profit>();
+  const out = new Map<string, ExactProfit>();
   const key = (currency: string, line: ChargedLine) => productKey(currency, line.productId, line.optionId);
-  const add = (k: string, p: Profit) => {
-    const so = out.get(k) ?? { state: "complete", cents: 0 };
-    if (so.state === "unavailable" || p.state === "unavailable") out.set(k, { state: "unavailable" });
-    else if (so.state === "incomplete" || p.state === "incomplete") out.set(k, { state: "incomplete", why: "cost not set" });
-    else out.set(k, { state: "complete", cents: so.cents + p.cents });
-  };
+  const add = (k: string, profit: ExactProfit) => out.set(k, addExact(out.get(k), profit));
   for (const order of orders) {
     const total = order.lines.reduce((n, l) => n + (Number.isSafeInteger(l.charged) && l.charged >= 0 ? l.charged : Number.NaN), 0);
     const whole = orderProfit(order);
@@ -137,19 +149,19 @@ export function productProfit(orders: (Omit<OrderMoney, "lines"> & { lines: Char
       if (!order.lines.length) add(productKey(order.currency, "", null), { state: "unavailable" });
       continue;
     }
-    const shared = (order.paid as number) - (order.refunded as number) - (order.fee as number) - (order.otherCosts as number);
-    let given = 0;
+    const shared = BigInt(order.paid as number) - BigInt(order.refunded as number) - BigInt(order.fee as number) - BigInt(order.otherCosts as number);
+    let given = BigInt(0);
     order.lines.forEach((line, i) => {
       // The last line takes the rounding, so the parts add up to the order's own figure.
       // In BigInt, so a large order's product of two amounts never loses a cent; floored, toward minus infinity for a loss.
-      const exact = (BigInt(shared) * BigInt(line.charged)) / BigInt(total);
-      const floored = exact * BigInt(total) > BigInt(shared) * BigInt(line.charged) ? exact - BigInt(1) : exact;
-      const part = i === order.lines.length - 1 ? shared - given : Number(floored);
+      const exact = (shared * BigInt(line.charged)) / BigInt(total);
+      const floored = exact * BigInt(total) > shared * BigInt(line.charged) ? exact - BigInt(1) : exact;
+      const part = i === order.lines.length - 1 ? shared - given : floored;
       given += part;
-      add(key(order.currency, line), line.costPerSale === null ? { state: "incomplete", why: "cost not set" } : { state: "complete", cents: part - line.costPerSale * line.units });
+      add(key(order.currency, line), line.costPerSale === null ? { state: "incomplete", why: "cost not set" } : { state: "complete", cents: part - BigInt(line.costPerSale) * BigInt(line.units) });
     });
   }
-  return out;
+  return new Map([...out].map(([currency, profit]) => [currency, publicProfit(profit)] as const));
 }
 
 /** How a profit reads: a loss said in words, never only by a color. */

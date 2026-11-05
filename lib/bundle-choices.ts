@@ -116,7 +116,9 @@ export async function bundleChoicesPage(store: Store, input: { owner: string; qu
     return { products: listed.map(choiceOf), matches: ids.length, next: from + PICKER_PAGE < ids.length ? from + PICKER_PAGE : null, unsearched: 0 };
   }
   const stretch = ids.slice(from, from + SEARCH_STRETCH);
-  const cards = await cachedCards(store, stretch);
+  // Names read on Redis's exact answer only: one that is not is unknown, said so, never a stretch searched short (Codex A3, #1933).
+  const cards = await cachedCards(store, stretch).catch(() => null);
+  if (!cards) return null;
   const found: string[] = [];
   let unsearched = 0;
   let at = from;

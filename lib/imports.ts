@@ -327,19 +327,32 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
 
 /**
  * The store's imports, read only on Redis's exact answers (the MCP tool
- * get_imports; Codex A3 on #1933): a list from LRANGE, then a text or null
- * for each GET. Any other answer is null, unknown, never an empty history.
+ * get_imports; Codex A3 on #1933): one list from LRANGE, then a text or null
+ * for each GET, each text an import (one of another store is never shown).
+ * Any other answer is null, unknown, never an empty or shorter history.
  */
 export async function storeImportsRead(store: Store): Promise<ImportJob[] | null> {
   if (!store.sid || !isRedisConfigured()) return null;
-  const [ids] = await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]);
+  // One command, one answer: a reply with more or fewer is not Redis's, so it is unknown (Codex A3 on #1933).
+  const index: unknown = await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]);
+  if (!Array.isArray(index) || index.length !== 1) return null;
+  const [ids] = index;
   // Every entry an import's id before anything is read: one that is not is unknown, never left out of the history (Codex G2, #1933).
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && IMPORT_ID_PATTERN.test(id))) return null;
   const list = ids as string[];
   if (!list.length) return [];
   const raws: unknown = await redisPipeline(list.map((id) => ["GET", jobKey(id)]));
   if (!Array.isArray(raws) || raws.length !== list.length || raws.some((raw) => raw !== null && typeof raw !== "string")) return null;
-  return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
+  // A record gone (null) has expired and is left out, and one of another store is never shown; a record kept that is not
+  // an import at all is unknown, never left out of the history (Codex A3 on #1933).
+  const jobs: ImportJob[] = [];
+  for (const raw of raws) {
+    if (raw === null) continue;
+    const job = parseJob(raw);
+    if (!job) return null;
+    if (job.sid === store.sid) jobs.push(job);
+  }
+  return jobs;
 }
 
 export type StartProblem = "busy" | "too_many" | "consent" | "email" | "list" | "store" | "unavailable" | "stripe" | "stopped";

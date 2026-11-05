@@ -6,6 +6,7 @@
  * In-memory Redis only.
  */
 import { test } from "node:test";
+import { inspect } from "node:util";
 import assert from "node:assert/strict";
 import { COURSE_READ_MOST_BYTES, CourseTooLarge, emptyCourse, readCourse, readCourseWithin } from "@/lib/course";
 import { store as redis } from "./redis-stub";
@@ -22,6 +23,23 @@ test("a course within the bound reads as it is kept", async () => {
 test("no course: nothing, as readCourse", async () => {
   redis.clear();
   assert.equal(await readCourseWithin(id), null);
+});
+
+test("the in-memory model answers a missing course as Redis does: [1, null]", async () => {
+  redis.clear();
+  const { READ_COURSE_WITHIN } = await import("@/lib/course");
+  assert.deepEqual(await redis.pipeline([["EVAL", READ_COURSE_WITHIN, 1, key, COURSE_READ_MOST_BYTES]]), [[1, null]]);
+});
+
+test("Redis's exact answer for a missing course, [1, null], is no course", async () => {
+  redis.clear();
+  const original = redis.pipeline;
+  redis.pipeline = async () => [[1, null]];
+  try {
+    assert.equal(await readCourseWithin(id), null);
+  } finally {
+    redis.pipeline = original;
+  }
 });
 
 test("a record past the bound is not read: too large, and the GET never runs", async () => {
@@ -41,8 +59,11 @@ test("a record past the bound is not read: too large, and the GET never runs", a
   }
 });
 
-for (const reply of [[], [[1, "{}", "extra"]], [[2]], [["1", "{}"]], [null]]) {
-  test(`an answer that is not the script's exact one (${JSON.stringify(reply)}) is not a course`, async () => {
+// Codex A3 on #1933: [1] alone, [1, undefined] and [1, false] are not Redis's answer for a missing course, which is [1, null]
+// (the exact script run on Redis 7.4: missing [1, null], present [1, "..."], too large [0]); a record that is kept but is
+// not a course is not "no course" either.
+for (const reply of [[], [[1, "{}", "extra"]], [[2]], [["1", "{}"]], [null], [[1]], [[1, undefined]], [[1, false]], [[1, "{"]], [[1, 7]]]) {
+  test(`an answer that is not the script's exact one (${inspect(reply)}) is not a course`, async () => {
     redis.clear();
     const original = redis.pipeline;
     redis.pipeline = async () => reply as unknown[];

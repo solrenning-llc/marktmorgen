@@ -951,7 +951,9 @@ export async function cachedCards(store: Store, ids: string[]): Promise<Map<stri
     return out;
   }
   if (!catalog.id || !isRedisConfigured()) throw new Error("the product cards could not be read");
-  const [reply] = await redisPipeline([["HMGET", titlesKey(catalog.id), ...ids]]);
+  const answer: unknown = await redisPipeline([["HMGET", titlesKey(catalog.id), ...ids]]);
+  // One command, one answer: more or fewer is not Redis's (Codex A3 on #1933).
+  const reply: unknown = Array.isArray(answer) && answer.length === 1 ? answer[0] : undefined;
   if (!Array.isArray(reply) || reply.length !== ids.length || reply.some((v) => v !== null && typeof v !== "string")) throw new Error("the product cards could not be read");
   ids.forEach((id, i) => out.set(id, typeof reply[i] === "string" ? parseCard(id, reply[i] as string) : null));
   return out;

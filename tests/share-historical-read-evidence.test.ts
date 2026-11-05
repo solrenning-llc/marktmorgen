@@ -10,7 +10,7 @@ const now=1800000000;
 const fee={id:'fee_HistoryRead0001',account:'acct_Receipt0001',charge:'ch_HistoryRead0001',amount:625,amount_refunded:0,currency:'usd'};
 const event={id:'evt_HistoryRead0001',data:{object:{application_fee:fee.id}}};
 const page=(data:unknown[]=[],has_more=false)=>({object:'list',has_more,data});
-async function world(options:{events?:unknown;pages?:(number:number)=>unknown;indexes?:unknown[];cursor?:unknown[];feePatch?:Record<string,unknown>;feeReply?:unknown;chargePatch?:Record<string,unknown>;chargeFails?:boolean}={}){
+async function world(options:{events?:unknown;pages?:(number:number)=>unknown;indexes?:unknown[];cursor?:unknown[];cursorWrite?:unknown[];feePatch?:Record<string,unknown>;feeReply?:unknown;chargePatch?:Record<string,unknown>;chargeFails?:boolean}={}){
  redis.clear();process.env.STRIPE_SECRET_KEY='sk_test_fee_refund_only_a_stand_in';
  const owner='historical-read-owner@example.test';
  assert.equal((await claimHandle(owner,'historyread','Synthetic shop','')).ok,true);
@@ -24,6 +24,7 @@ async function world(options:{events?:unknown;pages?:(number:number)=>unknown;in
   redis.pipeline=async commands=>{
    if(options.indexes!==undefined&&commands.length===2&&commands[0][0]==='SMEMBERS'&&commands[0][1]===SHARING_INDEX)return options.indexes;
    if(options.cursor!==undefined&&commands.length===1&&commands[0][0]==='HGET'&&commands[0][1]==='nl:share:read-until')return options.cursor;
+   if(options.cursorWrite!==undefined&&commands.length===1&&commands[0][0]==='HSET'&&commands[0][1]==='nl:share:read-until')return options.cursorWrite;
    return base(commands);
   };
   globalThis.fetch=async(input,init)=>{
@@ -89,4 +90,7 @@ test('C4: failed charge evidence stays incomplete without advancing the historic
 });
 test('C4: malformed application fee evidence cannot advance the historical cursor',async()=>{
  const r=await world({feeReply:{}});assert.equal(r.counts.complete,false);assert.equal(r.counts.failed,1);assert.equal(r.counts.unknownAmounts,1);assert.equal(r.saved,null);assert.equal(r.calls.filter(c=>c.method==='POST').length,0);
+});
+for(const cursorWrite of [[],[undefined],[null],['OK'],[2],[1,0]])test('unconfirmed historical marker write remains incomplete: '+JSON.stringify(cursorWrite),async()=>{
+ const r=await world({events:page(),cursorWrite});unconfirmed(r);
 });

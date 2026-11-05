@@ -11,7 +11,7 @@ const now = Math.floor(Date.now() / 1000), account = "acct_Receipt0001";
 const oldMember = { id: "sub_OldShare0001", status: "active", application_fee_percent: 6.25 };
 const noFeeMember = { id: "sub_NoShare0001", status: "active", application_fee_percent: null };
 const page = (data: unknown[] = [], has_more = false, next_page: unknown = null) => ({ object: "search_result", data, has_more, next_page });
-type Options = { reply?: unknown; pages?: (n: number) => unknown; applied?: unknown[]; live?: boolean; postFails?: boolean };
+type Options = { reply?: unknown; pages?: (n: number) => unknown; applied?: unknown[]; appliedWrite?: unknown[]; live?: boolean; postFails?: boolean; postReply?: unknown };
 async function world(options: Options = {}) {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_fee_refund_only_a_stand_in";
@@ -26,7 +26,13 @@ async function world(options: Options = {}) {
   const posts: { path: string; body: URLSearchParams }[] = [];
   let searches = 0;
   try {
-    redis.pipeline = async commands => options.applied !== undefined && commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === "nl:share:applied" ? options.applied : base(commands);
+    redis.pipeline = async commands => {
+      if (commands.length === 1 && commands[0][1] === "nl:share:applied") {
+        if (commands[0][0] === "HGET" && options.applied !== undefined) return options.applied;
+        if ((commands[0][0] === "HSET" || commands[0][0] === "HDEL") && options.appliedWrite !== undefined) return options.appliedWrite;
+      }
+      return base(commands);
+    };
     globalThis.fetch = async (input, init) => {
       const url = new URL(String(input)), method = init?.method ?? "GET";
       assert.equal(url.origin, "https://api.stripe.com");
@@ -37,7 +43,7 @@ async function world(options: Options = {}) {
       }
       if (method === "POST" && url.pathname.startsWith("/v1/subscriptions/")) {
         posts.push({ path: url.pathname, body: new URLSearchParams(String(init?.body)) });
-        return options.postFails ? Response.json({ error: { message: "Synthetic refusal" } }, { status: 500 }) : Response.json({ id: url.pathname.split("/").pop(), object: "subscription" });
+        return options.postFails ? Response.json({ error: { message: "Synthetic refusal" } }, { status: 500 }) : Response.json(Object.hasOwn(options, "postReply") ? options.postReply : { id: url.pathname.split("/").pop(), object: "subscription", application_fee_percent: Number(new URLSearchParams(String(init?.body)).get("application_fee_percent")) });
       }
       throw Error("Unexpected synthetic membership request");
     };
@@ -97,4 +103,13 @@ test("unfinished twentieth search page retains applied", async () => {
 test("canceled memberships need no percentage update", async () => {
   const r = await world({ reply: page([{ id: oldMember.id, status: "canceled" }]) });
   assert.equal(r.counts.complete, true); assert.equal(r.applied, null); assert.equal(r.posts.length, 0);
+});
+for (const postReply of [{}, null, [], { id: oldMember.id, object: "subscription" }, { id: "sub_Another0001", object: "subscription", application_fee_percent: 0 }, { id: oldMember.id, object: "other", application_fee_percent: 0 }, { id: oldMember.id, object: "subscription", application_fee_percent: "0" }, { id: oldMember.id, object: "subscription", application_fee_percent: 6.25 }]) test("an unconfirmed percentage POST never certifies the applied marker: " + JSON.stringify(postReply), async () => {
+  const r = await world({ reply: page([oldMember]), postReply });
+  assert.equal(r.counts.complete, false); assert.equal(r.counts.failed, 1); assert.equal(r.counts.memberships, 0);
+  assert.equal(r.applied, "625"); assert.equal(r.posts.length, 1, "unknown writes are not retried");
+});
+for (const appliedWrite of [[], [undefined], [null], ["OK"], [2], [1, 0]]) test("an unconfirmed applied-marker write cannot be reported complete: " + JSON.stringify(appliedWrite), async () => {
+  const r = await world({ appliedWrite });
+  assert.equal(r.counts.complete, false); assert.equal(r.counts.failed, 1); assert.equal(r.counts.listUnknown, 1); assert.equal(r.applied, "625");
 });

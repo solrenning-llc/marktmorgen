@@ -14,8 +14,8 @@ import { type CrmField, crmPhone, crmUrl, MAX_FIELD_VALUE, severalPicked, whatsa
  * kept in its international form and, once saved, offers a link that opens a
  * chat with that number in the creator's own WhatsApp; nothing is sent for them.
  */
-/** `generation`: the person's as the page read it (lib/crm.ts, readGeneration), sent with every save, so a person deleted since is never written again. */
-export function PersonFields({ person, fields, initial, generation }: { person: string; fields: CrmField[]; initial: Record<string, string>; generation: number }) {
+/** `mark`: the person as the page read them (lib/crm.ts, pageMark), signed by the server and sent with every save, so a person deleted since is never written again, nor from a page read too long ago. */
+export function PersonFields({ person, fields, initial, mark }: { person: string; fields: CrmField[]; initial: Record<string, string>; mark: string }) {
   const [values, setValues] = useState(initial);
   const [saved, setSaved] = useState(initial);
 
@@ -39,7 +39,7 @@ export function PersonFields({ person, fields, initial, generation }: { person: 
       const response = await fetch("/api/store/crm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "value", person, field: field.id, value, generation }),
+        body: JSON.stringify({ action: "value", person, field: field.id, value, mark }),
       });
       const answer = crmAnswer(response.ok, await response.json().catch(() => null));
       if (answer.ok) {

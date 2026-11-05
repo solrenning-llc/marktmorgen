@@ -14,8 +14,8 @@ function when(seconds: number): string {
  * Your team's notes about one buyer (lib/buyer-profile.ts): what they asked,
  * what was promised, what they like. Seen only by whoever may read orders.
  */
-/** `generation`: the person's as the page read it (lib/crm.ts, readGeneration), sent with every note, so a person deleted since is never written about again. */
-export function PersonNotes({ person, initial, generation }: { person: string; initial: PersonNote[]; generation: number }) {
+/** `mark`: the server's mark of the page's read of the person (lib/crm.ts, pageMark), sent with every note, so a person deleted since is never written about again. */
+export function PersonNotes({ person, initial, mark }: { person: string; initial: PersonNote[]; mark: string }) {
   const [notes, setNotes] = useState(initial);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,7 +26,7 @@ export function PersonNotes({ person, initial, generation }: { person: string; i
       const response = await fetch("/api/store/person", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, person, generation }),
+        body: JSON.stringify({ ...body, person, mark }),
       });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[]; error?: string };
       if (answer.ok && answer.notes) {
@@ -34,7 +34,7 @@ export function PersonNotes({ person, initial, generation }: { person: string; i
         toast(done);
         return true;
       }
-      toast(answer.error === "unknown" ? "This person is no longer in your store, so the note was not saved. Reload the page." : "That did not save. Try again in a moment.");
+      toast(answer.error === "unknown" ? "This person is no longer in your store, so the note was not saved. Reload the page." : answer.error === "stale" ? "This page was opened a long time ago, so the note was not saved. Your words are still here; reload the page, then add the note again." : "That did not save. Try again in a moment.");
     } catch {
       toast("That did not save. Check your connection and try again.");
     } finally {

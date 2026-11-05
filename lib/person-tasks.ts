@@ -38,7 +38,7 @@ export type PersonTask = {
   doneAt: number;
 };
 
-export type TaskRefusal = "text" | "long" | "date" | "assignee" | "full" | "store_full" | "unknown" | "gone";
+export type TaskRefusal = "text" | "long" | "date" | "assignee" | "full" | "store_full" | "unknown" | "gone" | "stale";
 
 /** What each refusal says to the team, in plain US English. */
 export const TASK_REFUSALS: Readonly<Record<TaskRefusal, string>> = {
@@ -50,6 +50,7 @@ export const TASK_REFUSALS: Readonly<Record<TaskRefusal, string>> = {
   store_full: `Your store keeps up to ${MAX_STORE_TASKS} tasks. Remove some done ones first.`,
   unknown: "That task is not there anymore.",
   gone: "This person is no longer in your store, so nothing was saved. Reload the page.",
+  stale: "This page was opened a long time ago, so nothing was saved. Reload the page, then try again.",
 };
 
 /** What a change refused while another one is being saved says (lib/crm.ts, changePersonTasks; answered 409 "busy"). */

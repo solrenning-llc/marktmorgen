@@ -241,10 +241,10 @@ export function staleRefusal(error: string | undefined): boolean {
  * words as well as by the line, until they are removed. Seen by whoever may
  * read orders, as the notes are.
  */
-export function PersonTasks({ person, initial, owner, assignees: drawnTeam, today: serverDay, generation }: {
+export function PersonTasks({ person, initial, owner, assignees: drawnTeam, today: serverDay, mark }: {
   person: string;
-  /** The person's generation as the page read it (lib/crm.ts, readGeneration), sent with every change: a person deleted since is refused "gone". */
-  generation: number;
+  /** The server's mark of the page's read of the person (lib/crm.ts, pageMark), sent with every change: a person deleted since is refused "gone", a page read too long ago "stale". */
+  mark: string;
   initial: PersonTask[];
   /** The store owner's address, lower case: always offered. */
   owner: string;
@@ -349,7 +349,7 @@ export function PersonTasks({ person, initial, owner, assignees: drawnTeam, toda
       const response = await fetch("/api/store/person-tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, person, generation }),
+        body: JSON.stringify({ ...body, person, mark }),
       });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; tasks?: PersonTask[]; message?: string; error?: string };
       if (answer.ok && answer.tasks) {

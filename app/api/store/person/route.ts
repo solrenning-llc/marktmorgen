@@ -5,7 +5,7 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
 import { studioPath } from "@/lib/studio-route";
 import { addPersonNote, addressForToken, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
-import { CrmPersonGone } from "@/lib/crm";
+import { CrmPersonGone, readPageMark } from "@/lib/crm";
 import { erasePerson } from "@/lib/person-erasure";
 
 /** How many addresses one store may look up in an hour: each look reads Stripe. */
@@ -61,9 +61,12 @@ export async function POST(request: NextRequest) {
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const person = typeof body.person === "string" ? body.person : "";
     if (body.action === "note") {
-      // The person's generation as the page read it (lib/crm.ts, readGeneration; none sent reads as 0): while they are
-      // deleted, or from a page read before a deletion, nothing about them is written.
-      const notes = await addPersonNote(store.statsId, person, guarded.email, body.text, store, Date.now(), body.generation === undefined ? 0 : typeof body.generation === "number" ? body.generation : -1);
+      // The person's generation as the page read it, from the mark the server signed on it (lib/crm.ts, pageMark): while
+      // they are deleted, or from a page read before a deletion, nothing about them is written; a page without a valid
+      // mark, or read longer ago than the deletion's mark is kept, saves nothing ("stale", Codex G2 on #2287).
+      const generation = readPageMark(store.statsId, person, body.mark);
+      if (generation === null) return Response.json({ ok: false, error: "stale" }, { status: 409 });
+      const notes = await addPersonNote(store.statsId, person, guarded.email, body.text, store, Date.now(), generation);
       if (!notes) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       return Response.json({ ok: true, notes }, noStore);
     }

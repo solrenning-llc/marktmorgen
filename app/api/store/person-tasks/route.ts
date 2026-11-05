@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { TasksRecountRefused, changePersonTasks, readAllTasks, readPersonTasks, taskPeople, tasksRecountUnits } from "@/lib/crm";
+import { TasksRecountRefused, changePersonTasks, readAllTasks, readPageMark, readPersonTasks, taskPeople, tasksRecountUnits } from "@/lib/crm";
 import { validCrmDate } from "@/lib/crm-rules";
 import { TASKS_BUSY, TASK_ID, TASK_REFUSALS, type TaskRefusal, addTask, dropTask, editTask, markTask, readTaskInput, studioRefusal, taskAssignees, tasksDue } from "@/lib/person-tasks";
 import { LockBusyError } from "@/lib/redis-lock";
@@ -87,16 +87,18 @@ export async function POST(request: NextRequest) {
   const person = typeof body.person === "string" ? body.person : "";
   const id = typeof body.id === "string" ? body.id : "";
   if (!store.statsId || !PERSON.test(person)) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
-  const refuse = (error: TaskRefusal) => Response.json({ ok: false, error, message: TASK_REFUSALS[error] }, { status: error === "unknown" || error === "gone" ? 404 : 400 });
+  const refuse = (error: TaskRefusal) => Response.json({ ok: false, error, message: TASK_REFUSALS[error] }, { status: error === "unknown" || error === "gone" ? 404 : error === "stale" ? 409 : 400 });
   try {
     const team = await readTeam(store.sid);
     const assignees = new Set(taskAssignees(store.email, team.members));
     // `kept`: the one the task already names, which an edit may keep.
     const read = (kept = "") => readTaskInput({ text: body.text, due: body.due, assignee: body.assignee }, (email) => assignees.has(email) || (kept !== "" && email === kept));
     const now = Date.now() / 1000;
-    // The person's generation as the page read it (lib/crm.ts, readGeneration; none sent reads as 0): a change about a
-    // person who is deleted, or from a page read before a deletion, is refused "gone".
-    const generation = body.generation === undefined ? 0 : typeof body.generation === "number" ? body.generation : -1;
+    // The person's generation as the page read it, from the mark the server signed on it (lib/crm.ts, pageMark): a
+    // change about a person who is deleted, or from a page read before a deletion, is refused "gone"; a page without a
+    // valid mark, or read longer ago than the deletion's mark is kept, saves nothing ("stale", Codex G2 on #2287).
+    const generation = readPageMark(store.statsId, person, body.mark);
+    if (generation === null) return refuse("stale");
     // What making the store's count of tasks again costs, taken before it is made, at most once a store.
     const pay = async (units: number): Promise<{ ok: true } | { ok: false; reason: string; message: string }> => {
       const counted = await countStudio(store, null, units);

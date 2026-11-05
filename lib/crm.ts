@@ -20,7 +20,8 @@
  * about them is), one hash a field, so the list's file reads each field once
  * however long the list is.
  */
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { deriveKey } from "@/lib/secret-box";
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
@@ -208,6 +209,50 @@ export function carriedGeneration(generation: number | undefined): number {
   return typeof generation === "number" && Number.isSafeInteger(generation) && generation >= 0 ? generation : -1;
 }
 
+/**
+ * How long a page's read of a person (pageMark) may save: less than the
+ * mark and the generation are kept, so a page read before a deletion can
+ * never outlive the generation that refuses it (Codex G2, #2287: once the
+ * generation lapsed back to 0, a renewed session saved from a page read
+ * before the deletion). An hour less, for clocks that differ.
+ */
+export const PAGE_MARK_SECONDS = ERASED_MARK_SECONDS - 3_600;
+const PAGE_MARK = /^(\d{1,9})\.(\d{1,12})\.([A-Za-z0-9_-]{22})$/;
+let pageKey: Buffer | null | undefined;
+function pageSignature(statsId: string, person: string, generation: number, at: number): string {
+  if (pageKey === undefined) pageKey = deriveKey("crm-page-read");
+  return pageKey ? createHmac("sha256", pageKey).update(`${statsId}|${person}|${generation}|${at}`).digest("base64url").slice(0, 22) : "";
+}
+
+/**
+ * What a page that reads a person carries to save about them: the person's
+ * generation as read, when it was read, and the server's signature over both
+ * (a key of this deployment, lib/secret-box.ts). "" when nothing can be signed.
+ */
+export function pageMark(statsId: string, person: string, generation: number, now = Date.now()): string {
+  if (!PERSON.test(person) || !Number.isSafeInteger(generation) || generation < 0) return "";
+  const at = Math.floor(now / 1000);
+  const signature = pageSignature(statsId, person, generation, at);
+  return signature ? `${generation}.${at}.${signature}` : "";
+}
+
+/**
+ * The generation a page's mark carries, or null: a mark that is not this
+ * deployment's for this person, or one read more than PAGE_MARK_SECONDS ago,
+ * saves nothing, and its page is reloaded.
+ */
+export function readPageMark(statsId: string, person: string, mark: unknown, now = Date.now()): number | null {
+  const parts = typeof mark === "string" ? PAGE_MARK.exec(mark) : null;
+  if (!parts || !PERSON.test(person)) return null;
+  const generation = Number(parts[1]);
+  const at = Number(parts[2]);
+  const age = Math.floor(now / 1000) - at;
+  if (!Number.isSafeInteger(generation) || age < -300 || age > PAGE_MARK_SECONDS) return null;
+  const expected = pageSignature(statsId, person, generation, at);
+  if (!expected || expected.length !== parts[3].length || !timingSafeEqual(Buffer.from(expected), Buffer.from(parts[3]))) return null;
+  return generation;
+}
+
 /** The person's generation as it is now (generationKey): what a page reads with them, and a save from it carries. */
 export async function readGeneration(statsId: string | null, person: string): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
@@ -352,14 +397,16 @@ export const CRM_VALUE_SAVE_UNITS = 2;
  * Sets one person's value of one field, or clears it with "", in one step on
  * the Redis side: 2, and nothing written, while the person's deletion mark is
  * there (KEYS[2]) or when the save carries another generation than theirs
- * (KEYS[3], ARGV[3]: the page was read before a deletion); otherwise the
+ * (KEYS[3], ARGV[3]: the page was read before a deletion), or, for a
+ * workflow step, when its run no longer holds its own take of the lease
+ * (KEYS[4], ARGV[4] with the score that take wrote, ARGV[5]); otherwise the
  * value is written, and the answer is {1, before} with what it replaced, or
  * {1}. It never takes the mark away. Inside: the mark and the generation
  * read, the value read and written (CRM_VALUE_SCRIPT_CALLS).
  */
-export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v5
+export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v6
 ${erasedGuard(2, 3, 3, "2")}
-if KEYS[4] and not redis.call("ZSCORE", KEYS[4], ARGV[4]) then return 2 end
+if KEYS[4] and tonumber(redis.call("ZSCORE", KEYS[4], ARGV[4]) or "-1") ~= tonumber(ARGV[5]) then return 2 end
 local before = redis.call("HGET", KEYS[1], ARGV[1])
 if ARGV[2] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]) end
 if before then return {1, before} end
@@ -371,7 +418,9 @@ return {1}`;
  * `generation` is the person's generation as the page read it (readGeneration), or as a workflow step read it when
  * it started. A workflow step also gives its run's `lease` (lib/flows.ts, LEASE): a deletion takes the run out of it
  * (forgetWorkflowPerson), so a run already under way when the person was deleted writes nothing, in the same step as
- * the write, even if they came back before its generation was read (Codex G, #2287). While the person's deletion mark is there, or for a save that carries another generation (a page read
+ * the write, even if they came back before its generation was read (Codex G, #2287). The lease is checked at the score
+ * its own take wrote, which no other take writes (lib/flows.ts, leaseScore), so the same entry taken again by a later
+ * run for the person who came back is not this run's (Codex G2, #2287). While the person's deletion mark is there, or for a save that carries another generation (a page read
  * before a deletion, even if they came back since), nothing is written (CrmPersonGone, with the room taken given
  * back), in the same step as the write. The deletion leaves its mark before it takes the values away, and each value
  * is taken in one script that answers what it removed, so a write is either refused or deleted with the rest. The new
@@ -381,7 +430,7 @@ return {1}`;
  * From the studio it is counted as CRM_VALUE_SAVE_UNITS studio requests, taken before anything is read
  * (app/api/store/crm/route.ts; tests/plan-cost-registry.ts, CRM_VALUE_SAVE).
  */
-export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore, generation: number, lease?: { key: string; member: string }): Promise<boolean> {
+export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore, generation: number, lease?: { key: string; member: string; score: number }): Promise<boolean> {
   if (!PERSON.test(person)) return false;
   const value = fieldValue(field, raw);
   if (value === null) return false;
@@ -394,7 +443,7 @@ export async function setValue(statsId: string, person: string, field: CrmField,
   let answer: unknown;
   try {
     const keys = [valuesKey(statsId, field.id), erasedKey(statsId, person), generationKey(statsId, person), ...(lease ? [lease.key] : [])];
-    const response = await redisPipeline([["EVAL", SET_CRM_VALUE, keys.length, ...keys, person, value, carried, ...(lease ? [lease.member] : [])]]);
+    const response = await redisPipeline([["EVAL", SET_CRM_VALUE, keys.length, ...keys, person, value, carried, ...(lease ? [lease.member, String(lease.score)] : [])]]);
     answer = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
   } catch { throw new CrmValueWriteUnconfirmed(); }
   if (answer === 2) {

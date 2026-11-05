@@ -7,7 +7,7 @@
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS, MAX_TASK_TEXT, TASKS_BUSY, studioRefusal, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
 import { createHash } from "node:crypto";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
-import { CrmValueWriteUnconfirmed, readGeneration, TASKS_RECOUNT_UNITS, TASK_COUNT_FIELD, TASK_COUNT_WEIGHT, TASK_KEPT_BYTES, TasksRecountRefused, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks, tasksRecountUnits } from "@/lib/crm";
+import { CrmValueWriteUnconfirmed, pageMark, readGeneration, TASKS_RECOUNT_UNITS, TASK_COUNT_FIELD, TASK_COUNT_WEIGHT, TASK_KEPT_BYTES, TasksRecountRefused, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks, tasksRecountUnits } from "@/lib/crm";
 import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
 import { dataBytes, utf8Length } from "@/lib/store-data-rules";
@@ -217,7 +217,9 @@ async function main(): Promise<void> {
   const statsId = (await storeForEmail(owner))!.statsId!;
   const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
   type Reply = { ok?: boolean; error?: string; message?: string; tasks?: PersonTask[]; overdue?: unknown[]; day?: string; today?: unknown[]; undated?: { person: string }[] };
-  const post = async (body: Record<string, unknown>, headers: Record<string, string> = { cookie }) => {
+  // As the person's page sends it: with the server's mark of its read (lib/crm.ts, pageMark), unless a test gives its own.
+  const post = async (given: Record<string, unknown>, headers: Record<string, string> = { cookie }) => {
+    const body = "mark" in given ? given : { ...given, mark: pageMark(statsId, String(given.person), 0) };
     const response = await POST(new NextRequest("https://marktmorgen.com/api/store/person-tasks", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
     return { status: response.status, body: (await response.json()) as Reply };
   };
@@ -298,7 +300,7 @@ async function main(): Promise<void> {
   part("An add that needs a recount the studio will not pay for: 429 with the studio's words (review of f6bd3d1f4, L6)");
   // The add's own request is let in; the recount's are not.
   await redis.pipeline([["DECRBY", (await redis.pipeline([["SCAN", "0", "MATCH", "nl:allow:studio:*"]]) as [[string, string[]]])[0][1].find((k) => k.includes(`:${createHash("sha256").update(`allowance:${agendaStore.sid}`).digest("hex").slice(0, 32)}:`))!, 1]]);
-  const agendaPost = await POST(new NextRequest("https://marktmorgen.com/api/store/person-tasks", { method: "POST", headers: { "content-type": "application/json", cookie: agendaCookie }, body: JSON.stringify({ action: "add", person: pk(900), text: "Call back" }) }));
+  const agendaPost = await POST(new NextRequest("https://marktmorgen.com/api/store/person-tasks", { method: "POST", headers: { "content-type": "application/json", cookie: agendaCookie }, body: JSON.stringify({ action: "add", person: pk(900), text: "Call back", mark: pageMark(agendaStore.statsId!, pk(900), 0) }) }));
   const refusedAdd = (await agendaPost.json()) as Reply;
   is("refused as the figure used, in the studio's own words", [agendaPost.status, refusedAdd.error, Boolean(refusedAdd.message) && refusedAdd.message !== "Your studio has no requests left this month for this. Try again next month, or change your plan."], [429, "studio_used", true]);
   is("nothing written, no count made", [await readPersonTasks(agendaStore.statsId, pk(900)), (await redis.pipeline([["HGET", `nl:crm:tasks:${agendaStore.statsId}`, TASK_COUNT_FIELD]]))[0]], [[], null]);

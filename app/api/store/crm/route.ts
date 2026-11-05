@@ -10,7 +10,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CRM_VALUE_SAVE_UNITS, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
+import { CRM_VALUE_SAVE_UNITS, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages, readPageMark } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -70,7 +70,13 @@ export async function POST(request: NextRequest) {
       // is refused, as is any save while they are deleted. A page drawn before generations were sent sends none, read
       // as 0, every person's until a deletion: refused for anyone deleted since. A time the page sends proves nothing
       // and is not read.
-      const ok = await setValue(statsId, typeof body.person === "string" ? body.person : "", field, body.value, store, body.generation === undefined ? 0 : typeof body.generation === "number" ? body.generation : -1);
+      // The page's mark of the person (lib/crm.ts, pageMark), signed by the server when the page was read: one not signed
+      // here, or older than PAGE_MARK_SECONDS, saves nothing (Codex G2, #2287), so a page read before a deletion never
+      // outlives the generation that refuses it, however the session was renewed.
+      const person = typeof body.person === "string" ? body.person : "";
+      const generation = readPageMark(statsId, person, body.mark);
+      if (generation === null) return refuse("stale", 409);
+      const ok = await setValue(statsId, person, field, body.value, store, generation);
       return ok ? Response.json({ ok: true }) : refuse("value");
     }
     if (body.action === "stages") {

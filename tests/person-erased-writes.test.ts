@@ -14,7 +14,7 @@ import { NextRequest } from "next/server";
 import { POST as tasksPost } from "@/app/api/store/person-tasks/route";
 import { POST as personPost } from "@/app/api/store/person/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { WRITE_TASKS_CALLS, erasedKey, forgetCrmPerson, readGeneration, readPersonTasks } from "@/lib/crm";
+import { WRITE_TASKS_CALLS, erasedKey, forgetCrmPerson, pageMark, readGeneration, readPersonTasks } from "@/lib/crm";
 import { ADD_NOTE_CALLS, ADD_PERSON_NOTE, forgetNotesPerson, readPersonNotes } from "@/lib/buyer-profile";
 import { ERASERS } from "@/lib/person-erasure";
 import { listOrder } from "@/lib/buyer-list";
@@ -55,7 +55,10 @@ async function main(): Promise<void> {
   const mark = erasedKey(statsId, ANA);
   const cookie = `${SESSION_COOKIE}=${await openSession(OWNER)}`;
   // As the studio sends it: every request names its store (components/studio-store-pin.tsx).
-  const send = async (route: typeof tasksPost, path: string, body: Record<string, unknown>) => {
+  // A page carries the server's mark of its read (lib/crm.ts, pageMark): `generation` here is the one that page read.
+  const send = async (route: typeof tasksPost, path: string, given: Record<string, unknown>) => {
+    const { generation, ...rest } = given;
+    const body = typeof generation === "number" ? { ...rest, mark: pageMark(statsId, ANA, generation) } : rest;
     const response = await route(new NextRequest(`https://marktmorgen.com${path}`, { method: "POST", headers: { "content-type": "application/json", cookie, [PIN_HEADER]: store.sid }, body: JSON.stringify(body) }));
     return { status: response.status, body: (await response.json()) as Reply };
   };
@@ -85,8 +88,11 @@ async function main(): Promise<void> {
   is("(never deleted: generation 0)", read, 0);
   is("a task", (await task({ action: "add", text: "Send the workbook", generation: read })).status, 200);
   is("a note", (await note({ text: "Asked about the course.", generation: read })).status, 200);
-  is("a page drawn before generations were sent: read as 0, and written", (await note({ text: "From an old page." })).status, 200);
-  is("both kept", [(await readPersonTasks(statsId, ANA)).length, (await readPersonNotes(statsId, ANA)).length], [1, 2]);
+  const unmarked = await note({ text: "From an old page." });
+  is("a page drawn without the server's mark: 409 stale, nothing written", [unmarked.status, unmarked.body.error], [409, "stale"]);
+  const unmarkedTask = await task({ action: "add", text: "From an old page" });
+  is("and a task from it, with what to do", [unmarkedTask.status, unmarkedTask.body.error, unmarkedTask.body.message], [409, "stale", "This page was opened a long time ago, so nothing was saved. Reload the page, then try again."]);
+  is("one of each kept", [(await readPersonTasks(statsId, ANA)).length, (await readPersonNotes(statsId, ANA)).length], [1, 1]);
   await erase();
   const empty = await used();
   is("the deletion took them", [(await readPersonTasks(statsId, ANA)).length, (await readPersonNotes(statsId, ANA)).length], [0, 0]);
@@ -99,8 +105,13 @@ async function main(): Promise<void> {
   for (const carried of [read, now, 99, undefined]) {
     const generation = carried === undefined ? {} : { generation: carried };
     const lateTask = await task({ action: "add", text: "Call back", preparedAt: Date.now(), ...generation });
-    is(`a task carrying ${String(carried)}: 404 gone, with what to do`, [lateTask.status, lateTask.body.error, lateTask.body.message], [404, "gone", "This person is no longer in your store, so nothing was saved. Reload the page."]);
     const lateNote = await note({ text: "Called back.", preparedAt: Date.now(), ...generation });
+    if (carried === undefined) {
+      is("a task from a page without a mark: 409 stale", [lateTask.status, lateTask.body.error], [409, "stale"]);
+      is("a note from it: 409 stale", [lateNote.status, lateNote.body.error], [409, "stale"]);
+      continue;
+    }
+    is(`a task carrying ${String(carried)}: 404 gone, with what to do`, [lateTask.status, lateTask.body.error, lateTask.body.message], [404, "gone", "This person is no longer in your store, so nothing was saved. Reload the page."]);
     is(`a note carrying ${String(carried)}: 404 unknown`, [lateNote.status, lateNote.body.error], [404, "unknown"]);
   }
   is("nothing about them is kept", [await readPersonTasks(statsId, ANA), await readPersonNotes(statsId, ANA)], [[], []]);

@@ -28,6 +28,7 @@
  * and file, so nobody is paid twice. Request bodies follow PayPal's published
  * OpenAPI description (payments_payouts_batch_v1).
  */
+import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
@@ -230,6 +231,11 @@ export function payableLines(book: Book, away: Set<string>): BatchLine[] {
   return owedLines(book).filter((line) => !away.has(line.affiliate.id));
 }
 
+/** The address a line is paid to, as the body sends it. */
+const receiverOf = (line: BatchLine) => payAddress(line.affiliate).slice(0, 127);
+/** Its fingerprint, kept with a batch on its way instead of the address (review of Codex H2 on #2681). */
+const receiverPrint = (address: string) => createHash("sha256").update(address).digest("hex");
+
 /** The body PayPal is sent for one batch (payments_payouts_batch_v1, create_payout_request). */
 export function batchBody(store: Store, lines: BatchLine[], senderBatchId: string): string {
   const note = payoutNote(store);
@@ -244,7 +250,7 @@ export function batchBody(store: Store, lines: BatchLine[], senderBatchId: strin
       recipient_type: "EMAIL",
       amount: { currency: store.currency.toUpperCase(), value: plainAmount(line.cents, store.currency) },
       // The PayPal address the affiliate chose on their page, or the one they joined with.
-      receiver: payAddress(line.affiliate).slice(0, 127),
+      receiver: receiverOf(line),
       note,
       sender_item_id: line.affiliate.id.slice(0, 63),
     })),
@@ -351,7 +357,7 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const auth = await bearer(store);
       if (!auth) return { ok: false, reason: "reconnect" };
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;
-      const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => ({ a: l.affiliate.id, c: l.cents })) };
+      const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => ({ a: l.affiliate.id, c: l.cents, r: receiverPrint(receiverOf(l)) })) };
       // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
       // or if it never answers, nobody in it can be put in another batch or payout file. Redis must say it holds it.
       const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;
@@ -513,7 +519,11 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     for (const line of sent.lines) {
       const row = rows.get(line.a);
       if (!row || row.affiliate.status !== "approved" || row.payable < line.c || sent.currency !== store.currency) return needsManualCheck(statsId, field, sent);
-      lines.push({ affiliate: row.affiliate, cents: line.c });
+      const again: BatchLine = { affiliate: row.affiliate, cents: line.c };
+      // The same recipient or none (review of Codex H2 on #2681, GRAVE): if the affiliate's PayPal address changed
+      // since the first request, or the batch kept no fingerprint of it, the retry could pay someone else.
+      if (!line.r || receiverPrint(receiverOf(again)) !== line.r) return needsManualCheck(statsId, field, sent);
+      lines.push(again);
     }
     // The try is counted before it is made, so a run that stops halfway never tries twice in a day.
     const tried: unknown = await redisPipeline([["HSET", openKey(statsId), field, JSON.stringify({ ...sent, t: now })]]);

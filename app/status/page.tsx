@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { headers } from "next/headers";
+import { clientAddress } from "@/lib/request-guard";
+import { paceAddress } from "@/lib/picture-pace";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import {
-  STATUS_STALE_HOURS, STATUS_VIEWS_PER_HOUR, STATUS_WINDOW_DAYS, type StatusSummary, describeStatus, readStatus, statusDate, statusTime,
+  STATUS_STALE_HOURS, STATUS_WINDOW_DAYS, type StatusSummary, describeStatus, notReadReason, readStatus, statusDate, statusTime,
 } from "@/lib/status-page";
 
 export const metadata: Metadata = {
@@ -12,9 +15,11 @@ export const metadata: Metadata = {
 };
 
 /**
- * Drawn for each request (247 [SP4] unit 2), with no host page cache: every
- * request is priced, and only the first STATUS_VIEWS_PER_HOUR of an hour
- * read the results (lib/status-page.ts, tests/status-page.test.ts).
+ * Drawn for each request (247 [SP4] unit 2), with no host page cache. Each
+ * instance answers from its last reading for a minute; the database work is
+ * bounded per instance and per address, and the results are read at most
+ * STATUS_VIEWS_PER_HOUR times an hour for the whole site (lib/status-page.ts,
+ * priced in tests/status-page.test.ts).
  */
 export const dynamic = "force-dynamic";
 
@@ -25,7 +30,7 @@ function History({ name, summary }: { name: string; summary: StatusSummary }) {
   return (
     <>
       <p>
-        {`${name}, from ${statusDate(summary.since!)}: ${summary.runs} ${summary.runs === 1 ? "run" : "runs"} recorded, ${summary.passed} passed, ${summary.failed} failed. Days with no recorded run: ${summary.daysWithoutRun}.`}
+        {`${name}, from ${statusDate(summary.since!)}: ${summary.runs} ${summary.runs === 1 ? "run" : "runs"} recorded, ${summary.passed} passed, ${summary.failed} failed${summary.untested ? `, ${summary.untested} checked nothing` : ""}. Days with no recorded run: ${summary.daysWithoutRun}.`}
       </p>
       {summary.failures.length === 0 ? (
         <p>{`${name}: no failed run recorded in these days.`}</p>
@@ -42,7 +47,8 @@ function History({ name, summary }: { name: string; summary: StatusSummary }) {
 }
 
 export default async function StatusPage() {
-  const reading = await readStatus();
+  const reading = await readStatus({ address: paceAddress(clientAddress({ headers: await headers() })) });
+  const notRead = notReadReason(reading);
   const view = describeStatus(reading);
   return (
     <LegalPage title="Status" eyebrow="How the site is doing" effective={null} legalNav={false}>
@@ -51,7 +57,7 @@ export default async function StatusPage() {
         no recent result, it says &ldquo;Unknown&rdquo;, not &ldquo;Passed&rdquo;.
       </p>
       <p>
-        {`This page was put together on ${view.builtAt}, when you opened it. UTC is Coordinated Universal Time.`}
+        {`The results below were read on ${view.builtAt}. UTC is Coordinated Universal Time. The page reads them again at most once a minute.`}
       </p>
 
       <LegalSection title="Results" id="results">
@@ -89,9 +95,10 @@ export default async function StatusPage() {
           email service. The run passes only when every step works.
         </p>
         <p>
-          <strong>Checkout.</strong> Once a day, the site runs checkouts in Stripe&rsquo;s test mode: session packages,
-          membership tiers, tax documents and a cart that ships. Stripe&rsquo;s test mode is a copy of Stripe for trying
-          payments with test cards. No real card is charged.
+          <strong>Checkout.</strong> Once a day, the site works through Stripe&rsquo;s test mode: it starts test
+          memberships and changes their tiers, and it opens checkouts for session packages, tax documents and a cart that
+          ships. Stripe&rsquo;s test mode is a copy of Stripe for trying payments with test cards. No real card is
+          charged. The run passes only when Stripe answers every step as expected.
         </p>
         <p>
           {`A check is “Unknown” when it has no result in the last ${STATUS_STALE_HOURS} hours. A failed run means at least one step did not work as expected. It does not always mean that emails or payments were lost.`}
@@ -100,8 +107,8 @@ export default async function StatusPage() {
 
       <LegalSection title={`The last ${STATUS_WINDOW_DAYS} days`} id="history">
         <p>Every recorded run is counted. Nothing is rounded.</p>
-        {reading.busy ? (
-          <p>{`Not read this time: to keep its cost down, this page reads the results for the first ${STATUS_VIEWS_PER_HOUR} visits of each hour only.`}</p>
+        {notRead ? (
+          <p>{`${notRead}.`}</p>
         ) : (
           reading.checks.map((check) => <History key={check.id} name={check.name} summary={check.summary} />)
         )}

@@ -4,40 +4,51 @@
  *
  *   - The daily mail check (app/api/cron/mail-check, lib/verify-mail.ts) and
  *     the daily Stripe check in test mode (app/api/cron/stripe-check,
- *     lib/verify-stripe.ts) each keep their runs here, in the same save as
- *     their last result: a time and a pass or fail, nothing of what failed
- *     or why, the last STATUS_RUNS_KEPT, for STATUS_RUNS_SECONDS.
- *   - Whether the database answered when the page was put together: the
- *     page's one read of those runs is that answer.
+ *     lib/verify-stripe.ts) each keep their runs here, after their own save
+ *     and notice: a time and a pass, a fail or "tested nothing", nothing of
+ *     what failed or why, the last STATUS_RUNS_KEPT, for STATUS_RUNS_SECONDS.
+ *     A mail run passes only when at least one email service's delivery loop
+ *     ran and everything passed (statusRunResult); with no loop run it tested
+ *     nothing, and the page never says Passed for it.
+ *   - Whether the database answered when the results were read.
  *
  * A check with no result in the last STATUS_STALE_HOURS is Unknown, a run
- * that cannot be read is dropped (never counted as a pass), and a database
- * that does not answer makes every check Unknown.
+ * that cannot be read is dropped (never counted as a pass), and when the
+ * database did not answer or is not set up, the page says the results were
+ * not read rather than that there were none.
  *
  * Its cost is the company's (MR item 2). The page is drawn for each request,
- * with no host page cache (no source in this repository prices one). Each
- * request first counts itself in its hour (STATUS_COUNT_COMMANDS); only the
- * first STATUS_VIEWS_PER_HOUR of an hour read the runs
- * (STATUS_READ_COMMANDS more). Past that, a request reads nothing more and
- * the page says the results were not read and from when they are read
- * again. tests/status-page.test.ts prices both kinds of request at the
- * rates of lib/spend-cost-table.ts and tests/traffic-cost.ts: the reading
- * ones are bounded by the hour's count, the counted-only ones cost a fixed
- * amount each, and their number past that is the host firewall's to stop,
- * as for every store page (lib/traffic-rules.ts, clientDayShare).
+ * with no host page cache (no source in this repository prices one), and:
  *
- *   nl:mail-check:runs       list    {"at":<ms>,"ok":<bool>}, newest first
+ *   - each server instance keeps the last reading for STATUS_MEMORY_MS and
+ *     answers from it without the database;
+ *   - otherwise a request counts itself in its hour (STATUS_COUNT_COMMANDS),
+ *     and only the first STATUS_VIEWS_PER_HOUR of the hour read the runs
+ *     (STATUS_READ_COMMANDS more); an instance that finds the hour used up
+ *     marks it and sends nothing more until the hour turns;
+ *   - one address may make an instance count at most
+ *     STATUS_COUNTS_PER_ADDRESS_PER_HOUR times an hour (lib/local-limit.ts),
+ *     so one client cannot use up the hour for everybody from one instance.
+ *
+ * So the database work is bounded per instance (one round a minute at the
+ * most), and reading the runs is bounded for the whole site. Every request,
+ * whatever it does, is a function call; their number is the host firewall's
+ * to stop, as for every page drawn per request on this site. All of it is
+ * priced in tests/status-page.test.ts.
+ *
+ *   nl:mail-check:runs       list    {"at":<ms>,"ok":<true|false|null>}, newest first
  *   nl:stripe-check:runs     list    the same, for the Stripe check
- *   nl:status:views:<hour>   string  the hour's requests, kept two hours
+ *   nl:status:views:<hour>   string  the hour's counted requests, kept two hours
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { withinLocalLimit } from "@/lib/local-limit";
 
 type Command = (string | number)[];
 
-/** The checks the page shows, in its order, with the list each keeps its runs in. */
+/** The checks the page shows, in its order, with the list each keeps its runs in and what a run that tested nothing means. */
 export const STATUS_CHECKS = [
-  { id: "mail", key: "nl:mail-check:runs", name: "Email delivery" },
-  { id: "checkout", key: "nl:stripe-check:runs", name: "Checkout (Stripe test mode)" },
+  { id: "mail", key: "nl:mail-check:runs", name: "Email delivery", untested: "no email service was checked" },
+  { id: "checkout", key: "nl:stripe-check:runs", name: "Checkout (Stripe test mode)", untested: "nothing was checked" },
 ] as const;
 
 /** Runs kept per check: two months of daily runs, more than the window shown. */
@@ -48,23 +59,29 @@ export const STATUS_RUNS_SECONDS = 70 * 86_400;
 export const STATUS_WINDOW_DAYS = 30;
 /** A result older than this is not today's: the check is Unknown. Daily runs, with half a day of room. */
 export const STATUS_STALE_HOURS = 36;
-/** Requests in an hour (UTC) that read the runs; past it, a request is counted and reads nothing more. */
+/** Requests in an hour (UTC), for the whole site, that read the runs. */
 export const STATUS_VIEWS_PER_HOUR = 60;
 /** How long an hour's count is kept: past its hour, so a late request still finds it. */
 export const STATUS_VIEW_KEY_SECONDS = 2 * 3600;
-/** Commands every request sends to count itself: INCR and EXPIRE, in one pipeline. */
+/** Commands a counted request sends: INCR and EXPIRE, in one pipeline. */
 export const STATUS_COUNT_COMMANDS = 2;
 /** Commands a reading request sends after that: one read of each check's runs, in one pipeline. */
 export const STATUS_READ_COMMANDS = STATUS_CHECKS.length;
+/** How long an instance answers from its last reading without the database. */
+export const STATUS_MEMORY_MS = 60_000;
+/** Times one address may make one instance count in an hour (lib/local-limit.ts). */
+export const STATUS_COUNTS_PER_ADDRESS_PER_HOUR = 5;
 
 const HOUR_MS = 3_600_000;
+const hourOf = (ms: number) => Math.floor(ms / HOUR_MS);
 /** The key an hour's requests are counted in. */
-export const statusViewKey = (now: number) => `nl:status:views:${Math.floor(now / HOUR_MS)}`;
+export const statusViewKey = (now: number) => `nl:status:views:${hourOf(now)}`;
 
-export type StatusRun = { at: number; ok: boolean };
+/** A run: when, and whether it passed, failed, or tested nothing (null). */
+export type StatusRun = { at: number; ok: boolean | null };
 
-/** What a check run adds to the save it already sends: its time and result, the list cut, and its life. */
-export function statusRunCommands(key: string, at: number, ok: boolean): Command[] {
+/** What a check run sends, after its own save: its time and result, the list cut, and its life. */
+export function statusRunCommands(key: string, at: number, ok: boolean | null): Command[] {
   return [
     ["LPUSH", key, JSON.stringify({ at, ok })],
     ["LTRIM", key, 0, STATUS_RUNS_KEPT - 1],
@@ -72,7 +89,18 @@ export function statusRunCommands(key: string, at: number, ok: boolean): Command
   ];
 }
 
-/** The runs read back, newest first; anything that is not exactly a time and a true or false is dropped. */
+/**
+ * A mail run's result for the page: failed when any check failed (or there
+ * were none), passed only when at least one delivery loop really ran
+ * (lib/verify-mail.ts marks its checks `loop: true`), otherwise null: it
+ * tested no delivery, so it is neither a pass nor a fail.
+ */
+export function statusRunResult(checks: readonly { ok: boolean; loop?: boolean }[]): boolean | null {
+  if (checks.length === 0 || checks.some((c) => !c.ok)) return false;
+  return checks.some((c) => c.loop === true) ? true : null;
+}
+
+/** The runs read back, newest first; anything that is not exactly a time and a true, false or null is dropped. */
 export function parseRuns(raw: unknown): StatusRun[] {
   if (!Array.isArray(raw)) return [];
   const runs: StatusRun[] = [];
@@ -82,7 +110,7 @@ export function parseRuns(raw: unknown): StatusRun[] {
       const value: unknown = JSON.parse(item);
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       const { at, ok } = value as { at?: unknown; ok?: unknown };
-      if (typeof at === "number" && Number.isFinite(at) && at > 0 && typeof ok === "boolean") runs.push({ at, ok });
+      if (typeof at === "number" && Number.isFinite(at) && at > 0 && (typeof ok === "boolean" || ok === null)) runs.push({ at, ok });
     } catch {
       /* A run that cannot be read is not a result. */
     }
@@ -91,13 +119,14 @@ export function parseRuns(raw: unknown): StatusRun[] {
 }
 
 export type StatusSummary = {
-  state: "passed" | "failed" | "unknown";
+  state: "passed" | "failed" | "untested" | "unknown";
   /** The newest run, however old. */
   last: StatusRun | null;
-  /** Runs, passes and failures in the window. */
+  /** Runs in the window: all, passed, failed and those that tested nothing. */
   runs: number;
   passed: number;
   failed: number;
+  untested: number;
   /** The failed runs' times in the window, newest first. */
   failures: number[];
   /** The UTC day counting starts: the window's first day or the first recorded run's, whichever is later; null with none. */
@@ -113,11 +142,12 @@ const dayOf = (ms: number) => Math.floor(ms / DAY_MS) * DAY_MS;
 export function summarizeRuns(all: StatusRun[], now: number): StatusSummary {
   const past = all.filter((r) => r.at <= now).sort((a, b) => b.at - a.at);
   const last = past[0] ?? null;
-  const fresh = last && now - last.at <= STATUS_STALE_HOURS * 3_600_000;
-  const state = !fresh ? "unknown" : last.ok ? "passed" : "failed";
+  const fresh = last !== null && now - last.at <= STATUS_STALE_HOURS * HOUR_MS;
+  const state = !fresh ? "unknown" : last.ok === true ? "passed" : last.ok === false ? "failed" : "untested";
   const windowStart = dayOf(now) - (STATUS_WINDOW_DAYS - 1) * DAY_MS;
   const inWindow = past.filter((r) => r.at >= windowStart);
-  const failures = inWindow.filter((r) => !r.ok).map((r) => r.at);
+  const failures = inWindow.filter((r) => r.ok === false).map((r) => r.at);
+  const passed = inWindow.filter((r) => r.ok === true).length;
   const oldest = inWindow[inWindow.length - 1];
   const since = oldest ? dayOf(oldest.at) : null;
   let daysWithoutRun = 0;
@@ -125,48 +155,84 @@ export function summarizeRuns(all: StatusRun[], now: number): StatusSummary {
     const days = new Set(inWindow.map((r) => dayOf(r.at)));
     for (let day = since; day < dayOf(now); day += DAY_MS) if (!days.has(day)) daysWithoutRun += 1;
   }
-  return { state, last, runs: inWindow.length, passed: inWindow.length - failures.length, failed: failures.length, failures, since, daysWithoutRun };
+  return {
+    state, last, runs: inWindow.length, passed, failed: failures.length, untested: inWindow.length - passed - failures.length,
+    failures, since, daysWithoutRun,
+  };
 }
 
+/**
+ * Why the runs were not read, when they were not: the hour's reads used up,
+ * this address's counts on this instance used up, or the hour's count
+ * unreadable. "none" when they were read, or the database is the reason.
+ */
+export type StatusLimit = "none" | "hour" | "address" | "count-unread";
+
 export type StatusReading = {
+  /** When the results were read (or found not readable). */
   builtAt: number;
-  /** True when the hour's reads were used up, so the runs were not read. */
-  busy: boolean;
-  /** Whether the database answered the page's read; "unset" where no database is set up (a build without one). */
+  limit: StatusLimit;
+  /** Whether the database answered; "unset" where no database is set up (a build without one). */
   database: "answered" | "no-answer" | "unset";
-  checks: { id: (typeof STATUS_CHECKS)[number]["id"]; name: string; summary: StatusSummary }[];
+  checks: { id: (typeof STATUS_CHECKS)[number]["id"]; name: string; untested: string; summary: StatusSummary }[];
 };
 
-/**
- * The request counted in its hour (STATUS_COUNT_COMMANDS), then, for the
- * first STATUS_VIEWS_PER_HOUR of the hour only, one read of every check's
- * runs (STATUS_READ_COMMANDS), each in its own pipeline.
- */
-export async function readStatus(now: number = Date.now()): Promise<StatusReading> {
-  const empty = (database: StatusReading["database"], busy = false): StatusReading => ({
+/** This instance's memory: its last reading, and the hour it found used up. */
+let remembered: StatusReading | null = null;
+let usedUpHour = -1;
+
+/** Forgets this instance's memory (the tests, between cases). */
+export function forgetStatusMemory(): void {
+  remembered = null;
+  usedUpHour = -1;
+}
+
+function notRead(now: number, database: StatusReading["database"], limit: StatusLimit): StatusReading {
+  return {
     builtAt: now,
-    busy,
+    limit,
     database,
-    checks: STATUS_CHECKS.map((c) => ({ id: c.id, name: c.name, summary: summarizeRuns([], now) })),
-  });
-  if (!isRedisConfigured()) return empty("unset");
-  let answers: unknown[];
+    checks: STATUS_CHECKS.map((c) => ({ id: c.id, name: c.name, untested: c.untested, summary: summarizeRuns([], now) })),
+  };
+}
+
+/**
+ * One request's reading. From this instance's memory while it is younger
+ * than STATUS_MEMORY_MS; otherwise, unless the hour is marked used up or the
+ * address has counted too often here, the request counted in its hour
+ * (STATUS_COUNT_COMMANDS) and, for the first STATUS_VIEWS_PER_HOUR of the
+ * hour only, one read of every check's runs (STATUS_READ_COMMANDS).
+ */
+export async function readStatus({ now = Date.now(), address = "unknown" }: { now?: number; address?: string } = {}): Promise<StatusReading> {
+  if (!isRedisConfigured()) return notRead(now, "unset", "none");
+  if (remembered && now >= remembered.builtAt && now - remembered.builtAt < STATUS_MEMORY_MS) return remembered;
+  if (usedUpHour === hourOf(now)) return notRead(now, "answered", "hour");
+  if (!withinLocalLimit("status-count", address, STATUS_COUNTS_PER_ADDRESS_PER_HOUR, HOUR_MS, now)) return notRead(now, "answered", "address");
+  let reading: StatusReading;
   try {
     const key = statusViewKey(now);
     const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, STATUS_VIEW_KEY_SECONDS]]);
-    // A count that cannot be read is not room to read.
-    const seen = Number(count);
-    if (!Number.isSafeInteger(seen) || seen < 1 || seen > STATUS_VIEWS_PER_HOUR) return empty("answered", true);
-    answers = await redisPipeline(STATUS_CHECKS.map((c) => ["LRANGE", c.key, 0, STATUS_RUNS_KEPT - 1]));
+    const seen = typeof count === "number" ? count : typeof count === "string" && /^\d+$/.test(count) ? Number(count) : NaN;
+    if (!Number.isSafeInteger(seen) || seen < 1) {
+      // A count that cannot be read is not room to read.
+      reading = notRead(now, "answered", "count-unread");
+    } else if (seen > STATUS_VIEWS_PER_HOUR) {
+      usedUpHour = hourOf(now);
+      return notRead(now, "answered", "hour");
+    } else {
+      const answers = await redisPipeline(STATUS_CHECKS.map((c) => ["LRANGE", c.key, 0, STATUS_RUNS_KEPT - 1]));
+      reading = {
+        builtAt: now,
+        limit: "none",
+        database: "answered",
+        checks: STATUS_CHECKS.map((c, i) => ({ id: c.id, name: c.name, untested: c.untested, summary: summarizeRuns(parseRuns(answers[i]), now) })),
+      };
+    }
   } catch {
-    return empty("no-answer");
+    reading = notRead(now, "no-answer", "none");
   }
-  return {
-    builtAt: now,
-    busy: false,
-    database: "answered",
-    checks: STATUS_CHECKS.map((c, i) => ({ id: c.id, name: c.name, summary: summarizeRuns(parseRuns(answers[i]), now) })),
-  };
+  remembered = reading;
+  return reading;
 }
 
 const DATE = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
@@ -177,6 +243,17 @@ export const statusDate = (ms: number) => DATE.format(new Date(ms));
 
 export type StatusRow = { what: string; result: "Answered" | "Did not answer" | "Passed" | "Failed" | "Unknown"; when: string };
 
+/** Why the runs were not read, in words, or null when they were. */
+export function notReadReason(reading: StatusReading): string | null {
+  const nextHour = statusTime((hourOf(reading.builtAt) + 1) * HOUR_MS);
+  if (reading.database === "no-answer") return "Not read: the database did not answer";
+  if (reading.database === "unset") return "Not read: no database is set up where this page was put together";
+  if (reading.limit === "hour") return `Not read: this page was opened more than ${STATUS_VIEWS_PER_HOUR} times this hour. It reads the results again from ${nextHour}`;
+  if (reading.limit === "address") return `Not read: this page was opened many times from your network this hour. It reads the results again for you from ${nextHour}`;
+  if (reading.limit === "count-unread") return "Not read: the count of visits this hour could not be read";
+  return null;
+}
+
 /** The page's words for a reading: a result in words for each row, and when it was measured. */
 export function describeStatus(reading: StatusReading): { builtAt: string; rows: StatusRow[] } {
   const builtAt = statusTime(reading.builtAt);
@@ -185,15 +262,13 @@ export function describeStatus(reading: StatusReading): { builtAt: string; rows:
     : reading.database === "no-answer"
       ? { what: "Database", result: "Did not answer", when: builtAt }
       : { what: "Database", result: "Unknown", when: "No database is set up where this page was put together" };
-  const nextHour = statusTime((Math.floor(reading.builtAt / HOUR_MS) + 1) * HOUR_MS);
-  const rows = reading.checks.map(({ name, summary }): StatusRow => {
-    if (reading.busy) {
-      return { what: name, result: "Unknown", when: `Not read: this page was opened more than ${STATUS_VIEWS_PER_HOUR} times this hour. It reads the results again from ${nextHour}` };
-    }
-    if (summary.state === "unknown") {
-      return { what: name, result: "Unknown", when: `No result in the last ${STATUS_STALE_HOURS} hours` };
-    }
-    return { what: name, result: summary.state === "passed" ? "Passed" : "Failed", when: statusTime(summary.last!.at) };
+  const reason = notReadReason(reading);
+  const rows = reading.checks.map(({ name, untested, summary }): StatusRow => {
+    if (reason) return { what: name, result: "Unknown", when: reason };
+    if (summary.state === "unknown") return { what: name, result: "Unknown", when: `No result in the last ${STATUS_STALE_HOURS} hours` };
+    const at = statusTime(summary.last!.at);
+    if (summary.state === "untested") return { what: name, result: "Unknown", when: `${at}: ${untested}` };
+    return { what: name, result: summary.state === "passed" ? "Passed" : "Failed", when: at };
   });
   return { builtAt, rows: [database, ...rows] };
 }

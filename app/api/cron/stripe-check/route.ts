@@ -42,9 +42,8 @@ export async function GET(request: NextRequest) {
     console.log(`stripe-check ${ok ? "pass" : "FAIL"}: ${checks.map((c) => `${c.ok ? "PASS" : "FAIL"} ${c.check} (${c.detail})`).join(" | ")}`);
     const [previous] = await redisPipeline([["GET", LAST]]);
     const failedBefore = typeof previous === "string" && previous.includes('"ok":false');
-    // The run is also kept for the public status page (lib/status-page.ts): its time and result only.
     const at = Date.now();
-    await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks }), "EX", 30 * 86_400], ...statusRunCommands(STATUS_CHECKS[1].key, at, ok)]);
+    await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks }), "EX", 30 * 86_400]]);
     if ((!ok || failedBefore) && isSenderConfigured()) {
       await sendEmail({ meter: { by: "company" },
         from: NIMBUS_FROM,
@@ -59,6 +58,9 @@ export async function GET(request: NextRequest) {
         ].join("\n"),
       }).catch((error) => console.error("sending the Stripe check result failed", error));
     }
+    // Kept for the public status page (lib/status-page.ts), after the save and the notice and apart from them, so
+    // its failure stops neither: its time and result only. Every check here is an answer from Stripe's test mode.
+    await redisPipeline(statusRunCommands(STATUS_CHECKS[1].key, at, ok)).catch((error) => console.error("keeping the Stripe check's run for the status page failed", error));
     return Response.json({ ok, checks }, { headers: { "Cache-Control": "no-store" } });
   } finally {
     await redisPipeline([["DEL", "nl:stripe-check:lock"]]).catch(() => {});

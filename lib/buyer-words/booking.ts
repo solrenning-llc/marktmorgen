@@ -160,8 +160,13 @@ const en = {
     `${store} has been told, and an email with the new time and a calendar file is on its way to you. The old time is free again for somebody else.`,
   moveAgain: (left: number) => ` You can move it ${left === 1 ? "once more" : `${left} more times`} from this page.`,
   noOtherSession: "There is no other session to move to",
-  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
-  lengthNotMovable: "This booking's length can't be moved here",
+  /**
+   * A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength),
+   * so the booking itself keeps its time; nothing on this page can move it.
+   */
+  lengthNotMovable: "This booking can't be moved to another time here",
+  /** The body of "length-gone" when the page offers no other length now (bookingNotice): only the call's own, said by its minutes. */
+  lengthGoneOwn: (minutes: number) => `Only the ${minutes}-minute length is offered now; pick a time below. Nothing was charged.`,
   staysAsIs: (store: string) => `Your booking stays as it is. To ask ${store} about it, reply to your confirmation email.`,
   /** `hasMoved`: moved before, so the times left are "more" times. */
   canMoveUntil: (left: number, hasMoved: boolean, until: string, zone: string) =>
@@ -242,6 +247,7 @@ const en = {
   /** Choosing one of a call's lengths, each with its price (lib/call-lengths.ts). */
   lengthPick: "How long would you like?",
   lengthChosen: (what: string) => `Showing times for ${what}.`,
+  backToCard: (title: string) => `Back to ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutes, ${price}`,
   withHost: (name: string) => `With ${name}`,
   /** The creator's cancellation deadline (lib/call-setup.ts, cancelHours), said before paying and in the confirmation. */
@@ -384,8 +390,12 @@ const es: BookingWords = {
     `${store} ya está al tanto, y te llega un email con el nuevo horario y un archivo de calendario. El horario anterior vuelve a quedar libre para otra persona.`,
   moveAgain: (left) => ` Puedes cambiarla ${left === 1 ? "una vez más" : `${left} veces más`} desde esta página.`,
   noOtherSession: "No hay otra sesión a la que cambiarla",
-  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
-  lengthNotMovable: "La duración de esta reserva no se puede cambiar aquí",
+  /**
+   * A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength),
+   * so the booking itself keeps its time; nothing on this page can move it.
+   */
+  lengthNotMovable: "Esta reserva no se puede cambiar a otro horario desde aquí",
+  lengthGoneOwn: (minutes) => `Ahora solo se ofrece la duración de ${minutes} minutos; elige un horario abajo. No se ha cobrado nada.`,
   staysAsIs: (store) => `Tu reserva se queda como está. Para preguntarle a ${store} sobre ella, responde a tu email de confirmación.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Puedes cambiarla ${left === 1 ? "una vez más" : `${left} ${hasMoved ? "veces más" : "veces"}`}, hasta el ${until} (${zone}). No se cobra ni se reembolsa nada.`,
@@ -451,6 +461,7 @@ const es: BookingWords = {
   hostShow: "Ver sus horarios",
   lengthPick: "¿Cuánto tiempo quieres?",
   lengthChosen: (what: string) => `Horarios para ${what}.`,
+  backToCard: (title: string) => `Volver a ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
@@ -591,8 +602,12 @@ const fr: BookingWords = {
     `${store} a été prévenu, et un e-mail avec le nouvel horaire et un fichier de calendrier est en route vers vous. L'ancien créneau est de nouveau libre pour quelqu'un d'autre.`,
   moveAgain: (left) => ` Vous pouvez encore la déplacer ${frTimes(left)} depuis cette page.`,
   noOtherSession: "Il n'y a pas d'autre session vers laquelle la déplacer",
-  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
-  lengthNotMovable: "La durée de cette réservation ne peut pas être déplacée ici",
+  /**
+   * A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength),
+   * so the booking itself keeps its time; nothing on this page can move it.
+   */
+  lengthNotMovable: "Cette réservation ne peut pas être déplacée à un autre horaire ici",
+  lengthGoneOwn: (minutes) => `Seule la durée de ${minutes} minutes est proposée maintenant${S}; choisissez un horaire ci-dessous. Rien n'a été débité.`,
   staysAsIs: (store) => `Votre réservation reste telle quelle. Pour en parler à ${store}, répondez à votre e-mail de confirmation.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Vous pouvez la déplacer ${left === 1 || hasMoved ? "encore " : ""}${frTimes(left)}, jusqu'au ${until} (${zone}). Rien n'est débité ni remboursé.`,
@@ -657,6 +672,7 @@ const fr: BookingWords = {
   hostShow: "Voir ses horaires",
   lengthPick: `Quelle durée souhaitez-vous${S}?`,
   lengthChosen: (what: string) => `Horaires pour ${what}.`,
+  backToCard: (title: string) => `Retour à ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutes à ${price}`,
   withHost: (name) => `Avec ${name}`,
   cancelPolicy: (hours, store) =>
@@ -792,8 +808,12 @@ const de: BookingWords = {
     `${store} wurde informiert, und eine E-Mail mit dem neuen Termin und einer Kalenderdatei ist unterwegs zu Ihnen. Der alte Termin ist wieder frei für jemand anderen.`,
   moveAgain: (left) => ` Sie können sie auf dieser Seite noch ${deTimes(left)} verschieben.`,
   noOtherSession: "Es gibt keine andere Session, auf die Sie verschieben können",
-  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
-  lengthNotMovable: "Die Länge dieser Buchung lässt sich hier nicht verschieben",
+  /**
+   * A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength),
+   * so the booking itself keeps its time; nothing on this page can move it.
+   */
+  lengthNotMovable: "Diese Buchung lässt sich hier nicht auf einen anderen Termin verschieben",
+  lengthGoneOwn: (minutes) => `Jetzt wird nur noch die Länge von ${minutes} Minuten angeboten; wählen Sie unten einen Termin. Es wurde nichts abgebucht.`,
   staysAsIs: (store) => `Ihre Buchung bleibt, wie sie ist. Wenn Sie ${store} dazu etwas fragen möchten, antworten Sie auf Ihre Bestätigungs-E-Mail.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Sie können sie ${left === 1 || hasMoved ? "noch " : ""}${deTimes(left)} verschieben, bis ${until} (${zone}). Es wird nichts berechnet oder erstattet.`,
@@ -859,6 +879,7 @@ const de: BookingWords = {
   hostShow: "Zeiten anzeigen",
   lengthPick: "Wie lange möchten Sie buchen?",
   lengthChosen: (what: string) => `Zeiten für ${what}.`,
+  backToCard: (title: string) => `Zurück zu ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} Minuten, ${price}`,
   withHost: (name) => `Bei ${name}`,
   cancelPolicy: (hours, store) =>
@@ -996,8 +1017,12 @@ const it: BookingWords = {
     `${store} è stato avvisato, e un'email con il nuovo orario e un file del calendario sta arrivando. Il vecchio orario è di nuovo libero per qualcun altro.`,
   moveAgain: (left) => ` Puoi spostarla ancora ${itTimes(left)} da questa pagina.`,
   noOtherSession: "Non c'è un'altra sessione in cui spostarla",
-  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
-  lengthNotMovable: "La durata di questa prenotazione non si può spostare qui",
+  /**
+   * A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength),
+   * so the booking itself keeps its time; nothing on this page can move it.
+   */
+  lengthNotMovable: "Questa prenotazione non si può spostare a un altro orario da qui",
+  lengthGoneOwn: (minutes) => `Ora è disponibile solo la durata di ${minutes} minuti; scegli un orario qui sotto. Non è stato addebitato nulla.`,
   staysAsIs: (store) => `La tua prenotazione resta com'è. Per chiedere a ${store}, rispondi alla tua email di conferma.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Puoi spostarla ${left === 1 || hasMoved ? "ancora " : ""}${itTimes(left)}, fino a ${until} (${zone}). Non viene addebitato né rimborsato nulla.`,
@@ -1063,6 +1088,7 @@ const it: BookingWords = {
   hostShow: "Mostra i suoi orari",
   lengthPick: "Quale durata preferisci?",
   lengthChosen: (what: string) => `Orari per ${what}.`,
+  backToCard: (title: string) => `Torna a ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minuti, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1200,8 +1226,12 @@ const nl: BookingWords = {
     `${store} is op de hoogte gebracht, en er is een e-mail met de nieuwe tijd en een agendabestand naar je onderweg. De oude tijd is weer vrij voor iemand anders.`,
   moveAgain: (left) => ` Je kunt hem vanaf deze pagina nog ${nlTimes(left)} verplaatsen.`,
   noOtherSession: "Er is geen andere sessie om naartoe te verplaatsen",
-  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
-  lengthNotMovable: "De lengte van deze boeking kan hier niet worden verplaatst",
+  /**
+   * A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength),
+   * so the booking itself keeps its time; nothing on this page can move it.
+   */
+  lengthNotMovable: "Deze boeking kan hier niet naar een andere tijd worden verplaatst",
+  lengthGoneOwn: (minutes) => `Nu wordt alleen de lengte van ${minutes} minuten aangeboden; kies hieronder een tijd. Er is niets afgeschreven.`,
   staysAsIs: (store) => `Je boeking blijft zoals hij is. Wil je ${store} er iets over vragen, beantwoord dan je bevestigingsmail.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Je kunt hem ${left === 1 || hasMoved ? "nog " : ""}${nlTimes(left)} verplaatsen, tot ${until} (${zone}). Er wordt niets afgeschreven of terugbetaald.`,
@@ -1266,6 +1296,7 @@ const nl: BookingWords = {
   hostShow: "Toon de tijden",
   lengthPick: "Hoe lang wil je boeken?",
   lengthChosen: (what: string) => `Tijden voor ${what}.`,
+  backToCard: (title: string) => `Terug naar ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minuten, ${price}`,
   withHost: (name) => `Bij ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1403,8 +1434,12 @@ const pt: BookingWords = {
     `${store} já foi avisado, e vai receber um email com o novo horário e um ficheiro de calendário. O horário anterior fica livre para outra pessoa.`,
   moveAgain: (left) => ` Pode mudá-la mais ${ptTimes(left)} a partir desta página.`,
   noOtherSession: "Não há outra sessão para onde a mudar",
-  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
-  lengthNotMovable: "A duração desta reserva não pode ser mudada aqui",
+  /**
+   * A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength),
+   * so the booking itself keeps its time; nothing on this page can move it.
+   */
+  lengthNotMovable: "Esta reserva não pode ser mudada para outro horário aqui",
+  lengthGoneOwn: (minutes) => `Agora só está disponível a duração de ${minutes} minutos; escolha um horário abaixo. Nada foi cobrado.`,
   staysAsIs: (store) => `A sua marcação mantém-se como está. Para perguntar a ${store}, responda ao seu email de confirmação.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Pode mudá-la ${left === 1 || hasMoved ? "mais " : ""}${ptTimes(left)}, até ${until} (${zone}). Nada é cobrado nem reembolsado.`,
@@ -1470,6 +1505,7 @@ const pt: BookingWords = {
   hostShow: "Ver os horários",
   lengthPick: "Que duração prefere?",
   lengthChosen: (what: string) => `Horários para ${what}.`,
+  backToCard: (title: string) => `Voltar a ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Com ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1498,6 +1534,18 @@ const pt: BookingWords = {
 };
 
 export const BOOKING_WORDS: Record<LanguageCode, BookingWords> = { en, es, fr, de, it, nl, pt };
+
+/**
+ * What the booking page says on a return from a refused booking (`status`, as app/api/store/book sends it), or null.
+ * A length taken off while the buyer chose ("length-gone") asks them to pick a length again only while the page
+ * offers several (`offered`, offeredLengths); with none, only the call's own length (`ownMinutes`) is left, and the
+ * notice says so rather than ask for a choice the page does not show.
+ */
+export function bookingNotice(words: BookingWords, status: string, offered: readonly unknown[], ownMinutes: number): Notice | null {
+  const notice = words.notices[status] ?? null;
+  if (status === "length-gone" && notice && offered.length === 0) return { title: notice.title, body: words.lengthGoneOwn(ownMinutes) };
+  return notice;
+}
 
 /** A store's booking words, in its language; English for anything not a language. */
 export function bookingWords(language: unknown): BookingWords {

@@ -18,7 +18,9 @@ import { execFileSync } from "node:child_process";
  */
 // app/privacy/page.tsx (inbox C3-37): each agent adds or changes only its own unit's sentences, never rewrites another's, and keeps both in a conflict.
 // tests/plan-cost-registry.ts and tests/test-config.mjs (inbox CX-29): registries where each unit adds its own rows; each agent adds or changes only its own rows and keeps both in a conflict.
-export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "app/privacy/page.tsx", "tests/plan-cost-registry.ts", "tests/test-config.mjs"]);
+// lib/data-families.ts, tests/store-data-registry.ts and lib/redis-memory.ts (inbox CX-46, C2 04/11 08h25): registries of key families and the
+// tests' Redis emulator, where each unit adds its own families or scripts; each agent adds or changes only its own entries and keeps both in a conflict.
+export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "app/privacy/page.tsx", "tests/plan-cost-registry.ts", "tests/test-config.mjs", "lib/data-families.ts", "tests/store-data-registry.ts", "lib/redis-memory.ts"]);
 
 /** The folder of each agent's own reservations file. */
 export const RESERVATIONS_DIR = "docs/reservations/";

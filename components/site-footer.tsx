@@ -57,6 +57,8 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
     title: "Company",
     links: [
       { label: "Our mission", href: "/mission" },
+      // Not in the legal links: those are on the home page, held to 30 links (498 [ME3]).
+      { label: "Security", href: "/platform/security" },
     ],
   },
   {

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {commercialProfitMix, COMMERCIAL_PROFIT_SOURCES, CURRENT_COMMERCIAL_PROFIT_MIX_INPUT, CURRENT_COMMERCIAL_MARGIN_REVIEW, commercialPlansMayOpen, type CommercialProfitMixInput, type ProfitSourceAmounts} from '../lib/commercial-margin';
+import {commercialProfitMix, commercialProfitMixData, COMMERCIAL_PROFIT_SOURCES, CURRENT_COMMERCIAL_PROFIT_MIX_INPUT, CURRENT_COMMERCIAL_MARGIN_REVIEW, commercialPlansMayOpen, type CommercialProfitMixInput, type ProfitSourceAmounts} from '../lib/commercial-margin';
 function fixture():CommercialProfitMixInput {
  return {basis:'worst_case',interval:'month',period:'2026-10',currency:'USD',companyFixedCostsCents:900,
   sources:Object.fromEntries(COMMERCIAL_PROFIT_SOURCES.map(source=>[source,{revenueCents:1000,variableCostsCents:100,allocatedFixedCostsCents:100,taxesCents:200,refundsCents:50,reservesCents:50,evidence:'synthetic reviewed all costs and most onerous taxes; equal fixed allocation'}])) as Record<typeof COMMERCIAL_PROFIT_SOURCES[number],ProfitSourceAmounts>};
@@ -176,7 +176,7 @@ test('hidden, symbolic and executable source categories are rejected without rea
  assert.equal(calls,0);
 });
 
-test('additional root financial categories are unknown even when zero or labelled as metadata',()=>{
+test('additional root financial categories are unknown even when zero or labeled as metadata',()=>{
  for(const key of ['unreviewedSupplierCents','privateContext','notes']){
   for(const amount of [null,0,100_000]){
    const input=Object.assign(fixture(),{[key]:amount});
@@ -213,5 +213,40 @@ test('a late-row Proxy cannot execute a getter installed on an earlier row (CX-1
   const result=commercialProfitMix(input);
   assert.equal(result.reason,'unknown');assert.equal(result.totalNetProfitCents,null);
   assert.equal(reads,0,'neither returning nor throwing getters may execute');
+ }
+});
+
+
+test('the exported snapshot owns every detached null-prototype container',()=>{
+ const input=fixture();const data=commercialProfitMixData(input)!;
+ assert.ok(data);assert.notEqual(data,input);assert.notEqual(data.sources,input.sources);
+ assert.equal(Object.getPrototypeOf(data),null);assert.equal(Object.getPrototypeOf(data.sources),null);
+ for(const source of COMMERCIAL_PROFIT_SOURCES){
+  assert.notEqual(data.sources[source],input.sources[source]);
+  assert.equal(Object.getPrototypeOf(data.sources[source]),null);
+ }
+ input.sources.captions!.revenueCents=0;
+ assert.equal(commercialProfitMix(data).totalNetProfitCents,4500);
+ data.sources.training!.taxesCents=300;
+ assert.equal(input.sources.training!.taxesCents,200);
+});
+
+test('Proxy detection precedes every trap, including revoked financial containers',()=>{
+ for(const location of ['root','sources','row'] as const){
+  for(const revoked of [false,true]){
+   const input=fixture();let calls=0;
+   const value=location==='root'?input:location==='sources'?input.sources:input.sources.captions!;
+   const handle=Proxy.revocable(value,{
+    ownKeys(){calls++;throw new Error('synthetic ownKeys');},
+    getOwnPropertyDescriptor(){calls++;throw new Error('synthetic descriptor');},
+    getPrototypeOf(){calls++;throw new Error('synthetic prototype');},
+    get(){calls++;throw new Error('synthetic read');},
+   });
+   if(revoked)handle.revoke();
+   if(location==='sources')input.sources=handle.proxy as typeof input.sources;
+   if(location==='row')input.sources.captions=handle.proxy as ProfitSourceAmounts;
+   assert.equal(commercialProfitMixData(location==='root'?handle.proxy:input),null);
+   assert.equal(calls,0);
+  }
  }
 });

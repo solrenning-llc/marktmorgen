@@ -17,10 +17,11 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, storeFolder, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, storeFolder, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { fileFolder } from "@/lib/product-file";
-import { readPodcast } from "@/lib/podcast";
+import * as podcastStore from "@/lib/podcast";
+import { dropPodcast, readPodcast } from "@/lib/podcast";
 import { store as redis } from "./redis-stub";
 import { files } from "./failure-cleanup-world";
 import { done, is, part } from "./check";
@@ -80,9 +81,9 @@ async function main(): Promise<void> {
   files.clear();
   await claimHandle(OWNER, "ownerfollowup", "Owner Followup", "");
   await ensureStatsId(OWNER);
-  const made = await Promise.all(["Guide", "Show", "Old show"].map((title) => addProduct(OWNER, title, "", "19", null)));
+  const made = await Promise.all(["Guide", "Show", "Old show", "Bonus show", "Bent show", "Flat show"].map((title) => addProduct(OWNER, title, "", "19", null)));
   if (!made.every((m) => m.ok)) throw new Error("setup");
-  const [a, show, oldShow] = made.map((m) => (m.ok ? m.product.id : ""));
+  const [a, show, oldShow, bonusShow, bentShow, flatShow] = made.map((m) => (m.ok ? m.product.id : ""));
   await addStoreLink(OWNER, "My podcast", "https://example.com/pod");
   await addStoreLink(OWNER, "My blog", "https://example.com/blog");
   const listed = await addStoreLink(OWNER, "My shop", "https://example.com/shop");
@@ -143,6 +144,49 @@ async function main(): Promise<void> {
   is("the audio the episode still plays is kept", files.has(shared), true);
   const episodes = await readPodcast((await readListing((await storeForEmail(OWNER))!, oldShow))!.podcast!.id);
   is("and the episode still names it", episodes?.episodes.map((episode) => episode.pathname), [shared]);
+
+  part("A price option of a podcast whose record was never written");
+  // The enable writes the product's reference before the podcast's record (app/api/store/podcast); a record that
+  // failed to be written leaves a podcast with no record, and a second enable answers ok without writing it.
+  is("the bonus show made a podcast", await result(await podcast(post("/api/store/podcast", session, { action: "enable", id: bonusShow }))), [200, "ok"]);
+  const bonusRef = (await readListing((await storeForEmail(OWNER))!, bonusShow))!.podcast!.id;
+  await dropPodcast(bonusRef);
+  is("its record is not there", await readPodcast(bonusRef), null);
+  const priced = await addOption(OWNER, bonusShow, "With the workbook", "29");
+  if (!priced.ok) throw new Error("option");
+  const bonusOption = (await readListing(priced.store, bonusShow))!.options[0].id;
+  const bonusFile = `${fileFolder(await storeFolder(OWNER), bonusOption)}${"b".repeat(20)}.pdf`;
+  files.set(bonusFile, { bytes: MP3, contentType: "application/pdf" });
+  is("a bonus file on the option: put on (it was a server error)", await attachFile(bonusOption, bonusFile), [200, "ok"]);
+  is("the option shows it", (await readListing((await storeForEmail(OWNER))!, bonusShow))!.options[0].file?.pathname, bonusFile);
+
+  part("A podcast record not in its exact form keeps the file");
+  /** A podcast with one episode whose audio is also the product's file, and then its record written as `bent`. */
+  const bentCase = async (id: string, letter: string, bent: (record: { id: string; episodes: Record<string, unknown>[] }) => unknown) => {
+    is(`${letter}: made a podcast`, await result(await podcast(post("/api/store/podcast", session, { action: "enable", id }))), [200, "ok"]);
+    const audioPath = `${fileFolder(await storeFolder(OWNER), id)}${letter.repeat(20)}.mp3`;
+    files.set(audioPath, { bytes: MP3, contentType: "audio/mpeg" });
+    is(`${letter}: an episode put out`, await result(await podcast(post("/api/store/podcast", session, { action: "add", id, pathname: audioPath, title: "Episode one", notes: "" }))), [200, "ok"]);
+    is(`${letter}: seeded, the product's file is the episode's audio`, seedFile(id, { pathname: audioPath, name: "audio.mp3", bytes: MP3.length, contentType: "audio/mpeg", addedAt: "2026-01-01T00:00:00.000Z" }) > 0, true);
+    const ref = (await readListing((await storeForEmail(OWNER))!, id))!.podcast!.id;
+    const record = JSON.parse(String(redis.run(["GET", `nl:pod:${ref}`]))) as { id: string; episodes: Record<string, unknown>[] };
+    redis.run(["SET", `nl:pod:${ref}`, JSON.stringify(bent(record))]);
+    is(`${letter}: the product's file taken off`, await result(await fileAttach(post("/api/store/file/attach", session, { id, detach: true }))), [200, "ok"]);
+    is(`${letter}: the audio is kept`, files.has(audioPath), true);
+  };
+  await bentCase(bentShow, "9", (record) => ({ ...record, episodes: record.episodes.map((episode) => ({ ...episode, id: "NOT-AN-ID" })) }));
+  await bentCase(flatShow, "8", (record) => ({ ...record, episodes: { first: record.episodes[0] } }));
+
+  part("Neither read finds the product: unknown, so kept");
+  // Read by name, so this file still runs (and fails) on a head without it.
+  const asked = (podcastStore as Record<string, unknown>).audioPlayedBy;
+  const audioPlayedBy = (product: { podcast: { id: string; episodes: number } | null } | null) =>
+    typeof asked === "function" ? (asked as (p: typeof product) => Promise<Set<string> | null>)(product) : Promise.resolve(new Set(["(not there)"]));
+  is("no product read before or after the write: unknown, not \"no episodes\"", await audioPlayedBy(null), null);
+  is("a product that is not a podcast: none", [...((await audioPlayedBy({ podcast: null })) ?? ["unknown"])], []);
+  is("a podcast whose record is not there: none, no episode can name a file", [...((await audioPlayedBy({ podcast: { id: bonusRef, episodes: 0 } })) ?? ["unknown"])], []);
+  const routeSource = readFileSync("app/api/store/file/attach/route.ts", "utf8");
+  is("the route asks with the product read after the write, or the one read before, and nothing else", routeSource.includes("audioPlayedBy((found ?? delivery)?.product)"), true);
 
   part("What the creator reads");
   const messageOf = (file: string, key: string) => readFileSync(file, "utf8").match(new RegExp(`\\n  ${key}: [\`"]([^\`"]*)[\`"]`))?.[1] ?? "";

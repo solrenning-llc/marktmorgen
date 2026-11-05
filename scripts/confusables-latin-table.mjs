@@ -54,6 +54,8 @@ export const EXTRA = [
   // Letters that look like a Latin letter in lowercase text, not in confusables.txt as such.
   [0x0500, "d", "CYRILLIC CAPITAL LETTER KOMI DE"], [0x043a, "k", "CYRILLIC SMALL LETTER KA"], [0x03ba, "k", "GREEK SMALL LETTER KAPPA"],
   [0x03c7, "x", "GREEK SMALL LETTER CHI"], [0x0275, "o", "LATIN SMALL LETTER BARRED O"],
+  // Letters with a stroke that have no decomposition, so the accent folding leaves them: read as their base letter (Danish, Croatian, Polish).
+  [0x00f8, "o", "LATIN SMALL LETTER O WITH STROKE"], [0x0111, "d", "LATIN SMALL LETTER D WITH STROKE"], [0x0142, "l", "LATIN SMALL LETTER L WITH STROKE"],
 ];
 
 /** The header lines that name the copy: its version and date. */

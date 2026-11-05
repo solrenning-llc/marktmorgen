@@ -186,4 +186,7 @@ is("while a site in any case is still refused", [
   heldToFacts("Visit Evil.Com today", probe), heldToFacts("Visit EVIL.COM today", probe), heldToFacts("See //evil.com/x", probe), heldToFacts("See /evil.com", probe),
   heldToFacts("See _evil.com", probe), heldToFacts("Visit evil.eu today", probe), heldToFacts("Visit Evil.Eu/now", probe), heldToFacts("Visit EVIL.EU now", probe),
 ], [false, false, false, false, false, false, false, false]);
+// Letters with a stroke have no decomposition, so accent folding leaves them; the look-alike table reads them as their base
+// letter (lib/confusables-latin.ts), so "cup\u00F8n", "\u0111iscount" or "\u0142ots" hide no deal word, while honest words pass.
+is("letters with a stroke read as their base letter, so they hide no deal word", [heldToFacts("Use the cup\u00F8n.", "Pottery course."), heldToFacts("A \u0111iscount.", "Pottery course."), heldToFacts("A discount for \u0142ots.", "A discount for lots."), heldToFacts("Kr\u00F8ner and \u0142\u00F3d\u017A.", "Pottery course.")], [false, false, true, true]);
 done();

@@ -94,3 +94,11 @@ test('C4: malformed application fee evidence cannot advance the historical curso
 for(const cursorWrite of [[],[undefined],[null],['OK'],[2],[1,0]])test('unconfirmed historical marker write remains incomplete: '+JSON.stringify(cursorWrite),async()=>{
  const r=await world({events:page(),cursorWrite});unconfirmed(r);
 });
+for(const id of [undefined,null,'ch_OtherHistory0001'])test('historical charge lookup must confirm its identity before declaring no fee: '+String(id),async()=>{
+ const r=await world({events:page([{...event,data:{object:{charge:fee.charge}}}]),chargePatch:{id,application_fee:null}});unconfirmed(r);
+});
+test('historical fee must belong to the charge named by its event',async()=>{
+ const r=await world({events:page([{...event,data:{object:{charge:fee.charge}}}]),feePatch:{charge:'ch_OtherHistory0001'}});
+ assert.equal(r.counts.complete,false);assert.equal(r.counts.failed,1);assert.equal(r.counts.unknownAmounts,1);assert.equal(r.saved,null);
+ assert.equal(r.calls.filter(c=>c.method==='POST').length,0);assert.equal(r.calls.filter(c=>c.path==='/v1/charges/ch_OtherHistory0001').length,0,'a mismatched identity must stop before reading unrelated charge data');
+});

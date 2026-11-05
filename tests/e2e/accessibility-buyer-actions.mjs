@@ -1,3 +1,4 @@
+import "./orders-list-actions.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {readFileSync,mkdtempSync,rmSync} from "node:fs";

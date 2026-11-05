@@ -41,7 +41,9 @@
     }
   ],
   "interpretation": "The cancellation is compatible with the configured 35-minute ceiling; no failed assertion was found in the inspected final output. This is not proof that the provider's cancellation reason was a timeout.",
-  "rerunState": "One request for only this cancelled job was rejected with 403 because its parent workflow was still running/queued. No rerun was started. Wait for terminal run status, then retry this job once.",
+  "rerunState": "The initial single-job request was rejected403 while the parent was nonterminal. After terminal/cancelled, exactly one rerun of job127046523434 was accepted at05:44UTC. Parent41963473129 is attempt2 queued as of05:52UTC. DO NOT RETRY AGAIN.",
   "ciCost": "unknown, never zero",
-  "scope": "No workflow, timeout, assertion, product or head change; no manual cancellation."
+  "scope": "No workflow, timeout, assertion, product or head change; no manual cancellation.",
+  "rerunAcceptedMinuteUTC": "2026-11-05 05:44 UTC",
+  "latestRunAttempt": 2
 }

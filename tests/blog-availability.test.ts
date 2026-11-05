@@ -91,6 +91,42 @@ async function main(){
  try{const result=await call("Confirmed post, cache unavailable");is("a later cache failure cannot lose the confirmed post id",[result.status,result.data.ok,result.data.countUnavailable,typeof result.data.post?.id],[200,true,true,"string"]);is("cache failure fixture reached the actual update",cacheRefused>0,true);is("the refused cache follows exactly one actually saved post",(await allPosts(store.statsId)).filter(p=>p.title==="Confirmed post, cache unavailable").length,1);}finally{redis.pipeline=pipeline;}
  const editor=readFileSync("components/blog-editor.tsx","utf8");
  is("uncertain write advice says to check before repeating",/unconfirmed:\s*"[^"]*check[^\"]*before/.test(editor),true);
+ part("Persisted metadata must preserve its identity, visibility and usable dates");
+ const metadataStats="metadata-boundary";
+ const keptId="abcde98765", otherId="abcde98764";
+ const input={title:"Metadata control",body:"Confirmed content.",product:null,draft:false};
+ const original=await savePost(metadataStats,null,input,()=>keptId,ROOM);
+ assert.ok(original.ok);
+ const key=`nl:blog:meta:${metadataStats}`;
+ const [raw]=await redis.pipeline([["HGET",key,keptId]]);
+ const valid=JSON.parse(String(raw)) as Record<string,unknown>;
+ for(const [field,value] of [["draft","true"],["publishedAt","not-a-date"],["publishedAt","1e309"],["publishedAt",8_640_000_000_001],["updatedAt",0.5],["updatedAt",-1]] as const){
+  await redis.pipeline([["HSET",key,keptId,JSON.stringify({...valid,[field]:value})]]);
+  let refused=false;try{await publishedPosts(metadataStats,1);}catch{refused=true;}
+  is(`unreadable ${field}:${String(value)} is not projected as published`,refused,true);
+  const changed=await savePost(metadataStats,keptId,input,()=>{throw Error("no new id on update");},ROOM);
+  is(`unreadable ${field}:${String(value)} cannot authorize an edit`,changed.ok,false);
+ }
+ await redis.pipeline([["HSET",key,keptId,String(raw)]]);
+ await savePost(metadataStats,null,{...input,title:"Other confirmed post",body:"Other content stays."},()=>otherId,ROOM);
+ await redis.pipeline([["HSET",key,keptId,JSON.stringify({...valid,id:otherId})]]);
+ is("mismatched identity cannot authorize updating another post",(await savePost(metadataStats,keptId,input,()=>{throw Error("no new id on update");},ROOM)).ok,false);
+ is("other post keeps its confirmed content",(await readPost(metadataStats,otherId))?.body,"Other content stays.");
+ await redis.pipeline([["HSET",key,keptId,String(raw)]]);
+ is("valid stored metadata still authorizes its own update",(await savePost(metadataStats,keptId,input,()=>{throw Error("no new id on update");},ROOM)).ok,true);
+ part("The actual demo seed consumer never writes an unknown post count");
+ const seedSource=readFileSync("lib/demo-seed.ts","utf8").match(/async function ensurePost\([\s\S]*?\n}/)?.[0];
+ assert.ok(seedSource);
+ const seedJs=ts.transpileModule(seedSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+ const seedFactory=new Function("DEMO_POST","cleanPost","readPost","savePost","setPostCount","REF","refused",seedJs+";return ensurePost;");
+ for(const total of [null,2]){
+  const writes:unknown[]=[];const pending:string[]=[];
+  const run=seedFactory({id:keptId,title:"Seed post",body:"Words.",product:false},(value:unknown)=>value,async()=>null,async()=>({ok:true,post:{id:keptId},published:total}),async(_ref:unknown,count:unknown)=>{writes.push(count);return {...store,posts:count};},"synthetic-owner@example.test",(step:string,reason:string)=>`${step}:${reason}`) as (s:typeof store,p:{id:string},pending:string[])=>Promise<typeof store>;
+  const result=await run(store,{id:"synthetic-product"},pending);
+  is("seed count writes: "+String(total),writes,total===null?[]:[2]);
+  is("seed count uncertainty stays explicit: "+String(total),pending,total===null?["post:count_unknown"]:[]);
+  is("seed cached count preserved when unknown: "+String(total),result.posts,total===null?store.posts:2);
+ }
  done();
 }
 main().catch(error=>{console.error(error);process.exit(1);});

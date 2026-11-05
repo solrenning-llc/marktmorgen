@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { MAX_MEMORY_NOTE, MAX_MEMORY_NOTES, NOTE_REFUSALS } from "@/lib/assistant-memory-rules";
-import { MEMORY_STORE_REFUSALS, type MemoryChange, changeNote, dropNote, forgetMemory, keepNote, readMemoryState } from "@/lib/assistant-memory-store";
+import { MEMORY_STORE_REFUSALS, type MemoryChange, MemoryWriteUnconfirmed, changeNote, dropNote, forgetMemory, keepNote, readMemoryState } from "@/lib/assistant-memory-store";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
@@ -15,12 +15,15 @@ import { jsonAccess } from "@/lib/studio-route";
  * written (lib/assistant-memory-rules.ts); a note is never cut. A change
  * made while another one holds the notes is refused as busy (409); notes
  * that are kept but cannot be read are said so (503), never listed as none,
- * and never written over (lib/assistant-memory-store.ts).
+ * and never written over; a change whose answer from Redis was not its own
+ * is said unconfirmed (502), never saved (lib/assistant-memory-store.ts).
  */
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
 // The longest note, quoted and escaped, with room for the other fields.
 const MAX_BODY_BYTES = MAX_MEMORY_NOTE * 6 + 1_000;
+/** What the studio shows when Redis's answer to a change was not its own: it may or may not have been made (Codex G2 on #1949, J on #1951). */
+const NOTES_UNCONFIRMED = "We could not confirm whether your notes changed. Reload them to see what is kept before you try again.";
 /** What the studio shows instead of "no notes" when the notes are kept but cannot be read. */
 const NOTES_UNREADABLE = "Your assistant's notes could not be read just now. Try again in a moment.";
 
@@ -64,6 +67,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    if (error instanceof MemoryWriteUnconfirmed) return Response.json({ ok: false, error: "unconfirmed", message: NOTES_UNCONFIRMED }, { status: 502, headers: NO_STORE });
     console.error("saving the assistant's notes failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

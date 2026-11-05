@@ -1,4 +1,4 @@
-import { pointsRecordOf } from "@/lib/community-points";
+import { MAX_REWARDS, award, pointsRecordOf } from "@/lib/community-points";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -37,6 +37,45 @@ async function refuses(reply: unknown): Promise<boolean> {
   }
 }
 
+async function concurrentRemovals(): Promise<{ total: number; today: number }> {
+  let total = 1;
+  let today = 1;
+  let reads = 0;
+  let releaseReads: (() => void) | null = null;
+  const bothRead = new Promise<void>((resolve) => { releaseReads = resolve; });
+  redis.pipeline = (async (batch) => {
+    if (batch.length === 2 && batch.every((command) => command[0] === "ZSCORE")) {
+      const snapshot = [String(total), String(today)];
+      reads += 1;
+      if (reads === 2) releaseReads?.();
+      await bothRead;
+      return snapshot;
+    }
+    if (batch.every((command) => command[0] === "ZINCRBY")) {
+      for (const command of batch) {
+        if (String(command[1]).includes(":pts:d:")) today += Number(command[2]);
+        else total += Number(command[2]);
+      }
+      return batch.map((command) => String(String(command[1]).includes(":pts:d:") ? today : total));
+    }
+    if (batch.length === 1 && batch[0]?.[0] === "EVAL") {
+      if (total > 0) total -= 1;
+      if (today > 0) today -= 1;
+      return [[String(total), String(today)]];
+    }
+    throw new Error("Unexpected community points command");
+  }) as typeof redis.pipeline;
+  try {
+    await Promise.all([
+      award(COMMUNITY, MEMBER, -1, { sid: "points-copy-evidence" }, NOW),
+      award(COMMUNITY, MEMBER, -1, { sid: "points-copy-evidence" }, NOW),
+    ]);
+    return { total, today };
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
 const empty = () => [null, [], ...Array(DAY_READS).fill(null)];
 const populated = () => ["5", [PRODUCT, "123"], "2", ...Array(DAY_READS - 1).fill(null)];
 
@@ -55,6 +94,23 @@ async function main(): Promise<void> {
   is("unlocked rewards are the second read", commands[1]?.[0], "HGETALL");
   is("all remaining reads are daily scores", commands.slice(2).every((command) => command[0] === "ZSCORE"), true);
 
+  part("States produced by the points writer remain copyable");
+  const negative = empty();
+  negative[0] = "-1";
+  negative[2] = "-1";
+  is("legacy negative scores are represented conservatively instead of blocking the copy", await read(negative), {
+    total: 0,
+    days: [{ day: TODAY, points: 0 }],
+    rewards: {},
+  });
+  const retainedRewards = empty();
+  retainedRewards[1] = Array.from({ length: MAX_REWARDS + 1 }, (_, index) => [
+    `course${String(index).padStart(3, "0")}`,
+    String(100 + index),
+  ]).flat();
+  is("retained rewards beyond today's configuration limit remain in the copy", Object.keys((await read(retainedRewards)).rewards).length, MAX_REWARDS + 1);
+  is("two simultaneous removals cannot make stored points negative", await concurrentRemovals(), { total: 0, today: 0 });
+
   part("The pipeline envelope is evidence");
   is("a non-list response is unknown", await refuses(null), true);
   is("a missing daily result is unknown", await refuses(empty().slice(0, -1)), true);
@@ -66,7 +122,6 @@ async function main(): Promise<void> {
     ["boolean", false],
     ["number instead of Redis text", 1],
     ["empty text", ""],
-    ["negative", "-1"],
     ["fractional", "1.5"],
   ] as const) {
     const reply = empty();

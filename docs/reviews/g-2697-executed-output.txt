@@ -1,0 +1,3054 @@
+/tmp/g2697-snapshot-before.log
+=== g-2697-outreach-snapshot.proof.ts ===
+
+Exact known state before page read remains controlled
+  ok    known permitted state writes the last permitted draft
+  ok    local: existing refusal control
+  ok    global: existing refusal control
+  ok    day: existing refusal control
+
+Fresh confirmed state changes during source read are honored before model work
+  ok    local: interleaving really changed Redis
+  ok    local: source read cannot bypass the current refusal
+  ok    local: no extra draft counted after refusal
+  ok    global: interleaving really changed Redis
+  ok    global: source read cannot bypass the current refusal
+  ok    global: no extra draft counted after refusal
+  ok    day: interleaving really changed Redis
+  ok    day: source read cannot bypass the current refusal
+  ok    day: no extra draft counted after refusal
+
+13 checks, all passing.
+
+
+/tmp/g2697-snapshot-head.log
+=== g-2697-outreach-snapshot.proof.ts ===
+
+Exact known state before page read remains controlled
+  ok    known permitted state writes the last permitted draft
+  ok    local: existing refusal control
+  ok    global: existing refusal control
+  ok    day: existing refusal control
+
+Fresh confirmed state changes during source read are honored before model work
+  ok    local: interleaving really changed Redis
+  FAIL  local: source read cannot bypass the current refusal
+        expected ["stopped",0]
+        got      ["written",1]
+  FAIL  local: no extra draft counted after refusal
+        expected 14
+        got      15
+  ok    global: interleaving really changed Redis
+  FAIL  global: source read cannot bypass the current refusal
+        expected ["stopped",0]
+        got      ["written",1]
+  FAIL  global: no extra draft counted after refusal
+        expected 14
+        got      15
+  ok    day: interleaving really changed Redis
+  FAIL  day: source read cannot bypass the current refusal
+        expected ["day",0]
+        got      ["written",1]
+  FAIL  day: no extra draft counted after refusal
+        expected 15
+        got      16
+
+13 checks, 6 failing.
+
+
+/tmp/g2697-author-red.log
+=== sg2-l1-counts.test.ts ===
+
+takeCredit: a closing's email is taken only on a whole number
+  FAIL  takeCredit, a total that is null: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCredit, a total that is null: nothing given back, since the take may have run
+  FAIL  takeCredit, a total written as text: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCredit, a total written as text: nothing given back, since the take may have run
+  FAIL  takeCredit, a total of zero written as text: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCredit, a total of zero written as text: nothing given back, since the take may have run
+  FAIL  takeCredit, a total that is true: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCredit, a total that is true: nothing given back, since the take may have run
+  FAIL  takeCredit, a fractional total: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCredit, a fractional total: nothing given back, since the take may have run
+  FAIL  takeCredit, a negative fractional total: refused as unknown, never taken
+        expected "rejected"
+        got      false
+  FAIL  takeCredit, a negative fractional total: nothing given back, since the take may have run
+        expected false
+        got      true
+  FAIL  takeCredit, a total that is an object: refused as unknown, never taken
+        expected "rejected"
+        got      false
+  FAIL  takeCredit, a total that is an object: nothing given back, since the take may have run
+        expected false
+        got      true
+  FAIL  takeCredit, a total that is a list: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCredit, a total that is a list: nothing given back, since the take may have run
+  FAIL  takeCredit, an empty reply: refused as unknown, never taken
+        expected "rejected"
+        got      false
+  FAIL  takeCredit, an empty reply: nothing given back, since the take may have run
+        expected false
+        got      true
+  FAIL  takeCredit, a second, unasked-for reply: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCredit, a second, unasked-for reply: nothing given back, since the take may have run
+  ok    takeCredit, a reply that is not a list: refused as unknown, never taken
+  ok    takeCredit, a reply that is not a list: nothing given back, since the take may have run
+  ok    takeCredit, a Redis that cannot be asked: refused as unknown, never taken
+  ok    takeCredit, a Redis that cannot be asked: nothing given back, since the take may have run
+  ok    takeCredit: the last one left (0 after) is taken
+  ok    takeCredit: past what was left (-1 after) is refused
+  ok    takeCredit: and what was taken past it is given back, as before
+  ok    takeCredit: the real counter still takes
+  ok    takeCredit: and gives back
+
+takeCalls: a call to the creator's Stripe account is taken only on a whole number
+  FAIL  takeCalls, a total that is null: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCalls, a total that is null: nothing given back, since the take may have run
+  FAIL  takeCalls, a total written as text: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCalls, a total written as text: nothing given back, since the take may have run
+  FAIL  takeCalls, a total of zero written as text: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCalls, a total of zero written as text: nothing given back, since the take may have run
+  FAIL  takeCalls, a total that is true: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCalls, a total that is true: nothing given back, since the take may have run
+  FAIL  takeCalls, a fractional total: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCalls, a fractional total: nothing given back, since the take may have run
+  FAIL  takeCalls, a negative fractional total: refused as unknown, never taken
+        expected "rejected"
+        got      false
+  FAIL  takeCalls, a negative fractional total: nothing given back, since the take may have run
+        expected false
+        got      true
+  FAIL  takeCalls, a total that is an object: refused as unknown, never taken
+        expected "rejected"
+        got      false
+  FAIL  takeCalls, a total that is an object: nothing given back, since the take may have run
+        expected false
+        got      true
+  FAIL  takeCalls, a total that is a list: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCalls, a total that is a list: nothing given back, since the take may have run
+  FAIL  takeCalls, an empty reply: refused as unknown, never taken
+        expected "rejected"
+        got      false
+  FAIL  takeCalls, an empty reply: nothing given back, since the take may have run
+        expected false
+        got      true
+  FAIL  takeCalls, a second, unasked-for reply: refused as unknown, never taken
+        expected "rejected"
+        got      true
+  ok    takeCalls, a second, unasked-for reply: nothing given back, since the take may have run
+  ok    takeCalls, a reply that is not a list: refused as unknown, never taken
+  ok    takeCalls, a reply that is not a list: nothing given back, since the take may have run
+  ok    takeCalls, a Redis that cannot be asked: refused as unknown, never taken
+  ok    takeCalls, a Redis that cannot be asked: nothing given back, since the take may have run
+  ok    takeCalls: the last ones left (0 after) are taken
+  ok    takeCalls: past what was left is refused
+  ok    takeCalls: and given back, as before
+  ok    takeCalls: the real budget still takes
+  ok    takeCalls: nothing asked is nothing taken, without asking Redis
+
+freeDeliveryPaused: an unknown counter pauses free copies
+  FAIL  freeDeliveryPaused, a count that is not a number: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, a negative count: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, a fractional count: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, a count with a space: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, a count that is true: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, a count that is an object: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, an empty reply: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, a second, unasked-for reply: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, a reply that is not a list: paused
+        expected true
+        got      false
+  FAIL  freeDeliveryPaused, a Redis that cannot be asked: paused
+        expected true
+        got      false
+  ok    freeDeliveryPaused: nothing sent this month (no key) is not paused
+  ok    freeDeliveryPaused: a count below the line is not paused
+  ok    freeDeliveryPaused: a count past the line is paused
+
+deliveredThisMonth: an unknown counter is not shown as a figure
+  FAIL  deliveredThisMonth, a count that is not a number: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":0,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, a negative count: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":0,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, a fractional count: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":1.5,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, a count with a space: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":5,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, a count that is true: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":1,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, a count that is an object: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":0,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, an empty reply: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":0,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, a second, unasked-for reply: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":5,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, a reply that is not a list: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":0,"allowance":214748364800,"over":false}
+  FAIL  deliveredThisMonth, a Redis that cannot be asked: unknown (null), never 0 bytes
+        expected null
+        got      {"bytes":0,"allowance":214748364800,"over":false}
+  ok    deliveredThisMonth: nothing sent this month (no key) is 0 bytes
+  ok    deliveredThisMonth: a count is read
+
+orderWriteCharged: what the storage meter was charged is read only as a whole number
+  FAIL  orderWriteCharged, a charge that is null: refused, never charged 0
+        expected "rejected"
+        got      {"charged":0,"replies":[1]}
+  FAIL  orderWriteCharged, a charge written as text: refused, never charged 0
+        expected "rejected"
+        got      {"charged":16,"replies":[1]}
+  FAIL  orderWriteCharged, a charge that is true: refused, never charged 0
+        expected "rejected"
+        got      {"charged":1,"replies":[1]}
+  FAIL  orderWriteCharged, a fractional charge: refused, never charged 0
+        expected "rejected"
+        got      {"charged":1.5,"replies":[1]}
+  ok    orderWriteCharged, a negative charge: refused, never charged 0
+  ok    orderWriteCharged, a charge that is an object: refused, never charged 0
+  ok    orderWriteCharged, a reply missing the command's answer: refused, never charged 0
+  ok    orderWriteCharged, a script answer that is not a list: refused, never charged 0
+  ok    orderWriteCharged, an empty pipeline reply: refused, never charged 0
+  ok    orderWriteCharged, a Redis that cannot be asked: refused, never charged 0
+  ok    orderWriteCharged: the exact reply is read
+  ok    orderWriteCharged: the real script still charges
+
+95 checks, 50 failing.
+could not read this month's deliveries TypeError: (intermediate value) is not iterable
+    at freeDeliveryPaused (/tmp/g-2681-proof-ISvXBa/0.cjs:9564:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (/tmp/g-2681-proof-ISvXBa/0.cjs:9850:49)
+could not read this month's deliveries Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/0.cjs:9763:39)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/0.cjs:3230:41)
+    at freeDeliveryPaused (/tmp/g-2681-proof-ISvXBa/0.cjs:9564:25)
+    at main (/tmp/g-2681-proof-ISvXBa/0.cjs:9850:55)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+could not read this month's deliveries TypeError: (intermediate value) is not iterable
+    at deliveredThisMonth (/tmp/g-2681-proof-ISvXBa/0.cjs:9552:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (/tmp/g-2681-proof-ISvXBa/0.cjs:9861:72)
+could not read this month's deliveries Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/0.cjs:9763:39)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/0.cjs:3230:41)
+    at deliveredThisMonth (/tmp/g-2681-proof-ISvXBa/0.cjs:9552:25)
+    at main (/tmp/g-2681-proof-ISvXBa/0.cjs:9861:78)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+=== sg2-l1-outreach.test.ts ===
+
+startPitch: a business is written to only on an exact 'not stopped' and a known day's count
+  FAIL  the store's stop answered null: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the store's stop answered null: and the model is never asked
+        expected false
+        got      true
+  FAIL  the store's stop as text: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the store's stop as text: and the model is never asked
+        expected false
+        got      true
+  FAIL  the store's stop as false: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the store's stop as false: and the model is never asked
+        expected false
+        got      true
+  FAIL  the store's stop as 2: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the store's stop as 2: and the model is never asked
+        expected false
+        got      true
+  FAIL  everyone's stop answered null: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  everyone's stop answered null: and the model is never asked
+        expected false
+        got      true
+  FAIL  everyone's stop as an object: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  everyone's stop as an object: and the model is never asked
+        expected false
+        got      true
+  FAIL  the day's count not a number: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the day's count not a number: and the model is never asked
+        expected false
+        got      true
+  FAIL  the day's count negative: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the day's count negative: and the model is never asked
+        expected false
+        got      true
+  FAIL  the day's count a fraction: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the day's count a fraction: and the model is never asked
+        expected false
+        got      true
+  FAIL  the day's count true: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the day's count true: and the model is never asked
+        expected false
+        got      true
+  FAIL  the day's count an object: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  the day's count an object: and the model is never asked
+        expected false
+        got      true
+  FAIL  one reply missing: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  one reply missing: and the model is never asked
+        expected false
+        got      true
+  FAIL  one reply too many: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  one reply too many: and the model is never asked
+        expected false
+        got      true
+  FAIL  an empty reply: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  an empty reply: and the model is never asked
+        expected false
+        got      true
+  FAIL  a reply that is not a list: refused as unavailable
+        expected "unavailable"
+        got      "written"
+  FAIL  a reply that is not a list: and the model is never asked
+        expected false
+        got      true
+  ok    the store's stop answered 1: stopped
+  ok    everyone's stop answered 1: stopped
+  ok    the day's number reached: refused for the day
+  ok    exact answers below the day's number: written, as before
+
+readStopLink: a stop is said to hold only on an exact 1
+  ok    exact: not stopped anywhere
+  ok    exact: stopped by this store
+  ok    exact: stopped everywhere
+  FAIL  the store's stop as text '1': not claimed, the buttons stay
+        expected [false,false]
+        got      [true,false]
+  FAIL  everyone's stop as text '1': not claimed, the buttons stay
+        expected [false,false]
+        got      [true,true]
+  FAIL  everyone's stop as true: not claimed
+        expected [false,false]
+        got      [true,true]
+  FAIL  a reply missing one answer: not claimed
+        expected [false,false]
+        got      [true,false]
+  FAIL  a reply that is not a list: not claimed
+        expected [false,false]
+        got      "threw"
+
+42 checks, 35 failing.
+
+=== sg2-l1-delivery-watch.test.ts ===
+
+recordDelivery: counted only on a whole total
+  FAIL  a total that is null: not counted
+        expected false
+        got      undefined
+  FAIL  a total that is null: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  a total written as text: not counted
+        expected false
+        got      undefined
+  FAIL  a total written as text: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  a fractional total: not counted
+        expected false
+        got      undefined
+  FAIL  a fractional total: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  a negative total: not counted
+        expected false
+        got      undefined
+  FAIL  a negative total: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  a total below what was just added: not counted
+        expected false
+        got      undefined
+  FAIL  a total below what was just added: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  a total that is an object: not counted
+        expected false
+        got      undefined
+  FAIL  a total that is an object: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  the EXPIRE's answer missing: not counted
+        expected false
+        got      undefined
+  FAIL  the EXPIRE's answer missing: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  an empty reply: not counted
+        expected false
+        got      undefined
+  FAIL  an empty reply: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  a reply that is not a list: not counted
+        expected false
+        got      undefined
+  FAIL  a reply that is not a list: the store is put on the month's list to look at
+        expected true
+        got      false
+  FAIL  a Redis that cannot be asked: not counted
+        expected false
+        got      undefined
+  FAIL  an exact total: counted
+        expected true
+        got      undefined
+  ok    and not listed, being far inside
+  FAIL  the real counter: counted
+        expected true
+        got      undefined
+  ok    inside: not listed
+  FAIL  the delivery that crosses: counted
+        expected true
+        got      undefined
+  ok    and listed once, as before
+  FAIL  nothing to count (no bytes) is not a failure
+        expected true
+        got      undefined
+  FAIL  nor a file outside any store
+        expected true
+        got      undefined
+
+storesOverAllowance: an unknown list or total is never 'nobody is over'
+  ok    the real list: only the store really over
+  FAIL  the list answered null: refused, never an empty list
+        expected "rejected"
+        got      []
+  FAIL  the list holding a number: refused, never an empty list
+        expected "rejected"
+        got      [{"folder":"big","bytes":220117073920}]
+  FAIL  the list as an object: refused, never an empty list
+        expected "rejected"
+        got      []
+  FAIL  an empty reply: refused, never an empty list
+        expected "rejected"
+        got      []
+  FAIL  a reply that is not a list: refused, never an empty list
+        expected "rejected"
+        got      []
+  FAIL  a Redis that cannot be asked: refused, never an empty list
+        expected "rejected"
+        got      []
+  FAIL  a total that is not a number: refused, never 0 bytes
+        expected "rejected"
+        got      []
+  FAIL  a negative total: refused, never 0 bytes
+        expected "rejected"
+        got      []
+  FAIL  a fractional total: refused, never 0 bytes
+        expected "rejected"
+        got      []
+  FAIL  a total that is true: refused, never 0 bytes
+        expected "rejected"
+        got      []
+  FAIL  one total missing: refused, never 0 bytes
+        expected "rejected"
+        got      []
+  FAIL  a total too many: refused, never 0 bytes
+        expected "rejected"
+        got      []
+  FAIL  a reply that is not a list: refused, never 0 bytes
+        expected "rejected"
+        got      []
+  FAIL  a Redis that cannot be asked: refused, never 0 bytes
+        expected "rejected"
+        got      []
+  ok    a total whose key is gone is 0 and not named; the rest are read
+
+43 checks, 38 failing.
+could not record a delivery TypeError: (intermediate value) is not iterable
+    at recordDelivery (/tmp/g-2681-proof-ISvXBa/2.cjs:1805:21)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (/tmp/g-2681-proof-ISvXBa/2.cjs:1906:33)
+could not record a delivery Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/2.cjs:1871:39)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/2.cjs:1768:41)
+    at recordDelivery (/tmp/g-2681-proof-ISvXBa/2.cjs:1805:27)
+    at main (/tmp/g-2681-proof-ISvXBa/2.cjs:1906:39)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+could not read the stores over the allowance TypeError: (intermediate value) is not iterable
+    at storesOverAllowance (/tmp/g-2681-proof-ISvXBa/2.cjs:1825:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async outcome (/tmp/g-2681-proof-ISvXBa/2.cjs:1881:12)
+    at async main (/tmp/g-2681-proof-ISvXBa/2.cjs:1941:50)
+could not read the stores over the allowance Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/2.cjs:1871:39)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/2.cjs:1768:41)
+    at storesOverAllowance (/tmp/g-2681-proof-ISvXBa/2.cjs:1825:25)
+    at /tmp/g-2681-proof-ISvXBa/2.cjs:1941:70
+    at outcome (/tmp/g-2681-proof-ISvXBa/2.cjs:1881:18)
+    at main (/tmp/g-2681-proof-ISvXBa/2.cjs:1941:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+could not read the stores over the allowance Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/2.cjs:1871:39)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/2.cjs:1768:41)
+    at storesOverAllowance (/tmp/g-2681-proof-ISvXBa/2.cjs:1828:26)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async outcome (/tmp/g-2681-proof-ISvXBa/2.cjs:1881:12)
+    at async main (/tmp/g-2681-proof-ISvXBa/2.cjs:1954:44)
+
+=== sg2-l1-serve-file.test.ts ===
+
+a free copy over the line: paused, and said truthfully
+  FAIL  at 50 GB: paused
+        expected [429,"This free download is paused until next month. This store has reached its free download allowance for this month. Anything you have bought is unaffected. Please try again next month or contact the creator."]
+        got      [429,"This free download is paused until next month. The store has given away more this month than its plan covers. Anything you have bought is unaffected, and the creator has been told."]
+  FAIL  at 50 GB: never says the creator was told
+        expected false
+        got      true
+  FAIL  at 60 GB: paused
+        expected [429,"This free download is paused until next month. This store has reached its free download allowance for this month. Anything you have bought is unaffected. Please try again next month or contact the creator."]
+        got      [429,"This free download is paused until next month. The store has given away more this month than its plan covers. Anything you have bought is unaffected, and the creator has been told."]
+  FAIL  at 60 GB: never says the creator was told
+        expected false
+        got      true
+  FAIL  at 199 GB: paused
+        expected [429,"This free download is paused until next month. This store has reached its free download allowance for this month. Anything you have bought is unaffected. Please try again next month or contact the creator."]
+        got      [429,"This free download is paused until next month. The store has given away more this month than its plan covers. Anything you have bought is unaffected, and the creator has been told."]
+  FAIL  at 199 GB: never says the creator was told
+        expected false
+        got      true
+  FAIL  at 250 GB: paused
+        expected [429,"This free download is paused until next month. This store has reached its free download allowance for this month. Anything you have bought is unaffected. Please try again next month or contact the creator."]
+        got      [429,"This free download is paused until next month. The store has given away more this month than its plan covers. Anything you have bought is unaffected, and the creator has been told."]
+  FAIL  at 250 GB: never says the creator was told
+        expected false
+        got      true
+
+a free copy whose counter is unknown: refused, and said truthfully
+  FAIL  a count that is not a number: refused as not checked
+        expected [503,"We couldn't check this download right now. Please try again in a few minutes."]
+        got      [302,""]
+  ok    a count that is not a number: never says the creator was told
+  FAIL  a negative count: refused as not checked
+        expected [503,"We couldn't check this download right now. Please try again in a few minutes."]
+        got      [302,""]
+  ok    a negative count: never says the creator was told
+  FAIL  a count that is an object: refused as not checked
+        expected [503,"We couldn't check this download right now. Please try again in a few minutes."]
+        got      [302,""]
+  ok    a count that is an object: never says the creator was told
+  FAIL  an empty reply: refused as not checked
+        expected [503,"We couldn't check this download right now. Please try again in a few minutes."]
+        got      [302,""]
+  ok    an empty reply: never says the creator was told
+  FAIL  a Redis that cannot be asked: refused as not checked
+        expected [503,"We couldn't check this download right now. Please try again in a few minutes."]
+        got      [302,""]
+  ok    a Redis that cannot be asked: never says the creator was told
+
+a free copy that could not be counted is not handed out
+  FAIL  INCRBY answered null: refused as not checked
+        expected [503,"We couldn't check this download right now. Please try again in a few minutes."]
+        got      [302,""]
+  ok    INCRBY answered null: a paid file still goes out
+  FAIL  INCRBY answered text: refused as not checked
+        expected [503,"We couldn't check this download right now. Please try again in a few minutes."]
+        got      [302,""]
+  ok    INCRBY answered text: a paid file still goes out
+  FAIL  INCRBY could not be asked: refused as not checked
+        expected [503,"We couldn't check this download right now. Please try again in a few minutes."]
+        got      [302,""]
+  ok    INCRBY could not be asked: a paid file still goes out
+
+what was fine stays fine
+  ok    a paid file never asks the counter
+  ok    a free copy with a real counter goes out
+
+26 checks, 16 failing.
+could not read this month's deliveries Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/3.cjs:33912:39)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/3.cjs:33666:41)
+    at freeDeliveryPaused (/tmp/g-2681-proof-ISvXBa/3.cjs:33803:25)
+    at serveFile (/tmp/g-2681-proof-ISvXBa/3.cjs:33847:25)
+    at answer (/tmp/g-2681-proof-ISvXBa/3.cjs:33928:26)
+    at main (/tmp/g-2681-proof-ISvXBa/3.cjs:33949:34)
+could not record a delivery Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/3.cjs:33912:39)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/3.cjs:33666:41)
+    at recordDelivery (/tmp/g-2681-proof-ISvXBa/3.cjs:33784:27)
+    at serveFile (/tmp/g-2681-proof-ISvXBa/3.cjs:33857:11)
+    at async answer (/tmp/g-2681-proof-ISvXBa/3.cjs:33928:20)
+    at async main (/tmp/g-2681-proof-ISvXBa/3.cjs:33960:44)
+could not record a delivery Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/3.cjs:33912:39)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/3.cjs:33666:41)
+    at recordDelivery (/tmp/g-2681-proof-ISvXBa/3.cjs:33784:27)
+    at serveFile (/tmp/g-2681-proof-ISvXBa/3.cjs:33857:11)
+    at async answer (/tmp/g-2681-proof-ISvXBa/3.cjs:33928:20)
+    at async main (/tmp/g-2681-proof-ISvXBa/3.cjs:33961:49)
+
+=== sg2-l1-outreach-order.test.ts ===
+
+an unknown answer refuses before the paid window is reserved
+  FAIL  the store's stop answered null: unavailable, and no window reserved
+        expected ["unavailable",0]
+        got      ["off",1]
+  FAIL  everyone's stop as text: unavailable, and no window reserved
+        expected ["unavailable",0]
+        got      ["off",1]
+  FAIL  the day's count not a number: unavailable, and no window reserved
+        expected ["unavailable",0]
+        got      ["off",1]
+  FAIL  one reply missing: unavailable, and no window reserved
+        expected ["unavailable",0]
+        got      ["off",1]
+  FAIL  a reply that is not a list: unavailable, and no window reserved
+        expected ["unavailable",0]
+        got      ["off",1]
+
+a known refusal also comes before the reservation
+  FAIL  stopped: refused, no window reserved
+        expected ["stopped",0]
+        got      ["stopped",1]
+
+exact answers go on to reserve the window, as before
+  ok    the window is reserved once
+
+7 checks, 6 failing.
+
+=== sg2-l1-usage-cron.test.ts ===
+
+delivery allowance: the list cannot be asked
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: every store inside the delivery allowance
+  FAIL  the run answers an error at the end, never throws
+        expected true
+        got      false
+  FAIL  and names the part that is unknown
+        expected ["delivery"]
+        got      undefined
+  ok    video hours still ran, and are in the answer
+  ok    visits still ran, and are in the answer
+  ok    orders still ran, and are in the answer
+  ok    the delivery told list is left as it was
+
+delivery allowance: the list answered null
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: every store inside the delivery allowance
+  FAIL  the run answers an error at the end, never throws
+        expected true
+        got      false
+  FAIL  and names the part that is unknown
+        expected ["delivery"]
+        got      undefined
+  ok    video hours still ran, and are in the answer
+  ok    visits still ran, and are in the answer
+  ok    orders still ran, and are in the answer
+  ok    the delivery told list is left as it was
+
+delivery allowance: the list holding a number
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: every store inside the delivery allowance
+  FAIL  the run answers an error at the end, never throws
+        expected true
+        got      false
+  FAIL  and names the part that is unknown
+        expected ["delivery"]
+        got      undefined
+  ok    video hours still ran, and are in the answer
+  ok    visits still ran, and are in the answer
+  ok    orders still ran, and are in the answer
+  ok    the delivery told list is left as it was
+
+every part read: as before
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: every store inside the delivery allowance
+  ok    ok
+  ok    nothing named unknown
+
+20 checks, 6 failing.
+could not read the stores over the allowance Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-ISvXBa/5.cjs:16219:47)
+    at redisPipeline (/tmp/g-2681-proof-ISvXBa/5.cjs:8239:41)
+    at storesOverAllowance (/tmp/g-2681-proof-ISvXBa/5.cjs:13049:25)
+    at GET (/tmp/g-2681-proof-ISvXBa/5.cjs:16038:22)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async run (/tmp/g-2681-proof-ISvXBa/5.cjs:16229:22)
+    at async main (/tmp/g-2681-proof-ISvXBa/5.cjs:16245:17)
+
+
+/tmp/g2697-author-green.log
+=== sg2-l1-counts.test.ts ===
+
+takeCredit: a closing's email is taken only on a whole number
+  ok    takeCredit, a total that is null: refused as unknown, never taken
+  ok    takeCredit, a total that is null: nothing given back, since the take may have run
+  ok    takeCredit, a total written as text: refused as unknown, never taken
+  ok    takeCredit, a total written as text: nothing given back, since the take may have run
+  ok    takeCredit, a total of zero written as text: refused as unknown, never taken
+  ok    takeCredit, a total of zero written as text: nothing given back, since the take may have run
+  ok    takeCredit, a total that is true: refused as unknown, never taken
+  ok    takeCredit, a total that is true: nothing given back, since the take may have run
+  ok    takeCredit, a fractional total: refused as unknown, never taken
+  ok    takeCredit, a fractional total: nothing given back, since the take may have run
+  ok    takeCredit, a negative fractional total: refused as unknown, never taken
+  ok    takeCredit, a negative fractional total: nothing given back, since the take may have run
+  ok    takeCredit, a total that is an object: refused as unknown, never taken
+  ok    takeCredit, a total that is an object: nothing given back, since the take may have run
+  ok    takeCredit, a total that is a list: refused as unknown, never taken
+  ok    takeCredit, a total that is a list: nothing given back, since the take may have run
+  ok    takeCredit, an empty reply: refused as unknown, never taken
+  ok    takeCredit, an empty reply: nothing given back, since the take may have run
+  ok    takeCredit, a second, unasked-for reply: refused as unknown, never taken
+  ok    takeCredit, a second, unasked-for reply: nothing given back, since the take may have run
+  ok    takeCredit, a reply that is not a list: refused as unknown, never taken
+  ok    takeCredit, a reply that is not a list: nothing given back, since the take may have run
+  ok    takeCredit, a Redis that cannot be asked: refused as unknown, never taken
+  ok    takeCredit, a Redis that cannot be asked: nothing given back, since the take may have run
+  ok    takeCredit: the last one left (0 after) is taken
+  ok    takeCredit: past what was left (-1 after) is refused
+  ok    takeCredit: and what was taken past it is given back, as before
+  ok    takeCredit: the real counter still takes
+  ok    takeCredit: and gives back
+
+takeCalls: a call to the creator's Stripe account is taken only on a whole number
+  ok    takeCalls, a total that is null: refused as unknown, never taken
+  ok    takeCalls, a total that is null: nothing given back, since the take may have run
+  ok    takeCalls, a total written as text: refused as unknown, never taken
+  ok    takeCalls, a total written as text: nothing given back, since the take may have run
+  ok    takeCalls, a total of zero written as text: refused as unknown, never taken
+  ok    takeCalls, a total of zero written as text: nothing given back, since the take may have run
+  ok    takeCalls, a total that is true: refused as unknown, never taken
+  ok    takeCalls, a total that is true: nothing given back, since the take may have run
+  ok    takeCalls, a fractional total: refused as unknown, never taken
+  ok    takeCalls, a fractional total: nothing given back, since the take may have run
+  ok    takeCalls, a negative fractional total: refused as unknown, never taken
+  ok    takeCalls, a negative fractional total: nothing given back, since the take may have run
+  ok    takeCalls, a total that is an object: refused as unknown, never taken
+  ok    takeCalls, a total that is an object: nothing given back, since the take may have run
+  ok    takeCalls, a total that is a list: refused as unknown, never taken
+  ok    takeCalls, a total that is a list: nothing given back, since the take may have run
+  ok    takeCalls, an empty reply: refused as unknown, never taken
+  ok    takeCalls, an empty reply: nothing given back, since the take may have run
+  ok    takeCalls, a second, unasked-for reply: refused as unknown, never taken
+  ok    takeCalls, a second, unasked-for reply: nothing given back, since the take may have run
+  ok    takeCalls, a reply that is not a list: refused as unknown, never taken
+  ok    takeCalls, a reply that is not a list: nothing given back, since the take may have run
+  ok    takeCalls, a Redis that cannot be asked: refused as unknown, never taken
+  ok    takeCalls, a Redis that cannot be asked: nothing given back, since the take may have run
+  ok    takeCalls: the last ones left (0 after) are taken
+  ok    takeCalls: past what was left is refused
+  ok    takeCalls: and given back, as before
+  ok    takeCalls: the real budget still takes
+  ok    takeCalls: nothing asked is nothing taken, without asking Redis
+
+freeDeliveryPaused: an unknown counter pauses free copies
+  ok    freeDeliveryPaused, a count that is not a number: paused
+  ok    freeDeliveryPaused, a negative count: paused
+  ok    freeDeliveryPaused, a fractional count: paused
+  ok    freeDeliveryPaused, a count with a space: paused
+  ok    freeDeliveryPaused, a count that is true: paused
+  ok    freeDeliveryPaused, a count that is an object: paused
+  ok    freeDeliveryPaused, an empty reply: paused
+  ok    freeDeliveryPaused, a second, unasked-for reply: paused
+  ok    freeDeliveryPaused, a reply that is not a list: paused
+  ok    freeDeliveryPaused, a Redis that cannot be asked: paused
+  ok    freeDeliveryPaused: nothing sent this month (no key) is not paused
+  ok    freeDeliveryPaused: a count below the line is not paused
+  ok    freeDeliveryPaused: a count past the line is paused
+
+deliveredThisMonth: an unknown counter is not shown as a figure
+  ok    deliveredThisMonth, a count that is not a number: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, a negative count: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, a fractional count: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, a count with a space: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, a count that is true: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, a count that is an object: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, an empty reply: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, a second, unasked-for reply: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, a reply that is not a list: unknown (null), never 0 bytes
+  ok    deliveredThisMonth, a Redis that cannot be asked: unknown (null), never 0 bytes
+  ok    deliveredThisMonth: nothing sent this month (no key) is 0 bytes
+  ok    deliveredThisMonth: a count is read
+
+orderWriteCharged: what the storage meter was charged is read only as a whole number
+  ok    orderWriteCharged, a charge that is null: refused, never charged 0
+  ok    orderWriteCharged, a charge written as text: refused, never charged 0
+  ok    orderWriteCharged, a charge that is true: refused, never charged 0
+  ok    orderWriteCharged, a fractional charge: refused, never charged 0
+  ok    orderWriteCharged, a negative charge: refused, never charged 0
+  ok    orderWriteCharged, a charge that is an object: refused, never charged 0
+  ok    orderWriteCharged, a reply missing the command's answer: refused, never charged 0
+  ok    orderWriteCharged, a script answer that is not a list: refused, never charged 0
+  ok    orderWriteCharged, an empty pipeline reply: refused, never charged 0
+  ok    orderWriteCharged, a Redis that cannot be asked: refused, never charged 0
+  ok    orderWriteCharged: the exact reply is read
+  ok    orderWriteCharged: the real script still charges
+
+95 checks, all passing.
+could not read this month's deliveries Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-C3r5RY/0.cjs:9797:39)
+    at redisPipeline (/tmp/g-2681-proof-C3r5RY/0.cjs:3230:41)
+    at monthBytes (/tmp/g-2681-proof-C3r5RY/0.cjs:9579:38)
+    at freeDeliveryPause (/tmp/g-2681-proof-C3r5RY/0.cjs:9598:23)
+    at freeDeliveryPaused (/tmp/g-2681-proof-C3r5RY/0.cjs:9603:16)
+    at main (/tmp/g-2681-proof-C3r5RY/0.cjs:9884:55)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+could not read this month's deliveries Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-C3r5RY/0.cjs:9797:39)
+    at redisPipeline (/tmp/g-2681-proof-C3r5RY/0.cjs:3230:41)
+    at monthBytes (/tmp/g-2681-proof-C3r5RY/0.cjs:9579:38)
+    at deliveredThisMonth (/tmp/g-2681-proof-C3r5RY/0.cjs:9592:23)
+    at main (/tmp/g-2681-proof-C3r5RY/0.cjs:9895:78)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+=== sg2-l1-outreach.test.ts ===
+
+startPitch: a business is written to only on an exact 'not stopped' and a known day's count
+  ok    the store's stop answered null: refused as unavailable
+  ok    the store's stop answered null: and the model is never asked
+  ok    the store's stop as text: refused as unavailable
+  ok    the store's stop as text: and the model is never asked
+  ok    the store's stop as false: refused as unavailable
+  ok    the store's stop as false: and the model is never asked
+  ok    the store's stop as 2: refused as unavailable
+  ok    the store's stop as 2: and the model is never asked
+  ok    everyone's stop answered null: refused as unavailable
+  ok    everyone's stop answered null: and the model is never asked
+  ok    everyone's stop as an object: refused as unavailable
+  ok    everyone's stop as an object: and the model is never asked
+  ok    the day's count not a number: refused as unavailable
+  ok    the day's count not a number: and the model is never asked
+  ok    the day's count negative: refused as unavailable
+  ok    the day's count negative: and the model is never asked
+  ok    the day's count a fraction: refused as unavailable
+  ok    the day's count a fraction: and the model is never asked
+  ok    the day's count true: refused as unavailable
+  ok    the day's count true: and the model is never asked
+  ok    the day's count an object: refused as unavailable
+  ok    the day's count an object: and the model is never asked
+  ok    one reply missing: refused as unavailable
+  ok    one reply missing: and the model is never asked
+  ok    one reply too many: refused as unavailable
+  ok    one reply too many: and the model is never asked
+  ok    an empty reply: refused as unavailable
+  ok    an empty reply: and the model is never asked
+  ok    a reply that is not a list: refused as unavailable
+  ok    a reply that is not a list: and the model is never asked
+  ok    the store's stop answered 1: stopped
+  ok    everyone's stop answered 1: stopped
+  ok    the day's number reached: refused for the day
+  ok    exact answers below the day's number: written, as before
+
+readStopLink: a stop is said to hold only on an exact 1
+  ok    exact: not stopped anywhere
+  ok    exact: stopped by this store
+  ok    exact: stopped everywhere
+  ok    the store's stop as text '1': not claimed, the buttons stay
+  ok    everyone's stop as text '1': not claimed, the buttons stay
+  ok    everyone's stop as true: not claimed
+  ok    a reply missing one answer: not claimed
+  ok    a reply that is not a list: not claimed
+
+42 checks, all passing.
+
+=== sg2-l1-redis-count.test.ts ===
+
+textCountOf: a GET or MGET slot
+  ok    a missing key is absent, not zero and not unknown
+  ok    the text Redis keeps
+  ok    zero as text
+  ok    a whole number
+  ok    zero
+  ok    the largest safe whole number as text
+  ok    undefined (a slot that never came back) is unknown
+  ok    an empty text is unknown
+  ok    a leading zero is unknown
+  ok    a sign is unknown
+  ok    a negative as text is unknown
+  ok    a fraction as text is unknown
+  ok    an exponent is unknown
+  ok    spaces around it is unknown
+  ok    words is unknown
+  ok    past the safe whole numbers is unknown
+  ok    a negative number is unknown
+  ok    a fraction is unknown
+  ok    not a number is unknown
+  ok    infinity is unknown
+  ok    an unsafe whole number is unknown
+  ok    true is unknown
+  ok    false is unknown
+  ok    an object is unknown
+  ok    a list is unknown
+
+signedOf: a DECRBY, INCRBY or HINCRBY total
+  ok    a whole number
+  ok    zero
+  ok    below zero, a take past what was left
+  ok    null is unknown
+  ok    undefined is unknown
+  ok    a count as text is unknown
+  ok    a negative as text is unknown
+  ok    a fraction is unknown
+  ok    a negative fraction is unknown
+  ok    not a number is unknown
+  ok    infinity is unknown
+  ok    an unsafe whole number is unknown
+  ok    true is unknown
+  ok    an object is unknown
+  ok    a list is unknown
+
+40 checks, all passing.
+
+=== sg2-l1-delivery-watch.test.ts ===
+
+recordDelivery: counted only on a whole total
+  ok    a total that is null: not counted
+  ok    a total that is null: the store is put on the month's list to look at
+  ok    a total written as text: not counted
+  ok    a total written as text: the store is put on the month's list to look at
+  ok    a fractional total: not counted
+  ok    a fractional total: the store is put on the month's list to look at
+  ok    a negative total: not counted
+  ok    a negative total: the store is put on the month's list to look at
+  ok    a total below what was just added: not counted
+  ok    a total below what was just added: the store is put on the month's list to look at
+  ok    a total that is an object: not counted
+  ok    a total that is an object: the store is put on the month's list to look at
+  ok    the EXPIRE's answer missing: not counted
+  ok    the EXPIRE's answer missing: the store is put on the month's list to look at
+  ok    an empty reply: not counted
+  ok    an empty reply: the store is put on the month's list to look at
+  ok    a reply that is not a list: not counted
+  ok    a reply that is not a list: the store is put on the month's list to look at
+  ok    a Redis that cannot be asked: not counted
+  ok    an exact total: counted
+  ok    and not listed, being far inside
+  ok    the real counter: counted
+  ok    inside: not listed
+  ok    the delivery that crosses: counted
+  ok    and listed once, as before
+  ok    nothing to count (no bytes) is not a failure
+  ok    nor a file outside any store
+
+storesOverAllowance: an unknown list or total is never 'nobody is over'
+  ok    the real list: only the store really over
+  ok    the list answered null: refused, never an empty list
+  ok    the list holding a number: refused, never an empty list
+  ok    the list as an object: refused, never an empty list
+  ok    an empty reply: refused, never an empty list
+  ok    a reply that is not a list: refused, never an empty list
+  ok    a Redis that cannot be asked: refused, never an empty list
+  ok    a total that is not a number: refused, never 0 bytes
+  ok    a negative total: refused, never 0 bytes
+  ok    a fractional total: refused, never 0 bytes
+  ok    a total that is true: refused, never 0 bytes
+  ok    one total missing: refused, never 0 bytes
+  ok    a total too many: refused, never 0 bytes
+  ok    a reply that is not a list: refused, never 0 bytes
+  ok    a Redis that cannot be asked: refused, never 0 bytes
+  ok    a total whose key is gone is 0 and not named; the rest are read
+
+43 checks, all passing.
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+could not record a delivery Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-C3r5RY/3.cjs:1916:39)
+    at redisPipeline (/tmp/g-2681-proof-C3r5RY/3.cjs:1768:41)
+    at recordDelivery (/tmp/g-2681-proof-C3r5RY/3.cjs:1837:13)
+    at main (/tmp/g-2681-proof-C3r5RY/3.cjs:1951:39)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+=== sg2-l1-serve-file.test.ts ===
+
+a free copy over the line: paused, and said truthfully
+  ok    at 50 GB: paused
+  ok    at 50 GB: never says the creator was told
+  ok    at 60 GB: paused
+  ok    at 60 GB: never says the creator was told
+  ok    at 199 GB: paused
+  ok    at 199 GB: never says the creator was told
+  ok    at 250 GB: paused
+  ok    at 250 GB: never says the creator was told
+
+a free copy whose counter is unknown: refused, and said truthfully
+  ok    a count that is not a number: refused as not checked
+  ok    a count that is not a number: never says the creator was told
+  ok    a negative count: refused as not checked
+  ok    a negative count: never says the creator was told
+  ok    a count that is an object: refused as not checked
+  ok    a count that is an object: never says the creator was told
+  ok    an empty reply: refused as not checked
+  ok    an empty reply: never says the creator was told
+  ok    a Redis that cannot be asked: refused as not checked
+  ok    a Redis that cannot be asked: never says the creator was told
+
+a free copy that could not be counted is not handed out
+  ok    INCRBY answered null: refused as not checked
+  ok    INCRBY answered null: a paid file still goes out
+  ok    INCRBY answered text: refused as not checked
+  ok    INCRBY answered text: a paid file still goes out
+  ok    INCRBY could not be asked: refused as not checked
+  ok    INCRBY could not be asked: a paid file still goes out
+
+what was fine stays fine
+  ok    a paid file never asks the counter
+  ok    a free copy with a real counter goes out
+
+26 checks, all passing.
+could not read this month's deliveries Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-C3r5RY/4.cjs:33958:39)
+    at redisPipeline (/tmp/g-2681-proof-C3r5RY/4.cjs:33666:41)
+    at monthBytes (/tmp/g-2681-proof-C3r5RY/4.cjs:33832:38)
+    at freeDeliveryPause (/tmp/g-2681-proof-C3r5RY/4.cjs:33842:24)
+    at serveFile (/tmp/g-2681-proof-C3r5RY/4.cjs:33885:34)
+    at answer (/tmp/g-2681-proof-C3r5RY/4.cjs:33974:26)
+    at main (/tmp/g-2681-proof-C3r5RY/4.cjs:33995:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+recording a delivery: Redis answered INCRBY in an unknown shape
+could not record a delivery Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-C3r5RY/4.cjs:33958:39)
+    at redisPipeline (/tmp/g-2681-proof-C3r5RY/4.cjs:33666:41)
+    at recordDelivery (/tmp/g-2681-proof-C3r5RY/4.cjs:33805:13)
+    at serveFile (/tmp/g-2681-proof-C3r5RY/4.cjs:33899:16)
+    at async answer (/tmp/g-2681-proof-C3r5RY/4.cjs:33974:20)
+    at async main (/tmp/g-2681-proof-C3r5RY/4.cjs:34006:44)
+could not record a delivery Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-C3r5RY/4.cjs:33958:39)
+    at redisPipeline (/tmp/g-2681-proof-C3r5RY/4.cjs:33666:41)
+    at recordDelivery (/tmp/g-2681-proof-C3r5RY/4.cjs:33805:13)
+    at serveFile (/tmp/g-2681-proof-C3r5RY/4.cjs:33899:16)
+    at async answer (/tmp/g-2681-proof-C3r5RY/4.cjs:33974:20)
+    at async main (/tmp/g-2681-proof-C3r5RY/4.cjs:34007:49)
+
+=== sg2-l1-outreach-order.test.ts ===
+
+an unknown answer refuses before the paid window is reserved
+  ok    the store's stop answered null: unavailable, and no window reserved
+  ok    everyone's stop as text: unavailable, and no window reserved
+  ok    the day's count not a number: unavailable, and no window reserved
+  ok    one reply missing: unavailable, and no window reserved
+  ok    a reply that is not a list: unavailable, and no window reserved
+
+a known refusal also comes before the reservation
+  ok    stopped: refused, no window reserved
+
+exact answers go on to reserve the window, as before
+  ok    the window is reserved once
+
+7 checks, all passing.
+
+=== sg2-l1-usage-cron.test.ts ===
+
+delivery allowance: the list cannot be asked
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+  ok    the run answers an error at the end, never throws
+  ok    and names the part that is unknown
+  ok    video hours still ran, and are in the answer
+  ok    visits still ran, and are in the answer
+  ok    orders still ran, and are in the answer
+  ok    the delivery told list is left as it was
+
+delivery allowance: the list answered null
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+  ok    the run answers an error at the end, never throws
+  ok    and names the part that is unknown
+  ok    video hours still ran, and are in the answer
+  ok    visits still ran, and are in the answer
+  ok    orders still ran, and are in the answer
+  ok    the delivery told list is left as it was
+
+delivery allowance: the list holding a number
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+  ok    the run answers an error at the end, never throws
+  ok    and names the part that is unknown
+  ok    video hours still ran, and are in the answer
+  ok    visits still ran, and are in the answer
+  ok    orders still ran, and are in the answer
+  ok    the delivery told list is left as it was
+
+every part read: as before
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: every store inside the delivery allowance
+  ok    ok
+  ok    nothing named unknown
+
+20 checks, all passing.
+usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it Error: the database did not answer
+    at store.pipeline (/tmp/g-2681-proof-C3r5RY/6.cjs:16258:47)
+    at redisPipeline (/tmp/g-2681-proof-C3r5RY/6.cjs:8239:41)
+    at storesOverAllowance (/tmp/g-2681-proof-C3r5RY/6.cjs:13074:35)
+    at GET (/tmp/g-2681-proof-C3r5RY/6.cjs:16070:18)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async run (/tmp/g-2681-proof-C3r5RY/6.cjs:16268:22)
+    at async main (/tmp/g-2681-proof-C3r5RY/6.cjs:16284:17)
+usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it UnknownReplyError: Redis answered the stores over the delivery allowance in an unknown shape
+    at storesOverAllowance (/tmp/g-2681-proof-C3r5RY/6.cjs:13076:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET (/tmp/g-2681-proof-C3r5RY/6.cjs:16070:12)
+    at async run (/tmp/g-2681-proof-C3r5RY/6.cjs:16268:22)
+    at async main (/tmp/g-2681-proof-C3r5RY/6.cjs:16284:17)
+usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it UnknownReplyError: Redis answered the stores over the delivery allowance in an unknown shape
+    at storesOverAllowance (/tmp/g-2681-proof-C3r5RY/6.cjs:13076:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET (/tmp/g-2681-proof-C3r5RY/6.cjs:16070:12)
+    at async run (/tmp/g-2681-proof-C3r5RY/6.cjs:16268:22)
+    at async main (/tmp/g-2681-proof-C3r5RY/6.cjs:16284:17)
+
+
+/tmp/g2697-linked.log
+=== blob-download-attachment.test.ts ===
+
+a named Blob address asks for a download
+  ok    an address was made
+  ok    it is Blob's own address for the file
+  ok    it asks for a download, not a page in the tab
+  ok    it carries the SDK's signature
+  ok    it carries the delegation
+
+the signed part is the SDK's, untouched
+  ok    an address with no name has no download switch (played in place)
+  ok    the same signed parameters, and no others
+  ok    the delegation is for this one file, to read it only
+  ok    the same delegation scope as a plain address
+  ok    the same path
+
+a buyer's big file goes out as a download (lib/serve-file.ts)
+  ok    a redirect to storage
+  ok    to Blob
+  ok    asking for a download
+  ok    never kept by a cache
+  ok    the delivery is counted once
+  ok    a free copy asks for a download too
+
+an address that cannot be signed is no address
+  ok    fileUrl answers null, never a half-made link
+  ok    the buyer is told it could not be fetched
+  ok    no Location is sent
+  ok    nothing is counted as delivered
+
+every caller that hands out a sold file names it
+  ok    lib/serve-file.ts passes the name
+  ok    app/api/store/file/download/route.ts passes the name
+  ok    lib/learn.ts calls it without a name only in signedMedia
+
+23 checks, all passing.
+signing a file's address failed Error: TEST: the Blob API could not be reached
+    at issueSignedToken2 (/tmp/g-2681-proof-NVaMPH/0.cjs:31832:34)
+    at fileUrl (/tmp/g-2681-proof-NVaMPH/0.cjs:33713:25)
+    at main (/tmp/g-2681-proof-NVaMPH/0.cjs:34009:60)
+signing a file's address failed Error: TEST: the Blob API could not be reached
+    at issueSignedToken2 (/tmp/g-2681-proof-NVaMPH/0.cjs:31832:34)
+    at fileUrl (/tmp/g-2681-proof-NVaMPH/0.cjs:33713:25)
+    at signedDownload (/tmp/g-2681-proof-NVaMPH/0.cjs:33884:10)
+    at serveFile (/tmp/g-2681-proof-NVaMPH/0.cjs:33901:23)
+    at main (/tmp/g-2681-proof-NVaMPH/0.cjs:34011:24)
+
+=== closing-cost.test.ts ===
+creator: deletes $0.0025, followers $0.0018, its whole export after its plan ended $0.0037, last steps $0.0015: $0.0095, once for the store; each order $0.000002 for its buyers' library entries
+pro: deletes $0.0067, followers $0.0088, its whole export after its plan ended $0.0080, last steps $0.0015: $0.0249, once for the store; each order $0.000002 for its buyers' library entries
+scale: deletes $0.0118, followers $0.0158, its whole export after its plan ended $0.0123, last steps $0.0015: $0.0413, once for the store; each order $0.000002 for its buyers' library entries
+a free trial's store: $0.0090, in the share of stores that pay nothing
+a walk reads a million keys for $0.0044; at one a day, $0.136 a month for every million keys
+✔ a closing's worst cost, part by part, for each plan and for a free trial (36.482416ms)
+✔ what a unit writes is paid for to its end by the window that writes it, so nothing that goes by itself is priced again (2.023752ms)
+✔ a buyer's library entry: its order pays for its whole life, which ends by itself (0.268204ms)
+✔ an export a paying store takes from its studio figure costs no more than the units it takes, Stripe's pages included (0.323747ms)
+✔ once a plan has ended, its whole exports are its own: counted for the store, never refused for want of a figure or a place, and priced in its closing (3.475626ms)
+✔ the walk, the company's: what it costs a walk for every million keys the database holds (0.250357ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 50.599761
+
+=== closing-families.test.ts ===
+✔ inactive diagnostic observations retain their existing absolute one-day expiry (1.325122ms)
+✔ every family of the registry says what becomes of it when its store closes, and nothing more is said (2.676163ms)
+✔ what each says fits how the registry bounds it (2.44121ms)
+✔ a key belongs to its longest family, and the walk takes only what names a closing store (0.673182ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20.283398
+
+=== closing-plan-guard.test.ts ===
+
+The race: a plan checkout opened before the closing day and finished on it
+  ok    the way back ends it and returns the payment at once
+  ok    the subscription is canceled at Stripe
+  ok    the payment is refunded in full, once
+  ok    the plan is never written down as the store's
+  ok    the creator is told once, honestly, that the store had closed and the payment was returned
+  ok    settled, it keeps only its dates
+
+Retries: the way back twice, the daily sync and the closing job
+  ok    the way back again changes nothing
+  ok    asked again directly, the same
+  ok    still one refund and one letter
+
+A refund the bank sends back after it was settled
+  ok    the next run makes it again, under a new key, and does not write again
+  ok    and once it went through, nothing more
+
+Rechecks over the 40 days never refund twice, after Stripe has forgotten the keys or while its list lags
+  ok    still the one refund that went through, and one letter
+
+The store's own plan from before its closing day, still able to charge: ended, nothing refunded, no letter
+  ok    it can charge no more, its old payment stays, and the creator is not told of a payment that never was
+
+A plan paid by card three minutes before the day, found only once the day has begun: refunded, and the creator told
+  ok    a plan started after the last one ended is refunded whatever minute it was paid, and its creator told
+  ok    its letter says truthfully it came too late to stop the closing, not that it was paid once the day had begun
+  ok    a plan paid once the day had begun keeps its own words
+
+A store already deleted, its plan found by the daily sync: one started after its last plan ended is refunded, never taken for its old one
+  ok    refunded in full and its creator told, from the end of its last plan kept with the address's mark
+
+The letter is marked sent as soon as it goes: a write that fails after it, and a retry days later, never send a second
+  ok    one letter, though the settled mark failed once and the retry came after Stripe and the sender forgot the keys
+
+The daily sync finds a plan paid during the closing day before the way back did
+  ok    it is not adopted
+  ok    it is ended and refunded in full, and the creator told
+  ok    a second sync refunds nothing more
+
+A refund that fails is tried again on every run, and never dropped
+  ok    Stripe failing to refund leaves it in line, not settled
+  ok    ended already, nothing refunded, nobody told yet
+  ok    in line, with the failed run counted
+  ok    the next run fails too and keeps it
+  ok    the run after refunds it in full, once, and tells the creator
+  ok    a refund the bank turns down is not taken as returned
+  ok    the next run makes it again under a new key, and it goes through
+  ok    the creator is told once, with the amount that came back
+
+Only what was paid since the day began
+  ok    a payment from before the day is not refunded; the one on it is
+  ok    an open invoice of it is voided, so it is never collected
+
+Not closing: nothing is touched
+  ok    a store with a running plan is not in a closing day
+  ok    and its plan runs
+
+A store whose records are gone is still known by its marked address
+  ok    ended and returned, the creator told at the customer's address
+  ok    an address never marked is left alone
+
+Once a closing store's record goes, a new store its owner opens is never taken for it
+  ok    the closed store leaves the closing day's line with its record
+  ok    the new store's plan is its own: not refused, not ended, nobody written to
+  ok    a plan paid under the closed store's address is still found by its mark
+
+When the day starts, the store's open plan checkouts are expired
+  ok    only its own open plan checkout is expired
+  ok    another store's checkout is not this store's to refuse or expire
+  ok    one of its own still open when met on the way back is expired there
+
+A stopped late plan's queued refund outlives the closing store
+  ok    closing uses the same two observations without a third customer-list read
+  ok    a confirmed stopped plan and self-contained refund queue do not retain the store's files
+  ok    the failed refund keeps the creator and obligation in its independent queue
+  ok    erasing the store does not erase its pending plan refund
+  ok    the independent worker refunds once after the store is gone
+  ok    a second worker pass never refunds twice
+  ok    returning with an unreadable queue is not proof of a stopped plan or a recoverable refund
+  ok    a readable queue without confirmed cancellation cannot release file retention
+  ok    a missing queue acknowledgement never reports an active plan as returned
+
+Where it is wired
+  ok    the closing day expires the checkouts right after it is entered, and each later run looks for a late plan
+  ok    the closing job tries the line again on every run
+  ok    the letter with nothing paid says so
+
+53 checks, all passing.
+closing-plan-guard: sub_rosalate01 is not settled yet (a refund is not made in full yet); tried again on the next run 
+closing-plan-guard: sub_saralate01 is not settled yet (Stripe did not answer); tried again on the next run BillingError: Stripe billing failed (500 api_error): a stand-in failure
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/3.cjs:80194:11)
+    at async giveBack (/tmp/g-2681-proof-NVaMPH/3.cjs:116566:16)
+    at async settleOne (/tmp/g-2681-proof-NVaMPH/3.cjs:116618:23)
+    at async refusePlanIfClosing (/tmp/g-2681-proof-NVaMPH/3.cjs:116455:8)
+    at async main (/tmp/g-2681-proof-NVaMPH/3.cjs:118590:65) {
+  status: 500,
+  code: 'api_error'
+}
+closing-plan-guard: sub_saralate01 is not settled yet (Stripe did not answer); tried again on the next run BillingError: Stripe billing failed (500 api_error): a stand-in failure
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/3.cjs:80194:11)
+    at async giveBack (/tmp/g-2681-proof-NVaMPH/3.cjs:116566:16)
+    at async settleOne (/tmp/g-2681-proof-NVaMPH/3.cjs:116618:23)
+    at async retryPlanUndos (/tmp/g-2681-proof-NVaMPH/3.cjs:116688:9)
+    at async main (/tmp/g-2681-proof-NVaMPH/3.cjs:118593:14) {
+  status: 500,
+  code: 'api_error'
+}
+closing-plan-guard: sub_lenalate01 is not settled yet (a refund is not made in full yet); tried again on the next run 
+closing-plan-guard: sub_handofflate01 is not settled yet (Stripe did not answer); tried again on the next run BillingError: Stripe billing failed (500 api_error): a stand-in failure
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/3.cjs:80194:11)
+    at async giveBack (/tmp/g-2681-proof-NVaMPH/3.cjs:116566:16)
+    at async settleOne (/tmp/g-2681-proof-NVaMPH/3.cjs:116618:23)
+    at async refusePlanIfClosing (/tmp/g-2681-proof-NVaMPH/3.cjs:116455:8)
+    at async refuseLatePlans (/tmp/g-2681-proof-NVaMPH/3.cjs:118350:22)
+    at async closeOne (/tmp/g-2681-proof-NVaMPH/3.cjs:118125:30)
+    at async main (/tmp/g-2681-proof-NVaMPH/3.cjs:118677:21) {
+  status: 500,
+  code: 'api_error'
+}
+closing-plan-guard: an unreadable entry for sub_handoffbadlate01 is kept for a person to see
+closing-plan-guard: sub_handoffholdlate01 is not settled yet (Stripe did not end it); tried again on the next run 
+
+=== closing-plan-routes.test.ts ===
+
+The way back from a plan checkout finished on the closing day
+  ok    the creator is sent back to say the payment was returned
+  ok    the plan is ended and refunded in full at Stripe, and never written down as the store's
+  ok    and the creator is emailed once
+  ok    pressing back again changes nothing
+  ok    a new plan checkout on that day is refused, and Stripe is not asked
+  ok    one paid just before the day began, coming back after: refunded, and told it came too late to stop the closing
+  ok    the studio says each truthfully
+
+In the closing period, a plan checkout lasts the shortest time Stripe allows
+  ok    it is opened, and expires in 31 minutes, not the funding grant's hour
+  ok    31 minutes is Stripe's minimum of 30, and a minute for clocks
+
+From the last moment, no plan checkout is opened
+  ok    the last moment is 32 minutes before the closing day begins
+  ok    a second before it, it opens, and expires before the day begins
+  ok    at the last moment, it is refused with the reason, and Stripe is not asked
+  ok    and so a minute before the day
+
+A store whose plan has not ended is not touched
+  ok    its checkout keeps the funding grant's hour
+  ok    nothing refunded or written for it
+
+15 checks, all passing.
+reading our price failed; opening the checkout with it inline BillingError: Stripe billing failed (400 unknown): not in this stand-in
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/4.cjs:48600:11)
+    at async ensureProduct (/tmp/g-2681-proof-NVaMPH/4.cjs:48627:5)
+    at async ensurePrice (/tmp/g-2681-proof-NVaMPH/4.cjs:48656:19)
+    at async createBillingCheckout (/tmp/g-2681-proof-NVaMPH/4.cjs:48732:13)
+    at async POST (/tmp/g-2681-proof-NVaMPH/4.cjs:83461:17)
+    at async main (/tmp/g-2681-proof-NVaMPH/4.cjs:83564:19) {
+  status: 400,
+  code: 'unknown'
+}
+reading our price failed; opening the checkout with it inline BillingError: Stripe billing failed (400 unknown): not in this stand-in
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/4.cjs:48600:11)
+    at async ensureProduct (/tmp/g-2681-proof-NVaMPH/4.cjs:48627:5)
+    at async ensurePrice (/tmp/g-2681-proof-NVaMPH/4.cjs:48656:19)
+    at async createBillingCheckout (/tmp/g-2681-proof-NVaMPH/4.cjs:48732:13)
+    at async POST (/tmp/g-2681-proof-NVaMPH/4.cjs:83461:17)
+    at async main (/tmp/g-2681-proof-NVaMPH/4.cjs:83573:22) {
+  status: 400,
+  code: 'unknown'
+}
+reading our price failed; opening the checkout with it inline BillingError: Stripe billing failed (400 unknown): not in this stand-in
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/4.cjs:48600:11)
+    at async ensureProduct (/tmp/g-2681-proof-NVaMPH/4.cjs:48627:5)
+    at async ensurePrice (/tmp/g-2681-proof-NVaMPH/4.cjs:48656:19)
+    at async createBillingCheckout (/tmp/g-2681-proof-NVaMPH/4.cjs:48732:13)
+    at async POST (/tmp/g-2681-proof-NVaMPH/4.cjs:83461:17)
+    at async main (/tmp/g-2681-proof-NVaMPH/4.cjs:83586:3) {
+  status: 400,
+  code: 'unknown'
+}
+
+=== closing-refunds-unknown.test.ts ===
+
+The store's closing could not be read
+  ok    never says the store is not closing
+  ok    says it could not check, to reload in a minute, what is tried, that it can fail, and who is the creator's to refund
+  ok    no refund button
+  ok    no promise the code does not keep
+
+The store is not closing (read, nothing found)
+  ok    the same words as before
+  ok    not the words for a failed read
+  ok    no refund button
+
+Closing, and the members' payments could not be read
+  ok    never says the store is not closing
+  ok    says it could not read, to reload in a minute, the day, what is tried, that it can fail, and who is the creator's to refund
+  ok    no refund button
+  ok    no promise the code does not keep
+
+Closing, payments read, none listed
+  ok    says only that the page lists none, the day, and who is the creator's to refund
+  ok    not the words for a failed read
+  ok    no refund button
+  ok    no promise the code does not keep
+
+F3: members the hold never reached (over its budget, failed) are not listed; the page never says no member paid
+  ok    does not say 'No member has paid'
+  ok    tells the creator that anyone not listed is theirs to refund in Stripe
+
+F4: one listed, and the closing day has begun (starting a plan is refused then)
+  ok    the member and the button
+  ok    not the words for a failed read
+  ok    says only what is done: the same refunds tried that day, that one can fail, and who is the creator's to refund
+  ok    never offers starting a plan again to keep the store
+  ok    no promise the code does not keep
+
+One listed, before the closing day (starting a plan still keeps the store)
+  ok    the member and the button
+  ok    says starting a plan again before then keeps the store
+  ok    no promise the code does not keep
+
+25 checks, all passing.
+reading the store's closing for the refund review failed Error: stand-in: ZSCORE could not be read
+    at w.redis.pipeline (/tmp/g-2681-proof-NVaMPH/5.cjs:99:66)
+    at redisPipeline (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:1915:41)
+    at closingOf (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:104085:42)
+    at ClosingRefundsPage (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:104127:34)
+    at async Object.render2 (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:104177:68)
+    at async main (/tmp/g-2681-proof-NVaMPH/5.cjs:107:28)
+reading the members' payments for the refund review failed Error: stand-in: HGETALL could not be read
+    at w.redis.pipeline (/tmp/g-2681-proof-NVaMPH/5.cjs:99:66)
+    at redisPipeline (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:1915:41)
+    at paidPeriods (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:101988:23)
+    at async unusedRows (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:104037:29)
+    at async unusedSummary (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:104045:16)
+    at async ClosingRefundsPage (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:104129:33)
+    at async Object.render2 (/tmp/closing-refunds-unknown-0OkGBb/world.cjs:104177:68)
+    at async main (/tmp/g-2681-proof-NVaMPH/5.cjs:123:29)
+
+=== delivery-check-rules.test.ts ===
+
+What a product delivers
+  ok    a file, a link, or a call's own meeting link
+  ok    nothing checked for a course's lessons, a bundle, nothing yet, or a call in person, in our room, a meeting with no link of the creator's behind it, or no sessions to come
+  ok    each price option's own file or link too, named by its option; a course's options, not its lessons
+  ok    a call's own link behind a Meet or Zoom meeting, said as the fallback; each dated session's link still to come, not one that is over
+
+A file
+  ok    in place at its size: fine
+  ok    missing, empty or of another size: a problem, with what to do
+  ok    storage not asked: not checked
+
+An address
+  ok    it answers, or answers with something long: fine
+  ok    gone, not https, or inside a private network: a problem
+  ok    asks to sign in, did not answer, redirected too often, or answered oddly: not checked, never fine and never broken
+  ok    each refusal in its own words: not https, not an address we can open, a port, not reachable from outside, a name not found
+  ok    a problem names the address and what to do
+
+One product
+  ok    its verdict from its target and what was read; none for nothing to check; an address not asked is not checked
+
+Plain words
+  ok    every problem says what to do, and every sentence ends
+
+14 checks, all passing.
+
+=== delivery-faq.test.ts ===
+
+The studio's own words
+  ok    the editor's buttons and label for a file or a link, shown while it hands over nothing
+  ok    the largest file, from the code
+  ok    getting it back emails a link to a page of purchases, kept a while
+  ok    a pre-order is handed over the day the product goes on sale
+  ok    the download refuses an unpaid order and a refunded one
+  ok    free files and the free first pages exist, so the refusal is said of paid files only
+
+The answers
+  ok    four questions
+  ok    start: the link first, which needs no upload, then the file, each in the editor's own words
+  ok    and says beside the file that uploads wait for a paid plan, from the policy
+  ok    the buttons show on each price option too
+  ok    try before paying: the one shared answer, in delivery's words, with uploads as the policy has them
+  ok    getting it back in the store's own words
+  ok    one space between sentences, never two
+  ok    no number of downloads, buyers or sales, no percent, no result promised
+
+On the delivery page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+
+16 checks, all passing.
+
+=== delivery-watch.test.ts ===
+✔ a store inside the allowance is counted and not named (4.337581ms)
+✔ the delivery that crosses the line is the one that writes it down (0.540122ms)
+✔ a store far over is named once, not once per file (0.890589ms)
+✔ nothing is ever blocked, whatever the number says (0.167082ms)
+✔ the worst offender is listed first, because that is the one to call (0.318058ms)
+✔ a path that is not a store's file is not counted against anyone (0.281583ms)
+✔ a size that is not a size is ignored rather than stored (1.012282ms)
+✔ the figures read as figures in an email (0.144418ms)
+✔ the watch reads nothing when there is nothing written (0.566542ms)
+✔ the promise in the Terms is one the machine can keep alone (0.697959ms)
+✔ a download is counted and published, and never charged for (0.846513ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.102451
+
+=== file-download-refusals.test.ts ===
+
+Each refusal is answered, never thrown
+  ok    signed_out: 401 with words
+  ok    no_store: 404 with words
+  ok    forbidden: 403 with words
+  ok    gone: 403 with words
+  ok    used: 429 with words
+  ok    used: says what the studio's count said
+  ok    locked: 403 with words
+  ok    two_step: 403 with words
+
+8 checks, all passing.
+
+=== order-data.test.ts ===
+
+The script, as Redis runs it
+  ok    its sizes are the constants'
+  ok    it runs the commands the code allows, and no other
+  ok    nothing is fixed in it
+
+Each write is charged what it adds
+  ok    a new key and field: its name and the key's own, the field, the value and the entry's own, a quarter more, in steps
+  ok    the reply is HSETNX's
+  ok    the room's slot for orders, and its total with the slot's own field
+  ok    what is already there costs nothing: a buyer's second order of it
+  ok    a value made longer is charged what it grew by
+  ok    one made shorter is charged nothing, and given nothing back
+  ok    a command outside the list is refused before it is sent
+  ok    one Redis refuses throws, as a pipeline does
+
+Never below what is stored
+  ok    after each of 300 writes of every kind, all that was charged is at least all that is kept
+
+What one order really leaves, and what a room now holds
+  a new buyer's one-product course order leaves 1584 bytes, a repeat buyer's next 160; the ceiling held at the checkout is 8960
+  ok    a new buyer's order is a small part of the ceiling it was charged before
+  ok    a buyer who has bought before costs less still
+  creator: 18,000,000 bytes held 2,008 orders at the fixed charge; 11,363 orders of new buyers now, each a new address
+  pro: 135,000,000 bytes held 15,066 orders at the fixed charge; 85,227 orders of new buyers now, each a new address
+  scale: 250,000,000 bytes held 27,901 orders at the fixed charge; 157,828 orders of new buyers now, each a new address
+  ok    the order's own records were all counted, nothing kept beside them uncounted
+
+15 checks, all passing.
+
+=== outreach-faq.test.ts ===
+
+The studio's own words and rules
+  ok    the tool
+  ok    each word on screen, the sender first, then the business, then the draft and the pitches
+  ok    the draft's own buttons
+  ok    why the writing help is off, said as it is
+  ok    a trial has no writing help at all
+  ok    the studio says that reason, never only "not switched on yet"
+  ok    nothing is sent from here
+
+The answers, in both states
+  ok    two questions
+  ok    writing: paid-up Studio or Scale, labeled Pro, switched on, who, the studio's words in order, sent by you
+  ok    trying: not yet today; not in the trial later, and no promise past a paid-up plan
+  ok    one space between sentences, never two
+  ok    no figure, no percent, no answer promised
+
+On the Outreach page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+  ok    no sentence of the answers said elsewhere on the page, or twice among them
+
+15 checks, all passing.
+
+=== outreach.test.ts ===
+
+Where a first email to a business may be written
+  ok    the countries that are open
+  ok    the ones that ask for consent first are closed
+  ok    a country nobody read the law of is closed too
+  ok    and says that it was not read, not that it refuses
+  ok    the United States asks the email to say what it is
+  ok    the United Kingdom: companies, and a desk's address
+  ok    France and Ireland: a desk's address
+  ok    named as a sentence names them
+  ok    every open country carries the law it rests on
+
+A desk, or a person
+  ok    partnerships@ is a desk
+  ok    hello@ is a desk
+  ok    press.media@ is a desk
+  ok    jane.doe@ is a person
+  ok    dana@ is a person
+
+Only the business's own address, from its own page
+  ok    an address at its domain is its own
+  ok    one at a part of its domain too
+  ok    the agency that built the site is not
+  ok    nor a free mailbox
+  ok    a mailto: link is read, without what follows the address
+  ok    an address written with &#64; is read, and the desk comes before the person
+  ok    each says whether it is a desk
+  ok    and keeps the words around it
+  ok    what a page wrote as numbered or named entities is read as a reader sees it
+  ok    a picture's name is not an address
+
+A page that says no
+  ok    no solicitations
+  ok    we do not accept unsolicited proposals
+  ok    please do not send sales emails
+  ok    an ordinary contact line is not a refusal
+
+The pages worth reading, and what robots.txt closes
+  ok    its own partner and contact pages, the likeliest first; nobody else's
+  ok    the rules for everybody are read
+  ok    a path under one is closed
+  ok    the rest is open
+  ok    a group that names this reader is the one that counts
+  ok    and closes the whole site
+  ok    named with nothing closed means open, whatever everybody else is told
+  ok    Shopify's own robots.txt, on every Shopify store, leaves the front page open
+  ok    and the contact page
+  ok    a star stands for any run of characters
+  ok    a query a rule names is closed, another is not
+  ok    a rule that ends in $ covers only what ends there
+  ok    a plain rule is a prefix
+  ok    an exact rule with $
+  ok    a shop's shelves and journal are not contact pages, and one of each kind comes before a second of any
+
+Reading a business's website
+  ok    its name, as it calls itself
+  ok    its own description
+  ok    its addresses, the partner page's before the front page's
+  ok    each with the page it is printed on
+  ok    four pages at most, and robots.txt
+  ok    something that is not an address is refused before reading
+  ok    a private address is never read
+  ok    a site that closes itself to this reader is not read
+  ok    a closed page is left alone
+  ok    and what it printed is not found
+
+The rules, asked in order
+  ok    nothing against it
+  ok    a closed country
+  ok    a business that asked to stop
+  ok    a page that refuses
+  ok    the United Kingdom, not said to be a company
+  ok    the United Kingdom, a person's address
+  ok    the United Kingdom, a company's desk
+  ok    nobody to sign it
+  ok    written to too recently
+  ok    long enough ago
+  ok    the day's number used
+
+What every email carries
+  ok    who is writing, their store and a postal address
+  ok    where the address was found
+  ok    in the United States, that it is a business proposal
+  ok    how to stop it: a reply, or a link
+  ok    elsewhere the line about a proposal is not added
+  ok    the creator's words, a blank line, the footer
+
+The draft, opened in the creator's own mailbox
+  ok    Gmail's own compose page
+  ok    or whatever opens an email address
+  ok    the longest email there can be still fits in a link
+  ok    and one in plain letters does
+
+Who is writing
+  ok    starts from the store's own name, with no postal address
+  ok    without a postal address nothing is written
+  ok    a name alone is not saved
+  ok    a name and an address are
+
+Writing one
+  ok    to the address the page prints
+  ok    kept with where it was found, the words around it and when
+  ok    a draft, not sent
+  ok    the model's words
+  ok    the footer with the creator's name and the store's address
+  ok    and a stop link of its own
+  ok    one writing job counted
+  ok    the model is told what the business says of itself
+  ok    and never the address
+  ok    it is told not to invent an audience
+  ok    and that a website's text is not an instruction
+  ok    the rules against invented numbers and results go with it
+  ok    nothing was sent anywhere but to the model
+
+What stops one before it is written
+  ok    Germany
+  ok    a country not on the list
+  ok    an address the page does not print
+  ok    an address at another domain
+  ok    a page that cannot be read
+  ok    a page robots.txt has closed since
+  ok    a person, where only a desk may be written to
+  ok    the United Kingdom without saying it is a company
+  ok    a page that says no solicitations
+  ok    nothing to write from
+  ok    none of them asked the model, or kept anything
+
+One pitch to a business at a time
+  ok    a new draft takes the place of the old one
+  ok    so one is kept
+  ok    and the old one's stop link no longer opens anything
+
+The creator's own changes
+  ok    the subject and the words are theirs
+  ok    the footer is not
+  ok    an empty one keeps what was there
+
+Sent, and what follows
+  ok    marked as sent, with when
+  ok    what was sent can no longer be changed
+  ok    or deleted
+  ok    the same business is not written to again so soon
+  ok    a draft can be deleted, and its stop link with it
+
+The business's own way out
+  ok    the page behind the link names who wrote and to whom
+  ok    a link nobody made opens nothing
+  ok    one press, by the business
+  ok    the pitch is marked, with nobody at the store doing anything
+  ok    the page says so
+  ok    and that store can never write to them again
+  ok    not a year later either
+  ok    once stopped, it cannot be marked as anything else
+
+Closed to every store
+  ok    another store may still write, until the business says otherwise
+  ok    the business closes itself to everyone, from the first store's link
+  ok    the page says nobody can
+  ok    and a store that never wrote to them cannot start
+
+The creator's own button does the same
+  ok    they replied
+  ok    they asked to stop
+  ok    and nothing more is written to them
+
+A day's number
+  ok    15 are written
+  ok    the next is refused
+  ok    and not counted against the month
+  ok    the next day it is open again
+
+A model that fails
+  ok    says so
+  ok    the started attempt remains counted
+
+A funded manual business lookup refuses before any external reader
+  ok    an unmarked lookup still uses the existing reader
+  ok    missing funding refuses a manual lookup
+  ok    not even its front page or robots file is read
+  ok    no pitch was created
+
+A funded new pitch refuses before page verification or AI work
+  ok    new draft work needs financial approval before its page
+  ok    no reader, model call, writing allowance or pitch is consumed
+
+Nothing here sends an email
+  ok    no mail service is called from any of it
+  ok    the studio opens a draft in the creator's own mailbox
+  ok    the stop link's page changes nothing until a button is pressed
+  ok    and the reader says who it is
+  ok    with a page that explains it
+
+145 checks, all passing.
+
+=== plan-closing-news.test.ts ===
+
+Known counts are said as they were
+  ok    nothing written down reads as none, known
+  ok    a known none says neither the counts nor that it could not check
+  ok    a member past the day and one not paused, known
+  ok    the notice says both, as before, and not that it could not check
+  ok    it says only the refund the closing day tries, when it is not made, and what the creator does
+  ok    members past the closing's limit: refunded by the creator, not promised
+
+A hold that cannot be read is said to be unchecked, never as none
+  ok    the hold's counts are unknown, not 0
+  ok    the members past the day are still read
+  ok    the failure is logged
+  ok    the notice says it could not check, and what to do
+  ok    and that the time a member not paused paid for past the day is theirs to refund
+
+Members past the day that cannot be read are said to be unchecked, never as none
+  ok    the members past the day are unknown, not 0
+  ok    the hold is still read
+  ok    the failure is logged
+  ok    the notice says it could not check, and what happens on the day
+
+Nothing can be read at all: the notice still goes, saying both are unchecked
+  ok    both are unknown, the rest as given
+  ok    the notice says both could not be checked
+
+An answer in a shape we do not expect is never a count
+  ok    both readers are there
+  ok    the hold: only two whole counts at or above zero
+  ok    members past the day: a count with one money total per currency
+  ok    the hold as holdCounts answers it is read
+
+A break that cannot be read is not 'not closing' (closingOf)
+  ok    with no break written down, the store is closing on its day
+  ok    a break that could not be read throws, never answers 'not closing'
+  ok    a break answered in a shape we do not expect throws too
+
+The whole letter in each state of the hold: 'nobody is charged again' only when every one is known to be paused
+  ok    every one paused: the fourth line says none is charged again, once
+  ok    every one paused: no line about memberships not paused or unchecked
+  ok    the letter has its sales paragraph
+  ok    some not paused (one could not be paused, one past the limit): the whole letter
+  ok    one not paused: the whole letter
+  ok    the hold could not be read: the whole letter
+  ok    one count read and the other not: the same as unread
+  ok    no news about the hold at all: no promise either
+
+The letter on its own: an unknown is never printed as a number
+  ok    both unknown lines, no count
+
+33 checks, all passing.
+
+=== plan-closing.test.ts ===
+
+The days
+  ok    what a store keeps past its room is removed thirty days after its plan ended
+  ok    with a notice when the plan ends, one fourteen days before and one seven days before
+
+A store whose plan runs is not in line
+  ok    a course
+  ok    a podcast
+  ok    she keeps eleven gigabytes, more than twice what a store with no plan may
+  ok    nobody is in line while their plan runs, or before they ever had one
+  ok    and a run looks at nobody
+
+The plan ends
+  ok    each is in line under the day its plan ended
+  ok    seen again as ended, a store keeps its place
+  ok    a notice that cannot be sent is not written down as sent
+  ok    the store that keeps more than its room is written to; the one that fits is left alone
+  ok    one email, to the store's owner, with replies going to the people who answer
+  ok    it says the plan ended and that nothing has been removed
+  ok    it gives the room, what the store keeps, and the day
+  ok    the two ways out
+  ok    what goes and what stays
+  ok    and that two more notices come first, the last at least a week before
+  ok    the same day again, nobody is written to twice
+
+A store that fits is measured once a week, not once a day
+  ok    not again inside the week
+  ok    and again after it
+  ok    a store that keeps more is measured every day it is looked at
+
+The notices before the day
+  ok    nothing more is said until two weeks before the day
+  ok    fourteen days before, the second
+  ok    with the days left and the same day named
+  ok    once
+  ok    seven days before, the last
+  ok    which says it is the last
+  ok    and until the day nothing is touched
+
+What the studio is told
+  ok    the day the job will act on, for a store whose last notice went out in time
+  ok    nothing for a store whose plan runs, or that never had one
+
+The day: Stripe is asked before anything is touched
+  ok    when it cannot be asked, nothing is removed
+  ok    told three times, like anybody
+  ok    Stripe says the plan runs: nothing is removed and nobody is told it was
+  ok    the record is put right from what Stripe said
+  ok    and the store is out of line
+  ok    asked about by its own number first: running, so nothing is removed
+
+The day: what is removed, and what stays
+  ok    with no plan at Stripe, what the store kept is removed
+  ok    the product's file and the price option's file are off them
+  ok    the lesson's video and its download are off it
+  ok    its title, its words, its place in the course and the course's settings are as they were
+  ok    the podcast has no episodes, and its product says so
+  ok    nothing of hers is left in the file store, the copy no record named among it
+  ok    nor at the video service, the video no lesson named among them
+  ok    what other stores keep is where it was
+  ok    the store is still hers: its address, its name, every product and every price
+  ok    she is told, once, what was removed and what was not
+  ok    and her studio has no day to show any more
+  ok    and after that she is a store that fits: not measured, not written to
+
+A last notice that went out late moves the day
+  ok    the email sender is down for the days it was due
+  ok    it goes out five days late
+  ok    and names the day it makes true, a week on, not the day first given
+  ok    the studio shows that later day
+  ok    nothing is removed on the day first given, nor the minute before the week is up
+
+A removal that could not be seen through is not written down as done
+  ok    the file store is down on the day: held, and nobody is told anything was removed
+  ok    the next day it is finished from what is left in the folder, and then she is told
+  ok    nor when the video service cannot be read
+  ok    until it can
+  ok    the letter saying so, which could not be sent that day, goes out on the next, once
+  ok    nor when the run is out of time before the files are gone: it stops, and says nothing yet
+  ok    and the next run finishes it from what is left
+
+A store that makes room is left alone
+  ok    having deleted enough to fit, he is not written to again, and nothing of his is removed
+  ok    should he ever keep more again, he is told from the start and has his week from that notice
+
+A plan that ran again and ended again starts from nothing
+  ok    a plan started again takes the store out of line at once
+  ok    ended again, it is in line under the new day
+  ok    and every notice is still to come, the first one first
+  ok    with the day counted from the second ending
+
+With no way to write to a creator, nothing moves
+  ok    no sender set up: held, on any day
+  ok    a store first written to long after its plan ended still has its week
+
+The daily run
+  ok    looks at every store whose plan has ended, the longest ended first
+  ok    out of time, it stops and writes down where
+  ok    the next run carries on from there to the end, and the mark is cleared
+  ok    a store the line lost is put back by the daily check of every store's plan, under the same day
+  ok    a store that is no longer there is taken out of line
+
+Where it runs, and what the pages say
+  ok    the job is one of ours to run, one at a time
+  ok    every day, after the check of every store's plan
+  ok    the Terms give the days, from where the job reads them
+  ok    what is removed, what is kept, and what it means for buyers
+  ok    the help pages say the same
+  ok    and the privacy policy says when such files are deleted
+  ok    and the studio shows a store past its room the day, counted the way the job counts it
+
+A plan that ends from October 18, 2026 keeps nothing past its day
+  ok    the room it keeps with no date is none, and the old room before that day
+  ok    it ended on that day or after
+  ok    ten megabytes and two pictures are not a store that fits: it is written to
+  ok    its letter gives the day, and one way out, and says what goes
+  ok    on its day its files go, its community's pictures with them, and the store closes
+  ok    nothing it sold is charged again: it had no Stripe account to stop
+  ok    the walk deletes its records, and nobody else's
+  ok    and its owner, told three times before, is not written to again
+
+Unknown acceptance never authorizes a second provider attempt
+  ok    a server error may follow acceptance: hold the notice without another POST
+  ok    the ended-plan source and recovery entry remain available
+
+90 checks, all passing.
+listing a closing store's open plan checkouts failed BillingError: Stripe billing failed (404 unknown): no stand-in for GET /checkout/sessions
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/14.cjs:14102:11)
+    at async expirePlanCheckouts (/tmp/g-2681-proof-NVaMPH/14.cjs:115432:18)
+    at async closingDay (/tmp/g-2681-proof-NVaMPH/14.cjs:119256:5)
+    at async main (/tmp/g-2681-proof-NVaMPH/14.cjs:121675:19) {
+  status: 404,
+  code: 'unknown'
+}
+
+=== plan-cost-registry.test.ts ===
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (68.494314ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (83.219334ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (43.268639ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.098575ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.181953ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.247081ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.390377ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (66.8445ms)
+✔ every store figure taken in the code is a kind a line prices (45.289598ms)
+✔ every email sent names a meter, and each file only the meters it may use (82.531074ms)
+✔ the units a figure is taken in cost at least what they stand for (12.381115ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.976865ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.176375ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.239951ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.096185ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.078659ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.639982ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.120094ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.123836ms)
+✔ Path push fits its reserved studio requests (0.103145ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.05298ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.054672ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.088143ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (55.061805ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 480.494676
+
+=== plan-margin.test.ts ===
+a thousand visits past the plan would bring in $0.4392 and cost $0.2638, keeping 40% before tax
+✔ the email each plan may send is the number that is published (2.030973ms)
+✔ creator, on sale: every brake at its limit at once still turns a profit (4.840147ms)
+✔ creator, on sale: the margin left in that worst case is a real one (2.292137ms)
+✔ creator, on sale: no single brake is big enough to swallow the plan by itself (0.270247ms)
+✔ pro, on sale: every brake at its limit at once still turns a profit (2.831057ms)
+✔ pro, on sale: the margin left in that worst case is a real one (1.897724ms)
+✔ pro, on sale: no single brake is big enough to swallow the plan by itself (0.143045ms)
+✔ scale, on sale: every brake at its limit at once still turns a profit (6.685065ms)
+✔ scale, on sale: the margin left in that worst case is a real one (4.584472ms)
+✔ scale, on sale: no single brake is big enough to swallow the plan by itself (0.383026ms)
+✔ creator, on sale: paid by the year, the worst month still leaves a real margin (2.036572ms)
+✔ pro, on sale: paid by the year, the worst month still leaves a real margin (1.497501ms)
+✔ scale, on sale: paid by the year, the worst month still leaves a real margin (1.700096ms)
+✔ Scale keeps more than Pro does in its own worst month, monthly and yearly, where neither takes a share (17.315113ms)
+✔ a lesson video kept by the video service never costs more to keep than the storage brake allows for (0.282094ms)
+✔ an hour of video past what a plan covers brings in well over what it costs (0.130456ms)
+✔ a thousand visits past what a plan covers are not sold: at the published price they would not pay their way (1.231431ms)
+✔ a thousand orders past what a plan covers bring in well over what they cost (0.097867ms)
+✔ an order that paid a share is covered by it several times over, so it is not counted (0.497298ms)
+✔ free copies stop at the month's orders: the plan's when paid, a trial's in a trial, none without a plan (0.251168ms)
+✔ every place an order is handed over counts it (0.492871ms)
+✔ a store nobody can charge cannot be visited past the visits it has (0.276827ms)
+✔ lesson pages supply the store's video allowance (0.122404ms)
+✔ a store that pays nothing can cost next to nothing (0.097266ms)
+✔ a store whose plan ended stops costing more than a store with no plan, on a day that is set (10.184512ms)
+✔ historical video invoices retain their old allowance and rate (0.158128ms)
+✔ the free-download brake is smaller than the allowance that is published (0.129995ms)
+✔ a buyer's download is bounded by nothing, and that is on purpose (0.147151ms)
+✔ a break from the plan is paid for by the months before it, at its longest (5.644426ms)
+✔ the one exposure is the first payment refunded in full: bounded, once per account, and said in writing (4.815079ms)
+✔ creator, on sale: a yearly plan refunded in its first month, past the guarantee, still pays for that month and the days to closing (1.434647ms)
+✔ pro, on sale: a yearly plan refunded in its first month, past the guarantee, still pays for that month and the days to closing (2.533188ms)
+✔ scale, on sale: a yearly plan refunded in its first month, past the guarantee, still pays for that month and the days to closing (1.559595ms)
+✔ a refunded year keeps Stripe's card fee, and every page that summarises it says so (0.949547ms)
+✔ a yearly first payment asks the card's bank to authenticate, so a fraud dispute lands on the bank (0.49242ms)
+✔ while the share is off, nothing is taken from a sale and the prices on sale are today's (0.263686ms)
+✔ the commission variant decided on 18 October 2026: the same price list, no share published or taken (0.169845ms)
+✔ a share is rounded down, and never taken from nothing (0.226841ms)
+✔ the share cannot be switched on before the checkout, the refunds and the pages are ready for it (1.469169ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 102.5586
+
+=== store-closing-fair.test.ts ===
+
+The rules
+  ok    the unused part is the payment times the share of its period after the closing day, rounded
+  ok    nothing for a period that ends by the closing day, or for nothing paid
+  ok    never more than the payment, even for a period that starts after the day
+  ok    what was refunded already is taken off, never below nothing
+  ok    a hold pauses collection with its invoices voided and no day to resume, and keeps a member's own pause
+  ok    a release resumes collection, or puts a member's own pause back with its own day
+  ok    the fixed sentence says the access comes from the store and the notice is at least seven days
+  ok    a paid store's cap is two years of its plan's orders, a trial's is its orders
+
+A store whose plan ends: held, told, ended and settled
+  ok    on the day the plan ends every member is held, before the first notice goes out
+  ok    the member's own pause is kept to be put back
+  ok    and their last payments are written down
+  ok    the first notice says members are not charged, buyers will be told, the refund that will be made and that a new plan keeps the store
+  ok    it names the exact last moment, in UTC, as the studio and the checkout count it, and no longer says a plan can be started until the day itself
+  ok    between the plan's end and the closing no member is charged
+  ok    the creator is told three times, the buyers once, at least seven days before
+  ok    every buyer and member is told, once each
+  ok    the closing day is at least seven days after the last buyer was told
+  ok    a member's notice says their payments stopped and what they will be refunded, from Marktmorgen with its address, in text and in HTML
+  ok    no refund is made before the closing day
+  ok    the review lists each member who paid past the day, with the proportional amount
+  ok    a screen drawn before something changed refunds nothing
+  ok    pressed twice, each member is refunded once, the proportional amount, from the creator's own account
+  ok    on its day the store closes
+  ok    every membership ends at once, none left running
+  ok    and the closing day refunds nobody twice
+  ok    what it kept for the closing is let go
+  ok    and nobody is charged after it either
+
+On the closing day, what the creator did not refund is refunded for them, once
+  ok    nothing is refunded before the day
+  ok    on the day, each member's proportional part is refunded, once, and the one already refunded is not
+  ok    a refund twice is impossible: the next day refunds nothing
+
+A balance that does not cover a refund: never made, the member told
+  ok    no refund is made and nothing is owed by Marktmorgen
+  ok    the member is emailed that it could not be made, with the creator's published contact and never their sign-in address
+  ok    and the store still closes that day
+
+A plan started again before the closing: as it was, nothing charged for the days between, nobody refunded
+  ok    its members are let go
+  ok    a member's own pause is put back with its own day
+  ok    nothing is charged for the days between: voided while held, and no invoice is collected for them
+  ok    every buyer told it closes is told it stays, once
+  ok    nobody is refunded
+  ok    and it leaves the line
+
+A hold that fails is tried again every day; the notices go anyway, with the count, and the store closes on its day
+  ok    the first notice goes on the first day, saying how many are not paused yet
+  ok    the next day only the failure is tried again, and the one Stripe accepts is held
+  ok    one that never pauses does not keep the store from closing on its day, where it ends with the rest
+  ok    the member Stripe never let us pause is not told its payments stopped: it may be charged until the day
+
+More than fifty pages of members: read a part a day, from where the last run stopped
+  ok    the first run reads fifty pages and waits; the next reads the rest and the notice goes
+
+An invoice issued before the hold is voided, never collected during it
+  ok    its open invoice is voided at the hold, and Stripe's retries never charge it
+
+The closing's calls to Stripe are capped before they are made; members past it are counted, never silent
+  ok    only what the budget covers is called, and the member past it is counted in the notice
+  ok    the member past the budget is still told the store closes, like the one held
+  ok    the held member is told its payments stopped; the one past the budget, still charged, is told the truth instead
+
+A refund the balance did not cover is tried again when the creator adds funds; only the closing day makes it final
+  ok    a press that cannot refund takes only the two calls it made, from the budget, never the reserve
+  ok    pressed without the funds: nothing refunded, and the member is still listed to try again
+  ok    pressed again after the funds came: refunded once
+  ok    the button's words say it can be tried again, not that it is final
+
+A balance in another currency than the sale: weighed in the currency it settles in
+  ok    a euro balance a little short of the refund in euros: nothing refunded
+  ok    enough euros: refunded in the sale's currency, the proportional amount
+
+Out of time: the refunds stop and say what is left, never pretend it is done
+  ok    with no time left, nothing is refunded and the row is counted as left
+  ok    the route sets its own maxDuration and a time budget below it
+
+Once its memberships ended at Stripe, a store closes: starting a plan does not bring it back
+  ok    the day began: its membership ended, the store not removed yet
+  ok    an unknown address search still reads the independent customer list and stops the late charge
+  ok    unknown address coverage never advances the final closing to removed
+  ok    has_more on the own customer page refuses removal even after the late charge ended
+  ok    the durable final closing still stops a late plan after the active snapshot cleared planEndedAt
+  ok    known final coverage and completed plan refunds let the closing finish
+  ok    no "it stays open" is sent: what its buyers paid for has ended
+  ok    and the next day the closing is seen through
+
+A plan paid three minutes before the closing day, not in Stripe's search yet: the store is saved
+  ok    the closing check reads Stripe's list by customer, so the plan keeps the store: it runs
+  ok    nothing is refunded, its memberships are not ended and no closing letter goes
+
+A paid invoice with a proration: the membership's own line is what counts
+  ok    the period and amount are the membership line's, not the credit's; the invoice's total caps any refund
+  ok    and a line that is a proration is never taken for the membership
+
+Addresses the cap does not cover are counted once each, however often they bought
+  ok    one address past the cap, bought from six times, is one not told
+  ok    a buyer's notice gives the creator's published way to reach them, never their sign-in address
+
+A coupon: the refund is of what was really paid, not the list price
+  ok    the membership's worth is its line less the coupon, as a share of what was paid
+  ok    half its period left is half of the $10 paid, never half of $20
+  ok    and the rule reads the coupon from the line
+  ok    a coupon on the membership's line beside another line is taken off that line only
+
+The membership's own paid invoice is found behind a proration-only one
+  ok    looked back past the proration, in the same one call: its own line and payment are written down
+
+A draft kept at the hold goes on again when the plan starts again; voided invoices do not come back
+  ok    at the hold the draft is kept as a draft, marked
+  ok    on the release it goes on as it was
+  ok    and the creator's letter says voided invoices do not come back
+
+On the closing day with the budget spent, the refunds set aside at the hold are still made; with none left, the member is told
+  ok    the reserve makes one refund; the member it does not cover is emailed, never left silent; the store closes
+  ok    and told honestly: not made automatically, never that the balance did not cover it, with what was left to give and the creator's contact
+
+Buyers are found by the store's own payments, a capped number of pages, and the rest counted, never waited on
+  ok    it reads at most its cap of pages, then closes on its day with the rest counted
+  ok    and never a payment of another store
+
+On its closing day a store cannot be given a plan: the checkout refuses, and refuses when it cannot tell
+  ok    the plan checkout asks first, and a failure to ask is a refusal
+  ok    while its closing day runs, the checkout's question says so
+  ok    and the studio says it is closing today
+
+The closing's emails are capped before any goes; none past the cap, never silent
+  ok    a store that never paid tells up to a trial's orders, and counts the rest for its creator
+  ok    the creator's last notice says how many and asks them to tell those buyers
+
+Without a company postal address no buyer is written to, and the store does not close
+  ok    there is no address in the code yet
+  ok    the buyers' notice waits, and so does the closing
+
+What the creator's notices and studio say
+  ok    the letter says the members' charges stopped, when buyers are told and the refund, from the first
+  ok    the studio says buyers are told and when, and leads to the review screen
+  ok    the review screen shows each amount before the one button, with a way back
+  ok    the closing job lets restarted stores go every day
+  ok    and the two notices before it are still the creator's
+
+Before buying: the fixed sentence on every checkout of what lasts, and on the receipt
+  ok    the box every paying checkout of something digital draws carries the sentence, marked as English, whatever the store's language
+  ok    every checkout path listed draws it
+  ok    and the creator cannot change or remove it: it is drawn by the code, from one constant
+  ok    the receipt of something that lasts says it; a shipped book's does not
+  ok    an offer taken after paying says it only for what lasts
+  ok    the box links the limit to the exact place in the Terms, and the receipt gives its address
+  ok    the Terms and the Refund policy no longer promise that no member is ever charged
+  ok    and the sentence states the limit, as the Terms do
+  ok    the Terms, the Refund policy and the Privacy policy say it in plain words
+
+103 checks, all passing.
+searching for a plan paid for a closing store failed BillingError: Stripe billing failed (503 unknown): synthetic incomplete search
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/17.cjs:13981:11)
+    at async observeStoreSubscriptions (/tmp/g-2681-proof-NVaMPH/17.cjs:14304:39)
+    at async refuseLatePlans (/tmp/g-2681-proof-NVaMPH/17.cjs:146885:23)
+    at async closeOne (/tmp/g-2681-proof-NVaMPH/17.cjs:146681:30)
+    at async main (/tmp/g-2681-proof-NVaMPH/17.cjs:147508:25) {
+  status: 503,
+  code: 'unknown'
+}
+searching for a plan paid for a closing store failed Error: Subscription search page is incomplete
+    at completeSubscriptionPage (/tmp/g-2681-proof-NVaMPH/17.cjs:14265:288)
+    at observeStoreSubscriptions (/tmp/g-2681-proof-NVaMPH/17.cjs:14312:14)
+    at async refuseLatePlans (/tmp/g-2681-proof-NVaMPH/17.cjs:146885:23)
+    at async closeOne (/tmp/g-2681-proof-NVaMPH/17.cjs:146681:30)
+    at async main (/tmp/g-2681-proof-NVaMPH/17.cjs:147513:25)
+listing plans paid for a closing store failed Error: Subscription search page is incomplete
+    at completeSubscriptionPage (/tmp/g-2681-proof-NVaMPH/17.cjs:14265:288)
+    at observeStoreSubscriptions (/tmp/g-2681-proof-NVaMPH/17.cjs:14312:14)
+    at async refuseLatePlans (/tmp/g-2681-proof-NVaMPH/17.cjs:146885:23)
+    at async closeOne (/tmp/g-2681-proof-NVaMPH/17.cjs:146681:30)
+    at async main (/tmp/g-2681-proof-NVaMPH/17.cjs:147513:25)
+searching for an ended store's plan failed BillingError: Stripe billing failed (503 unknown): synthetic incomplete search
+    at onPlatform (/tmp/g-2681-proof-NVaMPH/17.cjs:13981:11)
+    at async observeStoreSubscriptions (/tmp/g-2681-proof-NVaMPH/17.cjs:14304:39)
+    at async closeOne (/tmp/g-2681-proof-NVaMPH/17.cjs:146797:25)
+    at async main (/tmp/g-2681-proof-NVaMPH/17.cjs:147546:17) {
+  status: 503,
+  code: 'unknown'
+}
+plan-closing: a store's payments were not all read within its closing's cap; the rest are counted as not told
+
+=== store-data-registry.test.ts ===
+creator: room 18 MB; outside it 121.4 MB on average, 294.6 MB at once
+pro: room 135 MB; outside it 288.1 MB on average, 804.0 MB at once
+scale: room 250 MB; outside it 704.6 MB on average, 2472.8 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (71.206698ms)
+✔ each family is bounded one way at least, and what it says can be checked (54.433209ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (9.353528ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (2.479717ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.355845ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (11.744171ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.191778ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 173.080297
+
+=== store-data.test.ts ===
+
+What a room is, by plan
+  ok    a paid store's room is its plan's
+  ok    a free trial's, and an ended plan's
+  ok    what a store keeps may fill it up to two windows of its orders from the top
+  ok    bytes are UTF-8 and every entry counts, rounded up
+  ok    an order takes what it hands over
+  ok    a bundle hands over each of its items
+
+Taken before it is written, refused past the room
+  ok    a write that fits is taken, with its own field
+  ok    one past the room is refused with what it is
+  ok    and the creator is told in plain words
+  ok    nothing of it was written
+  ok    needData says it as a full store, so every studio route answers it
+  ok    a buyer is told it is the store's room, not theirs
+  ok    deleting gives the room back, field and all
+  ok    and never below nothing
+
+What expires by itself comes off with its month
+  ok    a record kept until December is counted until then
+  ok    in the room
+  ok    and gone once its month is over
+  ok    a cache that does not fit is not kept
+
+An order is never refused once paid
+  ok    what an order leaves is added whatever the room holds, at what it really adds
+  ok    so the room may be passed by what was paid for
+
+A checkout is held only while the room has space for its order
+  ok    an empty room admits a checkout
+  ok    a room with space for one more order admits one
+  ok    room made, sales go on
+  ok    a store is known by its id
+
+Unknown is not zero
+  ok    a room that cannot be read takes nothing
+  ok    and is an ordinary failure, to try again, not a full store
+  ok    a change that is not a number is refused before anything
+
+Counts that never grow a hash past its most
+  ok    new names fill the hash to its most
+  ok    what does not fit is counted under ~, and a name there always counts
+  ok    counting names that all fit runs its length once and a count each
+  ok    near its most, one read more says which are there
+  ok    the same hash named twice is refused, and nothing is written
+  ok    and the same names again, past it, as many
+
+33 checks, all passing.
+
+=== stream-measurement.test.ts ===
+✔ complete pages preserve exact integer watch totals, including zero (10.536606ms)
+✔ provider-declared smaller pages are fully traversed (1.784362ms)
+✔ short pages that contradict totals cannot authorize a partial reading or deletion (1.192873ms)
+✔ unknown, negative, fractional and unsafe watch values never become zero (4.328005ms)
+✔ missing or inconsistent pagination metadata is unavailable (5.730913ms)
+✔ duplicate, invalid and foreign collection IDs invalidate the entire reading (0.629145ms)
+✔ changing totals and repeated pages are not accepted as complete (0.611269ms)
+✔ scan bounds reject unfinished collections and accept a complete last page (14.416011ms)
+✔ lost credentials with existing collection never mean no usage (0.499651ms)
+✔ failed readings preserve the previous measured baseline and monthly total (2.697434ms)
+✔ invalid collection records and imprecise byte counts remain unknown (0.80519ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 53.996252
+
+=== stream.test.ts ===
+
+The path a lesson keeps for such a video
+  ok    it reads back as the folder, the lesson and the id it was made from
+  ok    a file in the file store is not one
+  ok    nor is a path with a folder inside it
+  ok    nor one that climbs out
+  ok    nor one whose id is not an id
+  ok    the store it belongs to is read from it, for the month's delivery
+
+What the service's own numbers mean
+  ok    made, with no file yet
+  ok    the file arrived
+  ok    being turned into its sizes, none done
+  ok    one size done, the rest still coming: it can be played
+  ok    finished
+  ok    could not be read
+  ok    the upload failed
+
+What one viewing is counted as
+  ok    ten minutes at 1080p
+  ok    a 4K file is counted at the tallest size kept, not at its own
+  ok    a small one at its own size
+  ok    never more than the file as it was uploaded
+  ok    a video whose length is not known yet is counted as the whole file
+
+The shape the player takes
+  ok    a video filmed wide
+  ok    one filmed upright and stored turned a quarter
+  ok    one the service has not measured yet
+
+Nothing runs until the service is set up
+  ok    it is off
+  ok    no door is opened
+  ok    the service was not asked anything
+  ok    nor with a library and no token key: a library without one plays to anybody
+  ok    with them it is on
+
+The studio asks for a door
+  ok    it is given one
+  ok    for a video made in the store's own collection
+  ok    named after the store and the lesson, not the creator
+  ok    good for a day
+  ok    signed the way the service's own page says: library, key, the second it ends, the video
+  ok    and the path to tell the lesson is that store's, that lesson's
+  ok    written down as an upload still to come
+  ok    a second video of the store goes in the same collection
+
+The lesson is told its video
+  ok    not a video whose door was opened for another store
+  ok    not for another lesson
+  ok    not a path nothing is known about
+  ok    not a file in the file store
+  ok    the one that was opened for it, yes: the file is there and no size is ready
+  ok    what it is called and how big come from what was written down, not from the browser
+
+An unconfirmed peek claim never asks the video provider
+  ok    unconfirmed claim [] keeps preparation without provider request or retry
+  ok    unconfirmed claim ["OK","extra"] keeps preparation without provider request or retry
+  ok    unconfirmed claim [null] keeps preparation without provider request or retry
+  ok    unconfirmed claim [false] keeps preparation without provider request or retry
+  ok    unconfirmed claim [0] keeps preparation without provider request or retry
+  ok    unconfirmed claim [1] keeps preparation without provider request or retry
+  ok    unconfirmed claim [true] keeps preparation without provider request or retry
+  ok    unconfirmed claim ["ok"] keeps preparation without provider request or retry
+  ok    unconfirmed claim [{}] keeps preparation without provider request or retry
+  ok    unconfirmed claim "OK" keeps preparation without provider request or retry
+  ok    unconfirmed claim null keeps preparation without provider request or retry
+
+A student opens the lesson while it is being prepared
+  ok    there is nothing to play yet, and the page says so
+  ok    a second student seconds later does not ask the service again
+
+The service says a size is ready
+  ok    an announcement signed with another key is not believed
+  ok    nor one whose body was changed after it was signed
+  ok    nor one that names another way of signing
+  ok    the video is still being prepared, as far as anybody is told
+  ok    the service's own is taken
+  ok    and the video is ready: there is a size to play
+  ok    its length and shape are not known yet, and nobody pretends they are
+  ok    an announcement about a video that is not ours is let go
+  ok    and one from another library
+
+A video that plays before the service has finished with it
+  ok    it plays meanwhile, in the usual shape
+  ok    and a viewing is counted as the whole file, at the tallest size, not at a shape that is only a guess
+  ok    a student seconds later does not ask the service again
+  ok    the next one, once the service has measured it, sees it in its own shape: filmed upright, it is upright
+  ok    its length is written down, and it is still being asked about: the larger sizes are coming
+  ok    a student's page no longer asks: what it needed, it has
+  ok    the five-minute job does, and the video goes on playing
+  ok    when the service says it has finished, what it weighs is the whole of it
+  ok    and it is not asked about again
+
+The player a student is shown
+  ok    it is the service's own, for that video
+  ok    good for a few hours
+  ok    with a token made the way the service's own page says: token key, video, the second it ends
+  ok    it does not start by itself, and goes on from where the student stopped
+  ok    the studio is told it is ready
+  ok    a store page may frame that player
+  ok    the studio, which shows no lesson, may not
+  ok    and the studio may send a video's pieces to the service
+
+How much a store keeps there is the service's own count
+  ok    every size of every video
+  ok    a store with nothing there keeps nothing
+  ok    invalid collection reference is unknown, not empty
+  ok    and a count that cannot be read is said to be unknown, not zero
+
+A door nothing came through
+  ok    is left alone for two days: an upload cut off may still go on
+  ok    then what was made for it is taken away at the service
+  ok    and here, whatever the service had made of it: no lesson has it
+  ok    the video a lesson has is not touched
+
+The service is busy, or not there
+  ok    a lesson told its video while the service cannot be reached still has it
+  ok    the five-minute job asks, learns nothing, and changes nothing
+  ok    when the service is back and says the file could not be read, the video has failed
+  ok    what could not be made into a video is not kept there, or paid for
+  ok    a student is told it could not be prepared, and shown nothing
+
+A file the service never finishes
+  ok    is waited for, for a week
+  ok    and then given up on, so the creator is told to upload it again
+
+A file far larger than the studio lets through
+  ok    is not kept, whatever the service made of it
+
+A video that plays, and what the service says of it afterward
+  ok    Lesson six.mp4: told to the lesson with one size made, it plays
+  ok    a later size that could not be made does not take away a video that plays
+  ok    and it is left alone from then on
+  ok    Lesson seven.mp4: told to the lesson with one size made, it plays
+  ok    the service not answering changes nothing about it
+  ok    one that is no longer at the service is said to have failed, not shown as a player with nothing in it
+  ok    Lesson eight.mp4: told to the lesson with one size made, it plays
+  ok    one that grows past what may be kept, as its larger sizes are made, is not kept either
+  ok    Lesson nine.mp4: told to the lesson with one size made, it plays
+  ok    one the service never says it has finished is asked about for a week, and then left as it is: playing
+
+Captions a creator uploads
+  ok    a subtitle file is taken, and the video has captions in that language
+  ok    what the service was sent is WebVTT made here, not the file as it came
+  ok    a second language sits beside the first, in the order the names are read in
+  ok    a second file in a language takes the place of the first
+  ok    the studio is told which videos have captions, and only those
+  ok    a file that is not captions is refused, and nothing is sent
+  ok    so is one over the size a captions file may be
+  ok    and a language that is not on the list
+  ok    a video that could not be made has none
+  ok    nor has a path nothing is known about
+  ok    with the service not there, the language is not listed: the player would not offer it
+  ok    and one that cannot be taken away there stays listed here
+  ok    a video holds captions in 12 languages and no more
+  ok    though one of those it has can still be replaced
+  ok    taken away, a language is gone from the service and from the list
+
+A creator removes the video
+  ok    a file in the file store is not this file's to delete
+  ok    the video is taken away
+  ok    at the service
+  ok    and here
+  ok    with the list of its captions
+  ok    a student who still has the page is shown nothing
+  ok    removed while the service cannot be reached, it is gone here at once
+  ok    and still there
+  ok    until the five-minute job tries again, so nothing is kept, and paid for, because of one bad minute
+
+Deletion failures retain durable cleanup intent
+  ok    an abandoned upload is detached locally
+  ok    both failed deletions remain queued
+  ok    both still exist at the provider
+  ok    a repeated outage retains both cleanup entries
+  ok    the job deletes both after provider recovery
+  ok    neither remains stored
+  ok    confirmed deletion clears the queue
+
+Unconfirmed cleanup persistence cannot discard a video
+  ok    unconfirmed queue persistence refuses cleanup
+  ok    the video remains discoverable locally
+  ok    no provider deletion was attempted
+
+A new upload needs confirmed tracking before receiving its signature
+  ok    missing tracking acknowledgement never publishes an upload signature
+  ok    the empty provider video is removed
+
+A new manual caption is bound to its funded owner before provider work
+  ok    the owner wrapper still adds captions on an unmarked period
+  ok    a new manual caption needs financial approval
+  ok    a foreign video's folder is refused
+  ok    no provider request or caption replacement
+  ok    the existing caption can still be removed
+  ok    the existing language is gone after provider cleanup
+
+The announcements' address does not exist without the key they are signed with
+  ok    not found
+
+148 checks, all passing.
+
+=== traffic-admission.test.ts ===
+✔ all paid tiers have finite thresholds, independent of monthly/yearly billing (4.320413ms)
+✔ inherited and unknown tiers cannot bypass the smallest paid threshold (1.522137ms)
+✔ acknowledged unused month and exact integer counters are readable (1.892204ms)
+✔ paid pages pause at the threshold and remain paused above it (0.407923ms)
+✔ missing acknowledgements, malformed rows and corrupt counters never authorize (2.25561ms)
+✔ unavailable ledger and provider exceptions pause admission (0.324729ms)
+✔ a paying store whose billing month is not known rests: nothing that costs is answered (0.228223ms)
+✔ invalid folder, month or request clock cannot authorize (0.241663ms)
+✔ marked funded pages and public requests require their resource month before traffic work (2.087067ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25.250239
+
+=== traffic.test.ts ===
+
+What a plan covers, and where a month's visits stop
+  ok    a larger plan covers more
+  ok    public pages rest at 95% of the figure, the rest kept for buyers' pages
+  ok    a figure that is not one rests everything
+  ok    in words
+  ok    the price visits were billed at did not keep the floor
+
+Who a visitor is, for a day
+  ok    an old-style address is itself
+  ok    a new-style address is its network: one subscriber's every address is one visitor
+  ok    another network is another visitor
+  ok    an old address written the new way is the old address
+  ok    what is not an address is kept as it came, and nothing is one visitor
+
+A visit is one person, one day, one store
+  ok    the first time somebody comes it is a visit
+  ok    however many pages they open that day, it is the one
+  ok    somebody else is another
+  ok    every address of one new-style network is one visitor
+  ok    the next day the same person is a visit again
+  ok    and at another store, a visit to that store
+  ok    the stores visited in a month are known, and whose each is
+  ok    a visit belongs to the billing month of its moment
+  ok    what is kept of a visitor is a few letters, not their address
+
+Who is never counted
+  ok    a robot that says it is one
+  ok    the store's owner, looking at their own store
+  ok    somebody signed in who is not the owner is a visitor like any other
+  ok    and so is anybody else
+
+Paid plans also have a finite visit threshold
+  ok    each paid plan is held to its published counted-visit threshold
+  ok    at five million visits its public pages rest
+  ok    a paid store is checked with the same strict read
+
+A store with no plan to charge rests at the visits it has
+  ok    before a plan, and after one, it has a few hundred
+  ok    one short of where public pages stop, its pages are open
+  ok    there, its public pages rest; buyers' pages go on to the whole figure
+  ok    at the whole figure, they rest too
+  ok    which is asked in one read
+  ok    a store whose plan ended is held to the same figure
+  ok    a free trial has its own figure, whichever plan it is a trial of, no more than the smallest plan's
+  ok    and rests there
+  ok    a paid Scale plan starts its own billing month, below its own larger threshold
+  ok    when the month turns, so are a resting store's
+  ok    an acknowledged unused month remains open
+
+Visits past a plan are never billed: pages rest instead
+  ok    under 95% of the figure, every page is open
+  ok    at 95%, public pages rest and buyers' pages stay open
+  ok    at the whole figure, buyers' pages rest too
+  ok    and no line is put on any invoice for it
+  ok    a yearly plan's month starts on the day of the month its year began
+  ok    the same visits on a larger plan are inside it
+  ok    a creator is written to about a month once
+
+What a page sends to the database is inside what a visit is costed at
+  ok    a full page of a store that pays is drawn in a few reads
+  ok    counting it a second time that day is inside the model
+  ok    and what somebody new to the day adds is too
+  ok    a product's page is drawn inside it
+  ok    and saying it was opened is too, with the product's own visitor
+  ok    and how a page was read is too, without reading the store
+  ok    the visit this is all worked out for is a heavy one
+
+Where it is counted, and where a store rests
+  ok    the front page's count is a visit too, and any other page's is only that
+  ok    a page other than the front one says only that it was opened
+  ok    p: somebody who arrives straight at it is counted
+  ok    book: somebody who arrives straight at it is counted
+  ok    free: somebody who arrives straight at it is counted
+  ok    waitlist: somebody who arrives straight at it is counted
+  ok    the store's page rests with the store, before anything else is read for it
+  ok    a product's page rests with the store, before anything else is read for it
+  ok    a resting page keeps the way back to what a buyer has, and counts nothing
+  ok    orders: what a buyer has is never part of the rest
+  ok    manage: what a buyer has is never part of the rest
+  ok    download: what a buyer has is never part of the rest
+  ok    orders: an opening takes ORDERS_OPEN_UNITS buyer requests before its grant is read, and its meter takes more as buyer requests
+  ok    courses, the community and podcasts rest only at the whole figure
+  ok    the daily job writes and never bills visits, and it is scheduled
+
+What the pages say
+  ok    the Terms give finite plan visit thresholds, and say nothing is billed
+  ok    what a visit is, and who is never counted
+  ok    and what happens with no paid plan
+  ok    the help pages disclose counted visits, page pauses and that nothing is billed
+  ok    the price list says it beside the plan, with no price past it
+  ok    the store feature page discloses finite public-page visits
+  ok    the privacy policy says what is kept of a visitor for the count, and for how long
+  ok    the studio shows visits and their finite threshold
+  ok    a plan's price is far more than its visits cost us
+
+75 checks, all passing.
+
+=== usage-meter.test.ts ===
+✔ unknown usage has a status message without a false zero or progress value (10.238507ms)
+✔ acknowledged zero remains a real zero with an accessible zero progress value (9.153127ms)
+✔ invalid counters are unavailable, never rendered as valid balances (1.273034ms)
+✔ invalid thresholds do not invent a zero allowance (2.007978ms)
+✔ recorded overuse remains visible while progress stays within accessible bounds (0.504168ms)
+✔ a verified zero threshold is exhausted rather than dividing by zero (0.315644ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.385035
+
+=== vault-upload.test.ts ===
+
+A file goes over in pieces
+  ok    it resolves with the file as the store measured it
+  ok    our door was told what the file is before a byte went
+  ok    each piece went once, in its own size
+  ok    and what the store answered for each is handed back in order
+  ok    the creator sees it start at nothing and end at 100
+  ok    nothing was waited for, and nothing given up
+
+Addresses are asked for a few at a time
+  ok    never more than the door gives at once
+  ok    and every piece arrived
+
+A small file goes whole
+  ok    in one piece, and no list of answers is needed to close it
+
+One-part multipart negotiation
+  ok    a negotiated one-part session returns its ETag for completion
+  ok    a successful PUT without its required ETag cannot complete
+
+A piece fails, and is sent again
+  ok    after a pause that grows
+  ok    three tries for that piece, one for the others
+  ok    each try with an address asked for afresh
+  ok    and the upload finishes with every piece
+  ok    a store that is busy is waited for the same way
+
+An upload that cannot go on says why
+  ok    a piece that fails through every pause: the upload stopped
+  ok    only after every pause was tried
+  ok    and what did arrive is thrown away at the store
+  ok    our door refusing to open it is said in the door's own word
+  ok    and nothing was sent anywhere
+  ok    our door no longer knowing the upload ends it at once, with no pauses
+  ok    a file the store measured as something else is refused at the end
+
+The store that takes these is not set up
+  ok    nothing is thrown: the caller uploads the way it always has
+
+24 checks, all passing.
+
+=== vault.test.ts ===
+
+The path a sold file is kept under
+  ok    the name is made plain, so its address never needs escaping
+  ok    it reads back as the store, what it hangs on, and its name
+  ok    a name with nothing plain in it is still a name
+  ok    it is this store's, on this product
+  ok    not another store's
+  ok    nor another product's
+  ok    the check every upload passes takes it as it takes a file in the host's store
+  ok    a file in the host's store is not one of these
+  ok    nor is a path that climbs out
+  ok    a buyer's stamped copy, kept in a folder beside the files, is
+  ok    the store it belongs to is read from it, for the month's delivery
+
+How an upload is cut into pieces
+  ok    a small file goes whole
+  ok    one byte more and it is two
+  ok    every piece is full but the last
+  ok    and there is no piece before the first or after the last
+  ok    the largest file here is 320 pieces, far under the store's ten thousand
+
+Nothing runs until the store is set up
+  ok    it is off
+  ok    no upload is opened
+  ok    no address is made
+  ok    and the store was not asked anything
+  ok    with its four settings it is on
+
+A large file goes up in pieces
+  ok    it is opened at the store, as what it is
+  ok    under a path in the store's own folder that nobody chose
+  ok    a second file of the same name gets a path of its own
+  ok    each piece gets an address at the store, for that piece of that upload
+  ok    good for an hour, and signed with the size the piece has to be
+  ok    the secret is nowhere in it
+  ok    there is no address for a piece the file does not have
+  ok    nor for an upload nobody opened
+  ok    closing it with a piece missing from the list is refused
+  ok    and with something that is not what the store answered
+  ok    with every piece, it is joined and measured by the store itself
+  ok    the store holds the file exactly
+  ok    and the upload cannot be closed, or added to, a second time
+
+A small file goes up whole
+  ok    to one address, with no upload opened at the store
+  ok    signed with its size and with what it is
+  ok    closed, it is the file the store measured
+
+A negotiated small file uses a revocable session
+  ok    one part is signed against an upload ID, never the bare object
+  ok    one part cannot complete without its ETag
+  ok    completion joins and verifies the small file
+  ok    an old part URL cannot resurrect the completed then deleted file
+  ok    the completed file stays deleted
+  ok    an unreachable provider does not falsely confirm cancellation
+  ok    a failed cancellation keeps the session available to retry
+  ok    a retry confirms cancellation at the provider
+  ok    a part URL from an aborted session cannot create a file
+  ok    the canceled file does not exist
+
+A file of text, which the store squeezes on its way out
+  ok    is measured as it is kept, because we ask for it as it is kept
+  ok    in one question
+  ok    and is kept
+  ok    squeezed all the same, its size is read from its first byte
+  ok    which is asked for after the store stated no length
+  ok    a file that is not text is still measured in one question
+  ok    an empty one is empty, not out of reach
+
+The studio says one size and sends another
+  ok    the file is refused
+  ok    and not kept
+
+An upload that is given up
+  ok    its pieces are thrown away at the store
+  ok    and it is forgotten here
+
+A file in the store
+  ok    is measured by the store
+  ok    one that is not there is said not to be
+  ok    through the one door every server file uses, too
+  ok    a store that cannot be reached is not mistaken for a missing file
+  ok    and a delete that did not happen is not reported as done
+
+The address a buyer is handed
+  ok    is the file's own, at the store, for five minutes
+  ok    and saves under the name the creator gave it, any character surviving
+  ok    a lesson's video is played, not saved: no name is forced on it
+  ok    fetched with that address, it is the file
+  ok    there is no address for a path that is not one of these
+
+A buyer's stamped copy, written and read by us
+  ok    it is kept as what it is
+  ok    and read back whole
+  ok    a file over the size we will hold in memory is not read
+  ok    the copies of one file are found by their folder
+
+What a store keeps here
+  ok    is every file in its folder, page after page
+  ok    a listing gives a page at a time
+  ok    a store with nothing here keeps nothing
+  ok    and a count that cannot be read is said to be unknown, not zero
+
+Incomplete storage listings never authorize new storage
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    malformed page is unavailable
+  ok    repeated cursor is incomplete
+  ok    duplicate file is not a complete measurement
+  ok    page cap is not a completed listing
+  ok    final page at page cap is complete
+  ok    a full requested thousand-key page remains complete
+  ok    an oversized S3 page cannot be exposed as a complete listing
+  ok    an oversized zero-byte final page is unknown, never empty
+  ok    an oversized later S3 page never returns the valid partial prefix
+  ok    twenty full requested S3 pages remain measurable
+  ok    explicit consistent empty listing remains zero
+  ok    consistent declared counts and the standard default namespace remain usable
+  ok    the full declared requested page remains measurable
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+  ok    contradictory or unsupported listing evidence never becomes a complete listing
+  ok    contradictory or unsupported listing evidence is unknown, never zero
+
+A creator removes a file
+  ok    it is gone from the store
+  ok    deleting what is already gone is not a failure
+
+138 checks, all passing.
+
+=== watch.test.ts ===
+
+What a plan covers, and what an hour past it costs
+  ok    a month inside the hours owes nothing
+  ok    an hour past them is the published price
+  ok    it is counted to the second, and a part of a cent is never charged
+  ok    a thousand hours past them
+  ok    a figure that is not one owes nothing
+  ok    a length of watching, in words
+  ok    money and months, in words
+  ok    a paid plan past its trial can be charged
+  ok    one still in its free trial cannot
+  ok    nor one that is not paying, or was never started
+
+How long a store's video was watched, read from the video service
+  ok    a store nobody watches is not asked about
+  ok    a lesson opened does not have it read at once
+  ok    ten minutes on it is read, and what was watched is added up
+  ok    under the month it was read in
+  ok    in one question for the whole store
+  ok    not again inside the hour
+  ok    an hour on, only what was watched since is added
+  ok    a reading with nothing new adds nothing
+  ok    a count that went down adds nothing
+  ok    and is counted again from where it went down to
+  ok    a video taken away takes nothing back, and a new one counts from its first second
+  ok    the one taken away is forgotten
+  ok    a service that cannot be read adds nothing
+  ok    and the store is not counted as read
+  ok    it is read again a quarter of an hour on, and nothing was lost
+  ok    it is read by the hour until the last token has run out, and then left alone
+  ok    until a lesson is opened again
+  ok    a store with more than a thousand videos is read page after page
+  ok    a month changes with the reading
+  ok    the last hour of a month, read in the next, is counted there and once
+  ok    a store with no videos at the service has watched nothing
+
+Past the hours, nothing is put on an invoice (232 [CA1] unit 3)
+  ok    50 hours past them owes nothing and adds nothing
+  ok    101 hours past them owes nothing and adds nothing
+  ok    1000 hours past them owes nothing and adds nothing
+  ok    when the month is over nothing is billed either
+  ok    a yearly plan is not switched to billing added lines monthly
+  ok    an unfinished line from before is dropped, not finished
+  ok    Stripe is never asked to add a line
+  ok    the legacy price is kept only as history: the meter does not use it
+
+A store with no plan that can be charged
+  ok    in its free trial, nothing is put on an invoice
+  ok    inside the hours its video plays
+  ok    and the store is put in line to be read
+  ok    at the hours it is paused
+  ok    a null limit cannot bypass a paid store playback threshold
+
+The daily run
+  ok    in a month's first days the month before is read and owes nothing
+  ok    and the month that is running owes nothing either
+  ok    a store inside its hours is not in it at all
+  ok    later in the month, the month before is left closed, and no line was ever added
+  ok    a creator is written to about a month once
+
+What the pages say is what is charged
+  ok    the Terms disclose a finite video threshold
+  ok    the Terms explain existing player links and separate file delivery
+  ok    and no longer say a download is charged for
+  ok    the studio shows the hours and the playback pause
+  ok    the home page discloses finite video admission
+  ok    the help explains the finite playback threshold
+  ok    the course feature page explains pauses
+  ok    nothing still says video counts as a download
+  ok    a lesson's video is no longer counted by the page that opens it
+  ok    the daily job still runs and is scheduled
+  ok    the daily job never tells a creator of a charge after use
+  ok    nothing but the usage meters names addToNextInvoice, however it is imported
+  ok    and lib/billing.ts only defines it
+  ok    no meter owes anything after use
+  ok    and the five-minute job is the one that reads
+
+64 checks, all passing.
+
+

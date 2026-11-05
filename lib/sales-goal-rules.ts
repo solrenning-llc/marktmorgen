@@ -17,6 +17,7 @@ export const MAX_GOAL_CENTS = 1_000_000_000;
 
 /** A goal as typed: a whole number of cents above zero, at most MAX_GOAL_CENTS; 0 to have none. */
 export function readGoal(raw: unknown): number | null {
+  if (typeof raw !== "number" && (typeof raw !== "string" || !/^\d+$/.test(raw.trim()))) return null;
   const cents = Number(raw);
   if (!Number.isInteger(cents) || cents < 0 || cents > MAX_GOAL_CENTS) return null;
   return cents;

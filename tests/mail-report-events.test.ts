@@ -76,6 +76,11 @@ async function main() {
     { kind: "delayed", permanent: false, recipients: ["slow@example.test"], tags, messageId: "ses_delay_1" },
   );
   const sesCampaign = "b-abcdef0123456789abcdef01";
+  const previousDay = new Date(Date.now() - 86_400_000).toISOString();
+  is("SES uses the delivery event time, not the earlier send time", readSesEvent(JSON.stringify({ eventType: "Delivery", delivery: { timestamp: EVENT_AT, recipients: ["reader@example.test"] }, mail: { timestamp: previousDay, messageId: "ses_cross_midnight", tags } }))?.occurredAt, Date.parse(EVENT_AT));
+  for (const [kind, field] of [["Bounce", "bounce"], ["Complaint", "complaint"], ["DeliveryDelay", "deliveryDelay"]]) {
+    is(`${kind} uses its own event timestamp`, readSesEvent(JSON.stringify({ eventType: kind, [field]: { timestamp: EVENT_AT }, mail: { timestamp: previousDay, messageId: `ses_${kind}`, tags } }))?.occurredAt, Date.parse(EVENT_AT));
+  }
   const sesTags = { nl_store: STORE, nl_list: LIST, [MAIL_REPORT_TAG]: sesCampaign };
   is("the authenticated SES route action records delivery", await recordSesEvent({ kind: "delivered", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delivery_2", occurredAt: Date.now() }), "delivered");
   is("and records a temporary outcome without treating it as permanent", await recordSesEvent({ kind: "delayed", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delay_2", occurredAt: Date.now() }), "temporary");
@@ -101,7 +106,7 @@ async function main() {
   is("a provider replay under another webhook id is still the same email outcome", (await mailReportDay(STORE, CAMPAIGN))?.temporaryBounces, 1);
   is("temporary delivery trouble never creates a pause or recipient mark", redis.keys().some((key) => key.startsWith(`nl:mail:paused:${STORE}`) || key.startsWith(`nl:mail:health:${STORE}:seen:`)), false);
   for (const bounceType of ["Transient", "Undetermined"]) {
-    const event = readSesEvent(JSON.stringify({ eventType: "Bounce", bounce: { bounceType, bouncedRecipients: [{ emailAddress: "temporary@example.test" }] }, mail: { messageId: `ses_${bounceType}`, timestamp: EVENT_AT, tags } }));
+    const event = readSesEvent(JSON.stringify({ eventType: "Bounce", bounce: { bounceType, timestamp: EVENT_AT, bouncedRecipients: [{ emailAddress: "temporary@example.test" }] }, mail: { messageId: `ses_${bounceType}`, timestamp: EVENT_AT, tags } }));
     is(`${bounceType} is explicitly non-permanent`, event?.permanent, false);
     is(`${bounceType} records only a temporary SES outcome`, event && await recordSesEvent(event), "temporary");
     const answer = await POST(announce("email.bounced", { email_id: `resend_${bounceType}`, to: ["temporary@example.test"], tags, bounce: { type: bounceType } }));
@@ -138,7 +143,9 @@ async function main() {
     Date.now = originalNow;
   }
   const keysBefore = redis.keys();
-  for (const occurredAt of [undefined, NaN, Infinity, -1, Date.now() + 1000, Date.now() - 11 * 86_400_000]) {
+  const clockNow = Date.now();
+  is("a signed provider clock three seconds ahead is retained at its own instant", await noteMailReportEvent(STORE, "b-clock-skew", "delivered", 1, "ses:clock-skew", clockNow + 3000, clockNow), true);
+  for (const occurredAt of [undefined, NaN, Infinity, -1, Date.now() + 60_000, Date.now() - 11 * 86_400_000]) {
     is("an unconfirmed, future or expired event time authorizes no report write: " + String(occurredAt), await noteMailReportEvent(STORE, CAMPAIGN, "delivered", 1, "ses:time-invalid", occurredAt), false);
   }
   is("refused timestamps leave every key intact", redis.keys(), keysBefore);

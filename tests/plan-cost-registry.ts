@@ -97,7 +97,7 @@ import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/li
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
-  UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
+  PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
@@ -124,9 +124,8 @@ export const STREAM_STORAGE_PER_GB = 0.02;
 export const STREAM_DELIVERY_PER_GB = 0.005;
 export const FETCHED_AHEAD = 1.25;
 export const PER_EMAIL = 0.0009;
-/** DR1 unit 1 observed components, deliberately NOT an authorization or a
- * complete cost line. The draft's new writes must not be merged until the
- * callback attempts, SNS/hosting tariff and admission envelope are closed.
+/** DR1 unit 1 components. A priced successful delivery is not evidence of
+ * the live retry policy, total provider publications or admission funding.
  * Lua includes EVAL and every internal command; storage is separately in
  * the mail-health family of store-data-registry, without free-tier credit. */
 export const MAIL_REPORT_COST_COMPONENTS = {
@@ -142,6 +141,49 @@ export const MAIL_REPORT_COST_COMPONENTS = {
   completeMonthlyUsd: null,
   reviewedAdmission: null,
 } as const;
+/** One published delivery notice, without supplier free-tier credit:
+ * SNS $0.50/million publishes + $0.60/million HTTPS deliveries, each 64 KiB
+ * chunk charged. Read 2026-11-04: aws.amazon.com/sns/faqs/ and /sns/pricing/.
+ * The caller MUST supply its regional data-out ceiling; null is unknown.
+ * This is an explicit sizing calculation, never a current account review.
+ * A retry is charged the full route envelope even when deduplication wins.
+ * Thirty CPU seconds and 2 GB held for all 30 seconds use maxDuration, not
+ * an observed fast callback. Eleven Redis commands = SET/INCR rate guard,
+ * SET SNS receipt, EVAL plus its seven internal report commands. Storage
+ * includes two report fields kept ten days and two 256-byte transport/guard
+ * records per attempt kept a full day (above the actual minute-long guard).
+ * Report fields are also in the data-family model: deliberately overlapping
+ * reserves, never a discount to another feature's existing storage budget.
+ */
+export function mailReportCallbackCost(deliveries: number, attempts: number, snsTransferPerGb: number | null) {
+  if (!Number.isSafeInteger(deliveries) || deliveries < 0 ||
+      !Number.isSafeInteger(attempts) || attempts < 1 || attempts > 101 ||
+      typeof snsTransferPerGb !== "number" || !Number.isFinite(snsTransferPerGb) || snsTransferPerGb <= 0 ||
+      !Number.isSafeInteger(deliveries * attempts)) return null;
+  const invocations = deliveries * attempts;
+  const redisCommands = invocations * 11;
+  if (!Number.isSafeInteger(redisCommands)) return null;
+  // Five chunks for an accepted 300,000-byte envelope, plus transport
+  // headers. An oversized/rejected publication is outside this delivery
+  // scenario; it does not become a free event or funded company expense.
+  // Count a cold certificate fetch's 20,000 bytes on every attempt as well.
+  const snsPerNotice = 5 * 0.5 / 1_000_000;
+  const snsPerAttempt = 5 * 0.6 / 1_000_000 + 320_000 * snsTransferPerGb / 1e9;
+  // Include CDN request and BOTH incoming and outgoing Fast Origin/Data
+  // Transfer; model 32 KiB of headers plus 300,000 request/128 response bytes.
+  // Regional account coverage still needs an independent review.
+  const networkBytes = 300_000 + 128 + 32_768;
+  const hostingPerAttempt = CALL + 30 * CPU_SECOND + 30 * MEMORY_SECOND + 2 / 1_000_000
+    + networkBytes * (ORIGIN_PER_BYTE + 0.15 / 1e9);
+  const redisPerAttempt = 11 * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
+  const retainedPerNotice = 512 * 10 / 30 * DB_BYTE_MONTH;
+  const snsUsd = deliveries * (snsPerNotice + attempts * snsPerAttempt);
+  const hostingUsd = invocations * hostingPerAttempt;
+  const redisUsd = deliveries * (attempts * redisPerAttempt + retainedPerNotice);
+  const totalUsd = deliveries * ((snsPerNotice + attempts * (snsPerAttempt + hostingPerAttempt + redisPerAttempt) + retainedPerNotice) * (1 + PROVIDER_CHARGES_BPS / 10_000));
+  if (!Number.isFinite(totalUsd)) return null;
+  return { notices: deliveries, invocations, redisCommands, snsUsd, hostingUsd, redisUsd, providerAllowanceUsd: totalUsd - snsUsd - hostingUsd - redisUsd, totalUsd };
+}
 /** An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). */
 export const ORDER_COMPUTE = 0.0003;
 /**

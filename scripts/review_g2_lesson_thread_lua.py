@@ -31,7 +31,10 @@ with tempfile.TemporaryDirectory(prefix='g2-thread-redis-') as directory:
   reset();rp=seed(parent);rr=seed(answer,parent);assert reply(successor,parent)==[1,1,1,0,2]
   expected=sum(((len(raw.encode())+512+15)//16)*16 for raw in (rp,rr,row(successor,parent)))
   assert delete(parent)==[3,expected];assert delete(parent)==[0,0];assert reply('dddddddddddd',parent)==[0,0,0,0,0];assert c('HLEN',keys[0])==0
-  print('PASS native reply-first and delete-first ordering, exact UTF-8 room, duplicate deletion')
+  print('PASS native reply-first and delete-first ordering, exact room, duplicate deletion')
+  reset();unicode_raw=row(parent,text='École — learner 👩🏽‍💻');c('HSET',keys[0],parent,unicode_raw);c('ZADD',keys[1],100,parent);c('ZADD',keys[2],100,parent)
+  assert delete(parent)==[1,((len(unicode_raw.encode())+512+15)//16)*16]
+  print('PASS actual Unicode/emoji stored bytes use UTF-8 length and the paid 16-byte room step')
   reset();seed(parent);seed(answer,parent);bad=json.loads(row(answer,parent));bad['r']={'unknown':True};c('HSET',keys[0],answer,json.dumps(bad));assert delete(parent)==[-1,0];assert c('HLEN',keys[0])==2
   print('PASS malformed link stops the exact Lua before any deletion')
   reset();seed(parent);seed(answer,parent);c('HSET',keys[3],parent,'1.5')

@@ -9,7 +9,7 @@ import {store as redis} from './redis-stub';
 const fee={id:'fee_UnknownState0001',account:'acct_Receipt0001',charge:'ch_UnknownState0001',amount:625,amount_refunded:0,currency:'usd'};
 const row={id:'du_UnknownState0001',object:'dispute',charge:fee.charge,currency:'usd',status:'future_status'};
 const now=1800000000;
-type Diagnostic={unknownDisputes:number;unknownDisputeFees:string[];unknownAmounts:number;unknownAmountFees:string[]};
+type Diagnostic={unknownDisputes:number;unknownDisputeFees:string[];unknownAmounts:number;unknownAmountFees:string[];listUnknown:number};
 async function world(options:{feeListReply?:unknown;recent?:boolean;historical?:boolean;reply?:unknown;unavailable?:boolean;feePatch?:Record<string,unknown>;chargePatch?:Record<string,unknown>;metadataPatch?:Record<string,unknown>;sessionPatch?:Record<string,unknown>;sessionListPatch?:Record<string,unknown>}={}){
  redis.clear();process.env.STRIPE_SECRET_KEY='sk_test_fee_refund_only_a_stand_in';
  const calls:{method:string;url:URL}[]=[];
@@ -43,6 +43,7 @@ async function world(options:{feeListReply?:unknown;recent?:boolean;historical?:
 test('G2: confirmed empty fee ledger is a complete zero control',async()=>{
  const {counts,calls}=await world({feeListReply:{object:'list',has_more:false,data:[]}});
  assert.equal(counts.complete,true);assert.equal(counts.failed,0);assert.equal(counts.fees,0);assert.equal(calls.filter(c=>c.method==='POST').length,0);
+ assert.equal((counts as unknown as Diagnostic).listUnknown,0);
 });
 for(const [label,feeListReply] of [['missing data',{}],['null data',{object:'list',has_more:false,data:null}],['missing has_more',{object:'list',data:[]}],['more pages without cursor',{object:'list',has_more:true,data:[]}],['malformed fee row',{object:'list',has_more:false,data:[{}]}]] as const){
  test('G2: unconfirmed fee list cannot mean complete zero: '+label,async()=>{
@@ -50,16 +51,19 @@ for(const [label,feeListReply] of [['missing data',{}],['null data',{object:'lis
   assert.equal(calls.filter(c=>c.method==='POST').length,0);
   assert.equal(counts.complete,false,'incomplete evidence must stay unknown');assert.equal(counts.failed,1);
   assert.equal(counts.fees,0);assert.equal(counts.unknownAmounts,0);assert.deepEqual(counts.unknownAmountFees,[]);
+  assert.equal((counts as unknown as Diagnostic).listUnknown,1);
  });
 }
 test('G2: validate every fee row before authorizing a refund from that page',async()=>{
  const {counts,calls}=await world({feeListReply:{object:'list',has_more:false,data:[fee,{}]},chargePatch:{disputed:false},metadataPatch:{share_bps:'0'}});
  assert.equal(calls.filter(c=>c.method==='POST').length,0);assert.equal(counts.complete,false);assert.equal(counts.failed,1);assert.equal(counts.fees,0);
+ assert.equal((counts as unknown as Diagnostic).listUnknown,1);
 });
 test('G2: repeated pagination cursor is an incomplete read, not fifty paid repeats',async()=>{
  const {counts,calls}=await world({feeListReply:{object:'list',has_more:true,data:[fee]},chargePatch:{disputed:false}});
  assert.equal(counts.complete,false);assert.equal(counts.failed,1);assert.equal(calls.filter(c=>c.url.pathname==='/v1/application_fees').length,2);
  assert.equal(calls.filter(c=>c.method==='POST').length,0);
+ assert.equal((counts as unknown as Diagnostic).listUnknown,1);
 });
 
 for(const [label,options,expected] of [

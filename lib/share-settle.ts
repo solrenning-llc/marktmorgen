@@ -212,17 +212,29 @@ export async function settleFee(fee: Fee, nowSeconds: number, live = COMMISSION_
 /** Step 1: every fee taken in the last RECENT_DAYS days. */
 async function settleRecent(nowSeconds: number, deadline: number, counts: SettleCounts, live: boolean): Promise<boolean> {
   let after = "";
+  const cursors = new Set<string>();
   for (let page = 0; page < 50; page += 1) {
     if (Date.now() > deadline) return false;
     const list = await onPlatform(
       "GET",
       `/application_fees?limit=100&created[gte]=${Math.floor(nowSeconds - RECENT_DAYS * 86_400)}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
     );
-    const rows = Array.isArray(list.data) ? (list.data as Record<string, unknown>[]) : [];
-    for (const raw of rows) {
+    if (list.object !== "list" || typeof list.has_more !== "boolean" || !Array.isArray(list.data)
+      || list.data.length > 100 || (list.has_more && list.data.length === 0)) {
+      throw new Error("Recent application fee page was not confirmed");
+    }
+    // Confirm the entire page before any of its rows can authorize a refund.
+    const ids = new Set<string>();
+    const fees = list.data.map((raw: unknown): Fee => {
+      const fee = raw && typeof raw === "object" && !Array.isArray(raw) ? readFee(raw as Record<string, unknown>) : null;
+      if (!fee || ids.has(fee.id) || fee.id === after) throw new Error("Recent application fee row was not confirmed");
+      ids.add(fee.id);
+      return fee;
+    });
+    const last = fees.length ? fees[fees.length - 1].id : "";
+    if (list.has_more && cursors.has(last)) throw new Error("Recent application fee cursor did not advance");
+    for (const fee of fees) {
       if (Date.now() > deadline) return false;
-      const fee = readFee(raw);
-      if (!fee) continue;
       counts.fees += 1;
       try {
         const back = await settleFee(fee, nowSeconds, live);
@@ -235,8 +247,8 @@ async function settleRecent(nowSeconds: number, deadline: number, counts: Settle
         console.error(`settling the share ${fee.id} failed`, error);
       }
     }
-    const last = rows.length ? str(rows[rows.length - 1].id) : "";
-    if (list.has_more !== true || !last) return true;
+    if (!list.has_more) return true;
+    cursors.add(last);
     after = last;
   }
   return false;

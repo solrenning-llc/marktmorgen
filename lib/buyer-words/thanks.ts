@@ -99,8 +99,8 @@ const en = {
   groupTakeOne: (people: number) => `Take a place yourself the same way: you paid for ${people}, and you are one of them only if you take one.`,
   groupDemo:
     "This is the demo store, which sends no email, so it makes no link and hands out no places. On a real store this page shows one link to pass on, and the same link is in your receipt: each person opens it, types their own email and has it on their own address.",
-  noGroupLink: "We could not get your link just now. Refresh this page in a moment; it is also on its way to your email.",
-  groupReceipt: (email: string) => `The same link is in the receipt sent to ${email}: keep it, it is how the places are handed out.`,
+  noGroupLink: "We could not get your link just now. Refresh this page in a moment; an email with it may also reach you.",
+  groupReceipt: (email: string) => `If the receipt reaches ${email}, it includes the same link: keep it, it is how the places are handed out.`,
 
   // ---- What was bought -------------------------------------------------------------------------------
   trialStarted: "Trial started",
@@ -305,8 +305,8 @@ const es: ThanksWords = {
   groupTakeOne: (people) => `Toma tú una plaza de la misma manera: pagaste por ${people}, y solo ocupas una si la tomas.`,
   groupDemo:
     "Esta es la tienda de demostración, que no envía emails, así que no crea ningún enlace ni reparte plazas. En una tienda real, esta página muestra un enlace para compartir, y el mismo enlace está en tu recibo: cada persona lo abre, escribe su propio email y lo tiene en su propia dirección.",
-  noGroupLink: "Ahora mismo no pudimos obtener tu enlace. Actualiza esta página en un momento; también va de camino a tu email.",
-  groupReceipt: (email) => `El mismo enlace está en el recibo enviado a ${email}: guárdalo, es como se reparten las plazas.`,
+  noGroupLink: "Ahora mismo no pudimos obtener tu enlace. Actualiza esta página en un momento; también puede llegarte por email.",
+  groupReceipt: (email) => `Si el recibo llega a ${email}, incluye el mismo enlace: guárdalo, es como se reparten las plazas.`,
 
   trialStarted: "Prueba iniciada",
   youAreBooked: "Tienes tu reserva",
@@ -500,8 +500,8 @@ const fr: ThanksWords = {
   groupTakeOne: (people) =>
     `Prenez vous-même une place de la même façon${S}: vous avez payé pour ${people}, et vous n'en faites partie que si vous en prenez une.`,
   groupDemo: `Ceci est la boutique de démonstration, qui n'envoie aucun e-mail, elle ne crée donc aucun lien et ne distribue aucune place. Dans une vraie boutique, cette page affiche un lien à transmettre, et le même lien figure sur votre reçu${S}: chaque personne l'ouvre, saisit son propre e-mail et l'a sur sa propre adresse.`,
-  noGroupLink: `Nous n'avons pas pu obtenir votre lien pour l'instant. Actualisez cette page dans un instant${S}; il est aussi en route vers votre boîte e-mail.`,
-  groupReceipt: (email) => `Le même lien se trouve sur le reçu envoyé à ${email}${S}: gardez-le, c'est avec lui que les places sont distribuées.`,
+  noGroupLink: `Nous n'avons pas pu obtenir votre lien pour l'instant. Actualisez cette page dans un instant${S}; il peut aussi vous parvenir par e-mail.`,
+  groupReceipt: (email) => `Si le reçu arrive à ${email}, il contient le même lien${S}: gardez-le, c'est avec lui que les places sont distribuées.`,
 
   trialStarted: "Essai commencé",
   youAreBooked: "Votre réservation est faite",
@@ -698,8 +698,8 @@ const de: ThanksWords = {
   groupTakeOne: (people) => `Nehmen Sie selbst auf dieselbe Weise einen Platz: Sie haben für ${people} bezahlt und gehören nur dazu, wenn Sie einen nehmen.`,
   groupDemo:
     "Dies ist der Demo-Shop, der keine E-Mails verschickt, daher erstellt er keinen Link und vergibt keine Plätze. In einem echten Shop zeigt diese Seite einen Link zum Weitergeben, und derselbe Link steht auf Ihrer Quittung: Jede Person öffnet ihn, gibt ihre eigene E-Mail ein und hat es auf ihrer eigenen Adresse.",
-  noGroupLink: "Wir konnten Ihren Link gerade nicht abrufen. Laden Sie diese Seite gleich neu; er ist auch per E-Mail unterwegs.",
-  groupReceipt: (email) => `Derselbe Link steht auf der Quittung an ${email}: Bewahren Sie ihn auf, damit werden die Plätze vergeben.`,
+  noGroupLink: "Wir konnten Ihren Link gerade nicht abrufen. Laden Sie diese Seite gleich neu; er kann Sie auch per E-Mail erreichen.",
+  groupReceipt: (email) => `Falls die Quittung ${email} erreicht, enthält sie denselben Link: Bewahren Sie ihn auf, damit werden die Plätze vergeben.`,
 
   trialStarted: "Testphase gestartet",
   youAreBooked: "Ihr Termin ist gebucht",
@@ -895,8 +895,8 @@ const it: ThanksWords = {
   groupTakeOne: (people) => `Prendi anche tu un posto allo stesso modo: hai pagato per ${people}, e ne fai parte solo se ne prendi uno.`,
   groupDemo:
     "Questo è il negozio dimostrativo, che non invia email, quindi non crea nessun link e non assegna posti. In un negozio vero, questa pagina mostra un link da passare, e lo stesso link è nella tua ricevuta: ogni persona lo apre, scrive la propria email e lo ha sul proprio indirizzo.",
-  noGroupLink: "Al momento non siamo riusciti a ottenere il tuo link. Aggiorna questa pagina tra un momento; è anche in arrivo nella tua email.",
-  groupReceipt: (email) => `Lo stesso link è nella ricevuta inviata a ${email}: conservalo, è così che si assegnano i posti.`,
+  noGroupLink: "Al momento non siamo riusciti a ottenere il tuo link. Aggiorna questa pagina tra un momento; potrebbe anche arrivarti via email.",
+  groupReceipt: (email) => `Se la ricevuta arriva a ${email}, contiene lo stesso link: conservalo, è così che si assegnano i posti.`,
 
   trialStarted: "Prova iniziata",
   youAreBooked: "Hai prenotato",
@@ -1092,8 +1092,8 @@ const nl: ThanksWords = {
   groupTakeOne: (people) => `Neem zelf op dezelfde manier een plek: je betaalde voor ${people}, en je hoort er alleen bij als je er een neemt.`,
   groupDemo:
     "Dit is de demowinkel, die geen e-mails verstuurt, dus hij maakt geen link en deelt geen plekken uit. In een echte winkel toont deze pagina één link om door te geven, en dezelfde link staat op je bon: ieder opent hem, typt een eigen e-mailadres en heeft het op een eigen adres.",
-  noGroupLink: "We konden je link nu niet ophalen. Vernieuw deze pagina zo meteen; hij is ook onderweg naar je e-mail.",
-  groupReceipt: (email) => `Dezelfde link staat op de bon naar ${email}: bewaar hem, daarmee worden de plekken uitgedeeld.`,
+  noGroupLink: "We konden je link nu niet ophalen. Vernieuw deze pagina zo meteen; hij kan je ook per e-mail bereiken.",
+  groupReceipt: (email) => `Als de bon ${email} bereikt, staat dezelfde link erop: bewaar hem, daarmee worden de plekken uitgedeeld.`,
 
   trialStarted: "Proefperiode gestart",
   youAreBooked: "Je bent geboekt",
@@ -1289,8 +1289,8 @@ const pt: ThanksWords = {
   groupTakeOne: (people) => `Fique também com um lugar da mesma forma: pagou por ${people}, e só faz parte delas se ficar com um.`,
   groupDemo:
     "Esta é a loja de demonstração, que não envia emails, por isso não cria nenhuma ligação nem distribui lugares. Numa loja real, esta página mostra uma ligação para partilhar, e a mesma ligação está no seu recibo: cada pessoa abre-a, escreve o próprio email e fica com ele no próprio endereço.",
-  noGroupLink: "Não conseguimos obter a sua ligação neste momento. Atualize esta página daqui a pouco; também vai a caminho do seu email.",
-  groupReceipt: (email) => `A mesma ligação está no recibo enviado para ${email}: guarde-a, é com ela que os lugares são distribuídos.`,
+  noGroupLink: "Não conseguimos obter a sua ligação neste momento. Atualize esta página daqui a pouco; também pode chegar-lhe por email.",
+  groupReceipt: (email) => `Se o recibo chegar a ${email}, inclui a mesma ligação: guarde-a, é com ela que os lugares são distribuídos.`,
 
   trialStarted: "Período experimental iniciado",
   youAreBooked: "A sua marcação está feita",

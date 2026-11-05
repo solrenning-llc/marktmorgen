@@ -89,6 +89,7 @@ import { forgetSyncPerson } from "@/lib/email-sync";
 import { forgetLedgerCopy } from "@/lib/segments";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
+import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
 import { forgetRequestsPerson } from "@/lib/payment-request-store";
@@ -190,6 +191,8 @@ export const ERASERS: Eraser[] = [
       return done.records;
     },
   },
+  // The month's summary of what customers say quotes their reviews (rule 28): it goes after them, and a reading under way is not kept.
+  { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
   { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },

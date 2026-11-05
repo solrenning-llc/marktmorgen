@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   if (!(await withinLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   try {
     const done = await makeVoice(store);
-    if (!done.ok) return Response.json({ ok: false, error: done.reason, texts: done.texts ?? null }, { status: done.reason === "failed" ? 502 : done.reason === "busy" ? 409 : 400 });
+    if (!done.ok) return Response.json({ ok: false, error: done.reason, texts: done.texts ?? null }, { status: done.reason === "failed" ? 502 : done.reason === "busy" || done.reason === "changed" ? 409 : 400 });
     return Response.json({ ok: true, summary: done.summary, fresh: done.fresh, left: done.left });
   } catch (error) {
     console.error("summing up what customers say failed", error);

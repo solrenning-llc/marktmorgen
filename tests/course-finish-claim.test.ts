@@ -25,21 +25,22 @@ async function main() {
     await ensureStatsId(owner);
     await ensureListId(owner);
     await setMailSettings(owner, { fromName: "Course claims", address: "Synthetic test address" });
-    await setStripeAccount(owner, "acct_TestCourseClaims", true);
-    await setSubscription(owner, { customerId: "cus_TestCourseClaims", subscriptionId: "sub_TestCourseClaims", active: true, tier: "pro", period: paidPeriod() });
+    await setStripeAccount(owner, "acct_ClaimTest", true);
+    await setSubscription(owner, { customerId: "cus_ClaimTest", subscriptionId: "sub_ClaimTest", active: true, tier: "pro", period: paidPeriod() });
     const made = await addProduct(owner, "Claim proof", "A synthetic course", "49", null);
     if (!made.ok) throw Error("Synthetic product was not created");
     // Use the actual module identity, as the editor does.
+    const product = made.product;
     const base = emptyCourse();
     const built = editCourse(base, { op: "lesson-add", moduleId: base.modules[0].id, title: "Claim lesson" });
     if (!built.ok) throw Error("Synthetic lesson was not created");
     const course = built.course, lesson = course.modules[0].lessons[0].id;
     await saveCourse(course, ROOM);
-    const linked = await setProductCourse(owner, made.product.id, { id: course.id, lessons: 1 });
+    const linked = await setProductCourse(owner, product.id, { id: course.id, lessons: 1 });
     if (!linked.ok) throw Error("Synthetic course was not linked");
     const store = (await storeForEmail(owner))!;
     for (const trigger of ["started", "finished"] as const) {
-      const flow = await saveFlow(store, { name: trigger, trigger, productId: made.product.id, active: true, steps: [{ delayHours: 0, subject: "Course event", body: "Synthetic sequence" }] }, { activate: true });
+      const flow = await saveFlow(store, { name: trigger, trigger, productId: product.id, active: true, steps: [{ delayHours: 0, subject: "Course event", body: "Synthetic sequence" }] }, { activate: true });
       if (!flow.ok) throw Error(`Synthetic ${trigger} flow was not created: ${JSON.stringify(flow)}`);
     }
     is("both real sequences are active", (await readFlows(store.listId)).map(flow => [flow.trigger, flow.active]).sort(), [["finished", true], ["started", true]]);
@@ -49,15 +50,15 @@ async function main() {
       const note = kind === "open" ? noteIfOpened : noteIfFinished;
       async function person() {
         const email = `learner${serial++}@example.com`;
-        await upsertContact(store.listId!, email, { agreed: true, explicit: true, productId: made.product.id, title: made.product.title, source: "buyer" }, ROOM);
+        await upsertContact(store.listId!, email, { agreed: true, explicit: true, productId: product.id, title: product.title, source: "buyer" }, ROOM);
         if (kind === "fin") await markLesson(course.id, email, lesson, true, ROOM);
         return email;
       }
       const email = await person();
-      is(`${kind}: an actual confirmed claim starts the event`, await note(store, made.product.id, course.id, email), true);
+      is(`${kind}: an actual confirmed claim starts the event`, await note(store, product.id, course.id, email), true);
       const queued = await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
       is(`${kind}: the real enrollment queued one step for that student`, (queued[0] as string[]).filter(item => item.endsWith(`|${email}`)).length, 1);
-      is(`${kind}: an ordinary repeated event does not start again`, await note(store, made.product.id, course.id, email), false);
+      is(`${kind}: an ordinary repeated event does not start again`, await note(store, product.id, course.id, email), false);
       const variants: { name: string; reply: unknown; apply?: boolean; fail?: boolean }[] = [
         { name: "missing reply", reply: [] }, { name: "missing slot", reply: [undefined] },
         { name: "false", reply: [false] }, { name: "zero", reply: [0] },
@@ -83,7 +84,7 @@ async function main() {
           queued += commands.filter(command => command[0] === "ZADD" && command[1] === "nl:mail:flowq").length;
           return original(commands);
         };
-        const result = await note(store, made.product.id, course.id, email);
+        const result = await note(store, product.id, course.id, email);
         redis.pipeline = original;
         is(`${kind}/${variant.name}: no confirmed course event`, result, false);
         is(`${kind}/${variant.name}: one claim, no enrollment IO or queue`, [claims, readsAfterClaim, queued], [1, 0, 0]);

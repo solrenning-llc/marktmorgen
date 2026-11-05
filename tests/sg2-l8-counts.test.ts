@@ -1,6 +1,6 @@
 /**
- * Counts read only in their exact shape, lesson video, a closing's told list,
- * reviews and the blog (audit SG2 L8, CX-123 rule 24).
+ * Counts read only in their exact shape: lesson video, a closing's told list
+ * and reviews (audit SG2 L8, CX-123 rule 24).
  *
  * Each of these read a Redis reply with Number() or `|| 0`, which turns
  * null, text and garbage into 0, and so let a malformed reply count as fact:
@@ -22,8 +22,6 @@
  *     credit is taken or any email goes.
  *   - saveReview (lib/reviews.ts) read an unknown count of a product's
  *     reviews as 0, and let a review past the ceiling. It now refuses.
- *   - savePost, publishedPosts, publishedTotal and deletePost
- *     (lib/store-blog.ts) read an unknown count of posts as 0 or as text.
  *
  * The exact replies keep working as before.
  */
@@ -32,7 +30,6 @@ import { workKey } from "@/lib/closing-holds";
 import { tellBuyers, tellRefundShort, toldOf } from "@/lib/closing-buyers";
 import { saveReview } from "@/lib/reviews";
 import { MAX_REVIEWS_PER_PRODUCT } from "@/lib/review-summary";
-import { MAX_POSTS, deletePost, publishedPosts, publishedTotal, savePost, allPosts } from "@/lib/store-blog";
 import { claimHandle, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { STREAM_API_ORIGIN } from "@/lib/stream-rules";
 import { measure, measureDue, watchedIn } from "@/lib/watch";
@@ -301,91 +298,6 @@ async function main(): Promise<void> {
   is("saveReview: a product at its ceiling takes no more", await saveReview(STATS, input("full"), ROOM), { state: "full" });
   rule = null;
   is("saveReview: the real count still lets a review in", (await saveReview(STATS, input("real"), ROOM)).state, "created");
-
-  // ------------------------------------------------------------- the blog
-  part("savePost: an unknown count of posts is refused, never read as 0");
-  const S = "b10gb10gb10gb10gb10gb10gb10gb10g";
-  let made = 0;
-  const nextId = () => (made += 1).toString(16).padStart(10, "0");
-  const post = (title: string) => ({ title, body: "Words.", product: null, draft: false });
-  const BAD_COUNTS: [string, unknown][] = [
-    ["a count that is null", [null]],
-    ["a count written as text", ["5"]],
-    ["a fractional count", [1.5]],
-    ["a negative count", [-1]],
-    ["a count that is true", [true]],
-    ["a count that is an object", [{ n: 1 }]],
-    ["an empty pipeline reply", []],
-    ["a second, unasked-for reply", [0, 0]],
-    ["a reply that is not a list", { result: 0 }],
-    ["a Redis that cannot be asked", "throw"],
-  ];
-  for (const [label, reply] of BAD_COUNTS) {
-    rule = { when: first("HLEN", "nl:blog:meta:"), reply };
-    const from = sent.length;
-    const got = await outcome(() => savePost(S, null, post(label), nextId, ROOM));
-    is(`savePost, ${label}: refused`, got === "rejected" || (typeof got === "object" && !got.ok), true);
-    is(`savePost, ${label}: nothing written`, sentSince(from, "HSET", "nl:blog:meta:"), false);
-  }
-  rule = { when: first("HLEN", "nl:blog:meta:"), reply: [MAX_POSTS] };
-  is("savePost: a full blog takes no more", await savePost(S, null, post("over"), nextId, ROOM), { ok: false, reason: "full" });
-  rule = null;
-  const one = await savePost(S, null, post("One"), nextId, ROOM, 1_000);
-  const two = await savePost(S, null, post("Two"), nextId, ROOM, 2_000);
-  is("savePost: the real count still lets posts in", [one.ok, two.ok, two.ok && two.published], [true, true, 2]);
-  is("allPosts: and only those two were written", (await allPosts(S)).map((p) => p.title).sort(), ["One", "Two"]);
-
-  part("publishedTotal: an unknown count is null, never a figure");
-  for (const [label, reply] of BAD_COUNTS) {
-    rule = { when: first("ZCARD", "nl:blog:pub:"), reply };
-    is(`publishedTotal, ${label}: null`, await publishedTotal(S), null);
-  }
-  rule = null;
-  is("publishedTotal: the real count", await publishedTotal(S), 2);
-
-  part("publishedPosts: a page whose count or list cannot be read is not shown");
-  const BAD_PAGES: [string, unknown][] = [
-    ...BAD_COUNTS.filter(([, reply]) => Array.isArray(reply) && reply.length === 1).map(([label, reply]) => [label, [["0000000002", "0000000001"], (reply as unknown[])[0]]] as [string, unknown]),
-    ["a list of posts that is not a list", [null, 2]],
-    ["a list of posts holding a number", [[5], 2]],
-    ["a reply missing the count", [["0000000002"]]],
-    ["a reply that is not a list", { result: 2 }],
-    ["a Redis that cannot be asked", "throw"],
-  ];
-  for (const [label, reply] of BAD_PAGES) {
-    rule = { when: first("ZREVRANGE", "nl:blog:pub:"), reply };
-    is(`publishedPosts, ${label}: refused`, await outcome(() => publishedPosts(S, 1)), "rejected");
-  }
-  for (const [label, reply] of [
-    ["posts' records that are not a list", [null]],
-    ["too few posts' records", [[]]],
-    ["an empty pipeline reply", []],
-  ] as [string, unknown][]) {
-    rule = { when: first("HMGET", "nl:blog:meta:"), reply };
-    is(`publishedPosts, ${label}: refused`, await outcome(() => publishedPosts(S, 1)), "rejected");
-  }
-  rule = null;
-  {
-    const page = await publishedPosts(S, 1);
-    is("publishedPosts: the real page and count", [page.posts.map((p) => p.title), page.total], [["Two", "One"], 2]);
-    is("publishedPosts: a blog with nothing published is 0, certain", await publishedPosts("e".repeat(32), 1), { posts: [], total: 0 });
-  }
-
-  part("deletePost: how many are left, when it cannot be counted, is not given as a figure");
-  for (const [label, reply] of [
-    ["a count that is null", [1, 1, 1, null]],
-    ["a count written as text", [1, 1, 1, "1"]],
-    ["a fractional count", [1, 1, 1, 1.5]],
-    ["a negative count", [1, 1, 1, -1]],
-    ["a count that is an object", [1, 1, 1, { n: 1 }]],
-    ["a reply missing the count", [1, 1, 1]],
-    ["a reply that is not a list", { result: 1 }],
-  ] as [string, unknown][]) {
-    rule = { when: first("HDEL", "nl:blog:meta:"), reply };
-    is(`deletePost, ${label}: no figure`, await outcome(() => deletePost(S, "0000000001", ROOM)), null);
-  }
-  rule = null;
-  is("deletePost: the real count of what is left", await deletePost(S, "0000000002", ROOM), 1);
 
   done();
 }

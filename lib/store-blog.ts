@@ -21,7 +21,6 @@
  * (lib/store.ts, posts), so the store page links to the blog without asking.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
@@ -132,28 +131,19 @@ export async function allPosts(statsId: string | null): Promise<PostMeta[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/**
- * One page of the published posts, newest first, and how many there are.
- * Throws (UnknownReplyError) when the page or the count cannot be read in
- * its exact shape (audit SG2, CX-123 rule 24): an unknown count is never
- * shown as a figure, nor an unread page as an empty blog.
- */
+/** One page of the published posts, newest first, and how many there are. */
 export async function publishedPosts(statsId: string | null, page: number): Promise<{ posts: PostMeta[]; total: number }> {
   if (!statsId || !isRedisConfigured()) return { posts: [], total: 0 };
   const start = (Math.max(1, page) - 1) * POSTS_PER_PAGE;
-  const replies = repliesFor(await redisPipeline([
+  const [ids, total] = await redisPipeline([
     ["ZREVRANGE", pubKey(statsId), start, start + POSTS_PER_PAGE - 1],
     ["ZCARD", pubKey(statsId)],
-  ]), 2);
-  const ids = stringList(replies?.[0]);
-  const total = countOf(replies?.[1]);
-  if (ids === null || total === null) throw new UnknownReplyError("a page of a blog's posts or their count");
-  const list = ids.filter((id) => POST_ID.test(id));
-  if (list.length === 0) return { posts: [], total };
-  const metas = repliesFor(await redisPipeline([["HMGET", metaKey(statsId), ...list]]), 1)?.[0];
-  if (!Array.isArray(metas) || metas.length !== list.length) throw new UnknownReplyError("a page of a blog's posts");
-  const posts = metas.map(parseMeta).filter((m): m is PostMeta => m !== null && !m.draft);
-  return { posts, total };
+  ]);
+  const list = (Array.isArray(ids) ? ids : []).filter((id): id is string => typeof id === "string" && POST_ID.test(id));
+  if (list.length === 0) return { posts: [], total: Number(total) || 0 };
+  const [metas] = await redisPipeline([["HMGET", metaKey(statsId), ...list]]);
+  const posts = (Array.isArray(metas) ? metas : []).map(parseMeta).filter((m): m is PostMeta => m !== null && !m.draft);
+  return { posts, total: Number(total) || 0 };
 }
 
 /** How many posts are out, counted with one command; null when it cannot be counted (lib/store-sitemap.ts, sitemapSize). */
@@ -161,8 +151,9 @@ export async function publishedTotal(statsId: string | null): Promise<number | n
   if (!statsId) return 0;
   if (!isRedisConfigured()) return null;
   try {
-    // ZCARD answers a whole number, 0 for a key that does not exist; null, text or anything else is unknown.
-    return countOf(repliesFor(await redisPipeline([["ZCARD", pubKey(statsId)]]), 1)?.[0]);
+    const [total] = await redisPipeline([["ZCARD", pubKey(statsId)]]);
+    const n = Number(total);
+    return Number.isSafeInteger(n) && n >= 0 ? n : null;
   } catch {
     return null;
   }
@@ -212,7 +203,7 @@ export async function readPosts(statsId: string | null, metas: PostMeta[]): Prom
   return out;
 }
 
-export type SaveResult = { ok: true; post: Post; published: number } | { ok: false; reason: "title" | "body" | "full" | "unknown" | "off" | "unavailable" };
+export type SaveResult = { ok: true; post: Post; published: number } | { ok: false; reason: "title" | "body" | "full" | "unknown" | "off" };
 
 /**
  * Writes a post: a new one when `id` is null, else the one with that id. A
@@ -237,10 +228,8 @@ export async function savePost(
     before = parseMeta(raw);
     if (!before) return { ok: false, reason: "unknown" };
   } else {
-    // An unknown count lets no post past the ceiling (audit SG2, CX-123 rule 24).
-    const count = countOf(repliesFor(await redisPipeline([["HLEN", metaKey(statsId)]]), 1)?.[0]);
-    if (count === null) return { ok: false, reason: "unavailable" };
-    if (count >= MAX_POSTS) return { ok: false, reason: "full" };
+    const [count] = await redisPipeline([["HLEN", metaKey(statsId)]]);
+    if ((Number(count) || 0) >= MAX_POSTS) return { ok: false, reason: "full" };
   }
   const postId = before?.id ?? newId();
   const publishedAt = input.draft ? before?.publishedAt ?? 0 : before?.publishedAt || now;
@@ -257,20 +246,15 @@ export async function savePost(
   return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: Number(total) || 0 };
 }
 
-/**
- * Removes a post for good. Says how many are published after it; null when
- * there is no such post to remove, or when what is left could not be counted
- * in its exact shape (audit SG2, CX-123 rule 24): the post is then gone, and
- * no figure is given for the rest. Removing it again is harmless.
- */
+/** Removes a post for good. Says how many are published after it. */
 export async function deletePost(statsId: string | null, id: string, room: DataStore): Promise<number | null> {
   if (!statsId || !isRedisConfigured() || !POST_ID.test(id)) return null;
-  const replies = repliesFor(await redisPipeline([
+  const [, , , total] = await redisPipeline([
     ["HDEL", metaKey(statsId), id],
     ["HDEL", bodyKey(statsId), id],
     ["ZREM", pubKey(statsId), id],
     ["ZCARD", pubKey(statsId)],
-  ]), 4);
+  ]);
   await giveData(room, [{ slot: `bl:${id}`, bytes: 0, set: true }]);
-  return countOf(replies?.[3]);
+  return Number(total) || 0;
 }

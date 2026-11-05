@@ -176,15 +176,18 @@ for (const historical of [false, true]) {
     const r=await world({...options,chargePatch:{disputed:false}});
     assert.equal(r.counts.complete,true); assert.equal(r.counts.failed,0);
     assert.equal(r.calls.filter(c=>c.method==='POST').length,1); assert.equal(r.counts.cents,625);
+    assert.equal(r.counts.unknownAmounts,0); assert.deepEqual(r.counts.unknownAmountFees,[]);
   });
   for (const bad of [undefined,null,'false',0,{},[]]) test('G2 unknown disputed flag must not authorize a fee refund '+path+': '+String(bad),async()=>{
     const r=await world({...options,chargePatch:{disputed:bad}});
     assert.equal(r.calls.filter(c=>c.method==='POST').length,0,'unknown disputed flag authorized refund');
     assert.equal(r.counts.complete,false); assert.equal(r.counts.cents,0); assert.equal(r.counts.failed,1);
+    assert.equal(r.counts.unknownAmounts,1); assert.deepEqual(r.counts.unknownAmountFees,[fee.id]);
   });
   for (const bad of [undefined,null,'ch_AnotherCharge0001']) test('G2 missing or foreign charge identity must not authorize a fee refund '+path+': '+String(bad),async()=>{
     const r=await world({...options,chargePatch:{id:bad,disputed:false}});
     assert.equal(r.calls.filter(c=>c.method==='POST').length,0,'unconfirmed charge identity authorized refund');
     assert.equal(r.counts.complete,false); assert.equal(r.counts.cents,0); assert.equal(r.counts.failed,1);
+    assert.equal(r.counts.unknownAmounts,1); assert.deepEqual(r.counts.unknownAmountFees,[fee.id]);
   });
 }

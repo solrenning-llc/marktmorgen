@@ -33,7 +33,7 @@ export async function purchased(priceCents=6500,shippingCents=500,sku?:string){
  const amount=priceCents+shippingCents;
  Object.assign(session,{customer_details:{email:'buyer@example.test'},status:'complete',payment_status:amount?'paid':'no_payment_required',amount_total:amount,
   ...(amount?{payment_intent:{object:'payment_intent',status:'succeeded',amount_received:amount,currency:'usd',
-   latest_charge:{object:'charge',paid:true,amount,amount_refunded:0,currency:'usd',refunded:false}}}:{}),
+   latest_charge:{object:'charge',paid:true,amount,amount_refunded:0,currency:'usd',refunded:false,disputed:false}}}:{}),
   shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
  return{...f,checkout,session,id:originId()};
 }

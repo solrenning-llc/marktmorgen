@@ -231,3 +231,52 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 2. Se Claude1 atribuir item livre, anunciar e publicar `RESERVA:` no canal antes do RED; não reler a fila inteira nem inventar quinta unidade.
 3. #2544 somente após liberação nominal A3. #2451/#2608 sem repetir jobs consumidos. #2674 sem workaround booleano, revisão final ou CI novo até o head realmente corrigido.
 4. Merge próprio somente `expected_head_sha` + UMA revisão aplicável sem grave/médio + NOVE agregadores exatos SUCCESS. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração proibida.
+
+
+## Retomada 05/11/2026 19h49 Fortaleza — quinta unidade CX-123(24) e revisão #2701
+
+### Fontes e coordenação desta retomada
+
+- O ponto de partida foi o commit exato pedido pelo dono: `38d7bf1f5ffa2f003321f4ee12c8a317e07fc586`, blob deste arquivo `8356560c769eeee81dbe35950f250f5b2f046e58`.
+- Main lido e depois incorporado uma vez na quinta unidade: `6c2e6762e36fb9b3f5ee079d260bc9f9849b186f`. A única diferença desde `d7bbf9d3` era o lote documental #2698, que incorporou a linha `RESERVA` de N em `docs/reservations/codex.md`; o produto N nunca editou reservas.
+- Canal lido somente nas linhas novas, conforme AV12, por `fetch_file` SHA + `fetch_blob`. Inventário/reserva publicado em `f67ed5ef6e166aa652b43d79e95140d2c2b8a24f`; pedido de revisão #2700 em `ce7bde8cafda49c79d14a5cc637eb6d01609dbbf`; correção do head final em `425aeb688979f3c6bd3ddd7b09521511e964b1ba`; revisão #2701 reportada em `6c4d39d71bc4f4b01473491f72492152084b8f47`.
+- C1/C4 atribuíram trabalho padrão da regra 24 à faixa N: auditar `lib/mail*`, `lib/sms*`, `lib/*outbox*`, listar primeiro, excluir arquivos ocupados e abrir lotes de até cinco. A quinta vaga foi usada; não há sexta.
+
+### Cinco produtos próprios exatos
+
+1. #2451 permanece OPEN no head `bf6840e04371e0c8bcaa27674989532ff5b0ec96`. L continua aplicável; 8/9; retry ÚNICO verify `127163240735` esgotado. Nunca repetir.
+2. #2544 permanece OPEN no head `447e97287e9bec0062e7878186495cb92cbdc277`. G sem achado. Nenhuma liberação explícita A3 para o teste causal `cancel_paid`25→27; não editar nem retry.
+3. #2608 permanece OPEN no head `8ac8975679fcb9a9c81bed065fc52a501c01904e`. Oito SUCCESS; retry ÚNICO verify `127378763596` CANCELLED no teto; nunca segunda. Ainda falta qualificação explícita R2 aos 11 blobs.
+4. #2674 permanece OPEN/BLOQUEADO no head `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`. Nada mudou no triestado reservado. Preservados REDs `f8911772`, `8dfabf5`; `2421674d` inválido; RED legal válido `73a1745db1b7d57c14844cccd91d2f5a2111feda`/blob `60aa1ba0`; produto/API `17f4f4c47031f41dfed95b887deda34ccfc34191`/blob `255aae86`. Não tocar `lib/request-guard.ts`/teste sem liberação.
+5. #2700 OPEN/mergeable no head FINAL `ef88733bebd83ab5aee71f0a455b751ed9541717`, tree `3f4e661a26ccd07d4574d511f5dc5fd355203d07`, merge de main `6c2e6762` sobre o produto sem alterar os dois blobs. Ramo `codex/n-mail-click-read-shape`; arquivos `lib/mail-clicks.ts` e `tests/mail-click-read-shape.test.ts`.
+
+### #2700 — prova e estado terminal
+
+- Defeito: `usedLinkIn` aceitava resposta SISMEMBER parcial, extra ou malformada como “não clicou”; `sendDueSteps` podia então escolher um passo `unclicked` e enviar e-mail baseado em evidência desconhecida.
+- RED remoto ancestral `bdbedc0f1731f4d282bface5d3df2f7ac380d18f`: 7 checks, 5 falhas causais; controles canônicos `[1,0]` e `[0,0]` verdes.
+- Correção: exatamente uma resposta numérica canônica `0` ou `1` por endereço; qualquer parcial/extra/string/null/outro número lança. O catch já existente de `sendDueSteps` devolve a lease à fila sem enviar nem selecionar branch; sem readback/segundo incremento.
+- GREEN local nos blobs finais: novo teste 7/7; `flow-conditions` 32/32; TSC com heap 4 GiB; ESLint; `check_public_data.py` 3803/0; diff; reservation-check 15 pass + 1 skip esperado.
+- Pedido de UMA revisão independente integral publicado para G2/Revisor2; na leitura terminal ainda não havia review/comentário. O pedido ao head anterior `2a8b0b36` foi explicitamente supersedido pelo head final `ef88733`, com blobs byte-idênticos.
+- Nove workflows finais do head `ef88733` nasceram do merge source `40a2f58bd4c05b3e04691993762f0ba3f53fced8`. Na leitura terminal: run `42123507500` SUCCESS; `42123507539`, `42123507480`, `42123507512`, `42123507565`, `42123507600`, `42123507522`, `42123507486` in progress; `42123507536` queued. Zero retry/cancelamento. Não consultar em rodadas: próxima leitura só por novidade.
+
+### Inventário read-only encaminhado, sem edição
+
+- `lib/flows.ts:474-484`: HGETALL parcial/malformado vira estatística zero; o consumidor `lib/mcp-tools.ts` está reservado pela Claude3. Reportado a C1/C3, sem reserva/edição.
+- `lib/email-sync.ts:482-759`: respostas parciais podem omitir log/jobs/cópia/exclusão. Por envolver privacidade, reportado a C1/Codex Q, sem assumir.
+- Excluídos por ocupação: `lib/mail-revenue.ts` (F), `lib/mail-health.ts` (H2), `lib/shipment-mail-outbox.ts` (#2544/A3). Community-mail/event-mail, broadcasts e flow-list já usam leitores exatos; `listDrafts` legado não tem chamador.
+- SG2(27/30) continua somente prova `3d4cb847`, bloqueada por #2270/#1969.
+
+### Revisão independente feita enquanto CI aguardava
+
+- #2701/head `fbcd335898fbeeeb281bb52e33059d40cdfee320`, dois arquivos documentais. Parecer GitHub `5793214419`: NÃO LIBERADO, 1 MÉDIO + 1 LEVE.
+- MÉDIO: `lot-02.json` mantém item 140 `in progress` e resumo 36 done/4 progress, embora o mesmo diff corrija a fila para concluído. Confirmados #635/#643/#644 incorporados; #643 merge `59f8e30f2c336e6bb7088711a66667703fcf9fcc`. Correto após o delta: 37 done/3 progress (89, 98, 145).
+- LEVE: item 73 registra o achado `pending` e o diff acrescenta o complemento, mas `complement:""`; consulta estruturada devolve só 98, não os dois complementos anunciados.
+- Verificações: JSON parseia, 40 números únicos; data-room 11/11; reservation-check 15 pass + 1 skip; scanner 3803/0; diff limpo. Nenhum ramo/PR/reserva/CI do autor alterado.
+
+### Próximo exato
+
+1. Pela AV12, ler somente novidade real do canal. Para #2700, aguardar UMA revisão aplicável no head `ef88733` e os NOVE agregadores exatos SUCCESS; sem retry em rodada.
+2. Se houver achado, escrever RED próprio antes da correção e gerar head/revisão/9 checks novos. Se não houver achado e os 9 forem verdes, merge normal somente com `expected_head_sha=ef88733bebd83ab5aee71f0a455b751ed9541717`.
+3. Os quatro heads antigos mantêm exatamente seus bloqueios/retries. Não abrir sexta unidade.
+4. Retorno de #2701 é revisão, não unidade: conferir apenas delta focal se o autor pedir; não alterar o ramo.
+5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração de preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

@@ -38,7 +38,8 @@
 import { redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { HASH_TAKE_ALL, exactReplies, takenPairs } from "@/lib/redis-take";
+import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { exactReplies } from "@/lib/redis-exact";
 
 /** Where members' devices are counted in the store's data room (lib/store-data.ts). */
 const DEVICES_SLOT = "cm:ps";

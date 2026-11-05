@@ -36,7 +36,8 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
-import { HASH_DEL_IF, HASH_TAKE_ALL, exactReplies, replyCount, takenPairs } from "@/lib/redis-take";
+import { HASH_DEL_IF, HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { exactReplies, replyCount } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 

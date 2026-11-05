@@ -32,7 +32,8 @@ import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rule
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
-import { SET_AND_VALUES_TAKE, UnknownReply, exactReplies } from "@/lib/redis-take";
+import { SET_AND_VALUES_TAKE } from "@/lib/redis-take";
+import { UnknownReply, exactReplies } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
 

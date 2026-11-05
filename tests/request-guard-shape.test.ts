@@ -26,6 +26,9 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
   return pipeline(commands);
 }) as typeof redis.pipeline;
 
+const revoked = Proxy.revocable([], {});
+revoked.revoke();
+
 const MALFORMED: [string, unknown][] = [
   ["an empty reply", []],
   ["only the SET's answer", ["OK"]],
@@ -38,6 +41,7 @@ const MALFORMED: [string, unknown][] = [
   ["a fractional count", ["OK", 1.5]],
   ["a negative count", ["OK", -1]],
   ["a reply that is not a list", { result: 1 }],
+  ["a returned list whose shape cannot be inspected", revoked.proxy],
 ];
 
 async function main(): Promise<void> {

@@ -838,7 +838,7 @@ type WalkState = {
   /** Closing stores whose reading of renewals Stripe refused SCAN_RESTARTS times (by address). */
   scansStuck: number;
   /** The lists whose given-up rows wait in PRUNE_KEPT_KEY, read with them when the list is pruned again. */
-  keptLists: Set<string>;
+  keptLists: Map<string, number>;
   /** When what the company's lists owe was last pruned. */
   prunedAt: number;
   /** Stores put in the batch since the last walk began: a run that stops before beginning one leaves them to the next. */
@@ -859,7 +859,7 @@ function walkStateOf(reply: unknown): WalkState {
   if (!CURSOR.test(cursor)) return refuse("the walk's cursor");
   const phase = fields.get("phase") || "idle";
   if (phase !== "idle" && phase !== "walk" && phase !== "finish") return refuse("the walk's phase");
-  const state: WalkState = { cursor, phase, started: number("started"), pageTries: number("pagetries"), parked: 0, stopped: 0, partial: [], out: [], left: new Map(), unread: new Map(), pending: number("pending") > 0, prunedAt: number("pruned"), scansStuck: 0, keptLists: new Set() };
+  const state: WalkState = { cursor, phase, started: number("started"), pageTries: number("pagetries"), parked: 0, stopped: 0, partial: [], out: [], left: new Map(), unread: new Map(), pending: number("pending") > 0, prunedAt: number("pruned"), scansStuck: 0, keptLists: new Map() };
   for (const [name, raw] of fields) {
     const [kind, ...rest] = name.split(":");
     const ref = rest.join(":");
@@ -874,7 +874,7 @@ function walkStateOf(reply: unknown): WalkState {
     else if (kind === "left") state.left.set(ref, count());
     else if (kind === "unread") state.unread.set(ref, count());
     else if (kind === "scanstuck") state.scansStuck += 1;
-    else if (kind === "kept") state.keptLists.add(ref);
+    else if (kind === "kept") state.keptLists.set(ref, /^[0-9]{1,16}$/.test(raw) ? Number(raw) : refuse("when a list given up on was last tried"));
   }
   return state;
 }
@@ -931,19 +931,27 @@ function deletedByItsOwner(ref: string, now: number): Batched | null {
  * is kept, and said. Its reads are the list's own pages, and one HGETALL of
  * what is owed.
  */
-async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
+async function prunePending(state: WalkState, refFree: RefFree, now: number): Promise<void> {
   // Once a gap; nothing more than this count when nothing is owed.
   const [size] = await redisPipeline([["HLEN", PRUNE_KEY]]);
   const triable = [...state.unread].filter(([, tries]) => tries < UNREAD_TRIES).map(([list]) => list);
-  if (!countOf(size, "what the company's lists owe") && !triable.some((list) => state.keptLists.has(list))) return;
+  if (!countOf(size, "what the company's lists owe") && !state.keptLists.size) return;
   const { rows, marks } = await owedOf(PRUNE_KEY);
   // Rows of a list given up on: its move to PRUNE_KEPT_KEY stopped half-way (sixth review, 3); moved again, the same way.
   for (const [list, owing] of [...rows]) {
     if ((state.unread.get(list) ?? 0) < UNREAD_TRIES) continue;
-    await moveToKept(list, owing, rows, marks, state);
+    await moveToKept(list, owing, rows, marks, state, now);
   }
   // Every list owed and tried: those marked, and any whose mark is gone (a delete that stopped half-way).
   const lists = [...new Set([...triable, ...[...rows.keys()].filter((list) => !state.unread.has(list))])];
+  // One list given up on is tried again each gap, the one tried longest ago (seventh review, 2): it may read again
+  // with no walk passing it over; its rows are let go only once pruned.
+  const givenUp = [...state.keptLists].filter(([list]) => !lists.includes(list)).sort((a, b) => a[1] - b[1])[0]?.[0];
+  if (givenUp) {
+    lists.push(givenUp);
+    await redisPipeline([["HSET", WALK_KEY, `kept:${givenUp}`, now]]);
+    state.keptLists.set(givenUp, now);
+  }
   const kept = lists.some((list) => state.keptLists.has(list)) ? await owedOf(PRUNE_KEPT_KEY) : null;
   for (const list of lists) {
     const owing = rows.get(list) ?? [];
@@ -974,12 +982,17 @@ async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
       state.unread.delete(list);
       state.keptLists.delete(list);
     } catch (error) {
+      // The list given up on tried again: still unreadable, it waits for its next turn, its tries unchanged.
+      if (list === givenUp) {
+        console.error("closed-data: a list of the company's given up on still cannot be read; what it owes stays kept", error);
+        continue;
+      }
       const [raw] = await redisPipeline([["HINCRBY", WALK_KEY, `unread:${list}`, 1]]);
       const tries = countOf(raw, "a list's tries");
       state.unread.set(list, tries);
       console.error("closed-data: a list of the company's passed over still cannot be read; what it owes is kept, and it is tried again with the next walk", error);
       // Given up on (fifth review, 4): what it owes moves to PRUNE_KEPT_KEY, out of what the gap reads, and is counted.
-      if (tries >= UNREAD_TRIES && owing.length) await moveToKept(list, owing, rows, marks, state);
+      if (tries >= UNREAD_TRIES && owing.length) await moveToKept(list, owing, rows, marks, state, now);
     }
   }
   // A store's ids no list owes it by (its rows' write failed after them, and its page was read again): let go. Only
@@ -996,11 +1009,12 @@ async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
  * half-way leaves rows in PRUNE_KEY for a list given up on, moved again by the
  * next pruning.
  */
-async function moveToKept(list: string, owing: Owing[], rows: Map<string, Owing[]>, marks: Map<string, { marks: string[]; keyMarks: string[] }>, state: WalkState): Promise<void> {
+async function moveToKept(list: string, owing: Owing[], rows: Map<string, Owing[]>, marks: Map<string, { marks: string[]; keyMarks: string[] }>, state: WalkState, now: number): Promise<void> {
+  if (!owing.length) return;
   const others = new Set([...rows.entries()].filter(([name]) => name !== list).flatMap(([, o]) => o.map((r) => r.store)));
   const stores = [...new Set(owing.map((o) => o.store))];
-  await redisPipeline([["HSET", WALK_KEY, `kept:${list}`, 1]]);
-  state.keptLists.add(list);
+  await redisPipeline([["HSET", WALK_KEY, `kept:${list}`, now]]);
+  state.keptLists.set(list, now);
   await redisPipeline([["HSET", PRUNE_KEPT_KEY, ...owing.flatMap((o) => [`${list}|${o.store}`, 1]), ...stores.flatMap((store) => [`marks|${store}`, JSON.stringify(marks.get(store) ?? refuse("the ids a list owes a store by"))])]]);
   await redisPipeline([["HDEL", PRUNE_KEY, ...owing.map((o) => `${list}|${o.store}`), ...stores.filter((store) => !others.has(store)).map((store) => `marks|${store}`)]]);
   rows.delete(list);
@@ -1069,7 +1083,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     // What the company's lists passed over owe: tried once a gap, with or without a walk (third review, I).
     if (now - state.prunedAt >= WALK_GAP_MS) {
       await redisPipeline([["HSET", WALK_KEY, "pruned", now]]);
-      await prunePending(state, refGuard());
+      await prunePending(state, refGuard(), now);
       report.unread = state.unread.size;
     }
     const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", now, "LIMIT", 0, BATCH_MAX]]);
@@ -1130,10 +1144,11 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
         console.error("closed-data: a closed store's record could not be read before its walk; it sits this walk out", error);
       }
     }
-    const old = [...state.partial.map((ref) => `partial:${ref}`), ...state.out.map((ref) => `out:${ref}`)];
+    // Never an HDEL with no field (rule 30): filtered before it is sent.
+    const old = [...state.partial.map((ref) => `partial:${ref}`), ...state.out.map((ref) => `out:${ref}`)].filter((field) => !out.some((ref) => field === `out:${ref}`));
     await redisPipeline([
       ["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now, "pagetries", 0, "pending", 0, ...out.flatMap((ref) => [`out:${ref}`, 1])],
-      ...(old.length ? [["HDEL", WALK_KEY, ...old.filter((field) => !out.some((ref) => field === `out:${ref}`))]] : []),
+      ...(old.length ? [["HDEL", WALK_KEY, ...old]] : []),
     ]);
     state.partial = [];
     state.out = out;
@@ -1182,7 +1197,8 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     }
     // What a list passed over owes the walk's stores, written before the page counts as read: a store is never
     // finished while it is owed and not kept (third review, I). A write that fails throws, and the page is read again.
-    if (passed.length) {
+    // With no store walked (every one sat it out) nothing is owed: nothing is written, and no command goes empty (N).
+    if (passed.length && walked.length) {
       // In this order (fifth review, L): the list's mark first, so a row is never written that no pruning will read;
       // then each store's ids, once a store and never over another's (HSETNX, by its sid: fifth review, 3 and 4);
       // then the rows. A write that fails throws, and the page is read again.

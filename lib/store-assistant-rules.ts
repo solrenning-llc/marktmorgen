@@ -335,17 +335,50 @@ const TERMS_TERMS = [
   // Portuguese
   "devolu\\p{L}*", "prazos?", "data limite", "teste gratis", "periodo de (?:teste|avaliacao|garantia)", "descont\\p{L}*", "cup(?:om|ons)", "cup(?:ao|oes)",
   "arrependimento",
+  // Paraphrases of money back, of no risk, of a window and of "if you don't like it" (Revisor 1's light after 49f9a252)
+  "pay(?:s|ing)? (?:you |me |them |him |her )?back", "paid (?:you |me |them )?back", "(?:every|each) (?:single )?(?:cent|penny|dollar)s?",
+  "risk[- ]?free", "no risk", "windows?", "(?:do not|don't|dont|does not|doesn't|didn't|did not) (?:like|love|enjoy) it", "not (?:happy|satisfied|pleased)", "unhappy", "dissatisf\\p{L}*",
+  "dinheiro de volta", "dinero de vuelta", "recuper\\p{L}*(?: \\p{L}+){0,2} (?:dinero|dinheiro|plata)", "sin riesgos?", "sem riscos?", "senza risch(?:i|io)", "sans risques?",
+  "risikofrei\\p{L}*", "ohne risiko", "zonder risico", "no (?:me |te |le |les |nos |os )?gust(?:a|e|o|ara)", "insatisf\\p{L}*", "nao (?:gost\\p{L}*|ficar satisfeit\\p{L}*|estiver satisfeit\\p{L}*)",
+  "ne (?:me |te |vous |lui |leur )?pla(?:it|ira|ise) pas", "pas satisfait\\p{L}*", "gefall\\p{L}* (?:\\p{L}+ ){0,2}nicht", "nicht (?:gefall\\p{L}*|zufrieden)", "unzufrieden\\p{L}*",
+  "non (?:mi |ti |vi |le |gli )?piac\\p{L}*", "non soddisfatt\\p{L}*", "insoddisfatt\\p{L}*", "(?:bevalt|bevallen) (?:\\p{L}+ ){0,2}niet", "niet (?:tevreden|bevalt|bevallen)", "ontevreden",
 ].filter((term, i, all) => all.indexOf(term) === i);
 const TERMS_WORDS = new RegExp(`${WORD_EDGE_BEFORE}(?:${TERMS_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}`, "u");
+/** Numbers written as words, folded, in the seven store languages, up to ninety; articles ("a", "un", "ein", "een", "um") are left out, so "a week of dinners" is no deadline. */
+const NUMBER_WORDS = [
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "fourteen", "fifteen", "twenty", "thirty", "forty", "fifty", "sixty", "ninety", "hundred",
+  "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "doce", "catorce", "quince", "veinte", "treinta", "cuarenta", "sesenta", "noventa",
+  "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "douze", "quatorze", "quinze", "vingt", "trente", "quarante", "soixante", "quatre[- ]vingt[- ]dix",
+  "zwei", "drei", "vier", "funf", "sechs", "sieben", "acht", "neun", "zehn", "zwolf", "vierzehn", "funfzehn", "zwanzig", "drei(?:ss|\u00df)ig", "vierzig", "sechzig", "neunzig",
+  "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "dodici", "quattordici", "quindici", "venti", "trenta", "quaranta", "sessanta", "novanta",
+  "twee", "drie", "vier", "vijf", "zes", "zeven", "acht", "negen", "tien", "twaalf", "veertien", "vijftien", "twintig", "dertig", "veertig", "zestig", "negentig",
+  "dois", "duas", "quatro", "sete", "oito", "nove", "dez", "doze", "catorze", "quatorze", "quinze", "vinte", "trinta", "quarenta", "sessenta", "noventa",
+].filter((word, i, all) => all.indexOf(word) === i);
+/** Units of time, folded, with their plurals and the German and Dutch compound forms ("30-tagige", "30-daagse"). */
+const TIME_UNITS = [
+  "days?", "weeks?", "months?", "years?", "hours?",
+  "dias?", "semanas?", "mes(?:es)?", "anos?", "horas?",
+  "jours?", "semaines?", "mois", "ans?", "annees?", "heures?",
+  "tag(?:e|en|ig\\p{L}*)?", "wochen?", "wochig\\p{L}*", "monat(?:e|en|ig\\p{L}*)?", "jahr(?:e|en|ig\\p{L}*)?", "stunden?",
+  "giorn[oi]", "settiman[ae]", "mes[ei]", "ann[oi]", "or[ae]",
+  "dag(?:en|s|se)?", "daagse", "weken", "maand(?:en|s)?", "jaar", "jaren", "uur", "uren",
+];
+/** A period of time: a number in digits or words, then a unit of time, however it is joined ("30 days", "30-day", "30 Tage", "thirty-day", "30days"). */
+const DURATION = new RegExp(
+  `${WORD_EDGE_BEFORE}(?:\\d+(?:[.,]\\d+)?|${NUMBER_WORDS.map(termSource).join("|")})(?:${BETWEEN})?(?:${TIME_UNITS.map(termSource).join("|")})${WORD_EDGE_AFTER}`,
+  "u",
+);
 /**
- * Whether a text speaks of terms (TERMS_TERMS) in any language a store
- * speaks. Read folded, with look-alike letters as Latin and with visible
- * hyphens joined, so a mark, an invisible character, another script's
- * look-alike or "Rück-erstattung" cannot hide one.
+ * Whether a text speaks of terms in any language a store speaks: a word or
+ * paraphrase of TERMS_TERMS, or any period of time (DURATION), which holds
+ * whatever words a paraphrase uses ("30 days to get every cent back"). Read
+ * folded, with look-alike letters as Latin and with visible hyphens joined,
+ * so a mark, an invisible character, another script's look-alike or
+ * "Rück-erstattung" cannot hide one.
  */
 export function speaksOfTerms(text: string): boolean {
   const folded = foldedText(text);
-  return [folded, hyphenJoined(folded), foldedText(text, "l"), foldedText(text, "i")].some((reading) => TERMS_WORDS.test(reading));
+  return [folded, hyphenJoined(folded), foldedText(text, "l"), foldedText(text, "i")].some((reading) => TERMS_WORDS.test(reading) || DURATION.test(reading));
 }
 
 const NUMBERS = /\d+(?:[.,]\d+)*/g;

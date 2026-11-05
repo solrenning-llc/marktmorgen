@@ -9,6 +9,18 @@ export async function checkCollectionProductTargets({section,is}){
  }
 }
 
+/** With no page scripts, SSR must not advertise an editing action it cannot run. */
+export async function checkCollectionsBeforeHydration({browser,LOCAL,fixture,is,width}){
+ const context=await browser.newContext({javaScriptEnabled:false,viewport:{width,height:900}});
+ try{
+  await context.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
+  const page=await context.newPage();
+  await page.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"domcontentloaded",timeout:60000});
+  const section=page.locator("[data-collections-editor]");await section.waitFor({state:"attached"});
+  is("collections editing waits for hydration "+width,await section.locator("input,textarea,select,button").evaluateAll(nodes=>nodes.length>0&&nodes.every(n=>n.disabled)),true);
+ }finally{await context.close();}
+}
+
 export async function checkCollectionsAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
  {name:"HTTP",status:500,reply:value=>value},{name:"truthy",reply:value=>({...value,ok:"true"})},
@@ -19,6 +31,7 @@ export async function checkCollectionsAcknowledgment({browser,LOCAL,fixture,is})
  {name:"confirmed",reply:value=>value,confirmed:true}
  ];
  for(const width of [390,1280]){
+  await checkCollectionsBeforeHydration({browser,LOCAL,fixture,is,width});
   const context=await browser.newContext({viewport:{width,height:900}});
   try{
    await context.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);

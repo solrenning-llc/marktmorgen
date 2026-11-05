@@ -20,7 +20,8 @@ for (const label of ["Move First guide up", "Take First guide out", "Move Second
   is(`${label} provides a 44px target in both directions`, !!found[0] && /\bh-11\b/.test(found[0]) && /\bw-11\b/.test(found[0]), true);
 }
 is("the first product still cannot move above the list", buttons.find(attributes => attributes.includes('aria-label="Move First guide up"'))?.includes('disabled=""'), true);
-is("the next product can still move up", buttons.find(attributes => attributes.includes('aria-label="Move Second guide up"'))?.includes('disabled=""'), false);
+is("the next product waits for its handler on the server", buttons.find(attributes => attributes.includes('aria-label="Move Second guide up"'))?.includes('disabled=""'), true);
+is("server-rendered editing controls wait for hydration", buttons.every(attributes => attributes.includes('disabled=""')), true);
 is("the collection page keeps its saved id", html.includes("guides-abcd1234"), true);
 is("empty collections offer no phantom product actions", /aria-label="(?:Move|Take) /.test(draw([])), false);
 done();

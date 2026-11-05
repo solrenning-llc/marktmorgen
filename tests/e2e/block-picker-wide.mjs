@@ -13,7 +13,14 @@ export async function checkBlockPickerTurnsWide({browser,LOCAL,session,sid,produ
   await context.addCookies([{name:"nl_session",value:session,url:LOCAL}]);
   const page=await context.newPage();
   let writes=0;page.on("request",request=>{if(request.method()==="POST")writes++;});
+  // The button is server-rendered: a press before hydration opens nothing (seen
+  // on CI in Firefox). PageEditor's depth read starts in its useEffect, so it
+  // proves the controls are live, as tests/e2e/us-english-composer.mjs waits
+  // for it; no sleep and no second press. The widening below still finds the
+  // place waiting, which is what this check is about.
+  const editorHydrated=page.waitForRequest(request=>{const url=new URL(request.url());return request.method()==="GET"&&url.pathname==="/api/store/depth"&&url.searchParams.get("id")===product;},{timeout:60000});
   await page.goto(LOCAL+"/studio/pages?store="+sid+"&product="+product,{waitUntil:"domcontentloaded",timeout:60000});
+  await editorHydrated;
   await page.getByRole("button",{name:/^Add a block \(/}).click();
   const below=page.getByRole("region",{name:/^Add a block /});
   await below.waitFor({state:"visible"});

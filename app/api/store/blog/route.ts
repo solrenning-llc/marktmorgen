@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { ensureStatsId, setPostCount } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { BlogWriteUnconfirmed, MAX_POST_BODY, cleanPost, deletePost, savePost } from "@/lib/store-blog";
+import { BlogCountUnavailable, BlogWriteUnconfirmed, MAX_POST_BODY, cleanPost, deletePost, savePost } from "@/lib/store-blog";
 import { outlinePromptsLeft } from "@/lib/blog-outline";
 
 /**
@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
     const counted = saved.published === null ? null : await setPostCount(guarded.ref, saved.published).catch(() => null);
     return Response.json({ ok: true, post: saved.post, countUnavailable: counted === null });
   } catch (error) {
+    if (error instanceof BlogCountUnavailable) return Response.json({ ok: true, countUnavailable: true });
     if (error instanceof BlogWriteUnconfirmed) return fail("unconfirmed", 503);
     // What does not fit in the store's data room is not written (lib/store-data.ts).
     if (error instanceof StoreFullError) return fail("store_full", 409);

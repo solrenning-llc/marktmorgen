@@ -67,6 +67,11 @@ export class BlogWriteUnconfirmed extends Error {
  constructor() { super("The blog change could not be confirmed"); this.name = "BlogWriteUnconfirmed"; }
 }
 
+/** The deletion is confirmed; only its resulting published count is unavailable. */
+export class BlogCountUnavailable extends Error {
+ constructor() { super("The blog count could not be confirmed"); this.name = "BlogCountUnavailable"; }
+}
+
 export type PostMeta = {
   id: string;
   title: string;
@@ -305,6 +310,6 @@ export async function deletePost(statsId: string | null, id: string, room: DataS
   ]));
   if (changed === null) throw new BlogWriteUnconfirmed();
   await giveData(room, [{ slot: `bl:${id}`, bytes: 0, set: true }]);
-  if (changed.total === null) throw new BlogWriteUnconfirmed();
+  if (changed.total === null) throw new BlogCountUnavailable();
   return changed.total;
 }

@@ -7,6 +7,7 @@ export function BlogUnavailable({ language, handle, name }: { language: unknown;
  const code = parseLanguage(language), words = blogReadingWords(code);
  const base = `/@${encodeURIComponent(handle)}`;
  return <div lang={LANGUAGES[code].locale} className="min-h-screen bg-paper text-ink">
+  <meta name="robots" content="noindex" />
   <main id="content" className="container-page max-w-2xl py-16">
    <a href={base} className="link inline-flex min-h-11 items-center">{name}</a>
    <h1 className="t-h2 mt-6">{wordsIn(code).blogOf(name)}</h1>

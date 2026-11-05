@@ -101,7 +101,7 @@ async function main(){
  const key=`nl:blog:meta:${metadataStats}`;
  const [raw]=await redis.pipeline([["HGET",key,keptId]]);
  const valid=JSON.parse(String(raw)) as Record<string,unknown>;
- for(const [field,value] of [["draft","true"],["publishedAt","not-a-date"],["publishedAt","1e309"],["publishedAt",8_640_000_000_001],["updatedAt",0.5],["updatedAt",-1]] as const){
+ for(const [field,value] of [["draft","true"],["publishedAt","not-a-date"],["publishedAt","1e309"],["publishedAt",8_640_000_000_001],["updatedAt",0.5],["updatedAt",-1],["minutes",null],["minutes","1e309"],["excerpt",null]] as const){
   await redis.pipeline([["HSET",key,keptId,JSON.stringify({...valid,[field]:value})]]);
   let refused=false;try{await publishedPosts(metadataStats,1);}catch{refused=true;}
   is(`unreadable ${field}:${String(value)} is not projected as published`,refused,true);

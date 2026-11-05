@@ -53,3 +53,12 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 - #2475 permanece `4a9234f92f14ac8ba5eb79e67334f844ce7a6ecb`: oito success e produto `41978798134` queued. #2466 ainda open/conflitado sob Claude1.
 - #2526 permanece `bcecfd1a43f5508b2cf41beb4c1dfe773c5fb4e1`: oito success e produto `41978795199` in_progress.
 - Canal atualizado em `fd75d92f600020f4cb214330b587b2a4b5efd800`. Nenhum merge, force, cancelamento, quinta unidade ou edição alheia.
+
+
+## Retomada 05/11/2026 05h18 Fortaleza
+
+- #2350: o ancestral `2511c27836d04f3867459cc79bed1ee12af9e6e1` concluiu nove success após uma repetição isolada de Firefox e uma de Mobile, ambas externas. O mesmo PR foi promovido sem force/expected SHA para o corretivo revisado `56890ee8b452279bc2a8d0d5ea1f15e2b534d7ff`, tree `5cce7bcfcc557373cc58ee9abdddc4842eb9efc2`; nove workflows novos `419922*` estavam queued/in_progress. Não usar verdes ancestrais.
+- #2599 foi incorporado; a linha de reserva Zapier agora está no main. #2466 permanece apenas para fechamento pelo Claude1; L não o toca.
+- Main atual `e53b3d8ec9d705892526d4ab34677ec9bb74fe5c` não mudou os quatro paths de Zapier/Unicode desde a integração anterior. #2475 novo head `94da186ffad2a851e01269dd54062f4ecf25f4e5`, tree `a90eac0568a1452f5d1400b456e482a715f152ab`; blobs próprios exatos 0bf91247/1ba15914. #2526 novo head `fb6e29c69aab95e8939c46a8e4984526428a3705`, tree `45048756e93e230f049584e344a0dd5c9f3f63e8`; blobs próprios exatos 41d0b023/52f842c8. Nove workflows novos `419923*` em cada PR.
+- #2383: `990ff798daad213be458ff2ec43b53bb2784142b` terminou oito success + um cancelado externo. Sem repetir o cancelado, foi integrado ao mesmo main no novo head `bedb4a49805b07658c65aba3de8b2291c1baf512`, tree `c413c33e2ee292ec85aea41f1f7d179cfad59662`. Nenhum dos oito paths mudou no main; oito blobs aprovados exatos verificados. Nove workflows novos `419925*` queued.
+- Descrições dos quatro PRs atualizadas. Canal em `ca8629cf343f282b2877c29c16baeac867278638`. Nenhum merge, force, cancelamento, quinta unidade ou edição de reserva/produto alheio.

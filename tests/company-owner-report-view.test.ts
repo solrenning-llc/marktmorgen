@@ -27,6 +27,6 @@ test("rendering revalidates source data, escapes text and never displays supplie
   assert.match(html, /0 observações de lista/);
   assert.match(html, /dateTime="2026-11-05T08:00:00.000Z"/);
   assert.match(html, /Estado observado da Amazon SES: estado desconhecido/);
-  assert.doesNotMatch(html, /synthetic@example|<script>/);
+  assert.doesNotMatch(html, /synthetic@example|<script>/i);
   assert.match(html, /página autenticada e envio automático ainda não estão ligados/);
 });

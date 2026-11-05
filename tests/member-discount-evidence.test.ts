@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     ["missing status", { status: undefined }], ["unknown status", { status: "mystery" }],
     ["missing discount evidence", { discounts: undefined }], ["null discounts", { discounts: null }],
     ["unknown discount object", { discounts: [], discount: {} }], ["broken discount item", { discounts: [null] }],
-  ]) { reset(); subscriptions = page([{ ...subscription(), ...extra }]); await refuses(String(name)); }
+  ] as const) { reset(); subscriptions = page([{ ...subscription(), ...extra }]); await refuses(String(name)); }
   part("Known absence and a genuine zero retain their existing meanings");
   reset(); customers = page([]);
   is("confirmed no customer is an empty membership list", await memberSubs(store, "member@example.com"), []);

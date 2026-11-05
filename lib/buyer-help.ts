@@ -17,8 +17,8 @@ export const BUYER_HELP: BuyerHelpItem[] = [
     id: "find",
     q: "Where do I find what I bought?",
     a: [
-      "Open marktmorgen.com/library and type the email address you paid with. We email you a link. It opens every store you bought from, each with its own list. You do not need an account or a password.",
-      "If you know the store, its own page works too: add /orders to the store's address, for example marktmorgen.com/@store-name/orders.",
+      "Open marktmorgen.com/library and type the email address you paid with. We email you a link. It opens the stores you bought from, up to the 60 most recent, each with its own list. You do not need an account or a password.",
+      "A store may not be there: an older purchase, more than 60 stores, or a store that has closed. If you know the store, its own page works too: add /orders to the store's address, for example marktmorgen.com/@store-name/orders.",
     ],
     routes: ["app/library/page.tsx", "app/[handle]/orders/page.tsx"],
   },
@@ -27,9 +27,10 @@ export const BUYER_HELP: BuyerHelpItem[] = [
     q: "Where is my receipt?",
     a: [
       "Your receipt is the order confirmation the store emailed you when you paid. Search your email for the store's name.",
-      "If you cannot find it, reply to any email from the store and ask them to send your purchase email again. They can do that from their studio. It goes to the address you paid with.",
+      "If you cannot find it, open the store's orders page: add /orders to the store's address, for example marktmorgen.com/@store-name/orders, and type the email address you paid with. It lists what you bought there.",
+      "To get the email itself again, ask the store. Reply to any order confirmation you have from them, or use the contact form on the store's page if it has one. They can send your purchase email again from their studio, to the address you paid with.",
     ],
-    routes: [],
+    routes: ["app/[handle]/orders/page.tsx", "app/[handle]/page.tsx"],
   },
   {
     id: "cancel",
@@ -53,10 +54,11 @@ export const BUYER_HELP: BuyerHelpItem[] = [
     id: "contact",
     q: "How do I reach the creator?",
     a: [
-      "Reply to any email the store sent you. Your reply reaches them.",
-      "Many stores also have a contact form near the bottom of their store page, at marktmorgen.com/@store-name. Not every store turns one on.",
+      "Reply to the order confirmation the store emailed you when you paid. Your reply reaches them.",
+      "Other emails, such as the sign-in links for your orders or your membership, come from marktmorgen.com. A reply to those does not reach the store.",
+      "Many stores also have a contact form near the bottom of their store page, at marktmorgen.com/@store-name. Not every store turns one on. Your orders page, at marktmorgen.com/@store-name/orders, lists what you bought there.",
     ],
-    routes: ["app/[handle]/page.tsx"],
+    routes: ["app/[handle]/page.tsx", "app/[handle]/orders/page.tsx"],
   },
   {
     id: "charge",

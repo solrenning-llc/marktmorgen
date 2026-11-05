@@ -78,7 +78,7 @@ import { PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { ENDED_INDEX, SETUP_STORAGE_BYTES, standingOf } from "@/lib/plan-standing";
 import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { onBreak } from "@/lib/plan-pause";
+import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
@@ -165,6 +165,21 @@ export function removalDay(endedAt: number): number {
 }
 
 /**
+ * Whether a break the creator chose holds the closing, as onBreak
+ * (lib/plan-pause.ts) answers it, except that a break that cannot be read,
+ * or is read in a shape we do not expect, throws. onBreak answers true then,
+ * which is right for the daily walk (nothing is removed on an unknown) but
+ * would have closingOf say the store is "not closing" about a store it could
+ * not check: its callers refuse or say they could not check instead.
+ */
+async function breakHolds(store: Store, nowSeconds: number): Promise<boolean> {
+  const view = await pauseView(store);
+  if (view.kind === "unknown") throw new Error("plan-closing: the store's break could not be read");
+  if (view.kind === "missing") return false;
+  return Boolean(view.record.funding) || view.record.until > nowSeconds;
+}
+
+/**
  * For the studio: the day what a store keeps would be removed, counted the
  * way the job counts it. Null when the store's plan has not ended, or when
  * what it kept has been removed already. Whether the store keeps more than
@@ -184,7 +199,7 @@ export async function closingOf(store: Store, now = Date.now()): Promise<{ ended
   const endedAt = Date.parse(store.planEndedAt);
   if (standingOf(store, now / 1000) !== "ended" || !Number.isFinite(endedAt) || !isRedisConfigured()) return null;
   // A break the creator chose keeps everything until it ends (lib/plan-pause.ts).
-  if (await onBreak(storeRef(store), now / 1000)) return null;
+  if (await breakHolds(store, now / 1000)) return null;
   const [raw] = await redisPipeline([["GET", stateKey(storeRef(store))]]);
   const read = parseState(raw);
   const state: State = read.of === endedAt ? read : {};
@@ -354,7 +369,9 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
   // A member whose payments were not paused may never be in it, so the
   // creator is asked to refund that time; and the notice never says a refund
   // is made that the code may not make.
-  const notMade = "A refund your Stripe balance does not cover, or one past this closing's limit, is not made: after that day, please check your Stripe account and refund what is left yourself.";
+  // Not a list of reasons: the balance, the closing's limit, a disputed payment
+  // or one Stripe names no payment for each stop one (lib/closing-refunds.ts).
+  const notMade = "Some refunds may not go through (for example, when your Stripe balance is too low): after that day, please check your Stripe account and refund what is left yourself.";
   const holds = news && (news.notHeld === null || news.overLimit === null)
     ? [
         "We could not check just now whether every membership's payments are paused.",
@@ -366,7 +383,9 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
     ? [
         `${unpaused} ${unpaused === 1 ? "membership's payments are" : "memberships' payments are"} not paused${news?.notHeld ? " yet: we try again every day" : ""}${news?.overLimit ? `${news?.notHeld ? ", and some are" : ":"} past this closing's limit` : ""}.`,
         `Every one of them ends on ${dateWords(day)}. If a member is charged before then, please refund them from Stripe.`,
-        `What these members paid for after ${dateWords(day)} may not be refunded for you: after that day, please check each of them in Stripe and refund that time yourself.`,
+        unpaused === 1
+          ? `What this member paid for after ${dateWords(day)} may not be refunded for you: after that day, please check their membership in Stripe and refund that time yourself.`
+          : `What these members paid for after ${dateWords(day)} may not be refunded for you: after that day, please check each of them in Stripe and refund that time yourself.`,
         "",
       ]
     : [];
@@ -381,7 +400,7 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
     : news && news.members !== null && news.members > 0 && news.unused
     ? [
         `${news.members} ${news.members === 1 ? "member has" : "members have"} paid for time after ${dateWords(day)}: ${news.unused} in all.`,
-        `On ${dateWords(day)} we try to refund each of them the unused part of their last payment, from your own Stripe account.`,
+        `On ${dateWords(day)} we try to refund the unused part of each member's last payment, from your own Stripe account.`,
         notMade,
         "You can refund it sooner, after checking each amount, from your studio. Marktmorgen never pays it and never takes it.",
         "",

@@ -33,11 +33,13 @@ export async function runTestFiles({files, compile, run}) {
   }
 }
 
-/** @param {string} bundle @param {NodeJS.ProcessEnv} env @returns {Promise<number>} */
-export function runBundle(bundle, env) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [bundle], {stdio: 'inherit', env});
-    child.once('error', reject);
+/** @param {string} bundle @param {NodeJS.ProcessEnv} env @param {string} [executable] @returns {Promise<number>} */
+export function runBundle(bundle, env, executable = process.execPath) {
+  return new Promise(resolve => {
+    const child = spawn(executable, [bundle], {stdio: 'inherit', env});
+    // spawnSync returned a null status on launch errors: count the failure
+    // and keep running the other test files, rather than dropping coverage.
+    child.once('error', () => resolve(1));
     // Wait for stdio to close before the next test's heading, as spawnSync did.
     child.once('close', code => resolve(code ?? 1));
   });

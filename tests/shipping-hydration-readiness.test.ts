@@ -50,8 +50,8 @@ function unavailable(button: string, label: string): void {
   is(`${label} keeps one server-rendered control`, button.length > 0, true);
   is(`${label} is natively unavailable before hydration`, /\sdisabled(="")?/.test(button), true);
   is(`${label} exposes its unavailable state`, button.includes('aria-disabled="true"'), true);
-  is(`${label} keeps its accessible name`, button.includes(`aria-label="${label}"`), true);
-  is(`${label} visibly says Loading before hydration`, />Loading…<\//.test(button), true);
+  is(`${label} does not override its visible accessible name`, button.includes("aria-label="), false);
+  is(`${label} visibly keeps its action while Loading`, button.includes(`>${label} — Loading…</`), true);
 }
 
 part("Physical-shipping controls are honest before hydration");

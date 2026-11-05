@@ -50,8 +50,9 @@ async function main() {
   const lost = await createResendFallbackFixture({ credential, cap: 1, fetch: reply });
   lost.loseNext("dispatch");
   is("lost dispatch ACK is unknown", (await guardedResendPost(request("lost-dispatch"), lost.runtime)).kind, "unknown");
+  is("the invocation that never received permission releases only its own hold", [lost.requests.filter(r => r.method === "POST").length, lost.held()], [0, 0]);
   await guardedResendPost(request("lost-dispatch"), lost.runtime);
-  is("a possibly committed dispatch is never repeated", [lost.requests.filter(r => r.method === "POST").length, lost.held()], [0, 1]);
+  is("a reconciled non-send can be retried with one fresh dispatch", [lost.requests.filter(r => r.method === "POST").length, lost.held()], [1, 0]);
   const uncertain = await createResendFallbackFixture({ credential, fetch: async () => { throw Error("Reply lost after possible acceptance"); } });
   is("an HTTP transport failure is unknown", (await guardedResendPost(request("lost-http"), uncertain.runtime)).kind, "unknown");
   await guardedResendPost(request("lost-http"), uncertain.runtime);
@@ -111,7 +112,7 @@ async function main() {
   try {
     Object.defineProperty(performance, "now", { configurable: true, value: () => samples[Math.min(clockReads++, samples.length - 1)] });
     is("consumer work after a valid budget helper cannot POST past its monotonic deadline", (await guardedResendPost(request("late-consumer"), monotonic.runtime)).kind, "unknown");
-    is("the final transport check preserved the hold without HTTP", [clockReads, monotonic.requests.filter(r => r.method === "POST").length, monotonic.held()], [3, 0, 1]);
+    is("the final transport check releases the confirmed non-send without HTTP", [clockReads, monotonic.requests.filter(r => r.method === "POST").length, monotonic.held()], [3, 0, 0]);
   } finally {
     Date.now = originalClock;
     if (performanceDescriptor) Object.defineProperty(performance, "now", performanceDescriptor);

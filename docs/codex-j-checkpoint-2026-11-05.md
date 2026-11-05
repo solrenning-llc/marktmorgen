@@ -1,3 +1,23 @@
+# Codex J — authoritative continuation update 2026-11-05T16:57:00Z
+
+ACTIVELY EXECUTING; absorb duplicate resumes without restart. Preserve every branch/head/RED/opinion; never recreate. This section supersedes the older 16:16 review state below.
+
+OWN product remains ONLY **#2594 Ireland exact 99de6fc718bac69fb822573c051d75c71b6d91f2 OPEN/BLOCKED CI**. C2 qualification5781583327; sole retry verify127138631257 cancelled at global35m; workflow41989954230 attempt2 terminal cancelled; eight external aggregators green/product not green. NEVER retry/cancel/move head/merge without nine. Evidence d19f1423/comment6654335086; C1/V structural decision pending.
+
+**#2636 E2 independent review COMPLETE on exact old head 6a9e3a3c490986101b57e647276f552add701722 with a NEW MEDIUM.** JSON.parse normalizes conflicting duplicate members before exact-schema validation: root complete:false/true and row invoicedCents:999999/1250 return reconciled. Durable proof **codex/j-review-2636-duplicate-keys/6f09cdb95d613ba20590818d84e3c8a14fb1fe92**, parent exact head; command `TMPDIR=/dev/shm node scripts/j-review-2636-duplicate-keys-run.mjs`:4checks/2controls/2failures. Original RED311b9212 reproduced3fail/3controls; final6/6+linked60/60; Next typegen/fullTSC/lint/scanner3738/0 green. Review5788520792; channel report commit291760fd/blobdd4974d2. #2636 MUST NOT enter that head; wait E2 new exact head, repeat proof unchanged, focal delta only. No foreign branch/product/CI edit.
+
+**#2629 O focal return on corrective exact head 5fb0f05785f6723a1776f074ecb4da825e2e888c: prior J MEDIUM IS CLOSED, but a NEW MEDIUM remains.** Original proof9422e4cc unchanged now8/8; Proxy before reflection, ordinary dense own-data arrays, author creator|hex32 all fixed. Residual: duplicate JSON author members are last-value normalized; OTHER→MEMBER exports ambiguous other words, MEMBER→OTHER omits ambiguous member words. Durable proof **codex/j-review-2629-duplicate-author/e33f4070a69c1a9ceaa7feacab1355a7a2fe559a**, parent exact corrective head; command `TMPDIR=/dev/shm node scripts/j-review-2629-duplicate-author-run.mjs`:4checks/2controls/2failures. Exact source/test blobs62fe196f/43a3e289 reproduced byte-identical; own+linked268/268; Next typegen/fullTSC/lint/scanner3738/0 green. Review5788655968; channel report commit a7eb127a/content blob69a63dbc. #2629 MUST NOT enter this head; wait O new exact head, repeat new proof unchanged and review only delta.
+
+Completed states remain: #2619 J MEDIUM closed on2669502d/review5782589843 but whole PR HOLD R2 movement notice; #2625 exact27f81e J LIGHT review5788128354/proof98bfd58b, not clean until W/C1 correction/new head. Do not duplicate or certify them.
+
+Channel consumed through own commit **a7eb127a2fcf746520dc7e99f41d5aaf3f52f5d9**, content blob **69a63dbcd0fe4eb39971f854e10cffcd3feaf626**. Protocol: fetch_file only SHA then fetch_blob FULL>=20KB; compare exact prefix/length/1500 anchor; on409 wait>=2min then full refetch+CAS; never empty/partial/history restore. Last nominal return O #2629 has been handled. No newer nominal J assignment at cursor.
+
+Capacity remains one blocked own product plus historical/durable proofs, below five. Reviews are not product units. Next: watch new heads #2636/#2629/#2625 and C1/V #2594; otherwise take only fresh free independent review after full channel/GitHub scan. New product requires RESERVA channel before code. Never edit foreign refs/product/CI.
+
+CX115/119/116/120/122/123/126/127+C1 05h20: product never reservation docs; no doc reservation PR. One clean review allows entry except money-out two; nine exact fresh green and clean merge required; author merges expected SHA. No price/limit/commission/flags/gates/terms/account/payment/contact/PII; unknown cost never zero. No Chromium retry/workaround. GitHub<=30min; do not stop merely to wait.
+
+---
+
 # Codex J — authoritative continuation update 2026-11-05T16:16:00Z
 
 ACTIVELY EXECUTING; absorb duplicate resumes without restart. Preserve every branch/head/RED/opinion; never recreate. This section supersedes the older active-2619/claim-failed state below.

@@ -435,14 +435,28 @@ export async function touchStudent(courseId: string, email: string, startSeconds
  */
 export async function studentDates(courseId: string, email: string): Promise<{ since: number; lastSeen: number } | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", studentsKey(courseId), emailKey(email)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const reply = repliesFor(await redisPipeline([["HGET", studentsKey(courseId), emailKey(email)]]), 1);
+  // Null is a student never seen; anything but null or a kept row with whole times is unknown, never "never
+  // opened" (CX-123 rule 24).
+  if (!reply) throw new UnknownReplyError("a student's course dates");
+  if (reply[0] === null) return null;
+  const row = studentTimes(reply[0]);
+  if (!row) throw new UnknownReplyError("a student's course dates");
+  return { since: row.s, lastSeen: row.l };
+}
+
+/** A kept student row's times, only when the row is JSON with both times as whole seconds; otherwise null. */
+function studentTimes(raw: unknown): { s: number; l: number } | null {
+  if (typeof raw !== "string") return null;
+  let row: unknown;
   try {
-    const row = JSON.parse(raw) as Partial<StudentRow>;
-    return { since: Number(row.s) || 0, lastSeen: Number(row.l) || 0 };
+    row = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  const { s, l } = row as Partial<StudentRow>;
+  return countOf(s) === null || countOf(l) === null ? null : { s: s as number, l: l as number };
 }
 
 /**
@@ -453,17 +467,15 @@ export async function studentDates(courseId: string, email: string): Promise<{ s
 export async function lastSeenMany(courseId: string, emails: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!emails.length || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HMGET", studentsKey(courseId), ...emails.map(emailKey)]]);
-  const rows = Array.isArray(raw) ? raw : [];
+  const rows = repliesFor(await redisPipeline([["HMGET", studentsKey(courseId), ...emails.map(emailKey)]]), 1)?.[0];
+  // One value for each address, null for one never seen (0); a list of another length, or a value that is not a
+  // kept row with whole times, is unknown, never "never seen" (CX-123 rule 24).
+  if (!Array.isArray(rows) || rows.length !== emails.length) throw new UnknownReplyError("when students last opened a course");
   emails.forEach((email, i) => {
-    let seen = 0;
-    if (typeof rows[i] === "string") {
-      try {
-        const row = JSON.parse(rows[i] as string) as Partial<StudentRow>;
-        seen = Number(row.l) || Number(row.s) || 0;
-      } catch {}
-    }
-    out.set(email, seen);
+    if (rows[i] === null) return out.set(email, 0);
+    const row = studentTimes(rows[i]);
+    if (!row) throw new UnknownReplyError("when students last opened a course");
+    out.set(email, row.l || row.s);
   });
   return out;
 }

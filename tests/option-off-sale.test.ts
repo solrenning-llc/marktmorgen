@@ -22,6 +22,9 @@ import { createCheckout, fromPriceCents } from "@/lib/store-checkout";
 import { directoryRow } from "@/lib/affiliate-directory";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { priceWords } from "@/lib/answers";
+import { canGift, givableOptions, givenOption } from "@/lib/gift-rules";
+import { canGroup } from "@/lib/group-rules";
+import { activePlan, planFor, planState } from "@/lib/product-extras";
 import type { Listing } from "@/lib/store";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { store as redis } from "./redis-stub";
@@ -103,7 +106,7 @@ async function main(): Promise<void> {
   const owner = "offsale@example.com";
   await claimHandle(owner, "offsaleshop", "Off Sale Shop", "");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_1TestOffSale0001", true);
+  await setStripeAccount(owner, "acct_1TestOffSale01", true);
   await setSubscription(owner, { customerId: "cus_OffSale0001", subscriptionId: "sub_OffSale0001", active: true, period: paidPeriod() });
   const made = await addProduct(owner, "Design Club", "", "10", { interval: "month", trialDays: 0, payments: 0 });
   if (!made.ok) throw new Error("no product");
@@ -144,6 +147,20 @@ async function main(): Promise<void> {
   const gone = (await readProduct((await storeForEmail(owner))!, pack.product.id))!;
   is("every price off sale: the directory lists nothing for it, and the assistant says it is not on sale", [await rowOf(), priceWords(gone, "usd")], [null, "It is not on sale right now."]);
 
+
+  part("Never given as a gift or bought for a group (Revisor 1 on #2685)");
+  const gift = { options: [option({ id: "g1", priceCents: 1000, best: true, offSale: true }), option({ id: "g2", label: "Plus", priceCents: 3000 })], priceCents: 1000, file: null, link: null, recurring: null, call: null, pwyw: false, keys: null, stock: null } as unknown as Listing;
+  is("the gift and group picker leaves it out, even when it is the pick", givableOptions(gift).map((o) => o.id), ["g2"]);
+  is("a gift or group for it is refused, never guessed; one on sale is taken", [givenOption(gift, "g1").ok, givenOption(gift, "g2").ok], [false, true]);
+  const lastOff = { ...gift, options: gift.options.map((o) => ({ ...o, offSale: true as const })) } as Listing;
+  is("with every price off sale, it cannot be given or bought for a group at all", [canGift(lastOff), canGroup(lastOff)], [false, false]);
+  is("with one on sale, it still can", [canGift(gift), canGroup(gift)], [true, true]);
+
+  part("The payment plan reads only the prices on sale (sweep after Revisor 1 on #2685)");
+  const planned = { options: [option({ id: "p1", priceCents: 3000, offSale: true }), option({ id: "p2", label: "Plus", priceCents: 3000 })], priceCents: 3000, file: null, link: null, recurring: null, call: null, pwyw: false, keys: null, stock: null, plan: { payments: 3, interval: "month", amountCents: 1000, options: { p2: 1000 } } } as unknown as Listing;
+  is("a price off sale with no payment set does not pause the plan for the others", activePlan(planned) !== null, true);
+  is("the plan is never offered for the price off sale, even with a payment saved for it", [planFor({ ...planned, plan: { ...planned.plan!, options: { p1: 1000, p2: 1000 } } } as Listing, "p1"), planFor(planned, "p2")?.amountCents], [null, 1000]);
+  is("with every price off sale, the plan is paused", planState({ ...planned, options: planned.options.map((o) => ({ ...o, offSale: true as const })) } as Listing), { paused: "options", plan: planned.plan });
   done();
 }
 

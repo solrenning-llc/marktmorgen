@@ -19,7 +19,7 @@ import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBro
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
 import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, restoreFlowVersion, saveFlow, setFlowActive } from "@/lib/flows";
-import { readFlowVersions } from "@/lib/flow-versions";
+import { FlowVersionsUnavailable, readFlowVersions } from "@/lib/flow-versions";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FlowRunUnavailable, PERSON_KEY, listRuns, readRun } from "@/lib/flow-runs";
 import { RUNS_LISTED } from "@/lib/flow-limits";
@@ -309,7 +309,7 @@ export async function POST(request: NextRequest) {
       const at = typeof body.at === "number" && Number.isSafeInteger(body.at) ? body.at : 0;
       if (!FLOW_ID.test(id) || !at) return fail("unknown", 404);
       const result = await restoreFlowVersion(store, id, at);
-      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "unknown" || result.reason === "version" ? 404 : 400);
+      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "unknown" || result.reason === "version" ? 404 : result.reason === "history_room" ? 409 : 400);
     }
 
     if (action === "flow-import") {
@@ -404,6 +404,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof BroadcastWriteUnconfirmed) return fail("broadcast_write_unconfirmed", 502);
     if (error instanceof FlowWriteUnconfirmed) return fail("flow_write_unconfirmed", 502);
     if (error instanceof FlowRunUnavailable) return fail("flow_runs_unavailable", 503);
+    if (error instanceof FlowVersionsUnavailable) return fail("flow_versions_unavailable", 503);
     if (error instanceof DraftWriteUnconfirmed) return fail("draft_write_unconfirmed", 502);
     if (error instanceof DraftReadUnavailable) return fail("draft_read_unavailable", 503);
     if (error instanceof DraftRemovalConflict) return fail("draft_remove_conflict", 409);

@@ -17,6 +17,9 @@ const ERRORS: Record<string, string> = {
   step: "A step of that version names something your store no longer has. Edit the workflow instead.",
   goal: "That version's goal names something your store no longer has. Edit the workflow instead.",
   flow_write_unconfirmed: "Putting it back could not be confirmed. Reload the page to see which version is in use.",
+  // Codex G2 on #1927: an unread history is never "none yet", and a version is put back only once the one it replaces is kept.
+  flow_versions_unavailable: "The earlier versions could not be read just now. This does not mean there are none. Try again in a moment.",
+  history_room: "The version in use could not be kept, so nothing was put back and nothing changed. Your store may be out of room for data. Free some room, or try again in a moment.",
 };
 
 const when = (ms: number) =>

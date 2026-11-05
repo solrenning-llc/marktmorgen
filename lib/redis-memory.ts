@@ -113,6 +113,24 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/flows.ts WRITE_FLOWS_IF: the workflows written only over the text they were read from.
+        if (key.startsWith("-- marktmorgen:flows-write-if:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, list, had, expected, json] = args;
+          const now = this.run(["GET", list]);
+          if (had === "0" ? now !== null && now !== undefined : now !== expected) return 0;
+          this.run(["SET", list, json]);
+          return 1;
+        }
+        // lib/flow-versions.ts KEEP_FLOW_VERSION: a version pushed only onto the list it was counted from.
+        if (key.startsWith("-- marktmorgen:flow-version-keep:v1\n") && args[0] === "1" && args.length === 6) {
+          const [, list, length, head, entry, most] = args;
+          const n = Math.min(Number(this.run(["LLEN", list]) ?? 0), Number(most));
+          if (n !== Number(length)) return 0;
+          if (n > 0 && this.run(["LINDEX", list, "0"]) !== head) return 0;
+          this.run(["LPUSH", list, entry]);
+          this.run(["LTRIM", list, "0", String(Number(most) - 1)]);
+          return 1;
+        }
         // CX-67: existing exposure reservation used by held-store company work.
         if (key.includes("local receiptField='case:'..ARGV[3]..':'..ARGV[4]") && args[0] === "1" && args.length === 9) {
           const [, ledger, review, binding, scope, id, rawCharge, rawLimit, rawFunded] = args;

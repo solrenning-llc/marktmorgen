@@ -22,7 +22,13 @@
  * The versions take room in the store's data room (slot wv:<flowId>), set to
  * what the list holds after each push; one that does not fit is not kept,
  * and the save goes ahead without it: a full room never stops a creator
- * saving their workflow.
+ * saving their workflow. Putting a version back is the exception: it keeps
+ * the version it replaces first, or puts nothing back (lib/flows.ts).
+ *
+ * Only Redis's exact answers count (Codex G2 on #1927): a list that cannot be
+ * read whole keeps no version and is never an empty history; a version is
+ * pushed only onto the list it was counted from (KEEP_FLOW_VERSION); room is
+ * given back only once the list is confirmed deleted.
  */
 import type { Flow } from "@/lib/flows";
 import { parseFlowList } from "@/lib/flow-list";
@@ -49,52 +55,103 @@ export function changesWhatItDoes(before: Flow, after: Flow): boolean {
 }
 
 /**
+ * Pushes a version only while the list is as it was counted from: as long
+ * (up to ARGV[4]) and with the same newest entry. 1 when kept, 0 when it
+ * changed in between. Modelled by lib/redis-memory.ts.
+ */
+export const KEEP_FLOW_VERSION = `-- marktmorgen:flow-version-keep:v1
+local n = redis.call('LLEN', KEYS[1])
+if n > tonumber(ARGV[4]) then n = tonumber(ARGV[4]) end
+if n ~= tonumber(ARGV[1]) then return 0 end
+if n > 0 and redis.call('LINDEX', KEYS[1], 0) ~= ARGV[2] then return 0 end
+redis.call('LPUSH', KEYS[1], ARGV[3])
+redis.call('LTRIM', KEYS[1], 0, tonumber(ARGV[4]) - 1)
+return 1`;
+
+/** A workflow's kept list, on Redis's exact answer only: null when it cannot be known. */
+async function heldVersions(key: string): Promise<string[] | null> {
+  const answer: unknown = await redisPipeline([["LRANGE", key, 0, MAX_FLOW_VERSIONS - 1]]);
+  if (!Array.isArray(answer) || answer.length !== 1 || !Array.isArray(answer[0]) || answer[0].some((x) => typeof x !== "string")) return null;
+  return answer[0] as string[];
+}
+
+/**
  * Keeps `before` as the newest earlier version of its workflow, when `after`
- * changes what it does. Best effort by design: a room that is full or cannot
- * be read keeps no version, and the save it belongs to goes on.
+ * changes what it does: true once it is kept (or already the newest kept).
+ * Best effort for an ordinary save: a room that is full, or a list that
+ * cannot be read whole or changed meanwhile, keeps no version, and the save
+ * goes on. Its room is counted for the list it will make before it is pushed.
  */
 export async function keepFlowVersion(store: DataStore, listId: string, before: Flow, after: Flow, now = Date.now()): Promise<boolean> {
   if (!isRedisConfigured() || !changesWhatItDoes(before, after)) return false;
   const key = versionsKey(listId, before.id);
-  const entry = `${now}\n${JSON.stringify(before)}`;
+  const body = JSON.stringify(before);
+  const entry = `${now}\n${body}`;
   try {
-    const [held] = await redisPipeline([["LRANGE", key, 0, MAX_FLOW_VERSIONS - 2]]);
-    const kept = [entry, ...(Array.isArray(held) ? held.filter((x): x is string => typeof x === "string") : [])];
+    const held = await heldVersions(key);
+    if (!held) return false;
+    // Tried again after the workflows changed under a save (lib/flows.ts): kept once, not twice.
+    if (held.length && held[0].slice(held[0].indexOf("\n") + 1) === body) return true;
+    const kept = [entry, ...held].slice(0, MAX_FLOW_VERSIONS);
     await needData(store, [{ slot: SLOT(before.id), bytes: dataBytes(kept, kept.length), set: true }]);
-    await redisPipeline([["LPUSH", key, entry], ["LTRIM", key, 0, MAX_FLOW_VERSIONS - 1]]);
-    return true;
+    const reply: unknown = await redisPipeline([["EVAL", KEEP_FLOW_VERSION, 1, key, held.length, held[0] ?? "", entry, MAX_FLOW_VERSIONS]]);
+    if (Array.isArray(reply) && reply.length === 1 && reply[0] === 1) return true;
+    if (Array.isArray(reply) && reply.length === 1 && reply[0] === 0) {
+      // Changed meanwhile: its room is counted again from what it holds now, never from the version not kept.
+      const now = await heldVersions(key);
+      if (now) await needData(store, [{ slot: SLOT(before.id), bytes: dataBytes(now, now.length), set: true }]);
+    }
+    return false;
   } catch (error) {
     if (!(error instanceof DataRoomError)) console.error("keeping a workflow's earlier version failed", error);
     return false;
   }
 }
 
-export type FlowVersion = { at: number; flow: Flow };
-
-/** A workflow's earlier versions, newest first. One that cannot be read is left out, never shown half. */
-export async function readFlowVersions(listId: string | null, flowId: string): Promise<FlowVersion[]> {
-  if (!listId || !isRedisConfigured()) return [];
-  const [list] = await redisPipeline([["LRANGE", versionsKey(listId, flowId), 0, MAX_FLOW_VERSIONS - 1]]);
-  if (!Array.isArray(list)) return [];
-  const out: FlowVersion[] = [];
-  for (const entry of list) {
-    if (typeof entry !== "string") continue;
-    const cut = entry.indexOf("\n");
-    const at = Number(entry.slice(0, cut));
-    if (cut < 1 || !Number.isSafeInteger(at)) continue;
-    try {
-      const [flow] = parseFlowList([JSON.parse(entry.slice(cut + 1))]) ?? [];
-      if (flow && flow.id === flowId) out.push({ at, flow });
-    } catch {
-      // Left out.
-    }
+/** A workflow's earlier versions could not be read whole: unknown, never "none yet". */
+export class FlowVersionsUnavailable extends Error {
+  constructor() {
+    super("A workflow's earlier versions could not be read");
+    this.name = "FlowVersionsUnavailable";
   }
-  return out;
 }
 
-/** Forgets the earlier versions of a workflow that is gone, and gives back their room. */
+export type FlowVersion = { at: number; flow: Flow };
+
+/**
+ * A workflow's earlier versions, newest first, on Redis's exact answer only:
+ * an empty list is none yet; a list that cannot be read whole, or holds an
+ * entry that is not a version of this workflow, throws FlowVersionsUnavailable,
+ * never a shorter or empty history (Codex G2 on #1927).
+ */
+export async function readFlowVersions(listId: string | null, flowId: string): Promise<FlowVersion[]> {
+  if (!listId) return [];
+  if (!isRedisConfigured()) throw new FlowVersionsUnavailable();
+  const list = await heldVersions(versionsKey(listId, flowId));
+  if (!list) throw new FlowVersionsUnavailable();
+  return list.map((entry) => {
+    const cut = entry.indexOf("\n");
+    const at = Number(entry.slice(0, cut));
+    if (cut < 1 || !Number.isSafeInteger(at) || at <= 0) throw new FlowVersionsUnavailable();
+    let flow: Flow | undefined;
+    try {
+      [flow] = parseFlowList([JSON.parse(entry.slice(cut + 1))]) ?? [];
+    } catch {
+      throw new FlowVersionsUnavailable();
+    }
+    if (!flow || flow.id !== flowId) throw new FlowVersionsUnavailable();
+    return { at, flow };
+  });
+}
+
+/**
+ * Forgets the earlier versions of a workflow that is gone, and gives back
+ * their room only once Redis confirms the list is deleted: an answer that is
+ * not its own keeps the room counted, and throws.
+ */
 export async function dropFlowVersions(store: DataStore, listId: string, flowId: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([["DEL", versionsKey(listId, flowId)]]);
+  const reply: unknown = await redisPipeline([["DEL", versionsKey(listId, flowId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== 0 && reply[0] !== 1)) throw new Error("a workflow's earlier versions could not be confirmed deleted");
   await giveData(store, [{ slot: SLOT(flowId), bytes: 0, set: true }]);
 }

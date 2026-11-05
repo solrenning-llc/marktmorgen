@@ -18,13 +18,15 @@ async function main() {
   let writes = 0;
   let writeReply: unknown = normal;
   let applyWrite = false;
+  // A write of the list: a SET, or the write made only over what was read (lib/flows.ts, WRITE_FLOWS_IF; Codex G2 on #1927).
+  const writesList = (command: (string | number)[]) => (command[0] === "SET" && command[1] === key) || (command[0] === "EVAL" && command[3] === key);
   redis.pipeline = async commands => {
-    writes += commands.filter(command => command[0] === "SET" && command[1] === key).length;
+    writes += commands.filter(writesList).length;
     if (commands.some(command => command[0] === "GET" && command[1] === key) && reply !== normal) {
       if (reply instanceof Error) throw reply;
       return reply as unknown[];
     }
-    if (commands.some(command => command[0] === "SET" && command[1] === key) && writeReply !== normal) {
+    if (commands.some(writesList) && writeReply !== normal) {
       if (applyWrite) await original.call(redis, commands);
       if (writeReply instanceof Error) throw writeReply;
       return writeReply as unknown[];

@@ -92,3 +92,33 @@ test("complete evidence still sends a permitted buyer exactly once", async () =>
     assert.equal(r.batches.flat().length, 1);
   } finally { redis.pipeline = r.original; globalThis.fetch = oldFetch; }
 });
+
+const unknownQueues: [string, unknown[] | "throw"][] = [
+  ["missing envelope", []], ["null list", [null]], ["missing list", [undefined]],
+  ["scalar list", [0]], ["empty unfinished list", [[]]], ["extra envelope", [[person], null]],
+  ["extra address", [[person, "extra@example.test"]]], ["non-string address", [[7]]],
+  ["invalid address", [["not-an-address"]]], ["sparse list", [new Array(1)]],
+  ["throwing queue read", "throw"],
+];
+for (const [name, reply] of unknownQueues) test(`${name} retains the real pending queue for a confirmed retry`, async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  const key = `nl:upd:job:${r.job.id}:to`;
+  redis.pipeline = async commands => {
+    if (commands.some(c => c[0] === "LRANGE" && c[1] === key)) {
+      if (reply === "throw") throw new Error("synthetic queue read failed");
+      return reply;
+    }
+    return r.original(commands);
+  };
+  try {
+    const held = await advanceUpdate(r.job.id, storeForHandle, Date.now() + 20000);
+    assert.deepEqual([held?.status, held?.done, held?.sent], ["waiting", 0, 0]);
+    assert.deepEqual(redis.run(["LRANGE", key, 0, -1]), [person]);
+    assert.equal(r.batches.length, 0);
+    redis.pipeline = r.original;
+    const recovered = await advanceUpdate(r.job.id, storeForHandle, Date.now() + 20000);
+    assert.deepEqual([recovered?.status, recovered?.done, recovered?.sent], ["sent", 1, 1]);
+    assert.equal(r.batches.flat().length, 1);
+  } finally { redis.pipeline = r.original; globalThis.fetch = oldFetch; }
+});

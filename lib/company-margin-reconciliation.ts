@@ -64,6 +64,8 @@ export function reconcileCompanyMonthlyEvidence(input: unknown, now = Date.now()
   try {
     const root = ownPacket(input, ["period", "currency", "companyFixedCostsCents", "sources"]);
     if (!root || root.period !== month || root.currency !== "USD") return null;
+    const fixedCosts = root.companyFixedCostsCents;
+    if (fixedCosts !== null && (typeof fixedCosts !== "number" || !Number.isSafeInteger(fixedCosts) || fixedCosts < 0)) return null;
     const sources = ownPacket(root.sources, COMMERCIAL_PROFIT_SOURCES);
     if (!sources) return null;
     const rows = Object.create(null) as CommercialProfitMixInput["sources"];
@@ -75,7 +77,7 @@ export function reconcileCompanyMonthlyEvidence(input: unknown, now = Date.now()
     }
     const accounting: CommercialProfitMixInput = {
       basis: "reconciled_actual", interval: "month", period: month, currency: "USD",
-      companyFixedCostsCents: root.companyFixedCostsCents as number | null, sources: rows,
+      companyFixedCostsCents: fixedCosts, sources: rows,
     };
     // Reuse the financial boundary on original rows BEFORE canonical encoding.
     const mix = commercialProfitMix(accounting);

@@ -10,19 +10,23 @@ const email = "host@example.com";
 const config = JSON.stringify({ email, source: "ics", read: [], write: "", ics: "sealed", icsAddedAt: "2026-11-05" });
 const good = JSON.stringify({ at: now, busy: [[now + 60_000, now + 120_000]], source: "ics" });
 let reply: unknown;
+let lockReply: unknown;
 let commands: (string | number)[][];
+const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
   redis.clear();
   commands = [];
+  lockReply = ["OK"];
   globalThis.fetch = (async () => { throw new Error("Unexpected external request"); }) as typeof fetch;
   redis.pipeline = (async (sent: (string | number)[][]) => {
     commands.push(...sent);
     if (sent[0]?.[0] === "MGET") return reply as never;
+    if (sent[0]?.[0] === "SET" && String(sent[0]?.[1]).startsWith("nl:hostcal:lock:")) return lockReply as never;
     return pipeline(sent);
   }) as typeof redis.pipeline;
 });
-afterEach(() => { redis.pipeline = pipeline; });
+afterEach(() => { redis.pipeline = pipeline; globalThis.fetch = originalFetch; });
 
 for (const [label, value] of Object.entries({
   missing: [], null: [null], short: [[null]], extra: [[null, null, null, null]],
@@ -78,3 +82,15 @@ test("complete prefetch keeps explicit nulls and the stored strings", async () =
   assert.equal(reading.state, "ok");
   assert.equal(commands.length, 1, "prefetch avoids another database read");
 });
+
+for (const [label, value] of Object.entries({
+  missing: [], undefined: [undefined], wrongType: [1], wrongWord: ["ok"], extra: ["OK", null], sparse: Array(1),
+})) {
+  test(`unknown refresh lock never authorizes work or lock deletion: ${label}`, async () => {
+    lockReply = value;
+    const reading = await hostSync(store, email, "UTC", { now, force: true, known: { cfg: config, good, err: null, conn: null } });
+    assert.equal(reading.state, "ok", "the already verified fresh cache may still be used");
+    assert.equal(commands.length, 1, "only the lock request; no provider/cache write or deletion of somebody else's lock");
+    assert.equal(commands[0][0], "SET");
+  });
+}

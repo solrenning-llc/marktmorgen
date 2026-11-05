@@ -3,6 +3,8 @@ import { test } from "node:test";
 import * as route from "@/app/api/store/download/route";
 import { fixture, expireGrant } from "./single-digital-access-renewal-world";
 import type { ShipmentMailRuntime } from "@/lib/shipment-mail-outbox";
+import { SHIPMENT_MAIL_SCRIPT } from "@/lib/shipment-mail-outbox";
+import { enqueueSingleDigitalRenewal } from "@/lib/order-confirmation-outbox";
 import type { NextRequest } from "next/server";
 
 test("the expired original URL offers a funded one-button inbox renewal without exposing its address", async () => {
@@ -21,6 +23,23 @@ import { renewalFixture, request, formFields, tokenKeys } from "./single-digital
 import { runOrderConfirmationMail, readSingleDigitalRenewalOrigin, forgetOrderConfirmationMail, confirmationOriginRowKey } from "@/lib/order-confirmation-outbox";
 import { store as redis } from "./redis-stub";
 import { queuedShipmentMailSender } from "@/lib/email";
+
+for (const clock of [NaN, Infinity, -Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "expired", "throws"] as const) {
+ test(`renewal admission refuses a ${String(clock)} clock observed after Redis TIME`, async()=>{
+  const f=await renewalFixture(), pipeline=f.runtime.pipeline!;
+  f.runtime.pipeline=async commands=>{
+   const reply=await pipeline(commands);
+   if(commands.some(c=>c[0]==="TIME"))f.runtime.now=()=>{
+    if(clock==="throws")throw Error("Synthetic clock unavailable");
+    return clock==="expired" ? f.runtime.policy!.admissionsUntil+1 : clock;
+   };
+   return reply;
+  };
+  const result=await enqueueSingleDigitalRenewal(f.store,f.url.searchParams.get("origin")!,"b".repeat(64),f.runtime);
+  assert.deepEqual(result,{ok:false,reason:"unknown"});
+  assert.equal(f.commands.filter(c=>c[0]==="EVAL"&&c[1]===SHIPMENT_MAIL_SCRIPT).length,0,"no retained liability on an unconfirmed local clock");
+ });
+}
 
 async function queued() {
   const f=await renewalFixture();

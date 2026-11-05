@@ -477,6 +477,30 @@ def main():
         assert db.command("GET", option_keys[0]) is None and db.command("GET", option_keys[1]) == source_option
         assert db.command("HGET", option_keys[5], "items") == "0"
         print("PASS: digital-option own lifetime scope, immutable CAS, one charged envelope, closed workers and existing erasure")
+        # A network-old ARGV clock cannot extend the paid admission window.
+        # Future and expired controls use real TIME, without sleeping or a provider.
+        for expired in [False, True]:
+            clock = db.command("TIME")
+            executed = int(clock[0]) * 1000 + int(clock[1]) // 1000
+            earlier = executed - 200
+            renewal, renewal_keys = fixture("renewal-cutoff-" + str(expired))
+            renewal.update(originKind="single_digital_renewal", purpose="single-digital-access-renewal",
+                           phase="renewal_queued", capsuleDigest="b" * 64, created=earlier,
+                           authorizedAt=earlier, next=earlier)
+            renewal_keys += ["nl:order-confirmation:renewal:capsule:SYNTHETIC:" + renewal["capsuleDigest"],
+                             "nl:order-confirmation:renewal:store:SYNTHETIC"]
+            renewal_keys[:10] = [k.replace(prefix, prefix + "renewal-cutoff:" + str(expired) + ":") for k in renewal_keys[:10]]
+            made.update(renewal_keys)
+            renewal_policy = dict(policy, admissionsUntil=executed - 100 if expired else executed + 3600000,
+                                  coveredOrigins=["single-digital-confirmation", "single-digital-access-renewal"],
+                                  singleDigitalAccessEvidence="SYNTHETIC ONLY", singleDigitalRenewalEvidence="SYNTHETIC ONLY")
+            answer = db.command("EVAL", shared, 12, *renewal_keys, "enqueue", "", json.dumps(renewal), earlier,
+                                131072, json.dumps(renewal_policy), "")
+            assert answer[0] == ("unknown" if expired else "queued"), "real execution TIME must enforce the cutoff before retention"
+            assert db.command("EXISTS", renewal_keys[0]) == (0 if expired else 1)
+            assert db.command("HGET", renewal_keys[5], "items") == (None if expired else "1")
+            db.command("DEL", *renewal_keys)
+        print("PASS: execution TIME rejects expired renewal admission before row/pool writes; future control retained")
 
         print(json.dumps({"observed_commands_including_eval_and_redis_call": profiles, "supplier_invoice": False}))
         # Exercise production TypeScript plus the exact shared/paid/accounting
@@ -485,7 +509,7 @@ def main():
 import {build} from 'esbuild';
 import {spawnSync} from 'node:child_process';
 import {testAliases,testEnvironment} from './tests/test-config.mjs';
-for(const file of ['order-confirmation-paid.test.ts','order-confirmation-paid-erasure.test.ts','course-origin-persistence.test.ts','digital-option-retention.test.ts','pending-mail-recovery.test.ts','digital-renewal-admission-native.test.ts','single-digital-access-renewal.test.ts','renewal-isolated-custody.test.ts','renewal-mail-notice.test.ts']) {
+for(const file of ['order-confirmation-paid.test.ts','order-confirmation-paid-erasure.test.ts','course-origin-persistence.test.ts','digital-option-retention.test.ts','pending-mail-recovery.test.ts','digital-renewal-admission-native.test.ts','single-digital-access-renewal.test.ts','renewal-isolated-custody.test.ts','renewal-mail-notice.test.ts','physical-option-checkout.test.ts','physical-option-coverage.test.ts','physical-option-origin.test.ts','physical-option-recovery.test.ts']) {
 await build({entryPoints:['tests/'+file],bundle:true,platform:'node',format:'cjs',outfile:process.argv[1],logLevel:'error',alias:testAliases(file,process.cwd(),process.cwd()+'/tests')});
 const result=spawnSync(process.execPath,[process.argv[1]],{env:testEnvironment(process.env),stdio:'inherit'});
 if(result.status!==0){process.exitCode=result.status ?? 1;break;}

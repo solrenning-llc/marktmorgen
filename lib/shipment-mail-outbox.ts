@@ -298,6 +298,11 @@ if op == 'enqueue' then
    if #pending~=64 or string.find(pending,'[^a-f0-9]') or redis.call('SISMEMBER',KEYS[12],pending)~=1 then return {'unknown'} end
    return {'duplicate',pending}
   elseif redis.call('EXISTS',KEYS[11])~=0 then return {'unknown'} end
+  -- A network-old producer clock cannot extend the funded admission window.
+  -- Read TIME in this atomic operation before any new retained row/pool write.
+  local clock=redis.call('TIME')
+  local executed=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
+  if math.abs(executed-now)>60000 or n.authorizedAt>executed or executed-n.authorizedAt>300000 or executed>p.admissionsUntil then return {'unknown'} end
  end
  local a,b=pool(KEYS[6]),pool(KEYS[7])
  if a==false or b==false then return {'unknown'} end

@@ -110,3 +110,15 @@ Combined2632 remainsOPEN8c5dbaac5c4e3becd504ca9b498d04f9136c9787; V releases and
 Fresh20most-recent OPEN PR metadata inspected for useful review work; current candidates all have controllers or applicable reviews:2676R2,2535R2,2352G,2669Q,2671U,2677R1/V,2674N/R2,2672S,2632V,2654C2,2670Q,2464G,2665E2/U,2094G,2663/2664K2,2666/2660/2661H2/L/N,2640P. The2664 K2 verdict6665844006 was confirmed by PR+branch mentions before considering it; no duplicate review started. No new product, reserved file change, automation, source/head push, retry, cancellation or merge.
 
 Next action remains nominal corrective2672stringList/own releases, or legitimate combined2632 merge followed by one own integration preserving reviewed blobs+linked/static+9NEW. Existing blocks are external coordination dependencies; no terminal credentials/service failure inferred. Keep all branches/proofs and original pending requests intact.
+
+## Latest coordination delta — 5 November, 18:10 Fortaleza
+
+Read new channel lines through C1-20261105-1809-TODOS-1. AV12 supersedes AV11's repeated model polling: one shell watcher, minimum60seconds between git reads, at most40newlines upon a relevant event, no repeated model/CI polling without novelty. No automation was created or changed.
+
+Fresh git fetch of main resolved 0c1caa6722c1df5ed779e3d4938fa90fe19f3e39. Git diff against c88ffeed confirms exactly ONE deletion in docs/reservations/codex.md: the V three-script reservation row. CLAUDE/AGENTS/inbox/queue and all other reservation files are byte-identical to the already-read state. This closes the shared reservation-row dependency; it does NOT release the separate2516inventory row or2473readers. No occupied file was edited.
+
+C1/C3 disposition is now explicit:2677 enters separately AFTER2632, except for the WebKit exception controlled by C1/C3. Do not infer a generic permission to combine it. C3 must integrate main once into2632 after2678; immediate metadata reread still returned OPEN8c5dbaac5c4e3becd504ca9b498d04f9136c9787, so no legitimate combined merge or new successful final head was observed. S does not poll/rerun/move that foreign head. After2632 legitimately merges with9NEW, integrate2507 once and run linked/static plus9NEW.
+
+Own final heads and evidence in the preceding checkpoint remain unchanged; no new test was justified or run.2672MEDIUM closure6668269511 and pending R2LOWstringList proof remain authoritative. New channel says Claude5 reviewed2676; do not duplicate. All scanned recent review candidates have controllers; no new unit claimed. No product/CI/reservation edit, own merge, retry, cancellation or deployment claim.
+
+Exact next action: relevant reply on own2473/2516 narrow releases or requested2672delta; otherwise combined2632 legitimate merge, then own integration. BLOCKED on those external coordination/CI dependencies; ask Claude1 for a specific free review/item rather than rescanning the full queue.

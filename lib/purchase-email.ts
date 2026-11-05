@@ -70,7 +70,7 @@ import { firstCharge } from "@/lib/move-rules";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { purchaseRefunded } from "@/lib/refunds";
 import { scheduleReviewAsk } from "@/lib/review-ask";
-import { type BundleSlot, bumpsFromMeta, bundleFromMeta, deliveredIds, isBundle } from "@/lib/bundle-rules";
+import { type BundleSlot, bumpsFromMeta, bundleFromMeta, deliveredIds } from "@/lib/bundle-rules";
 import { type NextOffer, nextOfferForEmail } from "@/lib/next-offer";
 import { nextOfferWords } from "@/lib/buyer-words/next-offer";
 import { pricePill } from "@/components/store-product";
@@ -479,10 +479,14 @@ async function confirmOnce(
     return confirmRequest(store, session, key);
   }
   const listings = await listingsNamed(store, session.metadata);
-  // The products it hands over, a bundle's each, for what it keeps (lib/store-data-rules.ts).
-  const items = listings.reduce((n, product) => n + (isBundle(product) ? (product.bundle?.length ?? 1) : 1), 0) || 1;
+  // Admission holds the purchased roots, each with its captured bundle slot.
+  // listingsNamed also includes the expanded members and affiliate extras;
+  // neither those extra rows nor a later catalog edit can grow this footprint.
+  const items = bumpsFromMeta(session.metadata).reduce((n, bump) =>
+    n + (bundleFromMeta(session.metadata, `${bump.key}_bundle`).length || 1),
+  bundleFromMeta(session.metadata, "bundle").length || 1);
   if (isSettled(session) && saleHandles(store).has(session.metadata?.store ?? "") && session.metadata?.kind !== "call" &&
-      (listings.length || session.metadata?.gift || session.metadata?.group)) {
+      (listings.length || session.metadata?.gift || session.metadata?.group || session.metadata?.preorder)) {
     await accountPaidCheckout(store, session, items);
   }
   // Bought for somebody else: handed to them, and the buyer gets a receipt

@@ -52,13 +52,17 @@ const invalid = (): TaxSalesCount => ({ status: "invalid" });
 function data(value: unknown, keys: readonly string[]): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return null;
+  // JSON consults inherited serialization hooks before own evidence fields.
+  // Inspect descriptors only: a hook may itself be an executable accessor.
+  if (Object.getPrototypeOf(value) !== null
+    && Object.getOwnPropertyDescriptor(Object.prototype, "toJSON")) return null;
   if (Reflect.ownKeys(value).length !== keys.length) return null;
   const fields = Object.getOwnPropertyDescriptors(value);
   const out: Record<string, unknown> = Object.create(null);
   for (const key of keys) {
     if (!Object.hasOwn(fields, key)) return null;
     const field = fields[key];
-    if (!field || !Object.hasOwn(field, "value")) return null;
+    if (!field || !field.enumerable || !Object.hasOwn(field, "value")) return null;
     out[key] = field.value;
   }
   return out;
@@ -87,6 +91,8 @@ export function countTaxSales(value: unknown): TaxSalesCount {
     if (!ledger) return unknown();
     const target = data(ledger.place, PLACE_KEYS);
     if (!target || !place(target) || !currency(ledger.currency)) return unknown();
+    // Probe only after both place fields are validated primitive own data.
+    structuredClone(ledger.place);
     if (!day(ledger.periodStart) || !day(ledger.periodEnd)
       || !day(ledger.coverageFrom) || !day(ledger.coverageThrough)) return unknown();
     if (ledger.periodStart > ledger.periodEnd) return invalid();
@@ -94,6 +100,11 @@ export function countTaxSales(value: unknown): TaxSalesCount {
       || ledger.coverageThrough < ledger.periodEnd) return unknown();
     const entries = ledger.entries;
     if (!Array.isArray(entries) || Object.getPrototypeOf(entries) !== Array.prototype) return unknown();
+    // An inserted ancestor could supply a hook beyond the two checked
+    // intrinsics. Refuse that chain without traversing or reading its fields.
+    if (Object.getPrototypeOf(Array.prototype) !== Object.prototype) return unknown();
+    if (Object.getOwnPropertyDescriptor(Array.prototype, "toJSON")
+      || Object.getOwnPropertyDescriptor(Object.prototype, "toJSON")) return unknown();
     const length = Object.getOwnPropertyDescriptor(entries, "length")?.value;
     if (!Number.isSafeInteger(length) || length < 0 || length > MAX_TAX_SALES_ENTRIES) return unknown();
     if (Reflect.ownKeys(entries).length !== length + 1) return unknown();
@@ -102,7 +113,7 @@ export function countTaxSales(value: unknown): TaxSalesCount {
     let applicableEntries = 0;
     for (let index = 0; index < length; index += 1) {
       const field = Object.getOwnPropertyDescriptor(entries, String(index));
-      if (!field || !Object.hasOwn(field, "value")) return unknown();
+      if (!field || !field.enumerable || !Object.hasOwn(field, "value")) return unknown();
       const entry = data(field.value, ENTRY_KEYS);
       if (!entry || !place(entry) || !currency(entry.currency) || !day(entry.supplyOn)
         || typeof entry.id !== "string" || entry.id.length > 200 || !entry.id.trim()
@@ -112,6 +123,9 @@ export function countTaxSales(value: unknown): TaxSalesCount {
       ids.add(entry.id);
       if (entry.amountMinor === null || entry.amountMinor === undefined) return unknown();
       if (typeof entry.amountMinor !== "number" || !Number.isSafeInteger(entry.amountMinor) || entry.amountMinor < 0) return invalid();
+      // A Proxy can forge complete descriptors. Probe the original leaf after
+      // validating every scalar, before any later trap can alter this branch.
+      structuredClone(field.value);
       // Require a single evidenced currency, including excluded rows: the
       // snapshot cannot silently treat a foreign-currency amount as local.
       if (entry.currency !== ledger.currency) return unknown();
@@ -125,6 +139,10 @@ export function countTaxSales(value: unknown): TaxSalesCount {
       totals[position] += BigInt(entry.amountMinor);
       applicableEntries += 1;
     }
+    // Child probes must finish before either parent: cloning live parents
+    // earlier could execute a getter introduced by a still-unchecked Proxy.
+    structuredClone(entries);
+    structuredClone(value);
     const maximum = BigInt(Number.MAX_SAFE_INTEGER);
     if (totals.settled + totals.reserved + totals.proposed > maximum) return invalid();
     return {

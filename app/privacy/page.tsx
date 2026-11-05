@@ -834,7 +834,8 @@ export default function PrivacyPage() {
           in as their name in the room, where the others in it see it. A
           replay is a YouTube, Vimeo or Loom video that loads from that
           service only when a member presses play, and so does a video on a
-          creator&apos;s sales page, when a visitor presses play.
+          creator&apos;s sales page, when a visitor presses play or the button
+          that opens it in a window, where it then starts playing.
         </p>
         <p id="imports">
           <strong className="text-black">
@@ -1124,7 +1125,10 @@ export default function PrivacyPage() {
           creator also gets a private address of their own that lists their
           upcoming calls and sessions with the name and email address of each
           buyer, for the calendar app they subscribe with; replacing that
-          address turns the old one off.
+          address turns the old one off. We keep the last copy of that list
+          made for their calendar app for up to 40 days; once the store is
+          deleted or closed, that copy is never shown again, and it is erased
+          within those 40 days.
         </p>
         <p id="webhooks">
           <strong className="text-black">Webhooks a creator adds.</strong> A

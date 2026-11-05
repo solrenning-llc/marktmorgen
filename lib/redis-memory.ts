@@ -131,6 +131,20 @@ export class MemoryRedis {
           this.run(["HINCRBY", ledger, "reserved", rawCharge]); return 1;
         }
         // CX-67: atomic held membership and aggregate observations.
+        // lib/webhooks.ts READ_DELIVERIES: each delivery read only while it is no larger than its bound, {0} at the first larger one.
+        if (key.startsWith("-- marktmorgen:webhook-deliveries-read:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const bounds = args.slice(1 + count);
+          const out: (string | null)[] = [];
+          for (let i = 0; i < keys.length; i += 1) {
+            const n = Number(this.run(["STRLEN", keys[i]]) ?? 0);
+            if (n > Number(bounds[i])) return [0];
+            const value = n > 0 ? this.run(["GET", keys[i]]) : null;
+            out.push(typeof value === "string" ? value : null);
+          }
+          return [1, out];
+        }
         if (key.startsWith("-- marktmorgen:held-state:v1\n") && args[0] === "2" && args.length === 6) {
           const [, index, month, held, ref, due] = args;
           if (Array.isArray(this.data.get(index)) && (this.data.get(index) as unknown[]).length === 0) this.data.delete(index);

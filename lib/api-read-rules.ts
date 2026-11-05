@@ -358,8 +358,13 @@ export const MEMBERSHIP_NUMBERS_BYTES = 256_000;
 export function membershipsWork(keptBytes = MEMBERSHIP_NUMBERS_BYTES): ReadWork {
   return { commands: 2, bytes: keptBytes, sent: MEMBERSHIP_NUMBERS_BYTES, stripePages: 0, roundTrips: 2 };
 }
-/** And when they are not kept: every page of subscriptions and invoices, and the numbers kept again. */
-export const MEMBERSHIPS_COLD_WORK: ReadWork = { commands: 1, bytes: MEMBERSHIP_NUMBERS_BYTES, sent: 0, stripePages: MEMBERSHIP_PAGES, roundTrips: 1 };
+/**
+ * And when they are not kept: every page of subscriptions and invoices, and the numbers kept again; with what members
+ * wrote looked up among the store's deleted people (one HMGET) and kept by a script that looks them up again where it
+ * writes (2 more beside its SET), for up to 70 comments and three addresses each (lib/membership-numbers.ts,
+ * SHOWN_COMMENTS, COMMENT_ADDRESSES; Codex E2 on #2111).
+ */
+export const MEMBERSHIPS_COLD_WORK: ReadWork = { commands: 1 + 1 + 2, bytes: MEMBERSHIP_NUMBERS_BYTES + 2 * 70 * 3 * (64 + 64), sent: 0, stripePages: MEMBERSHIP_PAGES, roundTrips: 1 + 1 };
 
 // ---------------------------------------------------------------- emails
 

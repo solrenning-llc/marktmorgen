@@ -219,9 +219,24 @@ export const SALES_READ_SHAPE: ReadShape = {
   seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 1 + READING_COPY_EXTRA_COMMANDS + LIST_TRY_COMMANDS, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
   dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES + 2 * ERASED_LOOKUP_BYTES,
 };
+/**
+ * Who what members wrote may name, at the most: the comments a reading can
+ * show (lib/membership-numbers.ts, SHOWN_COMMENTS: 70), each with its
+ * customer's address and up to COMMENT_ADDRESSES (2) typed in it (not imported
+ * here, read in an order that would leave them unset: tests/read-ceilings.test.ts
+ * fails when they move).
+ */
+export const MEMBER_WORDS_NAMES = 70 * (1 + 2);
+/**
+ * Besides the reading: their prints looked up (one HMGET), the memberships'
+ * cache and the reading kept each by a script that looks them up again where
+ * it writes (2 more each beside its SET; Codex E2 on #2111), and, for a store
+ * from before lists, the day's try mark (LIST_TRY_COMMANDS).
+ */
+export const MEMBER_WORDS_COMMANDS = 1 + 2 + 2 + LIST_TRY_COMMANDS;
 export const MEMBERS_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light, outBytes: 0, stripePages: 2 * 20,
-  dbBytes: 2 * 65_536 + READING_COPY_MAX_BYTES,
+  seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light + MEMBER_WORDS_COMMANDS, outBytes: 0, stripePages: 2 * 20,
+  dbBytes: 2 * 65_536 + READING_COPY_MAX_BYTES + 3 * MEMBER_WORDS_NAMES * (64 + 64),
 };
 export const STORE_READING_SHAPES: readonly ReadShape[] = [STATS_READ_SHAPE, SALES_READ_SHAPE, MEMBERS_READ_SHAPE];
 /**

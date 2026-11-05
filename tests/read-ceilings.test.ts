@@ -32,9 +32,10 @@ import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
-  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, LIST_MADE_HEAD_READS, LIST_MADE_SHAPE, STORE_LOCK_TRIES, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
+  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, MEMBER_WORDS_NAMES, LIST_MADE_HEAD_READS, LIST_MADE_SHAPE, STORE_LOCK_TRIES, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { TOP_BUYERS } from "@/lib/stats";
+import { COMMENT_ADDRESSES, SHOWN_COMMENTS } from "@/lib/membership-numbers";
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { createHash } from "node:crypto";
@@ -265,6 +266,7 @@ async function main(): Promise<void> {
   is("the file holds at most CALENDAR_MAX_EVENTS events, the soonest", [ics.split("BEGIN:VEVENT").length - 1, ics.includes("b0@example.com"), ics.includes(`b${CALENDAR_MAX_EVENTS}@example.com`)], [CALENDAR_MAX_EVENTS, true, false]);
   is("the build's Stripe pages are lib/calls.ts's own", read("lib/calls.ts").includes(`const MAX_PAGES = ${CALENDAR_STRIPE_PAGES};`), true);
   is("the biggest buyers' prints looked up are lib/stats.ts's TOP_BUYERS", ERASED_LOOKUP_BYTES >= TOP_BUYERS * (64 + 64), true);
+  is("the members' words looked up are lib/membership-numbers.ts's own bounds", MEMBER_WORDS_NAMES >= SHOWN_COMMENTS * (1 + COMMENT_ADDRESSES), true);
 
   part("A real making, measured, within its count (M1, light d)");
   {

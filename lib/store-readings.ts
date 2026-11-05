@@ -31,10 +31,10 @@ import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { keyFor } from "@/lib/stripe-account";
-import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Store, ensureListId, storeRef } from "@/lib/store";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
-import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
+import { type Numbers, membershipCacheKey, membershipNumbersNamed, withoutMemberWords } from "@/lib/membership-numbers";
 
 // The day's figures live in lib/store-reading-rules.ts, which the help reads without the database.
 export { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY };
@@ -180,18 +180,7 @@ export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; 
  * otherwise SET, and an empty list. Billed 1 + 2 (lib/read-ceilings.ts,
  * SALES_READ_SHAPE); lib/redis-memory.ts runs it the same way.
  */
-export const READING_COPY = `-- marktmorgen:reading-copy:v1
-local found = redis.call("HMGET", KEYS[2], unpack(ARGV, 3))
-local gone = {}
-for i = 1, #found do
-  if found[i] then gone[#gone + 1] = i end
-end
-if #gone > 0 then
-  redis.call("DEL", KEYS[1])
-  return gone
-end
-redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
-return gone`;
+export const READING_COPY = KEEP_UNLESS_ERASED;
 
 /**
  * Who a reading names by their address, for keeping it (READING_COPY): the
@@ -345,9 +334,24 @@ export async function withoutErasedBuyers<T extends { buyers?: { top: { email: s
   return { ...sales, buyers: { ...sales.buyers, top: top.filter((b) => !gone.has(b.email)) } };
 }
 
-/** The store's memberships, kept (lib/membership-numbers.ts). */
+/**
+ * The store's memberships, kept (lib/membership-numbers.ts), read from Stripe
+ * each time it is read again (never from the memberships' own cache, whose
+ * words could not be checked again here), with what members wrote checked
+ * where the copy is written, as the sales are (Codex E2 on #2111): someone
+ * deleted meanwhile leaves the words out and nothing kept.
+ */
 export async function keptMembers(store: Store, now = Date.now()): Promise<Numbers | null> {
-  return (await keptReading(store, "members", () => membershipNumbers(store, false, now), now))?.value ?? null;
+  let named: string[] = [];
+  const guard: ReadingGuard<Numbers | null> = { listId: store.listId, names: () => named, without: (numbers) => withoutMemberWords(numbers) };
+  const read = async () => {
+    const got = await membershipNumbersNamed(store, now);
+    named = got?.named ?? [];
+    // A store from before lists: tried once a day (listForNaming); with none, kept without the words.
+    if (!guard.listId && named.length) guard.listId = await listForNaming(store, now);
+    return got?.numbers ?? null;
+  };
+  return (await keptReading(store, "members", read, now, false, guard))?.value ?? null;
 }
 
 /**
@@ -388,6 +392,7 @@ export async function forgetStoreReadings(statsId: string | null | undefined): P
  */
 export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId), copyKey("members", statsId)]]);
+  // And the memberships' own cache, which keeps what members wrote when leaving (Codex E2 on #2111).
+  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId), copyKey("members", statsId), membershipCacheKey(statsId)]]);
   return Number(gone) || 0;
 }

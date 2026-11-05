@@ -73,6 +73,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/segments.ts", how: "erased", what: "The ten-minute copy of your buyers that segments are read from" },
   { file: "lib/store-readings.ts", how: "erased", what: "The day's copy of your sales numbers in your studio, which names your biggest buyers, and of your members' numbers" },
   { file: "lib/calendar-sync.ts", how: "erased", what: "The copy of your private booking calendar file, which names who booked" },
+  { file: "lib/membership-numbers.ts", how: "erased", via: "lib/store-readings.ts", what: "Your members' numbers, kept a few minutes with what members wrote when they left; what a deleted member wrote is left out each time the numbers are read again from your Stripe account, which keeps it" },
   { file: "lib/member-health.ts", how: "erased", what: "The ten-minute copy of your members' scores" },
   { file: "lib/inbox.ts", how: "erased", what: "Their conversations in your inbox: what they wrote and what you answered" },
   { file: "lib/imports.ts", how: "expires", days: 14, what: "A file you imported is kept for 14 days after the import began, then deleted with everything in it" },

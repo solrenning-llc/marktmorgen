@@ -2,7 +2,7 @@
  * A store's kept reading of its sales (lib/store-readings.ts) names its
  * biggest buyers by their address. A person's erasure, by the real door
  * (lib/person-erasure.ts, erasePerson), takes that copy with it: nothing kept
- * names them afterwards (inbox C4-48, the Codex E review of #2111). The next
+ * names them afterward (inbox C4-48, the Codex E review of #2111). The next
  * reading is made again from the store's Stripe account, which keeps the
  * purchase (lib/person-data.ts). The calendar feed's copy, which names who
  * booked, goes the same way.
@@ -13,7 +13,7 @@
 import { normaliseEmail } from "@/lib/auth";
 import { type Store, storeForEmail } from "@/lib/store";
 import { erasePerson } from "@/lib/person-erasure";
-import { keptReading, keptSales, withoutErasedBuyers } from "@/lib/store-readings";
+import { keptMembers, keptReading, keptSales, withoutErasedBuyers } from "@/lib/store-readings";
 import { CALENDAR_BUILDS_PER_DAY, bookedCalendar, bookedCalendarFeed, ensureFeedToken, newFeedToken, withoutErasedBookers } from "@/lib/calendar-sync";
 import { suppressCommand, suppressedAmong } from "@/lib/suppression";
 import { setStripeAccount } from "@/lib/store";
@@ -29,6 +29,8 @@ process.env.STRIPE_SECRET_KEY = "sk_test_readings_erasure_only";
 let checkouts: Record<string, unknown>[] = [];
 /** The one-click extras the stand-in for Stripe lists (paid with the checkout's card, named by their receipt address). */
 let intents: Record<string, unknown>[] = [];
+/** The memberships the stand-in for Stripe lists. */
+let subscriptions: Record<string, unknown>[] = [];
 /** Run once while Stripe lists the checkouts (a person's erasure while a reading is being made), then let go. */
 let whileListing: (() => Promise<unknown>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -39,7 +41,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     await run();
   }
   const extrasListed = String(input).includes("/payment_intents?") && (init?.method ?? "GET") === "GET";
-  return new Response(JSON.stringify({ object: "list", data: listing ? checkouts : extrasListed ? intents : [], has_more: false }), { status: 200 });
+  return new Response(JSON.stringify({ object: "list", data: listing ? checkouts : extrasListed ? intents : String(input).includes("/subscriptions?") ? subscriptions : [], has_more: false }), { status: 200 });
 }) as typeof fetch;
 
 /**
@@ -163,7 +165,7 @@ async function main(): Promise<void> {
   freshDay();
   const raced = await erasedDuring(selling, racer, () => keptSales(selling, Date.now(), true));
   is("the erasure ran between the look among the deleted people and the copy kept", raced.raced, true);
-  is("afterwards no copy kept names them", String(redis.run(["GET", key]) ?? "").includes(racer), false);
+  is("afterward no copy kept names them", String(redis.run(["GET", key]) ?? "").includes(racer), false);
   is("nor does the reading shown", JSON.stringify(raced.value.value).includes(racer), false);
   freshDay();
   const next = await keptSales(selling, Date.now(), true);
@@ -204,7 +206,7 @@ async function main(): Promise<void> {
   freshFeed();
   const feedRace = await erasedDuring(store, booker, () => bookedCalendarFeed(owner, making));
   is("the erasure ran between the look among the deleted people and the copy kept", feedRace.raced, true);
-  is("afterwards nothing kept names them", String(redis.run(["GET", feedKey]) ?? "").includes(booker), false);
+  is("afterward nothing kept names them", String(redis.run(["GET", feedKey]) ?? "").includes(booker), false);
   is("and the answer is not the file naming them: none, the app asks again", [feedRace.value.state, JSON.stringify(feedRace.value).includes(booker)], ["none", false]);
 
   part("The race the review found: the copy's step runs before the erasure's DEL, and takes the day's last own making (review of fe4cb5e56)");
@@ -483,6 +485,55 @@ async function main(): Promise<void> {
   redis.run(["DEL", `nl:cal:pace:${store.statsId}`]);
   const notListRead = await answered(isFeedRead, "not-an-array", () => bookedCalendarFeed(owner, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] })));
   is("nor when it is not a list", [notListRead instanceof Error ? "error" : notListRead.state, redis.run(["GET", feedKey]) !== null], ["none", true]);
+
+  part("Members: what an erased member wrote when leaving never comes back, from the cache or from Stripe (Codex E2 on 88888331d)");
+  const memberStore = { ...(await storeForEmail(OWNER))!, stripeAccountId: "acct_test_readings_race" } as Store;
+  const membersKey2 = `nl:reading:members:${memberStore.statsId}`;
+  const mnumKey = `nl:mnum:${memberStore.statsId}`;
+  const sec = Math.floor(Date.now() / 1000);
+  const sub = (id: string, email: string, comment: string, expanded: boolean) => ({
+    id, object: "subscription", status: "canceled", currency: memberStore.currency,
+    customer: expanded ? { id: `cus_${id}`, object: "customer", email } : `cus_${id}`,
+    metadata: { store: memberStore.handle, product: "membership" }, start_date: sec - 100_000, ended_at: sec - 1_000, canceled_at: sec - 1_000,
+    cancellation_details: { reason: "cancellation_requested", feedback: "too_expensive", comment },
+    items: { data: [{ quantity: 1, price: { unit_amount: 1_000, recurring: { interval: "month", interval_count: 1 } } }] },
+  });
+  const freshMembers = () => {
+    freshDay();
+    redis.run(["DEL", membersKey2, mnumKey]);
+  };
+  // Codex E2's reproduction: the address typed in the comment, the customer not expanded.
+  const leaver = normaliseEmail("lea.leaver@example.com");
+  subscriptions = [sub("sub_test_m1", leaver, `${leaver} wrote this synthetic private note`, false)];
+  freshMembers();
+  const firstMembers = await keptMembers(memberStore, Date.now());
+  is("control: the reading holds what they wrote, and the cache too", [JSON.stringify(firstMembers).includes(leaver), String(redis.run(["GET", membersKey2]) ?? "").includes(leaver), String(redis.run(["GET", mnumKey]) ?? "").includes(leaver)], [true, true, true]);
+  await erasePerson(memberStore, leaver, { kind: "person" });
+  is("the erasure takes the kept reading and the cache it is made from", [redis.run(["GET", membersKey2]), redis.run(["GET", mnumKey])], [null, null]);
+  freshDay();
+  const secondMembers = await keptMembers(memberStore, Date.now() + 1);
+  is("read again from Stripe, which keeps it: neither shown nor kept, nor cached", [JSON.stringify(secondMembers).includes(leaver), String(redis.run(["GET", membersKey2]) ?? "").includes(leaver), String(redis.run(["GET", mnumKey]) ?? "").includes(leaver)], [false, false, false]);
+
+  // Words with no address in them, from a member whose address Stripe has on their customer.
+  const mute = normaliseEmail("mo.mute@example.com");
+  const words = "I never found the time to use it";
+  subscriptions = [sub("sub_test_m2", mute, words, true), sub("sub_test_m3", still, "Too expensive for me right now", true)];
+  freshMembers();
+  is("control: what they wrote is read", JSON.stringify(await keptMembers(memberStore, Date.now())).includes(words), true);
+  await erasePerson(memberStore, mute, { kind: "person" });
+  freshDay();
+  const thirdMembers = await keptMembers(memberStore, Date.now() + 1);
+  is("their words go by their customer's address; another member's stay", [JSON.stringify(thirdMembers).includes(words), String(redis.run(["GET", membersKey2]) ?? "").includes(words), String(redis.run(["GET", membersKey2]) ?? "").includes("Too expensive for me right now")], [false, false, true]);
+
+  // A reading begun before an erasure and kept after it.
+  const racerM = normaliseEmail("ray.member@example.com");
+  const raceWords = "Leaving because of the move abroad";
+  subscriptions = [sub("sub_test_m4", racerM, raceWords, true)];
+  freshMembers();
+  const memberRace = await erasedDuring(memberStore, racerM, () => keptMembers(memberStore, Date.now()));
+  is("the erasure ran between the look among the deleted people and the copies kept", memberRace.raced, true);
+  is("nothing kept or cached names their words, nor is shown", [String(redis.run(["GET", membersKey2]) ?? "").includes(raceWords), String(redis.run(["GET", mnumKey]) ?? "").includes(raceWords), JSON.stringify(memberRace.value).includes(raceWords)], [false, false, false]);
+  subscriptions = [];
   done();
 }
 

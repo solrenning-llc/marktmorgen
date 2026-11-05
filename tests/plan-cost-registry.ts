@@ -462,6 +462,14 @@ export const ORDERS_METERED_LISTING = COMMAND + MAX_PRODUCT_BYTES * DB_BYTE;
  * moves read back through the database (lib/call-moves-read.ts).
  */
 export const ORDERS_METERED_MOVES = COMMAND + MOVES_PER_MGET * (MOVE_BYTES + MOVE_KEY_BYTES) * DB_BYTE;
+/**
+ * lib/two-step.ts lockedUntil, which every studio load and the locked-aware auth and store routes call: one command
+ * (MGET) a call. Only in the "*" state (more than KEPT_ANY_MAX accounts whose locked sessions could not be read, until
+ * SESSION_TTL_SECONDS and a day after the last such read; said in the server's log and counted for the owner's report,
+ * keptStarMonth) does a session with no lock of its own send three commands more: this, a call, held in
+ * tests/sg2-unknown-replies.test.ts. Not in a unit below: it exists only after more than 100 failed reads of Redis.
+ */
+export const LOCKED_UNTIL_STAR_EXTRA = 3 * COMMAND;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database.

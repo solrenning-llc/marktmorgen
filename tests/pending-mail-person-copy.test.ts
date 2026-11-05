@@ -9,7 +9,8 @@ import { physicalPaidFixture } from "./order-confirmation-paid-fixture";
 import { store as redis } from "./redis-stub";
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 const reads = new Set(["TYPE", "SCARD", "SMEMBERS", "GET", "GETRANGE"]);
-const onlyReads = (command: (string | number)[]) => reads.has(String(command[0]));
+const onlyReads = (command: (string | number)[]) => reads.has(String(command[0])) ||
+  (command[0] === "EVAL" && command[1] === SHIPMENT_MAIL_REFUSED_SCRIPT && command[2] === 1 && command[4] === "list");
 test("shipping copy permits only its bounded read-only Lua mode", () => {
   assert.equal(onlyReads(["EVAL", SHIPMENT_MAIL_REFUSED_SCRIPT, 1, "synthetic-pool", "list", "", ""]), true);
   assert.equal(onlyReads(["EVAL", SHIPMENT_MAIL_REFUSED_SCRIPT, 1, "synthetic-pool", "erase", "", ""]), false);

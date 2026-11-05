@@ -34,6 +34,27 @@ async function main(): Promise<void> {
   await forgetShipmentMail(input.statsId, input.message.to, runtime);
   is("person erasure removes the terminal status", await shipmentMailStatus(input.statsId, input.session, runtime), { state: "not_recorded", delayed: false });
 
+  part("An explicit no-POST outcome retains custody and its existing retry budget");
+  for (const stage of ["before", "confirmed", "lost"] as const) {
+    store.clear();
+    const noPostWorld = shipmentOutboxFixture();
+    const noPostRuntime = { ...runtime, pipeline: noPostWorld.pipeline };
+    const noPostInput = { ...input, statsId: `synthetic_no_post_${stage}`, session: `cs_test_shipmentnopost${stage}01` };
+    await enqueueShipmentMail(noPostInput, noPostRuntime);
+    const created = noPostWorld.commands.find(command => command[0] === "EVAL")!;
+    if (stage === "lost") noPostWorld.loseNext("dispatch");
+    const result = await runShipmentMail(now + 20000, async (_message, beforePost) => {
+      if (stage !== "before") await beforePost();
+      return "not_posted";
+    }, noPostRuntime);
+    is(`${stage}: explicit no POST returns to known waiting`, result, { accepted: 0, waiting: 1, unknown: 0 });
+    is(`${stage}: the same source remains queued`, (await shipmentMailStatus(noPostInput.statsId, noPostInput.session, noPostRuntime))?.state, "queued");
+    const raw = store.run(["GET", String(created[3])]);
+    const kept = typeof raw === "string" ? JSON.parse(raw) : null;
+    is(`${stage}: no-POST custody keeps its sealed content`, typeof kept?.sealed, "string");
+    is(`${stage}: the original check was charged and never reset`, kept?.checks, 1);
+  }
+
   part("The server-rendered mark must not invent missing mail evidence");
   const html = renderToStaticMarkup(createElement(MarkShipped, { session: input.session, to: null, shipped: input.shipped }));
   is("until a server status confirms it, missing acceptance is not asserted", html.includes("acceptance was not recorded"), false);

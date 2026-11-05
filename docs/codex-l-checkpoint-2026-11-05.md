@@ -118,3 +118,9 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 - Durable proof is now `codex/l-review-2660-proof` / `d914dd08cbcc2fd6e1d9d831e15f5b0ede770a02`: 4/4, versus 3/4 on the reviewed source. The author's focal test reproduced 4/4 in a minimal exact-source reconstruction with only an import-extension adaptation for direct Node; do not claim the repository runner or linked 80-test suite from that local invocation.
 - Approval comment: `6665709150`. Channel corrective return: `455b9c92d8c9ea9ab28fb6cbb3339bd7cf416e9c` after one clean 409 retry with a fresh full-content blob read.
 - #2475 remains unchanged at `a430d71ccf466f1a4e504c2ae79a2d07aab469bb`: eight successes plus one cancelled workflow, no second retry/head move/integration/merge. No fifth L product.
+
+## 05/11/2026 15h22 Fortaleza — final exact stop
+
+- Fresh main advanced to `cc9b1c06c1e4ad802b612630ad8188875ddbd494` (tree `0a0641785a5102f310b90d04a0c2cd41caa8e30a`) via reservation batch #2662. The product workflow is still unchanged blob `60fdbf39b9a0057ecc78406e22301d77ea7061e9`, with verify at 35 minutes and store-copy inside it.
+- #2475 is still open, exact head `a430d71ccf466f1a4e504c2ae79a2d07aab469bb`, now non-mergeable against the newer main, and remains eight exact-head successes plus cancelled workflow `41999621922`. No authorization or shared duration fix appeared; do not integrate merely to restart the same unresolved cycle.
+- Final fresh channel read was blob `e078df52ba14fb238ef698751b17c60549261e2b`, length 140138; the #2660 corrective approval and #2475 stop message are present. No retry, cancellation, head move, merge, fifth product or foreign-product edit occurred.

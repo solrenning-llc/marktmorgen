@@ -20,6 +20,13 @@ const en = {
   linkExplain: "Type the address you used to buy or sign up, and a link to read it on this device is sent there. No password.",
   sendLink: "Send me the link",
   closedTitle: "This address has none of these products",
+  /** Stripe could not be asked: never "none of these products" on a guess. */
+  unknownTitle: "We couldn't check your purchase just now",
+  unknownBody: "Reload the page in a moment.",
+  checkAgain: "Check again",
+  /** Every product it was kept for is gone from the store: nobody but the creator can open it. */
+  goneTitle: "No longer open to read",
+  goneBody: "The products this email was for are no longer for sale, so nobody can open it here.",
   closedBody: (email: string) => `${email} has none of the products that open this email, or a membership that did has stopped. If you used another address, ask for a link with it below.`,
   /** After asking for a link to read it (?link=...). */
   linkNotices: {
@@ -62,6 +69,11 @@ const es: LetterWords = {
   linkExplain: "Escribe la dirección que usaste para comprar o registrarte, y se te enviará un enlace para leerlo en este dispositivo. Sin contraseña.",
   sendLink: "Envíame el enlace",
   closedTitle: "Esta dirección no tiene ninguno de estos productos",
+  unknownTitle: "No pudimos comprobar tu compra ahora mismo",
+  unknownBody: "Vuelve a cargar la página en un momento.",
+  checkAgain: "Comprobar de nuevo",
+  goneTitle: "Ya no se puede leer",
+  goneBody: "Los productos para los que era este email ya no están a la venta, así que nadie puede abrirlo aquí.",
   closedBody: (email) => `${email} no tiene ninguno de los productos que abren este email, o una membresía que lo abría se detuvo. Si usaste otra dirección, pide un enlace con ella abajo.`,
   linkNotices: {
     sent: { title: "Revisa tu bandeja de entrada", body: "Si esa dirección tiene uno de estos productos, va en camino un enlace para leer este email. Funciona durante una hora." },
@@ -101,6 +113,11 @@ const fr: LetterWords = {
   linkExplain: "Saisissez l'adresse utilisée pour acheter ou vous inscrire : un lien pour le lire sur cet appareil y sera envoyé. Sans mot de passe.",
   sendLink: "M'envoyer le lien",
   closedTitle: "Cette adresse n'a aucun de ces produits",
+  unknownTitle: "Nous n'avons pas pu vérifier votre achat pour l'instant",
+  unknownBody: "Rechargez la page dans un instant.",
+  checkAgain: "Vérifier de nouveau",
+  goneTitle: "Il ne peut plus être lu",
+  goneBody: "Les produits auxquels cet e-mail était réservé ne sont plus en vente : personne ne peut l'ouvrir ici.",
   closedBody: (email) => `${email} n'a aucun des produits qui ouvrent cet e-mail, ou un abonnement qui l'ouvrait s'est arrêté. Si vous avez utilisé une autre adresse, demandez un lien avec elle ci-dessous.`,
   linkNotices: {
     sent: { title: "Consultez votre boîte de réception", body: "Si cette adresse a l'un de ces produits, un lien pour lire cet e-mail est en route. Il fonctionne pendant une heure." },
@@ -140,6 +157,11 @@ const de: LetterWords = {
   linkExplain: "Geben Sie die Adresse ein, mit der Sie gekauft oder sich angemeldet haben. Dorthin kommt ein Link, um es auf diesem Gerät zu lesen. Ohne Passwort.",
   sendLink: "Link senden",
   closedTitle: "Diese Adresse hat keines dieser Produkte",
+  unknownTitle: "Wir konnten Ihren Kauf gerade nicht prüfen",
+  unknownBody: "Laden Sie die Seite gleich noch einmal.",
+  checkAgain: "Erneut prüfen",
+  goneTitle: "Nicht mehr zu lesen",
+  goneBody: "Die Produkte, für die diese E-Mail war, werden nicht mehr verkauft, daher kann sie hier niemand öffnen.",
   closedBody: (email) => `${email} hat keines der Produkte, die diese E-Mail öffnen, oder eine Mitgliedschaft, die sie geöffnet hat, ist beendet. Wenn Sie eine andere Adresse verwendet haben, fordern Sie unten damit einen Link an.`,
   linkNotices: {
     sent: { title: "Sehen Sie in Ihr Postfach", body: "Wenn diese Adresse eines dieser Produkte hat, ist ein Link zum Lesen dieser E-Mail unterwegs. Er gilt eine Stunde." },
@@ -179,6 +201,11 @@ const it: LetterWords = {
   linkExplain: "Scrivi l'indirizzo che hai usato per acquistare o iscriverti: lì arriverà un link per leggerla su questo dispositivo. Senza password.",
   sendLink: "Inviami il link",
   closedTitle: "Questo indirizzo non ha nessuno di questi prodotti",
+  unknownTitle: "Non siamo riusciti a verificare il tuo acquisto in questo momento",
+  unknownBody: "Ricarica la pagina tra un momento.",
+  checkAgain: "Verifica di nuovo",
+  goneTitle: "Non si può più leggere",
+  goneBody: "I prodotti a cui era riservata questa email non sono più in vendita, quindi nessuno può aprirla qui.",
   closedBody: (email) => `${email} non ha nessuno dei prodotti che aprono questa email, oppure un abbonamento che la apriva si è fermato. Se hai usato un altro indirizzo, chiedi un link con quello qui sotto.`,
   linkNotices: {
     sent: { title: "Controlla la posta", body: "Se quell'indirizzo ha uno di questi prodotti, sta arrivando un link per leggere questa email. Funziona per un'ora." },
@@ -218,6 +245,11 @@ const nl: LetterWords = {
   linkExplain: "Typ het adres waarmee je kocht of je aanmeldde; daar komt een link om het op dit apparaat te lezen. Zonder wachtwoord.",
   sendLink: "Stuur me de link",
   closedTitle: "Dit adres heeft geen van deze producten",
+  unknownTitle: "We konden je aankoop nu niet controleren",
+  unknownBody: "Laad de pagina zo opnieuw.",
+  checkAgain: "Opnieuw controleren",
+  goneTitle: "Niet meer te lezen",
+  goneBody: "De producten waarvoor deze e-mail was, worden niet meer verkocht, dus niemand kan hem hier openen.",
   closedBody: (email) => `${email} heeft geen van de producten die deze e-mail openen, of een lidmaatschap dat dat deed is gestopt. Gebruikte je een ander adres? Vraag daarmee hieronder een link aan.`,
   linkNotices: {
     sent: { title: "Kijk in je inbox", body: "Als dat adres een van deze producten heeft, is er een link onderweg om deze e-mail te lezen. Hij werkt een uur." },
@@ -257,6 +289,11 @@ const pt: LetterWords = {
   linkExplain: "Escreva o endereço que usou para comprar ou se inscrever, e um link para ler neste dispositivo será enviado para ele. Sem senha.",
   sendLink: "Enviar o link",
   closedTitle: "Este endereço não tem nenhum destes produtos",
+  unknownTitle: "Não conseguimos verificar sua compra agora",
+  unknownBody: "Recarregue a página daqui a pouco.",
+  checkAgain: "Verificar de novo",
+  goneTitle: "Não pode mais ser lido",
+  goneBody: "Os produtos para os quais este email era reservado não estão mais à venda, então ninguém pode abri-lo aqui.",
   closedBody: (email) => `${email} não tem nenhum dos produtos que abrem este email, ou uma assinatura que o abria parou. Se usou outro endereço, peça um link com ele abaixo.`,
   linkNotices: {
     sent: { title: "Confira sua caixa de entrada", body: "Se esse endereço tem um destes produtos, um link para ler este email está a caminho. Ele funciona por uma hora." },

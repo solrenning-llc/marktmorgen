@@ -39,6 +39,7 @@ import { POST as publishRoute } from "@/app/api/store/letters/route";
 import { POST as linkRoute } from "@/app/api/store/letters/link/route";
 import { GET as openRoute } from "@/app/api/store/letters/open/route";
 import { PublishControl } from "@/components/letter-publish-control";
+import { LinkRequestForm } from "@/components/link-request-form";
 import { cookieValues } from "./letter-members-world";
 import { afterTasks } from "./next-server-after-world";
 import { advance, store as redis } from "./redis-stub";
@@ -59,6 +60,8 @@ const mails: { to: string; text: string }[] = [];
 /** How often the creator's Stripe account was asked, and whether the email service is down. */
 let stripeAsked = 0;
 let mailDown = false;
+/** Whether the creator's Stripe account cannot be asked (it answers 500). */
+let stripeDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -70,6 +73,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const path = url.pathname.replace(/^\/v1/, "");
   stripeAsked += 1;
+  if (stripeDown) return answer({ error: { message: "down" } }, 500);
   if (path === "/checkout/sessions") return answer({ object: "list", data: sessions[url.searchParams.get("customer_details[email]") ?? ""] ?? [], has_more: false });
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
@@ -280,6 +284,42 @@ async function main(): Promise<void> {
   is("the membership stopped: closed", (await letterReader(store, letter, jar({ [cookieName]: deePass }))).state, "closed");
   forgetAnswers();
 
+  part("Stripe that cannot be asked is unknown, never \"none of these products\"");
+  stripeDown = true;
+  is("a holder whose answer ran out, with Stripe down: unknown", (await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, "unknown");
+  const downHtml = await render(store, letter.id, { [cookieName]: anaPass });
+  is(
+    "the page says it could not check, offers to check again, never says none, never shows the form or the words",
+    [downHtml.includes("We couldn&#x27;t check your purchase just now"), downHtml.includes(`href="/@${HANDLE}/letters/${letter.id}"`), downHtml.includes("This address has none of these products"), downHtml.includes("/api/store/letters/link"), downHtml.includes(SECRET)],
+    [true, true, false, false, false],
+  );
+  is("nothing is kept from the failed ask", redis.keys().filter((k) => k.startsWith("nl:letters:ok:")).length, 0);
+  stripeDown = false;
+  is("Stripe back: the holder reads it again", [(await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, (await render(store, letter.id, { [cookieName]: anaPass })).includes(SECRET)], ["in", true]);
+  forgetAnswers();
+
+  part("The link form: its field is named and described, and a notice after it is reached");
+  const formHtml = await render(store, letter.id);
+  is(
+    "the field is labelled as an email address and described by the line that explains it",
+    [/<label[^>]*for="letter-email"[^>]*>Your email address<\/label>/.test(formHtml), /<p[^>]*id="letter-email-explain"[^>]*>Type the address you used/.test(formHtml), /<input[^>]*aria-describedby="letter-email-explain"/.test(formHtml)],
+    [true, true, true],
+  );
+  is("the form is named by its question", /<form[^>]*aria-labelledby="letter-email-title"/.test(formHtml) && /id="letter-email-title"[^>]*>Already have one\? Read it here</.test(formHtml), true);
+  for (const state of ["email", "limited", "error", "sent"]) {
+    const arrived = await render(store, letter.id, {}, { link: state });
+    is(`after the form (?link=${state}), the notice can take the focus the page gives it`, /<div[^>]*tabindex="-1"[^>]*data-arrival="focus"[^>]*role="status"/.test(arrived) || /<div[^>]*data-arrival="focus"[^>]*tabindex="-1"/.test(arrived) || /<div[^>]*role="status"[^>]*tabindex="-1"[^>]*data-arrival/.test(arrived), true);
+  }
+  for (const odd of ["constructor", "toString", "__proto__", "hasOwnProperty", "nope"]) {
+    is(`?link=${odd} draws no notice`, (await render(store, letter.id, {}, { link: odd })).includes('role="status"'), false);
+  }
+  const shared = renderToStaticMarkup(createElement(LinkRequestForm, { action: "/api/store/community/link", hidden: { handle: HANDLE }, id: "community-email", label: "Already a member?", explain: "Type the address you used to buy or sign up.", button: "Send me the link", placeholder: "you@example.com", language: "es" }));
+  is(
+    "the community's form, the same component: named, described, labelled in the store's language",
+    [/aria-labelledby="community-email-title"/.test(shared), /aria-describedby="community-email-explain"/.test(shared), /<label[^>]*for="community-email"[^>]*>Tu dirección de email<\/label>/.test(shared)],
+    [true, true, true],
+  );
+
   part("The emailed link: the same answer, at once, whoever asks");
   const ask = async (email: string, ip = "203.0.113.7") => {
     const form = new FormData();
@@ -353,6 +393,39 @@ async function main(): Promise<void> {
   const notice = await render(store, letter.id, {}, { link: "sent" });
   is("the page says to check the inbox", notice.includes("Check your inbox"), true);
 
+  part("The limits on the form and on the link");
+  for (let i = 1; i <= 10; i += 1) await ask(`ip-limit-${i}@example.com`, "198.51.100.50");
+  await runAfter();
+  is("the 11th request from one address on the internet: too many", (await ask("ip-limit-11@example.com", "198.51.100.50")).location.endsWith("?link=limited"), true);
+  const perAddress: string[] = [];
+  for (let i = 1; i <= 6; i += 1) perAddress.push((await ask("zed@example.com", `198.51.100.${60 + i}`)).location.replace(/^.*\?link=/, ""));
+  await runAfter();
+  is("the 6th request for one email address, from anywhere: too many", perAddress, ["sent", "sent", "sent", "sent", "sent", "limited"]);
+  is("and the page says so", (await render(store, letter.id, {}, { link: "limited" })).includes("Too many requests"), true);
+  const mailsBeforeOpens = mails.length;
+  await ask("ana@example.com", "198.51.100.80");
+  await runAfter();
+  is("a fresh link for the holder", mails.length, mailsBeforeOpens + 1);
+  const fresh = /token=([0-9a-f]{64})/.exec(mails.at(-1)!.text)![1];
+  const opens: number[] = [];
+  for (let i = 1; i <= 11; i += 1) opens.push((await openRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${fresh}`))).status);
+  is("a link opens 10 times; the 11th is gone", opens, [...Array(10).fill(303), 410]);
+
+  part("The email service known to be down: said honestly, the same for everyone");
+  const key = process.env.RESEND_API_KEY;
+  delete process.env.RESEND_API_KEY;
+  afterTasks.length = 0;
+  const holderNoMail = await ask("ana@example.com", "198.51.100.90");
+  const strangerNoMail = await ask("nobody-else@example.com", "198.51.100.90");
+  const leftAfter = afterTasks.length;
+  process.env.RESEND_API_KEY = key;
+  is(
+    "no \"on its way\": both told the email could not be sent, and nothing is left to do after the answer",
+    [holderNoMail.location.replace(/^.*\?link=/, ""), strangerNoMail.location.replace(/^.*\?link=/, ""), leftAfter],
+    ["error", "error", 0],
+  );
+  is("the page says the email could not be sent", (await render(store, letter.id, {}, { link: "error" })).includes("The email could not be sent"), true);
+
   part("Nowhere public: the list, the metadata, the code that reads copies");
   cookieValues.clear();
   const list = renderToStaticMarkup(await LettersPage({ params: Promise.resolve({ handle: `@${HANDLE}` }) }));
@@ -393,6 +466,13 @@ async function main(): Promise<void> {
   is("no EXPIRE with an option was ever sent", expireOptions, 0);
   is("the store lists all four", (await listLetters(store)).length, 4);
 
+  part("The feature page says what is true of an email kept for members");
+  // lib/help-content.ts says the same and waits: it is reserved by another agent (Claude 2, 513 [PF1]).
+  for (const file of ["lib/feature-pages.ts"]) {
+    const text = readFileSync(join(process.cwd(), file), "utf8");
+    is(`${file}: "anyone can read it" always comes with its exception`, [/anyone can read it once it is(?: published, including people who are not on your list)?\. /.test(text), text.includes("unless you keep it for the people who have products you choose")], [false, true]);
+  }
+
   part("The creator is told when none of the products is left");
   const lone = await publishLetter(store, broadcast(store, "c1", { subject: "Knife notes" }), now, [other.product.id]);
   if (!lone.ok) throw new Error(lone.message);
@@ -401,6 +481,14 @@ async function main(): Promise<void> {
   const loneHtml = await render(afterRemoval, lone.letter.id, { [SESSION_COOKIE]: owner });
   is("the creator reads it and is told nobody else can", [loneHtml.includes(SECRET), loneHtml.includes("None of the products you chose is on your store anymore")], [true, true]);
   is("a visitor still sees no words", (await render(afterRemoval, lone.letter.id)).includes(SECRET), false);
+  for (const [who, cookie] of [["a visitor", {}], ["a proved address", { [cookieName]: anaPass }]] as [string, Record<string, string>][]) {
+    const gone = await render(afterRemoval, lone.letter.id, cookie);
+    is(
+      `${who} is told its products are no longer for sale, with no empty list, no "below" and no form`,
+      [gone.includes("The products this email was for are no longer for sale"), gone.includes("<ul"), gone.includes("products below"), gone.includes("/api/store/letters/link"), gone.includes("This address has none of these products")],
+      [true, false, false, false, false],
+    );
+  }
   done();
 }
 

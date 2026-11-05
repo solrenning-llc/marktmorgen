@@ -21,6 +21,8 @@
  * (lib/store.ts, posts), so the store page links to the blog without asking.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { types } from "node:util";
+import { UnknownReplyError, countOf } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
@@ -37,6 +39,28 @@ const pubKey = (statsId: string) => `nl:blog:pub:${statsId}`;
 
 const POST_ID = /^[0-9a-f]{10}$/;
 const PRODUCT_ID = /^[A-Za-z0-9_-]{1,40}$/;
+
+/** Local equivalent until the independently reviewed shared reply reader reaches main. */
+function blogReplies(reply: unknown, size: number): unknown[] | null {
+  try {
+    if (types.isProxy(reply) || !Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return null;
+    if (Object.getOwnPropertyDescriptor(reply, "length")?.value !== size || Object.getOwnPropertyNames(reply).length !== size + 1) return null;
+    const out: unknown[] = [];
+    for (let i = 0; i < size; i++) {
+      const field = Object.getOwnPropertyDescriptor(reply, String(i));
+      if (!field || !Object.hasOwn(field, "value")) return null;
+      out.push(field.value);
+    }
+    return out;
+  } catch { return null; }
+}
+
+/** Each mutation changes at most one member; the last reply is the confirmed total. */
+function changedTotal(reply: unknown): number | null {
+  const values = blogReplies(reply, 4);
+  if (!values || values.slice(0, 3).some((value) => value !== 0 && value !== 1)) return null;
+  return countOf(values[3]);
+}
 
 export type PostMeta = {
   id: string;
@@ -135,15 +159,26 @@ export async function allPosts(statsId: string | null): Promise<PostMeta[]> {
 export async function publishedPosts(statsId: string | null, page: number): Promise<{ posts: PostMeta[]; total: number }> {
   if (!statsId || !isRedisConfigured()) return { posts: [], total: 0 };
   const start = (Math.max(1, page) - 1) * POSTS_PER_PAGE;
-  const [ids, total] = await redisPipeline([
+  const reply = blogReplies(await redisPipeline([
     ["ZREVRANGE", pubKey(statsId), start, start + POSTS_PER_PAGE - 1],
     ["ZCARD", pubKey(statsId)],
-  ]);
-  const list = (Array.isArray(ids) ? ids : []).filter((id): id is string => typeof id === "string" && POST_ID.test(id));
-  if (list.length === 0) return { posts: [], total: Number(total) || 0 };
-  const [metas] = await redisPipeline([["HMGET", metaKey(statsId), ...list]]);
-  const posts = (Array.isArray(metas) ? metas : []).map(parseMeta).filter((m): m is PostMeta => m !== null && !m.draft);
-  return { posts, total: Number(total) || 0 };
+  ]), 2);
+  const ids = reply?.[0], total = reply ? countOf(reply[1]) : null;
+  if (total === null || types.isProxy(ids) || !Array.isArray(ids)) throw new UnknownReplyError("a blog page count");
+  const rawIds = blogReplies(ids, Math.min(POSTS_PER_PAGE, Math.max(0, total - start)));
+  if (!rawIds || rawIds.some((id) => typeof id !== "string" || !POST_ID.test(id)) || new Set(rawIds).size !== rawIds.length) throw new UnknownReplyError("a blog page index");
+  const list = rawIds as string[];
+  if (list.length === 0) return { posts: [], total };
+  const response = blogReplies(await redisPipeline([["HMGET", metaKey(statsId), ...list]]), 1);
+  const metas = response ? blogReplies(response[0], list.length) : null;
+  if (!metas) throw new UnknownReplyError("blog page metadata");
+  const posts: PostMeta[] = [];
+  for (const [i, raw] of metas.entries()) {
+    const post = parseMeta(raw);
+    if (!post || post.id !== list[i] || post.draft) throw new UnknownReplyError("a published blog post");
+    posts.push(post);
+  }
+  return { posts, total };
 }
 
 /** How many posts are out, counted with one command; null when it cannot be counted (lib/store-sitemap.ts, sitemapSize). */
@@ -151,9 +186,8 @@ export async function publishedTotal(statsId: string | null): Promise<number | n
   if (!statsId) return 0;
   if (!isRedisConfigured()) return null;
   try {
-    const [total] = await redisPipeline([["ZCARD", pubKey(statsId)]]);
-    const n = Number(total);
-    return Number.isSafeInteger(n) && n >= 0 ? n : null;
+    const reply = blogReplies(await redisPipeline([["ZCARD", pubKey(statsId)]]), 1);
+    return reply ? countOf(reply[0]) : null;
   } catch {
     return null;
   }
@@ -224,12 +258,15 @@ export async function savePost(
   if (!input.body) return { ok: false, reason: "body" };
   let before: PostMeta | null = null;
   if (id) {
-    const [raw] = await redisPipeline([["HGET", metaKey(statsId), id]]);
-    before = parseMeta(raw);
+    const reply = blogReplies(await redisPipeline([["HGET", metaKey(statsId), id]]), 1);
+    before = parseMeta(reply?.[0]);
     if (!before) return { ok: false, reason: "unknown" };
   } else {
-    const [count] = await redisPipeline([["HLEN", metaKey(statsId)]]);
-    if ((Number(count) || 0) >= MAX_POSTS) return { ok: false, reason: "full" };
+    const reply = blogReplies(await redisPipeline([["HLEN", metaKey(statsId)]]), 1);
+    const count = reply ? countOf(reply[0]) : null;
+    // Unlike GET, HLEN/ZCARD always answer an integer, including zero for an absent key.
+    if (count === null) return { ok: false, reason: "unknown" };
+    if (count >= MAX_POSTS) return { ok: false, reason: "full" };
   }
   const postId = before?.id ?? newId();
   const publishedAt = input.draft ? before?.publishedAt ?? 0 : before?.publishedAt || now;
@@ -237,24 +274,27 @@ export async function savePost(
   // Its room first: the post's two records and its place among the published, counted as it now is.
   const bodyJson = JSON.stringify({ body: input.body, product: input.product });
   await needData(room, [{ slot: `bl:${postId}`, bytes: dataBytes([JSON.stringify(meta), bodyJson], 3), set: true }]);
-  const [, , , total] = await redisPipeline([
+  const total = changedTotal(await redisPipeline([
     ["HSET", metaKey(statsId), postId, JSON.stringify(meta)],
     ["HSET", bodyKey(statsId), postId, bodyJson],
     input.draft ? ["ZREM", pubKey(statsId), postId] : ["ZADD", pubKey(statsId), publishedAt, postId],
     ["ZCARD", pubKey(statsId)],
-  ]);
-  return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: Number(total) || 0 };
+  ]));
+  // The write may have happened: retain its room and report uncertainty, never a fabricated count.
+  if (total === null) return { ok: false, reason: "unknown" };
+  return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: total };
 }
 
 /** Removes a post for good. Says how many are published after it. */
 export async function deletePost(statsId: string | null, id: string, room: DataStore): Promise<number | null> {
   if (!statsId || !isRedisConfigured() || !POST_ID.test(id)) return null;
-  const [, , , total] = await redisPipeline([
+  const total = changedTotal(await redisPipeline([
     ["HDEL", metaKey(statsId), id],
     ["HDEL", bodyKey(statsId), id],
     ["ZREM", pubKey(statsId), id],
     ["ZCARD", pubKey(statsId)],
-  ]);
+  ]));
+  if (total === null) return null;
   await giveData(room, [{ slot: `bl:${id}`, bytes: 0, set: true }]);
-  return Number(total) || 0;
+  return total;
 }

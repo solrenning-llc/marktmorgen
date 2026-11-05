@@ -10,13 +10,16 @@ import {
   type OptionResult,
 } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
-import { membersOnOption, membershipNumbersPaid } from "@/lib/membership-numbers";
+import { keptNumbersWithin, membersOnOption } from "@/lib/membership-numbers";
 import { pendingInvitesOnOptions } from "@/lib/move-members";
 import { MAX_OPTION_DETAILS, MAX_OPTION_DETAIL_LENGTH, MAX_OPTION_LABEL_LENGTH } from "@/lib/product-option";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { readOptionDirection } from "@/lib/option-request";
+
+/** The most bytes of kept membership numbers the count reads (one studio request's included bytes, less room). */
+const OPTION_COUNT_BYTES = 40_000;
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "sale", "count", "invited"]);
 
@@ -64,8 +67,9 @@ export async function POST(request: NextRequest) {
     if (action === "count") {
       const product = await readProduct(guarded.store, id);
       if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-      const kept = await membershipNumbersPaid(guarded.store, async () => false).catch(() => null);
-      const numbers = kept === "refused" ? null : kept;
+      // At most OPTION_COUNT_BYTES of the kept reading is transferred (Codex Z on #2690): a bigger one is unknown here,
+      // and the Memberships page, which pays for its own reading, has it.
+      const numbers = await keptNumbersWithin(guarded.store, OPTION_COUNT_BYTES).catch(() => null);
       const members = Object.fromEntries(product.options.map((option) => [option.id, membersOnOption(numbers, product.id, option.id)]));
       return Response.json({ ok: true, members });
     }

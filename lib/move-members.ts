@@ -30,7 +30,8 @@ import { membershipLine, speech } from "@/lib/buyer-words";
 import { moveWords } from "@/lib/buyer-words/move";
 import { activeIntro } from "@/lib/intro-price";
 import { firstChargeAt, linkSeconds, reminderAt } from "@/lib/move-rules";
-import { giveData, needData } from "@/lib/store-data";
+import { dataKey, giveData, needData } from "@/lib/store-data";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const invitesKey = (statsId: string) => `nl:mv:${statsId}`;
@@ -38,6 +39,8 @@ export const linkKey = (token: string) => `nl:mv:link:${token}`;
 const DUE_KEY = "nl:mv:due";
 /** The slot invites are counted in, in the store's data room. */
 const INVITES_SLOT = "mv";
+/** The most bytes of invitations the studio reads to count them per price (one studio request's included bytes, less room). */
+export const INVITED_READ_BYTES = 40_000;
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const FIELD_PATTERN = /^[0-9a-f]{32}:[A-Za-z0-9_-]{1,64}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
@@ -142,9 +145,24 @@ export async function moveCounts(store: Store): Promise<{ invited: number; kept:
  * reads as an invitation. Anything else (no reading, a reply that is not a list, a record that does not read)
  * makes every count unknown (null), never 0; 0 only when the whole list was read and none names the option.
  */
-export async function pendingInvitesOnOptions(store: Store, productId: string, optionIds: string[]): Promise<Record<string, number | null>> {
+export async function pendingInvitesOnOptions(store: Store, productId: string, optionIds: string[], maxBytes = INVITED_READ_BYTES): Promise<Record<string, number | null>> {
   const unknown = Object.fromEntries(optionIds.map((id) => [id, null])) as Record<string, number | null>;
   if (!store.statsId || !isRedisConfigured()) return unknown;
+  // Bounded before anything is transferred (Codex Z on #2690): the invitations' bytes as the store's data room
+  // counts them when they are written (INVITES_SLOT, at least every field and value), and how many there are. None
+  // at all is a proved 0; more bytes than the bound, or invitations with no count of their bytes (written before it
+  // was kept), are unknown, and the list is not read.
+  const room = dataKey(store);
+  try {
+    const sized = repliesFor(await redisPipeline([["HLEN", invitesKey(store.statsId)], ...(room ? [["HGET", room, INVITES_SLOT]] : [])]), room ? 2 : 1);
+    const many = sized ? countOf(sized[0]) : null;
+    if (many === null) return unknown;
+    if (many === 0) return Object.fromEntries(optionIds.map((id) => [id, 0])) as Record<string, number | null>;
+    const counted = sized && room && typeof sized[1] === "string" && /^\d{1,12}$/.test(sized[1]) ? Number(sized[1]) : null;
+    if (counted === null || counted > maxBytes) return unknown;
+  } catch {
+    return unknown;
+  }
   let reply: unknown;
   try {
     const receipt: unknown = await redisPipeline([["HVALS", invitesKey(store.statsId)]]);

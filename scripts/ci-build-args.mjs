@@ -5,8 +5,11 @@ const MACOS_BUILD_HEAP_MIB = 4096;
  * 2 GiB default heap during Next's type check. Keep other platforms unchanged.
  *
  * @param {NodeJS.Platform} platform
- * @returns {string[]}
+ * @param {string} [nodeOptions]
+ * @returns {Record<string, string>}
  */
-export function ciBuildNodeArguments(platform) {
-  return platform === "darwin" ? [`--max-old-space-size=${MACOS_BUILD_HEAP_MIB}`] : [];
+export function ciBuildNodeEnvironment(platform, nodeOptions) {
+  if (platform !== "darwin") return {};
+  const heapOption = `--max-old-space-size=${MACOS_BUILD_HEAP_MIB}`;
+  return { NODE_OPTIONS: nodeOptions ? `${nodeOptions} ${heapOption}` : heapOption };
 }

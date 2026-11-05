@@ -128,6 +128,16 @@ async function main(): Promise<void> {
   const keptAgain = await openMove(store, id, ada.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
   is("an invitation already kept does not reopen the price off sale", keptAgain.ok ? "opened" : keptAgain.reason, "unavailable");
 
+  part("An invitation whose \"kept\" cannot be read is not taken as unused (Codex C2 on #2685)");
+  const benRecord = JSON.parse(redis.run(["HGET", `nl:mv:${statsId}`, benField]) as string) as Record<string, unknown>;
+  for (const odd of ["yes", {}, [], null, -1, 1.5]) {
+    redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify({ ...benRecord, kept: odd })]);
+    const before = checkouts.length;
+    const tried = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+    is(`kept ${JSON.stringify(odd)}: the price off sale is not opened`, [tried.ok, checkouts.length - before], [false, 0]);
+  }
+  redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify(benRecord)]);
+
   part("The rule itself");
   is("only the named option comes back on sale, nothing else changes", withInvitedOption(product, basic).options.map((o) => [o.id, o.offSale === true]), [[basic, false], [plus, false]]);
   is("an option on sale, an unknown id or none: the product unchanged", [withInvitedOption(product, plus) === product, withInvitedOption(product, "nope") === product, withInvitedOption(product, "") === product], [true, true, true]);

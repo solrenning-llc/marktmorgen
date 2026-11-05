@@ -70,7 +70,12 @@ function parseInvite(raw: unknown): Invite | null {
   try {
     const v = JSON.parse(raw) as Partial<Invite>;
     if (typeof v.e !== "string" || typeof v.p !== "string" || typeof v.r !== "number" || typeof v.t !== "string") return null;
-    return { e: v.e, p: v.p, o: typeof v.o === "string" ? v.o : "", r: v.r, job: typeof v.job === "string" ? v.job : "", at: Number(v.at) || 0, t: v.t, kept: Number(v.kept) || 0 };
+    // When it was kept, exactly (Codex C2 on #2685): a whole number of seconds, 0 for not yet. Anything else cannot
+    // say whether the invitation was used, so the record is not read at all: never taken as unused, which would
+    // reopen a price taken off sale to it (withInvitedOption), and never as used either.
+    const kept: unknown = v.kept;
+    if (typeof kept !== "number" || !Number.isSafeInteger(kept) || kept < 0) return null;
+    return { e: v.e, p: v.p, o: typeof v.o === "string" ? v.o : "", r: v.r, job: typeof v.job === "string" ? v.job : "", at: Number(v.at) || 0, t: v.t, kept };
   } catch {
     return null;
   }

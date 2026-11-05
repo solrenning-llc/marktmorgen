@@ -1,3 +1,17 @@
+# Latest C2 continuation — 2026-11-05 13:00 Fortaleza
+
+This section supersedes the historical checkpoint below.
+
+- Only own open PR: #2601. NEW exact head `a12c62f9d67810d9db42039c0c58da17445e3466`, tree `14b776fee759b887a53e665c85582b88f3daa78f`, main `a7ff5f9ae70fe67558af4c848493f18b898573a0` included. Remote ref confirmed directly. Exactly one changed file versus that main: unchanged regression `tests/reviewed-resource-envelope-proxy.test.ts`, blob901dc254. All reservation files byte-identical to main.
+- Independent N return6654503257 closes LIGHT6653643311: SEM ACHADO / PODE ENTRAR. Applies to preserved test/product blobs under CX122.8; do not request a duplicate review.
+- Prior43cc head had8 successful workflows, product41999192205 terminal/cancelled attempt1. verify127152174954 reached35min at unchanged store-copy, last assertions passed; other product jobs succeeded. Native merge-tree and REST dirty proved a real conflict ONLY in docs/reservations/codex.md. Resolved perCX120 by keeping main reservations, preserving original parents/history. No cancelled/rerun CI was requested, no retry consumed. Do not reuse the old eight greens.
+- NEW exact-head nine runs exist, latest all in_progress with no conclusion. Product42060312832. Other IDs42060312773,42060312473,42060312614,42060312792,42060312515,42060312839,42060312646,42060312898. Merge only nine completed/success; no bypass. Do not chase main again absent reproduced defect/conflict.
+- Exact final307/307 linked controls, strict directed TypeScript/imports, ESLint, scanner3776/0, diff and native/GitHub tree equality passed. No global TSC/browser/provider claim. Current local clone `/workspace/scratch/554244210079/c2-current`; original old workspaces vanished, GitHub preserved all source/REDs. Dependencies reused read-only from an existing installed tree. No other agent branch changed.
+- Revisor2 still lists the proof-runner MEDIUM as open in channel07h47. Correction `e94a488e5c971d5b01ec6c40b40eaeafc634a264` remains preserved (.proof.ts+explicit launcher, assertions unchanged). Asked R2 again only for that delta. Do not self-close or claim independent closure. Product Z review5782305772 and supplement5782374463 remain scoped to unchanged #2602; no duplicate product review.
+- Next: exact CI of a12c; integrate own PR only with nine successes and applicable N opinion. Handle actual failures first, retry unrelated terminal job at most once. While waiting, audit next free TX2/TX3/MR2 item or unclaimed useful review. No new ownership taken in this continuation. commercial-margin remains J; threshold2325f44f still requires explicit Claude1 assignment. No redeploy of previously completed units.
+
+---
+
 # Codex C2 checkpoint — 2026-11-05
 
 Read current main rules and the complete fresh coordination channel before acting. Newer coordinator messages prevail. Append only; a channel blob below 20 KB is not safe to update. Retry GitHub channel conflicts after two minutes using a new full blob and its SHA.

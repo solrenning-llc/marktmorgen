@@ -89,6 +89,17 @@ async function nativeCanonicalCounters() {
       if (!ready) await new Promise(resolve => setTimeout(resolve, 20));
     }
     if (!ready) throw new Error("Disposable Redis did not start");
+    const operations = async () => String(await command(["INFO", "commandstats"])).split("\n")
+      .filter(line => line.startsWith("cmdstat_") && !/^cmdstat_(info|config)(:|\|)/.test(line))
+      .reduce((sum, line) => sum + Number(line.match(/calls=(\d+)/)?.[1] ?? 0), 0);
+    const controlKey = `synthetic:mail-report:${randomUUID()}`;
+    const control = ["EVAL", RECORD_MAIL_REPORT, 1, controlKey, "receipt", "aggregate", 1, Math.floor(Date.now() / 1000) + 60, 3];
+    await command(["CONFIG", "RESETSTAT"]);
+    is("native Redis accepts a canonical first outcome", await command(control), 1);
+    is("native first-outcome command ceiling includes the script's internal commands", await operations(), callbackCosts.MAIL_REPORT_COST_COMPONENTS.firstOutcomeCommands);
+    await command(["CONFIG", "RESETSTAT"]);
+    is("native Redis confirms a valid replay", await command(control), 2);
+    is("native replay cost includes validating its aggregate", await operations(), callbackCosts.MAIL_REPORT_COST_COMPONENTS.duplicateOutcomeCommands);
     for (const bad of ["01", "00000"]) {
       const key = `synthetic:mail-report:${randomUUID()}`;
       await command(["HSET", key, "aggregate", bad]);
@@ -101,7 +112,7 @@ async function nativeCanonicalCounters() {
       is(`native Redis refuses a previously orphaned receipt over ${bad}`, await command(evalArgs).catch(() => "ERR"), -1);
     }
   } finally {
-    if (server.exitCode === null) {
+    if (server.pid && server.exitCode === null && server.signalCode === null) {
       const stopped = new Promise<void>(resolve => server.once("exit", () => resolve()));
       server.kill("SIGTERM");
       await stopped;

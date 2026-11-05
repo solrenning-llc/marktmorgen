@@ -130,7 +130,7 @@ export const PER_EMAIL = 0.0009;
  * the mail-health family of store-data-registry, without free-tier credit. */
 export const MAIL_REPORT_COST_COMPONENTS = {
   firstOutcomeCommands: 8,
-  duplicateOutcomeCommands: 3,
+  duplicateOutcomeCommands: 4,
   reportReadCommands: 1,
   reportReadFields: 4,
   outcomeKindsPerSentEmail: 4,

@@ -119,9 +119,9 @@ export class MemoryRedis {
           const type = this.run(["TYPE", daily]);
           if (type !== "none" && type !== "hash") return -1;
           const old = this.run(["HGET", daily, receipt]);
-          if (old !== null) return old === count ? 2 : -1;
           const total = this.run(["HGET", daily, aggregate]);
-          if (total !== null && (!/^\d+$/.test(String(total)) || Number(total) > 1_000_000_000)) return -1;
+          if (total !== null && (!/^(0|[1-9][0-9]*)$/.test(String(total)) || Number(total) > 1_000_000_000)) return -1;
+          if (old !== null) return old === count && total !== null && Number(total) >= Number(count) ? 2 : -1;
           if (Number(this.run(["HLEN", daily])) + (total === null ? 2 : 1) > Number(limit)) return -1;
           this.run(["HSET", daily, receipt, count]);
           this.run(["HINCRBY", daily, aggregate, count]);

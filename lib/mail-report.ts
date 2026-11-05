@@ -43,12 +43,12 @@ export const RECORD_MAIL_REPORT = `-- marktmorgen:mail-report:v1
 local t=redis.call('TYPE',KEYS[1]).ok
 if t~='none' and t~='hash' then return -1 end
 local old=redis.call('HGET',KEYS[1],ARGV[1])
+local total=redis.call('HGET',KEYS[1],ARGV[2])
+if total and ((total~='0' and not string.match(total,'^[1-9]%d*$')) or tonumber(total)>1000000000) then return -1 end
 if old then
-  if old==ARGV[3] then return 2 end
+  if old==ARGV[3] and total and tonumber(total)>=tonumber(ARGV[3]) then return 2 end
   return -1
 end
-local total=redis.call('HGET',KEYS[1],ARGV[2])
-if total and (not string.match(total,'^%d+$') or tonumber(total)>1000000000) then return -1 end
 local size=redis.call('HLEN',KEYS[1])
 local need=total and 1 or 2
 if size+need>tonumber(ARGV[5]) then return -1 end

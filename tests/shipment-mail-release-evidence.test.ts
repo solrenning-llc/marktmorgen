@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MarkShipped } from "@/components/mark-shipped";
 import { markShipped, doneKey } from "@/lib/shipments";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
-import { enqueueShipmentMail, runShipmentMail, shipmentMailStatus } from "@/lib/shipment-mail-outbox";
+import { enqueueShipmentMail, runShipmentMail, shipmentMailStatus, shipmentMailOf, forgetShipmentMail } from "@/lib/shipment-mail-outbox";
 import { shipmentOutboxFixture, shipmentPolicy } from "./shipment-mail-outbox-fixture";
 import { store } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -30,6 +30,9 @@ async function main(): Promise<void> {
   is("a matching source starts its existing 400-day terminal retention", store.run(["TTL", String(create[4])]), 400 * 86400);
   await runShipmentMail(now + 20000, async () => { posts++; return "accepted"; }, runtime);
   is("a refusal is not automatically retried", posts, 1);
+  is("the personal copy keeps only the minimal refused status", await shipmentMailOf(input.statsId, input.message.to, runtime), [{ checkout: input.session, state: "refused", at: now }]);
+  await forgetShipmentMail(input.statsId, input.message.to, runtime);
+  is("person erasure removes the terminal status", await shipmentMailStatus(input.statsId, input.session, runtime), { state: "not_recorded", delayed: false });
 
   part("The server-rendered mark must not invent missing mail evidence");
   const html = renderToStaticMarkup(createElement(MarkShipped, { session: input.session, to: null, shipped: input.shipped }));

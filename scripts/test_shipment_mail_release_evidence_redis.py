@@ -76,6 +76,15 @@ def evidence(redis):
     check("refusal removes the sealed message", not retained or not json.loads(retained).get("sealed"), True)
     check("refusal starts the matching shipment retention", redis.command("TTL", keys[1]), 400 * 86400)
     check("refusal cannot remain due for automatic sending", redis.command("ZSCORE", keys[2], row["id"]), None)
+    minimal = dict(state="refused", at=now, session=row["session"])
+    global_field = "refused:" + row["id"]
+    person_field = "refused:" + row["person"] + ":" + row["id"]
+    global_summary = redis.command("HGET", keys[5], global_field)
+    person_summary = redis.command("HGET", keys[6], person_field)
+    check("global status contains only the agreed minimal data", json.loads(global_summary) if global_summary else None, minimal)
+    check("personal status contains only the agreed minimal data", json.loads(person_summary) if person_summary else None, minimal)
+    check("global terminal field expires independently after400days", redis.command("HTTL", keys[5], "FIELDS", 1, global_field), [400 * 86400])
+    check("personal terminal field expires independently after400days", redis.command("HTTL", keys[6], "FIELDS", 1, person_field), [400 * 86400])
 
     row, keys = setup("unknown_dispatch")
     prepared = apply("claim", row, keys, redis.command("GET", keys[0]), now)

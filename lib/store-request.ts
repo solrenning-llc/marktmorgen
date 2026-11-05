@@ -22,6 +22,11 @@ import { type Need, refusedJson, studioAccess } from "@/lib/studio-route";
  * `need`. A route with several actions that need different things passes a
  * function of the body, and its answer is what is checked.
  *
+ * The action checked against what a session let in without its second step
+ * may not do (lib/two-step.ts LOCKED_ACTIONS) is the body's `action`, or what
+ * `act` answers for a route whose deleting write is named another way (an
+ * `op`, a `detach: true`).
+ *
  * Returns a Response to send back, or who is asking, the store, the key it is
  * kept under, their role and the parsed body.
  */
@@ -29,6 +34,7 @@ export async function guardStoreWrite(
   request: NextRequest,
   need: Need | ((body: Record<string, unknown>) => Need | null),
   maxBodyBytes = 4_000,
+  act?: (body: Record<string, unknown>) => string,
 ): Promise<
   | { ok: true; email: string; ref: string; store: Store; role: Role; body: Record<string, unknown> }
   | { ok: false; response: Response }
@@ -67,7 +73,7 @@ export async function guardStoreWrite(
   // Only a permission the table knows, or "member": an action name that found
   // something on an object's prototype ("constructor") is not one.
   if (!permission || (permission !== "member" && !isPermission(permission))) return refuse("invalid", 400);
-  const action = typeof body.action === "string" ? body.action.slice(0, 20) : "";
+  const action = act ? act(body).slice(0, 40) : typeof body.action === "string" ? body.action.slice(0, 20) : "";
   const result = await studioAccess(request, permission, action);
   if (!result.ok) return { ok: false, response: refusedJson(result.reason, result.message) };
   const { access } = result;

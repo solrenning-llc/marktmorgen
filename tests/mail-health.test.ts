@@ -17,7 +17,7 @@ import { POST } from "@/app/api/mail/inbound/route";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { importContacts, isMailable, listCounts, stopWriting, upsertContact } from "@/lib/contacts";
 import { advanceBroadcast, createBroadcast } from "@/lib/broadcasts";
-import { sendEmail } from "@/lib/email";
+import { sendBatch, sendEmail } from "@/lib/email";
 import { sendTo, usedThisMonth } from "@/lib/mail";
 import { LIST_TAG, PORTION_NOTE, STORE_TAG, healthId, heardFromSender, listHealth, noteSent, overTheLine, pauseEnds, pauseWords, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { BOUNCE_FLOOR, COMPLAINT_FLOOR, PAUSE_DAYS, RAMP_FIRST, RAMP_GAP_MINUTES, RAMP_TRIGGER, healthRuleWords, rampPortions, rampRuleWords } from "@/lib/mail-health-rules";
@@ -25,25 +25,26 @@ import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const OWNER = "owner@example.com";
 const SECRET_BYTES = Buffer.from("a-stand-in-secret-for-tests-only");
-type Message = { to: string[]; subject: string; tags?: { name: string; value: string }[] };
-const batches: Message[][] = [];
-const single: Message[] = [];
 let refuseTags = false;
-
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  if (url.hostname !== "api.resend.com") return new Response("{}", { status: 404 });
-  if (url.pathname === "/emails/batch") {
-    const batch = JSON.parse(String(init?.body)) as Message[];
-    // A sender that refuses a batch because of its tags, as one with other rules for them would.
-    if (refuseTags && batch.some((m) => m.tags)) return new Response(JSON.stringify({ name: "validation_error" }), { status: 422 });
-    batches.push(batch);
-  } else single.push(JSON.parse(String(init?.body)) as Message);
-  return new Response(JSON.stringify({ id: "email_1" }));
-}) as typeof fetch;
+const mail = installSesMailFixture({
+  onResend: (messages) => refuseTags && messages.some((message) => message.tags)
+    ? new Response(JSON.stringify({ name: "validation_error" }), { status: 422 })
+    : undefined,
+});
+const listMessages = () => mail.sent.filter((message) =>
+  message.provider === "ses"
+    ? message.tags?.some((tag) => tag.name === STORE_TAG || tag.name === LIST_TAG)
+    : message.batch
+).map((message) => [message]);
+const serviceMessages = () => mail.sent.filter((message) =>
+  message.provider === "ses"
+    ? !message.tags?.some((tag) => tag.name === STORE_TAG || tag.name === LIST_TAG)
+    : !message.batch
+);
 
 let announced = 0;
 /** What the sender posts when an email bounced or was marked as spam, signed as it signs them. */
@@ -62,6 +63,8 @@ function announce(type: string, data: Record<string, unknown>, opts: { id?: stri
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   process.env.RESEND_API_KEY = "re_test_health_only_a_stand_in";
   delete process.env.RESEND_WEBHOOK_SECRET;
   delete process.env.RESEND_INBOUND_API_KEY;
@@ -93,17 +96,30 @@ async function main(): Promise<void> {
 
   const first = await sendTo(store, ["reader0@example.com", "reader1@example.com"], "Hello", "It is ready.", "t:1");
   is("it went", [first.stopped, first.done.length], [null, 2]);
-  is("carrying the store and the list, as tags the reader never sees", batches[0][0].tags, [{ name: STORE_TAG, value: id }, { name: LIST_TAG, value: list }]);
+  is("carrying the store and the list, as tags the reader never sees", listMessages()[0][0].tags, [{ name: STORE_TAG, value: id }, { name: LIST_TAG, value: list }]);
   is("and what was sent is counted for the store", (await listHealth(id)).sent, 2);
 
 
   part("A sender that will not take the tags still sends the email");
   refuseTags = true;
-  batches.length = 0;
-  const plain = await sendTo(store, ["reader38@example.com"], "Hello", "It is ready.", "t:plain");
+  mail.clearCaptured();
+  const plain = await sendBatch([{
+    from: "Harbor Kitchen <hello@marktmorgen.com>",
+    to: "reader38@example.com",
+    subject: "Hello",
+    text: "It is ready.",
+    html: "<p>It is ready.</p>",
+    tags: { [STORE_TAG]: id, [LIST_TAG]: list },
+  }], "t:plain", { by: "company" }, "resend");
   refuseTags = false;
-  is("it goes all the same", [plain.stopped, plain.done], [null, ["reader38@example.com"]]);
-  is("once, and without them", [batches.length, batches[0][0].tags === undefined], [1, true]);
+  is("the Resend-specific retry goes all the same", plain, "sent");
+  is("the tagged request is refused and one untagged retry is accepted", [
+    mail.resendAttempts.length,
+    mail.resendAttempts[0]?.tags,
+    mail.resendAttempts[1]?.tags,
+    mail.sent.length,
+    listMessages().length,
+  ], [2, [{ name: STORE_TAG, value: id }, { name: LIST_TAG, value: list }], undefined, 1, 1]);
 
   part("Only the sender is believed");
   const bounced = (to: string, extra: Record<string, unknown> = {}) => ({ email_id: "e1", to: [to], subject: "Hello", bounce: { type: "Permanent", subType: "General", message: "no such user" }, tags: { [STORE_TAG]: id, [LIST_TAG]: list }, ...extra });
@@ -158,32 +174,32 @@ async function main(): Promise<void> {
   is("for seven days", Math.round(((pause?.until ?? 0) * 1000 - Date.now()) / 86_400_000), PAUSE_DAYS);
   is("said in words a creator can read", pauseWords(pause!).startsWith(`Email to your list is paused until ${pauseEnds(pause!)}: 25 of the 1,00`), true);
   const usedBefore = await usedThisMonth(list);
-  batches.length = 0;
+  mail.clearCaptured();
   const held = await sendTo(store, ["reader30@example.com", "reader31@example.com"], "Hello", "It is ready.", "t:3");
-  is("a list email is held, whole", [held.stopped, held.done, held.rest.length, batches.length], ["paused", [], 2, 0]);
+  is("a list email is held, whole", [held.stopped, held.done, held.rest.length, listMessages().length], ["paused", [], 2, 0]);
   is("and nothing is taken from the store's month for it", await usedThisMonth(list), usedBefore);
   const another = await heardFromSender({ kind: "bounced", permanent: true, to: "reader29@example.com", store: id, list });
   is("a bounce that arrives meanwhile is counted, and the pause keeps its own end", [another, (await pausedFor(id))?.until === pause?.until], ["counted", true]);
 
   part("What a store cannot run without still goes");
-  single.length = 0;
-  is("a login link is sent all the same", [await sendEmail({ meter: { by: "company" }, from: "Marktmorgen <hello@marktmorgen.com>", to: "buyer@example.com", subject: "Your login link", text: "Here." }), single.length], [true, 1]);
+  mail.clearCaptured();
+  is("a login link is sent all the same", [await sendEmail({ meter: { by: "company" }, from: "Marktmorgen <hello@marktmorgen.com>", to: "buyer@example.com", subject: "Your login link", text: "Here." }), serviceMessages().length], [true, 1]);
 
   part("A broadcast waits, and goes on by itself");
   const created = await createBroadcast(store, { subject: "The plan is here", body: "It is ready.", productId: "", notProductId: "", sendAt: undefined });
   if (!created.ok) throw new Error(`no broadcast: ${created.reason}`);
   const total = created.broadcast.total;
-  batches.length = 0;
+  mail.clearCaptured();
   let b = (await advanceBroadcast(created.broadcast.id, storeForHandle, Date.now() + 30_000))!;
   is("it waits, and says until when", [b.status, b.note.startsWith(`Paused until ${pauseEnds(pause!)}`)], ["waiting", true]);
-  is("nobody was written to, and nobody was dropped", [b.sent, b.total, batches.length], [0, total, 0]);
+  is("nobody was written to, and nobody was dropped", [b.sent, b.total, listMessages().length], [0, total, 0]);
   is("the bad addresses are not among those it will go to", total, (await listCounts(list)).mailable);
   // The week passes.
   advance((PAUSE_DAYS * 86_400 + 60) * 1000);
   is("after seven days the pause is over", await pausedFor(id), null);
   b = (await advanceBroadcast(created.broadcast.id, storeForHandle, Date.now() + 30_000))!;
   is("and it finishes without anyone pressing anything", [b.status, b.sent, b.note], ["sent", total, ""]);
-  const got = new Set(batches.flat().map((m) => m.to[0]));
+  const got = new Set(listMessages().flat().map((m) => m.to[0]));
   is("to everyone still on the list, once", [got.size, got.has("reader28@example.com"), got.has("reader30@example.com")], [total, false, true]);
 
   part("Too many spam reports do the same");
@@ -236,16 +252,16 @@ async function main(): Promise<void> {
   await startRamp(healthId(orchard), result.added);
   const news = await createBroadcast(orchard, { subject: "We moved", body: "Hello from the new place.", productId: "", notProductId: "", sendAt: undefined });
   if (!news.ok) throw new Error(`no broadcast: ${news.reason}`);
-  batches.length = 0;
+  mail.clearCaptured();
   let n = (await advanceBroadcast(news.broadcast.id, storeForHandle, Date.now() + 30_000))!;
   is("the first hundred go, and the rest wait with the reason", [n.status, n.sent, n.total, n.note === PORTION_NOTE], ["waiting", 100, 450, true]);
   n = (await advanceBroadcast(news.broadcast.id, storeForHandle, Date.now() + 30_000))!;
-  is("pressing on before the quarter hour sends nobody else", [n.sent, batches.flat().length], [100, 100]);
+  is("pressing on before the quarter hour sends nobody else", [n.sent, listMessages().flat().length], [100, 100]);
   // Thirty of that first hundred turn out to be dead: 30%, over both the floor and the share.
-  const firstHundred = batches.flat().map((m) => m.to[0]);
+  const firstHundred = listMessages().flat().map((m) => m.to[0]);
   const said: string[] = [];
   for (const to of firstHundred.slice(0, 30)) said.push(await heardFromSender({ kind: "bounced", permanent: true, to, store: healthId(orchard), list: orchard.listId as string }));
-  is("the store is paused at the twenty-fifth, with a hundred written to and not four hundred and fifty", [said.indexOf("paused"), (await pausedFor(healthId(orchard)))?.count, batches.flat().length], [24, 25, 100]);
+  is("the store is paused at the twenty-fifth, with a hundred written to and not four hundred and fifty", [said.indexOf("paused"), (await pausedFor(healthId(orchard)))?.count, listMessages().flat().length], [24, 25, 100]);
   is("what comes in late from the same emails is not held against it when its week is over", (await listHealth(healthId(orchard), Date.now() + 86_400_000)).bounced, 0);
   ahead += quarter;
   n = (await advanceBroadcast(news.broadcast.id, storeForHandle, Date.now() + 30_000))!;
@@ -265,7 +281,7 @@ async function main(): Promise<void> {
   await startRamp(healthId(meadow), good.added);
   const hello = await createBroadcast(meadow, { subject: "Hello", body: "The new timetable.", productId: "", notProductId: "", sendAt: undefined });
   if (!hello.ok) throw new Error(`no broadcast: ${hello.reason}`);
-  batches.length = 0;
+  mail.clearCaptured();
   const steps: number[] = [];
   let h = (await advanceBroadcast(hello.broadcast.id, storeForHandle, Date.now() + 30_000))!;
   steps.push(h.sent);
@@ -275,7 +291,7 @@ async function main(): Promise<void> {
     steps.push(h.sent);
   }
   is("100, then 200 more, then the rest: nobody pressed anything", [steps, h.status, h.note], [[100, 300, 450], "sent", ""]);
-  is("to everyone, once", new Set(batches.flat().map((m) => m.to[0])).size, 450);
+  is("to everyone, once", new Set(listMessages().flat().map((m) => m.to[0])).size, 450);
 
   part("Unconfirmed health-pause evidence cannot admit list email");
   const originalPipeline = redis.pipeline;
@@ -301,7 +317,7 @@ async function main(): Promise<void> {
     ["negative sent", [JSON.stringify({ ...validPause, sent: -1 })]],
     ["oversized record", [" ".repeat(513)]],
   ];
-  batches.length = 0;
+  mail.clearCaptured();
   const waitingRecipients = ["member0@example.com"];
   try {
     for (const [name, reply] of badPauseReads) {
@@ -321,7 +337,7 @@ async function main(): Promise<void> {
       is(`${name}: no extra read, reservation, ramp change or provider work`,
         commandsSeen, [["GET", pauseKey], ["GET", pauseKey]]);
     }
-    is("unknown health evidence sent no list batch", batches.length, 0);
+    is("unknown health evidence sent no list batch", listMessages().length, 0);
     is("health evidence getters were never invoked", pauseGetterCalls, 0);
     for (const [name, raw, expected] of [
       ["confirmed absence", null, null],
@@ -334,9 +350,9 @@ async function main(): Promise<void> {
     }
     redis.pipeline = async commands => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === pauseKey ? [] : originalPipeline.call(redis, commands);
     is("the existing display wrapper keeps its nullable contract", await pausedFor(healthId(meadow)), null);
-    single.length = 0;
+    mail.clearCaptured();
     is("an essential login link is still available while list health is unconfirmed",
-      [await sendEmail({ meter: { by: "company" }, from: "Marktmorgen <hello@marktmorgen.com>", to: "buyer@example.com", subject: "Your login link", text: "Hello." }), single.length], [true, 1]);
+      [await sendEmail({ meter: { by: "company" }, from: "Marktmorgen <hello@marktmorgen.com>", to: "buyer@example.com", subject: "Your login link", text: "Hello." }), serviceMessages().length], [true, 1]);
   } finally {
     redis.pipeline = originalPipeline;
   }
@@ -367,7 +383,7 @@ async function main(): Promise<void> {
     ["unsafe opening", [JSON.stringify({ ...validRamp, opens: Number.MAX_SAFE_INTEGER + 1 })]],
     ["oversized record", [" ".repeat(513)]],
   ];
-  batches.length = 0;
+  mail.clearCaptured();
   try {
     for (const [name, reply] of badRampReads) {
       const commandsSeen: (string | number)[][] = [];
@@ -415,7 +431,7 @@ async function main(): Promise<void> {
       const applied = JSON.parse(String((await rampPipeline.call(redis, [["GET", checkedRampKey]]))[0]));
       is(`${name}: applied uncertain portion remains taken`, applied.left, RAMP_FIRST - 1);
     }
-    is("unconfirmed portion checkpoints sent no provider batch", batches.length, 0);
+    is("unconfirmed portion checkpoints sent no provider batch", listMessages().length, 0);
     is("no computed read or write acknowledgement was invoked", rampGetterCalls, 0);
 
     redis.pipeline = async commands => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === checkedRampKey ? [null] : rampPipeline.call(redis, commands);
@@ -425,15 +441,16 @@ async function main(): Promise<void> {
     is("a known portion with confirmed write grants its exact amount", await rampRoom(healthId(meadow), 1), 1);
     const kept = Number((await rampPipeline.call(redis, [["TTL", checkedRampKey]]))[0]);
     is("existing 180-day portion retention is unchanged", kept <= 180 * 86_400 && kept >= 180 * 86_400 - 60, true);
-    single.length = 0;
+    mail.clearCaptured();
     is("essential email still uses its existing path",
-      [await sendEmail({ meter: { by: "company" }, from: "Marktmorgen <hello@marktmorgen.com>", to: "buyer@example.com", subject: "Your login link", text: "Hello." }), single.length], [true, 1]);
+      [await sendEmail({ meter: { by: "company" }, from: "Marktmorgen <hello@marktmorgen.com>", to: "buyer@example.com", subject: "Your login link", text: "Hello." }), serviceMessages().length], [true, 1]);
   } finally {
     redis.pipeline = rampPipeline;
   }
 
   Date.now = realNow;
 
+  mail.restore();
   done();
 }
 

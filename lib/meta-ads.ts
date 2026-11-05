@@ -106,7 +106,9 @@ export type MetaAdsView = {
 const STATE_SECONDS = 600;
 const KEEP_SECONDS = 400 * 86_400;
 const REQUEST_MS = 10_000;
-const DEFAULT_VERSION = "v26.0";
+// Marketing API's supported version, not the latest Graph API version.
+// Checked 2026-11-04: docs/meta-marketing-api-version-2026-11-04.md.
+const DEFAULT_VERSION = "v25.0";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 40);
 const connKey = (statsId: string) => `nl:metaads:conn:${statsId}`;

@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   part("The editor uses it");
   const editor = readFileSync("components/page-editor.tsx", "utf8");
   is("the drop-down is gone", editor.includes('id="add-kind"'), false);
-  is("a block can be added between two others", editor.includes("add(kind, index + 1)"), true);
+  is("a block can be added between two others", editor.includes("placeAt(index + 1)") && editor.includes("onPick={(kind) => add(kind, at, true)}"), true);
   done();
 }
 

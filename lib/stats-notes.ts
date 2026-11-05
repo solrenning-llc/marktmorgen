@@ -38,7 +38,7 @@ export function noteDay(raw: unknown, now = Date.now()): string {
   if (typeof raw !== "string" || !DAY.test(raw)) return "";
   const at = Date.parse(`${raw}T00:00:00Z`);
   if (!Number.isFinite(at) || new Date(at).toISOString().slice(0, 10) !== raw) return "";
-  if (at > now + 86_400_000 || at < now - 400 * 86_400_000) return "";
+  if (!Number.isFinite(now) || at > now || at < now - 400 * 86_400_000) return "";
   return raw;
 }
 

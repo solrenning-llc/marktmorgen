@@ -225,6 +225,7 @@ export async function sendCallReminders(
               lead: call.lead,
               pi: call.pi,
               due: call.due,
+              cancel: call.cancel,
               origin,
             });
             counts.confirmed += 1;

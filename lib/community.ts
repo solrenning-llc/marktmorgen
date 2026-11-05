@@ -1039,6 +1039,28 @@ export class ReportQueueReadError extends Error {
   }
 }
 
+async function readReportedRecord<T>(command: (string | number)[], parse: (raw: unknown) => T | null): Promise<T | null> {
+  const reply = await redisPipeline([command]);
+  const slot = Array.isArray(reply) && reply.length === 1 ? Object.getOwnPropertyDescriptor(reply, "0") : undefined;
+  if (!slot || !Object.hasOwn(slot, "value")) throw new ReportQueueReadError();
+  if (slot.value === null) return null;
+  const record = parse(slot.value);
+  if (!record) throw new ReportQueueReadError();
+  return record;
+}
+
+/** Resolve a confirmed report without treating a missing reply as a deleted target. */
+export async function readReportedTarget(id: string, target: ReportTarget): Promise<{ post: Post; comment: Comment | null } | null> {
+  const post = await readReportedRecord(["GET", postKey(id, target.post)], parsePost);
+  if (!post) return null;
+  if (post.id !== target.post) throw new ReportQueueReadError();
+  if (target.kind === "post") return { post, comment: null };
+  const comment = await readReportedRecord(["HGET", commentsKey(id, target.post), target.comment], parseComment);
+  if (!comment) return null;
+  if (comment.id !== target.comment) throw new ReportQueueReadError();
+  return { post, comment };
+}
+
 function reportInteger(raw: unknown): number | null {
   if (typeof raw !== "number" && (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw))) return null;
   const value = Number(raw);

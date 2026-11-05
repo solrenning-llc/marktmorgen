@@ -94,3 +94,18 @@ test("valid own data, null prototypes and explicit zero retain exact totals", ()
   assert.equal(report.netProfitCents, 0);
   assert.equal(report.netMarginBps, null);
 });
+
+test("a rejected late-row Proxy cannot execute a getter installed on an earlier row", () => {
+  const input = fixture();
+  let reads = 0;
+  input.sources.training = new Proxy(input.sources.training!, {
+    ownKeys(target) {
+      Object.defineProperty(input.sources.plan_subscriptions!, "evidence", {
+        enumerable: true, configurable: true, get() { reads++; return "SYNTHETIC ONLY"; },
+      });
+      return Reflect.ownKeys(target);
+    },
+  });
+  assert.equal(companyMonthlyMarginReport(input, NOW).status, "unknown");
+  assert.equal(reads, 0);
+});

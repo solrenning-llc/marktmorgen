@@ -47,6 +47,8 @@ export type Sub = {
   email?: string;
   status: string;
   product: string;
+  /** The price option it was bought at (metadata[option]); absent when it was bought at the product's own price. */
+  option?: string;
   /** In the currency's smallest unit, per interval, quantity included. */
   amount: number;
   currency: string;
@@ -229,7 +231,14 @@ export type ChannelStay = {
 export const STAY_AGES = [1, 2, 3, 6, 12];
 const MONTH = 30.4375 * DAY;
 
-export type ProductNumbers = { product: string; members: number; trialing: number; mrr: number };
+export type ProductNumbers = {
+  product: string;
+  members: number;
+  trialing: number;
+  mrr: number;
+  /** Live members (paying or in a trial) by the price option they bought at (642 [WG2]); absent with none on an option. */
+  byOption?: Record<string, number>;
+};
 
 export type Numbers = {
   currency: string;
@@ -253,6 +262,8 @@ export type Numbers = {
   byProduct: ProductNumbers[];
   /** Whether every membership Stripe holds was read. */
   complete: boolean;
+  /** Set on a reading that counted members by price option (byOption); absent on a reading from before, which cannot say. */
+  optionsCounted?: true;
   at: number;
   /** The last twelve months' cohorts, newest first; absent on a reading from before October 11, 2026. */
   cohorts?: Cohort[];
@@ -302,6 +313,7 @@ export function numbersFrom(subs: Sub[], currency: string, now: number, complete
     elsewhere: 0,
     byProduct: [],
     complete,
+    optionsCounted: true,
     at: now,
   };
   let payingThen = 0;
@@ -323,6 +335,9 @@ export function numbersFrom(subs: Sub[], currency: string, now: number, complete
     } else if (sub.status === "trialing") {
       out.trialing += 1;
       row.trialing += 1;
+    }
+    if (sub.option && LIVE.has(sub.status)) {
+      row.byOption = { ...row.byOption, [sub.option]: (row.byOption?.[sub.option] ?? 0) + 1 };
     }
     if (row.members || row.trialing) byProduct.set(sub.product, row);
 
@@ -472,6 +487,7 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     id: typeof raw.id === "string" ? raw.id : "",
     status: typeof raw.status === "string" ? raw.status : "",
     product: meta.product,
+    ...(typeof meta.option === "string" && meta.option ? { option: meta.option } : {}),
     amount: unit * quantity,
     currency: typeof raw.currency === "string" ? raw.currency : "",
     interval: typeof item?.price?.recurring?.interval === "string" ? item.price.recurring.interval : "month",
@@ -491,6 +507,16 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     email: raw.customer && typeof raw.customer === "object" && typeof (raw.customer as { email?: unknown }).email === "string" ? normaliseEmail((raw.customer as { email: string }).email) : "",
     comment: typeof raw.cancellation_details?.comment === "string" ? raw.cancellation_details.comment.replace(/\s+/g, " ").trim().slice(0, COMMENT_LENGTH) : "",
   };
+}
+
+/**
+ * How many live members (paying or in a trial) are on one price option, read from a reading already made (642 [WG2]):
+ * no Stripe call of its own. Null when it cannot be said: no reading, a reading that did not read every membership,
+ * or one from before members were counted by option. Never 0 for "unknown".
+ */
+export function membersOnOption(numbers: Numbers | null, productId: string, optionId: string): number | null {
+  if (!numbers || !numbers.complete || numbers.optionsCounted !== true) return null;
+  return numbers.byProduct.find((row) => row.product === productId)?.byOption?.[optionId] ?? 0;
 }
 
 /** The store's membership numbers kept CACHE_SECONDS; a person's erasure deletes it (lib/store-readings.ts, forgetReadingsPerson). */

@@ -28,7 +28,7 @@ test("consent and browser refusal happen before every optional request or write"
     "refusal is as easy as acceptance",
     "withdrawal",
   ]) assert.ok(text.includes(fact), fact);
-  assert.match(text, /no consent.*no request.*no storage/is);
+  assert.match(text, /no consent[\s\S]*no request[\s\S]*no storage/i);
 });
 
 test("the proposed event minimizes data and does not create a person profile", () => {
@@ -109,7 +109,7 @@ test("cost, abuse, retention and deletion remain bounded before activation", () 
     "refund",
     "disabled by default",
   ]) assert.ok(text.includes(fact), fact);
-  assert.match(text, /no finite launch budget.*verified supplier and infrastructure costs/is);
+  assert.match(text, /no finite launch budget[\s\S]*verified supplier and infrastructure costs/i);
 });
 
 test("the queue extends existing item 630 resource 36 once in Group B at MQ2 criterion f", () => {

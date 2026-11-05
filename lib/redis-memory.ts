@@ -121,9 +121,10 @@ export class MemoryRedis {
           return 1;
         }
         // lib/assistant-memory-store.ts MEMORY_FORGET: the lock made the forgetting's own and the notes deleted in one step.
-        if (key.startsWith("-- marktmorgen:amem-forget:v2\n") && args[0] === "2" && args.length === 5) {
+        if (key.startsWith("-- marktmorgen:amem-forget:v3\n") && args[0] === "2" && args.length === 5) {
           this.run(["SET", args[1], args[3], "EX", args[4]]);
-          return this.run(["DEL", args[2]]);
+          const length = this.run(["STRLEN", args[2]]);
+          return [this.run(["DEL", args[2]]), length];
         }
         // CX-67: existing exposure reservation used by held-store company work.
         if (key.includes("local receiptField='case:'..ARGV[3]..':'..ARGV[4]") && args[0] === "1" && args.length === 9) {

@@ -24,8 +24,8 @@ import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_MEMORY_NOTE, MAX_MEMORY_NOTES, type MemoryNote, type MemoryResult, addNote, editNote, parseMemory, removeNote } from "@/lib/assistant-memory-rules";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
-import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { dataBytes, dataBytesOfLength } from "@/lib/store-data-rules";
 
 const memoryKey = (statsId: string) => `nl:amem:${statsId}`;
 const lockKey = (statsId: string) => `nl:amem:lock:${statsId}`;
@@ -52,11 +52,12 @@ export type MemoryChange = MemoryResult | { ok: false; error: MemoryStoreRefusal
 /** The record as read: no record is no notes; a record that is there but cannot be read is said so. */
 export type MemoryRead = { ok: true; notes: MemoryNote[] } | { ok: false; error: "unreadable" };
 
-type StoredRecord = { ok: true; notes: MemoryNote[]; bytes: number } | { ok: false; error: "unreadable" };
+/** The record as read; `whole` when every note in it reads back, so a change may write the list over it. */
+type StoredRecord = { ok: true; notes: MemoryNote[]; bytes: number; whole: boolean } | { ok: false; error: "unreadable" };
 
 function recordOf(raw: unknown): StoredRecord {
   // Only Redis's own null is no record: anything else that is not the record's text is not known (Codex G2 on #1949).
-  if (raw === null) return { ok: true, notes: [], bytes: 0 };
+  if (raw === null) return { ok: true, notes: [], bytes: 0, whole: true };
   if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_MEMORY_BYTES) return { ok: false, error: "unreadable" };
   let parsed: unknown;
   try {
@@ -65,7 +66,10 @@ function recordOf(raw: unknown): StoredRecord {
     return { ok: false, error: "unreadable" };
   }
   if (!Array.isArray(parsed)) return { ok: false, error: "unreadable" };
-  return { ok: true, notes: parseMemory(parsed), bytes: dataBytes([raw], 1) };
+  const notes = parseMemory(parsed);
+  // A note left out (one with someone's details, a kind of a later version) is shown nowhere, but it is kept: a
+  // change never writes the list over it (Codex G2 on #1949).
+  return { ok: true, notes, bytes: dataBytes([raw], 1), whole: notes.length === parsed.length };
 }
 
 async function readRecord(statsId: string): Promise<StoredRecord> {
@@ -87,12 +91,16 @@ return 1`;
  * Forgets the notes and makes the lock the forgetting's own (ARGV[1], for
  * ARGV[2] seconds) in the same step: a change still in flight finds its lock
  * gone and writes nothing back (Codex G2 on #1949), and no new change can
- * start until the forgetting has given back the room and let go (Codex J on
- * #1951). The number of records deleted, 0 or 1. Modelled by lib/redis-memory.ts.
+ * start until the forgetting has let go (Codex J on #1951). Answers {records
+ * deleted (0 or 1), the length of the record deleted}, measured in the same
+ * step, so the room given back is only what it removed, however late that
+ * comes (Codex G2 on #1949: a note kept after its lock ran out keeps its room).
+ * Modelled by lib/redis-memory.ts.
  */
-export const MEMORY_FORGET = `-- marktmorgen:amem-forget:v2
+export const MEMORY_FORGET = `-- marktmorgen:amem-forget:v3
 redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
-return redis.call('DEL', KEYS[2])`;
+local length = redis.call('STRLEN', KEYS[2])
+return {redis.call('DEL', KEYS[2]), length}`;
 
 /** A change of the notes whose answer was not Redis's own: it may or may not have been written. */
 export class MemoryWriteUnconfirmed extends Error {
@@ -117,17 +125,20 @@ export async function readMemory(statsId: string | null): Promise<MemoryNote[]> 
 
 /**
  * Writes the notes while the lock is still ours, in one script with its own
- * answer (MEMORY_WRITE). Room is set first, to the larger of the record
- * there and the one written: a save that does not fit throws DataRoomError
- * and nothing is written, and the room is never below what is kept whatever
- * happens. Written: the room is set to the new record. The lock gone: nothing
- * was written, the room goes back to the record still there, refused as busy.
- * An answer that is not Redis's own: unconfirmed, the larger room kept.
+ * answer (MEMORY_WRITE). The room moves by what the write changes, never set
+ * to a total (Codex G2 on #1949: a total set by a change whose lock ran out
+ * cut a newer note's room). While the lock is ours no other change writes, so
+ * what it replaces is the record read. Taken first when it grows: a save that
+ * does not fit throws DataRoomError and nothing is written. Written: a shrink
+ * is given back. The lock gone: nothing was written, only what this change
+ * took goes back, refused as busy. An answer that is not Redis's own:
+ * unconfirmed, what it took kept.
  */
 async function writeMemory(held: Held, statsId: string, notes: MemoryNote[], wasBytes: number, room: DataStore): Promise<void> {
   const json = notes.length ? JSON.stringify(notes) : "";
   const bytes = notes.length ? dataBytes([json], 1) : 0;
-  await needData(room, [{ slot: MEMORY_SLOT, bytes: Math.max(bytes, wasBytes), set: true }]);
+  const grown = bytes - wasBytes;
+  if (grown > 0) await needData(room, [{ slot: MEMORY_SLOT, bytes: grown }]);
   let reply: unknown;
   try {
     reply = await redisPipeline([["EVAL", MEMORY_WRITE, 2, held.key, memoryKey(statsId), held.token, json]]);
@@ -136,11 +147,11 @@ async function writeMemory(held: Held, statsId: string, notes: MemoryNote[], was
   }
   const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
   if (answer === 1) {
-    if (bytes < wasBytes) await noteData(room, [{ slot: MEMORY_SLOT, bytes, set: true }]);
+    if (grown < 0) await giveData(room, [{ slot: MEMORY_SLOT, bytes: -grown }]);
     return;
   }
   if (answer === 0) {
-    await noteData(room, [{ slot: MEMORY_SLOT, bytes: wasBytes, set: true }]);
+    if (grown > 0) await giveData(room, [{ slot: MEMORY_SLOT, bytes: grown }]);
     throw new LockBusyError();
   }
   throw new MemoryWriteUnconfirmed();
@@ -164,6 +175,8 @@ async function changeMemory(statsId: string, room: DataStore, change: (notes: Me
   try {
     const read = await readRecord(statsId);
     if (!read.ok) return read;
+    // A note the rules leave out is kept: the list is never written over it (Codex G2 on #1949).
+    if (!read.whole) return { ok: false, error: "unreadable" };
     const result = change(read.notes);
     if (result.ok && result.notes !== read.notes) await writeMemory(held, statsId, result.notes, read.bytes, room);
     return result;
@@ -209,9 +222,13 @@ export async function forgetMemory(statsId: string | null, room: DataStore): Pro
   const held: Held = waited ?? { key: lockKey(statsId), token: crypto.randomUUID(), ttlSeconds: LOCK_SECONDS };
   try {
     const reply: unknown = await redisPipeline([["EVAL", MEMORY_FORGET, 2, held.key, memoryKey(statsId), held.token, LOCK_SECONDS]]);
-    // Room is given back only once Redis says the record is gone; an answer that is not its own keeps it counted.
-    if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== 0 && reply[0] !== 1)) throw new MemoryWriteUnconfirmed();
-    await giveData(room, [{ slot: MEMORY_SLOT, bytes: 0, set: true }]);
+    // Room is given back only once Redis says the record is gone, and only what it removed, by difference; an answer
+    // that is not its own keeps it counted.
+    const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+    if (!Array.isArray(answer) || answer.length !== 2) throw new MemoryWriteUnconfirmed();
+    const [deleted, length] = answer;
+    if ((deleted !== 0 && deleted !== 1) || typeof length !== "number" || !Number.isSafeInteger(length) || length < 0 || (deleted === 0 && length !== 0)) throw new MemoryWriteUnconfirmed();
+    if (deleted === 1) await giveData(room, [{ slot: MEMORY_SLOT, bytes: dataBytesOfLength(length, 1) }]);
   } finally {
     await releaseLock(held);
   }

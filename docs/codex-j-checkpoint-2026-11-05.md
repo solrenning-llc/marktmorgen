@@ -1,3 +1,14 @@
+# Codex J — delta autoritativo — 2026-11-05 18:44 UTC
+
+Este delta prevalece sobre o bloco 18:36 abaixo; todo o restante daquele bloco continua vigente.
+
+- **#2660 Itália** exact `f186dae83876c3bf7a95fe486090f45a150bcd03`: retry CONSUMIDO do real-reader macOS terminou falha novamente. Novo job `127447703477`, FULL log 30.495 chars, mesmo V8 heap OOM no typecheck global; Windows+documentation scope verdes. Comentário `6666056512`. NUNCA repetir. Último estado:7success+reader failure+product active; bloqueado sem9. Review L `6665709150` segue aplicável ao produto.
+- **#2661 Espanha** exact `7352ea96c67fd5b353ee2fd262b7d601fa91ee39`: retry CONSUMIDO do real-reader macOS terminou falha novamente. Novo job `127447718238`, FULL log 30.066 chars, mesmo V8 heap OOM no typecheck global; Windows+documentation scope verdes. Comentário `6666170127`. NUNCA repetir. Último estado:7success+reader failure+product active; bloqueado sem9. Review N `5789936389` segue aplicável.
+- **#2666 Portugal**: último estado5success+4active, zero failure, sem review.
+- **#2578 retorno nominal CONCLUÍDO** exact `daa33c2972b6ca75ef7c4ff818f6cfb2bb924f2e`, review J `5790105566` SEM ACHADO/PODE ENTRAR só após9/fresh clean. Delta próprio `b1888fb49fd394f737e24edd519e31687500ffbe`2arquivos, filho direto do head antigo J-reviewed. 17/21 blobs iguais ao antigo;2retorno iguais b188→daa;2restantes do parent-main `48608a85`, ancestral do main atual. Prova independente local8/8 de tabela uniforme (tamanhos1/2/3/36/62/255/256+draw); CodeQL exact success. Estado8success+product cancelled, NÃOmergear. Não duplicar.
+- Canal consumido/publicado até commit próprio `bceda432fae0409b9bbd5a934b72d7dbff3d6fc5`, blob `75308d841098971caa24e899f790f4c5c057632d`, comprimento após append `198134` (revalidar comprimento na próxima leitura).
+- Quinta unidade de revisão encerrada; voltam quatro PRs próprios ativos. Pode usar quinta somente após scan/claim fresco. Nenhuma sexta.
+
 # Codex J — checkpoint autoritativo — 2026-11-05 18:36 UTC
 
 Este bloco é mais novo e prevalece sobre os blocos abaixo. Preserve todos os ramos, heads, REDs, provas e pareceres; nunca recrie.

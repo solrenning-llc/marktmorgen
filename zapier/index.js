@@ -40,7 +40,27 @@ const explain = (response, z) => {
     const message = (body && body.message) || `Marktmorgen answered ${response.status}. Try again in a moment.`;
     throw new z.errors.Error(message, (body && body.error) || "api_error", response.status);
   }
+  if (!Number.isInteger(response.status) || response.status < 200 || response.status >= 300) {
+    unconfirmed(z);
+  }
   return response;
+};
+
+/** An unknown write result must not be reported as success or retried here. */
+const unconfirmed = (z) => {
+  throw new z.errors.Error(
+    "Marktmorgen could not confirm this operation. Check the store's Webhooks before trying again.",
+    "unconfirmed_response",
+    502,
+  );
+};
+
+/** Keep the response whole, but require the fields that identify its effect. */
+const hookResult = (response, z, matches) => {
+  const body = response.data;
+  const data = body && typeof body === "object" && !Array.isArray(body) ? body.data : null;
+  if (!data || typeof data !== "object" || Array.isArray(data) || !matches(data)) unconfirmed(z);
+  return data;
 };
 
 const authentication = {
@@ -206,12 +226,15 @@ const hookTrigger = (spec) => ({
     type: "hook",
     performSubscribe: async (z, bundle) => {
       const response = await z.request({ url: `${API}/hooks`, method: "POST", body: { url: bundle.targetUrl, events: [spec.event] } });
-      return response.data.data;
+      return hookResult(response, z, (data) =>
+        typeof data.id === "string" && /^we_[0-9a-f]{16}$/.test(data.id) &&
+        Array.isArray(data.events) && data.events.length === 1 && data.events[0] === spec.event,
+      );
     },
     performUnsubscribe: async (z, bundle) => {
       const id = bundle.subscribeData && bundle.subscribeData.id;
       const response = await z.request({ url: `${API}/hooks`, method: "DELETE", body: { id } });
-      return response.data.data;
+      return hookResult(response, z, (data) => typeof id === "string" && data.id === id && data.status === "removed");
     },
     perform: async (z, bundle) => {
       const body = bundle.cleanedRequest;

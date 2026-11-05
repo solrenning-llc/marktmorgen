@@ -104,8 +104,49 @@ function parse(raw: unknown): ChatMessage | null {
   }
 }
 
+/** JSON.parse keeps only the last repeated key; a personal copy must not lose that ambiguity. */
+function hasRepeatedTopLevelKey(raw: string): boolean {
+  const keys = new Set<string>();
+  let depth = 0;
+  let stringStart = -1;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index];
+    if (stringStart >= 0) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        const token = raw.slice(stringStart, index + 1);
+        stringStart = -1;
+        if (depth === 1) {
+          let next = index + 1;
+          while (/\s/.test(raw[next] ?? "")) next += 1;
+          if (raw[next] === ":") {
+            let key: unknown;
+            try {
+              key = JSON.parse(token);
+            } catch {
+              return true;
+            }
+            if (typeof key !== "string" || keys.has(key)) return true;
+            keys.add(key);
+          }
+        }
+      }
+      continue;
+    }
+    if (character === '"') stringStart = index;
+    else if (character === "{") depth += 1;
+    else if (character === "}") depth -= 1;
+  }
+  return false;
+}
+
 function copyMessage(raw: unknown): ChatMessage {
   if (typeof raw !== "string" || !raw) throw new Error("Incomplete community chat record");
+  if (hasRepeatedTopLevelKey(raw)) throw new Error("Incomplete community chat record");
   let value: unknown;
   try {
     value = JSON.parse(raw);

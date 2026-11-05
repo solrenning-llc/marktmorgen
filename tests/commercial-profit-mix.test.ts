@@ -189,9 +189,9 @@ test('an auxiliary root Proxy cannot erase an unpriced cost while the encoder re
  const base=fixture();
  const row=Object.assign(base.sources.training!,{unreviewedSupplierCents:null});
  let reads=0;
- let input:CommercialProfitMixInput&{aux?:object};
- const aux=new Proxy({}, {ownKeys(){reads++;delete (row as Partial<typeof row>).unreviewedSupplierCents;delete input.aux;return [];}});
- input={aux,...base};
+ const input:CommercialProfitMixInput&{aux?:object}={
+  aux:new Proxy({}, {ownKeys(){reads++;delete (row as Partial<typeof row>).unreviewedSupplierCents;delete input.aux;return [];}}),...base,
+ };
  const result=commercialProfitMix(input);
  assert.equal(result.reason,'unknown');
  assert.equal(result.totalNetProfitCents,null);

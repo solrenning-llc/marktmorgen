@@ -20,7 +20,8 @@ export const members = ["a", "b"].map((letter, i): Member => ({
 }));
 export const config = { name: "Synthetic community", access: [] } as unknown as CommunityConfig;
 export const event = { id: "c".repeat(12), title: "Synthetic event", start: Date.now() + 86_400_000,
-  minutes: 30, tz: "UTC", only: [], cancelled: false } as CommunityEvent;
+  minutes: 30, tz: "UTC", only: [], cancelled: false, about: "", cap: 0, where: "room", meet: null,
+  room: "synthetic-room", link: "", replay: null, post: "", at: 1, moves: 0, v: 1 } satisfies CommunityEvent;
 export const store = { handle: "synthetic", name: "Synthetic store", email: "owner@example.com", language: "en",
   community: { id: "d".repeat(32), on: true }, mail: { fromName: "Synthetic store" } } as Store;
 export const readConfig = async () => config;

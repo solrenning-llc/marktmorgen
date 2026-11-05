@@ -41,6 +41,31 @@ async function main(): Promise<void> {
       const resumed = await advance(id, async () => store, Date.now() + 10_000);
       is(`${label}: a confirmed reread resumes the same complete batch`, [resumed?.status, resumed?.done, resumed?.sent, sent.length, sent[0]?.length], ["sent", 2, 2, 1, 2]);
     }
+    part(`${kind}: an unread later batch must keep the confirmed earlier batch`);
+    reset();
+    const size = kind === "announcement" ? 25 : 100;
+    const firstKeys = [keys[0], ...Array.from({ length: size - 1 }, (_, i) => i.toString(16).padStart(32, "0"))];
+    db.run(["SET", prefix + id, JSON.stringify({ ...job, total: size + 1 })]);
+    db.run(["RPUSH", prefix + id + ":to", ...firstKeys, keys[1]]);
+    db.run(["SADD", queue, id]);
+    setReadReply(() => {
+      const command = commandsSeen.at(-1)!;
+      return command[2] === 0 ? [db.run(command)] : [];
+    });
+    const partial = await advance(id, async () => store, Date.now() + 10_000);
+    is("later unread batch preserves confirmed progress only", [partial?.status === "sent", partial?.done, partial?.sent, sent.length], [false, size, 1, 1]);
+    is("later unread batch preserves the complete original list", db.run(["LRANGE", prefix + id + ":to", 0, -1]), [...firstKeys, keys[1]]);
+    setReadReply(null);
+    const afterPartial = await advance(id, async () => store, Date.now() + 10_000);
+    is("retry resumes at the later batch and never resends the first", [afterPartial?.status, afterPartial?.done, afterPartial?.sent, sent.map(messages => messages.length)], ["sent", size + 1, 2, [1, 1]]);
+    reset();
+    members.forEach(member => { member.removed = true; });
+    db.run(["SET", prefix + id, JSON.stringify(job)]);
+    db.run(["RPUSH", prefix + id + ":to", ...keys]);
+    db.run(["SADD", queue, id]);
+    const removed = await advance(id, async () => store, Date.now() + 10_000);
+    is("confirmed readers who were removed are skipped without being emailed", [removed?.status, removed?.done, removed?.sent, sent.length], ["sent", 2, 0, 0]);
+    members.forEach(member => { member.removed = false; });
     reset();
     db.run(["SET", prefix + id, JSON.stringify({ ...job, total: 3, done: 1, sent: 1 })]);
     db.run(["RPUSH", prefix + id + ":to", "c".repeat(32), ...keys]);

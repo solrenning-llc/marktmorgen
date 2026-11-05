@@ -69,6 +69,6 @@ test("a unit proxy cannot replace an unknown scenario with reviewed evidence", (
 });
 
 test("customer-base rules stay importable from browser client graphs", () => {
-  const source = readFileSync(new URL("../lib/customer-base-rules.ts", import.meta.url), "utf8");
+  const source = readFileSync("lib/customer-base-rules.ts", "utf8");
   assert.doesNotMatch(source, /from\s+["']node:/);
 });

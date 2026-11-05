@@ -25,7 +25,7 @@ async function shop() {
   const owner = "a3-c4-control@example.test";
   await claimHandle(owner, "a3-c4-control", "Original store", "");
   await ensureStatsId(owner); await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_TestA3C4Controls01", true);
+  await setStripeAccount(owner, "acct_TestA3C401", true);
   const now = Math.floor(Date.now() / 1000);
   await setSubscription(owner, { customerId: "cus_A3C4", subscriptionId: "sub_A3C4", active: true, tier: "creator",
     period: { start: now - 86400, end: now + 20 * 86400, renews: true } });

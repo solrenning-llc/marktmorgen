@@ -6,12 +6,11 @@ import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-
 import { dealOrder, orderDeals, dealWorklistCsv, type DealOrder, type DealView } from "@/lib/crm-deal-worklist";
 import { DealAgenda } from "@/components/deal-agenda";
 import { crmAnswer, type CrmAnswer, type CrmCurrentDeal } from "@/lib/crm-response";
-import { MOVE_HINT, PIPELINE_NAME_ID, moveConflictWords, PIPELINE_REMOVE_TO_ID, SHOWN_SAY_AFTER_MS, VIEW_ONLY_WORDS, crmFieldChoicesId, crmFieldNameId, dealErrorField, fieldProblems, neighborAfterRemoval, pausedWords, pipelineProblems, shownWords, stageKindId, stageMovesId, stageNameId } from "@/lib/deal-board-focus";
+import { KIND_WORDS_HELP, MOVE_HINT, PIPELINE_NAME_ID, PIPELINE_WORDS, boardDayWords, dealDayWords, fieldControlName, fieldRemovalWords, moveConflictWords, pipelineRemovalWords, removedFields, stageControlName, PIPELINE_REMOVE_TO_ID, SHOWN_SAY_AFTER_MS, VIEW_ONLY_WORDS, crmFieldChoicesId, crmFieldNameId, dealErrorField, fieldProblems, neighborAfterRemoval, pausedWords, pipelineProblems, shownWords, stageKindId, stageMovesId, stageNameId } from "@/lib/deal-board-focus";
 import { DEAL_SAVE_ID, DRAFT_UNITS, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, savedNowId, stageMoveStep, stageChosenText, livePending, announce, focusWasLost, takeSaved, typedText, unitOf, DEAL_HIDDEN, DEAL_HIDDEN_ID, type DealDraft, type DraftField, type DraftConflict, type DraftUnit } from "@/lib/deal-draft";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
-import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { formatMoney, moneyField, readMoney, type Currency } from "@/lib/money";
 import {
@@ -94,6 +93,13 @@ const SHOWING_ID = "deal-showing";
 const EDITOR_WHY_ID = "deal-board-editor-why";
 /** Why a stage's Up or Down does nothing at the top or the bottom. */
 const STAGE_EDGES_ID = "stage-edges";
+/** The question asked before a pipeline is removed, and before a save removes fields (3.3.6). */
+const PIPELINE_CONFIRM_ID = "pipeline-remove-confirm";
+const FIELDS_CONFIRM_ID = "crm-fields-confirm";
+/** Where the result of the last change is shown, beside the control it came from (one at a time). */
+const RESULT_ID = "deal-board-result";
+/** The chosen pipeline's panel, which its tab controls. */
+const PIPELINE_PANEL_ID = "pipeline-panel";
 
 /**
  * A control that cannot be used now stays where it is and keeps focus (2.4.3,
@@ -146,7 +152,15 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const [invalid, setInvalid] = useState<{ ids: string[]; message: string } | null>(null);
   // The deal whose removal is waiting for "Remove deal" or "Keep deal" (3.3.6): nothing is removed before.
   const [confirming, setConfirming] = useState<string | null>(null);
-  const clearMessages = () => { setError(null); setInvalid(null); setLost(null); setConfirming(null); };
+  // What the last change did, shown in words beside where it was made (3.3.1, 4.1.3), not only in a toast that goes away:
+  // `at` is a deal's card ("deal:<id>"), a stage's column ("stage:<id>"), the top of the board ("board"), the pipelines
+  // ("pipeline") or the fields ("fields"); `fallback` is where it goes when that card is no longer shown.
+  const [result, setResult] = useState<{ at: string; fallback?: string; words: string } | null>(null);
+  // A removal of the pipeline, or a save that removes fields, waiting for its confirmation (3.3.6): the choice it was
+  // asked for, so any change made after it closes the question again.
+  const [pipelineReview, setPipelineReview] = useState<string | null>(null);
+  const [fieldsReview, setFieldsReview] = useState<string | null>(null);
+  const clearMessages = () => { setError(null); setInvalid(null); setLost(null); setConfirming(null); setResult(null); setPipelineReview(null); setFieldsReview(null); };
   const openDraft = (deal: Deal, from: string) => { opener.current = from; const base = draftFromDeal(deal, currency); clearMessages(); setDraft({ ...base, base, version: versions[deal.id] ?? "", conflicts: [] }); };
   const dealNameInput = useRef<HTMLInputElement>(null);
   const activeDealId = draft?.id;
@@ -230,18 +244,22 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     moveFocus(ids[0]);
   };
 
-  async function run(body: Record<string, unknown>, done: string, after?: () => void, onConflict?: (current: CrmCurrentDeal) => void, refocus?: string | readonly string[], invalidFor?: (error: string) => string[]) {
+  async function run(body: Record<string, unknown>, done: { words: string; at: string; fallback?: string }, after?: () => void, onConflict?: (current: CrmCurrentDeal) => void, refocus?: string | readonly string[], invalidFor?: (error: string) => string[]) {
     if (locked || writeUnconfirmed || !gate.current.enter()) return;
     setBusy(true);
     setError(null);
     setInvalid(null);
+    setResult(null);
     say("Saving your change.");
     const answer = await call(body);
     gate.current.leave();
     setBusy(false);
     if (answer.ok) {
-      toast(answer.workflows === "not_checked" ? `${done} The workflow for this stage was not started for this person.` : done);
+      // Said once in the board's status region and shown beside the control (not a toast as well, which is a live region of its own).
+      const words = answer.workflows === "not_checked" ? `${done.words} The workflow for this stage was not started for this person.` : done.words;
+      say(words);
       after?.();
+      setResult({ ...done, words });
       startRefresh(() => router.refresh());
       return;
     }
@@ -305,19 +323,20 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     if (!opened.id) {
       const cents = opened.value.trim() ? readMoney(opened.value, currency as Currency) : 0;
       if (cents === null) return badMoney();
-      void run({ action: "deal", deal: { title: opened.title, email: opened.email, cents, stage: opened.stage, note: opened.note, nextAction: opened.nextAction, dueDate: opened.dueDate, assignee: opened.assignee } }, "Deal added.", closeDeal, undefined, DEAL_SAVE_ID, dealInvalidFor);
+      void run({ action: "deal", deal: { title: opened.title, email: opened.email, cents, stage: opened.stage, note: opened.note, nextAction: opened.nextAction, dueDate: opened.dueDate, assignee: opened.assignee } }, { words: "Deal added.", at: "board" }, closeDeal, undefined, DEAL_SAVE_ID, dealInvalidFor);
       return;
     }
     // Nothing changed: nothing to send, and the deal is left exactly as it is.
     if (!changedFields(opened.base, opened).length) {
       closeDeal();
-      toast("Nothing changed, so nothing was saved.");
+      say("Nothing changed, so nothing was saved.");
+      setResult({ at: `deal:${opened.id}`, fallback: "board", words: "Nothing changed, so nothing was saved." });
       return;
     }
     // Only what the creator changed since opening it, over the record they opened (635 [GL3]).
     const changes = dealChanges(opened.base, opened, currency);
     if (!changes) return badMoney();
-    void run({ action: "deal", version: opened.version, deal: changes }, "Deal saved.", closeDeal, (current) => {
+    void run({ action: "deal", version: opened.version, deal: changes }, { words: "Deal saved.", at: `deal:${opened.id}`, fallback: "board" }, closeDeal, (current) => {
       const base = draftFromDeal(current.deal, currency);
       const rebased = rebaseDraft(opened.base, opened, current.deal, currency);
       setDraft({ ...rebased.draft, base, version: current.version, conflicts: rebased.conflicts });
@@ -369,7 +388,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     focusLater(...places);
     // Refused because the deal changed meanwhile: said in words that fit where it is now (here, out of this search or filter, or in another pipeline).
     const refused = (current: CrmCurrentDeal) => setError(moveConflictWords(here.has(current.deal.stage) ? (shownHere(current.deal) ? "here" : "filtered") : { pipeline: pipelines.find(p => p.stages.some(st => st.id === current.deal.stage))?.name ?? "another pipeline" }));
-    void run({ action: "deal", version: versions[deal.id] ?? "", deal: { id: deal.id, stage } }, here.has(stage) ? "Deal moved." : `Deal moved to ${pipelines.find(p => p.stages.some(st => st.id === stage))?.name ?? "another pipeline"}.`, undefined, refused, places);
+    void run({ action: "deal", version: versions[deal.id] ?? "", deal: { id: deal.id, stage } }, { words: here.has(stage) ? "Deal moved." : `Deal moved to ${pipelines.find(p => p.stages.some(st => st.id === stage))?.name ?? "another pipeline"}.`, at: `deal:${deal.id}`, fallback: `stage:${deal.stage}` }, undefined, refused, places);
   }
   function stageEvent(deal: Deal, event: Parameters<typeof stageMoveStep>[1]) {
     // Nothing is chosen or sent while the board is paused: the select keeps showing where the deal is.
@@ -388,7 +407,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   function removeDeal(deal: Deal) {
     if (locked || writeUnconfirmed) return;
     const neighbor = neighborAfterRemoval(visibleDeals.filter(d => d.stage === deal.stage).map(d => d.id), deal.id);
-    void run({ action: "undeal", id: deal.id }, "Deal removed.", () => { setConfirming(null); focusLater(neighbor ? `deal-stage-${neighbor}` : null, `deal-column-${deal.stage}`, "deals-title"); }, undefined, `deal-confirm-yes-${deal.id}`);
+    void run({ action: "undeal", id: deal.id }, { words: "Deal removed.", at: `stage:${deal.stage}` }, () => { setConfirming(null); focusLater(neighbor ? `deal-stage-${neighbor}` : null, `deal-column-${deal.stage}`, "deals-title"); }, undefined, `deal-confirm-yes-${deal.id}`);
   }
   const keepDeal = (id: string) => { setConfirming(null); focusLater(`deal-remove-${id}`); };
   const initialFields = fields.map(field => ({ ...field, optionsText: field.options.join(", ") }));
@@ -423,7 +442,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   /** Opens the pipeline editor from the control `from`, with focus on its name (2.4.3). */
   const pipelineOpened = (from: string) => { opener.current = from; clearMessages(); moveFocus(PIPELINE_NAME_ID); };
   const openPipeline = (next: PipelineDraft, from: string) => { setPipelineDraft(next); pipelineOpened(from); };
-  const closePipeline = (...then: (string | null | undefined)[]) => { setPipelineDraft(null); setError(null); setInvalid(null); focusLater(...then, opener.current, "pipeline-change", "deals-title"); };
+  const closePipeline = (...then: (string | null | undefined)[]) => { setPipelineDraft(null); setPipelineReview(null); setError(null); setInvalid(null); focusLater(...then, opener.current, "pipeline-change", "deals-title"); };
 
   function savePipeline() {
     if (!pipelineDraft || locked || writeUnconfirmed) return;
@@ -436,19 +455,31 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     if (unplaced.length) return showInvalid(unplaced, MESSAGES.moves);
     const moves = Object.fromEntries(gone.map(s => [s.id, pipelineDraft.moves[s.id]]));
     const saved = pipelineDraft;
-    void run({ action: "pipeline", pipeline: { id: pipelineDraft.id, name: pipelineDraft.name, stages: pipelineDraft.stages }, moves }, pipelineDraft.isNew ? "Pipeline added." : gone.length ? "Pipeline saved, and its deals moved." : "Pipeline saved.", () => { if (saved.isNew) setPipelineId(saved.id); closePipeline(saved.isNew ? `pipeline-tab-${saved.id}` : null); }, undefined, "pipeline-save", error => error === "pipelines" ? [PIPELINE_NAME_ID] : error === "stages" ? pipelineProblems(saved, []) : error === "moves" ? gone.map(s => stageMovesId(s.id)) : []);
+    void run({ action: "pipeline", pipeline: { id: pipelineDraft.id, name: pipelineDraft.name, stages: pipelineDraft.stages }, moves }, { words: pipelineDraft.isNew ? "Pipeline added." : gone.length ? "Pipeline saved, and its deals moved." : "Pipeline saved.", at: "pipeline" }, () => { if (saved.isNew) setPipelineId(saved.id); closePipeline(saved.isNew ? `pipeline-tab-${saved.id}` : null); }, undefined, "pipeline-save", error => error === "pipelines" ? [PIPELINE_NAME_ID] : error === "stages" ? pipelineProblems(saved, []) : error === "moves" ? gone.map(s => stageMovesId(s.id)) : []);
   }
 
-  function removePipeline() {
+  /**
+   * "Remove this pipeline" first checks where its deals go, then asks (3.3.6): nothing is sent until "Remove pipeline"
+   * is pressed in the question, which names where the deals go. A change to that choice closes the question again.
+   */
+  function removePipeline(confirmed = false) {
     if (!pipelineDraft || pipelineDraft.isNew || locked || writeUnconfirmed) return;
     const holding = pipelineDeals.length;
     if (holding && !pipelineDraft.removeTo) return showInvalid([PIPELINE_REMOVE_TO_ID], MESSAGES.moves);
+    if (!confirmed || pipelineReview !== pipelineDraft.removeTo) {
+      setError(null);
+      setInvalid(null);
+      setPipelineReview(pipelineDraft.removeTo);
+      moveFocus(PIPELINE_CONFIRM_ID);
+      return;
+    }
     const next = pipelines.find(p => p.id !== pipeline.id)?.id ?? pipelines[0].id;
-    void run({ action: "unpipeline", id: pipeline.id, moveTo: pipelineDraft.removeTo }, holding ? `Pipeline removed; its ${holding === 1 ? "deal was" : `${holding} deals were`} moved.` : "Pipeline removed.", () => { setPipelineId(next); closePipeline(`pipeline-tab-${next}`); }, undefined, "pipeline-remove", error => error === "moves" ? [PIPELINE_REMOVE_TO_ID] : []);
+    void run({ action: "unpipeline", id: pipeline.id, moveTo: pipelineDraft.removeTo }, { words: holding ? `Pipeline removed; its ${holding === 1 ? "deal was" : `${holding} deals were`} moved.` : "Pipeline removed.", at: "pipeline" }, () => { setPipelineId(next); closePipeline(`pipeline-tab-${next}`); }, undefined, ["pipeline-remove-yes", "pipeline-remove"], error => error === "moves" ? [PIPELINE_REMOVE_TO_ID] : []);
   }
+  const keepPipeline = () => { setPipelineReview(null); focusLater("pipeline-remove"); };
 
   // A change typed in the pipeline editor while it is being saved is not taken.
-  const putPipeline = (next: PipelineDraft) => { if (!locked) setPipelineDraft(next); };
+  const putPipeline = (next: PipelineDraft) => { if (!locked) { setPipelineDraft(next); if (next.removeTo !== pipelineReview) setPipelineReview(null); } };
   const moveStage = (from: number, to: number) => {
     if (!pipelineDraft || to < 0 || to >= pipelineDraft.stages.length) return;
     const next = [...pipelineDraft.stages];
@@ -461,21 +492,58 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const openFields = () => { opener.current = "crm-fields-change"; clearMessages(); setFieldDraft(fields.map((f) => ({ ...f, optionsText: f.options.join(", ") }))); moveFocus(fields[0] ? crmFieldNameId(fields[0].id) : "crm-field-add"); };
   // A change typed in the fields editor while it is being saved is not taken.
   const putFields = (next: NonNullable<typeof fieldDraft>) => { if (!locked) setFieldDraft(next); };
-  const closeFields = () => { setFieldDraft(null); setError(null); setInvalid(null); focusLater("crm-fields-change"); };
-  function saveFields() {
+  const closeFields = () => { setFieldDraft(null); setFieldsReview(null); setError(null); setInvalid(null); focusLater("crm-fields-change"); };
+  // The saved fields this draft would remove, with every answer kept for them (lib/crm.ts, writeFields).
+  const fieldsGone = fieldDraft ? removedFields(fields, fieldDraft) : [];
+  // The question before such a save is shown only while the draft is the one it was asked about (3.3.6).
+  const fieldsAsking = fieldDraft !== null && fieldsGone.length > 0 && fieldsReview === JSON.stringify(fieldDraft);
+  /** "Save fields": a save that removes saved fields asks first, naming them; one that removes none is sent at once (it can be changed back). */
+  function saveFields(confirmed = false) {
     if (!fieldDraft || locked || writeUnconfirmed) return;
     const problems = fieldProblems(fieldDraft);
     if (problems.length) return showInvalid(problems, MESSAGES.fields);
+    if (fieldsGone.length && (!confirmed || !fieldsAsking)) {
+      setError(null);
+      setInvalid(null);
+      setFieldsReview(JSON.stringify(fieldDraft));
+      moveFocus(FIELDS_CONFIRM_ID);
+      return;
+    }
     const sent = fieldDraft;
     void run(
       { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: hasChoices(f.type) ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
-      "Fields saved.",
+      { words: fieldsGone.length ? `Fields saved; ${fieldsGone.length === 1 ? "1 field was" : `${fieldsGone.length} fields were`} removed.` : "Fields saved.", at: "fields" },
       closeFields,
       undefined,
-      "crm-fields-save",
+      [fieldsGone.length ? "crm-fields-confirm-yes" : "", "crm-fields-save"].filter(Boolean),
       error => error === "fields" ? fieldProblems(sent) : [],
     );
   }
+
+  /** Shows a pipeline's deals (its tab chosen); nothing while a form is open, whose tab stays chosen. */
+  const choosePipeline = (id: string) => {
+    if (editing || id === pipeline.id) return;
+    setPipelineId(id);
+    setError(null);
+    setConfirming(null);
+    setResult(null);
+  };
+  /** The tabs' keys (APG, Tabs, automatic activation): Left and Right go round, Home and End to the first and the last. */
+  const pipelineKeys = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const ids = pipelines.map(p => p.id);
+    const at = ids.indexOf((event.target as HTMLElement).id.slice("pipeline-tab-".length));
+    if (at < 0) return;
+    const to = event.key === "ArrowRight" ? (at + 1) % ids.length : event.key === "ArrowLeft" ? (at - 1 + ids.length) % ids.length : event.key === "Home" ? 0 : event.key === "End" ? ids.length - 1 : -1;
+    if (to < 0) return;
+    event.preventDefault();
+    document.getElementById(`pipeline-tab-${ids[to]}`)?.focus();
+    choosePipeline(ids[to]);
+  };
+  // The last change's result, beside where it was made: its card or stage when still shown here, else the top of the board.
+  const shownAt = (at?: string) => !at ? false : at.startsWith("deal:") ? view === "board" && visibleDeals.some(d => d.id === at.slice(5)) : at.startsWith("stage:") ? view === "board" && columns.some(c => c.stage.id === at.slice(6)) : true;
+  const placed = !result ? null : shownAt(result.at) ? result.at : shownAt(result.fallback) ? result.fallback : "board";
+  // Not a live region: the board's status region says the same words once (4.1.3).
+  const resultBeside = (at: string, className = "") => (result && placed === at ? <p id={RESULT_ID} className={`notice notice-success text-sm ${className}`}>{result.words}</p> : null);
 
   return (
     <div className="space-y-8">
@@ -503,32 +571,41 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
         {/* Said once, at the top of the board, for a pipeline this person may only see (639 [GL7](7)); a refused change says why too. */}
         {!canChange ? <p id="deal-board-view-only" className="notice mt-4">{VIEW_ONLY_WORDS}</p> : null}
 
-        <div className="mt-5" role="group" aria-label="Pipelines">
-          <div className="flex flex-wrap items-center gap-2">
-            {allTotals.map(t => (
-              <button key={t.pipeline.id} id={`pipeline-tab-${t.pipeline.id}`} type="button" aria-pressed={t.pipeline.id === pipeline.id} {...offProps(editing && t.pipeline.id !== pipeline.id, WHY_ID)} className={`btn btn-sm ${t.pipeline.id === pipeline.id ? "btn-primary" : "btn-secondary"}`} onClick={() => { if (editing || t.pipeline.id === pipeline.id) return; setPipelineId(t.pipeline.id); setError(null); setConfirming(null); }}>
-                {t.pipeline.name}
-                <span className="tabular-nums opacity-80">{` · ${t.open.count} open`}</span>
-                {readOnly.has(t.pipeline.id) ? <span className="opacity-80"> · view only</span> : null}
-              </button>
-            ))}
-            {pipelines.length < pipelineMax ? (
+        {/* The pipelines as tabs (WAI-ARIA APG, Tabs): one tab stop, the arrow keys, Home and End move between them and show
+            each one's deals at once. While a form is open, the others stay focusable but are off and say why. */}
+        <div className="mt-5">
+          <div role="tablist" aria-label="Pipelines" className="flex flex-wrap items-center gap-2" onKeyDown={pipelineKeys}>
+            {allTotals.map(t => {
+              const chosen = t.pipeline.id === pipeline.id;
+              return (
+                <button key={t.pipeline.id} id={`pipeline-tab-${t.pipeline.id}`} type="button" role="tab" aria-selected={chosen} aria-controls={PIPELINE_PANEL_ID} tabIndex={chosen ? 0 : -1} {...offProps(editing && !chosen, WHY_ID)} className={`btn btn-sm ${chosen ? "btn-primary" : "btn-secondary"}`} onClick={() => choosePipeline(t.pipeline.id)}>
+                  {t.pipeline.name}
+                  <span className="tabular-nums opacity-80">{` · ${t.open.count} open`}</span>
+                  {readOnly.has(t.pipeline.id) ? <span className="opacity-80"> · view only</span> : null}
+                </button>
+              );
+            })}
+          </div>
+          {pipelines.length < pipelineMax ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <button type="button" id="pipeline-new" className="btn btn-ghost btn-sm" {...offProps(paused, WHY_ID)} onClick={() => { if (!paused) openPipeline({ id: newCrmId(), name: "", stages: starterStages(), isNew: true, moves: {}, removeTo: "" }, "pipeline-new"); }}>
                 <Icon name="plus" size={16} />
                 New pipeline
               </button>
-            ) : null}
-            {pipelines.length < pipelineMax && canChange ? (
-              /* 639 [GL7](8): the same stages under a new name, none of its deals; opened to read and save, nothing saved yet. */
-              <button type="button" id="pipeline-copy" className="btn btn-ghost btn-sm" {...offProps(paused, WHY_ID)} onClick={() => { if (paused) return; const copy = copyPipeline(pipeline, pipelines); setPipelineDraft({ ...copy, isNew: true, moves: {}, removeTo: "" }); pipelineOpened("pipeline-copy"); }}>
-                <Icon name="plus" size={16} />
-                {`Duplicate “${pipeline.name}”`}
-              </button>
-            ) : null}
-          </div>
-          <div className="mt-3 overflow-x-auto">
+              {pipelines.length < pipelineMax && canChange ? (
+                /* 639 [GL7](8): the same stages under a new name, none of its deals; opened to read and save, nothing saved yet. */
+                <button type="button" id="pipeline-copy" className="btn btn-ghost btn-sm" {...offProps(paused, WHY_ID)} onClick={() => { if (paused) return; const copy = copyPipeline(pipeline, pipelines); setPipelineDraft({ ...copy, isNew: true, moves: {}, removeTo: "" }); pipelineOpened("pipeline-copy"); }}>
+                  <Icon name="plus" size={16} />
+                  {`Duplicate “${pipeline.name}”`}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {resultBeside("pipeline", "mt-3")}
+          {/* A table wider than a phone scrolls inside its own named, focusable box, so the arrow keys scroll it (2.1.1, 1.4.10). */}
+          <div className="scroll-region mt-3 overflow-x-auto" role="region" tabIndex={0} aria-labelledby="pipeline-totals-caption">
             <table className="w-full min-w-[32rem] text-left text-sm">
-              <caption className="sr-only">What each pipeline&apos;s deals add up to</caption>
+              <caption id="pipeline-totals-caption" className="sr-only">What each pipeline&apos;s deals add up to</caption>
               <thead><tr className="text-ink-soft">{["Pipeline", "Open", "Won", "Lost"].map(label => <th key={label} scope="col" className="py-2 pr-4 font-semibold">{label}</th>)}</tr></thead>
               <tbody>{allTotals.map(t => (
                 <tr key={t.pipeline.id} className="border-t border-line">
@@ -541,6 +618,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
           <p className="mt-2 text-xs text-ink-mute">{`Each total adds up the values recorded on its deals, in ${currency.toUpperCase()}. Nothing is weighted or forecast. ${someHidden ? (pipelines.length < pipelineMax ? "Your store can add another pipeline." : "Your store has no room for another pipeline.") : `You have ${pipelines.length} of the ${pipelineMax} ${pipelineMax === 1 ? "pipeline" : "pipelines"} your store can keep.`}`}</p>
         </div>
 
+        {/* The chosen pipeline's deals, its filters, its board or agenda and its editor: the panel of the chosen tab. */}
+        <div role="tabpanel" id={PIPELINE_PANEL_ID} aria-labelledby={`pipeline-tab-${pipeline.id}`}>
         <div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="block"><span className="field-label">Find a deal</span><input type="search" id="deal-search" className="field mt-2" maxLength={80} value={search} onChange={e => setSearch(e.target.value)} placeholder="Name, email, next action or note" /></label><label className="block"><span className="field-label">Responsible teammate</span><select className="field mt-2" value={responsible} onChange={e => setResponsible(e.target.value)}><option value="all">Everyone</option><option value="unassigned">Unassigned</option>{responsibleChoices.map(email => <option key={email} value={"person:" + email}>{email}{assignees.includes(email) ? "" : " (no longer eligible)"}</option>)}</select></label></div>
         <p className="mt-2 text-xs text-ink-mute">{`The summary above includes all of ${pipelines.length > 1 ? `this pipeline's` : "your"} deals. Action counts and columns follow your search and teammate selection.`}</p>
         <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="Filter deals by next action">
@@ -879,6 +958,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
               {pipelines.length > 1 ? `Change ${pipeline.name} and its stages` : "Change the pipeline and its stages"}
             </button>
           ) : null}
+        </div>
         </div>
       </section>
 

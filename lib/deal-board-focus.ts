@@ -101,3 +101,59 @@ export const MOVE_HINT = "Choose a new stage, then press Move.";
 
 /** Said once, at the top of the board, for a pipeline this person may only see (639 [GL7](7)); each refused change says why too. */
 export const VIEW_ONLY_WORDS = "You can see this pipeline but not change it. Ask the store’s owner to change your access.";
+
+/**
+ * A calendar day (YYYY-MM-DD, as a deal keeps it) said the way the studio says
+ * a day: "November 4, 2026" (3.1.3, AX274). Anything else is shown as it is,
+ * never turned into an invented date.
+ */
+export function dealDayWords(day: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+  const at = new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== day) return day;
+  return at.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+/** What the board says, once, about the words "pipeline" and "stage" (3.1.3). */
+export const PIPELINE_WORDS = "A pipeline is the list of steps a deal goes through, from the first talk to won or lost. Each step is a stage.";
+
+/** What "Counts as" means, said beside the stages it is chosen for (3.1.3, 3.3.5). */
+export const KIND_WORDS_HELP = "“Counts as” says what a stage means: Open while you are still talking, Won when they bought, Lost when they did not.";
+
+/** Why the board's dates name a time zone (3.1.4: the abbreviation spelled out where it is used). */
+export function boardDayWords(today: string): string {
+  return `Dates follow the calendar in Coordinated Universal Time (UTC), where today is ${dealDayWords(today)}.`;
+}
+
+/** A stage named in a button's spoken name ("Move stage “Talking” up"); a stage with no name yet is called by its place. */
+export function stageControlName(name: string, index: number): string {
+  const shown = name.trim();
+  return shown ? `stage “${shown}”` : `stage ${index + 1}`;
+}
+
+/** A field named in a control's spoken name ("Remove field “Company”"); a field with no name yet is called by its place. */
+export function fieldControlName(name: string, index: number): string {
+  const shown = name.trim();
+  return shown ? `field “${shown}”` : `field ${index + 1}`;
+}
+
+/** The saved fields a save would remove (their answers go with them, lib/crm.ts writeFields), in their saved order. */
+export function removedFields<T extends { id: string }>(saved: readonly T[], draft: readonly { id: string }[]): T[] {
+  const kept = new Set(draft.map((field) => field.id));
+  return saved.filter((field) => !kept.has(field.id));
+}
+
+/** The review shown before a save that removes fields (3.3.6): what goes, and that it cannot come back. */
+export function fieldRemovalWords(names: readonly string[]): { title: string; text: string } {
+  const list = names.map((name) => `“${name}”`).join(", ");
+  return {
+    title: names.length === 1 ? "Remove 1 field and its answers?" : `Remove ${names.length} fields and their answers?`,
+    text: `Saving removes ${list}. Every answer kept about a person for ${names.length === 1 ? "it" : "them"} is deleted. You cannot get ${names.length === 1 ? "it" : "them"} back.`,
+  };
+}
+
+/** The review shown before a pipeline is removed (3.3.6): where its deals go, and that it cannot come back. */
+export function pipelineRemovalWords(pipeline: string, holding: number, target: string | null): { title: string; text: string } {
+  const deals = holding === 0 ? "" : `Its ${holding === 1 ? "deal moves" : `${holding} deals move`} to ${target ?? "the stage you chose"}. `;
+  return { title: `Remove “${pipeline}”?`, text: `${deals}The pipeline and its stages are deleted. You cannot get them back.` };
+}

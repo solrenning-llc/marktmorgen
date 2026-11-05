@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DealChannelsTable, DealChannelsWaiting } from "@/components/deal-channels-table";
+import { SOURCE_NAMES, channelName } from "@/lib/channel-names";
 import { done, is, part } from "./check";
 
 const deal = (id: string, email: string, stage: string, cents: number): Deal => ({ id, title: id, email, cents, stage, note: "", createdAt: 1, updatedAt: 1 });
@@ -76,6 +77,13 @@ const unread = renderToStaticMarkup(createElement(DealChannelsTable, { result: n
 is("sales that cannot be read: a plain line, no table", [unread.includes("<table"), unread.includes('role="status"')], [false, true]);
 is("no deals yet: says what it will show", renderToStaticMarkup(createElement(DealChannelsTable, { result: dealsByChannel([], DEFAULT_STAGES, channelOf), currency: "usd" })).includes("No deals yet"), true);
 is("while the sales are read, a status line", renderToStaticMarkup(createElement(DealChannelsWaiting)).includes('role="status"'), true);
+part("A campaign named like a property every object has (Codex J, #1952)");
+for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+  const odd = dealsByChannel([deal(`o-${name}`, "ivy@example.com", "won000", 1_000)], DEFAULT_STAGES, () => name);
+  is(`"${name}": its own name, as text`, odd.rows.map((one) => [typeof one.name, one.name]), [["string", name]]);
+  is(`"${name}": the table draws it`, renderToStaticMarkup(createElement(DealChannelsTable, { result: odd, currency: "usd" })).includes(`>${name}<`), true);
+}
+is("a known source still has its name", channelName("google"), SOURCE_NAMES.google);
 const page = readFileSync("app/studio/deals/page.tsx", "utf8");
 is("streamed in after the board, never holding it", page.includes("<Suspense fallback={<DealChannelsWaiting />}>") && page.indexOf("<DealsBoard") < page.indexOf("<DealChannelsLoader"), true);
 

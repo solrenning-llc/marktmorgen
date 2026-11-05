@@ -73,6 +73,7 @@ import { EXPECTATION, OPEN_COUNTRIES_WORDS, PITCHES_PER_DAY, REPITCH_DAYS } from
 import type { TopicPage } from "@/lib/site-pages";
 import { PLAN_AT, feeWords } from "@/lib/fee-words";
 import { paypalAtCheckout, paypalConnectionWords } from "@/lib/public-explanations";
+import { busyReadLimit, googleWritesLimit, teamHostCalendarLimit, teamSyncLimit } from "@/lib/host-sync-words";
 import { TEAM_LIMITS, teamLimitWords } from "@/lib/team-scheduling-rules";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
@@ -532,8 +533,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "limits",
         title: "What it does not do yet",
         items: [
-          "Your calendars are read for busy times, and only calls set to Google Meet, and team calls whose host connected their own Google Calendar, are written into Google Calendar. Other bookings reach your calendar as a feed you subscribe to, and a new busy time can take about ten minutes to close a slot.",
-          "Two-way Google Calendar sync for team hosts is built and switches on once Google approves the added permissions for our app; until then, hosts add their calendar's private iCal address, which is read the same way but writes nothing.",
+          googleWritesLimit(),
+          ...[teamSyncLimit()].filter((line) => line !== null),
           "A team call has one person per time, keeps its host when the buyer moves it, and sends its booking email to one address: yours when you host it, otherwise its first host's. Its reminders before the call come to you. A host's daily cap counts team calls only.",
           "Buyers move a booking themselves, but canceling is a reply to their confirmation email, which reaches you; a refund is made from your Stripe dashboard.",
           "Zoom links are not made for you yet. Connecting Zoom opens to every store once Zoom approves our app; until then, for Zoom, you type your own link. Stan creates Zoom links automatically.",
@@ -1492,10 +1493,10 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "What it does not do",
         items: [
           "For your own calls it is not a two-way sync. Only calls set to Google Meet are written into your calendar, on a Google Calendar you connect under Video calls; other bookings reach it through the feed you subscribe to, which your calendar app refreshes on its own schedule.",
-          "Hosts of team calls set their own calendar under Your calendar: a private iCal address, or their own Google Calendar for two-way sync (busy times read from the calendars they pick, bookings written to the one they choose), which switches on once Google approves the added permissions for our app.",
+          teamHostCalendarLimit(),
           "A new busy time can take about ten minutes to close a slot.",
           "Up to three calendars, read 120 days ahead.",
-          "Busy times are read only through a private iCal address, not through a Google or Microsoft connection. A calendar that cannot give one cannot be read.",
+          busyReadLimit(),
         ],
       },
       {

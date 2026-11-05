@@ -152,9 +152,10 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   if (!readsBuyers(store)) return { buyers: new Map(), partial: false };
   const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
   if (store.statsId && isRedisConfigured()) {
-    const [size] = await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]);
-    const bytes = Number(size ?? 0);
-    // An unknown size is never none: nothing is read (C3-112 (2)).
+    const sized: unknown = await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]);
+    // Exactly one number, 0 included, or the size is unknown, and an unknown size is never none: nothing more is
+    // read and the copy is not replaced (C3-112 (2); Codex J on #2270: [], [null], [""] or an extra slot read as 0).
+    const bytes = Array.isArray(sized) && sized.length === 1 && typeof sized[0] === "number" ? sized[0] : NaN;
     if (!Number.isSafeInteger(bytes) || bytes < 0) throw new LedgerNotCounted();
     // The copy is taken from the request's included bytes (`included`, shared with the page's other parts), or counted.
     const taken = bytes > 0 ? included.take(bytes, LEDGER_BYTES_PER_UNIT) : { units: 0, covers: 0 };

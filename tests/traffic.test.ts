@@ -585,13 +585,13 @@ async function main(): Promise<void> {
   }
   // A count and its expiry go in one write (third round, L2): a request that
   // died between two writes left a count kept for ever. The window's requests
-  // and its signals alike. The expiry is set by the count's first write, SET
-  // NX EX, so a set expiry is not moved, and never by an EXPIRE with an
+  // and its signals alike. The expiry is the same point at every count
+  // (keepSecondsFor), set again with each, and never by an EXPIRE with an
   // option, which a Redis or REST service may refuse (tests/letter-members.test.ts).
   sentPipelines.length = 0;
   await counted(() => signal(clicks.l, `192.0.2.${clickIp++}`));
   await counted(async () => { await isResting((await storeForHandle("joy"))!); });
-  const together = (prefix: string, add: string) => sentPipelines.some((list) => list.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith(prefix) && c[2] === "0" && c[3] === "NX" && c[4] === "EX" && Number(c[5]) > 0) >= 0 && list.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith(prefix)) < list.findIndex((c) => c[0] === add && String(c[1]).startsWith(prefix)));
+  const together = (prefix: string, add: string) => sentPipelines.some((list) => list.some((c) => c[0] === add && String(c[1]).startsWith(prefix)) && list.some((c) => c[0] === "EXPIRE" && String(c[1]).startsWith(prefix) && c.length === 3 && Number(c[2]) > 0));
   const optioned = sentPipelines.some((list) => list.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && String(c[1]).startsWith("nl:traffic:") && c.length > 3));
   is("a count of the window's signals and of its requests is written with its expiry, in one write, and no EXPIRE takes an option", [together("nl:traffic:s:", "INCR"), together("nl:traffic:r:", "INCRBY"), optioned], [true, true, false]);
   // The help center says it, its figures from the rule (third round, M3).

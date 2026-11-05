@@ -607,8 +607,9 @@ export function figureCost(allowances: Record<AllowanceKind, number>, kind: Allo
  * connection's share of the day, written a batch of requests at a time
  * (lib/traffic-rules.ts, SHARE_COMMANDS_PER_REQUEST; docs/security-audit-2026-10-18.md,
  * MM-SA-01), priced on every request of the window. Since 4 November 2026
- * the count's expiry goes with every count (EXPIRE ... NX in the same write),
- * not apart after the window's first: two commands where it was one.
+ * the count's expiry goes with every count (EXPIRE in the same write, the
+ * same point each time), not apart after the window's first: two commands
+ * where it was one.
  */
 export const REQUEST_COMMANDS = 2 + SHARE_COMMANDS_PER_REQUEST;
 

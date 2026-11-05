@@ -258,6 +258,27 @@ export async function isResting(store: Store, now = Date.now(), who: "public" | 
 }
 
 /**
+ * The count an INCR or INCRBY of `units` and the EXPIRE after it answered
+ * (countRequest, takeSignal), from Redis's own answer only (Codex G2 on #2583;
+ * CX-123, rule 24): two replies, an integer of at least `units`, then 1 (the
+ * key the count just wrote exists). Anything else (a `true`, a text, a 0, a
+ * missing or extra item) is a count that cannot be made: NaN, and the caller
+ * refuses.
+ */
+function countOf(reply: unknown, units: number): number {
+  if (!Array.isArray(reply) || reply.length !== 2) return NaN;
+  const [count, expiry] = reply;
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= units && expiry === 1 ? count : NaN;
+}
+
+/** What a DECR and the EXPIRE after it answered, the count after the give-back: NaN for any other answer. */
+function givenBack(reply: unknown): number {
+  if (!Array.isArray(reply) || reply.length !== 2) return NaN;
+  const [count, expiry] = reply;
+  return typeof count === "number" && Number.isSafeInteger(count) && expiry === 1 ? count : NaN;
+}
+
+/**
  * One more request answered for this store's public side, counted in its
  * window: true when it fits, where public pages rest at 95% of the window's
  * requests and what buyers have at all of them (lib/traffic-rules.ts,
@@ -276,17 +297,13 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
   const key = requestsKey(folder, window.id);
   // The count and its expiry in one write (4 November 2026): an expiry sent
   // apart, after the first count, was lost with a request that died between
-  // the two, and the count was then kept for ever. NX leaves an expiry already
-  // set as it is.
-  const reply = await redisPipeline([["INCRBY", key, units], ["EXPIRE", key, keepSecondsFor(window, now), "NX"]]);
-  // Only Redis's own answer to these two commands counts (Codex G2 on #2583):
-  // two replies, the first an integer at least `units`, the second 0 or 1,
-  // and 1 when the count was just made (a key INCRBY creates has no expiry,
-  // so NX sets one; nothing else writes this key). Anything else, a `true`,
-  // a text, a missing item or a new count Redis says kept an expiry, is a
-  // count that cannot be made: the request is refused.
-  const ok = Array.isArray(reply) && reply.length === 2 && typeof reply[0] === "number" && (reply[0] === units ? reply[1] === 1 : reply[1] === 0 || reply[1] === 1);
-  const n = ok ? (reply[0] as number) : NaN;
+  // the two, and the count was then kept for ever. The expiry is the window's
+  // end and a day (keepSecondsFor), the same point at every count, so it is
+  // set again with each, as a connection's share is (overShare); never an
+  // EXPIRE with an option, which a Redis or REST service may refuse
+  // (tests/letter-members.test.ts).
+  const reply = await redisPipeline([["INCRBY", key, units], ["EXPIRE", key, keepSecondsFor(window, now)]]);
+  const n = countOf(reply, units);
   if (!Number.isSafeInteger(n) || n < units) return false;
   return n <= limit;
 }
@@ -365,17 +382,13 @@ export async function takeSignal(store: Store, write: () => Promise<boolean> = a
     if (client && (await overShare(signalShareKey, pool === "paid" ? "paid" : "signal", folder, window, clientDayShare(limit), client, 1, now))) return refuse();
     key = (pool === "paid" ? paidArrivalsKey : signalsKey)(folder, window.id);
     keep = keepSecondsFor(window, now);
-    const reply = await redisPipeline([["INCR", key], ["EXPIRE", key, keep, "NX"]]);
-    // Only Redis's own answer to these two commands counts (CX-123, rule 24):
-    // two replies, an integer of at least one and 0 or 1. A count that went
-    // back to nothing keeps its expiry, so a new one may answer 0 here.
-    // Anything else is a count that cannot be made: nothing is written.
-    const n = Array.isArray(reply) && reply.length === 2 && (reply[1] === 0 || reply[1] === 1) && typeof reply[0] === "number" ? reply[0] : NaN;
+    // With its expiry in the same write, as a window's requests are (countRequest).
+    const n = countOf(await redisPipeline([["INCR", key], ["EXPIRE", key, keep]]), 1);
     if (!Number.isSafeInteger(n) || n < 1) return refuse();
     if (n > limit) {
-      const [left] = await redisPipeline([["DECR", key], ["EXPIRE", key, keep, "NX"]]);
+      const left = givenBack(await redisPipeline([["DECR", key], ["EXPIRE", key, keep]]));
       // Spent: written down unless the count fell back under its figure meanwhile (another signal was given back).
-      if (!(Number(left) < limit)) await gap();
+      if (!(left < limit)) await gap();
       return false;
     }
   } catch {
@@ -388,7 +401,7 @@ export async function takeSignal(store: Store, write: () => Promise<boolean> = a
   } catch {
     wrote = null;
   }
-  if (wrote === false) await redisPipeline([["DECR", key], ["EXPIRE", key, keep, "NX"]]).catch(() => undefined);
+  if (wrote === false) await redisPipeline([["DECR", key], ["EXPIRE", key, keep]]).catch(() => undefined);
   return wrote === true;
 }
 

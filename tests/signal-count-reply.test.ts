@@ -1,9 +1,8 @@
 /**
  * A signal's count (lib/traffic.ts, takeSignal) is made only from Redis's own
- * answer to its two commands, SET NX EX (the count made with its expiry) and
- * INCR: two replies, "OK" or null, then an integer of at least one, and
- * exactly one when the SET made the count (CX-123, rule 24). Anything else (a
- * `true`, a text, a missing or extra item) is a count that cannot be made:
+ * answer to its two commands, INCR and the EXPIRE with it: two replies, an
+ * integer of at least one, then 1 (CX-123, rule 24). Anything else (a `true`,
+ * a text, a 0, a missing or extra item) is a count that cannot be made:
  * nothing is written, and the count not made is written down (countGap).
  * Synthetic Redis (tests/redis-stub.ts), synthetic store.
  */
@@ -33,7 +32,7 @@ test("a signal's count from Redis's exact answer is taken, and the write runs", 
   assert.equal(await countGap(store), null);
 });
 
-for (const receipt of [[true, 1], ["1", 1], [1], [1, 1], ["OK"], ["OK", 1, 1], ["OK", "1"], ["OK", true], [null, "1"], [null, 0], ["OK", 2], [null, 1.5], [1, 0]]) {
+for (const receipt of [[true, 1], ["1", 1], [1], [1, 1, 1], [1, "1"], [1, true], [null, 1], [1.5, 1], [1, 0], ["OK", 1], [0, 1]]) {
   test(`a signal's count answered ${JSON.stringify(receipt)} is not made: nothing written, and written down`, async () => {
     const store = await seed();
     const original = redis.pipeline.bind(redis);
@@ -61,10 +60,10 @@ test("a key deleted takes its expiry with it, as in Redis: a count made again ge
   assert.deepEqual(await r.pipeline([["INCRBY", "count", 1], ["TTL", "count"], ["EXPIRE", "count", 60, "NX"]]), [1, -1, 1]);
 });
 
-test("a count is made with its expiry by SET NX EX, never by an EXPIRE with an option", async () => {
+test("a count's expiry goes in the same write, never by an EXPIRE with an option", async () => {
   // EXPIRE NX is refused by a Redis or REST service that does not take
-  // options (tests/letter-members.test.ts): the count's first write sets the
-  // expiry instead, in the same pipeline.
+  // options (tests/letter-members.test.ts): the expiry is the same point at
+  // every count (keepSecondsFor), set again with each.
   const store = await seed();
   const original = redis.pipeline.bind(redis);
   const sent: (string | number)[][][] = [];
@@ -78,5 +77,5 @@ test("a count is made with its expiry by SET NX EX, never by an EXPIRE with an o
   assert.equal(sent.flat().some((c) => String(c[0]).toUpperCase() === "EXPIRE" && c.length > 3), false);
   const counts = sent.filter((list) => list.some((c) => c[0] === "INCR" || c[0] === "DECR"));
   assert.ok(counts.length >= 3);
-  for (const list of counts) assert.ok(list.some((c) => c[0] === "SET" && c[2] === "0" && c[3] === "NX" && c[4] === "EX"), JSON.stringify(list));
+  for (const list of counts) assert.ok(list.length === 2 && list[1][0] === "EXPIRE" && list[1][1] === list[0][1] && Number(list[1][2]) > 0, JSON.stringify(list));
 });

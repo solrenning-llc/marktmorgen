@@ -21,8 +21,8 @@
  * gigabyte, and it has rules of its own (lib/watch-rules.ts).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { textCountOf } from "@/lib/redis-count";
-import { repliesFor } from "@/lib/redis-reply";
+import { signedOf, textCountOf } from "@/lib/redis-count";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { STREAM_PREFIX } from "@/lib/stream-rules";
 import { VAULT_PREFIX } from "@/lib/vault-rules";
 
@@ -147,39 +147,55 @@ const counterKey = (folder: string, month: string) =>
  * is to warn.
  *
  * Never throws. A counter that cannot be written must not cost a buyer the
- * file they paid for.
+ * file they paid for. Answers whether the delivery was counted (true too
+ * when there is nothing to count): false when INCRBY failed or answered in
+ * any other shape than a whole total at least the bytes just added (CX-123
+ * rule 24), so a free copy is not handed out uncounted (lib/serve-file.ts).
  */
 export async function recordDelivery(
   pathname: string,
   bytes: number,
-): Promise<void> {
-  if (!isRedisConfigured()) return;
-  if (!Number.isFinite(bytes) || bytes <= 0) return;
+): Promise<boolean> {
+  if (!isRedisConfigured()) return true;
+  if (!Number.isFinite(bytes) || bytes <= 0) return true;
   const folder = folderFromPathname(pathname);
-  if (!folder) return;
+  if (!folder) return true;
 
   const month = monthKey();
   const key = counterKey(folder, month);
+  const added = Math.round(bytes);
+  let total: number | null;
   try {
-    const [total] = await redisPipeline([
-      ["INCRBY", key, Math.round(bytes)],
-      ["EXPIRE", key, KEEP_SECONDS],
-    ]);
+    const replies = repliesFor(
+      await redisPipeline([
+        ["INCRBY", key, added],
+        ["EXPIRE", key, KEEP_SECONDS],
+      ]),
+      2,
+    );
+    const read = replies ? signedOf(replies[0]) : null;
+    total = read !== null && read >= added ? read : null;
+  } catch (error) {
+    console.error("could not record a delivery", error);
+    return false;
+  }
+  try {
     // Written down once, on the delivery that takes the store past the line.
     // Checking the crossing rather than the total keeps a store that is far
     // over from writing this on every file it hands out for the rest of the
-    // month.
-    const now = Number(total);
-    const before = now - Math.round(bytes);
-    if (Number.isFinite(now) && now > DELIVERY_ALLOWANCE_BYTES && before <= DELIVERY_ALLOWANCE_BYTES) {
+    // month. An unknown total may have crossed it: the store is written down
+    // too, and the watch names it only if its real total is over.
+    if (total === null || (total > DELIVERY_ALLOWANCE_BYTES && total - added <= DELIVERY_ALLOWANCE_BYTES)) {
       await redisPipeline([
         ["SADD", overKey(month), folder],
         ["EXPIRE", overKey(month), KEEP_SECONDS],
       ]);
     }
   } catch (error) {
-    console.error("could not record a delivery", error);
+    console.error("could not write down a store past its allowance", error);
   }
+  if (total === null) console.error("recording a delivery: Redis answered INCRBY in an unknown shape");
+  return total !== null;
 }
 
 export type DeliveryMonth = {
@@ -229,25 +245,32 @@ export async function deliveredThisMonth(
  * only thing that tells us. Nothing here stops a delivery: a creator over
  * the line is a conversation, and this is what makes the conversation
  * possible in the week it matters rather than after the invoice.
+ *
+ * Throws when Redis cannot be asked or answers in an unknown shape (CX-123
+ * rule 24): an unread list is never "nobody is over", and an unread total is
+ * never 0 bytes. The day's run then fails where it can be seen, and the
+ * next one reads again.
  */
 export async function storesOverAllowance(
   now: Date = new Date(),
 ): Promise<{ folder: string; bytes: number }[]> {
   if (!isRedisConfigured()) return [];
   const month = monthKey(now);
-  try {
-    const [raw] = await redisPipeline([["SMEMBERS", overKey(month)]]);
-    const folders = Array.isArray(raw) ? raw.filter((f): f is string => typeof f === "string" && f !== "") : [];
-    if (folders.length === 0) return [];
-    const totals = await redisPipeline(folders.map((f) => ["GET", counterKey(f, month)]));
-    return folders
-      .map((folder, i) => ({ folder, bytes: Number(totals[i]) || 0 }))
-      .filter((row) => row.bytes > DELIVERY_ALLOWANCE_BYTES)
-      .sort((a, b) => b.bytes - a.bytes);
-  } catch (error) {
-    console.error("could not read the stores over the allowance", error);
-    return [];
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", overKey(month)]]), 1);
+  const members = listed ? stringList(listed[0]) : null;
+  if (!members) throw new UnknownReplyError("the stores over the delivery allowance");
+  const folders = members.filter((f) => f !== "");
+  if (folders.length === 0) return [];
+  const totals = repliesFor(await redisPipeline(folders.map((f) => ["GET", counterKey(f, month)])), folders.length);
+  if (!totals) throw new UnknownReplyError("the delivery totals");
+  const rows: { folder: string; bytes: number }[] = [];
+  for (let i = 0; i < folders.length; i += 1) {
+    const count = textCountOf(totals[i]);
+    if (count === null) throw new UnknownReplyError("a store's delivery total");
+    // A total whose key is gone (the month's counter expired) is nothing sent: it is not named.
+    rows.push({ folder: folders[i], bytes: count === "absent" ? 0 : count });
   }
+  return rows.filter((row) => row.bytes > DELIVERY_ALLOWANCE_BYTES).sort((a, b) => b.bytes - a.bytes);
 }
 
 /** "1.4 TB", for a line in an email. */
@@ -258,17 +281,24 @@ export function bytesWords(bytes: number): string {
 }
 
 /**
- * Whether this store's free copies are paused for the rest of the month.
+ * Whether this store's free copies may go out this month: "open", "over"
+ * (the counter, read, is past the line: paused until the month turns), or
+ * "unknown" (the counter could not be read, or came back in any other
+ * shape: CX-123 rule 24). Nobody paid for a free copy, so "unknown" is never
+ * room for one; it is not "over" either, and is never told as such.
  *
  * Asked before a free file is handed over, and never before a paid one.
- * Answers true (paused) when the counter cannot be read or comes back in
- * any other shape (CX-123 rule 24): nobody paid for a free copy, so an
- * unknown count is never room for one. A paid download is never asked.
  */
-export async function freeDeliveryPaused(folder: string): Promise<boolean> {
-  if (!isRedisConfigured() || !folder) return false;
+export async function freeDeliveryPause(folder: string): Promise<"open" | "over" | "unknown"> {
+  if (!isRedisConfigured() || !folder) return "open";
   const bytes = await monthBytes(folder);
-  return bytes === null || bytes > FREE_PAUSE_ABOVE_BYTES;
+  if (bytes === null) return "unknown";
+  return bytes > FREE_PAUSE_ABOVE_BYTES ? "over" : "open";
+}
+
+/** Whether this store's free copies are paused: past the line, or the counter unknown. */
+export async function freeDeliveryPaused(folder: string): Promise<boolean> {
+  return (await freeDeliveryPause(folder)) !== "open";
 }
 
 /**

@@ -522,6 +522,15 @@ export class MemoryRedis {
           held.delete(args[2]);
           return value;
         }
+        // lib/crm.ts MARK_RETURNED: a deletion mark taken away only by an act after the deletion it records.
+        if (key.startsWith("-- marktmorgen:crm-erased-returned:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, target, at] = args;
+          const raw = this.run(["GET", target]);
+          const mark = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : null;
+          if (mark === null || !(mark < Number(at))) return 0;
+          this.run(["DEL", target]);
+          return 1;
+        }
         // lib/crm.ts SET_CRM_VALUE: a person's value written unless they are marked deleted or the save carries another generation, answering what it replaced.
         if (key.startsWith("-- marktmorgen:crm-value-set:v4\n") && args[0] === "3" && args.length === 7) {
           const [, target, erased, generation, person, value, carried] = args;

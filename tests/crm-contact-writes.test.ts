@@ -112,8 +112,15 @@ async function main() {
     is("nothing written again",await stored(zoe),null);
     is("and the mark stays",(await original.call(redis,[["EXISTS","nl:crm:erased:"+sid+":"+zoe]]))[0],1);
 
-    part("A real return, by a paid order: the mark goes; a page read since writes, one read before never does");
+    part("An order paid before the deletion and listed only after it (a late job, a thanks page opened again) is not a return (Codex D, #2287)");
     store=(await storeForEmail(owner))!;
+    is("(the old order is put on the list)",await listOrder(store,{sessionId:"cs_test_contacthistoric1",email:"zoe@example.com",news:false,created:Math.floor((Date.now()-2*86_400_000)/1000),products:[{id:"prod01",title:"Course"}]}),"done");
+    is("the mark stays",(await original.call(redis,[["EXISTS","nl:crm:erased:"+sid+":"+zoe]]))[0],1);
+    const fresh=await readGeneration(sid,zoe);
+    const historic=await post({action:"value",field:field.id,person:zoe,value:"Restored from a historical order",generation:fresh});
+    is("a page read after it is still refused, and nothing is written",[historic.status,await stored(zoe)],[404,null]);
+
+    part("A real return, by a paid order: the mark goes; a page read since writes, one read before never does");
     is("(the order is put on the list)",await listOrder(store,{sessionId:"cs_test_contactreturn01",email:"zoe@example.com",news:false,created:Math.floor(Date.now()/1000),products:[{id:"prod01",title:"Course"}]}),"done");
     is("the mark is gone",(await original.call(redis,[["EXISTS","nl:crm:erased:"+sid+":"+zoe]]))[0],0);
     is("a page read before the deletion: still 404",(await post({action:"value",field:field.id,person:zoe,value:"Stale",generation:read})).status,404);

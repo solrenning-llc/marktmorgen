@@ -61,8 +61,9 @@ export async function listOrder(store: Store, order: ListedOrder): Promise<"done
   }
   const products = order.products.filter((p, i) => order.products.findIndex((q) => q.id === p.id) === i);
   try {
-    // A paid order: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125).
-    await personReturned(store.statsId, order.email);
+    // A paid order: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125),
+    // only if it was paid after they were deleted: one listed late is not a return (Codex D, #2287).
+    await personReturned(store.statsId, order.email, order.created * 1000);
     if (order.news) {
       const [first, ...rest] = products;
       const added = await upsertContact(store.listId, order.email, {

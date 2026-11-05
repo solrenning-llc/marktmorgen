@@ -231,11 +231,33 @@ export async function readGenerations(statsId: string, persons: string[]): Promi
  * so the store may keep fields about them again. Their generation stays, so
  * a page read before the deletion is still refused. Server paths only; never
  * throws (a mark that stays only refuses more).
+ *
+ * `at` is when the person did it, in milliseconds, from the server's own
+ * record of the act (the payment's time, when the sign-up, the place or the
+ * copy was asked for, a form's arrival), never from a request. The mark goes
+ * only when that is after the deletion, compared in one step with the mark
+ * as it is (MARK_RETURNED): an order paid before the deletion and listed only
+ * after it (a late job, a thanks page opened again), or an old link used
+ * again, is not a return (Codex D, #2287). An unknown time keeps the mark.
  */
-export async function personReturned(statsId: string | null, email: string): Promise<void> {
-  if (!statsId || !email || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", erasedKey(statsId, personKey(statsId, email))]]).catch((error: unknown) => console.error("clearing a deletion mark failed", error));
+export async function personReturned(statsId: string | null, email: string, at: number): Promise<void> {
+  if (!statsId || !email || !Number.isSafeInteger(at) || at <= 0 || !isRedisConfigured()) return;
+  await redisPipeline([["EVAL", MARK_RETURNED, 1, erasedKey(statsId, personKey(statsId, email)), String(at)]]).catch((error: unknown) => console.error("clearing a deletion mark failed", error));
 }
+
+/**
+ * Takes a deletion mark away only when the act that brought the person back
+ * (ARGV[1], milliseconds) came after the deletion it records. A mark that is
+ * not a time is kept. Modelled by lib/redis-memory.ts.
+ */
+export const MARK_RETURNED = `-- marktmorgen:crm-erased-returned:v1
+local mark = tonumber(redis.call('GET', KEYS[1]) or '')
+if mark == nil then return 0 end
+if mark < tonumber(ARGV[1]) then
+  redis.call('DEL', KEYS[1])
+  return 1
+end
+return 0`;
 /** Where people's field values are counted in the store's data room (lib/store-data.ts). */
 const VALUES_SLOT = "crm:v";
 /** Where the pipelines are counted in it: one slot, at what their record weighs. */

@@ -174,7 +174,8 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
   }
   // A confirmed place: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125).
-  await personReturned(store.statsId, grant.e);
+  // When they asked for the place (seconds), not when the link was used: an old link used again is not a return (Codex D, #2287).
+  await personReturned(store.statsId, grant.e, entry.at * 1000);
   if (entry.c && store.listId) {
     await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
       console.error("could not add a waitlist address to a list", error),

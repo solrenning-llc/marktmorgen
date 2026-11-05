@@ -138,6 +138,7 @@ export async function confirmJoin(token: string, store: Store | null): Promise<C
   if (added.full) return { ok: false, reason: "full" };
   await redisPipeline([["DEL", tokenKey(token)]]);
   // A confirmed sign-up: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125).
-  await personReturned(store.statsId, grant.e);
+  // When they asked to join, not when the link was used: an old link used again is not a return (Codex D, #2287).
+  await personReturned(store.statsId, grant.e, Date.parse(grant.at));
   return { ok: true, grant, added };
 }

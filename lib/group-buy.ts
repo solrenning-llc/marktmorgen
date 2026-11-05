@@ -532,20 +532,31 @@ const OPENING_SECONDS = 30;
 /** A place's mark: who, when, the hour its order was admitted in, and whether all that follows the gift was done. */
 type Mark = Member & { h?: number; d?: 1 };
 
+/**
+ * A place's mark as HGET answers it: null only for an explicit nil (no
+ * mark), the mark when it is exactly what this file writes (a JSON object
+ * with an address, a time from one up, and, when present, a whole hour and
+ * d = 1), or undefined for anything else. A mark that cannot be read is
+ * unknown, never one made up, so it never says "already" or "done"
+ * (CX-123 rule 24).
+ */
 function markOf(reply: unknown): Mark | null | undefined {
   if (reply === null) return null;
   if (typeof reply !== "string") return undefined;
+  let value: unknown;
   try {
-    const value = JSON.parse(reply) as Partial<Mark>;
-    return {
-      e: typeof value.e === "string" ? value.e : "",
-      at: typeof value.at === "number" ? value.at : 0,
-      ...(Number.isSafeInteger(value.h) ? { h: value.h } : {}),
-      ...(value.d === 1 ? { d: 1 as const } : {}),
-    };
+    value = JSON.parse(reply);
   } catch {
-    return { e: "", at: 0 };
+    return undefined;
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const fields = value as Record<string, unknown>;
+  if (Object.keys(fields).some((name) => !["e", "at", "h", "d"].includes(name))) return undefined;
+  const { e, at, h, d } = fields;
+  if (typeof e !== "string" || !e || !Number.isSafeInteger(at) || (at as number) < 1) return undefined;
+  if (h !== undefined && !Number.isSafeInteger(h)) return undefined;
+  if (d !== undefined && d !== 1) return undefined;
+  return { e, at: at as number, ...(h !== undefined ? { h: h as number } : {}), ...(d === 1 ? { d: 1 as const } : {}) };
 }
 
 /** The address's mark and what it was given, in their exact shape; throws when either is not. */
@@ -592,7 +603,7 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
     // places. What follows the gift is done again when it was not, for a
     // gift of the last week (well inside the mark that counts its order
     // once, lib/orders.ts, 45 days).
-    const held: Mark = mark ?? { e: email, at: given.at };
+    const held: Mark = mark ?? { e: email, at: given.at > 0 ? given.at : now() };
     if (!mark) await redisPipeline([["HSETNX", members, who, write(held)]]);
     if (!held.d && given.at > 0 && now() - given.at < 7 * 86_400) await finish({ ...held, at: given.at });
     return { outcome: "already", email, group };
@@ -660,15 +671,18 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
 
   const [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], placed.at, store.sid);
   if (!granted) {
-    // Read in its exact shape: a gift this purchase made keeps its mark, so
-    // an unknown answer takes nothing off and is said as not done.
+    // This open's order is not counted by this open: the room it was
+    // admitted with goes back (another open gives back its own, and an open
+    // of this link that finds this gift later counts the order without it).
+    if (!held && hour !== null) await settleAdmitted(store, hour);
+    // Read in its exact shape: only a gift as grantImported writes it says
+    // who has the product. An unknown answer, or none at all just after the
+    // grant was refused for one being there, takes nothing off and is said
+    // as not done: the mark stays for the next open of the link.
     const one = repliesFor(await redisPipeline([["HGET", importedKey(group.s, email), group.p]]), 1);
     const other = one ? givenBy(one[0]) : undefined;
-    if (other === undefined) throw new UnknownReplyError("a place's gift");
-    // This open's order was not the one counted: the room it was admitted
-    // with goes back (the other open gives back its own).
-    if (!held && hour !== null) await settleAdmitted(store, hour);
-    if (other && other.job === groupJob(group.id)) {
+    if (!other) throw new UnknownReplyError("a place's gift");
+    if (other.job === groupJob(group.id)) {
       // This purchase gave it already, from another open of the same link:
       // its place stays, and what follows is that open's, or the next one's.
       return { outcome: "already", email, group };

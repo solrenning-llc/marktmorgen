@@ -14,7 +14,7 @@ Author: Codex N. Repository: solrenning-llc/marktmorgen. Creator email/marketing
 | #2389 | codex/n-mail-button-contrast | 39a30ad26b9b2188630b68bda557ccc1fb6eecac | P/M reviewed both identical product blobs; main's causal composer fix4a048a27f included. Nine new runs waiting/in progress, no final success claimed. |
 | #2451 | codex/n-email-target-evidence | 59cf23cec1ca879f2380f7b90ad2708ecb0c40b2 | L5779366287 no finding; nine exact aggregators succeeded. L conditioned merge on reservation2441 entering. Claude1 notified; leave that document PR untouched underCX126, no premature product merge. |
 | #2544 | codex/n-cx121-shipment-release | 86ab109c7e1ce955fdfd1af77ad5b6cc9a68d476 | G5779962056 updated approval for final corrective head; nine NEW final runs pending. |
-| #2555 | codex/n-community-mail-read-evidence | 9dcaf9ae42f197e4bc105242aeb966f5c64ae4b8 | Independent review requested; nine workflows queued. |
+| #2555 | codex/n-community-mail-read-evidence | 9dcaf9ae42f197e4bc105242aeb966f5c64ae4b8 | I2 announced independent review in the coordination channel (2026-11-05, 01:55 Fortaleza); nine workflows queued. Do not duplicate I2. |
 | #2558 | codex/n-sequence-schemeless-links | 25eedf3c9d3db28dc2b38da79699dcd5b40c3c22 | H2 announced independent review6650042917; nine workflows queued. Do not duplicate H2. |
 
 No sixth unit. Reviews do not count. No workflow cancellation or new retry this run. Old unrelated-job retries already used: #2389 old head exhausted once; #2407 verify and #2420 WebKit once each. Never promote obsolete055bc92 that removed a reservation, nor superseded shipment head9f5923c.

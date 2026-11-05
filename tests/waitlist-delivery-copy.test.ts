@@ -11,7 +11,7 @@ const EXPECTED: Record<LanguageCode, string> = {
   en: "We emailed you a button to confirm your spot on the waitlist for The Bread Book. It comes from Harbor Kitchen via Marktmorgen. If it is not there, look in spam.",
   es: "Te hemos enviado por email un botón para confirmar tu plaza en la lista de espera de The Bread Book. Llega de Harbor Kitchen a través de Marktmorgen. Si no está, mira en spam.",
   fr: "Nous vous avons envoyé par e-mail un bouton pour confirmer votre place sur la liste d'attente de The Bread Book. Il vient de Harbor Kitchen via Marktmorgen. S'il n'y est pas, regardez dans les spams.",
-  de: "Wir haben Ihnen per E-Mail eine Schaltfläche geschickt, mit der Sie Ihren Platz auf der Warteliste für The Bread Book bestätigen. Sie kommt von Harbor Kitchen über Marktmorgen. Falls nicht, sehen Sie im Spam-Ordner nach.",
+  de: "Wir haben Ihnen per E-Mail eine Schaltfläche geschickt, mit der Sie Ihren Platz auf der Warteliste für The Bread Book bestätigen. Sie kommt von Harbor Kitchen über Marktmorgen. Falls sie nicht da ist, sehen Sie im Spam-Ordner nach.",
   it: "Ti abbiamo inviato via email un pulsante per confermare il tuo posto nella lista d'attesa per The Bread Book. Arriva da Harbor Kitchen tramite Marktmorgen. Se non la trovi, guarda nello spam.",
   nl: "We hebben je een knop gemaild om je plek op de wachtlijst voor The Bread Book te bevestigen. De e-mail komt van Harbor Kitchen via Marktmorgen. Staat hij er niet, kijk dan in je spam.",
   pt: "Enviámos-lhe por email um botão para confirmar o seu lugar na lista de espera de The Bread Book. Chega de Harbor Kitchen através da Marktmorgen. Se não estiver lá, veja na pasta de spam.",

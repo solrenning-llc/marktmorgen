@@ -114,12 +114,19 @@ export class MemoryWriteUnconfirmed extends Error {
 export async function readMemoryState(statsId: string | null): Promise<MemoryRead> {
   if (!statsId || !isRedisConfigured()) return { ok: true, notes: [] };
   const read = await readRecord(statsId);
-  return read.ok ? { ok: true, notes: read.notes } : read;
+  if (!read.ok) return read;
+  // The studio shows every note it keeps, so a list with a note the rules leave out is not shown as if it were the
+  // whole list: unreadable, said so, never a shorter list (Codex G2 on #1949/#1951).
+  return read.whole ? { ok: true, notes: read.notes } : { ok: false, error: "unreadable" };
 }
 
-/** A store's notes, oldest first, or none when it has none (or they cannot be read): for the assistant, which only reads. */
+/**
+ * A store's notes, oldest first, for the assistant, which only reads: the ones the rules let through (a note left
+ * out is never sent to the model), or none when the record cannot be read.
+ */
 export async function readMemory(statsId: string | null): Promise<MemoryNote[]> {
-  const read = await readMemoryState(statsId);
+  if (!statsId || !isRedisConfigured()) return [];
+  const read = await readRecord(statsId);
   return read.ok ? read.notes : [];
 }
 

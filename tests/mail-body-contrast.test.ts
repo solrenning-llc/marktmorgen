@@ -21,6 +21,9 @@ function ratio({ fill, ink }: { fill: string; ink: string }): number {
   const b = luminance(ink);
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
+function colorRatio(a: string, b: string): number {
+  return ratio({ fill: a, ink: b });
+}
 
 part("Creator email buttons: rendered text contrast");
 for (const accent of ["#777777", "#999999", "#00aa00", "#ee7700", "#4c1d95", "#ffdd00", "#ffffff", "#000000"]) {
@@ -38,10 +41,13 @@ for (const r of [0, 51, 102, 153, 204, 255]) {
 }
 const unreadable = [...colors].filter((accent) => ratio(painted(accent)) < 7);
 is("all grayscale values and a six-level RGB grid render at least 7:1", unreadable, []);
+const indistinct = [...colors].filter((accent) => colorRatio(painted(accent).fill, "#ffffff") < 3);
+is("all grayscale values and a six-level RGB grid keep a 3:1 button edge on the white card", indistinct, []);
 
 part("Existing content and safe colors are preserved");
 is("dark store color remains unchanged", painted("#4c1d95").fill, "#4c1d95");
-is("readable light store color remains unchanged", painted("#ffdd00"), { fill: "#ffdd00", ink: "#1c1917" });
+is("readable light store color gains a visible edge", [painted("#ffdd00").fill !== "#ffdd00", colorRatio(painted("#ffdd00").fill, "#ffffff") >= 3], [true, true]);
+is("white store color gains a visible edge", [painted("#ffffff").fill !== "#ffffff", colorRatio(painted("#ffffff").fill, "#ffffff") >= 3], [true, true]);
 is("invalid CSS falls back to the established accent", painted("red;}body{display:none"), painted("#4c1d95"));
 is("uppercase hex remains readable", ratio(painted("#00AA00")) >= 7, true);
 let targets = 0;

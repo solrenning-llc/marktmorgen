@@ -6,7 +6,7 @@
  */
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {keepNote,forgetMemory} from '@/lib/assistant-memory-store';
+import {keepNote,forgetMemory,readMemory,readMemoryState} from '@/lib/assistant-memory-store';
 import {dataKey,needData} from '@/lib/store-data';
 import {dataBytes} from '@/lib/store-data-rules';
 import {ROOM} from './data-room';
@@ -48,4 +48,10 @@ test('forgetting cannot return the room of a fresh note saved after its atomic d
  let waiting=false;
  try{await forgetMemory(stats,room);assert.equal(raced,true);if(waiting)assert.equal((await keepNote(stats,{kind:'instruction',text:'N'.repeat(240)},room)).ok,true,'once the forgetting is done, the fresh note is kept');assert.equal(JSON.parse(String(redis.run(['GET',key])))[0].text,'N'.repeat(240));const a=accounting();console.log('G2_MEMORY_FORGET_ACCOUNTING',JSON.stringify(a));assert.ok(a.held>=a.required,'a confirmed older delete returned the fresh writer\'s room');}
  finally{redis.pipeline=base;}
+});
+test('a list with a note the rules leave out is never shown to the studio as the whole list; the model gets only the readable ones (Codex G2 on #1951)',async()=>{
+ const prior=await fixture(),valid=JSON.parse(prior)[0],raw=JSON.stringify([valid,{...valid,id:'abc123def4',kind:'future_kind',text:'Keep a deliberate preference for later.'}]);
+ redis.run(['SET',key,raw]);
+ assert.deepEqual(await readMemoryState(stats),{ok:false,error:'unreadable'},'the studio is told the notes cannot be read whole');
+ assert.deepEqual((await readMemory(stats)).map(n=>n.id),[valid.id],'the model gets only the note the rules let through');
 });

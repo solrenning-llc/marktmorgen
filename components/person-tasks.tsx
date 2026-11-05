@@ -75,11 +75,67 @@ export function watchDay(onChange: () => void, clock: DayClock = browserClock())
 
 const watchBrowserDay = (onChange: () => void) => watchDay(onChange);
 
-type Field = "text" | "due" | "assignee";
-/** Where the focus goes once the screen has drawn a change, so it is never left on a button that went away (AAA audit C1). */
-type FocusTo = { to: Field | "undo" | "full" | "count" } | { to: "task"; id: string };
+export type Field = "text" | "due" | "assignee";
+/**
+ * Where the focus goes once the screen has drawn a change, so it is never
+ * left on a button that went away (AAA audit C1). "kept": where it was, the
+ * element given, unless that element is gone (a task another tab removed,
+ * read again), when the count of tasks takes it (WCAG 2.4.3).
+ */
+export type FocusTo<E = HTMLElement> = { to: Field | "undo" | "full" | "count" } | { to: "task"; id: string } | { to: "kept"; element: E | null };
 /** The field of the add form each refusal is about (lib/person-tasks.ts), so the message is told beside it (AAA audit C2). */
 const FIELD_OF: Partial<Record<string, Field>> = { text: "text", long: "text", date: "due", assignee: "assignee" };
+
+/** Where the focus goes after each change: what the screen asks for, kept in one place so it is checked as it behaves. */
+export const focusAfter = {
+  /** A removal: to Undo. */
+  removed: (): FocusTo<never> => ({ to: "undo" }),
+  /** An undo: to the task put back, or to the count when it cannot be told apart. */
+  putBack: (added: PersonTask | null): FocusTo<never> => (added ? { to: "task", id: added.id } : { to: "count" }),
+  /** An add: to the field, ready for the next one; at the most a person can have, to the line that says so. */
+  added: (count: number): FocusTo<never> => ({ to: count >= MAX_PERSON_TASKS ? "full" : "text" }),
+  /** A refusal: to the field at fault; with none, it stays where it was, unless that is gone. */
+  refused: <E,>(field: Field | null, had: E | null): FocusTo<E> => (field ? { to: field } : { to: "kept", element: had }),
+};
+
+/**
+ * The element `next` names once the change is drawn: a field, a box, a
+ * button or a line from `named` and `boxes`, or the count when that one is
+ * not there; for "kept", null (the focus is left alone) while the element it
+ * was on is still on the page, and the count once it is gone.
+ */
+export function focusTarget<E>(next: FocusTo<E>, named: Readonly<Record<Field | "undo" | "full" | "count", E | null>>, boxes: ReadonlyMap<string, E>, connected: (element: E) => boolean): E | null {
+  if (next.to === "kept") return next.element && connected(next.element) ? null : named.count;
+  const target = next.to === "task" ? boxes.get(next.id) : named[next.to];
+  return target ?? named.count;
+}
+
+/** What the screen does with a refusal: nothing (one the caller answers itself), or its words, the field it is told beside, and what is read again. */
+export type Refusal = { quiet: true } | { quiet: false; said: string; field: Field | null; stale: boolean; team: boolean };
+
+/**
+ * A refusal read: quiet when the caller answers it itself (`quietOn`); else
+ * its words (the server's, or plain ones), the add form's field at fault when
+ * `form`, whether the tasks are read again (staleRefusal), and whether the
+ * team is too: a teammate refused may have left since the page was drawn.
+ */
+export function refusalOf(answer: { error?: string; message?: string }, form: boolean, quietOn = ""): Refusal {
+  if (quietOn && answer.error === quietOn) return { quiet: true };
+  const said = answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need first." : "That did not save. Try again in a moment.");
+  return { quiet: false, said, field: form ? (FIELD_OF[answer.error ?? ""] ?? null) : null, stale: staleRefusal(answer.error), team: answer.error === "assignee" };
+}
+
+/**
+ * What the alert region holds: the message, hidden there when it is shown
+ * beside its field; empty when the focus moves into that field, which says
+ * it already (HIGH 1 of the audit fixes), so it is never said twice.
+ */
+export function alertWords(error: string, errorField: Field | null, spoken: boolean): { words: string; hidden: boolean } {
+  return { words: errorField && !spoken ? "" : error, hidden: Boolean(errorField) };
+}
+
+/** Said when the team could not be read: only the owner is offered, and why. */
+export const TEAM_UNREAD = "Your team could not be read just now, so only you are listed. Open this page again to choose a teammate.";
 
 /**
  * The creator's own day for comparing tasks' dates. The server's page is
@@ -98,9 +154,12 @@ export function useCreatorDay(serverDay: string): string {
  * teammate who is no longer among those who may be responsible (they left
  * the team, or lost access to deals) is not sent, so the task comes back
  * with nobody named instead of not coming back at all; `unassigned` says so.
+ * When the team could not be read (`assignees` null), nothing is said about
+ * the teammate that is not known: they are sent, for the server to decide.
  */
-export function undoBody(task: PersonTask, assignees: readonly string[]): { body: Record<string, unknown>; unassigned: boolean } {
-  const stays = !task.assignee || assignees.includes(task.assignee);
+export function undoBody(task: PersonTask, assignees: readonly string[] | null): { body: Record<string, unknown>; unassigned: boolean } {
+  // The team not read (null): the teammate is sent as is, and the server decides; a refusal is then put back with nobody (putBack).
+  const stays = !task.assignee || assignees === null || assignees.includes(task.assignee);
   return { body: { action: "add", text: task.text, due: task.due, assignee: stays ? task.assignee : "" }, unassigned: !stays };
 }
 
@@ -148,7 +207,7 @@ export type PutBackSay = {
  * nobody, the first refusal neither said nor read again (round 3, M3; round
  * 4, M2). When done again does not save, it is said to be open (round 3, L5).
  */
-export async function putBack(task: PersonTask, assignees: readonly string[], before: readonly PersonTask[], say: PutBackSay): Promise<{ back: boolean; added: PersonTask | null }> {
+export async function putBack(task: PersonTask, assignees: readonly string[] | null, before: readonly PersonTask[], say: PutBackSay): Promise<{ back: boolean; added: PersonTask | null }> {
   let { body, unassigned } = undoBody(task, assignees);
   const words = () => (task.done ? null : undoWords(task, unassigned, null));
   let back = await say.send(body, words(), body.assignee ? "assignee" : "");
@@ -182,8 +241,20 @@ export function staleRefusal(error: string | undefined): boolean {
  * words as well as by the line, until they are removed. Seen by whoever may
  * read orders, as the notes are.
  */
-export function PersonTasks({ person, initial, assignees, today: serverDay }: { person: string; initial: PersonTask[]; assignees: string[]; /** The server's day, for its own drawing; the browser's day takes over. */ today: string }) {
+export function PersonTasks({ person, initial, owner, assignees: drawnTeam, today: serverDay }: {
+  person: string;
+  initial: PersonTask[];
+  /** The store owner's address, lower case: always offered. */
+  owner: string;
+  /** Who may be made responsible, or null when the team could not be read (then only the owner is offered, and it is said). */
+  assignees: string[] | null;
+  /** The server's day, for its own drawing; the browser's day takes over. */
+  today: string;
+}) {
   const today = useCreatorDay(serverDay);
+  // Read again after a teammate was refused (they left since the page was drawn).
+  const [team, setTeam] = useState<string[] | null>(drawnTeam);
+  const assignees = team ?? [owner];
   const [tasks, setTasks] = useState(initial);
   const [text, setText] = useState("");
   const [due, setDue] = useState("");
@@ -209,13 +280,19 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   const boxes = useRef(new Map<string, HTMLInputElement>());
   const full = tasks.length >= MAX_PERSON_TASKS;
 
-  /** The person's tasks read again, after a refusal that says this screen is out of date; true when they were. */
-  async function reread(): Promise<boolean> {
+  /** The person's tasks read again, after a refusal that says this screen is out of date, and the team with them when `withTeam`; true when they were. */
+  async function reread(withTeam = false): Promise<boolean> {
     try {
-      const response = await fetch(`/api/store/person-tasks?person=${encodeURIComponent(person)}`, { headers: { Accept: "application/json" } });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; tasks?: PersonTask[] };
+      const response = await fetch(`/api/store/person-tasks?person=${encodeURIComponent(person)}${withTeam ? "&team=1" : ""}`, { headers: { Accept: "application/json" } });
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; tasks?: PersonTask[]; assignees?: string[] | null };
       if (answer.ok && Array.isArray(answer.tasks)) {
         setTasks(answer.tasks);
+        if (withTeam && (answer.assignees === null || Array.isArray(answer.assignees))) {
+          const now = answer.assignees;
+          setTeam(now);
+          // A teammate chosen who may no longer be responsible is not left chosen.
+          setAssignee((chosen) => (!chosen || (now ?? [owner]).includes(chosen) ? chosen : ""));
+        }
         return true;
       }
     } catch {
@@ -234,9 +311,8 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
     const next = focusNext.current;
     focusNext.current = null;
     if (!next) return;
-    const named = { text: textField, due: dueField, assignee: assigneeField, undo: undoButton, full: fullLine, count: countLine };
-    const target = next.to === "task" ? boxes.current.get(next.id) : named[next.to].current;
-    (target ?? countLine.current)?.focus();
+    const named = { text: textField.current, due: dueField.current, assignee: assigneeField.current, undo: undoButton.current, full: fullLine.current, count: countLine.current };
+    focusTarget(next, named, boxes.current, (element) => element.isConnected)?.focus();
   }, [focusAsk]);
 
   function refuse(message: string, field: Field | null) {
@@ -281,11 +357,18 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
         return answer.tasks;
       }
       lastRefusal.current = answer.error ?? "";
-      // A refusal the caller answers itself (an undo tried again with nobody responsible) is neither said nor read again.
-      if (quietOn && answer.error === quietOn) return null;
-      const said = answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need first." : "That did not save. Try again in a moment.");
+      const refusal = refusalOf(answer, form, quietOn);
+      // A refusal the caller answers itself (an undo tried again with nobody responsible) is not said; a teammate refused has the team read again.
+      if (refusal.quiet) {
+        if (answer.error === "assignee") await reread(true);
+        return null;
+      }
+      // Where the focus is now: a box or button that the list read again no longer has gives it to the count (WCAG 2.4.3).
+      const had = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       // Changed elsewhere since this page was drawn: what is kept now is shown, and the refusal says why.
-      refuse(staleRefusal(answer.error) && (await reread()) ? `${said} The list now shows the tasks as they are.` : said, form ? (FIELD_OF[answer.error ?? ""] ?? null) : null);
+      const words = refusal.stale && (await reread(refusal.team)) ? `${refusal.said} The list now shows the tasks as they are.` : refusal.said;
+      refuse(words, refusal.field);
+      if (!refusal.field) focusAfterDrawing(focusAfter.refused(null, had));
     } catch {
       refuse("That did not save. Check your connection and try again.", null);
     } finally {
@@ -299,7 +382,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
     if (busy) return;
     if (await send({ action: "remove", id: task.id }, null)) {
       setRemoved(task);
-      focusAfterDrawing({ to: "undo" });
+      focusAfterDrawing(focusAfter.removed());
     }
   }
 
@@ -318,7 +401,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
     });
     if (!done.back) return;
     setRemoved(null);
-    focusAfterDrawing(done.added ? { to: "task", id: done.added.id } : { to: "count" });
+    focusAfterDrawing(focusAfter.putBack(done.added));
   }
 
   async function add(event: React.FormEvent) {
@@ -330,7 +413,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
       setText("");
       setDue("");
       // Ready for the next one; at the most a person can have, the line that says so takes the focus.
-      focusAfterDrawing({ to: after.length >= MAX_PERSON_TASKS ? "full" : "text" });
+      focusAfterDrawing(focusAfter.added(after.length));
     }
   }
 
@@ -455,7 +538,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
             <select id="task-assignee" ref={assigneeField} className="field mt-1" value={assignee} onChange={(event) => {
                 setAssignee(event.target.value);
                 corrected("assignee");
-              }} aria-invalid={errorField === "assignee" || undefined} aria-describedby={described("assignee")}>
+              }} aria-invalid={errorField === "assignee" || undefined} aria-describedby={described("assignee", team === null ? "task-team-unread" : undefined)}>
               <option value="">Nobody</option>
               {assignees.map((email) => (
                 <option key={email} value={email}>
@@ -463,6 +546,11 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
                 </option>
               ))}
             </select>
+            {team === null ? (
+              <span id="task-team-unread" className="mt-1 block text-xs text-ink-soft">
+                {TEAM_UNREAD}
+              </span>
+            ) : null}
             {fieldError("assignee")}
           </div>
           <div className="sm:col-span-2">
@@ -476,8 +564,8 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
       )}
       <p className="mt-2 text-sm text-danger-text" role="alert">
         {/* Shown beside its field: here only said, once. */}
-        <span key={errorAsk} className={errorField ? "sr-only" : undefined}>
-          {errorField && !spoken ? "" : error}
+        <span key={errorAsk} className={alertWords(error, errorField, spoken).hidden ? "sr-only" : undefined}>
+          {alertWords(error, errorField, spoken).words}
         </span>
       </p>
     </div>

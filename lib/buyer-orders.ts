@@ -69,6 +69,7 @@ import {
   ORDERS_STRIPE_CALLS,
   ORDERS_STRIPE_LISTS,
   PLAN_REFUND_CALLS,
+  ordersMovesCommands,
 } from "@/lib/buyer-orders-rules";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 
@@ -436,10 +437,10 @@ export async function callsFor(store: Store, email: string, meter?: OrdersMeter)
   const now = Date.now();
   // With a meter (the orders page), each read is taken before it is made. The move of every booking the store's pages
   // hold is read inside lib/calls.ts with the pages, before their number can be known here, so the most it can be,
-  // ORDERS_CALL_MOVES, is taken first; what those moves did not use is given back to the same opening's meter, which pays
+  // ORDERS_CALL_MOVES (a hundred moves at a command), is taken first; what those moves did not use is given back to the same opening's meter, which pays
   // this buyer's listings, rooms, feeds and keys from it. (Until lib/calls.ts says how many it is about to read.)
   // The other reads of the same opening wait for that number and use what is left, so they never ask the store meanwhile.
-  const paid = meter ? await meter.takeFor(ORDERS_CALL_MOVES, () => paidCalls(store), (calls) => calls.length) : await paidCalls(store);
+  const paid = meter ? await meter.takeFor(ORDERS_CALL_MOVES, () => paidCalls(store), (calls) => ordersMovesCommands(calls.length)) : await paidCalls(store);
   const mine = paid
     .filter((call) => call.email !== null && normaliseEmail(call.email) === who && call.end > now)
     .sort((a, b) => a.start - b.start)

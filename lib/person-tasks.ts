@@ -13,6 +13,7 @@
  * never cut.
  */
 import { validCrmDate } from "@/lib/crm-rules";
+import { type Role, can } from "@/lib/team-roles";
 
 /** The longest task, in characters. */
 export const MAX_TASK_TEXT = 200;
@@ -118,6 +119,27 @@ export function parseTasks(raw: unknown): PersonTask[] {
     if (out.length === MAX_PERSON_TASKS) break;
   }
   return out;
+}
+
+/**
+ * Who may be made responsible for a task, by address, lower case: the owner
+ * and the teammates who can see deals (orders), as on the deals board. What
+ * the person's page offers, what the route checks and what the page reads
+ * again after a teammate was refused (components/person-tasks.tsx).
+ */
+export function taskAssignees(owner: string, members: readonly { email: string; role: Role }[]): string[] {
+  return [owner.toLowerCase(), ...members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())];
+}
+
+/**
+ * What a route answers when the studio would not pay for reading every task
+ * (lib/crm.ts, TasksRecountRefused; the agenda): its own words; "try again"
+ * (503) when it could not be counted just now, as the studio does elsewhere,
+ * and the figure used (429) otherwise.
+ */
+export function studioRefusal(reason: string, message: string): { status: number; body: { ok: false; error: string; message: string } } {
+  if (reason === "unknown") return { status: 503, body: { ok: false, error: "unavailable", message: message || "This can't be counted right now. Try again in a minute." } };
+  return { status: 429, body: { ok: false, error: "studio_used", message: message || "Your studio has no requests left this month for this. Try again next month, or change your plan." } };
 }
 
 export type TaskResult = { ok: true; tasks: PersonTask[] } | { ok: false; error: TaskRefusal };

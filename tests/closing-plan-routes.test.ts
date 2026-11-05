@@ -67,6 +67,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   // No price kept at Stripe yet: the checkout writes the amount out (lib/billing.ts, writeInline).
   if (path === "/prices" && method === "GET") return json({ object: "list", data: [], has_more: false });
   if (path === "/products" || path === "/products/search" || path === "/prices") return json({ error: { message: "not in this stand-in" } }, 400);
+  if (path === "/subscriptions" && method === "GET") return json({ object: "list", data: [], has_more: false });
   if (path === "/subscriptions/search") return json({ object: "search_result", data: [], has_more: false, next_page: null });
   if (path === "/invoices" && method === "GET") return json({ object: "list", data: world.invoices.filter((row) => row.subscription === url.searchParams.get("subscription")), has_more: false });
   const intent = path.match(/^\/payment_intents\/(pi_\w+)$/);

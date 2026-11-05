@@ -101,7 +101,7 @@ export type PreviewPlace = "beside" | "full";
 
 /**
  * What each place shows until a choice is made: the column beside the blocks
- * is about a phone's width (24.5rem), so a phone is shown there at its real
+ * is a phone's width and its scroll bar (25.5rem), so a phone is shown there at its real
  * size, where a computer would be shrunk to about a third, its text too small
  * to read; the full Preview view has a computer's room.
  */

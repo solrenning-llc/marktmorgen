@@ -42,13 +42,19 @@ let duplicateLink = true;
 const byKey = new Map<string, { status: number; body: unknown }>();
 const bySender = new Map<string, string>();
 let batches = 0;
+/** Stripe's refunds as readBook reads them (review of Codex G on #2681, second GRAVE). */
+let stripeState: "normal" | "down" | "refunded" = "normal";
 let posts = 0;
 const items = new Map<string, string>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
+  if (url.hostname === "api.stripe.com") {
+    if (stripeState === "down") return json({ error: { message: "synthetic unavailable" } }, 500);
+    if (stripeState === "refunded" && url.pathname === "/v1/refunds") return json({ data: [{ id: "re_1", payment_intent: "pi_cs_1", amount: 10000, status: "succeeded" }, { id: "re_2", payment_intent: "pi_cs_2", amount: 5000, status: "succeeded" }], has_more: false });
+    return json({ data: [], has_more: false });
+  }
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: "https://uri.paypal.com/payments/payouts", expires_in: 32400 });
   const headers = new Headers(init?.headers);
@@ -223,6 +229,24 @@ async function main(): Promise<void> {
   const [rawLate] = await redis.pipeline([["HGETALL", OPEN]]);
   const late = JSON.parse(String((rawLate as string[])[1])) as { m?: unknown };
   is("marked for a manual check and not tried", [late.m, posts - p1, batches], [1, 0, 0]);
+
+  for (const state of ["down", "refunded"] as const) {
+    part(`Before the retry, Stripe's refunds ${state === "down" ? "cannot be read" : "took back every sale"}: nothing is sent (review of Codex G on #2681)`);
+    stripeState = "normal";
+    await seed(store);
+    next = "drop-before";
+    await payWithPayPal(store);
+    stripeState = state;
+    next = "make";
+    const before = posts;
+    await settlePayPal(store);
+    is("no request to PayPal, no batch", [posts - before, batches], [0, 0]);
+    is("still on its way", (await onTheirWay(store)).size, 2);
+    const [rawHeld] = await redis.pipeline([["HGETALL", OPEN]]);
+    const held = JSON.parse(String((rawHeld as string[])[1])) as { m?: unknown };
+    is(state === "down" ? "waiting for refunds that can be read, not a manual check" : "less owed now than was sent: a manual check", held.m ?? 0, state === "down" ? 0 : 1);
+    stripeState = "normal";
+  }
 
   part("Counted by month for the owner's report, with no store or person");
   const c = await counts();

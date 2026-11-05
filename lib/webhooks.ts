@@ -1628,9 +1628,10 @@ const skippedDayKey = (statsId: string, reason: "large" | "used", day: number) =
 async function skippedLines(statsId: string, deliveries: Delivery[], reason: "large" | "used", words: string, now: number): Promise<void> {
   const day = Math.floor(now / 86_400_000);
   const key = skippedDayKey(statsId, reason, day);
-  const [count] = await redisPipeline([["INCR", key], ["EXPIREAT", key, (day + 2) * 86400]]);
-  const n = Number(count);
-  if (!Number.isSafeInteger(n) || n < 1) throw new Error("the day's messages not kept could not be counted");
+  // INCR's whole number from 1 up, one reply for each command (CX-123 rule 24); text or true was read as a number.
+  // Thrown, emitEvent takes the event's mark back, so it is noticed again.
+  const n = countOf(repliesFor(await redisPipeline([["INCR", key], ["EXPIREAT", key, (day + 2) * 86400]]), 2)?.[0]);
+  if (n === null || n < 1) throw new Error("the day's messages not kept could not be counted");
   if (n <= SKIPPED_LINES_PER_DAY) {
     const lines = deliveries.map((d) => noticeLine(d.id, statsId, d.endpoint, d.eventId, d.type as WebhookEvent, words, now));
     const written = await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS]));

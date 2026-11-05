@@ -26,7 +26,7 @@ import { importedBuyers, importedWhoKey } from "@/lib/imported-purchases";
 import { IMPORTED_CHANNEL } from "@/lib/channel-names";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
@@ -359,6 +359,8 @@ export async function removeSegment(store: Store, id: unknown): Promise<Segment[
  */
 export async function forgetLedgerCopy(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", ledgerKey(statsId)]]);
-  return Number(gone) || 0;
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ledgerKey(statsId)]]), 1)?.[0]);
+  // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
+  if (gone === null) throw new UnknownReplyError("the deletion of the buyers' ten-minute copy");
+  return gone;
 }

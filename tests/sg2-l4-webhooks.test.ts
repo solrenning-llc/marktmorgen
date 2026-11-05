@@ -18,7 +18,7 @@
  * every name lookup is refused, so nothing leaves this machine.
  */
 import { randomBytes } from "node:crypto";
-import { STRIPE_WAIT_RUNS, addEndpoint, resendDelivery, sendTest, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
+import { MESSAGE_TEXT_MAX, STRIPE_WAIT_RUNS, TOO_LARGE_WORDS, addEndpoint, emitEvent, resendDelivery, sendTest, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -79,6 +79,7 @@ async function outcome<T>(run: () => Promise<T>): Promise<T | "rejected"> {
 const tests = (commands: (string | number)[][]) => commands.length === 2 && commands[1]?.[0] === "INCR" && String(commands[1]?.[1]).startsWith("nl:rl:hooks:test:");
 const endpointsTold = (commands: (string | number)[][]) => commands[0]?.[0] === "SADD" && String(commands[0]?.[1]).includes(":eps:");
 const dayPlace = (commands: (string | number)[][]) => commands[0]?.[0] === "ZADD" && String(commands[0]?.[1]).includes(":day:");
+const skippedDay = (commands: (string | number)[][]) => commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).includes(":skip:");
 const dayNumber = (commands: (string | number)[][]) => commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).includes(":seq:");
 
 /** Replies the minute's [SET NX, INCR] of tests must never be read from. */
@@ -175,6 +176,39 @@ async function main(): Promise<void> {
     const before = lookedUp.length;
     const got = await resendDelivery(shop, again);
     is("resendDelivery: the real counter still calls the endpoint", [got.ok, lookedUp.length - before], [true, 1]);
+  }
+
+  part("skippedLines: a message too large to keep is said in the log only on a whole count for the day");
+  const tooLarge = { notes: Array.from({ length: 300 }, () => "x".repeat(MESSAGE_TEXT_MAX)) };
+  const largeLines = async () => (await webhooksView(shop)).log.filter((d) => d.lastError === TOO_LARGE_WORDS).length;
+  let large = 0;
+  for (const [label, reply] of [
+    ["INCR as text", ["3", 1]],
+    ["INCR true", [true, 1]],
+    ["INCR null", [null, 1]],
+    ["INCR zero", [0, 1]],
+    ["INCR fractional", [1.5, 1]],
+    ["INCR negative", [-1, 1]],
+    ["INCR an object", [{ result: 1 }, 1]],
+    ["a reply missing the EXPIREAT", [1]],
+    ["a third, unasked-for reply", [1, 1, 1]],
+    ["a reply that is not a list", { result: 1 }],
+  ] as [string, unknown][]) {
+    rule = { when: skippedDay, reply };
+    const before = await largeLines();
+    large += 1;
+    // Thrown, so emitEvent takes the event's mark back and it is noticed again (its caller, lib/webhooks.ts emitEvent).
+    is(`skippedLines, ${label}: thrown, no line written`, [await outcome(() => emitEvent(shop, "sale.completed", `sg2-l4-large-${large}`, tooLarge)), (await largeLines()) - before], ["rejected", 0]);
+  }
+  rule = { when: skippedDay, reply: [1, 1] };
+  {
+    const before = await largeLines();
+    is("skippedLines: the day's first one (1) still gets its line", [await emitEvent(shop, "sale.completed", "sg2-l4-large-first", tooLarge), (await largeLines()) - before], [0, 1]);
+  }
+  rule = null;
+  {
+    const before = await largeLines();
+    is("skippedLines: the real counter still writes its line", [await emitEvent(shop, "sale.completed", "sg2-l4-large-real", tooLarge), (await largeLines()) - before], [0, 1]);
   }
 
   part("A passed-over Stripe event: the endpoints told are counted only in their exact shape");

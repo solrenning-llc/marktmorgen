@@ -32,10 +32,9 @@ test("React keys, refs, fragments and ordinary elements keep their own runtime b
   assert.equal(development.Fragment, reactDevelopment.Fragment);
   for (const type of ["div", "input", "main"] as const) {
     const ref = { current: null };
-    const props = () => ({ id: "not-content", children: "Same text", ref });
+    const props = () => ({ id: "not-content", children: ["Same text"], ref });
     for (const method of ["jsx", "jsxs"] as const) {
       const actualProps = props(), expectedProps = props();
-      if (method === "jsxs") { actualProps.children = ["Same text"] as unknown as string; expectedProps.children = ["Same text"] as unknown as string; }
       const actual = shared[method](type, actualProps, "stable-key"), expected = react[method](type, expectedProps, "stable-key");
       assert.equal(actual.type, expected.type);
       assert.equal(actual.key, expected.key);

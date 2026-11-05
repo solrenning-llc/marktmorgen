@@ -20,6 +20,7 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
   rate_limited: "That is a lot of passkey changes in an hour. Try again later.",
   busy: "Your passkeys are being changed by another request right now. Try again in a moment.",
+  unsent: "We could not send the email that tells your account about this, so nothing was set. Try again in a moment.",
   reauth: "Adding a passkey needs a login from the last 15 minutes. Log in again below, then add it.",
   second_step: "Your account already has a passkey or an authenticator app, so adding another needs a login with one of them. Log in again with your passkey or your app's code, then add it here.",
 };

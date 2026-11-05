@@ -9,6 +9,8 @@ import { PLANS_ON_SALE, PREVIEW_LINE } from "@/lib/opening";
 import { findPage } from "@/lib/site-pages";
 import { SITE_URL } from "@/lib/site-url";
 import { overdue, writtenDates } from "@/lib/competitor-review";
+import { COLUMNS, readBatch, startProblem } from "@/lib/imports";
+import type { Store } from "@/lib/store";
 
 const SLUG = "skool-alternatives-community-platforms";
 function guide() {
@@ -38,6 +40,10 @@ test("Marktmorgen's availability and payment description come from the real prod
   }
   assert.ok(post.body.some((block) => block.type === "p" && block.text === feeWords().whoHolds));
   assert.ok(text.includes("A CSV file does not move payment cards or live billing agreements."));
+  assert.deepEqual(COLUMNS.members, ["email", "product", "renews", "option"]);
+  assert.equal(readBatch("members", [[1, "person@example.test", "membership", "2026-12-05", "", "card-token"]]), null);
+  assert.equal(startProblem({ sid: "synthetic-store", catalog: { items: [] } } as unknown as Store,
+    "contacts", { expected: 1, agreed: false })?.reason, "consent");
   assert.doesNotMatch(text, /\$\d|guaranteed income|best platform|move everything|one-click migration/i);
 });
 

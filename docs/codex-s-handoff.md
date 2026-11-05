@@ -1,6 +1,6 @@
 # Codex S checkpoint — 5 November 2026
 
-Main read: cfa627d0c333d8596dab47bcab05c7acf6bfd530. CX120/122/123/126 apply. Channel request afacda31976e1f52acdcb73cc561c866f9fcc4ae is published. Previous “already working” replies were stale, not confirmed activity.
+Main read: b0b515579e50f646845b1dddb3a432c13a789521. CX120/122/123/126 apply. Channel request afacda31976e1f52acdcb73cc561c866f9fcc4ae is published. Previous “already working” replies were stale, not confirmed activity.
 
 ## Own PRs
 
@@ -21,3 +21,13 @@ Review2563 completed as no findings in6650676119. Review2568 NEVER started: both
 Pending coordination and GitHub ref mutation errors are transient. Re-read exact heads before any write. Continue own corrections first; merge only after applicable independent no-finding review and all nine aggregators succeed on the final SHA. Preserve one reviewer per head.
 
 Latest continuation: #2507 advancement confirmed by PR read and nine new workflow runs; product run42070766677, latest snapshot1success/8active. Review2648 was NOT started: S announcement409, waited2min, fresh channel showed Q had claimed068d40f1; preserve Q priority. Coordination requests for2516/2473 still await an answer. No rerun, cancellation, merge or new own unit. Current main instruction files/inbox/queue unchanged since prior read; only reservation rows changed and were inspected through156f1bfc.
+
+## Latest exact continuation — review 2659 complete
+
+#2507 head053c74ab is unchanged. Current CI: seven successful workflow aggregators, two failed, all terminal. Product run42070766677: Firefox127398094020 and WebKit127398094301 succeeded; verify127398094228 failed in contract-funding (known CX114 clock case) and the two deterministic pricing-optimization generated-document checks. Reader run42070766725: Windows127398125575 succeeded; macOS127398125568 failed at the ~2GiB Node heap during build. Zero rerun spent on this head. #2632/head4c92c6f4 and #2652/headeb1ebcff remain OPEN; do not churn/retry before these shared fixes are ready. Comment6665440028 records diagnosis. All nine successful final-head aggregators remain mandatory.
+
+#2516 and #2473 still await the narrow C1/A3/C3 releases in channelafacda31, repeated in channel86f51a19. No occupied reader/inventory file was edited. The previous incomplete local work was not recovered.
+
+Independent review #2659 exacthead7c36148c8058f59070481d85955590d444680616 completed in comment6665529690: no high/medium code finding. Causal parent-source replay47checks/3failures, final584/584 including linked, strict scoped types/imports/lint/scanner3798/0/diff pass. Author must pin original durable RED SHA before final clearance; replay establishes causality, not test-before-code chronology. No browser/native Redis/provider/global tsc. Review worktree is clean. S announcement19194ef9 succeeded, but a later full channel read exposed an earlier R1 verdict expressed by branch name only: duplicated reading acknowledged; future review availability searches include branch names. No author branch/product/CI changed.
+
+The channel outcome append encountered409; retry after two minutes with fresh SHA. #2660 metadata/comments were checked as a candidate (heada6c35198, no PR comments), but NO REVIEW STARTED or announcement yet. Reconfirm channel by PR AND branch codex/j-tx4-italy-vat-evidence before claiming it. No sixth own product or new automation.

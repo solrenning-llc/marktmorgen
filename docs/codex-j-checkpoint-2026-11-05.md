@@ -1,3 +1,19 @@
+# Codex J — delta autoritativo — 2026-11-05 18:56 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- **#2594 Irlanda** exact `99de6fc718bac69fb822573c051d75c71b6d91f2`: OPEN, head preservado, C2QUAL `5781583327`, 8success+productcancelled. Retry único global35m já esgotado; NUNCA repetir/cancelar/mover head/merge sem9; aguardar decisão C1/V.
+- **#2660 Itália** exact `f186dae83876c3bf7a95fe486090f45a150bcd03`: L clean `6665709150`. Reader retry único já esgotado e falhou novamente por V8 OOM (job `127447703477`, comentário `6666056512`). Product verify `127440200970` FULL4.812.960 chars: browser bundles268/268 verdes; única suíte falha foi pricing compartilhado, `coefYear.ai 7642 vs 7643` e documento histórico stale. Comentário `6666382681`. Estado7success+readerfailure+productfailure. NUNCA retry/cancel/headmove.
+- **#2661 Espanha** exact `7352ea96c67fd5b353ee2fd262b7d601fa91ee39`: N clean `5789936389`. WebKit retry consumido/success; reader retry único esgotado e falhou novamente por V8 OOM (job `127447718238`, comentário `6666170127`). Product verify `127438342928` FULL4.813.094 chars: mesma causa pricing e268/268 verdes. Comentário `6666382306`. Estado7success+readerfailure+productfailure. NUNCA retry/cancel/headmove.
+- **#2666 Portugal** exact `3c3d1ae28b2e078fa4b49124e106e91febe000ff`: H2 clean `5790143563`. Reader macOS `127447645082` V8 OOM; comentário `6666235165`; sem retry por repetição causal compartilhada. Product run `42084758550` ainda ativo neste cursor, mas verify `127447977442` já falhou somente no mesmo pricing stale; comentário `6666426091`. Não cancelar/repetir/mover head; esperar browsers/aggregate terminais.
+- **Bloqueio compartilhado #2632** exact `4c92c6f4008008120189bbaa4154c185d0612531`: attempt3 coordenado run `42044911877` terminou8success+productcancelled; verify `127438045395` cortado aos35m14s em store-copy, com PASS até o corte e sem AssertionError/TimeoutError. Comparação read-only com verify SUCCESS `127118054875` (#2585): pré-store-copy22m55 vs14m27; regressões16m14 vs10m04; no checkpoint textual do corte ainda restavam≈2m37 no run verde; projeção factual≈37m50, ≈2m50 além do teto. Canal `1a7160e3`. NUNCA tocar/repetir/mergear PR alheio; C1/V/Claude3 decidem estrutura.
+- **#2652** exact `eb1ebcff56099491bdc1423e9431924e345482da`: permanece OPEN/8success+productfailure pricing; macOS causal verde/revisão aplicável. Ordem vigente continua #2632 primeiro, depois #2652 em main com9; só depois integrar main UMA vez em cada head J, preservar blobs próprios/revisados e exigir9NOVOS. Não mover produto apenas por docs/main.
+- **Capacidade/revisões**: quatro PRs próprios ocupam quatro slots; quinta vaga não foi preenchida porque scan fresco encontrou #2670 já controlado por Q, #2669 com MÉDIO Q aceito pelo P e #2667 já revisado. #2636/#2629/#2645, #2578/#2656 e demais pareceres concluídos permanecem preservados; não duplicar.
+- **Canal**: consumido até commit `1a7160e3af16fafc4a36d9507f1f2fa15dfc5a11`, blob `e60c689837c65df0e6b7b1453de1962f839d178f` (validar len FULL na retomada e ler tudo depois). Protocolo imutável: fetch_file só SHA; fetch_blob FULL>=20KB; prefixo/comprimento/âncora1500; 409 esperar>=2min e refazer FULL/CAS; nunca vazio/parcial/restaurar sobre novas.
+- Regras CX115/119/116/120/122/123/126/127 e C1 05h20 intactas. Uma clean salvo dinheiro sai2; nove exact fresh SUCCESS+clean; autor incorpora próprio expectedSHA. RED durável+ligados+types/lint/scanner/diff+novo parecer. Sem preço/limite/comissão/flags/gates/termos/conta/pagamento/contato/PII; unknown nunca zero. ChromiumEPERM nunca retry/workaround. GitHub<=30min. Atualizar somente a automação existente, nunca criar outra.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-05 18:49 UTC
 
 Prevalece sobre deltas abaixo; demais fatos preservados.

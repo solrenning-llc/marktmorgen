@@ -7,7 +7,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, storeForEmail } from "@/lib/store";
 import { finishClosed } from "@/lib/plan-closing";
-import { WALK_GAP_MS, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { WALK_GAP_MS, closedDataLine, closedDataNow, eraseClosed, markDue } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -34,7 +34,6 @@ const DAY = 86_400_000;
 let clock = Date.UTC(2026, 10, 5);
 const later = () => (clock += WALK_GAP_MS + DAY);
 const run = () => eraseClosed(Date.now() + 30_000, finishClosed, clock);
-const inBatch = async (ref: string) => (await real([["HEXISTS", "nl:closed:batch", ref]]))[0];
 async function quietly<T>(work: () => Promise<T>): Promise<T> {
   const before = console.error;
   console.error = () => {};
@@ -110,7 +109,10 @@ async function main(): Promise<void> {
     }
     const kept = (await real([["EXISTS", leads]]))[0];
     console.log(`  after 12 gaps: record ${(await storeForEmail(hal))?.handle ?? "gone"}, a buyer's address kept ${kept === 1}, said as stuck ${last.stuck}`);
-    is("a person's record of a closed store is not kept for ever with only a log line to say so", kept === 1 && (last.stuck ?? 0) > 0, false);
+    // Whether such a store is let go is the owner's policy, still open (third review, 2): until then it is kept, and
+    // said in the owner's report line, not only in a log.
+    const line = closedDataLine(await closedDataNow());
+    is("a person's record of a closed store kept is said in the owner's report line, not only in a log", kept === 1 && (last.stuck ?? 0) > 0 ? line.includes("sem novas caminhadas") : true, true);
   });
 
   done();

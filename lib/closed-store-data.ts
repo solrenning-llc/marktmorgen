@@ -68,7 +68,9 @@
  *   nl:closed:walk    hash        cursor, started, phase, finished, pagetries, pending; per store's key:
  *                                 tries:<key> its first step's failures, left:<key> the walks it was left by,
  *                                 partial:<key> a key of it passed over, out:<key> it sits this walk out;
- *                                 unread:<family> -> when a list of the company's was passed over
+ *                                 unread:<list> -> the walks that could not prune a list of the company's passed over
+ *   nl:closed:prune   hash        "<list>|<a store's key>" -> its sid and stats id (JSON): the members a list passed
+ *                                 over still owes, pruned at the start of each walk until it reads (SG2 third review)
  *
  * Reading the database is the company's, bounded by its schedule: one walk a
  * day at the most, WALK_COUNT keys a command (docs/funded-exposure-review.md).
@@ -85,7 +87,7 @@ import { idsIn } from "@/lib/data-recount";
 import { readAllListingsExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { readFlowsExact } from "@/lib/flows";
-import { FINAL_INDEX } from "@/lib/closing-holds";
+import { FINAL_INDEX, workKey } from "@/lib/closing-holds";
 import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForClosing, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
@@ -122,6 +124,8 @@ import { forgetPath } from "@/lib/path";
 
 export const DUE_KEY = "nl:closed:due";
 export const BATCH_KEY = "nl:closed:batch";
+/** What the company's lists passed over still owe: their closed stores' members, pruned once each list reads again. */
+export const PRUNE_KEY = "nl:closed:prune";
 export const WALK_KEY = "nl:closed:walk";
 /** Keys one SCAN of the walk asks for. */
 export const WALK_COUNT = 1000;
@@ -146,6 +150,8 @@ export const PAGE_TRIES = 3;
 export const PARKED_TRIES = 12;
 /** A stopped store's score in line: after any time the walk will run at, so never due by itself. */
 export const STOPPED_AT = Date.UTC(9999, 0, 1);
+/** The walks that try again to prune a list passed over: after them it is kept, and said, no longer tried by itself. */
+export const UNREAD_TRIES = 7;
 /** The walks a store may be left by (a key passed over, its record not confirmed gone): after them it is kept in the batch, said, and no longer walked by itself. */
 export const LEFT_WALKS = 7;
 /**
@@ -161,12 +167,14 @@ export const TRY_COMMANDS = 4;
  * (SG2 second review, 6), each bounded by a count above, never a time: its
  * first step's tries after the first (PREPARE_TRIES - 1, then PARKED_TRIES
  * weekly), each at most `prepareCommands` and TRY_COMMANDS; and the walks it is
- * left by (LEFT_WALKS), each with a recordGone before it and at its finish, and
- * one count of the walks it was left by. A walk itself reads the whole
- * database: that is the company's scheduled job, once a day at the most.
+ * left by (LEFT_WALKS), each with a recordGone before it and at its finish,
+ * one count of the walks it was left by, and the guard's read of its key once
+ * a run (`runsPerWalk`: one for a database of up to WALK_PAGES_PER_RUN pages).
+ * A walk itself reads the whole database: that is the company's scheduled job,
+ * once a day at the most; so are the company's lists it prunes.
  */
-export function retryCommandsAtMost(prepareCommands: number): number {
-  return (PREPARE_TRIES - 1 + PARKED_TRIES) * (prepareCommands + TRY_COMMANDS) + (LEFT_WALKS + 1) * (2 * RECORD_GONE_COMMANDS + 1);
+export function retryCommandsAtMost(prepareCommands: number, runsPerWalk = 1): number {
+  return (PREPARE_TRIES - 1 + PARKED_TRIES) * (prepareCommands + TRY_COMMANDS) + (LEFT_WALKS + 1) * (2 * RECORD_GONE_COMMANDS + 1 + runsPerWalk);
 }
 /** The pages of one host's claims read at the most (COUNT 500): its claims not read to the end stop the first step. */
 export const CLAIM_PAGES = 50;
@@ -410,8 +418,11 @@ function memberMatch(member: string, owners: Owners): Match | null {
  * its owner may open a store again under the same key (queue item 307 [EC1])
  * while its walk runs, and then what is named by that key alone (its pause, its
  * place in the company's lists of plans) is the new store's, never deleted.
- * Read exactly once a page for each key a match needs; one of an account's
- * other stores ("#" and its id) is never opened again under it.
+ * Read exactly once a run for each key a match needs, so its reads are at
+ * most one for each store of the batch a run (third review, 4); one of an
+ * account's other stores ("#" and its id) is never opened again under it.
+ * What the closed store's key alone named then stays with the new one: the
+ * same owner, the same account (the key is the owner's address).
  */
 type RefFree = (ref: string) => Promise<boolean>;
 function refGuard(): RefFree {
@@ -704,7 +715,7 @@ export type WalkReport = { started: boolean; stores: number; failed: number; par
 /** Who a key the walk could not read held up: the stores it belongs to, and why. */
 type Skip = (refs: string[], error: unknown) => void;
 /** What a page does with what it cannot read, once it has failed PAGE_TRIES runs, and how it asks whether a key is free. */
-type PageWays = { skip?: Skip; unread?: (family: string, error: unknown) => void; read?: (family: string) => void; refFree?: RefFree };
+type PageWays = { skip?: Skip; unread?: (list: string, error: unknown) => void; refFree?: RefFree };
 
 /**
  * One page of the walk: deletes what belongs to the closing stores, and
@@ -724,11 +735,11 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
     if (rule.how === "index") {
       try {
         pruned += await pruneIndex(key, owners, refFree);
-        ways.read?.(family);
       } catch (error) {
-        // A list of the company's is no store's (SG2 second review, E): passed over and kept for the owner's report.
+        // A list of the company's is no store's (SG2 second review, E): passed over, and what it owes the walk's
+        // stores kept (PRUNE_KEY) until it reads again (third review, I).
         if (!ways.unread) throw error;
-        ways.unread(family, error);
+        ways.unread(key, error);
       }
       continue;
     }
@@ -797,7 +808,10 @@ type WalkState = {
   partial: string[];
   out: string[];
   left: Map<string, number>;
-  unread: string[];
+  /** The lists passed over, and the walks that tried to prune them since. */
+  unread: Map<string, number>;
+  /** When what the company's lists owe was last pruned. */
+  prunedAt: number;
   /** Stores put in the batch since the last walk began: a run that stops before beginning one leaves them to the next. */
   pending: boolean;
 };
@@ -816,7 +830,7 @@ function walkStateOf(reply: unknown): WalkState {
   if (!CURSOR.test(cursor)) return refuse("the walk's cursor");
   const phase = fields.get("phase") || "idle";
   if (phase !== "idle" && phase !== "walk" && phase !== "finish") return refuse("the walk's phase");
-  const state: WalkState = { cursor, phase, started: number("started"), pageTries: number("pagetries"), parked: 0, stopped: 0, partial: [], out: [], left: new Map(), unread: [], pending: number("pending") > 0 };
+  const state: WalkState = { cursor, phase, started: number("started"), pageTries: number("pagetries"), parked: 0, stopped: 0, partial: [], out: [], left: new Map(), unread: new Map(), pending: number("pending") > 0, prunedAt: number("pruned") };
   for (const [name, raw] of fields) {
     const [kind, ...rest] = name.split(":");
     const ref = rest.join(":");
@@ -829,7 +843,7 @@ function walkStateOf(reply: unknown): WalkState {
     } else if (kind === "partial") state.partial.push(ref);
     else if (kind === "out") state.out.push(ref);
     else if (kind === "left") state.left.set(ref, count());
-    else if (kind === "unread") state.unread.push(ref);
+    else if (kind === "unread") state.unread.set(ref, count());
   }
   return state;
 }
@@ -877,6 +891,46 @@ function deletedByItsOwner(ref: string, now: number): Batched | null {
   return sid ? { ref, email: "", sid, statsId: null, name: "", handle: "", handles: [], marks: [sid], endedAt: now, at: now } : null;
 }
 
+/**
+ * What the company's lists passed over still owe (SG2 third review, I): at the
+ * start of each walk, each such list is read again and pruned of the members
+ * its closed stores left in it (by their key, while no living store holds it,
+ * or by their id), and only then let go. One that still cannot be read is
+ * tried again with the next walk, UNREAD_TRIES walks at the most; after them it
+ * is kept, and said. Its reads are the list's own pages, and one HGETALL of
+ * what is owed.
+ */
+async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
+  const lists = [...state.unread].filter(([, tries]) => tries < UNREAD_TRIES).map(([list]) => list);
+  if (!lists.length) return;
+  const [flat] = await redisPipeline([["HGETALL", PRUNE_KEY]]);
+  if (!allStrings(flat) || flat.length % 2 !== 0) refuse("what the company's lists owe");
+  const rowsOf = flat as string[];
+  const owed = new Map<string, { field: string; entry: Batched }[]>();
+  for (let i = 0; i < rowsOf.length; i += 2) {
+    const field = rowsOf[i];
+    const cut = field.lastIndexOf("|");
+    const value = json(rowsOf[i + 1]);
+    if (cut < 1 || !value || typeof value.sid !== "string" || !(value.statsId === null || typeof value.statsId === "string")) refuse("what a company's list owes");
+    const ref = field.slice(cut + 1);
+    const marks = [value!.sid as string, value!.statsId as string | null].filter((id): id is string => typeof id === "string" && id.length >= 6);
+    const list = field.slice(0, cut);
+    owed.set(list, [...(owed.get(list) ?? []), { field, entry: { ref, email: "", sid: String(value!.sid), statsId: null, name: "", handle: "", handles: [], marks, endedAt: 0, at: 0 } }]);
+  }
+  for (const list of lists) {
+    const rows = owed.get(list) ?? [];
+    try {
+      await pruneIndex(list, ownersOf(rows.map((row) => row.entry)), refFree);
+      await redisPipeline([...(rows.length ? [["HDEL", PRUNE_KEY, ...rows.map((row) => row.field)]] : []), ["HDEL", WALK_KEY, `unread:${list}`]]);
+      state.unread.delete(list);
+    } catch (error) {
+      const [tries] = await redisPipeline([["HINCRBY", WALK_KEY, `unread:${list}`, 1]]);
+      state.unread.set(list, countOf(tries, "a list's tries"));
+      console.error("closed-data: a list of the company's passed over still cannot be read; what it owes is kept, and it is tried again with the next walk", error);
+    }
+  }
+}
+
 /** What the closing job does when a store's records are gone: told by the caller (lib/plan-closing.ts), which writes it down and emails the owner. */
 export type Finisher = (entry: Batched, now: number) => Promise<void>;
 
@@ -896,7 +950,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     report.stopped = state.stopped;
     report.left = state.left.size;
     report.stuck = [...state.left.values()].filter((n) => n >= LEFT_WALKS).length;
-    report.unread = state.unread.length;
+    report.unread = state.unread.size;
   };
   say();
   let phase: string = state.phase;
@@ -905,6 +959,12 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
 
   if (phase === "idle") {
     if (now - state.started < WALK_GAP_MS) return { ...report, done: true };
+    // What the company's lists passed over owe: tried once a gap, with or without a walk (third review, I).
+    if ([...state.unread.values()].some((tries) => tries < UNREAD_TRIES) && now - state.prunedAt >= WALK_GAP_MS) {
+      await redisPipeline([["HSET", WALK_KEY, "pruned", now]]);
+      await prunePending(state, refGuard());
+      report.unread = state.unread.size;
+    }
     const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", now, "LIMIT", 0, BATCH_MAX]]);
     if (!allStrings(due)) refuse("the stores in line");
     const refs = due as string[];
@@ -939,7 +999,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
           report.stopped += 1;
         }
         console.error(tries >= PREPARE_TRIES + PARKED_TRIES
-          ? "closed-data: a closed store's first step failed every try for a year; it is no longer tried by itself, its record is kept, and it is said on every run"
+          ? `closed-data: a closed store's first step failed every try, about ${Math.round((PREPARE_TRIES * WALK_GAP_MS + PARKED_TRIES * PARKED_GAP_MS) / PARKED_GAP_MS)} weeks of them; it is no longer tried by itself, its record is kept, and it is said on every run`
           : tries >= PREPARE_TRIES
             ? `closed-data: a closed store's first step failed ${PREPARE_TRIES} times or more; it is tried again once a week, and its record is kept until a try succeeds`
             : "closed-data: a closed store's first step failed; it is not taken for deleted, and it is tried again after the next gap", error);
@@ -980,30 +1040,27 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   const sitting = new Set(state.out);
   const owners = ownersOf([...batch.values()].filter((entry) => !sitting.has(entry.ref)));
   const partial = new Set(state.partial);
-  const unread = new Set(state.unread);
+  // One guard a run: its reads are at most one for each store of the batch, whatever the pages.
+  const refFree = refGuard();
+  const walked = [...batch.values()].filter((entry) => !sitting.has(entry.ref));
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
     const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", "nl:*", "COUNT", WALK_COUNT]]);
     // SG2, finding 18: a page in another shape stops the run where it was; it is read again next run, never passed over.
     const { cursor: next, items: keys } = pageOf(reply, "a page of the walk");
     // A page that failed PAGE_TRIES runs passes over the keys it cannot read, and says so: one key never holds every store for ever.
     const fresh: string[] = [];
-    const freshUnread: string[] = [];
-    const read: string[] = [];
+    const passed: string[] = [];
     const lenient = pageTries >= PAGE_TRIES;
     const ways: PageWays = {
-      refFree: refGuard(),
-      read: (family) => {
-        if (unread.has(family)) read.push(family);
-      },
+      refFree,
       ...(lenient ? {
         skip: (refs: string[], error: unknown) => {
           for (const ref of refs) if (!partial.has(ref)) { partial.add(ref); fresh.push(ref); }
           console.error(`closed-data: a key the walk could not read in ${PAGE_TRIES} runs is passed over; its stores are not finished, and are walked again with the next walk`, error);
         },
-        unread: (family: string, error: unknown) => {
-          if (!unread.has(family)) freshUnread.push(family);
-          unread.add(family);
-          console.error(`closed-data: a list of the company's (${family}) could not be read in ${PAGE_TRIES} runs; it is passed over, no store is held for it, and it is kept for the owner's report`, error);
+        unread: (list: string, error: unknown) => {
+          passed.push(list);
+          console.error(`closed-data: a list of the company's could not be read in ${PAGE_TRIES} runs; it is passed over, what it owes this walk's stores is kept, and it is pruned when it reads again`, error);
         },
       } : {}),
     };
@@ -1014,20 +1071,25 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       await redisPipeline([["HINCRBY", WALK_KEY, "pagetries", 1]]);
       throw error;
     }
-    for (const family of read) unread.delete(family);
+    // What a list passed over owes the walk's stores, written before the page counts as read: a store is never
+    // finished while it is owed and not kept (third review, I). A write that fails throws, and the page is read again.
+    if (passed.length) {
+      await redisPipeline([
+        ...passed.map((list) => ["HSET", PRUNE_KEY, ...walked.flatMap((entry) => [`${list}|${entry.ref}`, JSON.stringify({ sid: entry.sid, statsId: entry.statsId })])]),
+        ["HSET", WALK_KEY, ...passed.flatMap((list) => [`unread:${list}`, 0])],
+      ]);
+      for (const list of passed) state.unread.set(list, 0);
+    }
     report.deleted += done.deleted;
     report.pruned += done.pruned;
     report.pages += 1;
     cursor = next;
     pageTries = 0;
     await redisPipeline([
-      ["HSET", WALK_KEY, "cursor", cursor, "pagetries", 0, ...(cursor === "0" ? ["phase", "finish"] : []), ...fresh.flatMap((ref) => [`partial:${ref}`, 1]), ...freshUnread.flatMap((family) => [`unread:${family}`, now])],
-      ...(read.length ? [["HDEL", WALK_KEY, ...read.map((family) => `unread:${family}`)]] : []),
+      ["HSET", WALK_KEY, "cursor", cursor, "pagetries", 0, ...(cursor === "0" ? ["phase", "finish"] : []), ...fresh.flatMap((ref) => [`partial:${ref}`, 1])],
     ]);
     if (cursor === "0") phase = "finish";
   }
-  state.unread = [...unread];
-
   if (phase === "finish") {
     for (const [ref, entry] of batch) {
       if (Date.now() > deadline) return report;
@@ -1059,6 +1121,41 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     report.done = true;
   }
   return report;
+}
+
+/**
+ * For the owner's report (SG2 third review, 2): what the walk keeps now that it
+ * could not delete, counted, in the pattern of lib/store-forget-retry.ts
+ * (storeForgetMonth): numbers only, no store, no person; null when it cannot
+ * be read. Not wired yet: the monthly owner report (lib/company-margin-report.ts,
+ * queue item 465 [MR2], reserved by Codex E) is to show closedDataLine. Whether
+ * a store kept this way is let go is the owner's policy, still open.
+ */
+export type ClosedDataNow = { parked: number; stopped: number; left: number; stuck: number; unread: number; unreadKept: number };
+
+export async function closedDataNow(): Promise<ClosedDataNow | null> {
+  if (!isRedisConfigured()) return null;
+  try {
+    const [raw] = await redisPipeline([["HGETALL", WALK_KEY]]);
+    const state = walkStateOf(raw);
+    const stuck = [...state.left.values()].filter((n) => n >= LEFT_WALKS).length;
+    const unreadKept = [...state.unread.values()].filter((n) => n >= UNREAD_TRIES).length;
+    return { parked: state.parked, stopped: state.stopped, left: state.left.size, stuck, unread: state.unread.size, unreadKept };
+  } catch {
+    return null;
+  }
+}
+
+/** The owner's words for it, in the report (Portuguese, the owner's language; numbers only). Empty when nothing is kept. */
+export function closedDataLine(m: ClosedDataNow | null): string {
+  if (m === null) return "Apagamento dos dados de lojas fechadas: não foi possível ler o estado neste mês; o estado é desconhecido.";
+  if (!m.parked && !m.stopped && !m.left && !m.unread) return "";
+  return [
+    `Apagamento dos dados de lojas fechadas, agora: ${m.parked} lojas em nova tentativa semanal, ${m.stopped} sem novas tentativas depois de todas elas (registro e dados guardados);`,
+    `${m.left} lojas que a última caminhada não terminou, ${m.stuck} delas sem novas caminhadas (dados guardados);`,
+    `${m.unread} listas da empresa que não puderam ser lidas, ${m.unreadKept} delas sem novas tentativas (membros de lojas fechadas ainda nelas).`,
+    "O que está guardado sem novas tentativas precisa de decisão do dono.",
+  ].join(" ");
 }
 
 /**
@@ -1141,14 +1238,38 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
       // Not read to the end within RENEWAL_PAGES: never said all stopped.
       if (!whole) out.done = false;
     }
-    // SG2 second review, F: a status none of these names (one Stripe may add) is never searched for by them. One page
-    // of the address's renewals, with no status asked, catches it: such a one is stopped too, and counted only when
-    // Stripe says it ended. Only that page is read (its newest a hundred): the rest are ended or found above.
-    if (Date.now() > until) return { ...out, done: false };
-    const any = await search(`metadata['store']:'${handle}'`, "");
-    const unknown = fresh(any.rows, (st) => !ENDED.includes(st) && !LIVE.includes(st));
-    if (unknown.length) console.error(`plan-closing: ${unknown.length} renewals of a closing store are in a status the closing does not name; each is stopped, and counted only when Stripe says it ended`);
-    if (!(await stop(unknown))) return { ...out, done: false };
+    // SG2 second review, F: a status none of these names (one Stripe may add) is never searched for by them. Every
+    // page of the address's renewals, with no status asked, is read once in the closing, RENEWAL_PAGES a day, from
+    // where the day before stopped (third review): such a one is stopped too, counted only when Stripe says it ended,
+    // and the renewals are never "all stopped" while a page of them is unread.
+    const folder = await storeFolder(storeRef(store));
+    const field = `renewscan:${handle}`;
+    const [saved] = await redisPipeline([["HGET", workKey(folder), field]]);
+    if (saved !== null && typeof saved !== "string") refuse("where the closing's reading of renewals stopped");
+    if (saved === "whole") continue;
+    let page = typeof saved === "string" ? saved : "";
+    let whole = false;
+    for (let round = 0; round < RENEWAL_PAGES; round += 1) {
+      if (Date.now() > until) break;
+      let any: Awaited<ReturnType<typeof search>>;
+      try {
+        any = await search(`metadata['store']:'${handle}'`, page);
+      } catch (error) {
+        // A page Stripe no longer knows is read again from the first, the next day.
+        if (page) await redisPipeline([["HDEL", workKey(folder), field]]);
+        throw error;
+      }
+      const unknown = fresh(any.rows, (st) => !ENDED.includes(st) && !LIVE.includes(st));
+      if (unknown.length) console.error(`plan-closing: ${unknown.length} renewals of a closing store are in a status the closing does not name; each is stopped, and counted only when Stripe says it ended`);
+      if (!(await stop(unknown))) return { ...out, done: false };
+      page = any.next;
+      if (!page) {
+        whole = true;
+        break;
+      }
+    }
+    await redisPipeline([["HSET", workKey(folder), field, whole ? "whole" : page]]);
+    if (!whole) out.done = false;
   }
   return out;
 }

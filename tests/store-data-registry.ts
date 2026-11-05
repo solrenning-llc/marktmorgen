@@ -343,6 +343,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts)."),
   "nl:closed:due@lib/closed-store-data.ts": company("Closed stores waiting for the walk that deletes their records", "The company's job: a member a closed store, taken out when its walk begins."),
   "nl:closed:walk@lib/closed-store-data.ts": company("Where the walk that deletes closed stores' records is", "One key, the company's job."),
+  "nl:closed:prune@lib/closed-store-data.ts": company("What the company's lists the walk passed over still owe its closed stores", "One key, the company's job: a field a list and a closed store (its sid and stats id), taken out once the list is pruned (lib/closed-store-data.ts, prunePending)."),
   "nl:*@lib/closed-store-data.ts": company("The pattern the walk reads the database by", "Not a key: a pattern."),
   // The families whose keys a closing store's follower reads before the walk deletes them: names, not keys.
   "nl:cal:cfg:@lib/closed-store-data.ts": follower("nl:cal:cfg:"),

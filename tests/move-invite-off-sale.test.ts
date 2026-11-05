@@ -174,6 +174,21 @@ async function main(): Promise<void> {
   is("the invitation is kept, so its link opens no second membership", (cy?.kept ?? 0) > 0, true);
   swept = [];
 
+  part("A kept invitation opens nothing more, at any price (Revisor 1 on #2685)");
+  const [deeField] = await inviteMembers(store, "job_inviteoffsale_dee", [{ email: "dee@example.com", productId: id, option: plus, renews }]);
+  if (!deeField) throw new Error("dee not invited");
+  const dee = (await readInvite(statsId, deeField))!;
+  const deeFirst = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  is("the first press opens a checkout at Plus", deeFirst.ok, true);
+  await noteKept(store, "dee@example.com", id);
+  redis.run(["DEL", `nl:mv:open:${statsId}:${deeField}`]);
+  const deeBefore = checkouts.length;
+  const deeAgain = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
+  is("once kept, a day later, the link opens no second membership", [deeAgain.ok ? "opened" : deeAgain.reason, checkouts.length - deeBefore], ["done", 0]);
+  const deePage = await movePage("inviteoffsale", id, { k: dee.t });
+  is("its page says so, with no button to press", [deePage.includes(moveWords("en").notices.done.title), deePage.includes(moveWords("en").keep)], [true, false]);
+  for (const language of ["es", "fr", "de", "it", "nl", "pt"] as const) is(`said in ${language} too`, moveWords(language).notices.done.title.length > 0, true);
+
   part("The rule itself");
   is("only the named option comes back on sale, nothing else changes", withInvitedOption(product, basic).options.map((o) => [o.id, o.offSale === true]), [[basic, false], [plus, false]]);
   is("an option on sale, an unknown id or none: the product unchanged", [withInvitedOption(product, plus) === product, withInvitedOption(product, "nope") === product, withInvitedOption(product, "") === product], [true, true, true]);

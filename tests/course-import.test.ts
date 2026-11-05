@@ -41,7 +41,7 @@ for (const bad of [{ ...lesson(), title: "x".repeat(MAX_ITEM_TITLE + 1) }, { ...
 is("exact title and body ceilings are accepted", read({ ...manifest(), title: "x".repeat(MAX_ITEM_TITLE), modules: [{ title: "M", lessons: [{ ...lesson(), title: "x".repeat(MAX_ITEM_TITLE), text: "x".repeat(MAX_BODY_LENGTH) }] }] }).ok, true);
 
 part("Local paths, never a remote fetch or an archive traversal");
-for (const path of ["https://example.com/a.mp4", "//example.com/a.mp4", "/etc/passwd", "../x", "a/../x", "a/./x", "a//x", "a\\x", "C:/x", "a%2fx", "a?secret=x", "a#x", "a\u0000x", "a\u202ex", "a/", "./x", "a ", " a", "x".repeat(257)]) {
+for (const path of ["https://example.com/a.mp4", "//example.com/a.mp4", "/etc/passwd", "../x", "a/../x", "a/./x", "a//x", "a\\x", "C:/x", "a%2fx", "a?secret=x", "a#x", "a\u0000x", "a\u202ex", "media/\u061cwelcome.mp4", "a/", "./x", "a ", " a", "x".repeat(257)]) {
   is("an unsafe video reference is refused", read({ ...manifest(), modules: [{ title: "Unit", lessons: [{ ...lesson(), video: path }] }] }).ok, false);
   is("an unsafe download reference is refused", read({ ...manifest(), modules: [{ title: "Unit", lessons: [{ ...lesson(), files: [path] }] }] }).ok, false);
 }

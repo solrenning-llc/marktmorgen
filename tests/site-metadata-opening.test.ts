@@ -40,13 +40,13 @@ async function layoutMetadata(open?: boolean): Promise<Metadata> {
     },
   }];
   const result = await build(options);
-  const module = { exports: {} as { metadata: Metadata } };
+  const evaluated = { exports: {} as { metadata: Metadata } };
   const requireWithFonts = (id: string) => id === "next/font/google"
     ? Object.fromEntries(["Geist", "Instrument_Serif", "Fraunces", "Playfair_Display", "Nunito", "Bricolage_Grotesque"]
       .map((name) => [name, (font: { variable: string }) => ({ variable: font.variable, className: "synthetic-font" })]))
     : nodeRequire(id);
-  new Function("require", "module", "exports", result.outputFiles![0].text)(requireWithFonts, module, module.exports);
-  return module.exports.metadata;
+  new Function("require", "module", "exports", result.outputFiles![0].text)(requireWithFonts, evaluated, evaluated.exports);
+  return evaluated.exports.metadata;
 }
 
 test("the actual default metadata describes the product's current availability", async () => {

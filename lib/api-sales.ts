@@ -69,7 +69,7 @@ export const SALE_FIELDS = [
 
 export type SalesPage = { data: Record<string, unknown>[]; next: string | null };
 
-type Row = { id?: unknown; status?: unknown; payment_status?: unknown; mode?: unknown; created?: unknown; payment_intent?: unknown; invoice?: unknown; amount_total?: unknown; currency?: unknown; customer_email?: unknown; customer_details?: unknown; total_details?: unknown; metadata?: Record<string, string> | null };
+type Row = { object?: unknown; id?: unknown; status?: unknown; payment_status?: unknown; mode?: unknown; created?: unknown; payment_intent?: unknown; invoice?: unknown; amount_total?: unknown; currency?: unknown; customer_email?: unknown; customer_details?: unknown; total_details?: unknown; metadata?: Record<string, string> | null };
 
 const cents = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null);
 /** Seconds as an ISO time; null when not a time a Date can hold (past 8.64e15 ms it would throw), never a RangeError. */
@@ -96,32 +96,47 @@ export function cursorOf(url: string): { ok: true; cursor: string | null } | { o
 
 type Payment = { paidAt: string | null; refundedCents: number | null; disputed: boolean | null };
 
+/** An expanded Stripe object of the kind asked for, with its own id; anything else (another kind, no id, a bare value) is null. */
+const resource = (value: unknown, kind: string) => {
+  const o = obj(value);
+  return o && o.object === kind && typeof o.id === "string" && o.id !== "" ? o : null;
+};
+
 /**
  * What the expanded payment says, or null when Stripe's answer is not the
- * one asked for (a payment or invoice left as a bare id, a payment without
- * its charge, a charge without a readable moment or amounts): that is
- * unknown, never "nothing charged".
+ * one asked for: a payment or invoice left as a bare id, missing, or not of
+ * its own kind with its own id (a "charge" that says it is an invoice, an
+ * invoice that says it is a charge), a payment without its charge, a charge
+ * without a readable moment or amounts, or a checkout that took a payment
+ * with neither: that is unknown, never "nothing charged", "no refund" or
+ * "no dispute" (Codex G2 on #1899).
  *
  * When the buyer paid, never when the checkout page opened (the session's
  * own `created`): the charge of a one-time payment, or the payment of the
  * first invoice of a membership or payment plan. A checkout that charged
- * nothing (a free order) has no payment moment, so its paidAt is null.
+ * nothing (a free order, a trial) has no payment moment, so its paidAt is
+ * null; that is read only off Stripe's explicit null, never off a field it
+ * did not send.
  */
-export function payment(row: { payment_intent?: unknown; invoice?: unknown }): Payment | null {
-  if (typeof row.payment_intent === "string" || typeof row.invoice === "string") return null;
-  const intent = obj(row.payment_intent);
-  if (intent) {
-    const charge = obj(intent.latest_charge);
+export function payment(row: { payment_status?: unknown; payment_intent?: unknown; invoice?: unknown }): Payment | null {
+  if (row.payment_intent !== null) {
+    const intent = resource(row.payment_intent, "payment_intent");
+    const charge = intent && resource(intent.latest_charge, "charge");
     if (!charge) return null;
     const paidAt = iso(charge.created);
     const refundedCents = cents(charge.amount_refunded);
     if (!paidAt || refundedCents === null || typeof charge.disputed !== "boolean") return null;
     return { paidAt, refundedCents, disputed: charge.disputed };
   }
-  // An invoice not paid yet (a trial's) has no moment; one that cannot be read is unknown.
-  const at = obj(obj(row.invoice)?.status_transitions)?.paid_at;
-  const paidAt = at === null || at === undefined ? null : iso(at);
-  if (at !== null && at !== undefined && !paidAt) return null;
+  // No payment and no invoice: only a checkout that owed nothing, never one Stripe says was paid.
+  if (row.invoice === null) return row.payment_status === "no_payment_required" ? { paidAt: null, refundedCents: null, disputed: null } : null;
+  const invoice = resource(row.invoice, "invoice");
+  const transitions = invoice && obj(invoice.status_transitions);
+  if (!transitions) return null;
+  // An invoice not paid yet (a trial's) has no moment, but a checkout Stripe says was paid has one; one that cannot be read is unknown.
+  const at = transitions.paid_at;
+  const paidAt = at === null ? null : iso(at);
+  if (at === undefined || (at !== null && !paidAt) || (paidAt === null && row.payment_status !== "no_payment_required")) return null;
   return { paidAt, refundedCents: null, disputed: null };
 }
 
@@ -145,6 +160,11 @@ function isSale(row: Row): boolean {
 }
 
 type Read = { row: Row; paid: Payment; amount: number; discount: number | null; openedAt: string; currency: string };
+
+/** A checkout's status, payment status and mode: every value Stripe documents for each. */
+const STATUSES = ["open", "complete", "expired"];
+const PAYMENT_STATUSES = ["paid", "unpaid", "no_payment_required"];
+const MODES = ["payment", "subscription", "setup"];
 
 /** A currency as Stripe writes it: three lowercase letters (ISO 4217). */
 const CURRENCY = /^[a-z]{3}$/;
@@ -206,16 +226,23 @@ export async function sales(store: Store, cursor: string | null, charge: Charge)
   const lastId = rows.length ? rows[rows.length - 1].id : null;
   const last = typeof lastId === "string" && CURSOR.test(lastId) ? lastId : null;
   if (page.has_more === true && !last) return null;
+  // Every row must be a checkout with its own id and metadata, or which store it belongs to is unknown: a row that is
+  // not one is never taken for another store's checkout (Codex G2 on #1899).
+  if (rows.some((row) => {
+    const m = obj(row.metadata);
+    return row.object !== "checkout.session" || typeof row.id !== "string" || !CURSOR.test(row.id) || !m || (m.store !== undefined && typeof m.store !== "string");
+  })) return null;
   const handles = saleHandles(store);
-  // A checkout of this store is classed by its status, payment status and mode: one Stripe sent without them is
-  // unknown, never left out of the page as though it were no sale (Codex G2 on #1899).
+  // A checkout of this store is classed by its status, payment status and mode, each one Stripe documents: one Stripe
+  // sent without them, or with a value this reader does not know, is unknown, never left out of the page as though it
+  // were no sale (Codex G2 on #1899).
   const ours = rows.filter((row) => handles.has(row.metadata?.store ?? ""));
-  if (ours.some((row) => typeof row.id !== "string" || typeof row.status !== "string" || typeof row.payment_status !== "string" || typeof row.mode !== "string")) return null;
+  if (ours.some((row) => !STATUSES.includes(row.status as string) || !PAYMENT_STATUSES.includes(row.payment_status as string) || !MODES.includes(row.mode as string))) return null;
   const mine = ours.filter((row) => isSale(row));
   // One sale that cannot be read makes the page unknown: never a guessed zero, a negative amount or "nothing charged".
   const read: Read[] = [];
   for (const row of mine) {
-    const sale = CURSOR.test(row.id as string) ? readSale(row) : null;
+    const sale = readSale(row);
     if (!sale) return null;
     read.push(sale);
   }

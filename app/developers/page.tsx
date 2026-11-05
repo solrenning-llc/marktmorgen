@@ -633,8 +633,9 @@ export default function DevelopersPage() {
           payment plan, when its first invoice was paid (with a free trial, that invoice is for $0, so this is when the
           trial began). It is not when the checkout page was opened. It is{" "}
           <code className="font-mono">null</code> when nothing was charged at checkout, such as a free order.{" "}
-          <code className="font-mono">currency</code> is <code className="font-mono">null</code> if Stripe did not give
-          one (the webhook says <code className="font-mono">usd</code> there).
+          <code className="font-mono">currency</code> is always the three-letter code Stripe gave: if Stripe did not
+          give one for a sale, the answer is 502 <code className="font-mono">unavailable</code>, never a guessed{" "}
+          <code className="font-mono">usd</code>.
         </p>
         <p>
           Products checked at checkout are in <code className="font-mono">order_bumps</code>, in the order of their boxes,

@@ -210,6 +210,8 @@ async function main(): Promise<void> {
   // Codex G2 on #1899: a sale Stripe sent without a currency is unknown, so the page is: never a guessed usd, nor a sale with none.
   pages = [{ object: "list", has_more: false, data: [session("cs_test_nocurrency", { currency: null })] }];
   is("no currency from Stripe: the page is unknown, 502, never a guessed usd", (await call()).status, 502);
+  const saysCurrency = readFileSync(join(process.cwd(), "app/developers/page.tsx"), "utf8").replace(/\s+/g, " ");
+  is("/developers says so: no currency is the 502, never a null currency", [saysCurrency.includes('if Stripe did not give one for a sale, the answer is 502 <code className="font-mono">unavailable</code>, never a guessed{" "} <code className="font-mono">usd</code>'), saysCurrency.includes('<code className="font-mono">currency</code> is <code className="font-mono">null</code>')], [true, false]);
   is("a membership's first invoice is not read for refunds or disputes: null, never a guessed none", [newYear.data[1].refunded_cents, newYear.data[1].disputed], [null, null]);
   is("nothing charged: no refund or dispute to read either", [newYear.data[2].refunded_cents, newYear.data[2].disputed], [null, null]);
 
@@ -311,7 +313,7 @@ async function main(): Promise<void> {
   const worst = (i: number) => ({
     ...session(`cs_${"W".repeat(246)}${String(i).padStart(4, "0")}`, {
       amount_total: Number.MAX_SAFE_INTEGER, total_details: { amount_discount: Number.MAX_SAFE_INTEGER },
-      payment_intent: { id: "pi_w", latest_charge: charge("ch_w", 1_790_000_060, { amount_refunded: Number.MAX_SAFE_INTEGER }) },
+      payment_intent: { id: "pi_w", object: "payment_intent", latest_charge: charge("ch_w", 1_790_000_060, { amount_refunded: Number.MAX_SAFE_INTEGER }) },
       customer_details: { email: "漢".repeat(SALE_TEXT_LIMITS.email), name: "漢".repeat(SALE_TEXT_LIMITS.name) },
     }),
     metadata: { ...full, kind: "plan" },
@@ -335,13 +337,33 @@ async function main(): Promise<void> {
 
   part("Times a Date cannot hold, and a missing opening time: unknown, never a thrown error");
   for (const [what, extra] of [
-    ["a charge time past what a Date holds", { payment_intent: { id: "pi_t", latest_charge: charge("ch_t", 9e12) } }],
-    ["a first invoice paid past what a Date holds", { mode: "subscription", payment_intent: null, invoice: { id: "in_t", status_transitions: { paid_at: 9e12 } } }],
+    ["a charge time past what a Date holds", { payment_intent: { id: "pi_t", object: "payment_intent", latest_charge: charge("ch_t", 9e12) } }],
+    ["a first invoice paid past what a Date holds", { mode: "subscription", payment_intent: null, invoice: { id: "in_t", object: "invoice", status_transitions: { paid_at: 9e12 } } }],
     ["an opening time past what a Date holds", { created: 9e12 }],
     ["no opening time", { created: null }],
   ] as [string, Record<string, unknown>][]) {
     pages = [{ object: "list", has_more: false, data: [session("cs_test_time", extra)] }];
     is(`${what}: 502`, (await call()).status, 502);
+  }
+  // Codex G2 on #1899: "nothing charged" is read only off Stripe's explicit null on a checkout that owed nothing.
+  part("No payment moment only where Stripe says nothing was owed");
+  for (const [what, extra, status] of [
+    ["a paid checkout with neither a payment nor an invoice: 502", { payment_intent: null, invoice: null }, 502],
+    ["a paid membership whose first invoice has no paid moment: 502", { mode: "subscription", payment_intent: null, invoice: { id: "in_u", object: "invoice", status_transitions: { paid_at: null } } }, 502],
+    ["an invoice that does not say when it was paid: 502", { mode: "subscription", payment_intent: null, invoice: { id: "in_u", object: "invoice", status_transitions: {} } }, 502],
+    ["a trial whose first invoice is not paid yet: no moment, 200", { mode: "subscription", payment_status: "no_payment_required", amount_total: 0, payment_intent: null, invoice: { id: "in_u", object: "invoice", status_transitions: { paid_at: null } } }, 200],
+    ["a checkout whose payment field is missing: 502", { payment_intent: undefined }, 502],
+  ] as [string, Record<string, unknown>, number][]) {
+    pages = [{ object: "list", has_more: false, data: [session("cs_test_moment", extra)] }];
+    is(what, (await call()).status, status);
+  }
+  for (const [what, row] of [
+    ["a row whose store is not a text", { ...session("cs_test_meta"), metadata: { store: 7 } }],
+    ["a row without metadata", { ...session("cs_test_meta"), metadata: null }],
+    ["a row that is not a checkout", { ...session("cs_test_meta"), object: "payment_intent" }],
+  ] as [string, unknown][]) {
+    pages = [{ object: "list", has_more: false, data: [row] }];
+    is(`${what}: unknown, 502, never another store's`, (await call()).status, 502);
   }
   pages = [{ object: "list", has_more: false, data: [session("cs_test_opened")] }];
   is("opened_at is when the checkout page opened", ((await call()).body as { data: Record<string, unknown>[] }).data[0].opened_at, new Date(1_790_000_000_000).toISOString());

@@ -12,7 +12,8 @@ import {productIds} from '@/lib/catalog';
 import {paidPeriod} from './billing-period-fixture';
 import {store as redis} from './redis-stub';
 const owner='g2-api-sales@example.test',handle='g2-api-sales',account='acct_G2ApiSales';
-const session=(patch:Record<string,unknown>={})=>({id:'cs_test_G2Sale',object:'checkout.session',status:'complete',payment_status:'paid',mode:'payment',created:1790000000,amount_total:4900,currency:'eur',total_details:{amount_discount:0},metadata:{store:handle,title:'Known guide'},custom_fields:[{key:'private',text:{value:'G2_PRIVATE_ANSWER'}}],...patch});
+// A paid checkout carries its expanded payment, as Stripe sends it: one without it is unknown (Codex G2's second proof on #1899).
+const session=(patch:Record<string,unknown>={})=>({id:'cs_test_G2Sale',object:'checkout.session',status:'complete',payment_status:'paid',mode:'payment',created:1790000000,amount_total:4900,currency:'eur',total_details:{amount_discount:0},metadata:{store:handle,title:'Known guide'},custom_fields:[{key:'private',text:{value:'G2_PRIVATE_ANSWER'}}],payment_intent:{id:'pi_test_G2Sale',object:'payment_intent',latest_charge:{id:'ch_test_G2Sale',object:'charge',created:1790000060,amount_refunded:0,disputed:false}},...patch});
 const page=(data:unknown[]=[],has_more=false)=>({object:'list',data,has_more});
 async function fixture(drafts=false){
  redis.clear();process.env.STRIPE_SECRET_KEY='sk_test_g2_sales_synthetic';

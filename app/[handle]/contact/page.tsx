@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { cache } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { normaliseHandle, storeForPage } from "@/lib/store";
+import { normaliseHandle, storeForPage, type Store } from "@/lib/store";
+import { isResting } from "@/lib/traffic";
 import { lookStyle } from "@/lib/store-look";
 import { StoreTracking } from "@/components/store-tracking";
 import { speech } from "@/lib/buyer-words";
@@ -15,12 +17,32 @@ type Params = {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
-  const { handle } = await params;
+/**
+ * The creator's business card for this address, read only after the page is
+ * paid for (review of #1962): the store's isResting counts the page as one of
+ * its public requests before the card is read, and refuses it past the
+ * window's, or with no window it can be counted in; the page then sends the
+ * visitor to the store's own page, which says it is resting. The page and
+ * its title share this one count within a request (React cache), so a page
+ * drawn is one request, as every store page is; a title asked for alone pays
+ * the same.
+ */
+const cardFor = cache(async (handle: string): Promise<{ store: Store | null; card: Awaited<ReturnType<typeof readCreatorCard>> | null }> => {
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
+  // Switched off after notices about its content (lib/takedown.ts), or resting: no card is read.
+  if (!store || store.suspended || (await isResting(store))) return { store, card: null };
+  return { store, card: await readCreatorCard(store.statsId).catch(() => null) };
+});
+
+export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
+  const { handle } = await params;
   const query = await searchParams;
-  const card = store && !store.suspended && !query.status ? await readCreatorCard(store.statsId).catch(() => null) : null;
+  const decoded = decodeURIComponent(handle);
+  // A notice after a message names no card, so it reads none.
+  const { store, card } = query.status
+    ? { store: decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null, card: null }
+    : await cardFor(handle);
   const w = contactWords(store?.language);
   return { title: `${card?.on ? `${card.name} · ${w.card.pageTitle}` : w.pageTitle} — Marktmorgen`, robots: { index: false, follow: false } };
 }
@@ -43,7 +65,8 @@ export default async function ContactPage({ params, searchParams }: Params) {
   const said = speech(store);
   const w = contactWords(store.language);
   if (!status) {
-    const card = await readCreatorCard(store.statsId).catch(() => null);
+    // Resting, or no card on: the store's own page, which says when it rests.
+    const { card } = await cardFor(raw);
     if (!card?.on) redirect(`/@${store.handle}`);
     return (
       <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>

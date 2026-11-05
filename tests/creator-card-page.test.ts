@@ -4,7 +4,9 @@
  * (app/[handle]/contact/vcard/route.ts), through the real page, route and
  * store, the card itself drawn from components/creator-card-view.tsx. Shown and given only while the card is on; each way to reach the
  * creator a link that says what it is; the file a vCard to save; neither
- * while the store is switched off after a report; the words
+ * while the store is switched off after a report; each paid for with one of
+ * the store's public requests before the card is read, and refused while the
+ * store rests (review of #1962); the words
  * in every language the store can speak.
  */
 import { readFileSync } from "node:fs";
@@ -87,6 +89,38 @@ async function main(): Promise<void> {
   is("its title does not name the creator", String((await generateMetadata({ params: Promise.resolve({ handle: "@anapottery" }), searchParams: Promise.resolve({}) })).title).includes("Ana Souza"), false);
   await noteTakedown(owner, null, false);
   is("switched back on, the file is given again", (await file()).status, 200);
+
+  part("Paid for before the card is read (review of #1962)");
+  // Every command the store's data is sent, to see what each way in counts and reads.
+  const base = redis.pipeline.bind(redis);
+  const sent: (string | number)[][] = [];
+  redis.pipeline = async (batch) => { sent.push(...batch); return base(batch); };
+  const counted = async (run: () => Promise<unknown>) => {
+    sent.length = 0;
+    await run();
+    const taken = sent.filter((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:")).map((c) => Number(c[2]));
+    const firstRead = sent.findIndex((c) => c[0] === "GET" && String(c[1]).startsWith("nl:vcard:"));
+    const firstTaken = sent.findIndex((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:"));
+    return { taken, paidFirst: firstTaken >= 0 && firstTaken < firstRead };
+  };
+  const meta = () => generateMetadata({ params: Promise.resolve({ handle: "@anapottery" }), searchParams: Promise.resolve({}) });
+  try {
+    is("the file takes one of the store's public requests, before the card is read", await counted(file), { taken: [1], paidFirst: true });
+    is("the page takes one, before the card is read", await counted(open), { taken: [1], paidFirst: true });
+    is("its title asked for alone takes one, before the card is read", await counted(meta), { taken: [1], paidFirst: true });
+    is("a message's notice reads no card and takes nothing more", await counted(() => open("sent")), { taken: [], paidFirst: false });
+    // No paid window the requests can be counted in: the store rests, and the card is not read.
+    await setSubscription(owner, { active: true, period: null });
+    sent.length = 0;
+    const refused = await file();
+    is("then the file is refused, kept by no cache", [refused.status, refused.headers.get("cache-control")], [503, "no-store"]);
+    is("the page sends the visitor to the store's page, which says it rests", await open(), { redirect: "/@anapottery" });
+    is("its title does not name the creator", String((await meta()).title).includes("Ana Souza"), false);
+    is("and the card was never read", sent.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:vcard:")), false);
+  } finally {
+    redis.pipeline = base;
+    await setSubscription(owner, { active: true, tier: "creator", period: paidPeriod() });
+  }
 
   part("In every language the store can speak");
   const keys = Object.keys(CONTACT_WORDS.en.card).sort();

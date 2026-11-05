@@ -4,7 +4,7 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 import { FaqEditor } from "@/components/faq-editor";
 import { done, is, part } from "./check";
 
-const router = { back() {}, forward() {}, refresh() {}, push() {}, replace() {}, prefetch: async () => {} };
+const router = { bfcacheId: "faq-focus-fixture", back() {}, forward() {}, refresh() {}, push() {}, replace() {}, prefetch: async () => {} };
 const html = renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: router },
   createElement(FaqEditor, { faq: [{ q: "First question?", a: "First answer." }, { q: "Second question?", a: "Second answer." }], ai: { on: false, left: 0 } }),
 ));

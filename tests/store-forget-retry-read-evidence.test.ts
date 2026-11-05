@@ -39,9 +39,13 @@ async function main(): Promise<void> {
   assert.deepEqual(await storeForgetMonth(month), { month, queued: 7, done: 5, gaveUp: 2, waitingNow: 0, keptNow: 0 });
 
   redis.clear();
+  await original([["HSET", key, "queued", 1]]);
+  assert.deepEqual(await storeForgetMonth(month), { month, queued: 1, done: 0, gaveUp: 0, waitingNow: 0, keptNow: 0 });
+
+  redis.clear();
   assert.deepEqual(await storeForgetMonth("2026-12"), { month: "2026-12", queued: 0, done: 0, gaveUp: 0, waitingNow: 0, keptNow: 0 });
 
-  console.log("store-forget retry read evidence: 5/5");
+  console.log("store-forget retry read evidence: 6/6");
 }
 
 void main();

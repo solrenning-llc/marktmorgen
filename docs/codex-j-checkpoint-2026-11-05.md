@@ -1,3 +1,18 @@
+# Codex J — delta autoritativo — 2026-11-05 22:03 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- Ordem Pro C1-20261105-1900-CX-1 recebida; AV12 e trabalho padrão lidos no canal (publicados como1809/1843; IDs1808/1846 citados nas remissões). Claude4 passou a apoio rotineiro após30min, sem poder mudar regra/faixa/dinheiro.
+- **Revisão independente #2684 CONCLUÍDA no exact bae47bd57924e48c419ddd2b7552d6f3f629af2d: DOIS MÉDIOS, NÃO LIBERADO**, parecer5792735892. Prova durável codex/j-review-2684-shape@09de5b74cfaf90513af8bc290c6c113a83559f83, tests/j-2684-shape.proof.ts, docs/j-review-2684.md, j-review-run.mjs (mkdtemp/aliases oficiais). SearchConsole keys ausente/null/[]/[42]→queryvazia→[]conhecido/cache86400; Discord managed ausente/null/"true"→false→assignable e autorização de salvar cargo.11controles/7falhas,4controlespassam. Original REDc82e641af inalterado10/7; final10/10; ligados discord35/numbers24/faq18/words16/cards197/refusals12 verdes, demo-admin e orders-page processos0. Tipos recorte0/lint0/scanner3799/0/diff0. Nenhum produto/ref/CI alheio alterado; sem provedor/browser/native/globaltypes. Google schema rows.keys/dimensions e Discord managed:boolean conferidos em fontes oficiais. Próximo retorno só corretivo novo solicitado, mesmos vetores sem afrouxar.
+- Claim anterior b12eea4 foi antes de fonte/diff, apesar do horário "19h04" digitado errado; correção material no resumo do canal. Primeiro resumo409; espera>=2min e FULL/CAS bem-sucedido: commit5b3208050026b57580b5a4b9aa91dca91e26027b/blob a98f108634c4a28031150baa6a0391ea70acada0.
+- **Controlador novo pelo canal C3**: #2632 exact f183d78fd326c404c5a75fd6a3b9328b9fe24c94 inclui #2677 pela exceção C1 após rodada42e50 terminar productfailure exclusivamente WebKit. Nove novos necessários; C3 controla merge. Não consultar CI em rodadas nem tocar branch/retry alheio.
+- Próprios #2594/99de6fc718bac69fb822573c051d75c71b6d91f2;#2660/f186dae83876c3bf7a95fe486090f45a150bcd03;#2661/7352ea96c67fd5b353ee2fd262b7d601fa91ee39;#2666/3c3d1ae28b2e078fa4b49124e106e91febe000ff OPEN/headsintactos. Releituras API confirmaram. Nenhum retry/cancel/headmove/merge. Integração única main own somente após controlador MERGED com9, blobs próprios preservados, ligados/types/lint/scanner/diff+parecer aplicável+9NOVOS.
+- **Inventário nominal C4-20261105-1859-CX-1 realizado**: oito docs/tests Irlanda/Itália/Espanha/Portugal relidos nos heads próprios; zero JSON.parse/Redis/list/cursor. Vizinho lib/llc-fixed-costs.ts sem padrão; commercial-margin.ts:195 parseia apenas canonicalFinancialSnapshot após captura/validação, não leitura Redis. Não foi fabricado lote RED. Arquivos own ainda em PR, excluídos de nova unidade. #2686 segue OPEN em4a1c6f9e e revisãoQatribuída: não duplicar. Após merge, C4 autorizou quem não tem padrão a tomar um item novo a partir646, com reserva/sem sobrepor.
+- Workspace atual próprio /workspace/scratch/cb1e4dcbb376/j-review-2684 (clone compartilhado, branchlocalcodex/j-review-2684-shape embae47 com3provasuntracked; remoto09de contém provas). Red isolado j-review-2684-red emc82e. Dependências symlink para /workspace/scratch/452ffd7d3d6c/p-review-2682/node_modules, nenhuma alteração no doador. Directedconfig /tmp/j-2684-tsconfig.json/log. Não recriar/produto alheio.
+- Próximo: retorno2684 ou integração own após2632legítimo; antes de nova implementação conferir #2686+reservas/anúncios. Cinco unidades máximas; quatro produtos+revisãoconcluída, não abrir sexta artificial.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-05 21:52 UTC
 
 Prevalece sobre deltas abaixo; demais fatos preservados.

@@ -4,8 +4,8 @@ import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { createCheckout } from "@/lib/store-checkout";
 import { singleDigitalFixture } from "./single-digital-confirmation-world";
 
-test("single digital checkout cannot bypass durable admission when never activated or unfunded", async () => {
-  for (const lifecycle of ["never_activated", "active"] as const) {
+test("an active single digital checkout cannot bypass unfunded durable admission", async () => {
+  for (const lifecycle of ["active"] as const) {
     const f = await singleDigitalFixture();
     let posts = 0;
     process.env.STRIPE_SECRET_KEY = "sk_test_SYNTHETIC_ONLY";
@@ -18,6 +18,26 @@ test("single digital checkout cannot bypass durable admission when never activat
     assert.equal(f.commands.length, 0, "blocked producer spends no durable source commands");
     assert.equal(posts, 0, "no legacy payment POST before funded durable admission");
     assert.equal(returned, false, "no unprotected payment URL");
+  }
+});
+
+test("never-activated single-file checkout keeps the legacy payment path with and without news", async () => {
+  for (const news of [false, true]) {
+    const f = await singleDigitalFixture();
+    process.env.STRIPE_SECRET_KEY = "sk_test_SYNTHETIC_ONLY";
+    const bodies: URLSearchParams[] = [];
+    globalThis.fetch = async (_url, init) => {
+      if (init?.method === "POST") bodies.push(new URLSearchParams(String(init.body)));
+      return Response.json({ id: "cs_test_SyntheticLegacyDigital001", url: "https://checkout.stripe.com/c/pay/synthetic" });
+    };
+    const result = await createCheckout(f.store, f.product, "https://example.test", undefined,
+      { news, digitalConsent: { version: EU_WITHDRAWAL_CONSENT_VERSION, at: Math.floor(f.created / 1000) } },
+      { ...f.runtime, lifecycle: "never_activated", policy: null });
+    assert.equal(result.id, "cs_test_SyntheticLegacyDigital001");
+    assert.equal(bodies.length, 1, "the legacy provider POST is reachable");
+    assert.equal(bodies[0].get("metadata[news]"), news ? "yes" : null);
+    assert.equal(bodies[0].get("metadata[mm_order_origin]"), null);
+    assert.equal(f.commands.length, 0, "the inactive durable queue performs no IO");
   }
 });
 

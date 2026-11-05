@@ -127,6 +127,19 @@ test("paid source refuses substituted or unpaid provider records without a POST"
   }
 });
 
+test("a disputed charge is deferred without dispatch or original accounting", async () => {
+  const f = await paid();
+  const payment = f.session.payment_intent as { latest_charge: Record<string, unknown> };
+  payment.latest_charge.disputed = true;
+  let posts = 0;
+  await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => { posts++; return "accepted"; }, f.runtime, f.id);
+  assert.equal(posts, 0, "a disputed payment cannot dispatch its confirmation");
+  const retained = await readConfirmationOrigin(f.id, f.runtime);
+  assert.ok(retained);
+  assert.equal(retained.row.phase, "awaiting_payment");
+  assert.equal(f.commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION), false);
+});
+
 test("never activated means no worker or cleanup IO; retired cleanup still erases the source", async () => {
   const f = await paid(); let io = 0;
   const inactive = { ...f.runtime, lifecycle: "never_activated" as const, pipeline: async () => { io++; return []; } };

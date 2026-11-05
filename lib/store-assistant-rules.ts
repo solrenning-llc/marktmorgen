@@ -51,6 +51,7 @@ import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, PROVIDER_CHARGES_BPS, UPSTASH
 import { assessCustomerWorstCase, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
 import { captureCustomerTaxInput, customerTaxCeiling, type CustomerTaxInput } from "@/lib/customer-tax-review";
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
+import { CONFUSABLE_LATIN_SOURCES } from "@/lib/confusables-latin";
 import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_CORRECT_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf } from "@/lib/receiving-costs";
 
 /** The largest store record (lib/store.ts, MAX_STORE_BYTES), read once a message; held equal in tests/store-assistant.test.ts. */
@@ -211,9 +212,93 @@ export const HANDOFF_WORDS =
 
 // ----------------------------------------------------------------- held to the facts
 
-/** Words of a deal or of pressure. A reply may use one only when the store's own text does. */
-export const DEAL_WORDS =
-  /\b(discount|coupon|promo|promo code|voucher|code|% ?off|percent off|sale price|free shipping|limited time|only \d+ left|hurry|selling fast|last chance|ends (today|tonight|soon)|act now|today only|exclusive offer|guarantee[ds]?|best[- ]selling|bestseller|testimonial|five[- ]star|5[- ]star)\b/i;
+/**
+ * Words of a deal or of pressure, singular and plural, in English and in
+ * every language a store can speak (Spanish, French, German, Italian, Dutch,
+ * Portuguese). A reply may use one only when the store's own text does.
+ * Whole words only, by Unicode letters, so a longer word that merely
+ * contains one ("barcode", "Postversand") is not caught. They are written
+ * lowercase and are matched on text folded to one form (foldedText), so an
+ * accent the term spells as a choice ("cup[oó]n") matches with or without
+ * it. A stem with an open ending (written \p{L}* after it) takes every form
+ * of the word: "garantiert", "Gutscheinen", "promoção"; one with letters
+ * before it (\p{L}+) is the German or Dutch compound ("Frühlingsrabatt").
+ * Singular and plural share one term, so the store's "Discounts" allows "a
+ * discount"; another form ("discounted") is its own term.
+ */
+const DEAL_TERMS = [
+  // English
+  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|uv\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
+  "per[- ]?cent off", "on sale", "sale prices?", "free shipping", "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance",
+  "ends (?:today|tonight|soon)", "act now", "today only", "exclusive offers?", "guarant\\p{L}*", "best[- ]?sell(?:ing|ers?)", "testimonials?",
+  "five[- ]stars?", "5[- ]stars?",
+  // Spanish
+  "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promociona(?:l|les|is)", "rebaj\\p{L}*", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad",
+  "date prisa", "s[oó]lo hoy", "garant\\p{L}*", "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
+  // French
+  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
+  "livraison gratuite", "soldes", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
+  // German
+  "rabatt\\p{L}*", "\\p{L}+rabatt\\p{L}*", "gutschein\\p{L}*", "\\p{L}+gutschein\\p{L}*", "kostenlos\\p{L}* versand", "\\p{L}*(?:gratis|kostenlos)versand\\p{L}*",
+  "\\p{L}*versandkostenfrei\\p{L}*", "aktionscodes?", "\\p{L}*sonderangebot\\p{L}*", "letzte chance", "nur heute", "beeilen sie sich", "kundenstimmen?", "erfahrungsberichte?",
+  "f[uü]nf sterne",
+  // Italian
+  "scont[oi]", "scontat[aeio]", "spedizione gratuita", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi",
+  "garanz\\p{L}*", "saldi", "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
+  // Dutch
+  "korting\\p{L}*", "\\p{L}+korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
+  "gegarandeerd\\p{L}*", "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
+  // Portuguese
+  "descontos?", "cup(?:om|ons)", "cup(?:[aã]o|[oõ]es)", "ofertas? limitadas?", "[uú]ltima oportunidade", "s[oó] hoje", "frete gr[aá]tis", "depoimentos?",
+  "testemunhos?", "cinco estrelas", "mais vendid[oa]s?",
+].filter((term, i, all) => all.indexOf(term) === i);
+/** Between the words of a term: any run of spaces (a line break, a no-break space) or a hyphen of any kind. */
+const BETWEEN = "[\\s\\-\\u2010-\\u2015]+";
+const termSource = (term: string) => term.replace(/\[- \]\?/g, `(?:${BETWEEN})?`).replace(/\[- \]| /g, BETWEEN);
+/** Deal signs that are not words: "20% off" however it is spaced, and star ratings. */
+const DEAL_SIGNS = ["%\\s*off(?!\\p{L})", "[\\u22C6\\u2605\\u2606\\u2729-\\u2730\\u2B50-\\u2B52\\u{1F31F}\\u{1F320}]"];
+const WORD_EDGE_BEFORE = "(?<![\\p{L}\\p{N}_])";
+const WORD_EDGE_AFTER = "(?![\\p{L}\\p{N}_])";
+/**
+ * German and Dutch stems that take compounds, each with its compound form
+ * (letters before it): these are read with a visible hyphen joined, so the
+ * store's "Sommer-Rabatt" allows the reply's "Sommer-Rabatt", and neither
+ * "Geschenk-Gutschein" nor "Geschenkgutschein" allows "Gutschein" alone.
+ */
+const COMPOUND_STEMS = new Set(["rabatt\\p{L}*", "gutschein\\p{L}*", "korting\\p{L}*"]);
+/**
+ * The longest run of letters every match of a term must contain, read from
+ * the term itself (outside its groups, choices and optional letters), or ""
+ * when it has none: "cup[oó]n(?:es)?" gives "cup", "\\p{L}+rabatt\\p{L}*" gives "rabatt".
+ */
+function anchorOf(term: string): string {
+  let source = term.replace(/\\p\{L\}[*+]/g, " ").replace(/\\[a-z][+*]?/gi, " ");
+  while (/\([^()]*\)/.test(source)) source = source.replace(/\([^()]*\)[?*+]?/g, " ");
+  source = source.replace(/\[[^\]]*\][?*+]?/g, " ").replace(/.[?*]/g, " ");
+  return (source.match(/[a-z]+/g) ?? []).reduce((longest, run) => (run.length > longest.length ? run : longest), "");
+}
+/**
+ * A deal term: its pattern, whether its ending is open, whether it is read
+ * with visible hyphens joined, and what a text must hold for it to match at
+ * all (its anchor, a quick check that lets ordinary text skip the patterns;
+ * a term with no anchor is always checked, so the shortcut can only cost
+ * time, never let a deal word pass).
+ */
+type DealTerm = { find: RegExp; open: boolean; compound: boolean; anchor: string | RegExp };
+const DEAL_TERM_RULES: DealTerm[] = [
+  ...DEAL_TERMS.map((term) => ({
+    find: new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu"),
+    open: /\\p\{L\}[*+]/.test(term),
+    compound: term.startsWith("\\p{L}") || COMPOUND_STEMS.has(term),
+    anchor: anchorOf(term).length >= 2 ? anchorOf(term) : /[^]/,
+  })),
+  ...DEAL_SIGNS.map((sign) => ({ find: new RegExp(sign, "gu"), open: false, compound: false, anchor: new RegExp(sign, "u") })),
+];
+/** Every deal word or sign, as typed (case ignored): for a quick refusal where no deal may pass at all. */
+export const DEAL_WORDS = new RegExp(
+  `${WORD_EDGE_BEFORE}(?:${DEAL_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}|${DEAL_SIGNS.join("|")}`,
+  "iu",
+);
 
 const NUMBERS = /\d+(?:[.,]\d+)*/g;
 /** A number as digits, and without decimals that are all zeros: "$27.00" and "$27" are the same price. */
@@ -224,23 +309,276 @@ function numberForms(n: string): string[] {
 }
 const LINK = /\b(?:https?:\/\/|www\.)\S+/i;
 
+/** Every apostrophe-like sign, read as "'" (the modifier letters among them would otherwise count as letters). */
+const APOSTROPHES = /[\u2018\u2019\u201B\u02BB\u02BC\u2032\u00B4`\uFF07]/g;
+/** A decimal digit of any script as its ASCII digit: Unicode encodes each script's ten digits in a row, 0 first. */
+const DIGITS = new Map<string, string>();
+function asciiDigit(digit: string): string {
+  let ascii = DIGITS.get(digit);
+  if (ascii === undefined) {
+    const code = digit.codePointAt(0)!;
+    let start = code;
+    while (/\p{Nd}/u.test(String.fromCodePoint(start - 1))) start -= 1;
+    DIGITS.set(digit, (ascii = String((code - start) % 10)));
+  }
+  return ascii;
+}
+
+/**
+ * Letters that look like a plain Latin letter or digit, from Unicode's
+ * confusables.txt (lib/confusables-latin.ts, generated by
+ * scripts/confusables-latin.mjs): Cyrillic, Greek, Armenian, Coptic, Lisu,
+ * Cherokee, Osage, Old Italic, Canadian syllabics, Tifinagh, Latin small
+ * capitals and the rest. Used only to find a deal word spelled with them;
+ * Arabic, Hebrew, Han, kana and hangul are never mapped, so they never refuse.
+ */
+let lookalikes: Map<number, string> | null = null;
+/** Built on first use, so a page that only reads this module's constants never carries the table. */
+const lookalikeTable = () =>
+  (lookalikes ??= new Map<number, string>(
+    Object.entries(CONFUSABLE_LATIN_SOURCES).flatMap(([latin, sources]) => sources.map((source): [number, string] => [source, latin])),
+  ));
+/**
+ * One sign as the plain letter it looks like, or itself. A vertical stroke
+ * is read as `stroke` ("l" or "i"). Negative circled and squared letters and
+ * regional indicators are read as a to z; a small Cherokee letter as its capital.
+ */
+function lookalike(sign: string, stroke: "l" | "i"): string {
+  let code = sign.codePointAt(0)!;
+  if (code >= 0x1f150 && code <= 0x1f169) return String.fromCharCode(97 + code - 0x1f150);
+  if (code >= 0x1f170 && code <= 0x1f189) return String.fromCharCode(97 + code - 0x1f170);
+  if (code >= 0x1f1e6 && code <= 0x1f1ff) return String.fromCharCode(97 + code - 0x1f1e6);
+  const table = lookalikeTable();
+  if (code >= 0xab70 && code <= 0xabbf && !table.has(code)) code = code - 0xab70 + 0x13a0;
+  const latin = table.get(code);
+  return latin === undefined ? sign : latin === "l|i" ? stroke : latin;
+}
+
+/** Spaces other than a plain one: thin, no-break, ideographic and the rest. */
+const SPECIAL_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/u;
+/** A line break that ends a sentence ("Pro.\nMost") or comes before a capital ("Pro\nMonthly"): read as a space, never joined. */
+const SENTENCE_BREAK = /(?:[.!?:;][\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])|[\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])[\t ]*(?=[\p{Lu}\p{Lt}]))/gu;
+const MAY_LOOK_ALIKE = /[\u00B5\u0250-\u1FFF\u2070-\uFFFF\u{10000}-\u{10FFFF}]/u;
+/**
+ * Text folded to the one form it is matched in, never shown: compatibility
+ * forms as their plain letter and digit (fullwidth, mathematical bold, a
+ * digit of any script as ASCII), every mark (accent) and every invisible or
+ * format character removed (bidirectional marks, variation selectors, tags),
+ * the Turkish dotted and dotless i as "i", lowercase. With `skeleton`, every
+ * look-alike letter is also read as the Latin letter it looks like, a
+ * vertical stroke as that letter. With `splits`, for joinedText: a space
+ * other than a plain one is kept as a mark joinedText removes (NFKC would
+ * make it a plain space), and a line break that ends a sentence or comes
+ * before a capital becomes a plain space, which is never joined.
+ */
+export function foldedText(text: string, skeleton: false | "l" | "i" = false, splits = false, seen?: { stroke: boolean }): string {
+  let folded = (splits ? text.replace(SENTENCE_BREAK, " ").replace(new RegExp(SPECIAL_SPACES.source, "gu"), "\u2027") : text)
+    .replace(APOSTROPHES, "'")
+    .normalize("NFKC")
+    .replace(/[\u0130\u0131]/g, "i")
+    .normalize("NFKD")
+    .replace(/[\p{M}\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, "");
+  if (skeleton) {
+    folded = folded.replace(/[^\x00-\x7F]/gu, (sign) => {
+      const latin = lookalike(sign, skeleton);
+      if (seen && latin !== lookalike(sign, skeleton === "l" ? "i" : "l")) seen.stroke = true;
+      return latin;
+    });
+  }
+  return folded
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\p{Nd}/gu, asciiDigit);
+}
+/** A visible hyphen between letters joined, as German and Dutch compounds are read. */
+const hyphenJoined = (text: string) => text.replace(/(?<=\p{L})[\-\u2010\u2011](?=\p{L})/gu, "");
+/**
+ * The text with every split of a word joined, for the deal-word check only:
+ * a run of punctuation, symbols or breaks other than a plain space between
+ * two letters ("dis.count", "dis..count", "dis/count", a line break, a thin
+ * or no-break space), and a run of single letters with spaces between them
+ * ("d i s c o u n t"). Never shown, and never used for numbers or links.
+ * Made from a fold with `splits`, so a sentence's end is never joined.
+ */
+const joinedText = (folded: string) =>
+  folded
+    .replace(/(?<=\p{L})[\p{P}\p{S}\t\n\v\f\r\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+(?=\p{L})/gu, "")
+    .replace(/(?<![\p{L}\p{N}])\p{L}(?:\s+\p{L}){2,}(?![\p{L}\p{N}])/gu, (letters) => {
+      // Also without its first letter, which may be a word of its own ("a d i s c o u n t").
+      const all = letters.replace(/\s+/gu, "");
+      return `${all} ${[...all].slice(1).join("")}`;
+    });
+/** The text as typed, only lowercased and its apostrophes read as one: a deal word found folded but not here was hidden (a mark, an invisible character, a split). */
+const plainText = (text: string) =>
+  text
+    .replace(APOSTROPHES, "'")
+    .normalize("NFC")
+    .replace(/\p{Lu}/gu, (c) => {
+      const lower = c.toLowerCase();
+      return c.normalize("NFKC") === c && lower.normalize("NFKC") === lower && /^\p{Ll}$/u.test(lower) ? lower : c;
+    });
+/** Letters joined by punctuation or symbols with no space ("Pro-Mode", "Pro/Monthly"): a reply may repeat one the store wrote exactly so. */
+const SPLIT_WORD = /[\p{L}\p{M}]+(?:[^\s\p{L}\p{M}\p{N}]+[\p{L}\p{M}]+)+/gu;
+
+const countIn = (find: RegExp, text: string) => text.match(find)?.length ?? 0;
+/** The word without a plural or inflection ending, for terms with an open ending: "Gutscheinen" and "Gutschein" are the same word. */
+const stem = (word: string) => (word.length > 4 ? word.replace(/(?:en|es|e|s)$/, "") : word);
+const oneSpace = (word: string) => stem(word.replace(/[\s\-\u2010-\u2015]+/gu, " "));
+
+/** The readings a text is checked in, each made the first time it is asked for: as typed, folded, with every split joined, and with look-alike letters as Latin (strokes as "l" and as "i"); each also with its visible hyphens joined, for compounds. */
+class Readings {
+  private made = new Map<string, string>();
+  constructor(readonly text: string) {}
+  private once(name: string, make: () => string): string {
+    let value = this.made.get(name);
+    if (value === undefined) this.made.set(name, (value = make()));
+    return value;
+  }
+  /** Only a text with a sign that may be or become a look-alike (from the micro sign on, past Latin-1 and Latin Extended) is folded again. */
+  private get lookalikes() { return MAY_LOOK_ALIKE.test(this.text); }
+  private get splits() { return SPECIAL_SPACES.test(this.text) || /[\n\r\v\f\u0085\u2028\u2029]/u.test(this.text); }
+  get plain() { return this.once("plain", () => plainText(this.text)); }
+  get folded() { return this.once("folded", () => foldedText(this.text)); }
+  get joined() { return this.once("joined", () => joinedText(this.splits ? foldedText(this.text, false, true) : this.folded)); }
+  /** Whether the text has a vertical stroke, read both ways; known once the "l" reading is made. */
+  private seen = { stroke: false };
+  skeleton(stroke: "l" | "i"): string {
+    if (stroke === "i") return this.once("skeletoni", () => (this.skeleton("l") && this.seen.stroke ? foldedText(this.text, "i") : this.skeleton("l")));
+    return this.once("skeletonl", () => (this.lookalikes ? foldedText(this.text, "l", false, this.seen) : this.folded));
+  }
+  skeletonJoined(stroke: "l" | "i"): string {
+    if (!this.lookalikes) return this.joined;
+    if (stroke === "i" && !(this.skeleton("l") && this.seen.stroke)) return this.skeletonJoined("l");
+    return this.once(`skeletonJoined${stroke}`, () => joinedText(foldedText(this.text, stroke, this.splits)));
+  }
+  skeletonH(stroke: "l" | "i") { return this.once(`skeletonH${stroke}`, () => hyphenJoined(this.skeleton(stroke))); }
+  get plainH() { return this.once("plainH", () => hyphenJoined(this.plain)); }
+  get foldedH() { return this.once("foldedH", () => hyphenJoined(this.folded)); }
+}
+const STROKES = ["l", "i"] as const;
+/** How often a term is found in each reading: a compound stem with its visible hyphens joined. */
+const visibleCount = (term: DealTerm, r: Readings) => countIn(term.find, term.compound ? r.plainH : r.plain);
+const foundCount = (term: DealTerm, r: Readings) => Math.max(countIn(term.find, term.compound ? r.foldedH : r.folded), countIn(term.find, r.joined));
+const lookalikeCount = (term: DealTerm, r: Readings) =>
+  Math.max(...STROKES.map((s) => Math.max(countIn(term.find, term.compound ? r.skeletonH(s) : r.skeleton(s)), countIn(term.find, r.skeletonJoined(s)))));
+/** The words a term matched in the folded readings, each as one form. */
+function wordsOf(term: DealTerm, r: Readings): Set<string> {
+  return new Set([...((term.compound ? r.foldedH : r.folded).match(term.find) ?? []), ...(r.joined.match(term.find) ?? [])].map(oneSpace));
+}
+
+/** Whether the deal words of a reply are held to the facts: "held", "refused", or "hidden" (found only once a split, a mark or a look-alike is undone). */
+function dealWordsOf(reply: Readings, store: Readings): "held" | "refused" | "hidden" {
+  // The joined readings hold every hyphen joined too, so a term found in any reading below has its anchor in one of these.
+  const texts = [...new Set([reply.folded, reply.joined, ...STROKES.flatMap((s) => [reply.skeleton(s), reply.skeletonJoined(s)])])];
+  const holds = (anchor: string | RegExp) => texts.some((text) => (typeof anchor === "string" ? text.includes(anchor) : anchor.test(text)));
+  for (const term of DEAL_TERM_RULES) {
+    if (!holds(term.anchor)) continue;
+    const found = foundCount(term, reply);
+    const lookalikes = lookalikeCount(term, reply);
+    if (!found && !lookalikes) continue;
+    // Found more often folded than as typed: hidden by a mark, an invisible character or a split.
+    if (found > visibleCount(term, reply)) return "hidden";
+    // Spelled with look-alike letters: allowed only when the store spelled it with them too.
+    if (lookalikes > found && lookalikeCount(term, store) <= foundCount(term, store)) return "refused";
+    if (!found) continue;
+    if (!term.open) {
+      // The same term in the store's text, in any of its forms: "Discounts" allows "a discount", "Cupón" allows "cupon".
+      if (!foundCount(term, store)) return "refused";
+      continue;
+    }
+    // A stem with an open ending: the same word, but for a plural ending; "Rabattcode" does not allow "Rabatt".
+    const allowed = wordsOf(term, store);
+    for (const word of wordsOf(term, reply)) {
+      if (!allowed.has(word)) return "refused";
+    }
+  }
+  return "held";
+}
+
+/** An email address, whole, read from its first character (so a long word is not read again from each of its letters). */
+const EMAIL = /(?<![\p{L}\p{N}._%+\-])[\p{L}\p{N}._%+\-]+@[\p{L}\p{N}\-]+(?:\.[\p{L}\p{N}\-]+)+/gu;
+const emailsIn = (folded: string) => (folded.includes("@") ? folded.match(EMAIL) ?? [] : []);
+/** Common top-level domains: a name ending in one of them, after a dot, reads as a site. */
+const TLDS = new Set([
+  "com", "net", "org", "edu", "gov", "io", "co", "app", "dev", "shop", "store", "xyz", "info", "biz", "me", "ly", "gg", "link", "site", "online", "top",
+  "club", "live", "page", "tech", "tv", "us", "uk", "de", "fr", "es", "it", "nl", "pt", "br", "eu", "ca", "au", "ch", "at", "be", "mx", "ar", "cl", "in",
+  "jp", "ru", "cn", "pl", "se", "no", "dk", "fi", "ie", "nz", "za", "academy", "courses", "school", "email", "art", "design", "studio", "blog", "news",
+  "website", "space", "fun", "cloud", "digital", "example",
+]);
+/** Names that end like a site but are a library or a technology. */
+const NOT_SITES = new Set(["socket.io", "asp.net", "ado.net", "vb.net"]);
+/**
+ * Words of the store languages that start a sentence and are also top-level
+ * domains: written "Eu", "It", "Live" right after a dot with no space
+ * ("Uma aula.Eu gostei", "great.It's fun"), the dot ends a sentence. Only
+ * those of them in TLDS count (WORD_TLDS).
+ */
+const SENTENCE_WORDS = [
+  "me", "it", "in", "be", "at", "us", "no", "top", "live", "page", "fun", "art", "news", "online", "space", // English
+  "es", "se", "de", "la", "en", "el", "su", "mi", "si", // Spanish
+  "au", "ca", "ce", "ne", "tu", // French
+  "um", "so", "im", "an", // German
+  "io", "ci", "ma", // Italian
+  "net", "nu", "om", // Dutch
+  "eu", "ar", "um", "na", "do", // Portuguese
+];
+/** Top-level domains that are also such words (computed: SENTENCE_WORDS that are in TLDS). */
+const WORD_TLDS = new Set(SENTENCE_WORDS.filter((word) => TLDS.has(word)));
+/**
+ * A bare domain ("cheap.shop", "Evil.Com", "evil.example/deal"): labels and
+ * a dot, then a common top-level domain in any case, never a file or
+ * library name ("logo.ai", "Node.js", "ASP.NET") nor a word that starts a
+ * sentence after a dot ("great.It helps", "lessons.Live sessions").
+ */
+const DOMAIN = /(?<![\p{L}\p{N}@.\-])((?:[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?\.)+)([A-Za-z]{2,24})(?![\p{L}\p{N}])/gu;
+const sitesIn = (text: string) => {
+  const normal = text.normalize("NFKC");
+  return [...(/[.\uFF0E\u3002\uFE52]/u.test(text) ? normal.matchAll(DOMAIN) : [])]
+    // "Xx" only: a capitalized word, then anything but a path or another label (a space, an apostrophe, a line break, the end).
+    .filter((m) => !(WORD_TLDS.has(m[2].toLowerCase()) && /^[A-Z][a-z]+$/.test(m[2]) && !/^[/.]/.test(normal.slice(m.index + m[0].length))))
+    .map((m) => ({ site: m[0].toLowerCase(), tld: m[2].toLowerCase() }))
+    .filter(({ site, tld }) => TLDS.has(tld) && !NOT_SITES.has(site))
+    .map(({ site }) => site);
+};
+
 /**
  * Whether a reply says only what the store published: every number in it
  * (prices, percentages, days, counts) appears in the facts, every deal or
- * pressure word too, and it carries no link. A reply that fails is never
- * shown, whatever the model was told or tricked into.
+ * pressure word too, and it carries no link, nor an email address or a
+ * domain the facts do not. A reply is read folded to one form, so a hidden
+ * character, a mark or a split word cannot hide a deal word: one found only
+ * that way refuses it, unless the reply repeats the store's own split word
+ * exactly ("Pro-Mode"). A deal word spelled with look-alike letters of
+ * another script refuses it unless the facts spell it the same way. Honest
+ * text in any script passes. A reply that fails is never shown, whatever
+ * the model was told or tricked into. The reply itself is never changed by
+ * this: the folding is only for the comparison.
  */
-export function heldToFacts(reply: string, facts: string): boolean {
-  if (!reply.trim() || LINK.test(reply)) return false;
-  const factNumbers = new Set((facts.match(NUMBERS) ?? []).flatMap(numberForms));
-  for (const n of reply.match(NUMBERS) ?? []) {
+export function heldToFacts(raw: string, facts: string): boolean {
+  const reply = new Readings(raw);
+  const store = new Readings(facts);
+  const folded = reply.folded;
+  if (!folded.trim() || LINK.test(folded)) return false;
+  const factsFolded = store.folded;
+  const factEmails = new Set(emailsIn(factsFolded));
+  for (const email of emailsIn(folded)) {
+    if (!factEmails.has(email)) return false;
+  }
+  const factSites = new Set(sitesIn(facts));
+  for (const site of sitesIn(raw)) {
+    if (!factSites.has(site)) return false;
+  }
+  const factNumbers = new Set((factsFolded.match(NUMBERS) ?? []).flatMap(numberForms));
+  for (const n of folded.match(NUMBERS) ?? []) {
     if (!numberForms(n).some((form) => factNumbers.has(form))) return false;
   }
-  const lowerFacts = facts.toLowerCase();
-  for (const m of reply.matchAll(new RegExp(DEAL_WORDS.source, "gi"))) {
-    if (!lowerFacts.includes(m[0].toLowerCase())) return false;
-  }
-  return true;
+  const held = dealWordsOf(reply, store);
+  if (held !== "hidden") return held === "held";
+  // A split word the store wrote exactly so is the store's own: read the reply without it, once.
+  const storeWords = new Set((facts.match(SPLIT_WORD) ?? []).map(plainText));
+  const own = raw.replace(SPLIT_WORD, (word) => (storeWords.has(plainText(word)) ? " " : word));
+  return own !== raw && dealWordsOf(new Readings(own), store) === "held";
 }
 
 // ----------------------------------------------------------------- what one message costs at the most

@@ -90,7 +90,7 @@ test("a list email Resend will not take from the creators' domain goes out from 
     const from = (JSON.parse(String(init?.body)) as { from: string }[]).map((m) => m.from);
     const status = refuse && from.some((line) => /@creators\.example\.org/.test(line)) ? 403 : 200;
     asked.push({ from, key: new Headers(init?.headers).get("Idempotency-Key"), status });
-    return new Response(JSON.stringify({ data: [] }), { status });
+    return new Response(JSON.stringify({ data: from.map((_, i) => ({ id: `synthetic_${i}` })) }), { status });
   }) as typeof fetch;
   const domainBefore = process.env.MARKETING_FROM_DOMAIN;
   process.env.MARKETING_FROM_DOMAIN = "creators.example.org";

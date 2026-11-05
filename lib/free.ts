@@ -45,6 +45,7 @@ import {
   mailable,
   parseContact,
   upsertContact,
+  orderRoom,
 } from "@/lib/contacts";
 import { noteForErasure } from "@/lib/erasure-index";
 
@@ -327,7 +328,7 @@ export async function recordLead(
       productId: claim.p,
       title,
       at: claim.at,
-    }, { order: store });
+    }, orderRoom(store));
     if (result.full) console.error("a store's list is full", store.handle);
     return result;
   } catch (error) {

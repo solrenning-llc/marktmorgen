@@ -25,7 +25,8 @@ const FIELDS: [string, string[]][] = [
   ["app/[handle]/course/[product]/page.tsx", ["email"]],
   ["app/[handle]/podcast/[product]/page.tsx", ["email"]],
   ["app/[handle]/group/[group]/page.tsx", ["email"]],
-  ["components/community-parts.tsx", ["email"]],
+  // The community and an email kept for members share one form (components/link-request-form.tsx).
+  ["components/link-request-form.tsx", ["email"]],
   ["components/store-join-box.tsx", ["email"]],
   ["components/store-contact-box.tsx", ["email"]],
   ["components/store-product.tsx", ["gift_to", "email", "email", "email"]],
@@ -55,7 +56,7 @@ function main(): void {
   is("what was typed before the scripts loaded is read once they do", field.includes("setValue(own.value);"), true);
   is("no email field sits inside a label that wraps it (its name would take the line in)", FIELDS.every(([file]) => !/<label[^>]*>\s*<span[^>]*>[^<]*<\/span>\s*<EmailField/.test(read(file))), true);
   is("the embed's fixed-height frame keeps a plain field", /<input id="embed-join-email" type="email"/.test(read("app/embed/[handle]/join/page.tsx")), true);
-  is("a button beside a field is not stretched by the line", ["app/[handle]/course/[product]/page.tsx", "components/community-parts.tsx", "components/store-join-box.tsx"].every((file) => read(file).includes("sm:flex-row sm:items-start")), true);
+  is("a button beside a field is not stretched by the line", ["app/[handle]/course/[product]/page.tsx", "components/link-request-form.tsx", "components/store-join-box.tsx"].every((file) => read(file).includes("sm:flex-row sm:items-start")), true);
   is("and a send the browser stops for a bad shape shows the line too", field.includes("onInvalid={() => setLeft(true)}"), true);
   is("the line in the store's own look", /store \? "st-note mt-2 text-sm/.test(read("components/email-suggestion.tsx")) && /store \? "st-btn-ghost"/.test(read("components/email-suggestion.tsx")), true);
 }

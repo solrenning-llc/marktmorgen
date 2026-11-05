@@ -62,10 +62,19 @@ export async function readMoves(sessions: string[]): Promise<Map<string, Move>> 
   const found = new Map<string, Move>();
   const list = sessions.filter(Boolean);
   if (!list.length || !isRedisConfigured()) return found;
-  const replies = await redisPipeline(list.map((session) => ["GET", movedKey(session)]));
-  list.forEach((session, i) => {
-    const move = parseMove(replies[i]);
-    if (move) found.set(session, move);
+  // A hundred keys at one MGET, every MGET in one trip: a command for each hundred bookings, not one a booking
+  // (lib/call-moves-read.ts, MOVES_PER_MGET, prices it; tests/plan-cost-registry.test.ts holds the two equal).
+  // A key that is gone, or holds no string, is answered null and read as never moved, as an unreadable move is.
+  const perRead = 100;
+  const lots: string[][] = [];
+  for (let i = 0; i < list.length; i += perRead) lots.push(list.slice(i, i + perRead));
+  const replies = await redisPipeline(lots.map((lot) => ["MGET", ...lot.map(movedKey)]));
+  lots.forEach((lot, l) => {
+    const values = Array.isArray(replies[l]) ? (replies[l] as unknown[]) : [];
+    lot.forEach((session, i) => {
+      const move = parseMove(values[i]);
+      if (move) found.set(session, move);
+    });
   });
   return found;
 }

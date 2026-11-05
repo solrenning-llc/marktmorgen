@@ -94,17 +94,23 @@ export const MAX_RETRIES_BY_YOU = 1;
 /** Ceilings for the margin review's per-run arithmetic. */
 export const RUN_START_COMMANDS = 8;
 export const HISTORY_COMMANDS_PER_STEP = 9;
-export const QUEUE_COMMANDS_PER_STEP = 6;
+// The queue's own commands for one person's step: the scan, the take from the queue, the lease, the person's row, the lease entry read with
+// it (since 4 November 2026: a stop step of another workflow may have removed it), the next step queued while leased, and the lease let go: 7.
+// The actions' own commands (a deal read and moved, a rotate's lock, a stop's removal) are not in it yet: measured and added in the follow-up on workflow step costs.
+export const QUEUE_COMMANDS_PER_STEP = 7;
 /**
  * One wait, at the most, for a batch of one person (the dearest case; a
  * batch shares its reads): the job's queue scans, take and lease (6), the
- * store and its workflows (3), the person's row (1), the attempt claimed
- * and written (2), what the send read before stopping (up to 9 when the
+ * store and its workflows (3), the person's row and their lease entry, read
+ * together (2: a stop step of another workflow removes that entry), the
+ * attempt claimed and written (2), what the send read before stopping (up to 9 when the
  * month's emails ran out: the pause, the day, the sender, the month's count
  * taken and given back), the wait counted (3), the attempt cleared and taken
- * back out of the history (4), the step put back in the queue (1), and the
- * lease let go (1). Measured at 21 for a wait on the day's room and 30 for
- * the month's emails (tests/workflow-retries.test.ts); 32 with room to spare.
+ * back out of the history (4), the step put back in the queue only while
+ * the lease entry is still there (1, one script: QUEUE_IF_LEASED in
+ * lib/flows.ts), and the lease let go (1). Measured at 22 for a wait on the
+ * day's room and 31 for the month's emails (tests/workflow-retries.test.ts,
+ * 4 November 2026, with the lease read); 32 with room to spare.
  */
 export const WAIT_COMMANDS_PER_TRY = 32;
 export const WORST_COMMANDS_PER_RUN =

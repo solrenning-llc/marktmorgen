@@ -323,13 +323,22 @@ export type MilpSolution = { scenario: string; alternative: Alternative; status:
 export type MilpOutput = { solver: string; solutions: MilpSolution[] };
 export const milpOutput = (): MilpOutput => readJson<MilpOutput>(OUTPUT_FILE);
 
-/** The exhaustive search over the same grid: the best price at the alternative's lowest shares (the program's optimum when no ordering binds), checked by the repository's code. */
+let exhaustiveInput: MilpInput | null = null;
+/** Enumerate the same raw-share problem as the solver; printed rounding is
+ * checked only after selection, never used to loosen its five-cent reserve. */
 export function exhaustive(tier: Tier, alt: Alternative, e: number): { monthCents: number; shares: Shares; profit: number } | null {
-  const lowest = alt === "A" ? ones() : printedShares(tier, Object.fromEntries(ORDER.map((id) => [id, ALTERNATIVES[alt]])) as Shares);
+  const input = exhaustiveInput ??= milpInput();
+  const plan = input.plans[tier];
+  const lowest = Object.fromEntries(ORDER.map(id => [id, plan.figures[id] > 0 ? ALTERNATIVES[alt] : 1])) as Shares;
+  const used = (cycle: "Month" | "Year") => (cycle === "Month" ? plan.baseMonth : plan.baseYear) +
+    ORDER.reduce((sum, id) => sum + (cycle === "Month" ? plan.coefMonth : plan.coefYear)[id] * lowest[id], 0);
   let best: { monthCents: number; shares: Shares; profit: number } | null = null;
-  for (const monthCents of grid(tier)) {
-    if (!keeps(tier, monthCents, lowest)) continue;
-    const pr = profit(tier, monthCents, lowest, e);
+  for (const option of plan.options) {
+    const monthCents = option.monthCents;
+    if (alt === "A" ? !option.exactKeepsAtOnes : used("Month") > option.roomMonth || used("Year") > option.roomYear) continue;
+    const net = alt === "A" ? option.netAtOnes : option.netAtOnes + input.taxKeptBps / 10_000 *
+      ORDER.reduce((sum, id) => sum + plan.coefMonth[id] * (1 - lowest[id]), 0);
+    const pr = option.demand[String(e)] * net / 100;
     if (!best || pr > best.profit) best = { monthCents, shares: lowest, profit: pr };
   }
   return best;

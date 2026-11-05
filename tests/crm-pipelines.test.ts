@@ -52,6 +52,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { dataKey } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
 
 globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 })) as typeof fetch;
 
@@ -150,15 +152,29 @@ async function main(): Promise<void> {
 
   part("A concurrent change is never overwritten");
   const original = redis.pipeline;
+  const afterSave: string[] = [];
+  let saving = false;
   try {
     redis.pipeline = async (commands) => {
-      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-pipelines-save"))) await original.call(redis, [["SET", "nl:crm:pipes:" + statsId, JSON.stringify([sales, coaching])]]);
+      if (saving) for (const c of commands) afterSave.push(`${c[0]} ${String(c[1])}`);
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-pipelines-save"))) {
+        await original.call(redis, [["SET", "nl:crm:pipes:" + statsId, JSON.stringify([sales, coaching])]]);
+        saving = true;
+      }
       return original.call(redis, commands);
     };
     let conflict = false;
     try { await savePipelineChange(statsId, { pipeline: { ...coaching, name: "Mine" } }, {}, 2, ROOM); } catch (error) { conflict = error instanceof CrmSchemaConflict; }
     is("the change meanwhile is a conflict", conflict, true);
   } finally { redis.pipeline = original; }
+  // The script that refused the write says how long the record there now is: the room is sized from that, with no
+  // second read that could fail in between.
+  const pipesNow = String((await redis.pipeline([["GET", "nl:crm:pipes:" + statsId]]))[0]);
+  is(
+    "its room is what the other session's record weighs, sized without reading it again",
+    [afterSave.some((c) => c === "GET nl:crm:pipes:" + statsId), Number((await redis.pipeline([["HGET", dataKey(ROOM)!, "crm:pipes"]]))[0])],
+    [false, dataBytes([pipesNow], 1)],
+  );
   is("and the other session's pipelines are what is saved", (await readPipelines(statsId)).map((p) => p.name), ["Sales", "Coaching"]);
 
   part("The route: the plan's number, the moves, and removal");
@@ -196,10 +212,10 @@ async function main(): Promise<void> {
   is("a deal with nobody named, or the same stage, is not an entry", [entersStage({ email: "", stage: "bwon00" }, null), entersStage({ email: "a@b.co", stage: "bwon00" }, { stage: "bwon00" }), entersStage({ email: "a@b.co", stage: "bwon00" }, { stage: "bnew00" }), entersStage({ email: "a@b.co", stage: "bwon00" }, null)], [false, false, true, true]);
   const anaDeal = await call({ action: "deal", deal: { title: "Brand deal with Ana", email: "ana@example.com", cents: 50000, stage: "bnew00" } });
   is("made in another stage: not started", [anaDeal.body.workflows, await flowsStartedFor(flows, "ana@example.com")], ["checked", []]);
-  const signed = await call({ action: "deal", deal: { ...anaDeal.body.deal, stage: "bwon00" } });
+  const signed = await call({ action: "deal", version: anaDeal.body.version, deal: { ...anaDeal.body.deal, stage: "bwon00" } });
   is("moved into the stage: started", [signed.body.workflows, await flowsStartedFor(flows, "ana@example.com")], ["checked", [flowId]]);
-  await call({ action: "deal", deal: { ...signed.body.deal, stage: "bnew00" } });
-  await call({ action: "deal", deal: { ...signed.body.deal, stage: "bwon00" } });
+  const out = await call({ action: "deal", version: signed.body.version, deal: { ...signed.body.deal, stage: "bnew00" } });
+  await call({ action: "deal", version: out.body.version, deal: { ...signed.body.deal, stage: "bwon00" } });
   is("moved out and in again: one run, as every trigger", Number((await redis.pipeline([["HGET", "nl:mail:flowstats:" + flowId, "started"]]))[0]), 1);
   const ben = await call({ action: "deal", deal: { title: "Ben, not on the list", email: "ben@example.com", cents: 0, stage: "bwon00" } });
   is("somebody not on the list starts nothing", [ben.body.workflows, await flowsStartedFor(flows, "ben@example.com")], ["checked", []]);

@@ -1028,6 +1028,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      // Contact paste admits its complete command/transfer work before any contact read or atomic import write; same studio figure, no extra allowance.
+      { file: "lib/contact-import-rules.ts", names: ["CONTACT_IMPORT_WORK", "pastedContactWork"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).

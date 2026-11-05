@@ -21,6 +21,8 @@
  * gigabyte, and it has rules of its own (lib/watch-rules.ts).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
+import { repliesFor } from "@/lib/redis-reply";
 import { STREAM_PREFIX } from "@/lib/stream-rules";
 import { VAULT_PREFIX } from "@/lib/vault-rules";
 
@@ -187,24 +189,37 @@ export type DeliveryMonth = {
   over: boolean;
 };
 
-/** What this store has sent out so far this month. */
+/**
+ * The month's counter, in bytes, read only in its exact shape (CX-123 rule
+ * 24); null when it could not be read or came back in any other shape.
+ */
+async function monthBytes(folder: string): Promise<number | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", counterKey(folder, monthKey())]]), 1);
+    const count = replies ? textCountOf(replies[0]) : null;
+    // No key is nothing sent yet this month: INCRBY makes it on the first delivery.
+    return count === "absent" ? 0 : count;
+  } catch (error) {
+    console.error("could not read this month's deliveries", error);
+    return null;
+  }
+}
+
+/**
+ * What this store has sent out so far this month. Null when the counter
+ * could not be read: the studio then leaves the figure out rather than show
+ * an unknown as 0 bytes.
+ */
 export async function deliveredThisMonth(
   folder: string,
-): Promise<DeliveryMonth> {
+): Promise<DeliveryMonth | null> {
   const allowance = DELIVERY_ALLOWANCE_BYTES;
   if (!isRedisConfigured() || !folder) {
     return { bytes: 0, allowance, over: false };
   }
-
-  try {
-    const [raw] = await redisPipeline([["GET", counterKey(folder, monthKey())]]);
-    const bytes = typeof raw === "string" ? Number(raw) : Number(raw ?? 0);
-    const counted = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
-    return { bytes: counted, allowance, over: counted > allowance };
-  } catch (error) {
-    console.error("could not read this month's deliveries", error);
-    return { bytes: 0, allowance, over: false };
-  }
+  const bytes = await monthBytes(folder);
+  if (bytes === null) return null;
+  return { bytes, allowance, over: bytes > allowance };
 }
 
 /**
@@ -246,19 +261,14 @@ export function bytesWords(bytes: number): string {
  * Whether this store's free copies are paused for the rest of the month.
  *
  * Asked before a free file is handed over, and never before a paid one.
- * Answers false if it cannot be read: a counter we cannot reach must not
- * become a reason to refuse somebody.
+ * Answers true (paused) when the counter cannot be read or comes back in
+ * any other shape (CX-123 rule 24): nobody paid for a free copy, so an
+ * unknown count is never room for one. A paid download is never asked.
  */
 export async function freeDeliveryPaused(folder: string): Promise<boolean> {
   if (!isRedisConfigured() || !folder) return false;
-  try {
-    const [raw] = await redisPipeline([["GET", counterKey(folder, monthKey())]]);
-    const bytes = Number(raw);
-    return Number.isFinite(bytes) && bytes > FREE_PAUSE_ABOVE_BYTES;
-  } catch (error) {
-    console.error("could not read this month's deliveries", error);
-    return false;
-  }
+  const bytes = await monthBytes(folder);
+  return bytes === null || bytes > FREE_PAUSE_ABOVE_BYTES;
 }
 
 /**

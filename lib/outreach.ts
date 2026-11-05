@@ -56,6 +56,8 @@ import {
 } from "@/lib/outreach-rules";
 import { storeBase } from "@/lib/purchase-email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
+import { repliesFor } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -171,6 +173,14 @@ export async function readSite(raw: string, reader: PageReader = readPage): Prom
 const key = (statsId: string, part: string) => `nl:outreach:${statsId}:${part}`;
 export const linkKey = (token: string) => `nl:outreach:stoplink:${token}`;
 const STOP_ALL = "nl:outreach:stop:all";
+
+/**
+ * SISMEMBER on a stop list, only in its exact shape (CX-123 rule 24): 1 is
+ * stopped, 0 is not, and anything else (null, "1", true, 2) is null, unknown.
+ */
+function stopOf(reply: unknown): boolean | null {
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
 /** What one pitch leaves in the store's data room for good: its stop link and a domain's place in the stop lists. */
 export const OUTREACH_TRACE_BYTES = 640;
 /** What a pitch weighs at the most, counted in the store's data room while it is kept: its words in any script, its footer, its record. */
@@ -262,15 +272,23 @@ export async function startPitch(
       ["SISMEMBER", STOP_ALL, domain],
     ]),
   ]);
+  // Read only in their exact shape (CX-123 rule 24): a business is "not stopped" only on an exact 0 from both lists,
+  // and the day's count is a whole number, or no key at all (nothing written today: INCR makes it with the first).
+  // Anything else refuses before the model is asked, never "not stopped" or "0 written today".
+  const answered = repliesFor(replies, 3);
+  const mine = answered ? stopOf(answered[0]) : null;
+  const all = answered ? stopOf(answered[2]) : null;
+  const today = answered ? textCountOf(answered[1]) : null;
+  if (mine === null || all === null || today === null) return { ok: false, reason: "unavailable" };
   const before = pitches.filter((p) => p.domain === domain && p.status !== "draft");
   const problem = pitchProblem({
     country,
     address,
     isCompany: input.isCompany,
     pageRefuses: refusesProposals(around(pageText(read.html), email)),
-    stopped: Number(replies[0]) === 1 || Number(replies[2]) === 1 || pitches.some((p) => p.domain === domain && p.status === "stopped"),
+    stopped: mine || all || pitches.some((p) => p.domain === domain && p.status === "stopped"),
     lastWrittenAt: before.length ? Math.max(...before.map((p) => p.sentAt || p.createdAt)) : null,
-    sentToday: Number(replies[1]) || 0,
+    sentToday: today === "absent" ? 0 : today,
     sender,
     now,
   });
@@ -407,11 +425,18 @@ async function readLink(token: string): Promise<StopLink | null> {
 export async function readStopLink(token: string): Promise<{ domain: string; storeName: string; stopped: boolean; everyone: boolean } | null> {
   const link = await readLink(token);
   if (!link) return null;
-  const [mine, all] = await redisPipeline([
-    ["SISMEMBER", key(link.s, "stop"), link.d],
-    ["SISMEMBER", STOP_ALL, link.d],
-  ]);
-  return { domain: link.d, storeName: link.n, stopped: Number(mine) === 1 || Number(all) === 1, everyone: Number(all) === 1 };
+  const answered = repliesFor(
+    await redisPipeline([
+      ["SISMEMBER", key(link.s, "stop"), link.d],
+      ["SISMEMBER", STOP_ALL, link.d],
+    ]),
+    2,
+  );
+  // A stop is said to hold only on an exact 1 (CX-123 rule 24). An unknown answer is never shown as a stop: the page
+  // then keeps both stop buttons, and pressing one again only adds what is already there (stopFromLink, SADD).
+  const mine = answered ? stopOf(answered[0]) === true : false;
+  const all = answered ? stopOf(answered[1]) === true : false;
+  return { domain: link.d, storeName: link.n, stopped: mine || all, everyone: all };
 }
 
 /**

@@ -96,18 +96,26 @@ export default async function GroupPage({ params, searchParams }: Params) {
 
   // The link from a place's email: the place is taken now, once.
   let taken: Taken | null = null;
+  // Opening the link failed (an answer lost or of another shape): said as not
+  // done, to be tried again, never as an expired link.
+  let failed = false;
   if (PLACE_TOKEN.test(token)) {
-    taken = await takePlace({
+    const opened = await takePlace({
       store,
       token,
       recordStart: async (email, productId, start) => {
         const course = productId === product.id ? product : await readListing(store, productId);
         if (course?.course) await recordEnrollment(store, email, productId, start);
       },
-    }).catch((error) => {
-      console.error("taking a place failed", error);
-      return null;
-    });
+    }).then(
+      (value) => ({ value }),
+      (error: unknown) => {
+        console.error("taking a place failed", error);
+        return { value: null };
+      },
+    );
+    taken = opened.value;
+    failed = !taken;
     if (taken && taken.outcome !== "gone" && taken.outcome !== "full" && taken.outcome !== "resting") {
       const link = (await ordersLinkFor(store, taken.email, base).catch(() => null)) ?? `${base}/orders`;
       const email = taken.email;
@@ -136,6 +144,8 @@ export default async function GroupPage({ params, searchParams }: Params) {
       ? g.groupNotices.full
       : taken?.outcome === "resting"
         ? g.groupNotices.resting
+      : failed
+        ? g.groupNotices.unavailable
       : taken?.outcome === "gone" || (token && !taken)
         ? g.groupNotices.expired
         : status !== "expired" ? g.groupNotices[status] ?? null : null;

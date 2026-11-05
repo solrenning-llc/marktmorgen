@@ -24,10 +24,10 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, se
 import { readListing } from "@/lib/catalog";
 import { cardLink, openCardUpdate } from "@/lib/card-update";
 import { askPlace, placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
-import { importedFor } from "@/lib/imported-purchases";
+import { addressHash, importedFor } from "@/lib/imported-purchases";
 import { requestCopy, spendClaim } from "@/lib/free";
 import { paidPeriod } from "./billing-period-fixture";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -38,7 +38,34 @@ let counterCalls = 0;
 /** Every command that reached the store, to see what was written after the counter. */
 const seen: Command[] = [];
 const pipeline = redis.pipeline.bind(redis);
+/**
+ * Answers lost on the way back, as a timeout loses them: "after" runs the
+ * commands on the store and then throws, so they were done and nobody heard;
+ * "before" throws without running them, so they were not done. Each is used
+ * once, in the order given.
+ */
+let lost: { match: (commands: Command[]) => boolean; when: "after" | "before" }[] = [];
+/** Something another request does around one pipeline, once: just before it runs, and just after. */
+let around: { match: (commands: Command[]) => boolean; before: () => void; after: () => void } | null = null;
 redis.pipeline = (async (commands: Command[]) => {
+  if (around && around.match(commands)) {
+    const { before, after } = around;
+    around = null;
+    before();
+    const replies = await pipeline(commands);
+    seen.push(...commands);
+    after();
+    return replies;
+  }
+  const loss = lost.findIndex((l) => l.match(commands));
+  if (loss >= 0) {
+    const [{ when }] = lost.splice(loss, 1);
+    if (when === "after") {
+      seen.push(...commands);
+      await pipeline(commands);
+    }
+    throw new Error("the answer never came back");
+  }
   if (counter && counter.match(commands)) {
     counterCalls++;
     if (counter.reply === "throw") throw new Error("the database did not answer");
@@ -180,18 +207,21 @@ async function main(): Promise<void> {
     const id = await paidGroup("pi_NumberGatesA");
     let n = 0;
     const ask = () => outcome(() => askPlace({ store, id, email: `place${(n += 1)}@numbergates.example`, product, base: BASE, from: FROM, ordersLink: async () => null }));
-    const isTaken = (commands: Command[]) => commands.length === 2 && commands[0]?.[0] === "HEXISTS" && commands[1]?.[0] === "GET" && key(commands[1]).startsWith("nl:grp:");
-    const isMail = (commands: Command[]) => commands[0]?.[0] === "INCR" && /^nl:grp:.+:mail$/.test(key(commands[0]));
+    const isTaken = (commands: Command[]) => commands.length === 3 && commands[0]?.[0] === "HEXISTS" && commands[1]?.[0] === "HLEN" && key(commands[1]).startsWith("nl:grp:");
+    const isMail = (commands: Command[]) => commands[0]?.[0] === "SET" && /^nl:grp:.+:mail$/.test(key(commands[0]));
     const after = (from: number) => seen.slice(from).filter((c) => (c[0] === "INCR" && /:mail$/.test(key(c))) || key(c).startsWith("nl:grp:take:")).length;
     for (const [label, reply] of [
-      ["a membership answered as text", ["0", null]],
-      ["a membership of two", [2, null]],
-      ["places taken as a number", [0, 1]],
-      ["places taken as words", [0, "two"]],
-      ["places taken as an empty text", [0, ""]],
-      ["places taken that are negative", [0, "-1"]],
+      ["a membership answered as text", ["0", 0, null]],
+      ["a membership of two", [2, 0, null]],
+      ["places taken as text", [0, "1", null]],
+      ["places taken that are negative", [0, -1, null]],
+      ["places taken that are not whole", [0, 1.5, null]],
+      ["places taken that are null", [0, null, null]],
+      ["what the address was given as a number", [0, 0, 1]],
+      ["what the address was given as a list", [0, 0, []]],
       ["a reply that is not a list", { x: 1 }],
-      ["a reply cut short", [0]],
+      ["a reply cut short", [0, 0]],
+      ["a reply too long", [0, 0, null, null]],
       ["an empty reply", []],
     ] as [string, unknown][]) {
       counter = { match: isTaken, reply };
@@ -204,7 +234,7 @@ async function main(): Promise<void> {
       const [sent, from] = [mails.length, seen.length];
       is("places taken, a read that never answers: thrown to the route, which says unavailable; no email, nothing kept", [await ask(), mails.length - sent, after(from)], ["threw Error", 0, 0]);
     }
-    for (const [label, reply] of incrFirstUnknown(1)) {
+    for (const [label, reply] of SET_INCR_UNKNOWN) {
       counter = { match: isMail, reply };
       const [calls, sent, from] = [counterCalls, mails.length, seen.length];
       const got = await ask();
@@ -212,9 +242,11 @@ async function main(): Promise<void> {
       const want = reply === "throw" ? "threw Error" : "unavailable";
       is(`links sent, ${label}: refused, no email, no link kept`, [got, counterCalls - calls, mails.length - sent, kept], [want, 1, 0, 0]);
     }
-    counter = { match: isTaken, reply: [0, "2"] };
+    counter = { match: isTaken, reply: [0, 2, null] };
     is("places taken confirmed as all of them: full, as before", await ask(), "full");
-    counter = { match: isMail, reply: [10_000] };
+    counter = { match: isTaken, reply: [1, 2, null] };
+    is("an address's own mark with nothing given is not counted against it: a new link", await ask(), "sent");
+    counter = { match: isMail, reply: [null, 10_000] };
     is("links sent confirmed past the day's number: slow, as before", await ask(), "slow");
     counter = null;
     const sent = mails.length;
@@ -229,25 +261,155 @@ async function main(): Promise<void> {
     const token = tokenFor(address);
     const starts: string[] = [];
     const take = () => outcome(() => takePlace({ store, token, recordStart: async (email) => void starts.push(email) }));
-    const isTake = (commands: Command[]) => commands[0]?.[0] === "INCR" && /^nl:grp:.+:n$/.test(key(commands[0]));
-    for (const [label, reply] of incrFirstUnknown(1)) {
+    const givenTo = async (who: string) => (await importedFor((await storeForEmail(OWNER))!, who)).length;
+    const marksOf = () => Number(redis.run(["HLEN", `nl:grp:${id}:m`]));
+    const isRead = (commands: Command[]) => commands.length === 2 && commands[0]?.[0] === "HEXISTS" && /^nl:grp:.+:m$/.test(key(commands[0])) && commands[1]?.[0] === "HGET";
+    for (const [label, reply] of [
+      ["a mark answered as text", ["0", null]],
+      ["a mark of two", [2, null]],
+      ["what was given as a number", [0, 1]],
+      ["a reply that is not a list", { x: 1 }],
+      ["a reply cut short", [0]],
+      ["a reply too long", [0, null, null]],
+      ["a read that never answers", "throw"],
+    ] as [string, unknown][]) {
+      counter = { match: isRead, reply };
+      const got = await take();
+      const want = reply === "throw" ? "threw Error" : "threw UnknownReplyError";
+      is(`the address read, ${label}: refused, nothing marked or given`, [got, marksOf(), await givenTo(address), starts.length], [want, 0, 0, 0]);
+    }
+    const isTake = (commands: Command[]) => commands[0]?.[0] === "HSETNX" && /^nl:grp:.+:m$/.test(key(commands[0])) && commands[1]?.[0] === "HLEN";
+    for (const [label, reply] of [
+      ["a mark that is null", [null, 1]],
+      ["a mark written as text", ["1", 1]],
+      ["a mark of two", [2, 1]],
+      ["a count that is null", [1, null]],
+      ["a count written as text", [1, "1"]],
+      ["a count of zero after the mark", [1, 0]],
+      ["a count that is true", [1, true]],
+      ["a count that is negative", [1, -1]],
+      ["a count that is not whole", [1, 1.5]],
+      ["a reply that is not a list", { x: 1 }],
+      ["a reply cut short", [1]],
+      ["an empty reply", []],
+      ["a reply too long", [1, 1, 1]],
+      ["a counter that never answers", "throw"],
+    ] as [string, unknown][]) {
       counter = { match: isTake, reply };
       const [calls, from] = [counterCalls, seen.length];
       const got = await take();
-      const decr = seen.slice(from).filter((c) => c[0] === "DECR").length;
-      is(`${label}: refused, nothing given, no place handed back`, [got, counterCalls - calls, (await importedFor((await storeForEmail(OWNER))!, address)).length, starts.length, decr], ["threw UnknownReplyError", 1, 0, 0, 0]);
-    }
-    counter = { match: isTake, reply: [3] };
-    {
-      const from = seen.length;
-      const got = await take();
-      is("a confirmed count past the places paid for: full, as before, and its own place handed back", [typeof got === "object" && got.outcome, (await importedFor((await storeForEmail(OWNER))!, address)).length, seen.slice(from).filter((c) => c[0] === "DECR").length], ["full", 0, 1]);
+      const others = seen.slice(from).filter((c) => c[0] === "HDEL" && key(c).endsWith(":m") && c[2] !== addressHash(address)).length;
+      is(`${label}: refused, nothing given, no place moved`, [got, counterCalls - calls, await givenTo(address), starts.length, marksOf(), others], ["threw UnknownReplyError", 1, 0, 0, 0, 0]);
     }
     counter = null;
-    // The counter the check above handed back without having counted.
-    await redis.pipeline([["SET", `nl:grp:${id}:n`, "0"]]);
+    // Both places held by others, really: the hash says so.
+    redis.run(["HSET", `nl:grp:${id}:m`, "other-one", JSON.stringify({ e: "one@numbergates.example", at: 1 })]);
+    redis.run(["HSET", `nl:grp:${id}:m`, "other-two", JSON.stringify({ e: "two@numbergates.example", at: 1 })]);
+    {
+      const got = await take();
+      is("every place held by somebody else: full, as before, and its own mark taken off", [typeof got === "object" && got.outcome, await givenTo(address), marksOf()], ["full", 0, 2]);
+    }
+    redis.run(["HDEL", `nl:grp:${id}:m`, "other-two"]);
+    {
+      const opening = redis.keys().find((k) => k.startsWith(`nl:grp:${id}:t:`));
+      is("no open of the link is left holding it", opening, undefined);
+    }
+    const isOpening = (commands: Command[]) => commands[0]?.[0] === "SET" && /^nl:grp:.+:t:/.test(key(commands[0]));
+    for (const [label, reply, want] of [
+      ["another open of the same link still going", [null], "threw Error"],
+      ["an opening answered in another shape", [1], "threw UnknownReplyError"],
+      ["an opening that never answers", "throw", "threw UnknownReplyError"],
+    ] as [string, unknown, string][]) {
+      counter = { match: isOpening, reply };
+      is(`${label}: refused, nothing marked or given`, [await take(), marksOf(), await givenTo(address)], [want, 1, 0]);
+    }
+    counter = null;
     const got = await take();
-    is("the same address, once the count is confirmed: the place is taken and the product given", [typeof got === "object" && got.outcome, (await importedFor((await storeForEmail(OWNER))!, address)).length, await placesTaken(id)], ["taken", 1, 1]);
+    is("the same address, once the count is confirmed: the place is taken and the product given", [typeof got === "object" && got.outcome, await givenTo(address), await placesTaken(id)], ["taken", 1, 2]);
+  }
+
+  part("A place whose answer was lost after Redis did it: never a place gone for good (lib/group-buy.ts takePlace)");
+  {
+    /** The write that puts a place on an address: its mark, its count, or both in one. */
+    const marks = (c: Command) => (c[0] === "HSETNX" && /^nl:grp:.+:m$/.test(key(c))) || (c[0] === "INCR" && /^nl:grp:.+:n$/.test(key(c)));
+    const counts = (c: Command) => (c[0] === "INCR" && /^nl:grp:.+:n$/.test(key(c))) || (c[0] === "HLEN" && /^nl:grp:.+:m$/.test(key(c)));
+    const unmarks = (c: Command) => c[0] === "HDEL" && /^nl:grp:.+:m$/.test(key(c));
+    const cases: [string, { match: (commands: Command[]) => boolean; when: "after" | "before" }[]][] = [
+      ["the mark's answer lost after it was written", [{ match: (cs) => cs.some(marks), when: "after" }]],
+      ["the count's answer lost after it was counted", [{ match: (cs) => cs.some(counts), when: "after" }]],
+      ["the count's answer lost, and the mark never taken off", [{ match: (cs) => cs.some(counts), when: "after" }, { match: (cs) => cs.some(unmarks), when: "before" }]],
+    ];
+    let k = 0;
+    for (const [label, losses] of cases) {
+      k += 1;
+      const id = await paidGroup(`pi_NumberGatesL${k}`);
+      const [ana, ben, cy] = ["ana", "ben", "cy"].map((who) => `${who}${k}@numbergates.example`);
+      const linkFor = async (address: string) => {
+        is(`${label}: a link for ${address.split("@")[0]}`, await askPlace({ store, id, email: address, product, base: BASE, from: FROM, ordersLink: async () => null }), "sent");
+        return tokenFor(address);
+      };
+      const takeAs = async (token: string) => {
+        const got = await outcome(() => takePlace({ store, token, recordStart: async () => undefined }));
+        return typeof got === "object" ? got.outcome : got;
+      };
+      const given = async (address: string) => (await importedFor((await storeForEmail(OWNER))!, address)).length;
+      const anaToken = await linkFor(ana);
+      lost = [...losses];
+      const first = await takeAs(anaToken);
+      lost = [];
+      is(`${label}: the first open is not said as done, and nothing is given on it`, [typeof first === "string" && first.startsWith("threw"), await given(ana)], [true, 0]);
+      is(`${label}: opening the same link again takes the place and gives the product`, [await takeAs(anaToken), await given(ana)], ["taken", 1]);
+      is(`${label}: and opening it once more is already hers`, [await takeAs(anaToken), await given(ana)], ["already", 1]);
+      is(`${label}: the second person of two still gets the second place`, [await takeAs(await linkFor(ben)), await given(ben)], ["taken", 1]);
+      const cyAsked = await askPlace({ store, id, email: cy, product, base: BASE, from: FROM, ordersLink: async () => null });
+      is(`${label}: a third is told every place is taken, and nothing more is given`, [cyAsked, await given(cy), await placesTaken(id)], ["full", 0, 2]);
+    }
+  }
+
+  part("Two pressing for the last place in the same instant: one gets it, and nobody is told it is taken while it is free");
+  {
+    const id = await paidGroup("pi_NumberGatesT");
+    const members = `nl:grp:${id}:m`;
+    const linkFor = async (address: string) => {
+      await askPlace({ store, id, email: address, product, base: BASE, from: FROM, ordersLink: async () => null });
+      return tokenFor(address);
+    };
+    const takeAs = async (token: string) => {
+      const got = await outcome(() => takePlace({ store, token, recordStart: async () => undefined }));
+      return typeof got === "object" ? got.outcome : got;
+    };
+    const given = async (address: string) => (await importedFor((await storeForEmail(OWNER))!, address)).length;
+    is("the first of two places", await takeAs(await linkFor("first-t@numbergates.example")), "taken");
+    const isMarking = (commands: Command[]) => commands[0]?.[0] === "HSETNX" && key(commands[0]) === members;
+    const rival = JSON.stringify({ e: "rival-t@numbergates.example", at: 1 });
+    const lastToken = await linkFor("last-t@numbergates.example");
+    // A rival's mark lands just before this one and stays: the rival has the last place.
+    around = { match: isMarking, before: () => void redis.run(["HSET", members, "rival-t", rival]), after: () => undefined };
+    is("a rival marked first and keeps it: every place is taken, nothing given", [await takeAs(lastToken), await given("last-t@numbergates.example"), Number(redis.run(["HLEN", members]))], ["full", 0, 2]);
+    redis.run(["HDEL", members, "rival-t"]);
+    // A rival's mark lands just before this one and comes off just after: both saw three, both come off.
+    around = { match: isMarking, before: () => void redis.run(["HSET", members, "rival-t", rival]), after: () => void redis.run(["HDEL", members, "rival-t"]) };
+    is("both came off and a place is free: not said full, said as not done", [await takeAs(lastToken), await given("last-t@numbergates.example"), Number(redis.run(["HLEN", members]))], ["threw Error", 0, 1]);
+    is("and the same link then takes it", [await takeAs(lastToken), await given("last-t@numbergates.example"), await placesTaken(id)], ["taken", 1, 2]);
+  }
+
+  part("A purchase's emails of the day: the day always on the count, even when the answer is lost (lib/group-buy.ts askPlace)");
+  {
+    const id = await paidGroup("pi_NumberGatesM");
+    const mailOf = `nl:grp:${id}:mail`;
+    lost = [
+      { match: (cs) => cs.some((c) => c[0] === "INCR" && key(c) === mailOf), when: "after" },
+      { match: (cs) => cs.some((c) => c[0] === "EXPIRE" && key(c) === mailOf), when: "before" },
+    ];
+    const got = await outcome(() => askPlace({ store, id, email: "lost-mail@numbergates.example", product, base: BASE, from: FROM, ordersLink: async () => null }));
+    lost = [];
+    const ttl = Number(redis.run(["TTL", mailOf]));
+    is("the first count's answer lost and its repair never done: not sent, and the count still ends within the day", [got === "sent", ttl > 0 && ttl <= 86_400], [false, true]);
+    // A day of asking that a lost answer could otherwise have frozen: the count ends, and asking works again.
+    await redis.pipeline([["INCRBY", mailOf, 10_000]]);
+    is("past the day's number, slow, as before", await askPlace({ store, id, email: "after-day@numbergates.example", product, base: BASE, from: FROM, ordersLink: async () => null }), "slow");
+    advance(86_401_000);
+    is("a day later the count is gone and the link is sent again", await askPlace({ store, id, email: "after-day@numbergates.example", product, base: BASE, from: FROM, ordersLink: async () => null }), "sent");
   }
 
   part("A free copy: requests an hour counted before the email (lib/free.ts requestCopy)");

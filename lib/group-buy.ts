@@ -3,8 +3,9 @@
  * why it exists, are in lib/group-rules.ts).
  *
  *   nl:grp:<id>              string  the purchase: store, product, how many people; once paid, its payment
- *   nl:grp:<id>:m            hash    address hash -> { e, at }: who took a place
- *   nl:grp:<id>:n            string  how many places are taken
+ *   nl:grp:<id>:m            hash    address hash -> { e, at }: who took a place; its length is how many are taken
+ *   nl:grp:<id>:n            string  how many places were taken, as counted before 5 November 2026 (no longer written)
+ *   nl:grp:<id>:t:<hash>     string  one open of an address's link at a time, for 30 seconds at most
  *   nl:grp:<id>:mail         string  emails this link sent today, so it cannot be used to fill inboxes
  *   nl:grp:take:<token>      string  the link in a place's email: which purchase, which address
  *   nl:grp:pi:<payment>      string  the purchase a payment paid for, so a refund finds it
@@ -17,10 +18,14 @@
  * opens a purchase for an address opens it for them, and the buyer's own
  * checkout opens nothing (lib/bundle-rules.ts deliveredIds).
  *
- * Never one place more than was paid for: a place is counted with INCR, and
- * one counted past the number paid for is given back before anything is
- * handed over. Two people pressing at the same instant for the last place
- * leave one of them told that every place is taken.
+ * Never one place more than was paid for: a place is the address's mark in
+ * the purchase's hash, written first, and the places taken are the hash's
+ * length read after it. A mark that finds more marks than places is taken
+ * off before anything is handed over. Since 5 November 2026 there is no
+ * separate count: one INCR whose answer was lost after Redis did it left a
+ * place counted that nobody had, for good (audit SG2, CX-123 rule 24). A
+ * mark whose answer was lost belongs to its address, and opening its link
+ * again picks it up where it stopped.
  *
  * Each place taken is one of the store's orders in the month it is taken
  * (lib/orders.ts). The checkout held room for every place for a day
@@ -87,7 +92,9 @@ export type Group = {
 
 const groupKey = (id: string) => `nl:grp:${id}`;
 const membersKey = (id: string) => `nl:grp:${id}:m`;
+/** The count kept before 5 November 2026: no longer written, still deleted with the purchase. */
 const takenKey = (id: string) => `nl:grp:${id}:n`;
+const openingKey = (id: string, who: string) => `nl:grp:${id}:t:${who}`;
 const mailKey = (id: string) => `nl:grp:${id}:mail`;
 const tokenKey = (token: string) => `nl:grp:take:${token}`;
 const piKey = (pi: string) => `nl:grp:pi:${pi}`;
@@ -130,12 +137,13 @@ export async function openGroup(store: Store, id: string): Promise<Group | null>
   return group;
 }
 
-/** How many of its places are taken. */
+/** How many of its places are taken: the addresses that hold one. Throws when the answer is not a count. */
 export async function placesTaken(id: string): Promise<number> {
   if (!GROUP_ID.test(id) || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["GET", takenKey(id)]]);
-  const taken = Number(raw);
-  return Number.isFinite(taken) && taken > 0 ? Math.floor(taken) : 0;
+  const one = repliesFor(await redisPipeline([["HLEN", membersKey(id)]]), 1);
+  const taken = one ? countOf(one[0]) : null;
+  if (taken === null) throw new UnknownReplyError("a purchase's places");
+  return taken;
 }
 
 export type NewGroup = { ok: true; group: Group } | { ok: false; reason: "people" | "product" | "option" | "amount" | "unavailable" };
@@ -292,17 +300,34 @@ function parseMember(raw: unknown): Member | null {
   }
 }
 
-/** What one INCR answered: a whole number from one up, or null when the reply is not exactly that. */
+/** What a SET ... NX then INCR answered: the count, a whole number from one up, or null when the reply is not exactly that. */
 function incremented(replies: unknown): number | null {
-  const one = repliesFor(replies, 1);
-  const count = one ? countOf(one[0]) : null;
+  const two = repliesFor(replies, 2);
+  if (!two || (two[0] !== "OK" && two[0] !== null)) return null;
+  const count = countOf(two[1]);
   return count !== null && count >= 1 ? count : null;
 }
 
-/** Places taken as GET answers them: none when there is no count yet, the whole number written, or null for anything else. */
-function takenOf(reply: unknown): number | null {
-  if (reply === null) return 0;
-  return typeof reply === "string" && /^(0|[1-9][0-9]{0,15})$/.test(reply) ? Number(reply) : null;
+/** A 0 or a 1 (HEXISTS, HSETNX), or null for anything else. */
+function bit(reply: unknown): 0 | 1 | null {
+  const n = countOf(reply);
+  return n === 0 || n === 1 ? n : null;
+}
+
+/**
+ * What an address was given of a product, as HGET answers it: null when
+ * nothing, the job that gave it ("" when it cannot be read), or undefined
+ * when the answer is not of that shape.
+ */
+function givenBy(reply: unknown): { job: string; at: number } | null | undefined {
+  if (reply === null) return null;
+  if (typeof reply !== "string") return undefined;
+  try {
+    const value = JSON.parse(reply) as { job?: unknown; at?: unknown };
+    return { job: typeof value.job === "string" ? value.job : "", at: typeof value.at === "number" ? value.at : 0 };
+  } catch {
+    return { job: "", at: 0 };
+  }
 }
 
 /** Reads a hash as Redis returns it, a flat list or an object. */
@@ -344,27 +369,33 @@ export async function askPlace(input: {
   const read = repliesFor(
     await redisPipeline([
       ["HEXISTS", membersKey(group.id), addressHash(email)],
-      ["GET", takenKey(group.id)],
+      ["HLEN", membersKey(group.id)],
+      ["HGET", importedKey(group.s, email), group.p],
     ]),
-    2,
+    3,
   );
-  const held = read ? countOf(read[0]) : null;
-  const takenCount = read ? takenOf(read[1]) : null;
-  if (held === null || held > 1 || takenCount === null) return "unavailable";
-  const has = held === 1;
-  if (!has && takenCount >= group.people) return "full";
+  const marked = read ? bit(read[0]) : null;
+  const marks = read ? countOf(read[1]) : null;
+  const given = read ? givenBy(read[2]) : undefined;
+  if (marked === null || marks === null || given === undefined) return "unavailable";
+  // Its place is its own once this purchase gave it the product. A mark with
+  // nothing given (an open of its link that stopped half way) is picked up
+  // by a new link, and the places the others hold are the rest of the marks.
+  const has = marked === 1 && given?.job === groupJob(group.id);
+  if (!has && marks - marked >= group.people) return "full";
 
   // The link can be passed to anybody, and each address typed on it is sent
   // one email: counted per purchase and per day, generously for a real team
-  // and far short of a way to fill inboxes.
-  const sentCount = incremented(await redisPipeline([["INCR", mailKey(group.id)]]));
-  if (sentCount === null) {
-    // It may have counted a first one without its day: the day is put on it,
-    // so an answer lost here never leaves the purchase unable to send for good.
-    await redisPipeline([["EXPIRE", mailKey(group.id), 86_400]]).catch(() => undefined);
-    return "unavailable";
-  }
-  if (sentCount === 1) await redisPipeline([["EXPIRE", mailKey(group.id), 86_400]]);
+  // and far short of a way to fill inboxes. The day is put on the count in
+  // the same pipeline, before it is counted, so a count whose answer is lost
+  // still ends with its day.
+  const sentCount = incremented(
+    await redisPipeline([
+      ["SET", mailKey(group.id), "0", "EX", 86_400, "NX"],
+      ["INCR", mailKey(group.id)],
+    ]),
+  );
+  if (sentCount === null) return "unavailable";
   if (sentCount > group.people * 3 + 10) return "slow";
   // The email is one of the store's access emails, taken as it is sent
   // (lib/email.ts); when the month's are used, the person is told so here.
@@ -445,30 +476,97 @@ export async function takePlace(input: {
   const email = asked.e;
   const who = addressHash(email);
 
-  const [mine, owned] = await redisPipeline([
-    ["HEXISTS", membersKey(group.id), who],
-    ["HEXISTS", importedKey(group.s, email), group.p],
-  ]);
-  if (Number(mine) === 1) return { outcome: "already", email, group };
-  // Given it some other way already: no place is used for it.
-  if (Number(owned) === 1) return { outcome: "has", email, group };
+  // One open of an address's link at a time (two tabs, or a mail scanner and
+  // the person), so each finds the address's mark as the other left it. An
+  // answer of another shape may have set it: it ends on its own.
+  const opening = openingKey(group.id, who);
+  const lock = await redisPipeline([["SET", opening, "1", "NX", "EX", 30]]).then((r) => repliesFor(r, 1)?.[0], () => undefined);
+  if (lock === null) throw new Error("this place's link is being opened already");
+  if (lock !== "OK") throw new UnknownReplyError("a place's opening");
+  try {
+    return await takeOpened(input, group, email, who);
+  } finally {
+    await redisPipeline([["DEL", opening]]).catch(() => undefined);
+  }
+}
+
+async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, email: string, who: string): Promise<Taken> {
+  const { store } = input;
+  const members = membersKey(group.id);
+  const finish = async (at: number) => {
+    // The doors that read what an address was given are opened for this store.
+    if (!store.pastBuyers) await setPastBuyers(storeRef(store));
+    // A course is dated from the day its place was taken, so what opens over
+    // time opens on time for each person (kept once: lib/learn.ts).
+    for (const id of [group.p, ...(group.items ?? [])]) await input.recordStart(email, id, at);
+    // Each place taken is one of the month's orders (lib/orders.ts), counted
+    // once by its name. The purchase was paid, so it is covered wherever its
+    // sale paid a share.
+    await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0);
+  };
+
+  // Read in their exact shape, before anything is written (CX-123 rule 24).
+  const read = repliesFor(
+    await redisPipeline([
+      ["HEXISTS", members, who],
+      ["HGET", importedKey(group.s, email), group.p],
+    ]),
+    2,
+  );
+  const marked = read ? bit(read[0]) : null;
+  const given = read ? givenBy(read[1]) : undefined;
+  if (marked === null || given === undefined) throw new UnknownReplyError("a place's address");
+  if (given && given.job === groupJob(group.id)) {
+    // Given by this purchase: "already" only once that is so. What follows
+    // the gift is done again, each part once, in case the open that gave it
+    // stopped before them: only for a gift of the last week, well inside the
+    // mark that counts its order once (lib/orders.ts, 45 days).
+    if (given.at > 0 && now() - given.at < 7 * 86_400) await finish(given.at);
+    return { outcome: "already", email, group };
+  }
+  if (given) {
+    // Given it some other way: no place is used for it, and a mark left by an
+    // open that stopped half way is taken off.
+    if (marked === 1) await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
+    return { outcome: "has", email, group };
+  }
 
   const at = now();
-  const [fresh] = await redisPipeline([["HSETNX", membersKey(group.id), who, JSON.stringify({ e: email, at } satisfies Member)]]);
-  if (Number(fresh) !== 1) return { outcome: "already", email, group };
-  const giveBack = () => redisPipeline([["HDEL", membersKey(group.id), who], ["DECR", takenKey(group.id)]]);
-  // The place counted in its exact shape. An answer that never came or is of
-  // another shape may or may not have counted it: no place is handed back
-  // (that could hand out one more than was paid for), nothing is given, and
-  // only this address's mark comes off, so opening the link again is not
-  // told "already yours" for a place it never got (CX-123 rule 24).
-  const count = await redisPipeline([["INCR", takenKey(group.id)]]).then(incremented, () => null);
-  if (count === null) {
-    await redisPipeline([["HDEL", membersKey(group.id), who]]).catch(() => undefined);
+  // The mark first, then how many marks there are: the places taken, this
+  // one among them. A mark already there is this address's own, from an open
+  // that stopped before handing anything over, and is picked up here.
+  const wrote = await redisPipeline([
+    ...(marked === 1 ? [] : [["HSETNX", members, who, JSON.stringify({ e: email, at } satisfies Member)] as (string | number)[]]),
+    ["HLEN", members],
+  ]).then(
+    (r) => repliesFor(r, marked === 1 ? 1 : 2),
+    () => null,
+  );
+  const set = wrote && marked !== 1 ? bit(wrote[0]) : 1;
+  const count = wrote ? countOf(wrote.at(-1)) : null;
+  if (!wrote || set === null || count === null || count < 1) {
+    // The answer never came or is of another shape: the mark may be written,
+    // so nothing is given and no place is handed out. The mark is this
+    // address's alone: taken off, or, if that is lost too, picked up when the
+    // link is opened again. No other address's place moves.
+    await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
     throw new UnknownReplyError("a place's count");
   }
+  const giveBack = () => redisPipeline([["HDEL", members, who]]);
   if (count > group.people) {
-    await giveBack();
+    // More marks than places: this one comes off. When that leaves a place
+    // free (two pressed for the last one in the same instant and both came
+    // off), it is not said that every place is taken: the open is said as
+    // not done, and the link works again.
+    const after = await redisPipeline([["HDEL", members, who], ["HLEN", members]]).then(
+      (r) => {
+        const two = repliesFor(r, 2);
+        return two ? countOf(two[1]) : null;
+      },
+      () => null,
+    );
+    if (after === null) throw new UnknownReplyError("a place given back");
+    if (after < group.people) throw new Error("a place was given back in the same instant");
     return { outcome: "full", email, group };
   }
   // One of the store's orders this month: inside the room its checkout held
@@ -484,26 +582,23 @@ export async function takePlace(input: {
     }
     hour = admitted.hour;
   }
-  await redisPipeline([
-    ["EXPIRE", membersKey(group.id), GROUP_KEPT_SECONDS],
-    ["EXPIRE", takenKey(group.id), GROUP_KEPT_SECONDS],
-  ]);
+  await redisPipeline([["EXPIRE", members, GROUP_KEPT_SECONDS]]);
 
-  const [given] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], at, store.sid);
-  if (!given) {
+  const [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], at, store.sid);
+  if (!granted) {
+    const [again] = await redisPipeline([["HGET", importedKey(group.s, email), group.p]]);
+    const other = givenBy(again);
+    if (!held && hour !== null) await settleAdmitted(store, hour);
+    if (other && other.job === groupJob(group.id)) {
+      // This purchase gave it already: its place stays.
+      await finish(other.at > 0 ? other.at : at);
+      return { outcome: "already", email, group };
+    }
     // It reached this address another way in the same instant.
     await giveBack();
-    if (!held && hour !== null) await settleAdmitted(store, hour);
     return { outcome: "has", email, group };
   }
-  // The doors that read what an address was given are opened for this store.
-  if (!store.pastBuyers) await setPastBuyers(storeRef(store));
-  // A course is dated from the day its place was taken, so what opens over
-  // time opens on time for each person.
-  for (const id of [group.p, ...(group.items ?? [])]) await input.recordStart(email, id, at);
-  // Each place taken is one of the month's orders (lib/orders.ts). The
-  // purchase was paid, so it is covered wherever its sale paid a share.
-  await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0);
+  await finish(at);
   // Counted now, so what was held for it is given back (lib/order-admission.ts).
   if (hour !== null) await settleAdmitted(store, hour);
   return { outcome: "taken", email, group };

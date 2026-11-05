@@ -454,10 +454,19 @@ export async function settleShares(deadline: number, nowSeconds = Date.now() / 1
     counts.stores += 1;
     try {
       if (!(await settleGivenBack(store, ref, nowSeconds, deadline, counts, live))) counts.complete = false;
+    } catch (error) {
+      countSettlementFailure(counts, error);
+      counts.complete = false;
+      console.error(`settling historical shares on ${store.handle} failed`, error);
+    }
+    // Independent membership evidence may still lower a rate after a failed
+    // historical reading. Neither step certifies the other one's work.
+    try {
       if (!(await keepMemberships(store, ref, deadline, counts, live))) counts.complete = false;
     } catch (error) {
       countSettlementFailure(counts, error);
-      console.error(`keeping the share of ${store.handle} failed`, error);
+      counts.complete = false;
+      console.error(`keeping membership shares on ${store.handle} failed`, error);
     }
   }
   counts.complete = counts.complete && counts.failed === 0;

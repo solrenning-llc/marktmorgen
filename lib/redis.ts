@@ -15,6 +15,25 @@ function getConfig() {
   return { url: url.replace(/\/+$/, ""), token };
 }
 
+/** Upstash REST returns one single-field result/error envelope per command, in order.
+ * https://upstash.com/docs/redis/features/restapi (checked November 5, 2026).
+ * A malformed or incomplete batch is unknown, even if an earlier write succeeded.
+ */
+function pipelineResults(value: unknown, expected: number): unknown[] {
+  if (!Array.isArray(value) || value.length !== expected) throw new Error("Incomplete Redis pipeline response");
+  const results: unknown[] = [];
+  for (let i = 0; i < expected; i += 1) {
+    const entry: unknown = value[i];
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).length !== 1) throw new Error("Invalid Redis response envelope");
+    const error = Object.getOwnPropertyDescriptor(entry, "error");
+    if (error && "value" in error && typeof error.value === "string" && error.value.length > 0) throw new Error(`Redis error: ${error.value}`);
+    const result = Object.getOwnPropertyDescriptor(entry, "result");
+    if (!result || !("value" in result) || result.value === undefined) throw new Error("Redis result is unconfirmed");
+    results.push(result.value);
+  }
+  return results;
+}
+
 export function isRedisConfigured(): boolean {
   return getConfig() !== null;
 }
@@ -39,15 +58,9 @@ export async function redisPipeline(commands: Command[]): Promise<unknown[]> {
       throw new Error(`Redis request failed with status ${response.status}`);
     }
 
-    return (await response.json()) as {
-      result?: unknown;
-      error?: string;
-    }[];
+    return (await response.json()) as unknown;
   });
-  const failed = results.find((item) => item.error);
-  if (failed) throw new Error(`Redis error: ${failed.error}`);
-
-  return results.map((item) => item.result);
+  return pipelineResults(results, commands.length);
 }
 
 /**
@@ -68,10 +81,7 @@ export async function redisPipelineBase64(commands: Command[]): Promise<unknown[
       signal,
     });
     if (!response.ok) throw new Error(`Redis request failed with status ${response.status}`);
-    return (await response.json()) as { result?: unknown; error?: string }[];
+    return (await response.json()) as unknown;
   });
-  return results.map((entry) => {
-    if (entry.error) throw new Error(`Redis error: ${entry.error}`);
-    return entry.result;
-  });
+  return pipelineResults(results, commands.length);
 }

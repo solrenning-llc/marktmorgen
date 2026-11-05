@@ -1,0 +1,6 @@
+app/[handle]/layout.tsx(45,52): error TS2304: Cannot find name 'LayoutProps'.
+app/[handle]/layout.tsx(60,52): error TS2304: Cannot find name 'LayoutProps'.
+app/[handle]/layout.tsx(66,65): error TS2304: Cannot find name 'LayoutProps'.
+app/layout.tsx(104,50): error TS2304: Cannot find name 'LayoutProps'.
+app/signin/layout.tsx(8,52): error TS2304: Cannot find name 'LayoutProps'.
+app/studio/layout.tsx(23,52): error TS2304: Cannot find name 'LayoutProps'.

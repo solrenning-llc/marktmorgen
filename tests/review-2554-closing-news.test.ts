@@ -58,10 +58,13 @@ async function main(): Promise<void> {
     console.error = real;
     redis.pipeline = realPipeline as typeof redis.pipeline;
     const text = closingLetter("ended", rita.name, endedAt, day, now, news).text;
-    const promised = text.includes("each of them is given back the unused part of their last payment");
+    // No sentence that says a refund is made whatever happens on the day.
+    const promised = /is given back the unused part|are made for you|are still made for you/.test(text);
+    // The creator is told this member's time is theirs to refund, in the singular.
+    const told = text.includes("1 membership's payments are not paused: past this closing's limit.") && text.includes("What this member paid for after") && text.includes("please check their membership in Stripe and refund that time yourself.");
     // What closingDay gives back is giveBackUnused over unusedRows: the over-limit member is never in it.
     const refunded = (await unusedRows(rita, day)).some((r) => r.sub === "sub_member0009");
-    is("the letter promises a refund only to members the closing day can refund", { promised, overLimit: news.overLimit, refunded }, { promised, overLimit: 1, refunded: promised });
+    is("the letter promises a refund only to members the closing day can refund, and tells the creator to refund the rest", { promised, told, overLimit: news.overLimit, refunded }, { promised: false, told: true, overLimit: 1, refunded: false });
   }
 
   done();

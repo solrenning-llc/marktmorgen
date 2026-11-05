@@ -17,7 +17,7 @@
  */
 import { holdCounts, paidKey, savePaidPeriod, workKey } from "@/lib/closing-holds";
 import * as planClosing from "@/lib/plan-closing";
-import { type ClosingNews, closingLetter, closingNews, removalDay } from "@/lib/plan-closing";
+import { type ClosingNews, closingLetter, closingNews, closingOf, removalDay } from "@/lib/plan-closing";
 import { claimHandle, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -61,11 +61,15 @@ const UNKNOWN_MEMBERS = "We could not check just now which members paid for time
  * paused, from the creator's balance, within the closing's limit. These are
  * the sentences that say so, and no more.
  */
-const NOT_MADE = "A refund your Stripe balance does not cover, or one past this closing's limit, is not made: after that day, please check your Stripe account and refund what is left yourself.";
-const TRY_KNOWN = "we try to refund each of them the unused part of their last payment, from your own Stripe account.";
+/** Every reason a refund may not go through on the day (balance, limit, a disputed payment, one Stripe names no payment for), without a list that leaves one out. */
+const NOT_MADE = "Some refunds may not go through (for example, when your Stripe balance is too low): after that day, please check your Stripe account and refund what is left yourself.";
+/** Right for one member and for many. */
+const TRY_KNOWN = "we try to refund the unused part of each member's last payment, from your own Stripe account.";
 const TRY_UNKNOWN = "we try to refund, from your own Stripe account, the unused part of the last payment of each member whose payments we paused.";
 const SOONER = "You can refund it sooner, after checking each amount, from your studio. Marktmorgen never pays it and never takes it.";
 const NOT_PAUSED_REFUND = "may not be refunded for you: after that day, please check each of them in Stripe and refund that time yourself.";
+const NOT_PAUSED_ONE = "What this member paid for after";
+const NOT_PAUSED_ONE_END = "may not be refunded for you: after that day, please check their membership in Stripe and refund that time yourself.";
 const UNKNOWN_PAUSED_REFUND = "For a member whose payments were not paused, what they paid for after";
 const UNKNOWN_PAUSED_REFUND_END = "may not be refunded for you: after that day, please check your members in Stripe and refund that time yourself.";
 /** The promise the code does not keep: every member given back, whatever the balance, the limit or the hold. */
@@ -105,12 +109,12 @@ async function main(): Promise<void> {
     );
     is(
       "it says only the refund the closing day tries, when it is not made, and what the creator does",
-      [said.includes(TRY_KNOWN), said.includes(NOT_MADE), said.includes(SOONER), said.includes(`What these members paid for after`) && said.includes(NOT_PAUSED_REFUND), OVERPROMISE.test(said)],
+      [said.includes(TRY_KNOWN), said.includes(NOT_MADE), said.includes(SOONER), said.includes(NOT_PAUSED_ONE) && said.includes(NOT_PAUSED_ONE_END), OVERPROMISE.test(said)],
       [true, true, true, true, false],
     );
     // One past the closing's limit too: still told to refund that time from Stripe.
     const over = letterOf({ ...some, notHeld: 0, overLimit: 2 });
-    is("members past the closing's limit: refunded by the creator, not promised", [over.includes("2 memberships' payments are not paused: past this closing's limit."), over.includes(NOT_PAUSED_REFUND)], [true, true]);
+    is("members past the closing's limit: refunded by the creator, not promised", [over.includes("2 memberships' payments are not paused: past this closing's limit."), over.includes("What these members paid for after") && over.includes(NOT_PAUSED_REFUND)], [true, true]);
   }
 
   part("A hold that cannot be read is said to be unchecked, never as none");
@@ -199,6 +203,23 @@ async function main(): Promise<void> {
     }
     // What the real readers answer today is a shape these take.
     is("the hold as holdCounts answers it is read", readHoldCounts?.(await holdCounts(folder)), { failed: 1, over: 0 });
+  }
+
+  part("A break that cannot be read is not 'not closing' (closingOf)");
+  {
+    redis.clear();
+    const ended = { ...nora, planEndedAt: new Date(endedAt).toISOString() };
+    const known = await closingOf(ended, now);
+    is("with no break written down, the store is closing on its day", known?.endedAt, endedAt);
+    // The break is read by one Redis script (lib/plan-pause.ts, PAUSE_OBSERVATION).
+    failing((commands) => commands.some((c) => c[0] === "EVAL"));
+    const failed = await closingOf(ended, now).then(() => "answered", (error: unknown) => (error instanceof Error ? "threw" : "threw something"));
+    working();
+    is("a break that could not be read throws, never answers 'not closing'", failed, "threw");
+    redis.pipeline = (async (commands: Commands) => (commands.some((c) => c[0] === "EVAL") ? [[-1]] : realPipeline(commands))) as typeof redis.pipeline;
+    const odd = await closingOf(ended, now).then(() => "answered", () => "threw");
+    working();
+    is("a break answered in a shape we do not expect throws too", odd, "threw");
   }
 
   part("The letter on its own: an unknown is never printed as a number");

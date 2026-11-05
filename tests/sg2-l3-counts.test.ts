@@ -16,6 +16,12 @@
  *     count now opens nothing.
  *   - studentPage (lib/learn.ts) read an unknown HLEN as 0 students in all.
  *     It is now null, as for the other counts of that page.
+ *   - runImport (lib/imports.ts) read an unknown LLEN of the rows still to
+ *     bring in as 0, failed the import as "rows let go" and deleted them; read
+ *     an unknown LLEN of the report as an empty report; read an unknown SCARD
+ *     of the addresses to email as "nobody left" and finished the import, or
+ *     started the mail ramp at 0. Each now leaves the job as it was, to start
+ *     again from the last saved place.
  *   - forgetLearnerPerson (lib/learn.ts) read an unknown SMEMBERS of the
  *     person's passes as "no passes", so their pass records were not deleted,
  *     and counted an unknown DEL or HDEL as 0 records removed. Both now throw,
@@ -26,6 +32,7 @@
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { withinAddressLimit, withinRateLimit } from "@/lib/auth";
 import { forgetLearnerPerson, openCourseLink, requestCourseLink, studentPage } from "@/lib/learn";
+import { addRows, finishUpload, readJob, runImport, startImport } from "@/lib/imports";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -160,6 +167,53 @@ void (async () => {
   is("studentPage: no students is 0", (await studentPage(course, "0", 10, async () => true))?.total, 0);
   rule = { when: studentsPage, reply: [["0", []], 3, 0] };
   is("studentPage: three is three", (await studentPage(course, "0", 10, async () => true))?.total, 3);
+  rule = null;
+
+  part("runImport: an unknown length or count leaves the import as it was");
+  const owner = "sg2-l3-import@example.com";
+  const importer = await shop(owner, "sg2-l3-import");
+  const rows = [
+    ["2", "ada@sg2-l3.example", "Ada", "", "Subscribed"],
+    ["3", "not-an-address", "Bad", "", "Subscribed"],
+  ];
+  const input = { expected: rows.length, file: "contacts.csv", agreed: true, consentColumn: true, tags: [], source: "clickfunnels" as const };
+  const started = await startImport(importer, owner, "contacts", input);
+  if (!started.ok) throw new Error(`not started: ${started.reason}`);
+  const id = started.job.id;
+  await addRows(importer, id, rows);
+  await finishUpload(importer, id);
+  const llen = (suffix: string) => (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === "LLEN" && String(commands[0]?.[1]) === `nl:import:${id}:${suffix}`;
+  for (const [label, bad] of BAD_COUNTS) {
+    rule = { when: llen("rows"), reply: [bad] };
+    const after = await outcome(() => runImport(id, Date.now() + 30_000));
+    const [kept] = await pipeline([["LLEN", `nl:import:${id}:rows`]]);
+    is(`runImport, the rows' length ${label}: not failed, rows kept`, [typeof after === "object" && after ? after.state : after, kept], ["queued", 1]);
+  }
+  rule = { when: llen("rows"), reply: [] };
+  is("runImport, the rows' length missing: not failed", (await outcome(() => runImport(id, Date.now() + 30_000)) as { state?: string } | null)?.state, "queued");
+  for (const [label, bad] of BAD_COUNTS) {
+    rule = { when: llen("errors"), reply: [bad] };
+    await outcome(() => runImport(id, Date.now() + 30_000));
+    const job = await readJob(id);
+    is(`runImport, the report's length ${label}: the step is not saved as done`, [job?.done, job?.counts.errors], [0, 0]);
+  }
+  rule = null;
+  const finished = await runImport(id, Date.now() + 30_000);
+  // A step left halfway may have written Ada already (as any step that fails after its writes): she is then counted
+  // as already there, never twice.
+  const c = finished?.counts;
+  is("runImport: the real replies still bring the rows in and note the bad one", [finished?.state, (c?.added ?? 0) + (c?.already ?? 0) + (c?.contacts ?? 0), c?.errors, finished?.done], ["done", 1, 1, 2]);
+
+  part("runImport: an unknown count of addresses to email never finishes the mailing");
+  const mailing = { ...(await readJob(id))!, state: "mailing", finishedAt: undefined, options: { ...(await readJob(id))!.options, email: true } };
+  await pipeline([["SET", `nl:import:${id}`, JSON.stringify(mailing), "EX", 3600], ["SADD", `nl:import:${id}:mail`, "ada@sg2-l3.example"], ["SADD", "nl:imports:active", id]]);
+  const scard = (commands: (string | number)[][]) => commands.length === 1 && commands[0]?.[0] === "SCARD" && String(commands[0]?.[1]) === `nl:import:${id}:mail`;
+  for (const [label, bad] of BAD_COUNTS) {
+    rule = { when: scard, reply: [bad] };
+    await outcome(() => runImport(id, Date.now() + 30_000));
+    const [left] = await pipeline([["SCARD", `nl:import:${id}:mail`]]);
+    is(`runImport, the addresses to email ${label}: still mailing, the address kept`, [(await readJob(id))?.state, left], ["mailing", 1]);
+  }
   rule = null;
 
   part("forgetLearnerPerson: a person's passes and records are said as removed only on exact replies");

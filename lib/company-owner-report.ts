@@ -32,6 +32,38 @@ type Data = Record<string, unknown>;
 const object = (value: unknown): value is Data => value !== null && typeof value === "object" && !Array.isArray(value);
 const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const clock = (value: unknown): value is number => count(value) && value <= 8_640_000_000_000_000;
+function hasDuplicateObjectMembers(serialized: string): boolean {
+  const stack: Array<Set<string> | null> = [];
+  for (let index = 0; index < serialized.length; index += 1) {
+    const character = serialized[index];
+    if (character === "{") { stack.push(new Set()); continue; }
+    if (character === "[") { stack.push(null); continue; }
+    if (character === "}" || character === "]") {
+      const context = stack.pop();
+      if (context === undefined || (character === "}" ? context === null : context !== null)) return true;
+      continue;
+    }
+    if (character !== '"') continue;
+    const start = index;
+    let escaped = false;
+    for (index += 1; index < serialized.length; index += 1) {
+      const current = serialized[index];
+      if (escaped) { escaped = false; continue; }
+      if (current === "\\") { escaped = true; continue; }
+      if (current === '"') break;
+    }
+    if (index >= serialized.length) return true;
+    let after = index + 1;
+    while (/\s/.test(serialized[after] ?? "")) after += 1;
+    const context = stack.at(-1);
+    if (serialized[after] !== ":" || !(context instanceof Set)) continue;
+    let key: unknown;
+    try { key = JSON.parse(serialized.slice(start, index + 1)); } catch { return true; }
+    if (typeof key !== "string" || context.has(key)) return true;
+    context.add(key);
+  }
+  return stack.length !== 0;
+}
 function exact(row: Data, fields: readonly string[]): boolean {
   return Object.keys(row).length === fields.length && fields.every(key => Object.hasOwn(row, key));
 }
@@ -134,6 +166,7 @@ export function companyOwnerReport(serialized: string | null, requestedMonth: st
   let root: Data = {};
   if (clock(now) && month !== null && typeof serialized === "string" && serialized.length <= OWNER_REPORT_MAX_CHARACTERS) {
     try {
+      if (hasDuplicateObjectMembers(serialized)) throw new Error("Ambiguous owner-report snapshot");
       const parsed: unknown = JSON.parse(serialized);
       if (object(parsed) && Object.keys(parsed).every(key => IDS.includes(key as SectionId))) root = parsed;
     } catch { /* An absent or malformed snapshot remains unknown. */ }

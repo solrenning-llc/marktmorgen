@@ -85,6 +85,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/waitlist.ts", how: "erased", what: "Their place on every waitlist, and in any launch email still going out" },
   { file: "lib/affiliate-bond.ts", how: "erased", what: "Which affiliate they belong to" },
   { file: "lib/affiliate-leads.ts", how: "erased", what: "Their address on a lead an affiliate was credited for (a sign-up, a free product claimed or a call booked); the lead stays without it, as the affiliate's money record" },
+  { file: "lib/affiliate-book-snapshot.ts", how: "erased", via: "lib/affiliate-leads.ts", what: "The copy of your affiliate program's figures, shown for a day and kept for up to eight days, where a lead's address shows only masked (its first letter and its domain): deleted whole, with any copy being written, and worked out again without them" },
   { file: "lib/affiliate-leads.ts", how: "suppression", what: "A one-way fingerprint of the address in your affiliate program, the lead's id, so the same person is never counted as a new lead again. It cannot be turned back into the address." },
   { file: "lib/affiliates.ts", how: "kept", what: "Commissions an affiliate earned on their purchases", why: "They are the affiliate's money records, paid or owed, and name the sale, not the buyer's address." },
   { file: "lib/affiliates.ts", how: "account", what: "An affiliate's own account in a store's program; a buyer is not one" },
@@ -105,6 +106,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/certificate.ts", how: "erased", what: "Their certificates; a certificate's page then says it was not found" },
   { file: "lib/lesson-comments.ts", how: "erased", what: "Their comments under lessons, the answers under them, and the name they chose" },
   { file: "lib/podcast-access.ts", how: "erased", what: "Their private podcast feeds" },
+  { file: "lib/letter-access.ts", how: "expires", days: 1, what: "A link to read an email kept for members works for an hour; whether their address may read it is kept for minutes, and how often a link was asked for, by a one-way hash of their address and connection, for an hour" },
   { file: "lib/discord-store.ts", how: "erased", via: "lib/discord-access.ts", what: "Their Discord account, and the roles they were given are taken back in your server" },
   { file: "lib/discord-access.ts", how: "erased", what: "The answers kept about whether they may have Discord roles" },
 

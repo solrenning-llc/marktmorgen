@@ -1,4 +1,14 @@
 /** All collection saves/removals intercepted; generated ids are synthetic only. */
+/** Test actual geometry, including a disabled first-row move button. */
+export async function checkCollectionProductTargets({section,is}){
+ const controls=section.getByRole("button",{name:/^(?:Move .+ up|Take .+ out)$/});
+ is("collection has real product controls",await controls.count()>0,true);
+ for(const control of await controls.all()){
+  const box=await control.boundingBox();
+  is("collection target is at least 44px: "+await control.getAttribute("aria-label"),Boolean(box&&box.width>=44&&box.height>=44),true);
+ }
+}
+
 export async function checkCollectionsAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
  {name:"HTTP",status:500,reply:value=>value},{name:"truthy",reply:value=>({...value,ok:"true"})},
@@ -27,6 +37,7 @@ export async function checkCollectionsAcknowledgment({browser,LOCAL,fixture,is})
    await section.getByLabel("Collection 1: name",{exact:false}).fill("Guides  pour vous");
    await section.getByLabel("A line about it (optional)",{exact:false}).fill("Pour  apprendre.");
    await section.getByRole("button",{name:"Add to this collection",exact:true}).click();
+   await checkCollectionProductTargets({section,is});
    for(const phase of ["create","edit","remove"]){
     if(phase==="edit")await section.getByLabel("Collection 1: name",{exact:false}).fill("Guides  suivants");
     if(phase==="remove")await section.getByRole("button",{name:"Remove collection 1",exact:true}).click();

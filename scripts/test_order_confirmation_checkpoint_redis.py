@@ -21,13 +21,35 @@ class LocalRedis(Redis):
 
 
 def measure_commands(client, run):
-    def counts():
-        return {m[1]: int(m[2]) for m in re.finditer(
-            r"cmdstat_([^:]+):calls=(\d+),", client.command("INFO", "COMMANDSTATS")) if m[1] != "info"}
-    before = counts()
-    result = run()
-    after = counts()
-    return result, sum(after.get(name, 0) - before.get(name, 0) for name in set(before) | set(after))
+    """Count one unchanged application EVAL, isolated from other clients.
+
+    MULTI/EXEC are test infrastructure outside the snapshots. Subtract only
+    the first observer INFO, preserving every command invoked by the Lua.
+    The callback queues exactly one EVAL; it must not inspect its reply.
+    """
+    def counts(raw):
+        assert isinstance(raw, str)
+        return {m[1]: int(m[2]) for m in re.finditer(r"cmdstat_([^:]+):calls=(\d+),", raw)}
+    assert client.command("MULTI") == "OK"
+    try:
+        assert client.command("INFO", "COMMANDSTATS") == "QUEUED"
+        assert run() == "QUEUED"
+        assert client.command("INFO", "COMMANDSTATS") == "QUEUED"
+        executed = client.command("EXEC")
+    except Exception:
+        try:
+            client.command("DISCARD")
+        except Exception:
+            pass
+        raise
+    assert isinstance(executed, list) and len(executed) == 3, executed
+    before, after = counts(executed[0]), counts(executed[2])
+    delta = {name: after.get(name, 0) - before.get(name, 0) for name in set(before) | set(after)}
+    assert delta.get("info", 0) >= 1, delta
+    delta["info"] -= 1
+    assert delta.get("eval") == 1 and delta.get("multi", 0) == 0 and delta.get("exec", 0) == 0, delta
+    assert all(value >= 0 for value in delta.values()), delta
+    return executed[1], sum(delta.values())
 
 
 def measurement_controls():

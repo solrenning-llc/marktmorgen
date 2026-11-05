@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from test_order_confirmation_checkpoint_redis import LocalRedis
+from test_order_confirmation_checkpoint_redis import LocalRedis, measure_commands
 
 
 def main():
@@ -51,15 +51,11 @@ await build({stdin:{contents:process.argv[1],resolveDir:process.cwd(),loader:'ts
     def commit():
         return client.command("EVAL", script, 6, *keys, receipt, hour, 8960, 1,
                               folder, "synthetic@example.test", until, now, 34_560_000)
-    def stats():
-        return {m[1]: int(m[2]) for m in re.finditer(r"cmdstat_([^:]+):calls=(\d+),", client.command("INFO", "COMMANDSTATS")) if m[1] != "info"}
     try:
         client.command("HSET", keys[2], hour, 2)
         client.command("HSET", keys[3], hour, 17920)
-        before = stats()
-        assert commit() == 1
-        after = stats()
-        commands = sum(n - before.get(name, 0) for name, n in after.items())
+        result, commands = measure_commands(client, commit)
+        assert result == 1
         memory = client.command("MEMORY", "USAGE", seen, "SAMPLES", 0)
         assert len(seen.encode()) == 47 and len(receipt.encode()) == 68
         print(json.dumps({"keyBytes": 47, "valueBytes": 68, "memoryBytes": memory,

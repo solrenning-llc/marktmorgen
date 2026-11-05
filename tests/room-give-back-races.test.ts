@@ -264,7 +264,7 @@ async function waitlists(): Promise<void> {
   is("its link to confirm was written", last.startsWith("nl:wl:t:"), true);
   is("and is gone", (await redis.pipeline([["EXISTS", last]]))[0], 0);
 
-  part("A store renamed afterwards gets back exactly what a place took");
+  part("A store renamed afterward gets back exactly what a place took");
   is("the longest handle is the pattern's", [HANDLE_PATTERN.test("a".repeat(LONGEST_HANDLE)), HANDLE_PATTERN.test("a".repeat(LONGEST_HANDLE + 1))], [true, false]);
   const beforeIvy = await used(store);
   is("Ivy joins", await enter("ivy@example.com"), "sent");

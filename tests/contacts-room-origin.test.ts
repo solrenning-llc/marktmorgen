@@ -6,7 +6,7 @@
  * the orders' part and what it grew by to the members' slot. Records written
  * before the field existed are left counted, never given back by a guess.
  * A member's trace is given back by the deletion, and deleting a post or
- * comment of theirs afterwards gives nothing back a second time.
+ * comment of theirs afterward gives nothing back a second time.
  */
 import { forgetContactPerson, leadsKey, orderRoom, tokensFor, unsubscribe, upsertContact } from "@/lib/contacts";
 import { CREATOR, createPost, deleteComment, addComment, deletePost, setMail, setMemberToken, setProfile, toggleLike, touchMember } from "@/lib/community";
@@ -41,7 +41,7 @@ async function contacts(): Promise<void> {
   const before = await used();
   await signUp("ana@example.com");
   is("it is marked as counted in the contacts' slot", JSON.parse(await rawOf("ana@example.com")).r, "c");
-  // A purchase afterwards is counted in the same slot, and its token and leaving are written uncounted.
+  // A purchase afterward is counted in the same slot, and its token and leaving are written uncounted.
   await purchase("ana@example.com", "prodtwo");
   await tokensFor(LIST, ["ana@example.com"], "harbor");
   const token = JSON.parse(await rawOf("ana@example.com")).t as string;
@@ -56,7 +56,7 @@ async function contacts(): Promise<void> {
   await purchase("dana@example.com", "prodone");
   is("it is marked as counted in the orders' part", JSON.parse(await rawOf("dana@example.com")).r, "o");
   const ordersAfterOrder = (await dataUsed(ROOM))?.orders ?? 0;
-  // A sign-up afterwards grows it in the orders' part too, never in the contacts' slot.
+  // A sign-up afterward grows it in the orders' part too, never in the contacts' slot.
   const contactsBefore = await slot("ct");
   await signUp("dana@example.com");
   is("the contacts' slot is not touched", await slot("ct"), contactsBefore);
@@ -88,7 +88,7 @@ async function community(): Promise<void> {
   is("the record is marked as made by an order", ana?.r, "o");
   const first = String((await redis.pipeline([["HGET", `nl:cm:${ID}:m`, ana!.k]]))[0]);
   const named = await setProfile(ID, ana!, { name: "Ana Lima", dir: true, mail: true, answers: ["Baking bread at home"], questions: ["What brings you here?"] }, ROOM);
-  // Written uncounted afterwards: the emails switch, a token.
+  // Written uncounted afterward: the emails switch, a token.
   await setMail(ID, named, false);
   await setMemberToken(ID, named, "f".repeat(40));
   is("her name takes room in the members' slot", (await slot("cm:m")) > members, true);
@@ -109,7 +109,7 @@ async function community(): Promise<void> {
   const afterAna = await used();
   is("nothing more than she took came back", afterAna >= before, true);
 
-  part("Deleting her post and comment afterwards gives nothing back a second time");
+  part("Deleting her post and comment afterward gives nothing back a second time");
   await deletePost(ID, post.post, ROOM);
   await deleteComment(ID, theirs.post.id, comment.comment, ROOM);
   is("the members' slot does not move", await slot("cm:m"), members);

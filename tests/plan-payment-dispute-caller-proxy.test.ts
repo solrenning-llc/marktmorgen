@@ -103,11 +103,11 @@ for (const boundary of ["context", "review"] as const) {
       null,
       "a later bound liability cannot use an earlier smaller assessment",
     );
-    assert.ok(reads > 1, "the regression exercises distinct boundary captures");
+    assert.equal(reads, 0, "the funding boundary must reject the Proxy without traps");
   });
 }
 
-for (const change of ["disputes-reference", "review-reference", "review-prototype"] as const) {
+for (const change of ["disputes-reference", "review-reference", "review-prototype", "final-identity-scan"] as const) {
   test(`final observation cannot change unchecked original ${change}`, () => {
     const fixture = contractFixture();
     assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
@@ -125,37 +125,47 @@ for (const change of ["disputes-reference", "review-reference", "review-prototyp
         },
       },
     );
-    fixture.review.scenarios = new Proxy(fixture.review.scenarios, {
-      getOwnPropertyDescriptor(target, key) {
-        if (key === "review" && ++visits === 3) {
-          installed++;
-          if (change === "disputes-reference") {
-            fixture.review.planPaymentDisputes = unknownDisputes();
-          } else if (change === "review-reference") {
-            fixture.context.review = {
-              ...fixture.review,
-              planPaymentDisputes: unknownDisputes(),
-            };
-          } else {
-            Object.setPrototypeOf(fixture.review, { unreviewedLiability: null });
-          }
-        }
-        return Reflect.getOwnPropertyDescriptor(target, key);
-      },
-    });
-
-    const actual = contractFundingConfiguration(fixture.policy, fixture.context, fixture.now);
-    assert.equal(installed, 1, "the third traversal must trigger the late mutation");
-    if (change === "review-prototype") {
-      assert.equal(canonicalFinancialSnapshot(fixture.context), null);
+    let context = fixture.context;
+    if (change === "final-identity-scan") {
+      context = {
+        ...fixture.context,
+        review: new Proxy(fixture.review, {
+          getOwnPropertyDescriptor(target, key) {
+            const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+            if (key === "scenarios" && ++visits === 3) {
+              installed++;
+              fixture.review.planPaymentDisputes = unknownDisputes();
+            }
+            return descriptor;
+          },
+        }),
+      };
     } else {
-      assert.equal(
-        assessPlanPaymentDisputeCosts(fixture.context.review!.planPaymentDisputes),
-        null,
-      );
+      fixture.review.scenarios = new Proxy(fixture.review.scenarios, {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === "review" && ++visits === 3) {
+            installed++;
+            if (change === "disputes-reference") {
+              fixture.review.planPaymentDisputes = unknownDisputes();
+            } else if (change === "review-reference") {
+              fixture.context.review = {
+                ...fixture.review,
+                planPaymentDisputes: unknownDisputes(),
+              };
+            } else {
+              Object.setPrototypeOf(fixture.review, { unreviewedLiability: null });
+            }
+          }
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+      });
     }
+
+    const actual = contractFundingConfiguration(fixture.policy, context, fixture.now);
+    assert.equal(visits, 0, "Proxy detection must precede descriptor observation");
+    assert.equal(installed, 0, "no late mutation callback may run");
     assert.equal(gets, 0, "validation must not execute ordinary Proxy reads");
-    assert.equal(actual, null, "there must be no unchecked final observation");
+    assert.equal(actual, null, "executable evidence must fail closed before observation");
   });
 }
 
@@ -230,7 +240,7 @@ for (const wrapper of ["context", "review"] as const) {
         null,
         "matching projected numeric totals cannot approve substituted unknown evidence",
       );
-      assert.ok(reads > 1, "the entry point observes distinct original references");
+      assert.equal(reads, 0, "the entry point must reject the wrapper without traps");
     });
   }
 }
@@ -262,7 +272,7 @@ test("parent validation never executes a getter installed by a later scenario Pr
     contractFundingConfiguration(fixture.policy, fixture.context, fixture.now),
     null,
   );
-  assert.equal(installed, 1, "the regression must install the late getter");
+  assert.equal(installed, 0, "Proxy rejection must precede the late getter callback");
   assert.equal(reads, 0, "financial validation must not execute an original evidence getter");
 });
 
@@ -286,7 +296,7 @@ test("post-serialization validation rejects a late plain evidence change", () =>
     null,
     "a second valid snapshot cannot silently differ from the bound review",
   );
-  assert.ok(mutations > 0, "the regression must change already serialized evidence");
+  assert.equal(mutations, 0, "Proxy rejection must precede the mutation callback");
 });
 
 for (const stage of ["review-ownKeys", "context-identity", "late-canonical"] as const) {
@@ -338,15 +348,12 @@ for (const stage of ["review-ownKeys", "context-identity", "late-canonical"] as 
     }
 
     const actual = contractFundingConfiguration(fixture.policy, context, fixture.now);
-    assert.equal(
-      assessPlanPaymentDisputeCosts(fixture.review.planPaymentDisputes),
-      null,
-      "the actual original graph now contains an unknown hidden liability",
-    );
+    assert.equal(installs, 0, "Proxy rejection must precede hidden-liability insertion");
+    assert.equal(reads, 0, "Proxy rejection must not execute context descriptor traps");
     assert.equal(
       actual,
       null,
-      "captured evidence must remain complete after every executable observation",
+      "executable evidence must be rejected before it can alter the graph",
     );
   });
 }

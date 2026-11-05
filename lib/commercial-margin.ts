@@ -270,6 +270,47 @@ function profitCents(value:unknown):value is number {
 function safeProfitNumber(value:bigint):number|null {
  return value>BigInt(Number.MAX_SAFE_INTEGER)||value<BigInt(Number.MIN_SAFE_INTEGER)?null:Number(value);
 }
+/** Copy descriptive accounting evidence without traversing executable caller data.
+ * Node's native Proxy check runs before descriptors/prototypes on each container.
+ * No Node module enters the browser bundle: without that native proof this
+ * descriptive report is unknown. Release policy above is independent of it.
+ */
+export function commercialProfitMixData(input:unknown):CommercialProfitMixInput|null {
+ try{
+  if(typeof process==='undefined'||typeof process.getBuiltinModule!=='function')return null;
+  const isProxy=process.getBuiltinModule('node:util').types.isProxy;
+  const ownData=(value:unknown,keys:readonly string[]):Record<string,unknown>|null=>{
+   if(!value||typeof value!=='object'||isProxy(value)||Array.isArray(value))return null;
+   const prototype=Object.getPrototypeOf(value);
+   if(prototype!==null&&prototype!==Object.prototype)return null;
+   const actual=Reflect.ownKeys(value);
+   if(actual.length!==keys.length||!actual.every(key=>typeof key==='string'&&keys.includes(key)))return null;
+   const copy:Record<string,unknown>=Object.create(null);
+   for(const key of keys){
+    const descriptor=Object.getOwnPropertyDescriptor(value,key);
+    if(!descriptor||!Object.hasOwn(descriptor,'value'))return null;
+    copy[key]=descriptor.value;
+   }
+   return copy;
+  };
+  const root=ownData(input,['basis','interval','period','currency','companyFixedCostsCents','sources']);
+  if(!root||(root.basis!=='worst_case'&&root.basis!=='reconciled_actual')||
+   (root.interval!=='month'&&root.interval!=='year')||root.currency!=='USD'||
+   typeof root.period!=='string'||!root.period.trim()||
+   (root.companyFixedCostsCents!==null&&!profitCents(root.companyFixedCostsCents)))return null;
+  const sources=ownData(root.sources,COMMERCIAL_PROFIT_SOURCES);
+  if(!sources)return null;
+  for(const source of COMMERCIAL_PROFIT_SOURCES){
+   if(sources[source]===null)continue;
+   const row=ownData(sources[source],[...profitAmountKeys,'evidence']);
+   if(!row||typeof row.evidence!=='string'||!row.evidence.trim()||
+    !profitAmountKeys.every(key=>row[key]===null||profitCents(row[key])))return null;
+   sources[source]=row;
+  }
+  root.sources=sources;
+  return root as CommercialProfitMixInput;
+ }catch{return null;}
+}
 /** A missing source is unknown, even when sales are closed. Explicit evidenced zero is supported.
  * Negative source profits remain negative; their share may be negative or exceed 100%.
  * Shares are truncated to one basis point and need not sum to exactly 10,000.
@@ -280,31 +321,7 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
   rows:COMMERCIAL_PROFIT_SOURCES.map(source=>({source,netProfitCents:null,shareOfNetProfitBps:null})),
   totalNetProfitCents:null,reason:"unknown",
  };
- const inputKeys=["basis","interval","period","currency","companyFixedCostsCents","sources"] as const;
- // Refuse unmodelled root costs/context before traversing executable metadata.
- try{
-  if(!input||Array.isArray(input)||Reflect.ownKeys(input).length!==inputKeys.length||
-   !inputKeys.every(key=>Object.hasOwn(input,key)))return result;
- }catch{return result;}
- // Retain the original financial containers before an executable Proxy trap
- // can replace its reference while the shared encoder inspects descriptors.
- let originals:unknown[];
- try{
-  const own=(value:unknown,key:string):unknown=>{
-   if(!value||typeof value!=="object")return undefined;
-   const field=Object.getOwnPropertyDescriptor(value,key);
-   return field&&Object.hasOwn(field,'value')?field.value:undefined;
-  };
-  const sources=own(input,'sources');
-  originals=[input,sources,...COMMERCIAL_PROFIT_SOURCES.map(source=>own(sources,source))];
- }catch{return result;}
- const encoded=canonicalFinancialSnapshot(input);
- if(encoded===null)return result;
- // The own-data encoder rejects accessors before this native clone probe.
- // Cloning retained references also rejects a cost-hiding Proxy that detached
- // itself from the caller's graph during encoding.
- try{structuredClone(originals);}catch{return result;}
- const data=JSON.parse(encoded) as CommercialProfitMixInput|null;
+ const data=commercialProfitMixData(input);
  if(!data||Array.isArray(data)||(data.basis!=="worst_case"&&data.basis!=="reconciled_actual")||
   (data.interval!=="month"&&data.interval!=="year")||data.currency!=="USD"||
   typeof data.period!=="string"||!data.period.trim()||

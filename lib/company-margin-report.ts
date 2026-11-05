@@ -1,4 +1,4 @@
-import { commercialProfitMix, COMMERCIAL_PROFIT_SOURCES, type CommercialProfitMixInput } from "./commercial-margin";
+import { commercialProfitMix, commercialProfitMixData, COMMERCIAL_PROFIT_SOURCES, type CommercialProfitMixInput } from "./commercial-margin";
 import { canonicalFinancialSnapshot } from "./contract-funding-rules";
 
 /** MR, owner27 October2026: a measured company target, never a sales gate. */
@@ -89,9 +89,7 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
   // Validate the original graph through the shared accounting boundary before
   // any copy, including inspection of the independent held-store observation.
   // The detached data must be captured before that observation can run traps.
-  const mix = commercialProfitMix(input);
-  const encoded = mix.reason === "unknown" ? null : canonicalFinancialSnapshot(input);
-  const data = encoded === null ? null : JSON.parse(encoded) as CommercialProfitMixInput | null;
+  const data = commercialProfitMixData(input);
   // Aggregate observation is independent of financial reconciliation. Never
   // execute supplied getters or copy a store identifier/provenance into output.
   const aggregate = canonicalFinancialSnapshot(held);
@@ -105,6 +103,7 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
   if (data.basis !== "reconciled_actual" || data.interval !== "month" || data.period !== month) {
     report.reason = "wrong_period_or_basis"; return report;
   }
+  const mix = commercialProfitMix(data);
   if (mix.reason === "fixed_cost_allocation_mismatch") {
     report.reason = "fixed_cost_allocation_mismatch"; return report;
   }

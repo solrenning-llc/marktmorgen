@@ -197,6 +197,9 @@ export async function sendCallReminders(
       store = await findStore(handle);
     } catch (error) {
       console.error("reading a store for call reminders failed", error);
+      const stale = members.filter((m) => now - m.score > GIVE_UP_MS).map((m) => m.member);
+      if (stale.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...stale]]);
+      counts.dropped += stale.length;
       continue;
     }
     const done: string[] = [];
@@ -220,7 +223,7 @@ export async function sendCallReminders(
     const bySession = new Map(paid.map((call) => [call.session, call]));
     const find = listingFinder(store);
 
-    for (const { member } of members) {
+    for (const { member, score } of members) {
       const item = parseMember(member);
       done.push(member);
       if (!item) continue;
@@ -289,8 +292,10 @@ export async function sendCallReminders(
         if (again) done.pop();
       } catch (error) {
         console.error("sending a call reminder failed", error);
-        // Kept in the queue for the next run; stillUseful lets it go once it is too late.
-        done.pop();
+        // A failed individual lookup has the same bounded retry window as a
+        // failed list read; it must not monopolize the oldest queue slots.
+        if (now - score > GIVE_UP_MS) counts.dropped += 1;
+        else done.pop();
       }
     }
     if (done.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...done]]);

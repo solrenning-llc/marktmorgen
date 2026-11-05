@@ -43,13 +43,18 @@ let commands: (string | number)[][] = [];
 /** While true, the lease is refused, so a message made is kept untried (attempts 0), as when the try after it never ran. */
 let leaseOff = false;
 /** Answers the store's delivery log or its sizes broken, as Codex G did on #2192 (C3-124). */
-let fault: "partial-sizes" | "empty-sizes" | "null-log" | "text-sizes" | null = null;
+let fault: "partial-sizes" | "empty-sizes" | "null-log" | "text-sizes" | "not-ids" | "one-not-id" | null = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: (string | number)[][]) => {
   commands.push(...batch);
   const [only] = batch;
   if (fault === "null-log" && batch.length === 1 && only[0] === "LRANGE" && /^nl:hooks:log:/.test(String(only[1]))) return [null];
-  if (fault && fault !== "null-log" && batch.length > 0 && batch.every((c) => c[0] === "STRLEN")) {
+  // An id that is not one (Codex G on #2192): alone, or among the real ones.
+  if ((fault === "not-ids" || fault === "one-not-id") && batch.length === 1 && only[0] === "LRANGE" && /^nl:hooks:log:/.test(String(only[1]))) {
+    const [log] = (await pipeline(batch)) as unknown[];
+    return [fault === "not-ids" ? ["not-a-delivery-id"] : [...(log as string[]), "not-a-delivery-id"]];
+  }
+  if (fault && fault !== "null-log" && fault !== "not-ids" && fault !== "one-not-id" && batch.length > 0 && batch.every((c) => c[0] === "STRLEN")) {
     const answers = (await pipeline(batch)) as unknown[];
     return fault === "partial-sizes" ? answers.slice(0, 1) : fault === "empty-sizes" ? [] : answers.map((n, i) => (i === 0 ? "a lot" : n));
   }
@@ -196,7 +201,7 @@ async function main(): Promise<void> {
   await leave(1_000);
 
   part("A log or sizes answered broken: unavailable before any delivery is read, nothing taken past the door's (C3-124)");
-  for (const kind of ["partial-sizes", "empty-sizes", "text-sizes", "null-log"] as const) {
+  for (const kind of ["partial-sizes", "empty-sizes", "text-sizes", "null-log", "not-ids", "one-not-id"] as const) {
     const was = await used();
     commands = [];
     fault = kind;

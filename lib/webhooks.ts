@@ -700,12 +700,12 @@ export function recentLimit(limit: number): number {
 export async function recentDeliverySizes(store: Store): Promise<{ ids: string[]; logBytes: number; sizes: number[] } | null> {
   if (!store.statsId || !isRedisConfigured()) return { ids: [], logBytes: 0, sizes: [] };
   const [rawLog] = await redisPipeline([["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]]);
-  // A log that is not a list of strings is unknown, never an empty log (Codex G on #2192, C3-124): nothing is read
-  // or paid for, and the request answers as unavailable.
-  if (!Array.isArray(rawLog) || !(rawLog as unknown[]).every((id) => typeof id === "string")) return null;
-  const all = rawLog as string[];
-  const logBytes = all.reduce((n, id) => n + Buffer.byteLength(id), 0);
-  const ids = all.filter((id) => DELIVERY_ID_PATTERN.test(id));
+  // A log that is not a list of delivery ids is unknown, never an empty log (Codex G on #2192, C3-124): one item that
+  // is not an id makes it so, and is never dropped in silence. Nothing is read or paid for, and the request answers as
+  // unavailable.
+  if (!Array.isArray(rawLog) || !(rawLog as unknown[]).every((id) => typeof id === "string" && DELIVERY_ID_PATTERN.test(id))) return null;
+  const ids = rawLog as string[];
+  const logBytes = ids.reduce((n, id) => n + Buffer.byteLength(id), 0);
   if (!ids.length) return { ids, logBytes, sizes: [] };
   // One size for every delivery, each a whole number of bytes: a partial or malformed answer would set aside less
   // than the deliveries then read, so it is unknown, before any delivery is read and before any unit is taken.

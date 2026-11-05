@@ -92,7 +92,7 @@ async function main(){
    is("one read, no retry or replacement: "+page,calls,1);
   }finally{redis.pipeline=pipeline;}
  }
- const router={back(){},forward(){},push(){},replace(){},refresh(){},prefetch(){},hmrRefresh(){}};
+ const router={bfcacheId:"c2-display-proof",back(){},forward(){},push(){},replace(){},refresh(){},prefetch(){},hmrRefresh(){}};
  const wrap=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(AppRouterContext.Provider,{value:router},child));
  for(const [name,component] of [
   ["agreements",()=>createElement(AgreementsStudio,{rows:[],now:Date.now(),currency:"usd",canSend:true,open:true,emails:{used:null as unknown as number,limit:100},payChoices:[]})],

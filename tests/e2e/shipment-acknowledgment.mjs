@@ -15,6 +15,10 @@ export async function checkShipmentAcknowledgment({browser,LOCAL,fixture,shipmen
   {name:"known refusal",status:400,body:{ok:false,error:"unknown"},known:true},
   {name:"confirmed without email",body:{ok:true,shipped,emailed:false},confirmed:true,emailed:false},
   {name:"confirmed with email",body:{ok:true,shipped,emailed:true},confirmed:true,emailed:true},
+  {name:"durable waiting",body:{ok:true,shipped,emailed:false,mail:{state:"queued",delayed:false}},confirmed:true,mail:"The email is saved and waiting. Sending is not confirmed yet."},
+  {name:"durable old wait",body:{ok:true,shipped,emailed:false,mail:{state:"on_hold",delayed:true}},confirmed:true,mail:"It has been waiting for more than 72 hours."},
+  {name:"uncertain acceptance",body:{ok:true,shipped,emailed:false,mail:{state:"acceptance_unknown",delayed:true}},confirmed:true,mail:"It will not be sent again automatically."},
+  {name:"contradictory pending acceptance",body:{ok:true,shipped,emailed:true,mail:{state:"queued",delayed:false}}},
  ];
  for(const width of [390,1280]){
   const context=await browser.newContext({viewport:{width,height:900}});
@@ -86,7 +90,9 @@ export async function checkShipmentAcknowledgment({browser,LOCAL,fixture,shipmen
      const status=page.locator("#sales").getByRole("status");await status.waitFor();
      is("confirmed shipment has truthful persistent status "+scenario.name+"/"+width,(await status.innerText()).includes("Marked as shipped on"),true);
      is("persistent shipment never asserts email delivery "+scenario.name+"/"+width,/told|emailed/.test(await status.innerText()),false);
-     await page.locator('.nb-toast-region [role="status"]').getByText(scenario.emailed?"Marked as shipped. The buyer was emailed.":"Marked as shipped. No new email was confirmed.",{exact:true}).waitFor();
+     if(scenario.mail)is("durable shipment mail state stays explicit "+scenario.name+"/"+width,(await status.innerText()).includes(scenario.mail),true);
+     const toast=scenario.emailed?"Marked as shipped. The email was accepted for sending.":scenario.body.mail?.state==="queued"?"Marked as shipped. The email is saved and waiting.":"Marked as shipped. No new email was confirmed.";
+     await page.locator('.nb-toast-region [role="status"]').getByText(toast,{exact:true}).waitFor();
      is("confirmed tracking remains safe "+scenario.name+"/"+width,await status.getByRole("link").getAttribute("href"),shipped.tracking);
     }else{
      const alert=form.getByRole("alert");await alert.waitFor();

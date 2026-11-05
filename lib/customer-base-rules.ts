@@ -72,6 +72,11 @@ export function assessMinimumCustomerBase(units: CustomerBaseUnit[], fixed: Cust
     if (fixedCosts == null || fixedTaxes == null || payingCustomers == null) return stopped('unknown');
     if (!cents(fixedCosts) || !cents(fixedTaxes) || !cents(payingCustomers)) return stopped('invalid');
     if (costsBounded !== true || taxesReviewed !== true || typeof costsEvidence !== 'string' || !costsEvidence.trim() || typeof taxEvidence !== 'string' || !taxEvidence.trim()) return stopped('unknown');
+    // Reflection alone cannot establish a complete review: Proxy traps may
+    // conceal an additional unpriced category. All seven original fields are
+    // now validated primitive data; native serialization rejects Proxy exotic
+    // objects without executing ordinary accessors or projecting away costs.
+    structuredClone(fixed);
     const fixedCents = BigInt(fixedCosts) + BigInt(fixedTaxes);
     let minimum = BigInt(1);
     // Descriptors bind the actual dense array. A supplied iterator cannot omit

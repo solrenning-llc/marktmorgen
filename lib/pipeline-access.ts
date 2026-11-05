@@ -104,7 +104,7 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
 /** A restriction whose write did not answer as written: nothing may be taken as saved. */
 export class PipelineAccessWriteUnconfirmed extends Error {
   constructor() {
-    super("This person's access could not be saved just now. Nothing was changed. Try again in a moment.");
+    super("We could not confirm this person's access was saved. Reload the page to see what it is now, then choose again if it is not what you chose.");
   }
 }
 
@@ -123,9 +123,14 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
   if (before === after) return;
-  const [raw, old] = await redisPipeline([["HGET", accessKey(statsId), before], ["HGET", accessKey(statsId), after]]);
+  const reply: unknown = await redisPipeline([["HGET", accessKey(statsId), before], ["HGET", accessKey(statsId), after]]);
+  // Both answers exactly, before anything moves: a text or null each (nothing recorded). A partial or empty reply,
+  // or one of another kind, is not "no restriction": it throws, and the caller keeps the membership on the old
+  // address, its restrictions in place (Codex D, #2036: a missing answer moved a restricted teammate unrestricted).
+  if (!Array.isArray(reply) || reply.length !== 2 || reply.some((one) => one !== null && typeof one !== "string")) throw new Error("a teammate's pipeline access could not be read before their move");
+  const [raw, old] = reply as (string | null)[];
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([after, v], 1) : 0);
-  if (raw === null || raw === undefined || raw === "") {
+  if (raw === null || raw === "") {
     // No restriction to carry: a field the new address had from before (someone else's, long gone) must not
     // restrict them, so it goes, and gives its room back.
     if (weight(old) === 0) return;

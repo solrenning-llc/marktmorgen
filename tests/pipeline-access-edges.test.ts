@@ -445,8 +445,39 @@ async function main(): Promise<void> {
   const dActual=await readPipelineAccess(statsId,"sam@example.com");
   const dStillOpen=await crm("sam@example.com",dBody);
   is("(the write was dropped)", dDropped > 0, true);
-  is("D unconfirmed restriction is never reported as saved: refused, saying nothing was changed", [dSave.status, dSave.body.error, dSave.body.ok, dSave.body.access], [503, "unavailable", false, undefined]);
+  is("D unconfirmed restriction is never reported as saved: refused, saying it could not be confirmed", [dSave.status, dSave.body.error, dSave.body.ok, dSave.body.access], [503, "unavailable", false, undefined]);
   is("and what is read is what is really there: no restriction, so the board does not show one", [dActual, dStillOpen.status], [{}, 200]);
+
+  part("Codex D (#2036): a lost answer after the access was applied is not said as nothing changed");
+  await writePipelineAccess(statsId,"sam@example.com",{},store);
+  let d9Applied=0;
+  redis.pipeline=(async(commands:(string|number)[][])=>{
+    if(commands.length===1&&commands[0][0]==="HSET"&&commands[0][1]===`nl:crm:pacc:${statsId}`&&commands[0][2]==="sam@example.com") {await real(commands);d9Applied++;return [];}
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const d9Answer=await pacc({email:"sam@example.com",choices:{wkshp1:"none"},was:{}});
+  redis.pipeline=real;
+  const d9Actual=await readPipelineAccess(statsId,"sam@example.com");
+  is("(the write landed, its answer lost)", [d9Applied, d9Actual], [1, { wkshp1: "none" }]);
+  is("D committed-but-unconfirmed restriction is never said unchanged: it says it could not be confirmed and to reload", [d9Answer.status, d9Answer.body.message?.includes("Nothing was changed"), d9Answer.body.message?.includes("Reload the page")], [503, false, true]);
+
+  part("Codex D (#2036): a membership never moves without both access reads confirmed");
+  const d9From="dsource@example.com",d9To="dtarget@example.com";
+  await putMember(store,d9From,"support");
+  await writePipelineAccess(statsId,d9From,{wkshp1:"none"},store);
+  is("D migration control: source cannot write the hidden pipeline",(await crm(d9From,{action:"deal",deal:{title:"D blocked migration",email:"",cents:1,stage:"wnew01",note:""}})).status,403);
+  let d9CopyRead=0;
+  redis.pipeline=(async(commands:(string|number)[][])=>{
+    if(commands.length===2&&commands.every(c=>c[0]==="HGET"&&c[1]===`nl:crm:pacc:${statsId}`)&&commands[0][2]===d9From&&commands[1][2]===d9To) {d9CopyRead++;return [];}
+    return real(commands);
+  }) as typeof redis.pipeline;
+  try{await moveMemberships(d9From,d9To);}catch{/* refused: the membership stays */}
+  redis.pipeline=real;
+  const d9Members=(await readTeam(store.sid)).members.map(m=>m.email);
+  const d9TargetWrite=await crm(d9To,{action:"deal",deal:{title:"D migration bypass",email:"",cents:1,stage:"wnew01",note:""}});
+  is("(the partial read was made)", d9CopyRead > 0, true);
+  is("D partial ACL source read keeps original membership and restriction",[d9Members.includes(d9From),d9Members.includes(d9To),await readPipelineAccess(statsId,d9From)],[true,false,{wkshp1:"none"}]);
+  is("D target cannot write without confirmed migration of its restrictions",d9TargetWrite.status===200,false);
 
   done();
 }

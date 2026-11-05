@@ -11,7 +11,8 @@ async function main() {
   const last = {at: now, code: '\u0000'.repeat(60), message: '\u0000'.repeat(300)};
   for (const d of dates) await pipeline([['HSET', `nl:cotrouble:${sid}`, d, String(max)]]);
   await pipeline([['HSET', `nl:cotrouble:${sid}`, 'last', JSON.stringify(last), '2027-01-02', '999999999999999999999999', '2026-12-25', '999999999999999999999999']]);
-  let batches: (string|number)[][] = [], bytes=0;
+  const batches: (string|number)[][] = [];
+  let bytes=0;
   redis.pipeline = async batch => { batches.push(...batch); const reply = await pipeline(batch); bytes += Buffer.byteLength(JSON.stringify(batch))+Buffer.byteLength(JSON.stringify(reply)); return reply; };
   const result = await readTroubleStrict(sid, now);
   is('seven exact UTC dates cross year boundary and exclude old/future counters', result?.week, 7*max);

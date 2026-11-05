@@ -1,7 +1,7 @@
 /**
  * Independent review of PR #2554 (lib/plan-closing.ts, closingNews and
  * closingLetter): cases the PR's own test does not reach. Each check here
- * fails on head 3bded984e and states what should hold instead.
+ * failed on head 3bded984e and states what should hold instead.
  *
  * Against the Redis stand-in only; nothing real is reached.
  */
@@ -27,28 +27,12 @@ async function main(): Promise<void> {
   if (!rita) throw new Error("the test store was not made");
   const folder = await storeFolder(storeRef(rita));
 
-  part("Regra 24: a written-down payment that cannot be read is dropped below closingNews, and the notice reads it as none");
-  {
-    // One member's row is unreadable (bad JSON); another's has no usable period.
-    await redis.pipeline([
-      ["HSET", paidKey(folder), "sub_member0001", "{not json"],
-      ["HSET", paidKey(folder), "sub_member0002", JSON.stringify({ inv: "in_member0002", amt: 3000, cur: "usd", e: "m2@buyers.example.com" })],
-    ]);
-    const news = await closingNews(rita, endedAt, day, 0);
-    is("two unreadable paid rows are not a known zero (members should be null)", news.members, null);
-    await redis.pipeline([["DEL", paidKey(folder)]]);
-  }
-
-  part("Regra 24: a malformed HKEYS answer is normalised to zero inside holdCounts, before readHoldCounts sees it");
-  {
-    redis.pipeline = (async (commands: Commands) => {
-      if (commands.some((c) => c[0] === "HKEYS" && c[1] === workKey(folder))) return [null];
-      return realPipeline(commands);
-    }) as typeof redis.pipeline;
-    const news = await closingNews(rita, endedAt, day, 0);
-    redis.pipeline = realPipeline as typeof redis.pipeline;
-    is("a non-list HKEYS answer is unknown, not 0 unpaused", [news.notHeld, news.overLimit], [null, null]);
-  }
+  // Left out here: two checks of this review that read as a known zero below
+  // closingNews, a paid row that cannot be read (bad JSON, no period) and an
+  // HKEYS answer that is not a list. Both are swallowed inside
+  // lib/closing-holds.ts (holdCounts, paidPeriods) and lib/closing-refunds.ts
+  // (unusedRows) before closingNews sees them; they depend on Codex X's fix of
+  // those files (SG2 findings 21 and 29) and are tested there.
 
   part("Regra 24: readUnusedSummary takes a repeated currency, and more currencies than members, as a count");
   {

@@ -54,6 +54,22 @@ async function quietly<T>(work: () => Promise<T>): Promise<{ answer: T; complain
 
 const UNKNOWN_HOLDS = "We could not check just now whether every membership's payments are paused.";
 const UNKNOWN_MEMBERS = "We could not check just now which members paid for time after";
+/**
+ * What the closing day does with the time members paid for past it
+ * (giveBackUnused, lib/closing-refunds.ts): it tries a refund only for the
+ * members whose last payment was written down when their payments were
+ * paused, from the creator's balance, within the closing's limit. These are
+ * the sentences that say so, and no more.
+ */
+const NOT_MADE = "A refund your Stripe balance does not cover, or one past this closing's limit, is not made: after that day, please check your Stripe account and refund what is left yourself.";
+const TRY_KNOWN = "we try to refund each of them the unused part of their last payment, from your own Stripe account.";
+const TRY_UNKNOWN = "we try to refund, from your own Stripe account, the unused part of the last payment of each member whose payments we paused.";
+const SOONER = "You can refund it sooner, after checking each amount, from your studio. Marktmorgen never pays it and never takes it.";
+const NOT_PAUSED_REFUND = "may not be refunded for you: after that day, please check each of them in Stripe and refund that time yourself.";
+const UNKNOWN_PAUSED_REFUND = "For a member whose payments were not paused, what they paid for after";
+const UNKNOWN_PAUSED_REFUND_END = "may not be refunded for you: after that day, please check your members in Stripe and refund that time yourself.";
+/** The promise the code does not keep: every member given back, whatever the balance, the limit or the hold. */
+const OVERPROMISE = /is given back the unused part/;
 
 async function main(): Promise<void> {
   redis.clear();
@@ -87,6 +103,14 @@ async function main(): Promise<void> {
       [said.includes("1 member has paid for time after"), said.includes(": $15 in all."), said.includes("1 membership's payments are not paused yet: we try again every day."), said.includes("could not check")],
       [true, true, true, false],
     );
+    is(
+      "it says only the refund the closing day tries, when it is not made, and what the creator does",
+      [said.includes(TRY_KNOWN), said.includes(NOT_MADE), said.includes(SOONER), said.includes(`What these members paid for after`) && said.includes(NOT_PAUSED_REFUND), OVERPROMISE.test(said)],
+      [true, true, true, true, false],
+    );
+    // One past the closing's limit too: still told to refund that time from Stripe.
+    const over = letterOf({ ...some, notHeld: 0, overLimit: 2 });
+    is("members past the closing's limit: refunded by the creator, not promised", [over.includes("2 memberships' payments are not paused: past this closing's limit."), over.includes(NOT_PAUSED_REFUND)], [true, true]);
   }
 
   part("A hold that cannot be read is said to be unchecked, never as none");
@@ -103,6 +127,7 @@ async function main(): Promise<void> {
       [text.includes(UNKNOWN_HOLDS), text.includes(`If a member is charged before then, please refund them from Stripe.`), /\b0 membership/.test(text), text.includes("not paused yet")],
       [true, true, false, false],
     );
+    is("and that the time a member not paused paid for past the day is theirs to refund", [text.includes(UNKNOWN_PAUSED_REFUND), text.includes(UNKNOWN_PAUSED_REFUND_END)], [true, true]);
   }
 
   part("Members past the day that cannot be read are said to be unchecked, never as none");
@@ -118,12 +143,16 @@ async function main(): Promise<void> {
       "the notice says it could not check, and what happens on the day",
       [
         text.includes(UNKNOWN_MEMBERS),
-        text.includes("each of them is given back the unused part of their last payment, from your own"),
+        text.includes(TRY_UNKNOWN),
+        text.includes(NOT_MADE),
         text.includes("Marktmorgen never pays it and never takes it."),
         /\b0 members?\b/.test(text),
         text.includes("member has paid for time after"),
+        OVERPROMISE.test(text),
+        // The studio's refund page shows no row when this read fails, so the creator is sent to Stripe, not there.
+        text.includes(SOONER),
       ],
-      [true, true, true, false, false],
+      [true, true, true, true, false, false, false, false],
     );
   }
 
@@ -159,10 +188,13 @@ async function main(): Promise<void> {
           { members: 1, totals: [{ cur: "usd", amount: -5 }] },
           { members: 1, totals: [{ cur: "", amount: 500 }] },
           { members: -1, totals: [] },
+          { members: 2, totals: [{ cur: "usd", amount: 1500 }, { cur: "usd", amount: 1000 }] },
+          { members: 2, totals: [{ cur: "usd", amount: 1500 }, { cur: "USD", amount: 1000 }] },
+          { members: 1, totals: [{ cur: "usd", amount: 1500 }, { cur: "eur", amount: 1000 }] },
           { members: 0, totals: [] },
           { members: 2, totals: [{ cur: "usd", amount: 1500 }, { cur: "eur", amount: 4000 }] },
         ].map(readUnusedSummary),
-        [null, null, null, null, null, null, null, null, { members: 0, unused: "" }, { members: 2, unused: "$15 and €40" }],
+        [null, null, null, null, null, null, null, null, null, null, null, { members: 0, unused: "" }, { members: 2, unused: "$15 and €40" }],
       );
     }
     // What the real readers answer today is a shape these take.

@@ -1,5 +1,5 @@
 import { addNote, MAX_NOTES, parseNotes, readNotes } from "@/lib/stats-notes";
-import { changeReading, commands, reset, store } from "./stats-notes-read-world";
+import { changeKeyReading, changeReading, commands, reset, store } from "./stats-notes-read-world";
 import { done, is, part } from "./check";
 
 const stats = "a".repeat(32);
@@ -71,6 +71,27 @@ async function main() {
     const flat = after as string[];
     for (let i = 0; i < flat.length; i += 2) kept.set(flat[i], flat[i + 1]);
     is(`variant ${variant}: every original note remains`, Array.from({ length: MAX_NOTES + 1 }, (_, i) => kept.get(i.toString(16).padStart(8, "0")) === value).every(Boolean), true);
+  }
+
+  part("A later incomplete or changed key list never authorizes cleanup");
+  const keyCorruptions = [
+    () => [],
+    () => [null],
+    (reply: unknown[]) => [(reply[0] as string[]).slice(0, -1)],
+    (reply: unknown[]) => { const keys = [...reply[0] as string[]]; keys[0] = keys[1]; return [keys]; },
+    (reply: unknown[]) => { const keys = [...reply[0] as string[]]; keys[0] = "ffffffff"; return [keys]; },
+  ];
+  for (let variant = 0; variant < keyCorruptions.length; variant++) {
+    reset();
+    const seed: (string | number)[] = ["HSET", key];
+    for (let i = 0; i <= MAX_NOTES; i++) seed.push(i.toString(16).padStart(8, "0"), value);
+    await store.pipeline([seed]);
+    changeKeyReading(keyCorruptions[variant]);
+    let refused = false;
+    try { await addNote(stats, "2026-11-05", "Keep the history", now); } catch { refused = true; }
+    is(`key variant ${variant}: unknown cleanup refuses success`, refused, true);
+    is(`key variant ${variant}: no note is deleted`, commands.filter(c => c[0] === "HDEL").length, 0);
+    is(`key variant ${variant}: original oldest note remains`, await store.pipeline([["HGET", key, "00000000"]]), [value]);
   }
 
   reset();

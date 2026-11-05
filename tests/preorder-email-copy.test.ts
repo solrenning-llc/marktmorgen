@@ -1,7 +1,7 @@
 /**
- * A released pre-order is granted before its email is attempted. The page
- * therefore describes the durable purchase access and treats email as an
- * additional possibility, including when the sender refuses the request.
+ * A released pre-order can be shown before its deferred hand-over runs. The
+ * page therefore treats both purchase access and email as possibilities. The
+ * release path still proves that sender refusal does not undo a later grant.
  */
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { importedKey } from "@/lib/imported-purchases";
@@ -16,13 +16,13 @@ const SESSION = "cs_test_preordercopy0001";
 const PRODUCT = "breadbookcopy1";
 
 const EXPECTED: Record<LanguageCode, string> = {
-  en: "It is out now and it is yours. The way to open it is in your purchases; it may also reach you by email.",
-  es: "Ya ha salido y es tuyo. La forma de abrirlo está en tus compras; también puede llegarte por email.",
-  fr: "Il est sorti et il est à vous. Vous pouvez l'ouvrir depuis vos achats ; vous pouvez aussi recevoir le lien par e-mail.",
-  de: "Es ist jetzt erschienen und gehört Ihnen. Sie können es über Ihre Käufe öffnen; der Zugang kann Sie auch per E-Mail erreichen.",
-  it: "Ora è uscito ed è tuo. Puoi aprirlo dai tuoi acquisti; il modo per entrare può arrivarti anche via email.",
-  nl: "Het is nu uit en het is van jou. Je kunt het vanuit je aankopen openen; de toegang kan je ook per e-mail bereiken.",
-  pt: "Já saiu e é seu. Pode abri-lo a partir das suas compras; a forma de entrar também pode chegar-lhe por email.",
+  en: "It is out now. The way to open it may appear in your purchases or reach you by email.",
+  es: "Ya ha salido. La forma de abrirlo puede aparecer en tus compras o llegarte por email.",
+  fr: "Il est sorti. Le lien pour l'ouvrir peut apparaître dans vos achats ou vous parvenir par e-mail.",
+  de: "Es ist jetzt erschienen. Der Zugang kann in Ihren Käufen erscheinen oder Sie per E-Mail erreichen.",
+  it: "Ora è uscito. Il modo per aprirlo può apparire nei tuoi acquisti o arrivarti via email.",
+  nl: "Het is nu uit. De toegang kan in je aankopen verschijnen of je per e-mail bereiken.",
+  pt: "Já saiu. A forma de o abrir pode aparecer nas suas compras ou chegar-lhe por email.",
 };
 
 const store = {

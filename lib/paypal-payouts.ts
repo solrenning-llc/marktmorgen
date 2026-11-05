@@ -316,7 +316,10 @@ async function countUnknown(what: UnknownCount, now = Date.now()): Promise<void>
 export async function payoutUnknownMonth(month: string): Promise<Record<UnknownCount, number> | null> {
   if (!/^\d{4}-\d{2}$/.test(month) || !isRedisConfigured()) return null;
   try {
-    const [raw] = await redisPipeline([["HMGET", unknownMonthKey(month), "unknown", "settled", "manual"]]);
+    // One answer, to the one command sent, of exactly three counts (review of Codex G on #2681).
+    const reply: unknown = await redisPipeline([["HMGET", unknownMonthKey(month), "unknown", "settled", "manual"]]);
+    if (!Array.isArray(reply) || reply.length !== 1) return null;
+    const raw: unknown = reply[0];
     if (!Array.isArray(raw) || raw.length !== 3) return null;
     const [unknown, settled, manual] = raw.map((v) => (v === null ? 0 : typeof v === "string" && /^\d{1,15}$/.test(v) ? Number(v) : NaN));
     return [unknown, settled, manual].every(Number.isSafeInteger) ? { unknown, settled, manual } : null;

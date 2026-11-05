@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": [
+    "../../lib/plan-refund-flow.ts",
+    "../../lib/store-allowance.ts",
+    "../../tests/plan-refund-flow.test.ts",
+    "../../tests/store-allowance-ack.test.ts",
+    "../../tests/d2-review-2692-evidence.test.ts"
+  ]
+}

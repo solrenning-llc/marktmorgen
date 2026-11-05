@@ -7,7 +7,7 @@ import {
   readCourseConfirmationOrigin, readSingleDigitalRenewalOrigin, reserveCourseConfirmationOrigin,
   runOrderConfirmationMail, type ConfirmationOriginRuntime,
 } from "@/lib/order-confirmation-outbox";
-import { SHIPMENT_MAIL_SCRIPT } from "@/lib/shipment-mail-outbox";
+import { SHIPMENT_MAIL_SCRIPT, type ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
 import { paidDownloadRenewalPost } from "@/app/api/store/download/route";
 import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { createCheckout } from "@/lib/store-checkout";
@@ -110,6 +110,23 @@ for (const real of [false, true]) {
       }
       assert.equal((await w.post(w.buyer(49).capsule,810)).status,200);
     }finally{await w.cleanup();}
+  });
+  test(`CX121 ${label}: a renewal with acknowledged dispatch but no provider POST stays queued`, options, async () => {
+    const w = await world(real);
+    try {
+      const request = await enqueueSingleDigitalRenewal(w.f.store, w.original, nonce(819), w.runtime);
+      assert.ok(request.ok);
+      const result = await runOrderConfirmationMail(w.runtime.now!() + 30_000, async (_message, beforePost) => {
+        assert.equal(await beforePost(), true);
+        return "not_posted" as unknown as Awaited<ReturnType<ShipmentMailDispatch>>;
+      }, w.runtime);
+      const saved = await readSingleDigitalRenewalOrigin(request.id, w.runtime);
+      assert.ok(saved, "known zero POST retains the original renewal request");
+      assert.equal(saved.row.state, "queued", "known zero POST must not be turned into terminal refusal");
+      assert.equal((await w.run([["TTL", confirmationOriginRowKey(request.id)]]))[0], -1);
+      assert.deepEqual(result, { accepted: 0, waiting: 1, unknown: 0 });
+      assert.equal(w.paymentPosts(), 0);
+    } finally { await w.cleanup(); }
   });
   test(`CX59 ${label}: an unknown dispatch is never described as saved and scheduled again`, options, async()=>{
     const w=await world(real);

@@ -125,3 +125,23 @@ test("never inspects executable non-string input", () => {
   assert.equal(reconcileSupplierInvoiceEvidence(input).status, "unknown");
   assert.equal(traps, 0);
 });
+
+test("a conflicting duplicate root member is unknown before last-value normalization", () => {
+  const valid = packet([row()]);
+  assert.equal(reconcileSupplierInvoiceEvidence(valid).status, "reconciled");
+  const duplicateRoot = valid.replace(
+    '"complete":true',
+    '"complete":false,"complete":true',
+  );
+  assert.equal(reconcileSupplierInvoiceEvidence(duplicateRoot).status, "unknown");
+});
+
+test("a conflicting duplicate row member is unknown before last-value normalization", () => {
+  const valid = packet([row()]);
+  assert.equal(reconcileSupplierInvoiceEvidence(valid).status, "reconciled");
+  const duplicateRow = valid.replace(
+    '"invoicedCents":1250',
+    '"invoicedCents":999999,"invoicedCents":1250',
+  );
+  assert.equal(reconcileSupplierInvoiceEvidence(duplicateRow).status, "unknown");
+});

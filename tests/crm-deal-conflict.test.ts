@@ -12,7 +12,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { MOVE_CRM_DEAL, dealSlot, dealVersion, readDealExact, readPipelines, readStages, writeDealOver } from "@/lib/crm";
 import { crmAnswer } from "@/lib/crm-response";
 import { redisPipeline } from "@/lib/redis";
-import { dataKey } from "@/lib/store-data";
+import { dataKey, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { writePipelineAccess } from "@/lib/pipeline-access";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -110,6 +110,8 @@ async function main(): Promise<void> {
         const current = JSON.parse((await original.call(redis, [["HGET", dealsKey, eve.id]]))[0] as string);
         raced = JSON.stringify({ ...current, assignee: "maya@example.com", note: "Written by a step meanwhile, a longer note than before" });
         await original.call(redis, [["HSET", dealsKey, eve.id, raced]]);
+        // The step's own write counts its room, by what it changed, as a real write does.
+        await noteData(store, [{ slot: dealSlot(eve.id), bytes: dataBytes([eve.id, raced], 1) - dataBytes([eve.id, JSON.stringify(current)], 1) }]);
       }
       return original.call(redis, commands);
     };

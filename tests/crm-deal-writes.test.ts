@@ -22,7 +22,7 @@ async function main() {
     return original.call(redis,commands);
   };
   const reset=async()=>{preflight=normal;writeReply=normal;removeReply=normal;applied=false;writes=0;await original.call(redis,[["DEL",key]]);};
-  const invalidPreflights=[null,{},[],[null,0],[0],[0,0,0],["0",0],[false,0],[0,"0"],[0,-1],[1,0],[0,1.5],[0,NaN],[0,Infinity],new Error("preflight reply lost")];
+  const invalidPreflights=[null,{},[],[null,0,0],[0],[0,0],[0,0,0,0],["0",0,0],[false,0,0],[0,"0",0],[0,-1,0],[1,0,0],[0,1.5,0],[0,NaN,0],[0,Infinity,0],[0,0,-1],[0,0,"0"],[0,0,1.5],[0,0,null],new Error("preflight reply lost")];
   const invalidWrites=[null,{},[],[null],["1"],[true],[2],[-1],[1,1],new Error("write reply lost")];
   try{
     part("Unknown capacity/existence reads never authorize writes");
@@ -41,8 +41,8 @@ async function main() {
     is("applied deletion with lost reply is uncertain",lost,true);is("deleted record is not recreated",(await original.call(redis,[["HGET",key,deal.id]]))[0],null);is("no repeated deletion",writes,1);
     part("Confirmed capacity and absence retain existing behavior");
     await reset();is("confirmed creation succeeds",await writeDeal(statsId,deal, ROOM),true);is("confirmed update succeeds",await writeDeal(statsId,{...deal,title:"Updated"}, ROOM),true);
-    writes=0;preflight=[0,MAX_DEALS];is("full collection refuses new deal",await writeDeal(statsId,{...deal,id:"bbbbbbbbbb"}, ROOM),false);is("capacity refusal writes nothing",writes,0);
-    preflight=[1,MAX_DEALS];is("existing deal can still be edited at capacity",await writeDeal(statsId,deal, ROOM),true);
+    writes=0;preflight=[0,MAX_DEALS,0];is("full collection refuses new deal",await writeDeal(statsId,{...deal,id:"bbbbbbbbbb"}, ROOM),false);is("capacity refusal writes nothing",writes,0);
+    preflight=[1,MAX_DEALS,Number((await original.call(redis,[["HSTRLEN",key,deal.id]]))[0])];is("existing deal can still be edited at capacity",await writeDeal(statsId,deal, ROOM),true);
     preflight=normal;is("confirmed deletion succeeds",await dropDeal(statsId,deal.id, ROOM),true);is("confirmed absence returns false",await dropDeal(statsId,deal.id, ROOM),false);writes=0;is("invalid removal id refused",await dropDeal(statsId,"bad", ROOM),false);is("invalid id sends no deletion",writes,0);
     part("API and client distinguish prewrite read failure from uncertain change");
     const owner="crm-write-owner@example.com";await claimHandle(owner,"crm-write-check","CRM Write Check","");await ensureStatsId(owner);const store=(await storeForEmail(owner))!;statsId=store.statsId!;key="nl:crm:deals:"+statsId;const session=await openSession(owner);

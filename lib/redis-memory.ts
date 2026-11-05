@@ -480,7 +480,7 @@ export class MemoryRedis {
           this.data.set(target, args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-save:v4\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
+        if (key.startsWith("-- marktmorgen:crm-deal-save:v5\n") && ((args[0] === "1" && args.length === 6) || (args[0] === "2" && args.length === 9))) {
           if (args[0] === "2") {
             const held = this.run(["ZSCORE", args[2], args[7]]);
             if (held === null || Number(held) !== Number(args[8])) {
@@ -496,8 +496,9 @@ export class MemoryRedis {
           const there = held instanceof Map && held.has(args[2]);
           if (!there && args[5] === "edit") return 2;
           if (!there && held instanceof Map && held.size >= Number(args[4])) return 0;
+          const was = there ? (held as Map<string, string>).get(args[2]) : undefined;
           this.hash(target).set(args[2], args[3]);
-          return 1;
+          return typeof was === "string" ? [1, new TextEncoder().encode(was).length] : [1];
         }
         if (key.startsWith("-- marktmorgen:crm-tasks-write:v2\n") && args[0] === "3" && args.length === 12) {
           // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step, unless the person is deleted
@@ -981,6 +982,10 @@ export class MemoryRedis {
         return this.hash(key).get(args[0]) ?? null;
       case "HEXISTS":
         return this.hash(key).has(args[0]) ? 1 : 0;
+      case "HSTRLEN": {
+        const value = this.hash(key).get(args[0]);
+        return typeof value === "string" ? new TextEncoder().encode(value).length : 0;
+      }
       case "HMGET":
         return args.map((field) => this.hash(key).get(field) ?? null);
       case "HDEL": {

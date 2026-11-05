@@ -22,6 +22,10 @@ import { countKey, monthOf, sentKey } from "@/lib/dunning-keys";
 const DAY = 86_400;
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
+const BILLING_REASONS = new Set([
+  "automatic_pending_invoice_item_invoice", "manual", "quote_accept", "subscription",
+  "subscription_create", "subscription_cycle", "subscription_threshold", "subscription_update", "upcoming",
+]);
 
 // v2: with the renewals in another currency counted (22 [E5], unit 2e).
 const cacheKey = (store: Store) => `nl:dun:report:${store.statsId}:v2`;
@@ -73,7 +77,7 @@ function invoiceEvidence(raw: unknown, now: number): raw is Invoice {
   if (typeof invoice.id !== "string" || !/^in_[A-Za-z0-9]+$/.test(invoice.id) ||
       typeof invoice.currency !== "string" || !/^[a-z]{3}$/.test(invoice.currency) ||
       !natural(invoice.amount_paid) || !natural(invoice.attempt_count) ||
-      typeof invoice.billing_reason !== "string" || !invoice.billing_reason ||
+      typeof invoice.billing_reason !== "string" || !BILLING_REASONS.has(invoice.billing_reason) ||
       !natural(invoice.status_transitions?.paid_at) || invoice.status_transitions.paid_at === 0 || invoice.status_transitions.paid_at > Math.floor(now / 1000) ||
       (invoice.paid_out_of_band !== undefined && typeof invoice.paid_out_of_band !== "boolean")) return false;
   for (const metadata of [invoice.parent?.subscription_details?.metadata, invoice.subscription_details?.metadata]) {
@@ -89,7 +93,7 @@ function reportEvidence(raw: unknown, store: Store, now: number): raw is Recover
   return natural(report.at) && report.at <= Math.floor(now / 1000) && report.currency === store.currency &&
     [report.recovered, report.cents, report.afterEmail, report.afterEmailCents, report.elsewhere].every(natural) &&
     report.afterEmail <= report.recovered && report.afterEmailCents <= report.cents && typeof report.complete === "boolean" &&
-    !!report.month && natural(report.month.failed) && natural(report.month.cards);
+    !!report.month && natural(report.month.failed) && natural(report.month.cards) && natural(report.month.failed + report.month.cards);
 }
 
 /** A confirmed absent hash field is zero; other nondecimal values are unknown. */
@@ -113,8 +117,8 @@ export function recoveredFrom(invoices: Invoice[], handles: Set<string>, currenc
     const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
     if (!id || paidAt < since || cents <= 0 || invoice.paid_out_of_band === true) continue;
     if (!handles.has(storeOf(invoice))) continue;
-    // A renewal, not the first payment of a membership (which is the checkout's).
-    if (invoice.billing_reason === "subscription_create") continue;
+    // Only a subscription cycle is a renewal; other known invoice reasons are not recovered renewals.
+    if (invoice.billing_reason !== "subscription_cycle") continue;
     const told = emailed.has(id);
     const retried = typeof invoice.attempt_count === "number" && invoice.attempt_count >= 2;
     if (!told && !retried) continue;
@@ -189,6 +193,7 @@ export async function recoveryReport(store: Store, fresh = false, now = Date.now
     if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0]) || reply[0].length !== 2) throw unknownReport();
     month.failed = countEvidence(reply[0][0]);
     month.cards = countEvidence(reply[0][1]);
+    if (!natural(month.failed + month.cards)) throw unknownReport();
   }
   const report: RecoveryReport = {
     at: Math.floor(now / 1000),

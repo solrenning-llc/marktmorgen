@@ -3,7 +3,9 @@
  * CX-123 rule 24).
  *
  * serveFile (lib/serve-file.ts) asks freeDeliveryPause before a free copy.
- * A counter read past the line pauses it with the message it always had;
+ * A counter read past the line pauses it, saying only what is true: the
+ * store reached its free download allowance (the creator is written to only
+ * past the 200 GB allowance, so the page never says they were told);
  * a counter that could not be read, or came back in another shape, also
  * refuses it, but never says the store gave away too much or that the
  * creator was told: it says the download could not be checked. A free copy
@@ -22,7 +24,8 @@ import { resetBlobWorld } from "./blob-download-attachment-world";
 import { done, is, part } from "./check";
 
 const UNKNOWN = "We couldn't check this download right now. Please try again in a few minutes.";
-const OVER = "This free download is paused until next month. The store has given away more this month than its plan covers. Anything you have bought is unaffected, and the creator has been told.";
+const OVER = "This free download is paused until next month. This store has reached its free download allowance for this month. Anything you have bought is unaffected. Please try again next month or contact the creator.";
+const GB = 1024 * 1024 * 1024;
 
 type Rule = { when: (commands: (string | number)[][]) => boolean; reply: unknown };
 let rule: Rule | null = null;
@@ -55,9 +58,15 @@ async function answer(paid: boolean): Promise<[number, string]> {
 async function main(): Promise<void> {
   redis.clear();
 
-  part("a free copy over the line: paused, as before");
-  rule = { when: first("GET"), reply: [String(FREE_PAUSE_ABOVE_BYTES + 1)] };
-  is("the message it always had", await answer(false), [429, OVER]);
+  part("a free copy over the line: paused, and said truthfully");
+  // Free copies pause past 50 GB; the creator is written to only past the 200 GB allowance, by the daily watch
+  // (app/api/cron/usage). Between the two nobody has been told, so the page never says so.
+  for (const bytes of [FREE_PAUSE_ABOVE_BYTES + 1, 60 * GB, 199 * GB, 250 * GB]) {
+    rule = { when: first("GET"), reply: [String(bytes)] };
+    const [status, text] = await answer(false);
+    is(`at ${Math.round(bytes / GB)} GB: paused`, [status, text], [429, OVER]);
+    is(`at ${Math.round(bytes / GB)} GB: never says the creator was told`, text.includes("told"), false);
+  }
 
   part("a free copy whose counter is unknown: refused, and said truthfully");
   for (const [label, reply] of [

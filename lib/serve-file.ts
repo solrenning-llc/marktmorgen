@@ -79,7 +79,9 @@ export async function serveFile(
     if (pause === "over") {
       return plain(
         429,
-        "This free download is paused until next month. The store has given away more this month than its plan covers. Anything you have bought is unaffected, and the creator has been told.",
+        // Only what is true at this moment: free copies pause past FREE_PAUSE_ABOVE_BYTES, while the creator is
+        // written to only past the larger delivery allowance (app/api/cron/usage), so the page never says they were told.
+        "This free download is paused until next month. This store has reached its free download allowance for this month. Anything you have bought is unaffected. Please try again next month or contact the creator.",
       );
     }
     // The counter could not be read (CX-123 rule 24): a free copy is not handed out on an unknown count, and the

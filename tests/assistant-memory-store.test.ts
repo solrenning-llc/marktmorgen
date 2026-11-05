@@ -8,7 +8,7 @@
  * that failed.
  */
 import { MAX_MEMORY_NOTES, NOTE_ID, type MemoryNote } from "@/lib/assistant-memory-rules";
-import { MEMORY_STORE_REFUSALS, changeNote, dropNote, forgetMemory, keepNote, newNoteId, readMemory, readMemoryState } from "@/lib/assistant-memory-store";
+import { MEMORY_STORE_REFUSALS, MemoryWriteUnconfirmed, changeNote, dropNote, forgetMemory, keepNote, newNoteId, readMemory, readMemoryState } from "@/lib/assistant-memory-store";
 import { DataRoomError, dataUsed, needData, type DataStore } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -129,11 +129,11 @@ async function main(): Promise<void> {
   is("the refusal in plain words", MEMORY_STORE_REFUSALS.busy, "Someone else is changing these notes right now. Try again in a moment.");
   await redis.pipeline([["DEL", `nl:amem:lock:${SAME}`]]);
 
-  part("A write that fails lets go of the lock");
+  part("A write whose answer is lost lets go of the lock, says so, and keeps the larger room (Codex G2 on #1949)");
   const pipeline = redis.pipeline;
   const usedBefore = (await dataUsed(ROOM))?.used ?? 0;
   redis.pipeline = async (commands) => {
-    if (commands.some((command) => command[0] === "SET" && command[1] === `nl:amem:${SAME}`)) throw new Error("synthetic write failure");
+    if (commands.some((command) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:amem-write:v1") && command[4] === `nl:amem:${SAME}`)) throw new Error("synthetic write failure");
     return pipeline(commands);
   };
   let failed: unknown = null;
@@ -144,10 +144,10 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = pipeline;
   }
-  is("the failure is said", failed instanceof Error && failed.message, "synthetic write failure");
+  is("it is said unconfirmed, never saved", failed instanceof MemoryWriteUnconfirmed, true);
   is("the lock is let go of", has(`nl:amem:lock:${SAME}`), false);
   is("the notes as they were", JSON.stringify(await readMemory(SAME)), before2);
-  is("their room as it was", (await dataUsed(ROOM))?.used ?? 0, usedBefore);
+  is("their room kept at the larger record's, never given back on an answer that is not Redis's", ((await dataUsed(ROOM))?.used ?? 0) > usedBefore, true);
   const after = await keepNote(SAME, { kind: "preference", text: "One after the failure." }, ROOM, NOW);
   is("the next change goes through", [after.ok, (await readMemory(SAME)).map((note: MemoryNote) => note.text).at(-1)], [true, "One after the failure."]);
 

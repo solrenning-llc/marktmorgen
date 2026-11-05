@@ -30,6 +30,23 @@ const sessions = new Map<string, Record<string, unknown>>();
 let opened = 0;
 const expired: string[] = [];
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+let enteredSlowMail: (() => void) | null = null;
+let slowMailEntries = 0;
+/** Observe the real mocked provider entry; a refused send cannot stand in for
+ * a race with an in-flight email. No mutation starts before this ACK. */
+function expectSlowMail(): Promise<void> {
+  const expected = slowMailEntries + 1;
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => { enteredSlowMail = null; reject(new Error("The slow synthetic mail provider was never reached")); }, 5_000);
+    enteredSlowMail = () => {
+      enteredSlowMail = null;
+      clearTimeout(timer);
+      check("the exact next slow synthetic provider POST began before the concurrent write", ++slowMailEntries, expected);
+      resolve();
+    };
+  });
+}
+
 const real = globalThis.fetch;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -46,7 +63,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return real(input as string, init);
   }
   if (url.hostname === "api.resend.com") {
-    if (slow.mail) await wait(slow.mail);
+    if (slow.mail) {
+      const delay = slow.mail;
+      enteredSlowMail?.();
+      await wait(delay);
+    }
     mails.push(String(init?.body));
     return answer({ id: `email_${mails.length}` });
   }
@@ -110,8 +131,9 @@ async function main(): Promise<void> {
   // 1. A reminder is still sending its email when the buyer pays.
   const a = await newRequest(store, "reminded@example.com");
   slow.mail = 600;
+  const reminderEntered = expectSlowMail();
   const reminding = sendRequestEmail(store, a);
-  await wait(150);
+  await reminderEntered;
   const paidA = await markPaid(store, a.id, settled(a.id));
   slow.mail = 0;
   await reminding;

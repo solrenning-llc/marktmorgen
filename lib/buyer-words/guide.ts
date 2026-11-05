@@ -42,10 +42,10 @@ const es: GuideWords = {
 };
 
 const fr: GuideWords = {
-  title: "Vous ne savez pas lequel choisir ?",
+  title: "Vous ne savez pas lequel choisir ?",
   lead: (store) => `Dites ce que vous voulez accomplir, et voyez quels produits de ${store} vous conviennent, et pourquoi.`,
-  label: "Que cherchez-vous ?",
-  placeholder: "Par exemple : dîners rapides en famille",
+  label: "Que cherchez-vous ?",
+  placeholder: "Par exemple : dîners rapides en famille",
   button: "Aidez-moi à choisir",
   busy: "Recherche…",
   picks: "Ceux qui conviennent le mieux",

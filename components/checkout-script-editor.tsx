@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { DEFAULT_PLACE, MAX_PLACE, embedPlace } from "@/lib/embed-rules";
+import { DEFAULT_PLACE, MAX_PLACE, buttonColors, embedPlace } from "@/lib/embed-rules";
 import { MAX_CAMPAIGN, MAX_EMBED_SITES, type ScriptMode, listedReturn, readEmbedSites } from "@/lib/embed-sites";
 import { BUILDERS, MAX_LINK_TEXT, cspLines, loaderHash, scriptCode } from "@/lib/embed-sdk";
 import { NewTab } from "@/components/new-tab";
@@ -100,6 +100,7 @@ export function CheckoutScriptEditor({
 
   const product = products.find((p) => p.id === what) ?? null;
   const forSignup = what === "join";
+  const colorsChanged = buttonColors(fill, onFill).changed;
   const backOk = !back.trim() || listedReturn(sites, back.trim()) !== null;
   const code =
     product || forSignup
@@ -241,6 +242,13 @@ export function CheckoutScriptEditor({
               ))}
             </div>
           </fieldset>
+
+          {colorsChanged ? (
+            <p className="mt-3 text-sm text-ink-soft">
+              These colors are hard to read. The code uses dark and white so the words are clear.{" "}
+              <a href="/studio#look" className="font-semibold underline underline-offset-4">Choose another store color</a>.
+            </p>
+          ) : null}
 
           <label className="mt-6 block">
             <span className="field-label">The code to paste</span>

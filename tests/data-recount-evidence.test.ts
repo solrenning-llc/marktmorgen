@@ -103,7 +103,7 @@ test("a repeated collection cursor is incomplete, never a truncated measurement"
   try { await assert.rejects(measureKey("nl:blog:body:evidence:post")); assert.equal(reads, 2); } finally { redis.pipeline = pipeline; }
 });
 
-for (const raw of [null, [], [null], ["owner@example.com", null]]) test(`owner HMGET ${JSON.stringify(raw)} cannot omit a key`, async () => {
+for (const raw of [null, [], [undefined], ["owner@example.com", null]]) test(`owner HMGET ${JSON.stringify(raw)} cannot omit a key`, async () => {
   redis.clear();
   const id = "0123456789abcdef0123456789abcdef";
   const key = `nl:blog:body:${id}:post`;

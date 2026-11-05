@@ -11,9 +11,10 @@ test("Italian evidence keeps the optional non-Union OSS route conditional on the
     "https://www1.agenziaentrate.gov.it/servizi/scadenzario/main.php/main.php?chi=3814&come=516&cosa=3098&entroil=30-04-2025&op=4",
     "https://telematici.agenziaentrate.gov.it/Main/Avviso?id=20210401214329",
     "https://www.normattiva.it/atto/caricaDettaglioAtto?atto.codiceRedazionale=21G00094&atto.dataPubblicazioneGazzetta=2021-06-15&tipoDettaglio=originario",
-    "https://eur-lex.europa.eu/legal-content/en/TXT/?uri=CELEX%3A02006L0112-20240101",
+    "https://eur-lex.europa.eu/eli/dir/2006/112/2025-04-14/eng",
   ]) assert.ok(text.includes(source), source);
   assert.match(text, /2026-11-05/);
+  assert.match(text, /current consolidated version[\s\S]*14 April 2025/i);
   assert.match(text, /non-Union scheme[\s\S]*services[\s\S]*non-taxable persons/i);
   assert.match(text, /optional[\s\S]*Member State of identification/i);
   assert.match(text, /does not determine[\s\S]*LLC[\s\S]*registration/i);

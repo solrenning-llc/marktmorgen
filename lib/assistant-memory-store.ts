@@ -23,7 +23,7 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_MEMORY_NOTE, MAX_MEMORY_NOTES, type MemoryNote, type MemoryResult, addNote, editNote, parseMemory, removeNote } from "@/lib/assistant-memory-rules";
-import { type Held, LockBusyError, holdLock, releaseLock, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -55,7 +55,8 @@ export type MemoryRead = { ok: true; notes: MemoryNote[] } | { ok: false; error:
 type StoredRecord = { ok: true; notes: MemoryNote[]; bytes: number } | { ok: false; error: "unreadable" };
 
 function recordOf(raw: unknown): StoredRecord {
-  if (raw === null || raw === undefined) return { ok: true, notes: [], bytes: 0 };
+  // Only Redis's own null is no record: anything else that is not the record's text is not known (Codex G2 on #1949).
+  if (raw === null) return { ok: true, notes: [], bytes: 0 };
   if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_MEMORY_BYTES) return { ok: false, error: "unreadable" };
   let parsed: unknown;
   try {
@@ -68,8 +69,35 @@ function recordOf(raw: unknown): StoredRecord {
 }
 
 async function readRecord(statsId: string): Promise<StoredRecord> {
-  const [raw] = await redisPipeline([["GET", memoryKey(statsId)]]);
-  return recordOf(raw);
+  const reply: unknown = await redisPipeline([["GET", memoryKey(statsId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) return { ok: false, error: "unreadable" };
+  return recordOf(reply[0]);
+}
+
+/**
+ * Writes the notes (or deletes them, with an empty ARGV[2]) only while the
+ * lock KEYS[1] is still the change's own (ARGV[1]): 1 when written, 0 when
+ * the lock was gone and nothing was. Modelled by lib/redis-memory.ts.
+ */
+export const MEMORY_WRITE = `-- marktmorgen:amem-write:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if ARGV[2] == '' then redis.call('DEL', KEYS[2]) else redis.call('SET', KEYS[2], ARGV[2]) end
+return 1`;
+/**
+ * Forgets the notes and takes the lock away in the same step, so a change
+ * still in flight finds its lock gone and writes nothing back (Codex G2 on
+ * #1949): the number of records deleted, 0 or 1. Modelled by lib/redis-memory.ts.
+ */
+export const MEMORY_FORGET = `-- marktmorgen:amem-forget:v1
+redis.call('DEL', KEYS[1])
+return redis.call('DEL', KEYS[2])`;
+
+/** A change of the notes whose answer was not Redis's own: it may or may not have been written. */
+export class MemoryWriteUnconfirmed extends Error {
+  constructor() {
+    super("The assistant's notes may or may not have changed");
+    this.name = "MemoryWriteUnconfirmed";
+  }
 }
 
 /** A store's notes, oldest first, or that they could not be read: for the studio, which must not show "no notes" then. */
@@ -86,25 +114,34 @@ export async function readMemory(statsId: string | null): Promise<MemoryNote[]> 
 }
 
 /**
- * Writes the notes while the lock is still ours. Room is set first: a save
- * that does not fit throws DataRoomError and nothing is written. When the
- * write does not land (the lock ran out, or Redis failed), the room is set
- * back to the record that is still there.
+ * Writes the notes while the lock is still ours, in one script with its own
+ * answer (MEMORY_WRITE). Room is set first, to the larger of the record
+ * there and the one written: a save that does not fit throws DataRoomError
+ * and nothing is written, and the room is never below what is kept whatever
+ * happens. Written: the room is set to the new record. The lock gone: nothing
+ * was written, the room goes back to the record still there, refused as busy.
+ * An answer that is not Redis's own: unconfirmed, the larger room kept.
  */
 async function writeMemory(held: Held, statsId: string, notes: MemoryNote[], wasBytes: number, room: DataStore): Promise<void> {
-  const json = JSON.stringify(notes);
-  await needData(room, [{ slot: MEMORY_SLOT, bytes: notes.length ? dataBytes([json], 1) : 0, set: true }]);
-  let landed = false;
+  const json = notes.length ? JSON.stringify(notes) : "";
+  const bytes = notes.length ? dataBytes([json], 1) : 0;
+  await needData(room, [{ slot: MEMORY_SLOT, bytes: Math.max(bytes, wasBytes), set: true }]);
+  let reply: unknown;
   try {
-    if (notes.length) landed = await setIfHeld(held, memoryKey(statsId), json);
-    else if (await holdLock(held)) {
-      await redisPipeline([["DEL", memoryKey(statsId)]]);
-      landed = true;
-    }
-  } finally {
-    if (!landed) await noteData(room, [{ slot: MEMORY_SLOT, bytes: wasBytes, set: true }]);
+    reply = await redisPipeline([["EVAL", MEMORY_WRITE, 2, held.key, memoryKey(statsId), held.token, json]]);
+  } catch {
+    throw new MemoryWriteUnconfirmed();
   }
-  if (!landed) throw new LockBusyError();
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  if (answer === 1) {
+    if (bytes < wasBytes) await noteData(room, [{ slot: MEMORY_SLOT, bytes, set: true }]);
+    return;
+  }
+  if (answer === 0) {
+    await noteData(room, [{ slot: MEMORY_SLOT, bytes: wasBytes, set: true }]);
+    throw new LockBusyError();
+  }
+  throw new MemoryWriteUnconfirmed();
 }
 
 /**
@@ -167,7 +204,10 @@ export async function forgetMemory(statsId: string | null, room: DataStore): Pro
   if (!statsId || !isRedisConfigured()) return;
   const held = await takeLock(lockKey(statsId), LOCK_SECONDS, MEMORY_LOCK_WAIT_MS).catch(() => null);
   try {
-    await redisPipeline([["DEL", memoryKey(statsId)]]);
+    // The notes and the lock go in one step: a change still in flight finds its lock gone and writes nothing back.
+    const reply: unknown = await redisPipeline([["EVAL", MEMORY_FORGET, 2, lockKey(statsId), memoryKey(statsId)]]);
+    // Room is given back only once Redis says the record is gone; an answer that is not its own keeps it counted.
+    if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== 0 && reply[0] !== 1)) throw new MemoryWriteUnconfirmed();
     await giveData(room, [{ slot: MEMORY_SLOT, bytes: 0, set: true }]);
   } finally {
     if (held) await releaseLock(held);

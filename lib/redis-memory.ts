@@ -113,6 +113,18 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
+        if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, notes, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(json === "" ? ["DEL", notes] : ["SET", notes, json]);
+          return 1;
+        }
+        // lib/assistant-memory-store.ts MEMORY_FORGET: the lock and the notes deleted in one step.
+        if (key.startsWith("-- marktmorgen:amem-forget:v1\n") && args[0] === "2" && args.length === 3) {
+          this.run(["DEL", args[1]]);
+          return this.run(["DEL", args[2]]);
+        }
         if (key.startsWith("-- marktmorgen:pause-due-observation:v1\n") && args[0] === "1" && args.length === 3) {
           const [,target,deadline]=args;
           if(!/^(0|[1-9][0-9]*)$/.test(deadline)||Number(deadline)>1_000_000_000_000)return [-1];

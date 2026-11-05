@@ -194,7 +194,7 @@ Permanent REDd6f01158 final84checks/8failures→84/84. V ORIGINAL proof copied B
 
 ### Remaining own products / shared dependencies
 2473d57357ab42fa2abc522def9f16c90e3e526bd0c3,2507053c74abf7565464e826c7e9f962fd0d0354d84a,2516d6818344df8c5e7734ee31183cd1bcbe0291f280 unchanged. Old2473reader/2516inventory narrow-release requests still require nominal disposition. No protected/foreign files edited.
-2632f183d78f was reported terminal8success/product failure because2693 reintroduced V's released script reservation (verify127559847814 onlyreservation-check); browsers green. Main d7bbf9d3 is the later2694 documentation cleanup; a fresh git grep found NO V script reservation row in that main. C1/C3 must reconcile and integrate once then9NEW; S does not rerun foreign CI, claim combined merge or prematurely integrate own waiting products.
+2632f183d78f was reported terminal8success/product failure because2693 reintroduced V's released script reservation (verify127559847814 onlyreservation-check); browsers green. Main d7bbf9d3 contains the later2694 documentation cleanup, but a fresh git grep CONFIRMED the V script reservation row STILL PRESENT at docs/reservations/codex.md:97. That cleanup did not release the row; do not infer removal. C1/C3 must reconcile and integrate once then9NEW; S does not rerun foreign CI, claim combined merge or prematurely integrate own waiting products.
 
 C4 channel19:26 assigns K2 ordersGrant MEDIUM to C4/#2672 and requests S return together with LOWstringList WHEN the new delta is ready. K2 proof59cabc18 belongs to C4 now; S did not reserve/alter it. Prior repliesFor MEDIUM closure6668269511 remains focal only.
 

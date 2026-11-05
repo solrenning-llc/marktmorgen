@@ -39,7 +39,7 @@ import { storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { personKeys, personWrite } from "@/lib/joined-stores";
 
@@ -82,8 +82,8 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
   const email = normaliseEmail(raw);
-  if (!(await withinLimit("affhub-ip", input.ip, 10, 3_600))) return "limited";
-  if (!(await withinLimit("affhub-address", sha(email), 5, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("affhub-ip", input.ip, 10, 3_600))) return "limited";
+  if (!(await withinEssentialLimit("affhub-address", sha(email), 5, 3_600))) return "limited";
   const stores = await storesPromoted(email);
   if (!stores.length) return "sent";
   const token = randomBytes(32).toString("hex");

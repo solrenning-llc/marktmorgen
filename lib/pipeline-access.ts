@@ -120,14 +120,16 @@ function oneAnswer(reply: unknown): 0 | 1 | null {
  * it. Throws when the copy cannot be confirmed; the caller then leaves that
  * store's membership on the old address, so the new one never has a store
  * without its restrictions. The old field is deleted only once the team
- * record has moved (forgetPipelineAccess).
+ * record has moved (forgetPipelineAccess). Answers what the new address
+ * held before and holds now, so a move that fails after it can put the new
+ * address back as it was (undoPipelineAccessCopy).
  */
-export async function copyPipelineAccess(store: DataStore, from: string, to: string): Promise<void> {
+export async function copyPipelineAccess(store: DataStore, from: string, to: string): Promise<PipelineAccessCopy> {
   const statsId = store.statsId;
-  if (!statsId || !isRedisConfigured()) return;
+  if (!statsId || !isRedisConfigured()) return UNCHANGED;
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
-  if (before === after) return;
+  if (before === after) return UNCHANGED;
   const reply: unknown = await redisPipeline([["HGET", accessKey(statsId), before], ["HGET", accessKey(statsId), after]]);
   // Both answers exactly, before anything moves: a text or null each (nothing recorded). A partial or empty reply,
   // or one of another kind, is not "no restriction": it throws, and the caller keeps the membership on the old
@@ -138,11 +140,12 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   if (raw === null || raw === "") {
     // No restriction to carry: a field the new address had from before (someone else's, long gone) must not
     // restrict them, so it goes, and gives its room back.
-    if (weight(old) === 0) return;
+    if (weight(old) === 0) return UNCHANGED;
     const deleted = oneAnswer(await redisPipeline([["HDEL", accessKey(statsId), after]]));
     if (deleted === null) throw new Error("clearing the new address's pipeline access could not be confirmed");
-    if (deleted === 1) await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
-    return;
+    if (deleted === 0) return UNCHANGED;
+    await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
+    return { prior: old, now: null };
   }
   // A record moved, not a new one. Its room is taken BEFORE it is written, so a write that lands is never left
   // uncounted; a full data room still never leaves a teammate off the store when they change their sign-in (it
@@ -165,6 +168,40 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   // not a copy (Codex D and G2, #2036: [1, 1] for a write that never landed moved a restricted teammate unrestricted).
   const written = oneAnswer(await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]));
   if (written === null) throw new Error("copying a teammate's pipeline access could not be confirmed");
+  if (grown < 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: -grown }]);
+  return { prior: old, now: String(raw) };
+}
+
+/** What a copy found at the new address (`prior`) and left there (`now`): null for no record. */
+export type PipelineAccessCopy = { prior: string | null; now: string | null };
+const UNCHANGED: PipelineAccessCopy = { prior: null, now: null };
+
+/**
+ * A move that failed after copyPipelineAccess (lib/team.ts, moveMemberships:
+ * the API keys could not follow, so the membership stays on the old
+ * address): the new address gets back what it held before the copy, and the
+ * data room moves by exactly that difference (Codex N, #2036). Run under the
+ * same team lock as the copy, as every write to this record is. The room is
+ * taken before a larger record is written back and given back only once a
+ * smaller one is confirmed; a write that cannot be confirmed keeps what was
+ * taken (too much counted, never too little) and throws.
+ */
+export async function undoPipelineAccessCopy(store: DataStore, to: string, copy: PipelineAccessCopy): Promise<void> {
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured() || copy.prior === copy.now) return;
+  const after = normaliseEmail(to);
+  const weight = (v: string | null) => (v ? dataBytes([after, v], 1) : 0);
+  const grown = weight(copy.prior) - weight(copy.now);
+  if (grown > 0) {
+    try {
+      await needData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
+    } catch (error) {
+      if (!(error instanceof DataRoomError)) throw error;
+      await forceData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
+    }
+  }
+  const put = oneAnswer(await redisPipeline([copy.prior ? ["HSET", accessKey(statsId), after, copy.prior] : ["HDEL", accessKey(statsId), after]]));
+  if (put === null) throw new Error("putting back the new address's pipeline access could not be confirmed");
   if (grown < 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: -grown }]);
 }
 

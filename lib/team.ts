@@ -31,7 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
-import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
+import { type PipelineAccessCopy, copyPipelineAccess, forgetPipelineAccess, undoPipelineAccessCopy } from "@/lib/pipeline-access";
 import { type AccessLog, parseAccessLog } from "@/lib/pipeline-access-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -690,8 +690,9 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
       // What they may do with each pipeline (639 [GL7](7)) is copied to the new address first. If that cannot
       // be confirmed, this store's membership stays on the old address: the new one never has the store without
       // its restrictions.
+      let copied: PipelineAccessCopy | null = null;
       try {
-        await copyPipelineAccess(store, before, after);
+        copied = await copyPipelineAccess(store, before, after);
         // The API keys they made follow them (owner C3-100); left behind, they would read as a former teammate's.
         // Cut short, the keys already moved are moved back, so they and the membership stay on the old address together.
         const { movedMaker } = await import("@/lib/api-key-pause");
@@ -701,6 +702,8 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
         });
       } catch (error) {
         console.error("copying pipeline access or the maker of their API keys failed; the membership stays on the old address", error);
+        // A copy that landed goes back too, with its room: the new address keeps only what it had (Codex N, #2036).
+        if (copied) await undoPipelineAccessCopy(store, after, copied).catch((undo: unknown) => console.error("putting back the new address's pipeline access failed", undo));
         stayed.push(sid);
         return null;
       }

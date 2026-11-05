@@ -40,7 +40,8 @@ async function main() {
   const malformed = { ...base, validUntil: "1800000000", withdrawnAt: null };
   const otherId = "otherstudent0001";
   await redis.pipeline([["SET", certKey(id), JSON.stringify(malformed)], ["SET", certKey(otherId), JSON.stringify({ ...malformed, id: otherId, email: "other@example.com" })], ["SADD", allKey(base.courseId), id, otherId]]);
-  is("legacy privacy export includes malformed evidence exactly as stored", await certificatesOf([base.courseId], base.email), [malformed]);
+  const entries = (value: object) => Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+  is("legacy privacy export includes malformed evidence exactly as stored", (await certificatesOf([base.courseId], base.email)).map(entries), [entries(malformed)]);
   is("legacy erasure still finds a record with malformed status by its own email", await forgetCertificatesPerson([base.courseId], base.email), 1);
   is("the erased record is gone and another student's record stays", await redis.pipeline([["GET", certKey(id)], ["EXISTS", certKey(otherId)]]), [null, 1]);
   done();

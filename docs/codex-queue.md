@@ -2126,7 +2126,7 @@ A ordem abaixo é de execução dos itens acionáveis. Itens feitos/aguardando/c
 
 140. **[B2-SAFE-ERROR-MESSAGES] Mensagens de erro inesperadas não são valores herdados**
    - Pedido: B2/P0/P4, revisão de estados de falha em formulários.
-   - Estado: **em andamento; branch codex/safe-error-messages**. Posição vigente: OR: andamento prioritário preservado, antes de 273 [BK1] e 275 [FX1]; conferir o histórico de publicações e executar somente o remanescente acionável.
+   - Estado: **concluído; incorporado no PR #643 (commit 59f8e30f2c336e6bb7088711a66667703fcf9fcc, 19/10/2026 23h15 Fortaleza); correção de estado da auditoria de completude, C4-20261105-1940-C5-4**. Posição vigente: OR: andamento prioritário preservado, antes de 273 [BK1] e 275 [FX1]; conferir o histórico de publicações e executar somente o remanescente acionável.
    - Histórico OR — estado anterior à atualização documental: - Estado: **em andamento; branch codex/safe-error-messages**.
    - Escopo: Login, alteração de endereço e configuração fiscal usam somente mensagens próprias da tabela local. Uma resposta com erro __proto__ ou constructor deve mostrar a explicação genérica existente, sem tratar um objeto/função herdado como texto. Não é alegação de poluição de protótipo; é proteção da interface contra resposta inesperada.
    - Prova: dois novos erros inesperados interceptados em cada formulário real390/1280, preservando casos de sucesso, recusa específica, HTTP, dados incompletos e controles pendentes. Total: login20, endereço22 e fiscal26 casos; nenhuma mensagem/gravação real. CI completo no novo head pendente.
@@ -2134,7 +2134,7 @@ A ordem abaixo é de execução dos itens acionáveis. Itens feitos/aguardando/c
 
 141. **[B2-PAUSE-ACKNOWLEDGMENT] Confirmar a configuração de pausa sem prometer gravação incerta**
    - Pedido: B2/P0/P4, revisão de mensagens/estados de preferências de assinatura.
-   - Estado: **em andamento; branch codex/pause-acknowledgment, após PR643**. Posição vigente: OR: andamento prioritário preservado, antes de 273 [BK1] e 275 [FX1]; conferir o histórico de publicações e executar somente o remanescente acionável.
+   - Estado: **concluído; incorporado no PR #644 (commit ca31becced39e7e15ec7b8ff1746336ba6860861, 19/10/2026 23h50 Fortaleza), entrega 59; correção de estado da auditoria de completude, C4-20261105-1940-C5-4**. Posição vigente: OR: andamento prioritário preservado, antes de 273 [BK1] e 275 [FX1]; conferir o histórico de publicações e executar somente o remanescente acionável.
    - Histórico OR — estado anterior à atualização documental: - Estado: **em andamento; branch codex/pause-acknowledgment, após PR643**.
    - Escopo: o servidor já devolve pause; o cliente exige HTTP bem-sucedido, ok booleano, ausência de erro e pause numérico igual ao escolhido. Bloquear seletor durante espera, anunciar aria-busy, recusar submissão duplicada e usar só mensagens próprias. Resposta incerta manda conferir a página; não afirma que nada mudou.
    - Prova:14respostas interceptadas por estado inicial em390/1280, com duas fixtures exclusivamente locais para ativar e desativar:56casos. Inclui valores ausentes/diferentes/em texto, HTTP, JSON inválido, erros herdados, perda de resposta, recusa conhecida e sucesso; nenhum POST de pausa chega ao servidor, nenhuma assinatura/cobrança real é alterada.
@@ -2345,6 +2345,7 @@ Proveniência AB: passou a fazer parte do Bloco de abertura, posição (i), por 
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
    - Escopo e prova: Reunir arrependimento do item91, IVA da seçãoC, divulgação FTC automática nos links de afiliado e checagens de alt/contraste/legendas em páginas/arquivos do criador. Mostrar o que falta e como corrigir, com limites de verificação; não dizer AAA/conformidade legal por causa de uma nota ou teste automatizado.
    - Custo e margem: Antes de construir: conferir capacidade existente no main e preservar Claude. Custo unitário pago mais caro, uso integral simultâneo por plano mensal/anual, taxas de receiving-costs e leitura fiscal mais onerosa (nunca abaixo de27,5%); teto por fornecedor/loja e reserva antes da operação, plan-cost-registry/spend-floor. Desconhecido reprova; sem cortar limite visível, mudar preço ou afrouxar gates.
+   - Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta a unidade das imagens da comunidade sem descrição, prevista na própria linha de andamento do item ("imagens ... da comunidade"): nenhum aviso no estúdio lista as fotos dos posts da comunidade sem texto alternativo nem diz onde corrigir; hoje só existe o campo opcional img_alt no compositor (components/community-composer.tsx) e o servidor aceita descrição vazia (app/api/store/community/route.ts). A regra deve ficar pura, ao lado de lib/store-access-check.ts e lib/course-access-check.ts, e ser mostrada na área da comunidade do estúdio (app/studio/community), sem alterar o conteúdo do criador e sem dizer conformidade. As unidades 2 (legendas, lib/course-access-check.ts) e 3 (imagens das páginas de venda, lib/page-coach.ts) já estão no main, mas sem linha de estado na fila. O IVA da seção C continua dependente de 300–303, ainda na fila, e os termos do criador seguem no 493 [DE2].
 
 18. **[E1] Tutor por IA nas aulas, só conteúdo do curso, reaproveitando pool/heldToFacts e encaminhamento ao criador; add-on ou franquia, nunca trial.**
    - Pedido: P2 E1; datas/horas e grau de certeza em Proveniência.
@@ -3029,6 +3030,7 @@ A indicação histórica de preço candidato ou aguardando decisão fica superad
    - Estado: **feito (PR #619, mesclado em 19/10, 19:05, horário de Fortaleza)**.
    - Custo e margem: Um job existente, um pedido Haiku de até240tokens/240caracteres, hold monetário antes do provedor, sem trial e sem ampliar envelope/franquias. M0 antes=depois, sem certificação de60% na leitura vinculante.
    - Evidência: [PR #619](https://github.com/viniciussucupira/marktmorgen/pull/619), commit `f2d044c0458d2eeef32a501e114a5c48e79882e3`.
+   - Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar a lista de recursos em docs/marktmorgen-path.md (linha 293, item 5, "Optional paid, reserved and fact-checked AI mission wording — pending"), que ainda diz "pending"; o recurso foi entregue por este item (PR #619) e a seção própria do documento ("## Optional paid wording (ordered item 5)", a partir da linha 354) já o descreve.
 
 74. **[CLAUDE-614] Announce the site's own pages to IndexNow once each**
    - Pedido: P2 já feito pelo Claude; datas/horas e grau de certeza em Proveniência.
@@ -3172,7 +3174,7 @@ Validação634: a execução integral antiga terminou com a mesma ambiguidade he
 
 88. **[B2-ADDRESS-ACKNOWLEDGMENT] Confirmar endereço retornado e preservar o pedido pendente**
    - Pedido: revisão contínua B2/usabilidade autorizada; achado19/10/2026,21h de Fortaleza (aproximado).
-   - Estado: **em andamento; branch codex/address-confirmation; depende explicitamente634; alterações próprias em RenameForm e suíte store-copy, sem editar SignInForm/agreements**. Posição vigente: OR: andamento prioritário preservado, antes de 273 [BK1] e 275 [FX1]; conferir o histórico de publicações e executar somente o remanescente acionável.
+   - Estado: **concluído; incorporado no PR #635 (commit 4eabb47abec4c03e9309f4376c55df512a7e34e6, 19/10/2026 22h12 Fortaleza), entrega 53; correção de estado da auditoria de completude, C4-20261105-1940-C5-4**. Posição vigente: OR: andamento prioritário preservado, antes de 273 [BK1] e 275 [FX1]; conferir o histórico de publicações e executar somente o remanescente acionável.
    - Histórico OR — estado anterior à atualização documental: - Estado: **em andamento; branch codex/address-confirmation; depende explicitamente634; alterações próprias em RenameForm e suíte store-copy, sem editar SignInForm/agreements**.
    - Evidência: A interface exigirá HTTP válido, ok booleano, ausência de erro e endereço normalizado igual ao solicitado; edição/cancelamento ficam bloqueados durante pedido. Campos passam a poder encolher no celular. Nove respostas interceptadas em390/1280; não renomeia nenhuma loja real. CI integral pendente.
    - Custo e margem: Validação local limitada dentro da página existente; sem chamada, armazenamento, mensagem ou franquia adicional. M0 antes=depois em todos os planos/intervalos, modelo vinculante continua reprovando60%; nenhum gate de vendas/fiscal alterado.

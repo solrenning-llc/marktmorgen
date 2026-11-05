@@ -59,13 +59,18 @@ async function main() {
       const queued = await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
       is(`${kind}: the real enrollment queued one step for that student`, (queued[0] as string[]).filter(item => item.endsWith(`|${email}`)).length, 1);
       is(`${kind}: an ordinary repeated event does not start again`, await note(store, product.id, course.id, email), false);
-      const variants: { name: string; reply: unknown; apply?: boolean; fail?: boolean }[] = [
+      const variants: { name: string; reply: unknown; apply?: boolean; fail?: boolean; inheritedDescriptorValue?: boolean }[] = [
         { name: "missing reply", reply: [] }, { name: "missing slot", reply: [undefined] },
         { name: "false", reply: [false] }, { name: "zero", reply: [0] },
         { name: "integer", reply: [1] }, { name: "wrong string", reply: ["ok"] },
         { name: "extra reply", reply: ["OK", "OK"] }, { name: "object envelope", reply: { 0: "OK", length: 1 } },
         { name: "inherited slot", reply: Object.setPrototypeOf(new Array(1), ["OK"]) },
         { name: "getter slot", reply: Object.defineProperty(new Array(1), "0", { get() { getterReads++; return "OK"; } }) },
+        {
+          name: "getter slot with inherited descriptor value",
+          reply: Object.defineProperty(new Array(1), "0", { get() { getterReads++; return "not-confirmed"; } }),
+          inheritedDescriptorValue: true,
+        },
         { name: "confirmed duplicate", reply: [null] },
         { name: "applied claim with lost reply", reply: [], apply: true },
         { name: "transport failure after applying", reply: [], apply: true, fail: true },
@@ -78,13 +83,18 @@ async function main() {
             claims++; seenClaim = true;
             if (variant.apply) await original(commands);
             if (variant.fail) throw Error("Synthetic lost claim response");
+            if (variant.inheritedDescriptorValue) {
+              Object.defineProperty(Object.prototype, "value", { value: "OK", configurable: true });
+            }
             return variant.reply as never;
           }
+          if (variant.inheritedDescriptorValue) Reflect.deleteProperty(Object.prototype, "value");
           if (seenClaim) readsAfterClaim += commands.length;
           queued += commands.filter(command => command[0] === "ZADD" && command[1] === "nl:mail:flowq").length;
           return original(commands);
         };
         const result = await note(store, product.id, course.id, email);
+        if (variant.inheritedDescriptorValue) Reflect.deleteProperty(Object.prototype, "value");
         redis.pipeline = original;
         is(`${kind}/${variant.name}: no confirmed course event`, result, false);
         is(`${kind}/${variant.name}: one claim, no enrollment IO or queue`, [claims, readsAfterClaim, queued], [1, 0, 0]);

@@ -28,6 +28,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type Admission, orderConfirmationAdmission, orderConfirmationHoldKeys } from "@/lib/order-admission";
+import { MAX_ORDER_ITEMS, orderDataBytes } from "@/lib/store-data-rules";
 
 const seenKey = (reference: string) => `nl:orders:seen:${createHash("sha256").update(reference).digest("hex").slice(0, 32)}`;
 const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${month}`;
@@ -331,11 +332,14 @@ export function coveredByShare(store: Parameters<typeof shareBps>[0], paidCents:
  * Never throws: a count that cannot be written must not cost a buyer their
  * email.
  */
-export async function countOrder(store: Store, reference: string, paidCents: number, now = Date.now()): Promise<boolean> {
+export async function countOrder(store: Store, reference: string, paidCents: number, now = Date.now(), admission?: { hour: unknown; items: number; createdAtMs: number }): Promise<boolean> {
   if (!isRedisConfigured() || !reference) return false;
   try {
-    const [fresh] = await redisPipeline([["SET", seenKey(reference), "1", "NX", "EX", SEEN_SECONDS]]);
-    if (fresh === null) return false;
+    if (admission) return await countLegacyCheckout(store, reference, paidCents, now, admission);
+    const reply: unknown = await redisPipeline([["SET", seenKey(reference), "1", "NX", "EX", SEEN_SECONDS]]);
+    if (!Array.isArray(reply)) return false;
+    const length = Object.getOwnPropertyDescriptor(reply, "length"), fresh = Object.getOwnPropertyDescriptor(reply, "0");
+    if (!length || !("value" in length) || length.value !== 1 || !fresh || !("value" in fresh) || fresh.value !== "OK") return false;
     // What the order leaves in the database is counted in the store's data
     // room by the writes that leave it, at what each really adds
     // (lib/order-data.ts), never refused: its room was held when its checkout
@@ -369,6 +373,33 @@ export async function countOrder(store: Store, reference: string, paidCents: num
     console.error("could not count an order", error);
     return false;
   }
+}
+
+/** Compatibility accounting for an already settled legacy checkout, not an
+ * original funded-confirmation token or permission to dispatch its email.
+ * Reuse the existing atomic counter/hold Lua and its intent protocol. The
+ * legacy 45-day horizon is fixed to checkout creation and is never renewed
+ * by a retry; after it, refuse instead of counting again after expiry. */
+async function countLegacyCheckout(store: Store, reference: string, paidCents: number, now: number,
+  admission: { hour: unknown; items: number; createdAtMs: number }): Promise<boolean> {
+  if (!CHECKOUT_REFERENCE.test(reference) || !Number.isSafeInteger(paidCents) || paidCents < 0 ||
+      !Number.isSafeInteger(now) || !Number.isSafeInteger(admission.createdAtMs) || admission.createdAtMs <= 0 ||
+      now < admission.createdAtMs || now >= admission.createdAtMs + SEEN_SECONDS * 1000 ||
+      !Number.isSafeInteger(admission.items) || admission.items < 1 || admission.items > MAX_ORDER_ITEMS) return false;
+  const hour = typeof admission.hour === "number" && Number.isSafeInteger(admission.hour) && admission.hour >= 0 ? String(admission.hour)
+    : typeof admission.hour === "string" && /^(0|[1-9][0-9]{0,8})$/.test(admission.hour) ? admission.hour : "";
+  const owner = storeRef(store), folder = await storeFolder(owner);
+  if (!FOLDER_PATTERN.test(folder)) return false;
+  const window = (allowanceWindow(store, now) ?? calendarWindow(now)).id, month = calendarWindow(now).id;
+  const bytes = orderDataBytes(admission.items), count = coveredByShare(store, paidCents, now / 1000) ? 0 : 1;
+  const receipt = `oc1:${fingerprint(JSON.stringify(["legacy-checkout-v1", reference, folder, paidCents, hour, bytes, count, admission.createdAtMs]))}`;
+  const [open, held] = orderConfirmationHoldKeys(folder);
+  const reply: unknown = await redisPipeline([["EVAL", COMMIT_ORDER_CONFIRMATION, 6, seenKey(reference), countKey(folder, window), open, held,
+    foldersKey(month), `nl:store:folder-owner:${folder}`, receipt, hour, bytes, count, folder, owner,
+    admission.createdAtMs + SEEN_SECONDS * 1000, now, KEEP_SECONDS]]);
+  if (!Array.isArray(reply)) return false;
+  const length = Object.getOwnPropertyDescriptor(reply, "length"), value = Object.getOwnPropertyDescriptor(reply, "0");
+  return Boolean(length && "value" in length && length.value === 1 && value && "value" in value && value.value === 1 && count === 1);
 }
 
 /** The orders a store had in a window: a calendar month ("2026-10"), this one by default, or a billing month ("2026-10-19"). Zero when it cannot be read. */

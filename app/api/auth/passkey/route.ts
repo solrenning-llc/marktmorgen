@@ -3,7 +3,7 @@ import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
+import { RemovalBusyError, RemovalUnsentError, addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
 import { liveSecondStep, mayAddNow, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { lockedUntil, twoStepOn } from "@/lib/two-step";
@@ -19,6 +19,10 @@ const ANSWERS: Record<string, number> = { expired: 400, invalid: 400, full: 409,
 /** What went wrong, in JSON: another change to the same passkeys holding them (lib/passkeys.ts) is "busy", to try again. */
 function failed(error: unknown, doing: string): Response {
   if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
+  // Another request's notice of a removal is still going out: nothing was set, try again (lib/passkeys.ts scheduleRemoval).
+  if (error instanceof RemovalBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
+  // The email that tells the account could not be sent, so nothing was set (lib/passkeys.ts scheduleRemoval).
+  if (error instanceof RemovalUnsentError) return Response.json({ ok: false, error: "unsent" }, { status: 503 });
   console.error(doing, error);
   return Response.json({ ok: false, error: "server_error" }, { status: 500 });
 }

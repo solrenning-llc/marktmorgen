@@ -9,13 +9,13 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PersonTasks, addedTask, browserDay, putBack, staleRefusal, undoBody, undoWords, untilNextDay, watchDay } from "@/components/person-tasks";
-import { MAX_PERSON_TASKS, type PersonTask, dayIn, readTaskInput } from "@/lib/person-tasks";
+import { PersonTasks, TEAM_UNREAD, addedTask, alertWords, browserDay, focusAfter, focusTarget, putBack, refusalOf, staleRefusal, undoBody, undoWords, untilNextDay, watchDay } from "@/components/person-tasks";
+import { MAX_PERSON_TASKS, type PersonTask, dayIn, readTaskInput, taskAssignees } from "@/lib/person-tasks";
 import { done, is, part } from "./check";
 
 const PERSON = "a".repeat(32);
 const task = (n: number, over: Partial<PersonTask> = {}): PersonTask => ({ id: `task${String(n).padStart(6, "0")}`, text: `Task ${n}`, due: "", assignee: "", done: false, createdAt: 1, doneAt: 0, ...over });
-const draw = (tasks: PersonTask[], today = "2026-11-03") => renderToStaticMarkup(createElement(PersonTasks, { person: PERSON, initial: tasks, assignees: ["owner@example.com", "sam@example.com"], today }));
+const draw = (tasks: PersonTask[], today = "2026-11-03", assignees: string[] | null = ["owner@example.com", "sam@example.com"]) => renderToStaticMarkup(createElement(PersonTasks, { person: PERSON, initial: tasks, owner: "owner@example.com", assignees, today }));
 
 part("Each task");
 const html = draw([task(1, { text: "Send the workbook", due: "2026-11-01", assignee: "sam@example.com" }), task(2, { text: "Book the call", due: "2026-11-10" }), task(3, { text: "Say thanks", done: true })]);
@@ -59,14 +59,35 @@ is("put back, but done again did not save (round 3, L5): it is said to be open a
 part("The AAA audit of 4 November 2026");
 is("C1: busy boxes and buttons are said to be, never switched off, and ignore a press then", !/(?<![-\w])disabled=\{/.test(source) && (source.match(/aria-disabled=\{busy \|\| undefined\}/g) ?? []).length === 3 && source.includes("aria-disabled={busy || full || undefined}") && (source.match(/if \(busy\) return;/g) ?? []).length === 3 && source.includes("if (busy || full) return;"), true);
 is("C1: the focus is moved by refs once the change is drawn, never by a timer (the only timer waits for midnight, watchDay)", source.includes("}, [focusAsk]);") && !/requestAnimationFrame/.test(source) && (source.match(/setTimeout\(/g) ?? []).length === 1 && source.includes("setTimer: (run, ms) => setTimeout(run, ms)"), true);
-is("C1: a removal takes the focus to Undo; the undo to the task put back; an add to the field, or to the line saying the list is full", source.includes('focusAfterDrawing({ to: "undo" })') && source.includes('focusAfterDrawing(done.added ? { to: "task", id: done.added.id } : { to: "count" })') && source.includes('focusAfterDrawing({ to: after.length >= MAX_PERSON_TASKS ? "full" : "text" })') && source.includes("<p ref={fullLine} tabIndex={-1}"), true);
-is("C2: a refusal of the add form names its field, marked invalid and described by the message beside it", source.includes('const FIELD_OF: Partial<Record<string, Field>> = { text: "text", long: "text", date: "due", assignee: "assignee" };') && ["text", "due", "assignee"].every((field) => source.includes(`aria-invalid={errorField === "${field}" || undefined}`)) && source.includes("`task-${field}-error`") && source.includes('send({ action: "add", text, due, assignee }, "Task added.", true)'), true);
+// What each change asks for, and what it lands on, as it behaves: elements stood in for by names, "on the page" said by a set.
+const onPage = new Set(["text", "due", "assignee", "undo", "full", "count", "box 1", "box 2"]);
+const named = { text: "text", due: "due", assignee: "assignee", undo: "undo", full: "full", count: "count" } as const;
+const boxes = new Map([["task000001", "box 1"], ["task000002", "box 2"]]);
+const lands = (next: Parameters<typeof focusTarget<string>>[0], drawn: Partial<Record<keyof typeof named, string | null>> = named) => focusTarget<string>(next, { ...named, ...drawn }, boxes, (element) => onPage.has(element));
+is("C1: a removal takes the focus to Undo", lands(focusAfter.removed()), "undo");
+is("C1: an undo to the task put back, or to the count when it cannot be told apart", [lands(focusAfter.putBack(task(2))), lands(focusAfter.putBack(null))], ["box 2", "count"]);
+is("C1: an add to the field for the next one, or to the line saying the list is full", [lands(focusAfter.added(3)), lands(focusAfter.added(MAX_PERSON_TASKS))], ["text", "full"]);
+is("C1: a target not drawn (a task gone) falls to the count, never to nothing", [lands({ to: "task", id: "task000099" }), lands(focusAfter.removed(), { undo: null })], ["count", "count"]);
+is("C2: a refusal of the add form to its field", lands(focusAfter.refused("due", "box 1")), "due");
+is("a refusal with no field leaves the focus where it is while that is still drawn", lands(focusAfter.refused(null, "box 1")), null);
+onPage.delete("box 1");
+is("review of #1959 (a): the box it was on gone (another tab removed the task, read again): to the count, never to the page itself (2.4.3)", [lands(focusAfter.refused(null, "box 1")), lands(focusAfter.refused<string>(null, null))], ["count", "count"]);
+is("and the count line can take it", html.includes('<p tabindex="-1" class="mt-1 text-sm text-ink-soft">2 open, 1 done.</p>') && source.includes("<p ref={fullLine} tabIndex={-1}"), true);
+const told = (error: string, form = true) => { const r = refusalOf({ error, message: `Said: ${error}.` }, form); return r.quiet ? "quiet" : r.field; };
+is("C2: a refusal of the add form names its field", ["text", "long", "date", "assignee", "full", "store_full", "unknown"].map((e) => told(e)), ["text", "text", "due", "assignee", null, null, null]);
+is("C2: a refusal of a box or button names no field", ["text", "date", "assignee"].map((e) => told(e, false)), [null, null, null]);
+is("C2: the field is marked invalid and described by the message beside it", ["text", "due", "assignee"].every((field) => source.includes(`aria-invalid={errorField === "${field}" || undefined}`)) && source.includes("`task-${field}-error`") && source.includes('send({ action: "add", text, due, assignee }, "Task added.", true)'), true);
+is("the server's words are said; with none, plain ones", [refusalOf({ error: "full", message: "Full." }, false), refusalOf({ error: "data_full" }, false), refusalOf({}, false)].map((r) => (r.quiet ? "" : r.said)), ["Full.", "Your store has no room left for more records. Delete some you no longer need first.", "That did not save. Try again in a moment."]);
+is("a refusal the caller answers itself is quiet; another one is not", [refusalOf({ error: "assignee" }, false, "assignee").quiet, refusalOf({ error: "unknown" }, false, "assignee").quiet], [true, false]);
 is("C3: Add with nothing typed says what to do; Undo at the most a person can have says why", source.includes('if (!text.trim()) return refuse("Write what needs doing.", "text");') && source.includes('aria-describedby={full ? "task-undo-full" : undefined}') && source.includes("It cannot be put back now: this person has"), true);
 is("C6: a removal and its undo are said once each", !source.includes('"Task removed."') && source.includes("task.done ? null : undoWords(task, unassigned, null)"), true);
 is("a box checked off again is said in plain words", source.includes('"Marked as not done."') && !source.includes('"Open again."'), true);
 
 part("The independent review of the audit fixes");
-is("HIGH 1: a refusal tied to a field is also said in the alert when the focus is already in that field, hidden there as it shows beside the field", source.includes("=== document.activeElement);") && source.includes('<span key={errorAsk} className={errorField') && source.includes('"sr-only" : undefined}>') && source.includes('{errorField && !spoken ? "" : error}') && source.includes("setErrorAsk((n) => n + 1);"), true);
+is("HIGH 1: a refusal with no field is said in the alert, shown", alertWords("That did not save.", null, false), { words: "That did not save.", hidden: false });
+is("HIGH 1: tied to a field the focus is already in, said in the alert, hidden there as it shows beside the field", alertWords("Keep a task to 200 characters.", "text", true), { words: "Keep a task to 200 characters.", hidden: true });
+is("HIGH 1: tied to a field the focus moves to, which says it, not said twice", alertWords("Pick a real date, or leave it empty.", "due", false), { words: "", hidden: true });
+is("HIGH 1: whether the focus is already there is read when it is refused, the alert drawn anew each time", source.includes("=== document.activeElement);") && source.includes("<span key={errorAsk}") && source.includes("setErrorAsk((n) => n + 1);"), true);
 is("MEDIUM 3: correcting the field at fault takes its refusal away", ["text", "due", "assignee"].every((field) => source.includes(`corrected("${field}");`)) && source.includes("if (errorField === field) clearError();"), true);
 is("the alert region is there before any refusal, its message drawn as a new node each time", html.includes('role="alert"><span></span></p>'), true);
 
@@ -76,7 +97,18 @@ part("On the person's page");
 const page = readFileSync("app/studio/people/page.tsx", "utf8");
 is("a named section with its heading", page.includes('aria-labelledby="tasks-title"') && page.includes('<h2 id="tasks-title"'), true);
 is("read with the person's page, and said when they cannot be read", page.includes("readPersonTasks(store.statsId, profile.person)") && page.includes("tasks could not be read just now"), true);
-is("the teammates offered are those who can see orders", page.includes('filter((m) => can(m.role, "orders"))'), true);
+is("the teammates offered are those who can see orders", page.includes("taskAssignees(store.email, team.members)"), true);
+is("the owner and the teammates who can see deals, by address in lower case", taskAssignees("Owner@Example.com", [{ email: "Sam@Example.com", role: "support" }, { email: "ed@example.com", role: "editor" }, { email: "ada@example.com", role: "admin" }]), ["owner@example.com", "sam@example.com", "ada@example.com"]);
+
+part("A team that could not be read (review of #1959, b and c)");
+is("the page sends null, never a list of the owner alone, when the team cannot be read", page.includes("const assignees = team ? taskAssignees(store.email, team.members) : null;") && page.includes("readTeam(store.sid).catch(() => null)"), true);
+const unread = draw([task(1)], "2026-11-03", null);
+is("only the owner offered, and said why in plain words beside the choice", [unread.includes('<option value="owner@example.com">owner@example.com</option>'), unread.includes("sam@example.com"), unread.includes(TEAM_UNREAD), unread.includes('aria-describedby="task-team-unread"')], [true, false, true, true]);
+is("not said when the team was read", html.includes(TEAM_UNREAD), false);
+const colleague = task(4, { text: "Call Ana", assignee: "sam@example.com" });
+is("an undo of a teammate's task sends the teammate, for the server to decide, and says nothing untrue", undoBody(colleague, null), { body: { action: "add", text: "Call Ana", due: "", assignee: "sam@example.com" }, unassigned: false });
+is("a refusal of the teammate has the team read again, with the tasks", [refusalOf({ error: "assignee" }, true), refusalOf({ error: "unknown" }, false)].map((r) => (r.quiet ? null : [r.stale, r.team])), [[true, true], [true, false]]);
+is("read again from the route, the team with it", source.includes("&team=1") && source.includes("await reread(refusal.team)") && source.includes('if (answer.error === "assignee") await reread(true);'), true);
 
 part("The creator's own day, not the server's");
 // 01:30 UTC on 4 November is 22:30 on 3 November in Fortaleza (UTC-3).
@@ -119,7 +151,7 @@ else process.env.TZ = zoneBefore;
 
 part("A screen another tab changed (edge review)");
 is("a task gone, a list filled or a teammate gone elsewhere says this screen is out of date", ["unknown", "full", "store_full", "assignee", "text", "long", "date", undefined].map(staleRefusal), [true, true, true, true, false, false, false, false]);
-is("then the tasks are read again, so what is shown is what is kept, and the refusal says so", source.includes("staleRefusal(answer.error) && (await reread())") && source.includes("/api/store/person-tasks?person=${encodeURIComponent(person)}") && source.includes("The list now shows the tasks as they are."), true);
+is("then the tasks are read again, so what is shown is what is kept, and the refusal says so", ["unknown", "full", "store_full", "assignee"].every((error) => { const r = refusalOf({ error }, false); return !r.quiet && r.stale; }) && source.includes("refusal.stale && (await reread(refusal.team))") && source.includes("/api/store/person-tasks?person=${encodeURIComponent(person)}") && source.includes("The list now shows the tasks as they are."), true);
 
 part("Words no one can see (edge review)");
 const typed = (text: string) => { const r = readTaskInput({ text }, () => true); return r.ok ? r.value.text : r.error; };
@@ -141,11 +173,11 @@ is("words of tag characters only are no task", typed("\u{E0068}\u{E0069}"), "tex
 // What putting a task back does, with the screen's request and its two ways of saying given here (round 4, M2).
 async function undoChecks() {
   part("Putting a removed task back, step by step (round 4, M2)");
-  const run = async (removed: PersonTask, answers: (PersonTask[] | string)[]) => {
+  const run = async (removed: PersonTask, answers: (PersonTask[] | string)[], assignees: string[] | null = ["owner@example.com", "sam@example.com"]) => {
     const sent: { body: Record<string, unknown>; done: string | null; quietOn?: string }[] = [];
     const said: string[] = [];
     let refusal = "";
-    const result = await putBack(removed, ["owner@example.com", "sam@example.com"], [task(1)], {
+    const result = await putBack(removed, assignees, [task(1)], {
       send: async (body, done, quietOn) => {
         sent.push({ body, done, quietOn });
         const answer = answers.shift() ?? "unknown";
@@ -170,6 +202,10 @@ async function undoChecks() {
   is("put back and done again: one message, the done one's", [doneOk.sent.map((s) => s.done), doneOk.said], [[null, "Task put back. Marked done again."], []]);
   const other = await run(left, ["text"]);
   is("any other refusal is said by the request itself, with no second try", [other.sent.length, other.result.back], [1, false]);
+  const unreadTeam = await run(left, [[task(1), { ...back, assignee: "sam@example.com" }]], null);
+  is("the team not read: put back with the teammate, the plain words, nothing said about them leaving (review of #1959, b)", [unreadTeam.sent.map((s) => [s.body.assignee, s.done]), unreadTeam.said], [[["sam@example.com", "Task put back."]], []]);
+  const refusedThen = await run(left, ["assignee", [task(1), back]], null);
+  is("and when the server refuses the teammate, put back with nobody, said so then", [refusedThen.sent.map((s) => s.body.assignee), refusedThen.sent[1].done], [["sam@example.com", ""], "Task put back with nobody named, since sam@example.com can no longer be responsible for tasks."]);
   const src = readFileSync("components/person-tasks.tsx", "utf8");
   is("the request starts with no refusal left from an earlier one", src.includes('lastRefusal.current = "";\n    working.current = true;'), true);
 }

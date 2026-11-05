@@ -87,7 +87,9 @@ import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_LESSONS } from "@/lib/course";
-import { MAX_POSTS } from "@/lib/store-blog";
+import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
+import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
+import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
@@ -230,16 +232,23 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * Open/recovery repeats Redis/provider reads, so these are NOT a full call or
  * lifetime envelope. Activation remains blocked on missing lifecycle work
  * and unknown/rejected full retention/failure/cleanup costs.
- * Its accounting hooks remain unconnected to a payment worker. Their68-byte
+ * The protected-origin accounting contract has a68-byte
  * OCI/OC1 receipt horizon is ORIGINAL window end+400
  * days (at most767 from capture), first apply23 commands; the200-byte MEMORY
- * fixture is not universal storage coverage. The legacy45-day '1' marker's
- * priced part excludes this new path. Other effects can lose TTL after a
+ * fixture is not universal storage coverage. This is distinct from LIVE
+ * legacy checkout accounting: its first atomic application is23billed
+ * commands plus8KB of serialized Lua/keys/arguments/reply transfer, added
+ * explicitly below, and its47-byte key/68-byte receipt has
+ * KEY256 allocated for45days in store-data-registry. Replays keep the same
+ * absolute checkout-created deadline; requests that retry still have their
+ * existing request budget, not a new free retry allowance.
+ * Shared counter/index effects can lose TTL after a
  * partial Lua failure; the whole tail is unknown, not bounded by the receipt.
- * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
- * financial envelope or retention approval is changed/certified here.
+ * No PER_EMAIL coefficient, real review, quota protection or protected-origin
+ * financial envelope/retention approval is changed/certified here.
  */
-export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
+export const LEGACY_ORDER_ACCOUNTING = 23 * COMMAND + 8_192 * DB_BYTE;
+export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + LEGACY_ORDER_ACCOUNTING;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -298,6 +307,82 @@ export const NEXT_OFFER_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMAN
  * waited on at 2 GB.
  */
 export const ASSIST_REMIND_READ = request("wait", ASSIST_REMIND_COMMANDS + TAKE_COMMANDS, 1_000_000 + ASSIST_REMIND_PRODUCTS * 16_384 + 4_096);
+/**
+ * Review ceilings for the two public reads paid for since 4 November 2026
+ * (lib/public-read-rules.ts): a field of an affiliate program's records (an
+ * affiliate, with their note, address and shares, is the largest), a record
+ * read on its own (a PayPal payment, a moved booking), a product's listing,
+ * a page of the creator's Stripe account as it arrives (a hundred invoices
+ * with their payments, refunds or disputes, or the codes), a post's summary,
+ * and a line of the map or of an affiliate's page as it leaves.
+ */
+export const AFFILIATE_FIELD_BYTES = 4_096;
+export const AFFILIATE_ROW_BYTES = 2_048;
+export const PUBLIC_LISTING_BYTES = 16_384;
+export const STRIPE_PAGE_BYTES = 1_000_000;
+export const POST_META_BYTES = 2_048;
+export const SITEMAP_LINE_BYTES = 300;
+/**
+ * Working out an affiliate program's book, besides what scales: the book
+ * counted (eight), the seven hashes, the PayPal refunds' set, two reads of
+ * listings, the lock taken, read and let go, the kept book's state read
+ * again under it and its previous marks, and the parts written to a draft
+ * that is renamed into place.
+ */
+export const AFFILIATE_PAGE_COMMANDS = 50;
+/** And what it reads whatever the size: the store record's share. */
+export const AFFILIATE_PAGE_BYTES = 64_000;
+/** What one line of the kept book takes, written as it is kept (lib/affiliate-book-snapshot.ts): two per field (a sale and a second tier's line of it), one per record read and per invoice, at the most. */
+export const BOOK_LINE_BYTES = 1_024;
+/** And each affiliate's whole part around their lines: its row with their record (address, PayPal address and note left out) and its wrapping. */
+export const BOOK_PART_BYTES = 2_048;
+/** One load of an affiliate's page, besides a later page's own commands: the kept book's time and length, the codes counted, its part read. */
+export const AFFILIATE_LOAD_COMMANDS = 4;
+/** Working through a body past what a request's shape holds: a heavy request's CPU and wait for each megabyte. */
+const perMegabyte = (bytes: number) => (bytes / 1e6) * (SHAPES.heavy.cpu * CPU_SECOND + SHAPES.heavy.seconds * MEMORY_SECOND);
+/** One call to the creator's Stripe account, waited on at 2 GB, its body worked through. */
+const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_SECOND + perMegabyte(bytes);
+/**
+ * What working out a program's book costs at the most, for a book of that
+ * size (lib/affiliate-page-admission.ts, refreshBook): its reads, every
+ * page of Stripe it may read, and the book kept written (at most
+ * BOOK_SNAPSHOT_MAX_BYTES, past which it is not kept). Holding it is store
+ * data, priced all month at that cap in the store's data line
+ * (tests/store-data-registry.ts, nl:aff:@lib/affiliate-book-snapshot.ts),
+ * so not again here.
+ */
+export function affiliatePageRead(size: AffiliatePageSize): number {
+  const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
+  const bytes = AFFILIATE_PAGE_BYTES + size.fields * AFFILIATE_FIELD_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
+  // Every field could be an affiliate with a part of their own; every part its lines.
+  const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);
+  const writes = Math.ceil(kept / 512_000) + 1;
+  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes, bytes + kept) + perMegabyte(bytes + kept)
+    + size.stripePages * stripePage();
+}
+/** What one load of an approved affiliate's page costs at the most: the page, its own part of the kept book, its listings, and its codes when it reads them. */
+export function affiliateLoadRead(size: AffiliateLoadSize): number {
+  const bytes = size.sliceBytes + size.listings * PUBLIC_LISTING_BYTES + (size.codes ?? 0) * 256;
+  // Only its own part leaves with the page (the listings give titles, the codes a few lines).
+  return laterPageCost() + AFFILIATE_LOAD_COMMANDS * COMMAND + bytes * DB_BYTE + size.sliceBytes * ORIGIN_PER_BYTE + perMegabyte(bytes)
+    + (size.codes === null ? 0 : stripePage(64_000));
+}
+/** What the listings a visitor's affiliate page reads add to the page itself (a later page, counted by isResting). */
+export function publicListingsRead(listings: number): number {
+  return listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
+}
+/**
+ * What one drawing of a store's map costs at the most (lib/store-sitemap.ts):
+ * the request, the store's counts and the listings it reads, every page of
+ * posts paid for (three commands each), working through all of it, and the
+ * answer as it leaves, a line for each product, post, collection and page.
+ */
+export function sitemapRead(size: SitemapSize): number {
+  const posts = size.postPages * POSTS_PER_PAGE;
+  const bytes = size.listings * PUBLIC_LISTING_BYTES + posts * POST_META_BYTES;
+  const lines = size.listings + size.carried + posts + 2 + 12 + 10;
+  return request("heavy", 4 + TAKE_COMMANDS + 3 * size.postPages, bytes) + perMegabyte(bytes) + lines * SITEMAP_LINE_BYTES * ORIGIN_PER_BYTE;
+}
 /**
  * The most one agreement's version may be as it is kept (lib/agreement-store.ts,
  * readVersion reads it whole): its title, text and lines twice, once as typed
@@ -672,6 +757,7 @@ export const COST_LINES: CostLine[] = [
       // A payment request's checkout is one order, admitted before Stripe's page opens and counted at its receipt (18 October 2026).
       { file: "lib/payment-requests.ts", names: ["admitOrders(store, 1, now, 1)"] },
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },
+      { file: "lib/orders.ts", names: ["countLegacyCheckout", "COMMIT_ORDER_CONFIRMATION", "SEEN_SECONDS"] },
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },
       // A cart's checkout reads the offers of each of its products, and what each bundle in it hands over, at most MAX_CART of each, to know whose offers follow it (556 [CT1], 1 and 2 November 2026): reads only, inside that order.
@@ -896,8 +982,15 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
+      // An affiliate's own page and the store's map read in proportion to the store: counted first, paid before they read (4 November 2026).
+      { file: "lib/public-read-rules.ts", names: ["AFFILIATE_PAGE_UNITS", "AFFILIATE_STRIPE_PAGES_PER_UNIT", "AFFILIATE_FIELDS_PER_UNIT", "AFFILIATE_ROWS_PER_UNIT", "PUBLIC_LISTINGS_PER_UNIT", "AFFILIATE_LOAD_BYTES_PER_UNIT", "AFFILIATE_CODE_FIELDS_PER_UNIT", "SITEMAP_POST_PAGES_PER_UNIT", "SITEMAP_LINES_PER_UNIT", "affiliatePageUnits", "affiliateLoadUnits", "sitemapUnits"] },
+      { file: "lib/affiliate-page-admission.ts", names: ["bookSize(store)", "codeOwnerCount(store)", "takePublicRequest(store, \"buyer\", now, affiliateLoadUnits(", "takePublicRequest(store, \"buyer\", now, units, { shared: true })", "isResting(store, now)", "claimRefresh(store)"] },
+      { file: "lib/affiliate-book-snapshot.ts", names: ["BOOK_FRESH_SECONDS", "BOOK_KEEP_SECONDS", "BOOK_SNAPSHOT_MAX_BYTES", "BOOK_LOCK_SECONDS", "BOOK_READ_SECONDS", "AFFILIATE_PAGE_MAX_SECONDS"] },
+      { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
+      { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
+      { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
     ],
-    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
+    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. An affiliate's own page (lib/affiliate-page-admission.ts) and the store's map (lib/store-sitemap.ts) count what they would read first, with a few commands, and take that many of the window's requests before reading it (lib/public-read-rules.ts; affiliatePageRead, affiliateLoadRead and sitemapRead held in tests/plan-cost-registry.test.ts), so neither reads past the window; the affiliate program's book is worked out for all its affiliates at most every BOOK_FRESH_SECONDS and kept that long (lib/affiliate-book-snapshot.ts), the load that works it out paying for it in full outside its connection's share of the day, every other load paying for its own part. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
   },
   {
     id: "studio",
@@ -909,6 +1002,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
+      // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
+      { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
+      // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).
+      { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).
       { file: "lib/path.ts", names: ["PATH_READ_UNITS", "countStudio(store, null, units)"] },
       { file: "lib/path-atomic.ts", names: ["WRITE_PATH", "FORGET_PATH", "PATH_DATA_CHANGE"] },
@@ -1379,7 +1476,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,
   "lib/buyer-library.ts": STORE, "lib/erasure-request.ts": STORE, "lib/buyer-orders.ts": STORE, "lib/checkout-recovery.ts": STORE, "lib/checkout-trouble.ts": STORE,
-  "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE,
+  "lib/community-access.ts": STORE, "lib/community-event-mail.ts": STORE, "lib/inbox.ts": STORE, "lib/learn.ts": STORE, "lib/letter-access.ts": STORE,
   "lib/lesson-comment-notify.ts": STORE, "lib/member-nudge.ts": STORE, "lib/membership-manage.ts": STORE, "lib/membership-pause.ts": STORE,
   "lib/payment-recovery.ts": STORE, "lib/podcast-access.ts": STORE, "lib/quiet-sales.ts": STORE, "lib/store-contact.ts": STORE,
   "lib/store-join.ts": STORE, "lib/team.ts": STORE, "lib/tier-switch.ts": STORE, "lib/waitlist.ts": STORE,

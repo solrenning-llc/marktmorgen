@@ -1,5 +1,5 @@
 import { customerTaxReviewFields } from './customer-tax-review';
-import { CUSTOMER_COST_CATEGORIES, type CustomerWorstCase } from '@/lib/net-margin-rules';
+import { customerCostSnapshot, CUSTOMER_COST_CATEGORIES, type CustomerWorstCase } from '@/lib/net-margin-rules';
 export const EXPOSURE_SCOPES = ['trial','setup','full_refund','non_payment','post_cancellation','paused','legacy_credits','platform_waitlist'] as const;
 export const FUNDED_EXPOSURE_RULES = {schema:1,period:'worst-recognized-month',offsets:'none-no-future-conversions',fixedTaxShield:'none',scopes:EXPOSURE_SCOPES} as const;
 export type ExposureScope = typeof EXPOSURE_SCOPES[number];
@@ -33,10 +33,11 @@ export function assessFundedExposure(review:FundedExposureReview|null,now=new Da
  const budget=own(review,'monthlyBudgetCents'),cases=own(review,'cases');if(!integer(budget))return fail(budget==null?'unknown':'invalid');
  let required=BigInt(0);
  for(const scope of EXPOSURE_SCOPES){
-  const item=own(cases,scope),count=own(item,'maximumMonthlyCases'),raw=own(item,'worstCase'),costs=own(raw,'costCeilings');
+  const item=own(cases,scope),count=own(item,'maximumMonthlyCases'),raw=own(item,'worstCase'),costs=customerCostSnapshot(own(raw,'costCeilings'));
   if(raw&&typeof raw==='object'&&customerTaxReviewFields(raw).present)return fail('unknown');
   if(!integer(count))return fail(count==null?'unknown':'invalid');
-  const unit={collectedRevenueCents:own(raw,'collectedRevenueCents'),refundableRevenueCents:own(raw,'refundableRevenueCents'),taxesCeilingCents:own(raw,'taxesCeilingCents'),costCeilings:Object.fromEntries(CUSTOMER_COST_CATEGORIES.map(key=>[key,own(costs,key)])),allCostsBounded:own(raw,'allCostsBounded')===true,allTaxesReviewed:own(raw,'allTaxesReviewed')===true,revenueCollected:own(raw,'revenueCollected')===true} as CustomerWorstCase;
+  if(costs===null)return fail('unknown');
+  const unit={collectedRevenueCents:own(raw,'collectedRevenueCents'),refundableRevenueCents:own(raw,'refundableRevenueCents'),taxesCeilingCents:own(raw,'taxesCeilingCents'),costCeilings:costs,allCostsBounded:own(raw,'allCostsBounded')===true,allTaxesReviewed:own(raw,'allTaxesReviewed')===true,revenueCollected:own(raw,'revenueCollected')===true} as CustomerWorstCase;
   // A pre-opening waitlist has no collected subscription revenue. Interest or
   // later conversions cannot offset this scope's costs or another obligation.
   if(scope==='platform_waitlist'&&unit.collectedRevenueCents!==0)return fail(unit.collectedRevenueCents==null?'unknown':'invalid');
@@ -55,9 +56,10 @@ export function fundedExposureDetails(review:FundedExposureReview|null,now=new D
  // Capture each raw once: a Proxy cannot swap in TX between checking and copying.
  const cases={} as FundedExposureReview['cases'];
  for(const scope of EXPOSURE_SCOPES){
-  const item=own(own(review,'cases'),scope),raw=own(item,'worstCase'),costs=own(raw,'costCeilings');
+  const item=own(own(review,'cases'),scope),raw=own(item,'worstCase'),costs=customerCostSnapshot(own(raw,'costCeilings'));
   if(raw&&typeof raw==='object'&&customerTaxReviewFields(raw).present)return null;
-  cases[scope]={maximumMonthlyCases:own(item,'maximumMonthlyCases'),worstCase:{collectedRevenueCents:own(raw,'collectedRevenueCents'),refundableRevenueCents:own(raw,'refundableRevenueCents'),taxesCeilingCents:own(raw,'taxesCeilingCents'),costCeilings:Object.fromEntries(CUSTOMER_COST_CATEGORIES.map(key=>[key,own(costs,key)])),allCostsBounded:own(raw,'allCostsBounded'),allTaxesReviewed:own(raw,'allTaxesReviewed'),revenueCollected:own(raw,'revenueCollected')}} as FundedExposureReview['cases'][ExposureScope];
+  if(costs===null)return null;
+  cases[scope]={maximumMonthlyCases:own(item,'maximumMonthlyCases'),worstCase:{collectedRevenueCents:own(raw,'collectedRevenueCents'),refundableRevenueCents:own(raw,'refundableRevenueCents'),taxesCeilingCents:own(raw,'taxesCeilingCents'),costCeilings:costs,allCostsBounded:own(raw,'allCostsBounded'),allTaxesReviewed:own(raw,'allTaxesReviewed'),revenueCollected:own(raw,'revenueCollected')}} as FundedExposureReview['cases'][ExposureScope];
  }
  const copy={month:own(review,'month'),evidence:own(review,'evidence'),admissionLimitsEnforced:own(review,'admissionLimitsEnforced'),monthlyBudgetCents:own(review,'monthlyBudgetCents'),cases} as FundedExposureReview;
  if(!assessFundedExposure(copy,now).approved)return null;

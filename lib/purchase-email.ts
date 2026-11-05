@@ -37,7 +37,7 @@
 import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from "@/lib/closing-buyers-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
-import { ADMITTED_FIELD, settleAdmitted } from "@/lib/order-admission";
+import { ADMITTED_FIELD } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
@@ -439,24 +439,13 @@ export async function confirmPurchase(
   sessionId: string,
   known?: SessionRecord,
 ): Promise<ConfirmOutcome> {
-  const read: { session?: SessionRecord; items?: number } = {};
-  const outcome = await confirmOnce(store, sessionId, known, read);
-  // Confirmed now, so it is one of the month's orders (lib/orders.ts): once,
-  // by the checkout, and not at all when its sale paid a share.
-  if (outcome === "sent") {
-    const paid = typeof read.session?.amount_total === "number" ? read.session.amount_total : 0;
-    await countOrder(store, `checkout:${sessionId}`, paid, Date.now());
-    // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts).
-    await settleAdmitted(store, read.session?.metadata?.[ADMITTED_FIELD], 1, read.items ?? 1);
-  }
-  return outcome;
+  return confirmOnce(store, sessionId, known);
 }
 
 async function confirmOnce(
   store: Store,
   sessionId: string,
   known: SessionRecord | undefined,
-  read: { session?: SessionRecord; items?: number },
 ): Promise<ConfirmOutcome> {
   if (!canConfirm(store) || !SESSION_ID_PATTERN.test(sessionId)) return "skip";
   const key = confirmationKey(sessionId);
@@ -480,14 +469,22 @@ async function confirmOnce(
   // The original reserved source owns confirmation and accounting. The
   // thanks page/sweep must never start a second legacy sender or counter.
   if (["physical-v1", "single-digital-v1"].includes(session.metadata?.mm_order_origin ?? "")) return "skip";
-  read.session = session;
   // A gift through "Support my work" has nothing to hand over or confirm (lib/store-tips.ts).
   if (session.metadata?.kind === "tip") return "skip";
   // A payment request (lib/payment-requests.ts): written down as paid, and its receipt emailed.
-  if (session.metadata?.kind === "request") return confirmRequest(store, session, key);
+  if (session.metadata?.kind === "request") {
+    if (isSettled(session) && saleHandles(store).has(session.metadata.store ?? "") && typeof session.metadata.request === "string") {
+      await accountPaidCheckout(store, session, 1);
+    }
+    return confirmRequest(store, session, key);
+  }
   const listings = await listingsNamed(store, session.metadata);
   // The products it hands over, a bundle's each, for what it keeps (lib/store-data-rules.ts).
-  read.items = listings.reduce((n, product) => n + (isBundle(product) ? (product.bundle?.length ?? 1) : 1), 0) || 1;
+  const items = listings.reduce((n, product) => n + (isBundle(product) ? (product.bundle?.length ?? 1) : 1), 0) || 1;
+  if (isSettled(session) && saleHandles(store).has(session.metadata?.store ?? "") && session.metadata?.kind !== "call" &&
+      (listings.length || session.metadata?.gift || session.metadata?.group)) {
+    await accountPaidCheckout(store, session, items);
+  }
   // Bought for somebody else: handed to them, and the buyer gets a receipt
   // that says so (lib/gifts.ts), instead of the usual confirmation.
   if (session.metadata?.gift) return confirmGift(store, session, key);
@@ -510,6 +507,14 @@ async function confirmOnce(
   const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next);
   if (!letter) return "skip";
 
+  // A paid order goes on the store's review list independently of the receipt
+  // outcome. Trials/fully discounted orders are not asked; the existing
+  // per-checkout ZADD NX makes scheduling idempotent.
+  if (typeof session.amount_total === "number" && session.amount_total > 0) {
+    const paidAt = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
+    await scheduleReviewAsk(store, sessionId, paidAt).catch((error) => console.error("putting an order on the review list failed", error));
+  }
+
   const [claimed] = await redisPipeline([["SET", key, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
   if (claimed === null) return "already";
 
@@ -528,15 +533,18 @@ async function confirmOnce(
     // pass of the job, or the next open of the thanks page, tries again.
     await redisPipeline(sent ? [["SET", key, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", key]]);
   }
-  // A paid order confirmed while the store asks for reviews goes on the list
-  // to be asked, once (lib/review-ask.ts). Nothing is asked of a trial that
-  // charged nothing or of an order paid in full by a discount, and an offer
-  // taken after paying is not asked about on its own: one email per order.
-  if (sent && typeof session.amount_total === "number" && session.amount_total > 0) {
-    const paidAt = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
-    await scheduleReviewAsk(store, sessionId, paidAt).catch((error) => console.error("putting an order on the review list failed", error));
-  }
   return sent ? "sent" : "failed";
+}
+
+async function accountPaidCheckout(store: Store, session: SessionRecord, items: number): Promise<void> {
+  // Missing payment amounts cannot become a free order. This accepts the
+  // same explicit zero as isSettled for a fully discounted checkout.
+  const paid = session.amount_total;
+  if (!Number.isSafeInteger(paid) || Number(paid) < 0) return;
+  const createdAtMs = typeof session.created === "number" && Number.isSafeInteger(session.created) ? session.created * 1000 : NaN;
+  await countOrder(store, `checkout:${session.id}`, Number(paid), Date.now(), {
+    hour: session.metadata?.[ADMITTED_FIELD], items, createdAtMs,
+  });
 }
 
 /**

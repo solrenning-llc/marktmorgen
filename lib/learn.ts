@@ -30,7 +30,7 @@ import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { fileUrl } from "@/lib/file-store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
+import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable, serviceMailRouteReady } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
@@ -767,7 +767,7 @@ export async function requestCourseLink(input: {
   if (!(await within(`nl:learn:rate:addr:${emailKey(raw)}`, ADDRESS_LIMIT))) return "limited";
   // A global known refusal must not reveal course ownership or consume a link.
   // False is unknown; the original rights and final sender checks still apply.
-  if (serviceMailKnownUnavailable()) return "error";
+  if (serviceMailKnownUnavailable() || !(await serviceMailRouteReady())) return "error";
 
   const paid = await paidCourses(store, raw);
   if (!paid.has(product.id)) return "sent";
@@ -776,7 +776,7 @@ export async function requestCourseLink(input: {
 
 /** Sends the link itself. Also used when a buyer pays in another browser. */
 export async function sendCourseLink(store: Store, product: Listing, email: string, origin: string): Promise<boolean> {
-  if (serviceMailKnownUnavailable()) return false;
+  if (serviceMailKnownUnavailable() || !(await serviceMailRouteReady())) return false;
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { e: normaliseEmail(email), k: storeKey(store), h: store.handle, p: product.id };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]);

@@ -25,6 +25,7 @@ export function testAliases(file,root,here){
   for(const name of ['meet-test','account-notice'])aliases['@/lib/'+name]=join(here,'meeting-disabled-world.ts');
  }
  if(file==='host-calendar-removal.test.ts')aliases['@/lib/host-calendar']=join(here,'host-calendar-removal-world.ts');
+ if(file==='outreach-counter-admission.test.ts')for(const name of ['redis','store-request','outreach','metered-limits'])aliases['@/lib/'+name]=join(here,'outreach-counter-admission-world.ts');
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');

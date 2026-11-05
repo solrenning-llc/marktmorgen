@@ -64,10 +64,29 @@ export class UnknownReply extends Error {
   }
 }
 
-/** The pipeline's replies, exactly `count` of them, or UnknownReply. */
+/**
+ * A list as Redis's JSON answers it: a real array whose every place holds a
+ * plain value, read without running a getter; null for anything else (a hole,
+ * an accessor, an array-like object).
+ */
+function plainList(raw: unknown): unknown[] | null {
+  if (!Array.isArray(raw)) return null;
+  const length = Object.getOwnPropertyDescriptor(raw, "length")?.value;
+  if (typeof length !== "number") return null;
+  const out: unknown[] = [];
+  for (let i = 0; i < length; i++) {
+    const place = Object.getOwnPropertyDescriptor(raw, String(i));
+    if (!place || !("value" in place)) return null;
+    out.push(place.value);
+  }
+  return out;
+}
+
+/** The pipeline's replies, exactly `count` of them, each a plain value, or UnknownReply. */
 export function exactReplies(replies: unknown, count: number, what: string): unknown[] {
-  if (!Array.isArray(replies) || replies.length !== count) throw new UnknownReply(what);
-  return replies;
+  const list = plainList(replies);
+  if (!list || list.length !== count) throw new UnknownReply(what);
+  return list;
 }
 
 /** A count Redis answered (DEL, HDEL, SREM and the like): a whole number from zero, or UnknownReply. */
@@ -82,8 +101,9 @@ export function replyCount(raw: unknown, what: string): number {
  * hash. Anything else (nothing, a list cut short, another shape) is UnknownReply.
  */
 export function takenPairs(raw: unknown, what = "a hash's deletion"): [string, string][] {
-  if (!Array.isArray(raw) || raw.length % 2 !== 0 || !raw.every((item) => typeof item === "string")) throw new UnknownReply(what);
+  const list = plainList(raw);
+  if (!list || list.length % 2 !== 0 || !list.every((item) => typeof item === "string")) throw new UnknownReply(what);
   const out: [string, string][] = [];
-  for (let i = 0; i < raw.length; i += 2) out.push([raw[i] as string, raw[i + 1] as string]);
+  for (let i = 0; i < list.length; i += 2) out.push([list[i] as string, list[i + 1] as string]);
   return out;
 }

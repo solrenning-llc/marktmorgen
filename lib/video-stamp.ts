@@ -14,6 +14,19 @@
  *   - It moves between places every MOVE_SECONDS, so it cannot be cropped
  *     out of one corner; for a student who asked their system for less
  *     motion (prefers-reduced-motion) it stays in one place, never moving.
+ *   - Full screen: a video's own full-screen view shows the video alone,
+ *     without anything the page draws over it. So a stamped player turns its
+ *     own full screen and picture in picture off where the browser allows it
+ *     (the service's frame is not given them; the file player is asked not
+ *     to offer them) and offers a "Full screen" button that puts the video
+ *     and the mark in full screen together (components/video-stamp.tsx).
+ *     Some browsers and phones still offer their own full-screen view of a
+ *     video (Firefox and Safari ignore that request on the file player; an
+ *     iPhone has its own), and there the mark is not shown: the studio note
+ *     says so, and nothing here claims otherwise.
+ *   - The course page's notice to buyers (VIDEO_STAMP_NOTICE) is not shown
+ *     yet. The unit that lets a creator switch the mark on must show it on
+ *     the course page, with its test, in the same change.
  *   - Its places are all in the top 60% of the video, away from the
  *     controls and the captions at the bottom, so it never covers either.
  *   - It is not read by screen readers (it repeats the student's own email
@@ -78,4 +91,4 @@ export const VIDEO_STAMP_NOTICE =
 
 /** What the studio tells the creator beside the switch. */
 export const VIDEO_STAMP_STUDIO_NOTE =
-  "Shows each student's email and the date they joined over the lesson videos, moving now and then. It discourages sharing; it cannot stop anyone from recording their screen, and it is not shown while a video plays full screen. Buyers are told on the course page before they pay.";
+  "Shows each student's email and the date they joined over the lesson videos, moving now and then. It discourages sharing; it cannot stop anyone from recording their screen. The Full screen button under the video keeps it showing, but it is not shown when a browser or phone plays the video full screen on its own. Buyers are told on the course page before they pay.";

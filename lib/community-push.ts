@@ -217,8 +217,9 @@ export async function pushMembers(id: string, to: string[], alert: MemberAlert):
 /**
  * Deletes the devices one member let us notify (lib/community-erasure.ts),
  * read and deleted in one step, and gives back to `room`, when it is given,
- * what each took, once. A reply that is not exactly the one asked for throws
- * (UnknownReply), and nothing is given back.
+ * what each took, once. A reply that is not exactly the one asked for (read
+ * without running a getter, as main's exact acknowledgement asked) throws
+ * (UnknownReply), and nothing is given back or replayed.
  */
 export async function forgetPushPerson(id: string, who: string, room?: DataStore): Promise<number> {
   const what = "the deletion of a member's devices";

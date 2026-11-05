@@ -62,7 +62,8 @@ import { SocialsEditor } from "@/components/socials-editor";
 import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
 import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
-import { productsInStats, reachProducts, readAllTimeSales, readSales, readStats, studioStats } from "@/lib/stats";
+import { productsInStats, reachProducts, readAllTimeSales, studioStats } from "@/lib/stats";
+import { ReadingFailed, ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
 import { readSpends } from "@/lib/ad-spend";
@@ -112,7 +113,7 @@ import { TaxEditor } from "@/components/tax-editor";
 import { StoreLanguageEditor } from "@/components/store-language-editor";
 import { RecoveryEditor } from "@/components/recovery-editor";
 import { ApiKeyEditor } from "@/components/api-key-editor";
-import { listKeys } from "@/lib/api-keys";
+import { shownKeys } from "@/lib/api-key-pause";
 import { INVITE_SHARE_PERCENT, INVITE_PROGRAM_OPEN } from "@/lib/creator-invite-rules";
 import { SaveOfferEditor } from "@/components/save-offer-editor";
 import { PauseEditor } from "@/components/pause-editor";
@@ -165,7 +166,7 @@ import { storeChecks } from "@/lib/store-coach";
 import { accessCheck } from "@/lib/store-access-check";
 import { isPaidUp } from "@/lib/billing";
 import { allowanceWindow, calendarWindow, samePeriod } from "@/lib/allowance-window";
-import { ALLOWANCE_KINDS, API_WRITE_UNITS, KIND_WORDS, allowanceFor } from "@/lib/store-allowance-rules";
+import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, KIND_WORDS, allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
@@ -1043,7 +1044,7 @@ export default async function StudioPage({
   // first time there is a call to put in it, and the busy times are read (from
   // the ten-minute copy, usually) to point out a dated session that clashes.
   if (current && callProducts.length > 0 && may("settings")) await ensureFeedToken(current).catch(() => {});
-  const apiKeys = current && may("export") ? await listKeys(current.sid).catch(() => []) : null;
+  const apiKeys = current && may("export") ? await shownKeys(current, email, role).catch(() => []) : null;
   const [calendar, calendarBusyTimes, hooks] = current
     ? await Promise.all([
         callProducts.length > 0 && may("settings") ? calendarView(current).catch(() => null) : Promise.resolve(null),
@@ -1059,15 +1060,18 @@ export default async function StudioPage({
   if (current && paidList && paidList.length) after(() => catchUpBookings(current, paidList, SITE_URL));
   // Visits from Redis and sales from the creator's Stripe, read side by side,
   // with the creator's own notes on the chart and what they spent on ads.
-  const [visits, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = current && may("stats")
+  // "Update now" asks for the store's numbers read again, from the day's own budget (inbox C4-33 (2)).
+  const freshNumbers = params.numbers === "fresh";
+  const [visitsKept, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = current && may("stats")
     ? await Promise.all([
-        readStats(current).catch(() => null),
+        // Kept for every page that shows them, and read again only from the store's own daily budget (lib/store-readings.ts).
+        keptStats(current, undefined, freshNumbers).then((kept) => kept, () => null),
         readsSales(current)
-          ? readSales(current).then(
-              (value) => ({ state: "ok" as const, value }),
-              () => ({ state: "error" as const, value: null }),
+          ? keptSales(current, undefined, freshNumbers).then(
+              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true }),
+              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false }),
             )
-          : Promise.resolve({ state: "none" as const, value: null }),
+          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
         readNotes(current.statsId).catch(() => []),
         readSpends(current.statsId).catch(() => []),
         heardOff(current.handle).catch(() => false),
@@ -1076,6 +1080,26 @@ export default async function StudioPage({
         readMarks(current, ...chartDays()).catch(() => []),
       ])
     : [null, null, [], [], false, { week: 0, last: null }, []];
+  const visits = visitsKept?.value ?? null;
+  // When the numbers shown were read, whether the day still has a reading to read them again, and when the
+  // day's readings come back: said on the panel, the kept copy shown as it is (inbox C4-33 (2), (3)).
+  const readingAt = [visitsKept?.at, salesRead?.at].filter((at): at is number => typeof at === "number");
+  const left = current && visits ? await readingsLeft(current) : { any: false, heavy: false, anyLeft: 0, heavyLeft: 0 };
+  const numbersReading = current && visits
+    ? {
+        at: readingAt.length ? Math.min(...readingAt) : null,
+        canRefresh: readsSales(current) ? left.heavy : left.any,
+        refreshHref: studioPath(current, "numbers=fresh"),
+        backAt: readingsBackAt(),
+        salesUsed: salesRead?.used === true,
+        // Its biggest buyers left out for lack of a list (lib/store-readings.ts, listForNaming): back on their own, or
+        // after the next saved change of a store not yet moved to product records.
+        buyersLater: salesRead?.unnamed ? (current.catalog.id ? ("on-their-own" as const) : ("after-change" as const)) : undefined,
+        // A reading that failed after calling Stripe was counted (inbox C4-53): said, with what is left of the day.
+        failed: salesRead?.failed === true || visitsKept?.failed === true,
+        left: readsSales(current) ? left.heavyLeft : left.anyLeft,
+      }
+    : null;
   const statListings = current && visits && salesRead ? await readListings(current, [...new Set([...productsInStats(current, visits, salesRead.value), ...reachProducts(visits)])]) : [];
   const counted =
     current && visits && salesRead
@@ -1486,6 +1510,7 @@ export default async function StudioPage({
                 ) : null}
                 <StatsPanel
                   data={numbers}
+                  reading={numbersReading}
                   canExport={may("export")}
                   notes={statsNotes}
                   marks={autoMarks}
@@ -1795,7 +1820,14 @@ export default async function StudioPage({
               </section>
             ) : null}
 
-            {calendar ? <CalendarEditor view={calendar} weekly={callProducts.some((p) => p.call?.kind === "weekly")} /> : null}
+            {calendar ? (
+              <CalendarEditor
+                view={calendar}
+                weekly={callProducts.some((p) => p.call?.kind === "weekly")}
+                // No list yet: its file names nobody (lib/store-readings.ts, listForNaming), said on the card.
+                namesLater={current && !current.listId ? (current.catalog.id ? "on-their-own" : "after-change") : undefined}
+              />
+            ) : null}
 
             {may("page") ? <div id="links" className="scroll-mt-32"><LinkEditor links={store.links} folder={pictures} /></div> : null}
 
@@ -2684,7 +2716,7 @@ export default async function StudioPage({
                       ))}
                     </dl>
                     <p className="mt-3 text-sm text-ink-soft">
-                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, and a contact added or a product given through the API as ${API_WRITE_UNITS} API requests. Past a figure, that use waits until the figure opens again${standing === "paid" && largerOnSale ? ", or for a larger plan" : ""}, with a plain message that says when; nothing is billed. ${PLANS_ON_SALE ? "Changing or canceling your plan" : "Canceling your plan"}, deleting your store and downloading your sales always work.`}
+                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, a contact added or a product given through the API as ${API_WRITE_UNITS} API requests, and a page of sales read through the API as ${API_SALES_UNITS}. Past a figure, that use waits until the figure opens again${standing === "paid" && largerOnSale ? ", or for a larger plan" : ""}, with a plain message that says when; nothing is billed. ${PLANS_ON_SALE ? "Changing or canceling your plan" : "Canceling your plan"}, deleting your store and downloading your sales always work.`}
                     </p>
                   </div>
                 ) : null}

@@ -59,7 +59,7 @@ async function main(): Promise<void> {
       const reply=await pipeline(commands);
       return commands[0][0]==="HSET"&&String(commands[0][1]).startsWith("nl:blog:")?[reply[0],reply[1],reply[2],count] as never:reply;
     };
-    try{const saved=await savePost("mutation-evidence",null,input,nextId,ROOM);is("uncertain save does not report zero or success: "+String(count),saved.ok?"saved":saved.reason,"unknown");}finally{redis.pipeline=pipeline;}
+    try{const saved=await savePost("mutation-evidence",null,input,nextId,ROOM);is("confirmed save keeps its id with unknown total: "+String(count),saved.ok?[saved.published,typeof saved.post.id]:saved.reason,[null,"string"]);}finally{redis.pipeline=pipeline;}
   }
   const kept=await savePost("delete-evidence",null,input,nextId,ROOM);
   if(!kept.ok)throw Error("synthetic fixture failed");
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     if(commands.some(c=>c[0]==="EVAL"))releases++;
     return pipeline(commands);
   };
-  try{is("unconfirmed delete is unknown",await deletePost("delete-evidence",kept.post.id,ROOM),null);is("unconfirmed delete never releases data room",releases,0);}finally{redis.pipeline=pipeline;}
+  try{let outcome:unknown;try{outcome=await deletePost("delete-evidence",kept.post.id,ROOM);}catch(error){outcome=error instanceof Error?error.name:"failed";}is("unconfirmed delete has an explicit retry-check outcome",outcome,"BlogWriteUnconfirmed");is("unconfirmed delete never releases data room",releases,0);}finally{redis.pipeline=pipeline;}
   is("unconfirmed deletion leaves fixture content intact",(await readPost("delete-evidence",kept.post.id))?.body,input.body);
 
   part("What is kept");

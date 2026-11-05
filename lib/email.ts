@@ -200,6 +200,15 @@ export function serviceMailKnownUnavailable(runtime: ResendTransportRuntime = {}
   return !isSesConfigured() && (!getKey() || currentResendFallbackProofIsMissing(runtime));
 }
 
+/** Check an available route before minting an expiring access token. This
+ * takes no allowance and grants no send permission: the final provider and
+ * budget barriers still apply. Missing SES state is not readiness. */
+export async function serviceMailRouteReady(runtime: ResendTransportRuntime = {}): Promise<boolean> {
+  if (serviceMailKnownUnavailable(runtime)) return false;
+  if (isSesConfigured() && await sesReady()) return true;
+  return Boolean(getKey() && !currentResendFallbackProofIsMissing(runtime));
+}
+
 /** Whether Resend is there to send what Amazon does not take. */
 export function hasResend(): boolean {
   return getKey() !== null;
@@ -399,17 +408,23 @@ export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): 
     if (!to) return "refused";
     const config = sesConfig();
     if (!config || !(await sesReady())) {
+      // A durable dispatch barrier is single-use. Select the site's existing
+      // service-mail fallback before that barrier, rather than making a
+      // second POST after a creators-domain refusal. Keep the store name,
+      // reply address and content; the changed payload gets its own key.
+      const fromSite = isCreators(message.from) && getKey() !== null;
+      const from = fromSite ? atSiteAddress(message.from, NIMBUS_FROM) : message.from;
       const result = await guardedResendPost({
-        base: BASE, path: "/emails", credential: keyFor(message.from) ?? "", usageCredential,
-        body: JSON.stringify({ from: fromLine(message.from), to: [to], subject: headerText(message.subject), text: message.text,
+        base: BASE, path: "/emails", credential: (fromSite ? getKey() : keyFor(from)) ?? "", usageCredential,
+        body: JSON.stringify({ from: fromLine(from), to: [to], subject: headerText(message.subject), text: message.text,
           ...(oneAddress(message.replyTo) ? { reply_to: oneAddress(message.replyTo) } : {}) }),
-        idempotencyKey: `shipment:${context.id}`, recipients: 1, beforePost,
+        idempotencyKey: `shipment:${context.id}${fromSite ? ":site" : ""}`, recipients: 1, beforePost,
       }, runtime);
       if (result.kind === "accepted_receipt") return await beforePost() === true ? "accepted" : "unknown";
       if (result.kind === "blocked") return "waiting";
       if (result.kind !== "response") return "unknown";
       if (result.response.ok) { await countSent(1); return "accepted"; }
-      return result.response.status === 429 ? "not_accepted" : "refused";
+      return result.response.status === 422 ? "refused" : "not_accepted";
     }
     if (!(await beforePost())) return "unknown";
     const result = await sesSend(config, {

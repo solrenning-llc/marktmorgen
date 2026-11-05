@@ -242,14 +242,17 @@ const STORED_PRODUCT = /^[a-z0-9]{6,40}$/;
 
 function storedPoints(value: unknown): number | null {
   if (value === null) return null;
-  if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error("Incomplete community points record");
+  // A pair of removals could race before the atomic decrement existed and
+  // leave a negative integer behind. It is known points data, not a missing
+  // Redis answer; the copy represents that impossible public score as zero.
+  if (typeof value !== "string" || !/^(0|-[1-9][0-9]*|[1-9][0-9]*)$/.test(value)) throw new Error("Incomplete community points record");
   const points = Number(value);
   if (!Number.isSafeInteger(points)) throw new Error("Incomplete community points record");
   return points;
 }
 
 function storedRewards(value: unknown): Record<string, string> {
-  if (!Array.isArray(value) || value.length % 2 !== 0 || value.length > MAX_REWARDS * 2) {
+  if (!Array.isArray(value) || value.length % 2 !== 0) {
     throw new Error("Incomplete community points record");
   }
   const rewards: Record<string, string> = {};
@@ -259,6 +262,7 @@ function storedRewards(value: unknown): Record<string, string> {
     if (typeof product !== "string" || !STORED_PRODUCT.test(product) || typeof at !== "string" || !/^(0|[1-9][0-9]*)$/.test(at)) {
       throw new Error("Incomplete community points record");
     }
+    if (Object.hasOwn(rewards, product)) throw new Error("Incomplete community points record");
     const reachedAt = Number(at);
     if (!Number.isSafeInteger(reachedAt)) throw new Error("Incomplete community points record");
     rewards[product] = at;
@@ -281,8 +285,8 @@ export async function pointsRecordOf(id: string, who: string, now = Date.now()):
   const rewards = storedRewards(replies[1]);
   const days = replies.slice(2).map(storedPoints);
   return {
-    total: total ?? 0,
-    days: dayList.flatMap((day, i) => (days[i] === null ? [] : [{ day, points: days[i] }])),
+    total: Math.max(0, total ?? 0),
+    days: dayList.flatMap((day, i) => (days[i] === null ? [] : [{ day, points: Math.max(0, days[i]) }])),
     rewards,
   };
 }

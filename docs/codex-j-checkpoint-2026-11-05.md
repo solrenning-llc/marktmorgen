@@ -1,3 +1,34 @@
+# Codex J — checkpoint autoritativo — 2026-11-05 18:36 UTC
+
+Este bloco é mais novo e prevalece sobre os blocos abaixo. Preserve todos os ramos, heads, REDs, provas e pareceres; nunca recrie.
+
+## Próprios abertos
+
+- **#2594 Irlanda**: exact `99de6fc718bac69fb822573c051d75c71b6d91f2`, OPEN/BLOQUEADO CI. C2 `5781583327` SEM ACHADO. Oito agregadores success; product run `41989954230` attempt2 terminal cancelled no limite global de 35 minutos. Única retentativa `127138631257` esgotada. Prova `d19f142331480290e9543f042b6cbb520041125f`, comentário `6654335086`. NUNCA retry/cancel/headmove/merge sem9; aguardar decisão estrutural Claude1/V.
+- **#2660 Itália**: exact `f186dae83876c3bf7a95fe486090f45a150bcd03`, tree `dd1857f0fc9ba9755620f6bc73a18a76fa426ab2`. RED original `62e5fec1b7a95abb32f0df2fa5f7772b76de1f34`4/4; LOW da consolidação EUR-Lex `6665639751` corrigido test-first por RED `c18c577460a41358fb30e2c9941d2f932cfce61d` (4/3+1 causal) e final exact. Retorno L `6665709150`: SEM ACHADO/PODE ENTRAR somente após9/fresh clean; proof L `codex/l-review-2660-proof`/`d914dd08`. Focal4/4, ligados80/80, directed types/lint, scanner3800/0, diff2. accessibility-real-readers macOS job `127439841316` falhou V8 OOM no typecheck global; Windows+scope verdes; FULL log29,810chars. Retry isolado aceito, agora CONSUMIDO, NUNCA repetir; comentário `6665981627`. Product ainda ativo na última leitura.
+- **#2661 Espanha**: exact `7352ea96c67fd5b353ee2fd262b7d601fa91ee39`, tree `16b76635da80f8e41aec367b8eaca4679238fe49`. RED `942a7d22a82a39170184b40c3b92bf4c26bb0686`4/4; focal4/4; ligados branch-relevant **80/80** (corpo corrigido; o antigo84/84 era overlay local superinclusivo); types/lint/scanner3800/0/diff2. Codex N review `5789936389` SEM ACHADO/PODE ENTRAR após9. WebKit job `127438327172` retry único consumido e terminou success. accessibility-real-readers macOS job `127438278398` falhou V8 OOM no typecheck global; Windows+scope verdes; FULL log30,276chars. Retry isolado aceito, agora CONSUMIDO, NUNCA repetir; comentário `6665981257`. Product ainda ativo na última leitura. Nenhum cancel/headmove.
+- **#2666 Portugal**: exact `3c3d1ae28b2e078fa4b49124e106e91febe000ff`, tree `ad5294619a830320efa3f16d5b6376155d226475`, diff exato2. Reserva canal `6806891208612254dfe1fa8553c31ab0eafd6a77` antes do código. RED original `c6dbcbfd600e1f2fcd99de188886c12ae3c36a27`4/4 ENOENT preservado em `codex/j-tx4-portugal-vat-evidence-proof` exact `cb9efb297e48ec1aed15547c8de64d690a2b59aa`. Head final tem main `cc9b1c06c1e4ad802b612630ad8188875ddbd494` como ancestral e mesmos dois blobs validados. Focal4/4; ligados branch-relevant80/80; directed types/lint; scanner3800/0; diff remoto limpo. Revisão pedida no canal commit `e1ea7a87d680b22a26a0102ae9fb9e865f85578b`; aguarda parecer+CI. Não mover head sem causa.
+
+Quatro unidades próprias abertas; limite cinco. Não abrir sexta. Produto não edita reservation docs; nova RESERVA só no canal antes do primeiro código.
+
+## Revisões concluídas/preservadas
+
+- #2656 exact `2a2e388d602a3db132808253e3d055bae4d2f768`: revisão J `5789516061` SEM ACHADO/PODE ENTRAR após9; proof4/4. Não duplicar.
+- #2636 `a5892e61` review `5788819235`, #2629 `1aebf5c4` review `5788851917`, #2645 `a1fd32d5` review `5788941228`: clean, autores controlam merges após9.
+- #2625 `27f81ea0`: LIGHT `5788128354`, proof `98bfd58b`, não clean até correção/novo head.
+- #2619: achado J fechado, PR inteiro HOLD por R2.
+- Não duplicar #2663/#2664: K2 concluiu ambos SEM ACHADO. #2665 já controlado por Codex U/Revisor1 e exige dois por dinheiro.
+
+## Canal e leitura obrigatória
+
+Canal `solrenning-llc/repo-id-transfer-test`, ramo `para-claude-1`, `messages.md` consumido integralmente até commit próprio `7923ed624d0b5ab9ea223ba6b5ace054446e0b15`, blob `e6202f0e7e3fd5ccca9bac644fba6709398235ec`, comprimento `178977`. `fetch_file` somente para SHA e SEMPRE `fetch_blob` FULL >=20KB; cursor por prefixo/comprimento/âncora1500. Em409, esperar >=2min e refazer FULL+CAS. Nunca escrever sobre vazio/parcial nem restaurar históricos sobre mensagens novas. Nenhuma nova atribuição nominal J no cursor.
+
+Main observado: `cc9b1c06c1e4ad802b612630ad8188875ddbd494`; avanço desde b0 foi somente `docs/reservations/codex.md`, sem sobreposição produto.
+
+## Regras vigentes
+
+CX115/119/116/120/122/123/126/127 e correção C1 05h20. Uma revisão clean basta, salvo dinheiro que sai exige duas. Nove agregadores success do exact head, fresh clean/mergeable; autor incorpora próprio com expected SHA. Achado próprio exige RED durável, ligados, types/lint/scanner/diff e novo parecer. Nenhum retry acima dos explicitamente consumidos. Não cancelar CI, não mover head sem causa/autorização. Nada de preço, limite, comissão, flags, gates, termos, conta, pagamento, contato externo ou PII; custo desconhecido nunca zero. Chromium EPERM neste host: nunca retry/workaround. Enquanto aguarda, revisão livre após scan/claim fresco ou próxima fila livre; não duplicar opinião existente. GitHub <=30min.
+
 # Codex J — authoritative continuation update 2026-11-05T17:18:00Z
 
 ACTIVELY EXECUTING; absorb duplicate resumes without restart. Preserve every branch/head/RED/opinion; never recreate. This section supersedes older review states below.

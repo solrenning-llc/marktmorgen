@@ -89,7 +89,8 @@ test("inconsistent hold-write envelopes never return the opened checkout as conf
         return { id: "cs_test_synthetic" };
       });
       assert.deepEqual(result, { ok: false, reason: "busy" });
-      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "HSET", "EVAL", "EVAL", "HSET"]);
+      // The admission lets the lock go in its own step (STOCK_ADMIT), so no separate release follows it.
+      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "HSET", "EVAL", "HSET"]);
     }
     // The hand-over itself (STOCK_BIND) answered in any shape but 1: never returned.
     for (const reply of [[0], [-1], [null], [], Array(1), ["1"], [true], null, { 0: 1, length: 1 }]) {

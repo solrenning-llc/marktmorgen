@@ -23,11 +23,20 @@ const HOLD_MS = HOLD_SECONDS * 1000;
 const MAX_CHECKS = 5;
 /**
  * The longest one count waits for Stripe about a hold that ran out (2
- * November 2026): a count runs under the product's lock, so it is kept short;
- * an answer that does not come in time counts the unit as used, the safe way
- * to be wrong.
+ * November 2026): kept short, so a page or a checkout never waits long; an
+ * answer that does not come in time counts the unit as used, the safe way to
+ * be wrong. Since the review of 5 November 2026 Stripe is never asked while a
+ * stock lock is held (withCartStockHolds).
  */
 const CHECK_MS = 2_000;
+/**
+ * The longest a checkout waits for another's stock lock (5 November 2026):
+ * a lock is held only for a few Redis round trips (Stripe is never asked
+ * under it), so a short wait is enough, and it bounds the tries a contended
+ * lock costs (tests/cart-stock.test.ts, CART_STOCK_COMMANDS_MOST).
+ */
+const LOCK_WAIT_MS = 500;
+const LOCK_SECONDS = 15;
 
 type Entry = { until: number; paid?: boolean };
 
@@ -61,12 +70,23 @@ async function readEntries(store: Store, product: Listing): Promise<Map<string, 
  * safe way to be wrong is to show one unit too few, never to sell one too many.
  */
 export async function stockLeft(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
+  return (await countStock(store, product, now, true))?.left ?? null;
+}
+
+/**
+ * The count itself. Without `ask` (under a stock lock) Stripe is never asked:
+ * a hold that ran out and is not settled yet counts as used, the safe way to
+ * be wrong, and is counted in `unresolved` so the caller can have it settled
+ * once the lock is let go.
+ */
+async function countStock(store: Store, product: Listing, now: number, ask: boolean): Promise<{ left: number; unresolved: number } | null> {
   const limit = limitedStock(product);
   if (limit === null) return null;
   if (!store.statsId || !isRedisConfigured()) throw new Error("Stock reading unavailable");
   const entries = await readEntries(store, product);
   let used = 0;
   let checks = 0;
+  let unresolved = 0;
   const writes: (string | number)[][] = [];
   for (const [session, entry] of entries) {
     if (entry.paid || entry.until > now) {
@@ -76,6 +96,11 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
     // A cart's provisional hold that lapsed: every checkout opened under it has closed, and none bears its name (withCartStockHolds).
     if (session.startsWith(PENDING)) {
       writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
+      continue;
+    }
+    if (!ask) {
+      used += 1;
+      unresolved += 1;
       continue;
     }
     if (checks >= MAX_CHECKS || !store.stripeAccountId) {
@@ -100,7 +125,7 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
     }
   }
   if (writes.length) await redisPipeline(writes).catch(() => {});
-  return Math.max(0, limit - used);
+  return { left: Math.max(0, limit - used), unresolved };
 }
 
 export type StockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldout" | "busy" };
@@ -197,8 +222,9 @@ const PENDING_MS = HOLD_MS + 5 * 60 * 1000;
  * The admission of a cart's provisional holds (CX-123, rule 25; Codex G2's
  * review of #1730, 5 November 2026), one step on the Redis side: every
  * lock still holds this request's token AND every provisional hold it wrote
- * is there, so 1; otherwise each of its provisional holds is taken back in
- * the same step, so 0. A lock key that still holds our token has held it
+ * is there, so 1, and the locks are let go in the same step; otherwise each
+ * of its provisional holds is taken back in the same step, so 0. A key of
+ * another type makes the script fail, read as unknown (nothing opens). A lock key that still holds our token has held it
  * since we took it (only we write that token, and a lock that ran out comes
  * back with another), so no other checkout counted that product between our
  * count and our write: whoever counts after the write sees our hold.
@@ -211,16 +237,14 @@ if not n or n ~= math.floor(n) or n < 1 or n > 8 or #KEYS ~= 2 * n or #ARGV ~= n
 local pending = ARGV[n + 2]
 local ours = 1
 for i = 1, n do
-  local lock = redis.call("TYPE", KEYS[i]).ok
-  if lock ~= "string" or redis.call("GET", KEYS[i]) ~= ARGV[1 + i] then ours = 0 end
-  local hold = redis.call("TYPE", KEYS[n + i]).ok
-  if hold ~= "hash" and hold ~= "none" then return -1 end
-  if hold == "none" or redis.call("HEXISTS", KEYS[n + i], pending) ~= 1 then ours = 0 end
+  if redis.call("GET", KEYS[i]) ~= ARGV[1 + i] then ours = 0 end
+  if redis.call("HEXISTS", KEYS[n + i], pending) ~= 1 then ours = 0 end
 end
-if ours == 1 then return 1 end
-for i = 1, n do
-  if redis.call("TYPE", KEYS[n + i]).ok == "hash" then redis.call("HDEL", KEYS[n + i], pending) end
+if ours == 1 then
+  for i = 1, n do redis.call("DEL", KEYS[i]) end
+  return 1
 end
+for i = 1, n do redis.call("HDEL", KEYS[n + i], pending) end
 return 0`;
 
 /**
@@ -238,7 +262,6 @@ export const STOCK_BIND = `-- marktmorgen:stock-bind:v1
 local n = tonumber(ARGV[1])
 if not n or n ~= math.floor(n) or n < 1 or n > 8 or #KEYS ~= n or #ARGV ~= 3 then return -1 end
 for i = 1, n do
-  if redis.call("TYPE", KEYS[i]).ok ~= "hash" then return 0 end
   if redis.call("HEXISTS", KEYS[i], ARGV[2]) ~= 1 or redis.call("HEXISTS", KEYS[i], ARGV[3]) ~= 1 then return 0 end
 end
 for i = 1, n do redis.call("HDEL", KEYS[i], ARGV[2]) end
@@ -266,11 +289,13 @@ export const refusedBeforeStripe = (error: unknown): boolean => error instanceof
  * carts sharing products never wait on each other. Every count is read
  * under them, a provisional hold is written for each, and STOCK_ADMIT then
  * checks, in one step, that every lock is still ours and every provisional
- * hold there, or takes them back: a lock that ran out meanwhile (a count may
- * ask Stripe several times, a request may be paused) opens nothing, since
- * another checkout may have counted the same unit (Codex G2, 5 November
- * 2026). Only then are the locks let go, so no lock is held while Stripe
- * opens the checkout.
+ * hold there, or takes them back: a lock that ran out meanwhile (a request
+ * may be paused) opens nothing, since another checkout may have counted the
+ * same unit (Codex G2, 5 November 2026). The admission lets the locks go in
+ * the same step, so no lock is held while Stripe opens the checkout. Stripe
+ * is never asked while a lock is held (review of 5 November 2026): a hold
+ * that ran out and is not settled counts as used, and a cart refused for it
+ * has it asked about once the locks are let go, every product at once.
  *
  * The provisional holds are let go only when it is proven they are no
  * longer needed: when Stripe refused to make the checkout (`refused`, and
@@ -300,36 +325,51 @@ export async function withCartStockHolds<T extends { id: string }>(
   // Our own provisional holds, and nothing else, taken back while no checkout was opened under them; one that stays lapses.
   const withdraw = () => redisPipeline(keys.map((key) => ["HDEL", key, pending])).catch(() => {});
   const taken: Held[] = [];
+  // Locks the admission let go in its own step (STOCK_ADMIT), not to be let go again.
+  let admittedLocks = false;
+  // Products refused only for holds that ran out and are not settled yet: asked about once the locks are let go.
+  const unsettled: Listing[] = [];
+  let refusal: CartStockHold<T> | null = null;
   try {
-    // Long enough for every count to ask Stripe its most times, each at its shortest ceiling.
-    const lockSeconds = 15 + Math.ceil((limited.length * MAX_CHECKS * CHECK_MS) / 1000);
-    for (const product of limited) taken.push(await takeLock(lockKey(statsId, product.id), lockSeconds, 1500));
+    for (const product of limited) taken.push(await takeLock(lockKey(statsId, product.id), LOCK_SECONDS, LOCK_WAIT_MS));
     const now = Date.now();
     const out: string[] = [];
     for (const product of limited) {
-      // A count that cannot be read throws, as it always has for one product: nothing opens, every lock is let go below.
-      const left = await stockLeft(store, product, now);
-      if (left !== null && left <= 0) out.push(product.id);
+      // Never Stripe under a lock (review of 5 November 2026). A count that cannot be read throws: nothing opens, every lock is let go below.
+      const counted = await countStock(store, product, now, false);
+      if (counted !== null && counted.left <= 0) {
+        out.push(product.id);
+        if (counted.unresolved > 0) unsettled.push(product);
+      }
     }
-    if (out.length > 0) return { ok: false, reason: "soldout", ids: out };
-    const receipt = await redisPipeline(keys.map((key) => ["HSET", key, pending, JSON.stringify({ until: Date.now() + PENDING_MS })])).catch(() => null);
-    if (!acknowledged(receipt, keys.length)) {
-      await withdraw();
-      return { ok: false, reason: "busy" };
-    }
-    const admitted = scriptAnswer(
-      await redisPipeline([["EVAL", STOCK_ADMIT, keys.length * 2, ...taken.map((held) => held.key), ...keys, keys.length, ...taken.map((held) => held.token), pending]]).catch(() => null),
-    );
-    if (admitted !== 1) {
-      // 0: taken back in the same step. Unknown: never opened on; taken back again, or lapsing.
-      if (admitted === null) await withdraw();
-      return { ok: false, reason: "busy" };
+    if (out.length > 0) {
+      refusal = { ok: false, reason: "soldout", ids: out };
+    } else {
+      const receipt = await redisPipeline(keys.map((key) => ["HSET", key, pending, JSON.stringify({ until: Date.now() + PENDING_MS })])).catch(() => null);
+      if (!acknowledged(receipt, keys.length)) {
+        await withdraw();
+        return { ok: false, reason: "busy" };
+      }
+      const admitted = scriptAnswer(
+        await redisPipeline([["EVAL", STOCK_ADMIT, keys.length * 2, ...taken.map((held) => held.key), ...keys, keys.length, ...taken.map((held) => held.token), pending]]).catch(() => null),
+      );
+      if (admitted !== 1) {
+        // 0: taken back in the same step. Unknown: never opened on; taken back again, or lapsing.
+        if (admitted === null) await withdraw();
+        return { ok: false, reason: "busy" };
+      }
+      admittedLocks = true;
     }
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     throw error;
   } finally {
-    for (const held of taken) await releaseLock(held);
+    if (!admittedLocks) for (const held of taken) await releaseLock(held);
+  }
+  if (refusal) {
+    // The holds that ran out are asked about now, with no lock held, every product at once, so the next try counts them right.
+    if (unsettled.length > 0) await Promise.all(unsettled.map((product) => stockLeft(store, product).catch(() => null)));
+    return refusal;
   }
   let value: T;
   try {

@@ -165,17 +165,21 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", key("print7"), "p_lapsed0000000000000000000000000", JSON.stringify({ until: Date.now() - 1000 })]]);
   is("a provisional hold that lapsed is let go without asking Stripe", [await stockLeft(creator, limited("print7", 1)), gets.some((id) => id.startsWith("p_")), (await redis.pipeline([["HGETALL", key("print7")]]))[0]], [1, false, []]);
   await redis.pipeline([["HSET", key("print8"), "cs_test_cartstockold00001", JSON.stringify({ until: Date.now() - 1000 })]]);
-  onGet = async () => {
-    await redis.pipeline([["DEL", `nl:stock:lock:${creator.statsId}:print8`]]);
+  // Since the review of 5 November 2026 Stripe is never asked under the lock, so the slow step a lock can run out in is the count's own read.
+  const base = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    if (commands.length === 1 && commands[0][0] === "HGETALL" && commands[0][1] === key("print8")) await base([["DEL", `nl:stock:lock:${creator.statsId}:print8`]]);
+    return base(commands);
   };
+  const asked8 = gets.length;
   let tried = 0;
   const lost = await withCartStockHolds(creator, [limited("print8", 2)], async () => {
     tried += 1;
     return { id: "cs_test_cartstocklost0001" };
   });
-  onGet = null;
+  redis.pipeline = base;
   const after8 = (await redis.pipeline([["HGETALL", key("print8")]]))[0] as string[];
-  is("a lock lost while Stripe was asked: nothing held, nothing opened", [lost, tried, after8.filter((_, i) => i % 2 === 0)], [{ ok: false, reason: "busy" }, 0, ["cs_test_cartstockold00001"]]);
+  is("a lock lost before the provisional hold is admitted: nothing held, nothing opened, and Stripe never asked under it", [lost, tried, after8.filter((_, i) => i % 2 === 0), gets.length - asked8], [{ ok: false, reason: "busy" }, 0, ["cs_test_cartstockold00001"], 0]);
   const original = redis.pipeline.bind(redis);
   redis.pipeline = async (commands) => (commands.some((command) => command[0] === "HSET" && command[2] === "cs_test_cartstockbad00001") ? [] : original(commands));
   const unwritten = await withCartStockHolds(creator, [limited("print9", 3)], async () => ({ id: "cs_test_cartstockbad00001" }));
@@ -367,7 +371,7 @@ async function main(): Promise<void> {
     readFileSync("app/[handle]/p/[product]/page.tsx", "utf8").includes("!pairedOut.has(p.id)"),
   ], [true, true, true]);
   is("the thanks page marks the cart's limited products sold", readFileSync("app/[handle]/thanks/page.tsx", "utf8").includes("confirmCartStock(store, order.bumps.map((added) => added.product), sessionId)"), true);
-  is("nor in the cart's reminder", readFileSync("lib/checkout-recovery.ts", "utf8").includes("return kept.filter((_, i) => left[i] !== 0);"), true);
+  is("nor in the cart's reminder, nor one whose count cannot be read", readFileSync("lib/checkout-recovery.ts", "utf8").includes("return kept.filter((_, i) => left[i] !== 0 && left[i] !== undefined);"), true);
 
   done();
 }

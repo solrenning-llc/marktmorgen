@@ -66,8 +66,7 @@ async function main() {
   };
   const first = reserve();
   await arrived;
-  // #1732 (unit 3b) makes the lock last 15 s plus every count's questions to Stripe (25 s for one limited product): advanced past it, as 16 s was past 15 s at 54b2d00b.
-  redis.advance(26_000);
+  redis.advance(16_000);
   const second = await reserve();
   resume();
   const firstResult = await first;

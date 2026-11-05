@@ -89,7 +89,7 @@ def evidence(redis):
     # bounded 25-member read. Their evidence must survive but must not keep
     # excluding later eligible work from every worker visit.
     for kind in ("fenced", "unsupported"):
-        row, keys = setup(kind)
+        row, keys = setup(kind, store="synthetic_" + kind)
         raw = redis.command("GET", keys[0])
         if kind == "fenced":
             redis.command("SET", keys[8], "synthetic erasure fence")

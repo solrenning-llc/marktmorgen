@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ciBuildNodeArguments } from "./ci-build-args.mjs";
 
 if (process.env.GITHUB_ACTIONS !== "true") {
   throw new Error("ci-build.mjs is only for synthetic GitHub Actions builds; use npm run build elsewhere");
@@ -34,7 +35,7 @@ await new Promise((accept, reject) => {
 try {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing loopback font port");
-  const child = spawn(process.execPath, [join(root, "node_modules/next/dist/bin/next"), "build"], {
+  const child = spawn(process.execPath, [...ciBuildNodeArguments(process.platform), join(root, "node_modules/next/dist/bin/next"), "build"], {
     cwd: root,
     stdio: "inherit",
     env: {

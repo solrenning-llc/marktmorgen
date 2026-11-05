@@ -17,3 +17,6 @@ test("complete compliance cost remains unknown and unfunded", () => {
   assert.match(text, /custo completo[\s\S]*desconhecido[\s\S]*nunca zero/);
   assert.match(text, /teto mensal e anual nulos[\s\S]*reserveReviewed: false/);
 });
+test("the evidence document passes the required change-level whitespace check", () => {
+  assert.doesNotMatch(text, /[\t ]+$/m);
+});

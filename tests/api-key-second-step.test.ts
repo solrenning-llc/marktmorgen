@@ -568,6 +568,8 @@ async function main(): Promise<void> {
   part("M4: when the keys cannot follow a move, the membership stays where it was");
   await putMember(third, ADA, "admin");
   const adaKey = await make(await openSession(ADA), "Ada's sheet", third);
+  const pipelineAccessKey = `nl:crm:pacc:${third.statsId}`;
+  await realPipeline([["HSET", pipelineAccessKey, ADA, JSON.stringify({ sales0: "none" })]]);
   hook = async (commands) => {
     if (!commands.some((c) => (c[0] === "HSET" || (c[0] === "EVAL" && c[1] === RECORD_SWAP)) && (c[1] === `nl:api:keys:${third.sid}` || c[3] === `nl:api:keys:${third.sid}`))) return;
     hook = null;
@@ -576,6 +578,7 @@ async function main(): Promise<void> {
   await moveMemberships(ADA, ADA2);
   hook = null;
   is("the membership stayed on the old address", [(await readTeam(third.sid)).members.some((m) => m.email === ADA), (await readTeam(third.sid)).members.some((m) => m.email === ADA2)], [true, false]);
+  is("pipeline access stays only with the address whose membership stayed", await realPipeline([["HGET", pipelineAccessKey, ADA], ["HGET", pipelineAccessKey, ADA2]]), [JSON.stringify({ sales0: "none" }), null]);
   is("and the key is still hers there", (await shownKeys(third, ADA, "admin")).find((k) => k.name === "Ada's sheet")?.maker, "you");
   is("and still works", (await asApi(adaKey.body.key ?? "")).status, 200);
 

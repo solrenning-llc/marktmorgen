@@ -72,12 +72,15 @@ async function main(): Promise<void> {
 
   part("Was the confirmation already sent? Only an exact 0 says no");
   sessions = [paid("cs_test_lsixsweep00000001", "ann@example.com")];
-  await withReply("EXISTS", () => [undefined], () => sweepCheckouts(Date.now() + 20_000));
-  is("a mark read in an unknown shape (no answer) sends nothing this run", confirmations("ann@example.com"), 0);
-  await withReply("EXISTS", () => ["1"], () => sweepCheckouts(Date.now() + 20_000));
-  is("nor one answered as text", confirmations("ann@example.com"), 0);
-  await withReply("EXISTS", (real) => [...(real as unknown[]), 0], () => sweepCheckouts(Date.now() + 20_000));
-  is("nor an answer with more replies than were asked", confirmations("ann@example.com"), 0);
+  // Each run that cannot read the mark says so in its failed count (Claude 3 on #2714): past the confirmation window
+  // the order is not read again, so a silent skip would be a confirmation never sent and never noticed.
+  let said = { failed: -1 };
+  await withReply("EXISTS", () => [undefined], async () => (said = await sweepCheckouts(Date.now() + 20_000)));
+  is("a mark read in an unknown shape (no answer) sends nothing this run, and the run counts it as failed", [confirmations("ann@example.com"), said.failed], [0, 1]);
+  await withReply("EXISTS", () => ["1"], async () => (said = await sweepCheckouts(Date.now() + 20_000)));
+  is("nor one answered as text, counted as failed", [confirmations("ann@example.com"), said.failed], [0, 1]);
+  await withReply("EXISTS", (real) => [...(real as unknown[]), 0], async () => (said = await sweepCheckouts(Date.now() + 20_000)));
+  is("nor an answer with more replies than were asked, counted as failed", [confirmations("ann@example.com"), said.failed], [0, 1]);
   await sweepCheckouts(Date.now() + 20_000);
   is("an exact answer on the next run sends it, once", confirmations("ann@example.com"), 1);
   await sweepCheckouts(Date.now() + 20_000);

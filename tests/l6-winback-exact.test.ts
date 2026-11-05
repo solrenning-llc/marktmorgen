@@ -30,6 +30,8 @@ const customers = new Map<string, string>();
 const subsBody = new Map<string, unknown>();
 /** The events list, as pages of at most `eventsPage`. */
 let eventsPage = 100;
+/** Customers read from Stripe, one per offer looked at. */
+let lookedUp = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -49,7 +51,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return answer({ object: "list", data: page, has_more: from + eventsPage < all.length });
   }
   const customer = path.match(/^\/customers\/(cus_\w+)$/);
-  if (customer) return answer({ id: customer[1], email: customers.get(customer[1]) ?? null });
+  if (customer) {
+    lookedUp += 1;
+    return answer({ id: customer[1], email: customers.get(customer[1]) ?? null });
+  }
   if (path === "/subscriptions") return answer(subsBody.get(url.searchParams.get("customer") ?? "") ?? { object: "list", data: [], has_more: false });
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
 }) as typeof fetch;
@@ -83,6 +88,24 @@ async function withReply(name: string, when: (command: (string | number)[]) => b
   }
 }
 
+/** Like withReply, but the command never reaches Redis: the reply is all there is (a write that did not land). */
+async function withReplyOnly(name: string, when: (command: (string | number)[]) => boolean, reply: unknown, run: () => Promise<unknown>): Promise<void> {
+  const real = redis.pipeline.bind(redis);
+  let used = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!used && commands[0]?.[0] === name && when(commands[0])) {
+      used = true;
+      return reply;
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await run();
+  } finally {
+    redis.pipeline = real;
+  }
+}
+
 async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_l6_winback_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
@@ -93,14 +116,14 @@ async function main(): Promise<void> {
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
   await setStripeAccount(OWNER, "acct_1TestLsixBack1", true);
-  await setSubscription(OWNER, { customerId: "cus_LsixOwner1", subscriptionId: "sub_LsixOwner1", active: true, period: paidPeriod() });
+  await setSubscription(OWNER, { customerId: "cus_LsixOwner1", subscriptionId: "sub_LsixOwner1", active: true, tier: "pro", period: paidPeriod() });
   const club = await addProduct(OWNER, "The Inner Circle", "", "29", { interval: "month", trialDays: 0, payments: 0 });
   if (!club.ok) throw new Error("no product");
   await setProductLink(OWNER, club.product.id, "https://example.com/club");
   await setWinBack(OWNER, { percent: 25, months: 2, days: 7, coupon: "co_Back0001", address: "1 Main St, Portland, OR 97201" });
   const store = (await storeForEmail(OWNER))!;
   const meta = { store: "lsixback", product: club.product.id };
-  const people = ["ann", "bob", "cat", "dan", "eve"];
+  const people = ["ann", "bob", "cat", "dan", "eve", "fay", "gus"];
   for (const name of people) {
     const id = `cus_${name[0].toUpperCase()}${name.slice(1)}0000001`.slice(0, 18);
     customers.set(id, `${name}@example.com`);
@@ -125,12 +148,20 @@ async function main(): Promise<void> {
   part("Is the mark ours? Only an exact OK says yes");
   ended("sub_Cat0000001", cus("cat"), 8, meta);
   const claimOf = (key: string) => (command: (string | number)[]) => String(command[1]).includes(key);
-  await withReply("SET", claimOf("sub_Cat0000001"), () => [undefined], () => sendWinBacks(Date.now() + 30_000, now));
-  is("a claim answered in an unknown shape (no reply) is not taken for ours: Cat is not written to", sentTo().includes("cat@example.com"), false);
-  await withReply("SET", claimOf("sub_Cat0000001"), () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
-  is("nor answered with anything but OK", sentTo().includes("cat@example.com"), false);
+  // Changed assertions (rule 23, Claude 4 on #2714): an oddly answered claim used to be kept and never sent. The claim
+  // now holds a value of its own and is read back: ours only when that value is there, and sent once.
+  await withReplyOnly("SET", claimOf("sub_Cat0000001"), [undefined], () => sendWinBacks(Date.now() + 30_000, now));
+  is("a claim answered in an unknown shape that did not land is not taken for ours: Cat is not written to", sentTo().includes("cat@example.com"), false);
   await sendWinBacks(Date.now() + 30_000, now);
-  is("a mark that may be ours is kept: the next run does not write to Cat either, so nothing is ever sent twice", sentTo().includes("cat@example.com"), false);
+  is("the next run claims it whole and writes to Cat, once", sentTo().filter((to) => to === "cat@example.com").length, 1);
+  ended("sub_Fay0000001", cus("fay"), 8, meta);
+  await withReply("SET", claimOf("sub_Fay0000001"), () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
+  is("a claim answered oddly that did land with our own value is read back as ours: Fay is written to", sentTo().filter((to) => to === "fay@example.com").length, 1);
+  await sendWinBacks(Date.now() + 30_000, now);
+  is("and never twice", sentTo().filter((to) => to === "fay@example.com" || to === "cat@example.com").length, 2);
+  ended("sub_Gus0000001", cus("gus"), 8, meta);
+  await withReply("SET", (command) => String(command[1]).includes("once") || String(command[1]).includes(":o:"), () => ["QUEUED"], () => sendWinBacks(Date.now() + 30_000, now));
+  is("the once-a-while mark answered oddly but ours: Gus is written to, not held back for months", sentTo().filter((to) => to === "gus@example.com").length, 1);
 
 
   part("Every ended membership of the window, past the first page");
@@ -141,6 +172,25 @@ async function main(): Promise<void> {
   is("Dan and Eve are both read, though the window's events come one a page", [sentTo().includes("dan@example.com"), sentTo().includes("eve@example.com")], [true, true]);
   is("and nobody is written to twice", sentTo().length, new Set(sentTo()).size);
   eventsPage = 100;
+
+  part("No more than a hundred offers looked at per store per run, however many ended (Claude 3 on #2714)");
+  // Ann's memberships read whole now (she came back), so no earlier offer is looked at again in what follows.
+  subsBody.set(cus("ann"), { object: "list", data: [{ status: "active", metadata: meta }], has_more: false });
+  await sendWinBacks(Date.now() + 30_000, now);
+  for (let i = 0; i < 150; i += 1) {
+    const id = String(i).padStart(4, "0");
+    const customerId = `cus_LsixMany${id}`;
+    customers.set(customerId, `m${id}@example.com`);
+    await upsertContact(store.listId as string, `m${id}@example.com`, { agreed: true, explicit: true, source: "buyer" }, ROOM);
+    ended(`sub_LsixMany${id}`, customerId, 8, meta);
+  }
+  // Counted by the offers looked at (one customer read each), not by emails, which the store's own monthly email
+  // figure also holds back.
+  const before = lookedUp;
+  await sendWinBacks(Date.now() + 60_000, now);
+  is("150 ended: a hundred looked at this run", lookedUp - before, 100);
+  await sendWinBacks(Date.now() + 60_000, now);
+  is("the other fifty on the next", lookedUp - before, 150);
   done();
 }
 

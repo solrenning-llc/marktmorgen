@@ -113,6 +113,21 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // DR1: one provider receipt and its campaign counter, atomically.
+        if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, daily, receipt, aggregate, count, expiry, limit] = args;
+          const type = this.run(["TYPE", daily]);
+          if (type !== "none" && type !== "hash") return -1;
+          const old = this.run(["HGET", daily, receipt]);
+          const total = this.run(["HGET", daily, aggregate]);
+          if (total !== null && (!/^(0|[1-9][0-9]*)$/.test(String(total)) || Number(total) > 1_000_000_000)) return -1;
+          if (old !== null) return old === count && total !== null && Number(total) >= Number(count) ? 2 : -1;
+          if (Number(this.run(["HLEN", daily])) + (total === null ? 2 : 1) > Number(limit)) return -1;
+          this.run(["HSET", daily, receipt, count]);
+          this.run(["HINCRBY", daily, aggregate, count]);
+          this.run(["EXPIREAT", daily, expiry]);
+          return 1;
+        }
         // CX-67: existing exposure reservation used by held-store company work.
         if (key.includes("local receiptField='case:'..ARGV[3]..':'..ARGV[4]") && args[0] === "1" && args.length === 9) {
           const [, ledger, review, binding, scope, id, rawCharge, rawLimit, rawFunded] = args;
@@ -186,6 +201,14 @@ export class MemoryRedis {
           const [, lock, target, token, value] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", target, value]);
+          return 1;
+        }
+        // The customer voice's summary, written only while its reading's lock is its own (lib/customer-voice.ts, VOICE_KEEP).
+        if (key.startsWith("-- marktmorgen:voice-keep:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lock, target, token, value, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", target, value, "EX", seconds]);
+          this.run(["DEL", lock]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:fenced-set-new:v1\n") && args[0] === "2" && args.length === 5) {

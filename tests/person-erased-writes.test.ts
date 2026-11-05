@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   const buys = async () => {
     store = (await storeForEmail(OWNER))!;
     orders += 1;
-    return listOrder(store, { sessionId: `cs_test_erasedwrites${String(orders).padStart(3, "0")}`, email: "ana@example.com", news: false, created: Math.floor(Date.now() / 1000), products: [{ id: "prod01", title: "Course" }] });
+    return listOrder(store, { sessionId: `cs_test_erasedwrites${String(orders).padStart(3, "0")}`, email: "ana@example.com", news: false, created: Math.floor(Date.now() / 1000) + 1, products: [{ id: "prod01", title: "Course" }] });
   };
 
   part("The deletion leaves its mark before the notes are taken away");

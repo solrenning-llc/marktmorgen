@@ -38,6 +38,7 @@ import { type AllowanceStore, allowancesUsedStrict } from "@/lib/store-allowance
 import { ALLOWANCE_KINDS } from "@/lib/store-allowance-rules";
 import { resetWords } from "@/lib/allowance-window";
 import { standingOf } from "@/lib/plan-standing";
+import { planAboveSold } from "@/lib/larger-plan";
 
 /** The moment a checkup is read, said on the page with it. */
 export function checkupClock(): number {
@@ -157,7 +158,7 @@ export async function runCheckup(store: CheckedStore, can: (permission: Permissi
     domainCheck(domain, resting ? "resting" : site),
     stopped === "left-out" ? null : stopped ?? emailCheck(pause, now),
     account ? checkoutCheck(trouble) : null,
-    limitsCheck(limits, resetWords(store, now), standingOf(store, now / 1000) === "paid", plansOnSale),
+    limitsCheck(limits, resetWords(store, now), standingOf(store, now / 1000) === "paid", plansOnSale, planAboveSold(store.tier ?? "creator")),
     // With no Stripe account there is nothing a dispute could be opened on; the payments line says so.
     account ? disputesCheck(disputes, now) : null,
   ]);

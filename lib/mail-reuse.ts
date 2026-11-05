@@ -51,7 +51,7 @@ export type KeepRefusal =
   | "unsent"
   /** It was narrowed two ways at once, and an email in a sequence carries one condition. */
   | "excludes"
-  /** It was narrowed by spending, a channel or quiet days, which a sequence's step cannot read for each person (lib/segments.ts). */
+  /** It was narrowed by spending, a channel, quiet days, a recent purchase or a kind of buyer, which a sequence's step cannot read for each person (lib/segments.ts). */
   | "money"
   /** The same subject and text are already in that sequence. */
   | "already"

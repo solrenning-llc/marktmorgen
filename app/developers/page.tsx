@@ -3,10 +3,48 @@ import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { API_PAGE } from "@/lib/api-read";
 import { API_RATE } from "@/lib/api-guard";
+import { FIELD_NAME_MAX, MAX_FIELDS_ASKED } from "@/lib/api-fields";
+import { DELIVERY_WRITE_MAX_BYTES, MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
 import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
-import { API_WRITE_UNITS, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { SALE_TEXT_LIMITS, SALES_PAGE, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { PLAN_TITLES } from "@/lib/plan";
+import {
+  BLOCKED_READ_MAX, BOOKINGS_READ, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_NUMBERS_BYTES, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, apiReadUnits, bookWork,
+  bookingsWork, codeMakeWork, codeStopWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
+} from "@/lib/api-read-rules";
+import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+
+/** What each reading that reads more than a page counts as, from the code that takes it (lib/api-read-rules.ts). */
+const STUDENTS_PAGE_COUNTS = 1 + apiReadUnits(studentsPageWork(API_PAGE, 1));
+const STUDENTS_PAGE_COUNTS_MOST = 1 + apiReadUnits(studentsPageWork(API_PAGE, BLOCKED_READ_MAX + 1));
+const BOOKINGS_COUNT = 1 + apiReadUnits(bookingsWork(true));
+const BOOK_EXAMPLE = { affiliates: 100, sales: 1_000 };
+const AFFILIATES_COUNT_LEAST = 1 + apiReadUnits(bookWork({ kept: true, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: false, products: 0 }, BOOK_STRIPE_PAGES));
+const AFFILIATES_COUNT_EXAMPLE =
+  1 + apiReadUnits(bookWork({ kept: true, entries: 2 * BOOK_EXAMPLE.affiliates + BOOK_EXAMPLE.sales, people: BOOK_EXAMPLE.affiliates, leads: 0, paypalRefunds: 0, stripe: true, products: 10 }, BOOK_STRIPE_PAGES));
+const PRODUCTS_PAGE_MOST = 1 + apiReadUnits(productsPageWork(API_PAGE, API_PAGE));
+const ROWS_EXAMPLE = { rows: API_PAGE, kb: 2 };
+const LIST_PAGE_EXAMPLE = 1 + apiReadUnits(scannedPageWork(1, ROWS_EXAMPLE.rows * ROWS_EXAMPLE.kb * 1_000, ROWS_EXAMPLE.rows * ROWS_EXAMPLE.kb * 1_000));
+/** A page of any size: its scan and its take, settled at one more than the door's. */
+const LIST_PAGE_LEAST = 1 + apiReadUnits(scannedPageWork(1, 1, 1));
+const LIST_PAGE_HELD = 1 + apiReadUnits(listPageMost("leads", API_PAGE));
+const MEMBERS_PAGE_HELD = 1 + apiReadUnits(listPageMost("members", API_PAGE));
+const NUMBERS_COUNT = 1 + apiReadUnits(addWork(numbersWork({ kept: true, sales: true, stripe: true, paypalSales: 0, paypalRefunds: 0 }), NUMBERS_KEEP_WORK));
+const NUMBERS_COUNT_NO_SALES = 1 + apiReadUnits(addWork(numbersWork({ kept: true, sales: false, stripe: false, paypalSales: 0, paypalRefunds: 0 }), NUMBERS_KEEP_WORK));
+/** Numbers read from the copy kept an hour: as few as this, and at most this for the largest copy and answer. */
+const NUMBERS_KEPT_LEAST = 1 + apiReadUnits(keptNumbersWork(1, 1));
+const NUMBERS_KEPT_MOST = 1 + apiReadUnits(keptNumbersWork(NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES));
+const CODES_COUNT = 1 + apiReadUnits(codesWork());
+const CODE_MAKE_COUNT = 1 + apiReadUnits(codeMakeWork());
+const CODE_STOP_COUNT = 1 + apiReadUnits(codeStopWork());
+/** The recent events, measured first: an empty log, and the most, LOG_SIZE deliveries at the most each is kept at. */
+const EVENTS_LEAST = 1 + apiReadUnits(eventsWork({ deliveries: 0, bytes: 0, sent: 0 }));
+const EVENTS_MOST_COUNT = 1 + apiReadUnits(eventsWork());
+const MEMBERSHIPS_COUNT = 1 + apiReadUnits(membershipsWork(MEMBERSHIP_NUMBERS_BYTES));
+const MEMBERSHIPS_COUNT_COLD = 1 + apiReadUnits(addWork(membershipsWork(0), MEMBERSHIPS_COLD_WORK));
+const n = (count: number) => count.toLocaleString("en-US");
 
 export const metadata: Metadata = {
   title: "Developers — Marktmorgen",
@@ -79,27 +117,54 @@ export default function DevelopersPage() {
           Every answer is JSON. A list comes as <code className="font-mono">data</code>, and a long list comes a page at a
           time with <code className="font-mono">next</code>: send it back as <code className="font-mono">?cursor=</code> for
           the next page, until it is <code className="font-mono">null</code>.
-          {` A page holds up to ${API_PAGE} rows. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
+          {` A page holds about ${API_PAGE} rows. Products never has more; your list, your members and a course's students can have a few more on a page, and a page can come back empty before the last one, so keep asking until next is null. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
+        </p>
+        <p>
+          To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
+          separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
+          fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
+          <code className="font-mono">unknown_field</code>, with its name, and a name that cannot be a field (a field name is
+          lowercase letters, digits and underscores, starting with a letter, up to {FIELD_NAME_MAX} characters) or more than{" "}
+          {MAX_FIELDS_ASKED} names is answered 400 <code className="font-mono">fields</code>. Both are
+          answered before anything is read, so they count as one request. This works on every list above, on
+          Store, on Bookings, on Discount codes and on Sales.
         </p>
         <p>
           {`Each key may make ${API_RATE} requests a minute. Past that, the answer is 429 with `}
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A contact added or a product given counts as ${API_WRITE_UNITS}. Past it, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}, and a page of sales as ${API_SALES_UNITS}, and more when it names products that are read for their titles. Every read except Store counts as more than one when it reads more than one request's worth: a page of products, of your list or of your members, a course's students, your numbers, your discount codes, your affiliates, your bookings and the recent events (/api/v1/events, the examples a tool such as Zapier shows while you set up a step: from ${n(EVENTS_LEAST)} to ${n(EVENTS_MOST_COUNT)} each, by the size of the deliveries it reads, measured before they are read; a webhook message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, each text in it at most ${MESSAGE_TEXT_MAX} characters, so ${n(EVENTS_MOST_COUNT)} is the most for messages made since November 4, 2026, and one kept from before counts at its size), as said with each below; what it will take is taken before it reads. A read whose size is known only once it is read (a page of your list or your members, your numbers from their copy) sets aside the most it may take first, and gives back at once what it did not need. Past the figure, or when a read needs more than are left, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
-          {" until the next billing month, or at once on a larger plan. Nothing is billed for requests. A write that does not fit the store's data room (its words and records, by plan) is answered 409 "}
+          {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
+          <code className="font-mono">no_place</code>
+          {". Nothing is billed for requests. A write that does not fit the store's data room (its words and records, by plan) is answered 409 "}
           <code className="font-mono">store_full</code>
           {", and nothing is written."}
         </p>
         <Code>{`401  {"error": "unauthorized", "message": "Send your API key as: Authorization: Bearer nl_live_…"}
 429  {"error": "rate_limited", "message": "At most ${API_RATE} requests a minute per key. Try again in a minute."}
-429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: …"}
+429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: 2,000 API requests. This opens again with your next billing month, on …"}
+429  {"error": "monthly_limit", "message": "This read takes ${n(BOOKINGS_COUNT)} of your store's API requests, more than your store has left, so nothing was read."}
+429  {"error": "monthly_limit", "message": "This read may take up to ${n(LIST_PAGE_HELD)} of your store's API requests, more than your store has left, so nothing was read."}
+400  {"error": "unknown_field", "message": "No item in this answer has a field named “nothing_here”."}
+400  {"error": "fields", "message": "“bad-name” cannot be a field name. Use letters, digits and underscores, at most 30 fields."}
+429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
 409  {"error": "store_full", "message": "Your store's data room is full, so nothing was added. …"}
+403  {"error": "key_paused", "message": "This key is paused: the store's team now logs in with a second step, and the key was made without one. …"}
 409  {"error": "paused_unpaid", "message": "Nothing was read: your plan's renewal payment did not go through, …"}
 409  {"error": "paused_unpaid", "message": "Nothing was changed: your plan's renewal payment did not go through, …"}
 502  {"error": "unavailable", "message": "… could not be read just now. Try again in a moment."}`}</Code>
         <p>A missing, mistyped and revoked key all get the same 401.</p>
+        <p>
+          A key made by a team member who logged in without a second step is paused when the store&apos;s owner starts
+          asking the team for one. Every request with it is answered 403 <code className="font-mono">key_paused</code>{" "}
+          until whoever made it logs in with a passkey or an authenticator app&apos;s code and turns it back on under API
+          keys in the studio. A key made by someone who then leaves the team is paused too, and can only be revoked;
+          one made by someone whose role no longer allows it waits for the store&apos;s owner to turn it back on.
+          A paused key is never deleted. The webhook endpoints a key added are sent nothing while it is paused, start
+          again when it is turned back on, and stop for good when it is revoked.
+        </p>
         <p>
           {"While the store's plan renewal is unpaid, reads answer 409 "}
           <code className="font-mono">paused_unpaid</code>
@@ -118,6 +183,7 @@ export default function DevelopersPage() {
 
       <LegalSection title="Products">
         <Endpoint path="/api/v1/products">Every product, in the order your store shows them, drafts included.</Endpoint>
+        <p>{`A full page counts as up to ${n(PRODUCTS_PAGE_MOST)} of your API requests, by how many of its products have to be read; a smaller page counts as fewer.`}</p>
         <Code>{`{
   "data": [
     {
@@ -147,6 +213,7 @@ export default function DevelopersPage() {
           CSV export in your studio. Add <code className="font-mono">?agreed=true</code> for only those who agreed to hear
           from you and have not unsubscribed: the ones it is fair to email.
         </Endpoint>
+        <p>{`A page counts as at least ${n(LIST_PAGE_LEAST)} of your API requests (one while your store has no list yet), and more when its rows are long, by the bytes it reads and sends: for example, ${n(LIST_PAGE_EXAMPLE)} for ${n(ROWS_EXAMPLE.rows)} rows of about ${ROWS_EXAMPLE.kb} KB each. A page needs ${n(LIST_PAGE_HELD)} requests free before it is read, what a full page of the longest rows could take; what it did not use is given back at once. With fewer free, the page is refused and nothing is read. Members count the same way: a page of members needs ${n(MEMBERS_PAGE_HELD)} free before it is read.`}</p>
         <Code>{`{
   "data": [
     {
@@ -193,9 +260,16 @@ export default function DevelopersPage() {
 
       <LegalSection title="Students">
         <Endpoint path="/api/v1/students?product=<id>">
-          Everybody who has opened one course, with how far they got, the most recently active first, up to 500.{" "}
-          <code className="font-mono">product</code> is the course product&apos;s id, from Products.
+          Everybody who has opened one course, with how far they got, a page at a time, in no set order.{" "}
+          <code className="font-mono">product</code> is the course product&apos;s id, from Products, and{" "}
+          <code className="font-mono">total</code> is how many students the course has in all.
         </Endpoint>
+        <p>
+          {`Changed on November 4, 2026: students now come a page at a time, about ${n(API_PAGE)} a page in no set order, and no longer as the 500 most recently active. If the course changes while you page through it, a student can show up twice, or a page can come back empty before the last one, so the rows you add up may not match total.`}
+        </p>
+        <p>
+          {`Each page reads every student's progress, so a full page of ${n(API_PAGE)} counts as ${n(STUDENTS_PAGE_COUNTS)} of your API requests (${n(STUDENTS_PAGE_COUNTS_MOST)} when more than ${n(BLOCKED_READ_MAX)} students of the course are blocked). A smaller page counts as fewer.`}
+        </p>
         <Code>{`{
   "total": 1,
   "data": [
@@ -207,7 +281,8 @@ export default function DevelopersPage() {
       "last_seen_at": "2026-09-29T08:15:31.000Z",
       "blocked": false
     }
-  ]
+  ],
+  "next": null
 }`}</Code>
       </LegalSection>
 
@@ -216,6 +291,7 @@ export default function DevelopersPage() {
           Your numbers for the last 7, 30 and 90 days, the same ones your studio shows: visitors, checkouts, sales and
           revenue, each channel from visit to sale, and page views by country and by device.
         </Endpoint>
+        <p>{`Read anew, it reads 180 days of counts and, with your Stripe account connected, every page of your sales, renewals, refunds and disputes it may need, so it counts as ${n(NUMBERS_COUNT)} of your API requests (${n(NUMBERS_COUNT_NO_SALES)} for a store with no sales to read), and more when you have PayPal sales or refunds. A copy of the numbers is then kept for an hour: within that hour, a read comes from the copy and counts only for reading it and its answer, as few as ${n(NUMBERS_KEPT_LEAST)} and at most ${n(NUMBERS_KEPT_MOST)}. `}<code className="font-mono">asOf</code>{" says when the numbers were read, in ISO 8601 (UTC), so a number up to an hour old is never taken for one of this minute."}</p>
         <Code>{`{
   "data": {
     "currency": "usd",
@@ -247,7 +323,8 @@ export default function DevelopersPage() {
       "last_30_days": { "...": "the same fields" },
       "last_90_days": { "...": "the same fields" }
     }
-  }
+  },
+  "asOf": "2026-10-14T16:05:12.000Z"
 }`}</Code>
         <p>
           Money is in the smallest unit of your store&apos;s currency, before Stripe&apos;s fee. <code className="font-mono">sales</code>{" "}
@@ -380,6 +457,9 @@ export default function DevelopersPage() {
           subscribers&apos; or affiliates&apos;: what an assistant reads is kept by whoever runs the assistant,
           and the people on your list did not agree to that. The endpoints above are where your own tools read them.
         </p>
+        <p>
+          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats, read anew or from the copy kept an hour (the tools about a stretch of days keep their own copy, with the products they name, and count those products when read anew), each answer with its asOf; each product's numbers also count what buyers bought next, by its size; your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes, and more for the names of the products they name; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. Which store the key belongs to counts as one.`}
+        </p>
       </LegalSection>
 
       <LegalSection title="Affiliates">
@@ -407,6 +487,9 @@ export default function DevelopersPage() {
   ]
 }`}</Code>
         <p>
+          {`It reads your whole program, so it counts as at least ${n(AFFILIATES_COUNT_LEAST)} of your API requests, and more as your program grows: for example, ${n(AFFILIATES_COUNT_EXAMPLE)} for ${n(BOOK_EXAMPLE.affiliates)} affiliates with ${n(BOOK_EXAMPLE.sales)} sales and your Stripe account connected. The count is made before anything is read.`}
+        </p>
+        <p>
           <code className="font-mono">payable</code> is what can be paid today; <code className="font-mono">waiting</code>{" "}
           is still inside the wait you set before a sale can be paid. When <code className="font-mono">refunds_checked</code>{" "}
           is <code className="font-mono">false</code>, Stripe could not be asked about refunds just now and the amounts may
@@ -419,6 +502,9 @@ export default function DevelopersPage() {
           Paid calls and seats in live sessions, each at the time it is booked for now — a booking its buyer moved is at
           its new time.
         </Endpoint>
+        <p>
+          {`With your Stripe account connected, it reads up to ${n(BOOKINGS_READ)} bookings from it, so it counts as ${n(BOOKINGS_COUNT)} of your API requests, however many you have. Without Stripe connected, it counts as one.`}
+        </p>
         <Code>{`{
   "data": [
     {
@@ -466,6 +552,27 @@ export default function DevelopersPage() {
         <p>{`A store may add ${ADDS_PER_DAY.toLocaleString("en-US")} new people a day through the API; past that, 429 daily_limit until the next day.`}</p>
       </LegalSection>
 
+      <LegalSection title="Discount codes">
+        <Endpoint path="/api/v1/codes">
+          Your discount codes, read from your own Stripe account as your studio lists them: what each takes off, how many
+          times it was used, its limit, its smallest order and whether it is live.
+        </Endpoint>
+        <p>{`Reading them asks your Stripe account, so it counts as ${n(CODES_COUNT)} of your API requests; making a code counts as ${n(CODE_MAKE_COUNT)} and switching one off as ${n(CODE_STOP_COUNT)}, taken before Stripe is asked.`}</p>
+        <Endpoint method="POST" path="/api/v1/codes">
+          Makes a code on your own Stripe account, checked as in your studio. Send{" "}
+          <code className="font-mono">{`{"code": "LAUNCH20", "percent": 20}`}</code>, or{" "}
+          <code className="font-mono">{`{"code": "TENOFF", "kind": "amount", "amount": "10"}`}</code> in your store&apos;s
+          currency; <code className="font-mono">uses</code> and <code className="font-mono">minimum</code> are optional. A
+          code that cannot be made says why, as <code className="font-mono">error</code> and{" "}
+          <code className="font-mono">message</code>; the same letters twice give 409 <code className="font-mono">taken</code>.
+        </Endpoint>
+        <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
+          Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
+          the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}
+          <code className="font-mono">not_selling</code> while your store is not taking payments.
+        </Endpoint>
+      </LegalSection>
+
       <LegalSection title="Writing: giving a product">
         <Endpoint method="POST" path="/api/v1/access">
           Gives a product to an address with no payment, as an import of past buyers does: a file, a link, a course, a
@@ -491,9 +598,96 @@ export default function DevelopersPage() {
       </LegalSection>
 
       <LegalSection title="Sales and refunds">
+        <Endpoint path="/api/v1/sales">
+          Your store&apos;s paid checkouts, newest first, read from your own Stripe account as your studio&apos;s list of
+          sales reads them, in the same shape as the <code className="font-mono">sale.completed</code> webhook.
+          {` Up to ${SALES_PAGE} checkouts are read per call, and each call counts as ${API_SALES_UNITS} API requests, because it waits on Stripe. `}
+          A page can be empty and still have a <code className="font-mono">next</code>, when those checkouts were not this
+          store&apos;s. A checkout that only saved a card is not a sale and is not listed. What a buyer typed at checkout is
+          not included. 409 with <code className="font-mono">not_selling</code> while the store is not taking payments.
+        </Endpoint>
+        <Code>{`{
+  "data": [
+    {
+      "checkout_session": "cs_live_a1B2c3",
+      "kind": "one_time",
+      "product": { "id": "k3j9x2p1ab", "title": "The 7-Day Reset" },
+      "option": null,
+      "bundle_items": [{ "id": "q8w2e4r6ty", "title": "Reset Workbook" }],
+      "order_bump": { "id": "m5n7b9v1cx", "title": "Meal Planner", "bundle_items": null },
+      "order_bumps": [{ "id": "m5n7b9v1cx", "title": "Meal Planner", "bundle_items": null }],
+      "amount_cents": 5800,
+      "discount_cents": 0,
+      "currency": "usd",
+      "buyer": { "email": "dana@example.com", "name": "Dana Ortiz" },
+      "opened_at": "2026-09-20T09:38:52.000Z",
+      "paid_at": "2026-09-20T09:41:10.000Z",
+      "refunded_cents": 0,
+      "disputed": false,
+      "trial": false,
+      "source": { "utm_source": "newsletter", "utm_medium": "email", "utm_campaign": null, "utm_content": null, "site": null }
+    }
+  ],
+  "next": "cs_live_a1B2c3"
+}`}</Code>
         <p>
-          Sales, subscriptions and refunds are charged on your own Stripe account, so Stripe&apos;s own API is where to
-          read them, with your own Stripe key. To be told about each one as it happens, add a webhook in your studio.
+          <code className="font-mono">amount_cents</code> is what the buyer paid at checkout, products checked at checkout
+          included, in the currency&apos;s smallest unit, as Stripe counts it: cents for dollars, but whole yen for{" "}
+          <code className="font-mono">jpy</code> and whole units for the other currencies Stripe has without decimals,
+          such as <code className="font-mono">krw</code>. So 4900 is $49.00 in <code className="font-mono">usd</code> and
+          ¥4,900 in <code className="font-mono">jpy</code>. <code className="font-mono">discount_cents</code> is in the same
+          unit, and is <code className="font-mono">null</code> if Stripe gave no discount details.
+        </p>
+        <p>
+          <code className="font-mono">paid_at</code> is when the buyer paid: the charge, or for a membership or
+          payment plan, when its first invoice was paid (with a free trial, that invoice is for $0, so this is when the
+          trial began). It is not when the checkout page was opened. It is{" "}
+          <code className="font-mono">null</code> when nothing was charged at checkout, such as a free order.{" "}
+          <code className="font-mono">currency</code> is always the three-letter code Stripe gave: if Stripe did not
+          give one for a sale, the answer is 502 <code className="font-mono">unavailable</code>, never a guessed{" "}
+          <code className="font-mono">usd</code>.
+        </p>
+        <p>
+          Products checked at checkout are in <code className="font-mono">order_bumps</code>, in the order of their boxes,
+          and the first is also in <code className="font-mono">order_bump</code>; a bundle&apos;s products are in{" "}
+          <code className="font-mono">bundle_items</code>, which is <code className="font-mono">null</code> when there is
+          no bundle. A product&apos;s <code className="font-mono">title</code> is{" "}
+          <code className="font-mono">null</code> when the product is no longer in your store
+          {`, or, on a page naming more than ${SALES_TITLE_IDS} different products, for those past the ${SALES_TITLE_IDS}th. `}
+          A one-click extra taken after the checkout (an upsell) is its own payment, not a checkout, so it is not on this
+          list: the <code className="font-mono">sale.completed</code> webhook with{" "}
+          <code className="font-mono">&quot;kind&quot;: &quot;upsell&quot;</code> tells you of each one.
+        </p>
+        <p>
+          <code className="font-mono">refunded_cents</code> and <code className="font-mono">disputed</code> are not in the
+          webhook, which is sent when the sale is made. For a one-time payment they are read from its charge when you
+          call: how much of it was refunded so far, in the same unit as <code className="font-mono">amount_cents</code>, and
+          whether the buyer disputed it. For a membership or payment plan, and when nothing was charged, both are{" "}
+          <code className="font-mono">null</code>: not read here, which is not the same as none. Add the{" "}
+          <code className="font-mono">refund.issued</code> and <code className="font-mono">dispute.opened</code> webhooks in
+          your studio to be told of each one, or read them in Stripe&apos;s own API with your own Stripe key.
+        </p>
+        <p>
+          The list is in the order Stripe keeps checkouts: newest first by{" "}
+          <code className="font-mono">opened_at</code>, when the checkout page was opened, not by{" "}
+          <code className="font-mono">paid_at</code>. A buyer can open a checkout and pay later, and some payment methods,
+          such as bank debits, settle days after that, so a sale can appear below sales you already read. To keep a copy
+          in step, read again from the top each time and go on until a sale&apos;s{" "}
+          <code className="font-mono">opened_at</code> is earlier than your last read, less a margin: at least 24 hours,
+          and a week or more if your store takes payment methods that settle later. Use{" "}
+          <code className="font-mono">checkout_session</code> to skip a sale you already have.
+        </p>
+        <p>
+          {`Texts are cut to a fixed length, so a page stays small: a product's title from the checkout to ${SALE_TEXT_LIMITS.title} characters, the buyer's name to ${SALE_TEXT_LIMITS.name}, each utm tag to ${SALE_TEXT_LIMITS.utm} and the site to ${SALE_TEXT_LIMITS.site}, with control characters left out. Lengths are counted in UTF-16 code units, as JavaScript counts them, so an emoji counts as 2. An email address longer than ${SALE_TEXT_LIMITS.email} characters is not a real one, so it is null rather than cut, and so is one holding a control character.`}{" "}
+          <code className="font-mono">product.id</code> and <code className="font-mono">option</code> are{" "}
+          <code className="font-mono">null</code> when the id stored on the checkout is not shaped like an id (letters,
+          digits, hyphens and underscores, up to 64).
+        </p>
+        <p>
+          A <code className="font-mono">cursor</code> this list did not give, or sent twice, is answered 400{" "}
+          <code className="font-mono">invalid_cursor</code>: start again without one. If Stripe is busy with your account,
+          the answer is 503 with <code className="font-mono">Retry-After</code>. If Stripe&apos;s answer cannot be read
+          whole, the answer is 502 <code className="font-mono">unavailable</code>, never a page with guessed amounts.
         </p>
       </LegalSection>
 

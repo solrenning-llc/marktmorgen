@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import { CodeField, type CodeWords } from "@/components/slot-picker";
 
 const noop = () => () => {};
 
@@ -38,6 +39,8 @@ export type SessionWords = {
   details: Record<string, string>;
   submit: string;
   note: string;
+  /** A session with a deposit: the field for a discount code, off the whole price (lib/deposit-code.ts). */
+  code?: CodeWords;
 };
 
 /**
@@ -125,6 +128,8 @@ export function SessionPicker({
           {(local ? words.yours : words.creators).replace("{zone}", zoneLabel(sessions[0].start, tz, locale))}
         </p>
       </fieldset>
+
+      {words.code && !move ? <CodeField words={words.code} /> : null}
 
       <div className="mt-6">
         <button type="submit" className="btn st-btn btn-lg btn-block">

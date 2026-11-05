@@ -144,7 +144,7 @@ function BlockView({ block }: { block: Block }) {
               return (
                 <li key={item.title}>
                   {item.href ? (
-                    <Link href={item.href} className="card flex h-full gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-md)]">
+                    <Link href={item.href} className="card flex gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-md)]">
                       {inner}
                     </Link>
                   ) : (
@@ -199,9 +199,11 @@ function BlockView({ block }: { block: Block }) {
           <div className="mt-6 divide-y divide-line overflow-hidden rounded-[var(--r-lg)] border border-line bg-white">
             {block.items.map((item) => (
               <details key={item.q} className="group">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-semibold text-ink sm:px-6 [&::-webkit-details-marker]:hidden">
+                {/* A native summary, so its open or closed state is announced; a plus when closed and a minus when open, both decorative, with no movement, and the focus ring drawn inside, since the rounded box clips what is outside (534 [FQ1] (i)). */}
+                <summary className="flex min-h-11 cursor-pointer focus-visible:[outline-offset:-3px]! list-none items-center justify-between gap-4 px-5 py-4 font-semibold text-ink sm:px-6 [&::-webkit-details-marker]:hidden">
                   {item.q}
-                  <Icon name="plus" size={18} className="shrink-0 text-violet-deep transition-transform duration-200 group-open:rotate-45" />
+                  <Icon name="plus" size={18} className="shrink-0 text-violet-deep group-open:hidden" />
+                  <Icon name="minus" size={18} className="hidden shrink-0 text-violet-deep group-open:block" />
                 </summary>
                 <p className="px-5 pb-5 text-[0.9375rem] text-ink-soft sm:px-6">{item.a}</p>
               </details>
@@ -343,6 +345,21 @@ function BlockView({ block }: { block: Block }) {
             {block.title}
           </h2>
           <p className="mt-2 text-[0.9375rem] text-ink-soft">{block.body}</p>
+        </section>
+      );
+
+    case "terms":
+      return (
+        <section className="rounded-[var(--r-lg)] border border-line bg-white p-6 sm:p-8" aria-labelledby={sectionId(block.title)}>
+          <h2 id={sectionId(block.title)} className="t-h3 text-ink">{block.title}</h2>
+          <dl className="mt-5 grid gap-4">
+            {block.items.map((item) => (
+              <div key={item.term}>
+                <dt className="font-semibold text-ink">{item.term}</dt>
+                <dd className="mt-1 text-[0.9375rem] text-ink-soft [overflow-wrap:anywhere]">{item.meaning}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
       );
 

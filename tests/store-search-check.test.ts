@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StoreSearchCheck } from "@/components/store-search-check";
 import { addProduct, claimHandle, ensureStatsId, storeForEmail, updateDetails, type Store } from "@/lib/store";
 import { KIND } from "@/lib/catalog";
-import { SEARCH_DONE_FOR_YOU, searchCheck } from "@/lib/store-search-check";
+import { AGENTS_GET, SEARCH_DONE_FOR_YOU, searchCheck } from "@/lib/store-search-check";
 import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -44,11 +44,11 @@ async function main(): Promise<void> {
   is("an own domain counts only when live and allowed by the plan", searchCheck({ ...stored, domain: null }).ownDomain, false);
 
   part("What the studio shows");
-  const shown = renderToStaticMarkup(StoreSearchCheck({ check: { description: false, indexed: true, suspended: false, summaries: { missing: ["Bread & Co"], unchecked: 0 }, ownDomain: false } }));
+  const shown = renderToStaticMarkup(StoreSearchCheck({ check: { description: false, indexed: true, suspended: false, agents: { noPicture: ["Bread & Co"] }, summaries: { missing: ["Bread & Co"], unchecked: 0 }, ownDomain: false } }));
   is("a heading, the missing description with where to write it, the product named with where to fix it", [shown.includes("Can people find your store?"), shown.includes('href="#details"'), shown.includes("Bread &amp; Co"), shown.includes('href="#products"')], [true, true, true, true]);
   is("never a promise about results", [/rank|top of google|first page of google|guarantee/i.test(shown), shown.includes("nobody can promise that")], [false, true]);
-  const fine = renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: true, suspended: false, summaries: { missing: [], unchecked: 0 }, ownDomain: false } }));
-  is("a suspended store is told why, not told to add a product", renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: false, suspended: true, summaries: { missing: [], unchecked: 0 }, ownDomain: false } })).includes('data-search-indexed="suspended"'), true);
+  const fine = renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: true, suspended: false, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain: false } }));
+  is("a suspended store is told why, not told to add a product", renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: false, suspended: true, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain: false } })).includes('data-search-indexed="suspended"'), true);
   is("all done: said so", [fine.includes('data-search-description="yes"'), fine.includes('data-search-summaries="done"')], [true, true]);
 
   part("What is done for every store is what the code does");
@@ -62,6 +62,17 @@ async function main(): Promise<void> {
     /alternates: \{ canonical: ownDomain \}/.test(storePage),
   ], [true, true, true, true, true]);
   is("four lines, plain words", SEARCH_DONE_FOR_YOU.length, 4);
+
+  part("What AI agents get (624 [SZ8](42)), each line what the code does");
+  is("products with no picture named, with where to add one", [(await check()).agents.noPicture, shown.includes('data-agents-no-picture="1"')], [["Bread Book", "Cake Course"], true]);
+  is("none missing: nothing to fix is shown", fine.includes("data-agents-no-picture"), false);
+  is("the three lines on every studio's check", AGENTS_GET.every((line) => fine.includes(line.replace(/'/g, "&#x27;"))), true);
+  is("backed: robots open to every crawler but buyers' pages; product data with name, price, picture, rating; the MCP server reads a store with an API key", [
+    /User-agent: \*[\s\S]*Allow: \/[\s\S]*Disallow: \/orders[\s\S]*Disallow: \/course[\s\S]*Disallow: \/community/.test(readFileSync("lib/store-sitemap.ts", "utf8")),
+    !/GPTBot|ClaudeBot|PerplexityBot|OAI-SearchBot|Google-Extended/.test(readFileSync("lib/store-sitemap.ts", "utf8") + readFileSync("app/robots.ts", "utf8")),
+    ['"@type": "Product"', "aggregateRating", "image:"].every((w) => productPage.includes(w)),
+    readFileSync("app/api/mcp/route.ts", "utf8").includes("apiStore(request)"),
+  ], [true, true, true, true]);
   done();
 }
 

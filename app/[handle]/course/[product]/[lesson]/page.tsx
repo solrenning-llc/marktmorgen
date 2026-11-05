@@ -11,7 +11,7 @@ import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, lessonVideo } from "@/lib/learn";
-import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor } from "@/lib/quiz";
+import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor, studentQuiz } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -27,6 +27,8 @@ import { speech } from "@/lib/buyer-words";
 import { type CoursesWords, coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
+import { StampedPlayer } from "@/components/video-stamp";
+import { videoStampText } from "@/lib/video-stamp";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -119,6 +121,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
     lesson.task && student ? submissionOf(course.id, lesson.id, who) : Promise.resolve<Submission | null>(null),
   ]);
   const quizMode = access.state === "open" && access.learner.owner ? "owner" : student && open ? "student" : "visitor";
+  // A student sees only the questions their try draws from a bank (lib/quiz.ts).
+  const asked = quiz && attempt && quizMode === "student" ? studentQuiz(quiz, course.id, lesson.id, who, attempt) : null;
   // Comments are for the course's students and its creator; a visitor on a
   // free preview sees none of them.
   const reader = access.state === "open" && open ? (access.learner.owner ? CREATOR_AUTHOR : who) : null;
@@ -133,6 +137,11 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const mustPass = Boolean(student && quiz && lesson.quiz?.required && !passed.has(lesson.id));
   // Work to hand in, still holding the lessons after it shut.
   const mustHandIn = Boolean(student && task && lesson.task?.gate && !passed.has(lesson.id));
+
+  // The buyer's mark over the video (602 [WP1]): only a signed-in student's own
+  // email and the day they joined, only when the creator switched it on; never
+  // for the creator, a visitor on a free preview, or anybody else's email.
+  const stamp = course.stampVideo === true && student && start !== null ? videoStampText(student.email, "", new Date(start * 1000)) : null;
 
   const order = lessonsInOrder(course);
   const at = order.findIndex((entry) => entry.lesson.id === lesson.id);
@@ -174,39 +183,78 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {lesson.video ? (
               video?.kind === "stream" ? (
-                <div className="mt-6 overflow-hidden rounded-2xl bg-black">
-                  {/* The video service's player (lib/stream.ts): it sends the
-                      size the line can carry, so the video does not stop to
-                      wait. The frame takes the video's own shape, so one
-                      filmed upright stays upright, and is never taller than
-                      three quarters of the screen. */}
-                  <iframe
-                    src={video.src}
-                    title={lesson.title}
-                    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
-                    allowFullScreen
-                    referrerPolicy="strict-origin-when-cross-origin"
-                    className="mx-auto block w-full"
-                    style={{
-                      aspectRatio: `${video.width} / ${video.height}`,
-                      maxWidth: `calc(75vh * ${video.width} / ${video.height})`,
-                      border: 0,
-                    }}
-                  />
-                </div>
+                stamp ? (
+                  <StampedPlayer text={stamp} seed={`${course.id}:${who}`} enter={w.fullScreen} exit={w.exitFullScreen}>
+                    {/* Stamped: the service's own full screen and picture in
+                        picture are not given to its frame, since they would
+                        show the video without the mark; the button under it
+                        puts both in full screen instead. */}
+                    <iframe
+                      src={video.src}
+                      title={lesson.title}
+                      allow="accelerometer; gyroscope; autoplay; encrypted-media"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      className="mx-auto block w-full"
+                      style={{
+                        aspectRatio: `${video.width} / ${video.height}`,
+                        maxWidth: `calc(var(--player-tall, 75vh) * ${video.width} / ${video.height})`,
+                        border: 0,
+                      }}
+                    />
+                  </StampedPlayer>
+                ) : (
+                  <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
+                    {/* The video service's player (lib/stream.ts): it sends the
+                        size the line can carry, so the video does not stop to
+                        wait. The frame takes the video's own shape, so one
+                        filmed upright stays upright, and is never taller than
+                        three quarters of the screen. */}
+                    <iframe
+                      src={video.src}
+                      title={lesson.title}
+                      allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
+                      allowFullScreen
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      className="mx-auto block w-full"
+                      style={{
+                        aspectRatio: `${video.width} / ${video.height}`,
+                        maxWidth: `calc(75vh * ${video.width} / ${video.height})`,
+                        border: 0,
+                      }}
+                    />
+                  </div>
+                )
               ) : video?.kind === "file" ? (
-                <div className="mt-6 overflow-hidden rounded-2xl bg-black">
-                  {/* Vertical videos stay vertical: the player takes the
-                      shape of the video instead of forcing it wide. */}
-                  <video
-                    src={video.src}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    controlsList="nodownload"
-                    className="mx-auto block max-h-[75vh] w-full object-contain"
-                  />
-                </div>
+                stamp ? (
+                  <StampedPlayer text={stamp} seed={`${course.id}:${who}`} enter={w.fullScreen} exit={w.exitFullScreen}>
+                    {/* Stamped: the video's own full screen and picture in
+                        picture are turned off where the browser allows it,
+                        and the button under it puts the video and the mark
+                        in full screen together. */}
+                    <video
+                      src={video.src}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      controlsList="nodownload nofullscreen"
+                      disablePictureInPicture
+                      className="mx-auto block max-h-[var(--player-tall,75vh)] w-full object-contain"
+                    />
+                  </StampedPlayer>
+                ) : (
+                  <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
+                    {/* Vertical videos stay vertical: the player takes the
+                        shape of the video instead of forcing it wide. */}
+                    <video
+                      src={video.src}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      controlsList="nodownload"
+                      className="mx-auto block max-h-[75vh] w-full object-contain"
+                    />
+                  </div>
+                )
               ) : video?.kind === "preparing" ? (
                 <p className="st-note mt-6" role="status">
                   <strong>{w.preparingStrong}</strong>{` ${w.preparingRest}`}
@@ -224,7 +272,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {body ? (
               <div className="mt-6" style={{ color: "var(--st-text)" }}>
-                <LessonText text={body} />
+                <LessonText text={body} codeLabel={w.codeBlock} />
               </div>
             ) : null}
 
@@ -260,8 +308,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {quiz ? (
               <LessonQuiz
-                quiz={quiz}
+                quiz={asked?.quiz ?? quiz}
                 attempt={attempt}
+                waitSeconds={asked?.wait ?? 0}
+                stale={query.quiz === "stale"}
                 mode={quizMode}
                 action="/api/store/course/quiz"
                 hidden={{ handle: store.handle, product: product.id, lesson: lesson.id }}

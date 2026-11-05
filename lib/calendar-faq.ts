@@ -4,7 +4,7 @@
  * the studio's "Your calendars" card, shown once the store has a call product
  * (components/calendar-editor.tsx, app/studio/page.tsx), its limits and how
  * long a reading is kept (lib/calendar-limits.ts), and
- * the shared answer to "Can I try it before paying?" (lib/beginner-faq.ts).
+ * the shared answer to "Can I try calendar sync before paying?" (lib/beginner-faq.ts).
  * No number of calendars or bookings beyond the code's own limits. Shown
  * first in the page's own "Questions" block.
  */
@@ -28,7 +28,7 @@ export function calendarBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
       a: `In your studio, once your store has a call (a draft counts), find “${w.card}”; the store's owner and Admins see it. Paste the calendar's private address under “${w.field}” and press “${w.add}”. “${w.where}” says where Google Calendar, Outlook and Apple Calendar keep it. There is no account to connect and no password. Once ${MAX_FEEDS} are added, remove one to add another.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try calendar sync before paying?",
       a: tryBeforePaying("Calendar sync", "a call and the calendars your store reads", onSale, trialDays),
     },
     {

@@ -1,5 +1,5 @@
 import type { Attempt, Quiz } from "@/lib/quiz";
-import { triesLeft } from "@/lib/quiz";
+import { questionsPerTry, triesLeft } from "@/lib/quiz";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 
@@ -12,6 +12,10 @@ import type { LanguageCode } from "@/lib/store-language";
  * the explanations of those, and — once passed or out of tries — the right
  * answers and every explanation.
  *
+ * With a question bank (630 [HN6](7)) `quiz` holds only the questions this
+ * student's try draws, and a student who must wait between tries sees how
+ * long, with the form shut, so the wait never shows the next questions.
+ *
  * Said in the store's `language` (lib/buyer-words/courses.ts), English
  * unless given.
  */
@@ -23,6 +27,8 @@ export function LessonQuiz({
   hidden,
   storeName,
   justMarked,
+  waitSeconds = 0,
+  stale = false,
   language = "en",
 }: {
   quiz: Quiz;
@@ -34,10 +40,14 @@ export function LessonQuiz({
   storeName: string;
   /** Came straight back from marking a try: the result is announced. */
   justMarked: boolean;
+  /** Seconds before this student may try again; 0 when they may now. */
+  waitSeconds?: number;
+  /** Came back because the questions sent were no longer this try's: nothing was counted. */
+  stale?: boolean;
   language?: LanguageCode;
 }) {
   const w = coursesWords(language);
-  const total = quiz.questions.length;
+  const total = questionsPerTry(quiz);
   const heading = (
     <div className="flex flex-wrap items-baseline justify-between gap-2">
       <h2 id="quiz-title" className="font-display text-xl font-semibold">{w.quiz}</h2>
@@ -61,14 +71,32 @@ export function LessonQuiz({
   const passed = attempt?.passed === true;
   const last = attempt?.last ?? null;
   const reveal = mode === "owner" || passed || left === 0;
-  const canAnswer = mode === "student" && !passed && left !== 0;
+  const waiting = mode === "student" && !passed && left !== 0 && waitSeconds > 0;
+  const canAnswer = mode === "student" && !passed && left !== 0 && !waiting;
+  // A bank's next try draws other questions: the marks above them are the last try's.
+  const fresh = Boolean(quiz.draw);
+  const waitLine = waiting ? w.waitAgain(w.span(Math.max(1, Math.ceil(waitSeconds / 60)))) : null;
+  const bank = mode === "owner"
+    ? [
+        quiz.draw ? w.bankDraw(quiz.draw, quiz.questions.length) : null,
+        quiz.shuffle ? w.bankShuffle : null,
+        quiz.waitMinutes ? w.bankWait(w.span(quiz.waitMinutes)) : null,
+      ].filter((line): line is string => Boolean(line))
+    : [];
 
   return (
     <section id="quiz" className="mt-8 scroll-mt-6 rounded-2xl px-5 py-5 sm:px-6" style={{ border: "1px solid var(--st-line-strong)" }} aria-labelledby="quiz-title">
       {heading}
 
+      {stale && mode === "student" ? (
+        <p className="st-note mt-3 text-sm" role="status">{w.staleTry}</p>
+      ) : null}
+
       {mode === "owner" ? (
-        <p className="st-note mt-3 text-sm">{w.ownerQuiz}</p>
+        <>
+          <p className="st-note mt-3 text-sm">{w.ownerQuiz}</p>
+          {bank.length ? <p className="st-muted mt-2 text-sm">{bank.join(" ")}</p> : null}
+        </>
       ) : last ? (
         <div
           id="quiz-result"
@@ -87,9 +115,10 @@ export function LessonQuiz({
               : left === 0
                 ? w.outOfTries(quiz.attempts, storeName)
                 : left === null
-                  ? w.againAny
-                  : w.againLeft(left)}
+                  ? fresh ? w.answerAny : w.againAny
+                  : fresh ? w.answerLeft(left) : w.againLeft(left)}
           </p>
+          {waitLine ? <p className="mt-1 text-sm font-semibold">{waitLine}</p> : null}
         </div>
       ) : (
         <p className="st-muted mt-2 text-sm">{left === null ? w.answerAny : w.answerLeft(left)}</p>
@@ -99,6 +128,7 @@ export function LessonQuiz({
         {Object.entries(hidden).map(([name, value]) => (
           <input key={name} type="hidden" name={name} value={value} />
         ))}
+        {canAnswer ? <input type="hidden" name="shown" value={quiz.questions.map((q) => q.id).join(",")} /> : null}
         <ol className="space-y-6">
           {quiz.questions.map((question, qi) => {
             const picked = last?.answers[question.id] ?? [];

@@ -81,19 +81,54 @@ export function flowMoney(revenue: MailRevenue | null, flowId: string): MailMone
   return total.sales || total.elsewhere ? total : null;
 }
 
+/**
+ * How many bytes what the emails sold holds as kept, 0 when it is not kept,
+ * looked up before it is read by a reading that pays for its size
+ * (lib/mcp-tools.ts, emailsTool); null when it did not come back.
+ */
+export async function keptMailRevenueBytes(store: Store): Promise<number | null> {
+  if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["STRLEN", cacheKey(store.statsId)]]);
+  const bytes = Number(n);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+}
+
 /** The store's email sales, from the cache when it is fresh. Never throws: a page is not lost over a number. */
 export async function readMailRevenue(store: Store): Promise<MailRevenue | null> {
+  const read = await readMailRevenuePaid(store, null);
+  return read === "refused" ? null : read;
+}
+
+/**
+ * readMailRevenue, asking `beforeStripe` first when it is not kept and the
+ * sales are about to be read, so a reading that pays for its size
+ * (lib/mcp-tools.ts, emailsTool) takes it then: "refused" when it says no,
+ * with nothing read. Never throws otherwise. `sized` hears the bytes the kept
+ * copy was read at, or, when it was made again, the bytes of the copy kept,
+ * so that reading settles at them.
+ */
+export async function readMailRevenuePaid(
+  store: Store,
+  beforeStripe: (() => Promise<boolean>) | null,
+  sized?: (bytes: { read: number } | { kept: number }) => void,
+): Promise<MailRevenue | null | "refused"> {
   if (!store.stripeAccountId || !store.statsId) return null;
   try {
     if (isRedisConfigured()) {
       const [cached] = await redisPipeline([["GET", cacheKey(store.statsId)]]);
-      if (typeof cached === "string") return JSON.parse(cached) as MailRevenue;
+      if (typeof cached === "string") {
+        sized?.({ read: Buffer.byteLength(cached) });
+        return JSON.parse(cached) as MailRevenue;
+      }
     }
+    if (beforeStripe && !(await beforeStripe())) return "refused";
     const since = Math.floor(Date.now() / 1000) - STATS_DAYS * 86400;
     const { sales, partial } = await readPaidSales(store, since, PAGES);
     const out: MailRevenue = { by: moneyByCampaign(sales, store.currency), partial };
+    const text = JSON.stringify(out);
+    sized?.({ kept: Buffer.byteLength(text) });
     if (isRedisConfigured()) {
-      await redisPipeline([["SET", cacheKey(store.statsId), JSON.stringify(out), "EX", CACHE_SECONDS]]).catch(() => {});
+      await redisPipeline([["SET", cacheKey(store.statsId), text, "EX", CACHE_SECONDS]]).catch(() => {});
     }
     return out;
   } catch (error) {

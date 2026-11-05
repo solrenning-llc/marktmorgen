@@ -22,11 +22,11 @@ export function affiliateBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = T
       a: `People share their own link to your store, and a one-time purchase made through it within your window earns them the share you set, worked out from what the buyer paid before tax and taken back if you refund the sale. Memberships and payment plans earn only if you choose so under “${w.recurring}”. You choose who is in, or let buyers take a link without applying, and you pay them yourself.`,
     },
     {
-      q: "How do I start one?",
+      q: "How do I start an affiliate program?",
       a: `In your studio, open “${w.tool}”. Under “${w.program}”, check “${w.take}”, check or change “${w.share}” and “${w.window}”, and press “${w.save}”. The store's owner and Admins see this page. ${onSale ? "Links start earning once your Stripe account is connected and your plan is running." : "Links start earning once your store can sell: your Stripe account connected and a paid plan running. Paid plans are not on sale yet."}`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try an affiliate program before paying?",
       a: tryBeforePaying("An affiliate program", "your affiliate program", onSale, trialDays),
     },
     {

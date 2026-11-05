@@ -22,7 +22,7 @@
  */
 import { readFileSync } from "node:fs";
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { addProduct, claimHandle, ensureStatsId, setCartDeal, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setCartDeal, setProductBundle, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { funnelView, newUpsellKey, readUpsell, takeUpsell } from "@/lib/upsell";
 import { CART_OFFER_REQUEST_UNITS, cartOfferFrom, cartOfferOwner } from "@/lib/cart-offers";
@@ -139,6 +139,10 @@ async function main(): Promise<void> {
   });
   is("a funnel may offer the same product for less after a no", cheaper.ok, true);
   is("and the pastry course's one", (await setProductFunnel(OWNER, pastry, { steps: [{ id: "brd001", productId: bread, priceCents: 1500, headline: "", text: "", imageFrom: null, yes: null, no: null }] })).ok, true);
+  // A bundle holding every offer the course could lead to (556 [CT1], unit 2).
+  const starter = await add("Starter Bundle", "45");
+  await setProductLink(OWNER, starter, null);
+  is("the bundle holds the kit, the notes and the checklist", (await setProductBundle(OWNER, starter, [kit, prior, list])).ok, true);
   // Buy more, save more: 10% off each line from two products.
   await setCartDeal(OWNER, { on: true, min: 2, percent: 10 });
   const store = (await storeForEmail(OWNER))!;
@@ -150,6 +154,7 @@ async function main(): Promise<void> {
   is("the course, second in the cart, has them: its own", (await cartOfferOwner(store, [await p(bread), await p(course)]))?.id, course);
   is("its first offer is in the cart: still the course, its next offers are left", (await cartOfferOwner(store, [await p(course), await p(kit)]))?.id, course);
   is("every offer it could lead to is in the cart: none, and no card is kept for nothing", await cartOfferOwner(store, [await p(course), await p(kit), await p(prior), await p(list)]), null);
+  is("every offer it could lead to is in a bundle in the cart: none, and no card is kept for nothing", await cartOfferOwner(store, [await p(course), await p(starter)]), null);
   is("the first with offers decides: the pastry course's only offer is in the cart, so none, never the course's instead", await cartOfferOwner(store, [await p(pastry), await p(bread), await p(course)]), null);
 
   part("The cart's checkout keeps the card only when offers follow");

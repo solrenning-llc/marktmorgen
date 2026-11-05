@@ -41,7 +41,7 @@
 import { activeFunnel, funnelPosition, funnelProductIds, type Funnel } from "@/lib/funnel";
 import { offerableAfterPaying } from "@/lib/bundles";
 import { readListings } from "@/lib/catalog";
-import { bumpsFromMeta } from "@/lib/bundle-rules";
+import { bumpsFromMeta, deliverableItems } from "@/lib/bundle-rules";
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { ownedHere } from "@/lib/next-offer";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -67,11 +67,18 @@ export async function liveFunnel(store: Store, product: Product): Promise<{ funn
 /**
  * The cart product whose offers follow paying for the cart: the first, in the
  * cart's order, with a live funnel. Null when there is none, or when every
- * offer its funnel could lead to is already in the cart.
+ * offer its funnel could lead to is already in the cart, the products a
+ * bundle in it hands over included (556 [CT1], unit 2, 2 November 2026): the
+ * buyer gets those too, and the offers after paying pass over them
+ * (deliveredIds in lib/upsell.ts), so a card kept for them would be kept for
+ * nothing. Read as the checkout writes them (deliverableItems), one read per
+ * bundle, at most MAX_CART.
  */
 export async function cartOfferOwner(store: Store, products: Product[]): Promise<Product | null> {
   if (store.tax.enabled) return null;
-  const inCart = new Set(products.map((p) => p.id));
+  // A bundle's products as the cart's checkout writes them onto the order (lib/cart-checkout.ts): what it hands over today.
+  const inside = await Promise.all(products.map(async (p) => (p.bundle ? deliverableItems(p, await readListings(store, p.bundle)).map((item) => item.id) : [])));
+  const inCart = new Set([...products.map((p) => p.id), ...inside.flat()]);
   for (const product of products) {
     const live = await liveFunnel(store, product);
     if (!live) continue;

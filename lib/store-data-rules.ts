@@ -177,6 +177,15 @@ export function dataBytes(values: (string | number | null | undefined)[] | strin
   return Math.ceil(bytes / DATA_STEP_BYTES) * DATA_STEP_BYTES;
 }
 
+/**
+ * dataBytes for values known only by their total UTF-8 length, as a Redis script reports one (string.len counts
+ * bytes): dataBytesOfLength(utf8Length(a) + utf8Length(b), n) === dataBytes([a, b], n).
+ */
+export function dataBytesOfLength(utf8Bytes: number, entries = 1): number {
+  const bytes = Math.max(0, Math.floor(entries)) * ENTRY_BYTES + Math.max(0, Math.floor(utf8Bytes));
+  return Math.ceil(bytes / DATA_STEP_BYTES) * DATA_STEP_BYTES;
+}
+
 /** UTF-8 bytes of a string, without a TextEncoder (so it runs anywhere). */
 export function utf8Length(text: string): number {
   let n = 0;
@@ -204,9 +213,9 @@ export function dataRoomListWords(names: Record<Tier, string>): string {
   return `${dataWords(DATA_ROOM_BYTES.creator)} on ${names.creator}, ${dataWords(DATA_ROOM_BYTES.pro)} on ${names.pro} and ${dataWords(DATA_ROOM_BYTES.scale)} on ${names.scale}`;
 }
 
-/** What the creator is told when something does not fit. */
-export function dataFullWords(used: number, room: number): string {
-  return `Your store's data room is full (${dataWords(used)} of ${dataWords(room)}). Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan.`;
+/** What the creator is told when something does not fit; `larger` whether this store can move to a larger plan now (lib/larger-plan.ts). */
+export function dataFullWords(used: number, room: number, larger = false): string {
+  return `Your store's data room is full (${dataWords(used)} of ${dataWords(room)}). Delete something you no longer need, such as old posts, drafts, pages or contacts${larger ? ", or move to a larger plan" : ""}.`;
 }
 
 /** What a buyer or visitor is told when what they wrote does not fit: it is the store's room, not theirs. */

@@ -4,7 +4,7 @@
  * the product editor's own buttons and labels for a file or a link
  * (components/product-editor.tsx), the largest file (lib/product-file.ts),
  * the store's "Get it again" (lib/buyer-words/en.ts), the upload policy and
- * the shared answer to "Can I try it before paying?" (lib/beginner-faq.ts).
+ * the shared answer to "Can I try instant delivery before paying?" (lib/beginner-faq.ts).
  * No number of downloads or sales. Shown first in the delivery page's own
  * "Questions" block.
  */
@@ -27,11 +27,11 @@ export function deliveryBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
       a: `Once Stripe confirms the payment, a file or link you sell is on the buyer's screen: a download tied to their order, or the link you set. A pre-order is handed over the day the product goes on sale. If they lose it later, “${en.getAgain}” on your store emails the address they paid with a link to what it bought here.`,
     },
     {
-      q: "How do I start one?",
+      q: "How do I set up instant delivery?",
       a: `In your studio, where a product, or one of its price options, says “Nothing on this yet”, press “${DELIVERY_EDITOR_WORDS.link}”, type “${DELIVERY_EDITOR_WORDS.where}” and press “${DELIVERY_EDITOR_WORDS.save}”. Or press “${DELIVERY_EDITOR_WORDS.file}” for a file of up to ${maxFileLabel()}${filesWait}.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try instant delivery before paying?",
       a: tryBeforePaying("A product that hands over a link", "a product that hands over a link", onSale, trialDays),
     },
     {

@@ -51,7 +51,9 @@ export async function POST(request: NextRequest) {
       }
       if (result.reason === "incomplete") return Response.json({ ok: false, error: "incomplete", failed: result.failed }, { status: 503 });
       if (result.reason === "limit") return Response.json({ ok: false, error: "limited", message: result.message }, { status: 429 });
-      return Response.json({ ok: false, error: result.reason }, { status: result.reason === "email" ? 400 : 503 });
+      // No place this month, or not counted: the store's own words, where the erasure gave them.
+      const said = "message" in result && typeof result.message === "string" ? { message: result.message } : {};
+      return Response.json({ ok: false, error: result.reason, ...said }, { status: result.reason === "email" ? 400 : 503 });
     }
 
     const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);

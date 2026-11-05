@@ -8,12 +8,12 @@ export function Faq({ questions = HOME_QUESTIONS }: { questions?: typeof HOME_QU
   return <ul className="divide-y divide-line border-y border-line">
     {questions.map((item,i)=><li key={item.q}>
       <details name="home-faq" className="group">
-        <summary id={`faq-q-${i}`} aria-controls={`faq-a-${i}`} className="cursor-pointer list-none py-5 text-left text-[1.0625rem] font-semibold text-ink hover:text-violet-deep sm:text-lg">
-          <h3 className="flex w-full items-center justify-between gap-6">{item.q}
-            <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-ink-soft group-open:rotate-45 group-open:border-violet-brand group-open:text-violet-deep"><Icon name="plus" size={16}/></span>
-          </h3>
+        {/* A native summary with no heading inside it (a summary is read as a button, which flattens a heading) and no ARIA over its own state (534 [FQ1] unit 43). */}
+        <summary className="flex min-h-11 w-full cursor-pointer list-none items-center justify-between gap-6 py-5 text-left text-[1.0625rem] font-semibold text-ink sm:text-lg [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0">{item.q}</span>
+          <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-ink-soft group-open:border-violet-brand"><Icon name="plus" size={16} className="group-open:hidden"/><Icon name="minus" size={16} className="hidden group-open:block"/></span>
         </summary>
-        <div id={`faq-a-${i}`} role="region" aria-labelledby={`faq-q-${i}`} className="pb-6 pr-12">
+        <div className="pb-6 pr-12">
           <p className="text-ink-soft">{item.a}</p>
           {item.links?.length?<ul className="mt-4 flex flex-wrap gap-x-5 gap-y-3">{item.links.map(link=><li key={link.href}><Link href={link.href} prefetch={false} className="link">{link.label}</Link></li>)}</ul>:null}
         </div>

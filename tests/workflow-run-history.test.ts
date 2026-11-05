@@ -25,32 +25,24 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const realNow = Date.now;
 let shift = 0;
 Date.now = () => realNow() + shift;
 
-const sent: string[] = [];
-let resendDown = false;
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (url.hostname === "api.resend.com") {
-    const body = JSON.parse(String(init?.body)) as { subject: string } | { subject: string }[];
-    const all = Array.isArray(body) ? body : [body];
-    for (const m of all) sent.push(m.subject);
-    // The provider took it, and its answer was lost on the way back.
-    if (resendDown) return json({ error: "unavailable" }, 503);
-    return json(Array.isArray(body) ? { data: all.map((_, i) => ({ id: `email_${sent.length}_${i}` })) } : { id: `email_${sent.length}` });
-  }
-  return json({ object: "list", data: [], has_more: false });
-}) as typeof fetch;
+const mail = installSesMailFixture({
+  fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
+});
+const sent = mail.sesAttempts;
 
 const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
 const ev = (step: number, state: RunEvent["state"], note = "", stepId = `s${step}`): RunEvent => ({ at: 1, step, stepId, kind: "email", state, note });
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   process.env.STRIPE_SECRET_KEY = "sk_test_workflows_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_workflows_only_a_stand_in";
 
@@ -104,7 +96,7 @@ async function main(): Promise<void> {
   await redisPipeline([["SET", used(), 1_000_000_000]]);
   await run();
   const waiting = await readRun(flowId, ivy);
-  is("it waits: nothing was sent", [waiting?.run.status, sent.includes("Waited for")], ["waiting", false]);
+  is("it waits: nothing was sent", [waiting?.run.status, sent.some((message) => message.subject === "Waited for")], ["waiting", false]);
   is("and its history is still just its start", waiting?.events.map((e) => e.state), ["started"]);
   // Tried again when it is due (lib/flow-retry.ts: when the month turns), with room this time.
   const [flat] = await redisPipeline([["ZRANGEBYSCORE", "nl:mail:flowq", 0, "+inf", "WITHSCORES"]]);
@@ -113,18 +105,18 @@ async function main(): Promise<void> {
   await redisPipeline([["DEL", used()]]);
   await run();
   const through = await readRun(flowId, ivy);
-  is("once there is room it goes out, written down once: attempted, then confirmed", [sent.filter((s) => s === "Waited for").length, through?.events.map((e) => e.state)], [1, ["started", "attempted", "confirmed"]]);
+  is("once there is room it goes out, written down once: attempted, then confirmed", [sent.filter((message) => message.subject === "Waited for").length, through?.events.map((e) => e.state)], [1, ["started", "attempted", "confirmed"]]);
   is("counted as one attempt, confirmed", runEffects(through?.events ?? []).counts, { attempted: 1, confirmed: 1, failed: 0, uncertain: 0 });
 
   part("A held run's history stays bounded, whatever came before the creator's choice");
   await upsertContact(list, "jo@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   await enroll(store, "jo@example.com", { joined: false, tag: "wait" });
   const jo = personOf("jo@example.com");
-  resendDown = true;
+  mail.setSesOutcome("lost");
   await run();
   is("a lost answer holds the run", (await readRun(flowId, jo))?.run.status, "held");
   is(`trying it again is taken ${MAX_RETRIES_BY_YOU} time${MAX_RETRIES_BY_YOU === 1 ? "" : "s"}, then refused`, [await resolveHeldRun(store, flowId, jo, "retry"), (await run(), await resolveHeldRun(store, flowId, jo, "retry"))], ["ok", "retry_limit"]);
-  resendDown = false;
+  mail.setSesOutcome("ok");
   // As if a history had grown long before these bounds existed: a choice still leaves it within MAX_RUN_EVENTS.
   const log = `nl:wf:log:${flowId}:${jo}`;
   await redisPipeline([["RPUSH", log, ...Array.from({ length: 80 }, (_, i) => JSON.stringify({ at: i, step: 0, stepId: "a000000000000001", kind: "email", state: "skipped", note: "" }))]]);
@@ -135,6 +127,7 @@ async function main(): Promise<void> {
   is("the history says its earliest events were let go", counted.trimmed, true);
   is("its last event is the creator's choice, and nothing it kept counts as confirmed", [kept.at(-1)?.state, counted.counts.confirmed], ["resolved", 0]);
 
+  mail.restore();
   done();
 }
 

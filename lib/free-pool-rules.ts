@@ -46,4 +46,9 @@ export function freePoolSize(paying: number): number {
 
 /** What a store past the places is told, in the studio. */
 export const POOL_FULL_WORDS =
-  "Stores without a paid plan are full for this month, so this can't run right now. It opens again on the 1st (UTC), or as soon as your plan is paid.";
+  "Stores without a paid plan are full for this month, so this can't run right now. It opens again on the 1st (UTC).";
+
+/** The same, with the way out a paid plan gives, said only while a plan can be bought (PLANS_ON_SALE, passed in so this file stays browser-safe). */
+export function poolFullWords(plansOnSale: boolean): string {
+  return plansOnSale ? `${POOL_FULL_WORDS} A paid plan opens it at once.` : POOL_FULL_WORDS;
+}

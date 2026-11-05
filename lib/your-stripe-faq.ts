@@ -6,7 +6,7 @@
  * switched on (app/studio/page.tsx); the connect route, which needs that role
  * and no plan (app/api/stripe/connect/route.ts); the account it opens, with a
  * full Stripe dashboard (lib/stripe-connect.ts); canSell, which needs Stripe to
- * say the account can take payments (lib/store-checkout.ts); and the shared answer to "Can I try it before
+ * say the account can take payments (lib/store-checkout.ts); and the shared answer to "Can I try … before
  * paying?" (lib/beginner-faq.ts). No number of accounts, sales or payouts.
  * Shown first in the page's own "Questions" block.
  */
@@ -25,12 +25,12 @@ export function stripeBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIA
       a: "When your store sells, the charge is made on a Stripe account in your own name, with your own login at stripe.com. The money goes there and Stripe pays it out to your bank; your sales never sit with us.",
     },
     {
-      q: "How do I connect it?",
+      q: "How do I connect my Stripe account?",
       a: `In your studio, under “${w.title}”, choose “${w.country}” and press “${w.connect}”. Only the store's owner sees this. Pick the country your bank account is really in: Stripe fixes it when the account is opened. Stripe then asks for the details it needs to pay you. If the owner sees no button there, connecting is not switched on yet on our side, and the studio says so.`,
     },
     {
-      q: "Can I try it before paying?",
-      a: `${tryBeforePaying("Your store", "your products", onSale, trialDays)} Connecting your Stripe account needs no plan, once connecting is switched on on our side.`,
+      q: "Can I connect my own Stripe before paying?",
+      a: `Yes, once connecting is switched on on our side: connecting your Stripe account needs no plan. ${tryBeforePaying("Your store", "your products", onSale, trialDays).replace(/^Yes\. /, "")}`,
     },
     {
       q: "Does selling on my own Stripe work?",

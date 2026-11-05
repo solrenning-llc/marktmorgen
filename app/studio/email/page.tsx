@@ -1,3 +1,5 @@
+import { agreementsAllowed } from "@/lib/agreement-rules";
+import { requestsOpen } from "@/lib/payment-requests";
 import { randomBytes } from "node:crypto";
 import { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";
 import { storeBase } from "@/lib/purchase-email";
@@ -17,7 +19,7 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listCounts } from "@/lib/contacts";
 import { listBroadcastsStrict } from "@/lib/broadcasts";
-import { letterIdFor, publishedLetterIds } from "@/lib/letters";
+import { letterIdFor, publishedLetters } from "@/lib/letters";
 import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";
 import { sellsSomething } from "@/lib/mail-starters";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
@@ -105,12 +107,15 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     readMailVisits(store, broadcasts.filter((b) => b.status === "sent" && b.tagged).map((b) => b.id)),
   ]);
   const trial = allowance > 0 && inTrial(store);
-  // Which sent emails are published on the store (lib/letters.ts): one read.
-  const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetterIds(store) : new Set<string>();
+  // Which sent emails are published on the store, and which for members (lib/letters.ts): one read.
+  // A failed read is not "not published": the studio says it does not know (null).
+  const published = broadcasts.some((b) => b.status === "sent") ? await publishedLetters(store) : new Map<string, { members: boolean }>();
   const letterPath = (id: string) => {
+    if (published === null) return null;
     const letter = letterIdFor(store.sid, id);
     return published.has(letter) ? `/@${store.handle}/letters/${letter}` : null;
   };
+  const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -266,6 +271,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               total: b.total,
               sent: b.sent,
               note: b.note,
+              listed: b.listed,
               productId: b.productId,
               who: b.who,
               notProductId: b.notProductId,
@@ -276,6 +282,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               visits: visits?.[b.id] ?? null,
               test: b.test,
               published: letterPath(b.id),
+              publishedMembers: letterMembers(b.id),
+              publishedUnknown: published === null,
             }))}
             currency={store.currency}
             sells={sellsSomething(store)}
@@ -287,12 +295,17 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             segments={await listSegments(store.listId).catch(() => [])}
             preset={typeof query.who === "string" && (WHO as readonly string[]).includes(query.who) ? { who: query.who as Who } : undefined}
             courses={idsOfKind(store, "course")}
+            calls={idsOfKind(store, "call")}
             paidProducts={idsOfKind(store, "paid")}
             automation={{
               forms: (await readForms(store.statsId).catch(() => [])).filter((f) => f.fields.some((x) => x.type === "email")).map((f) => ({ id: f.id, name: f.name, outcomes: f.outcomes.map((o) => ({ id: o.id, title: o.title })) })),
               fields: (await readFields(store.statsId).catch(() => [])).map((f) => ({ id: f.id, name: f.name, type: f.type, options: f.options })),
               // Each stage named with its pipeline once there is more than one (lib/crm-rules.ts).
               stages: labeledStages(await readPipelines(store.statsId).catch(() => [])).map((st) => ({ id: st.id, name: st.name })),
+              // Whether the plan has proposals and agreements, so a sequence may start when one is signed (635 [GL3]).
+              signing: agreementsAllowed(store),
+              // Whether the store can take payment requests now (lib/payment-requests.ts), so a sequence may start when one is paid.
+              requests: requestsOpen(store),
             }}
             workflowLimits={{
               maxActive: activeFlowLimit(store),

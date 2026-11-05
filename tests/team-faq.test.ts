@@ -40,9 +40,9 @@ is("the three roles by their own names", [ROLE_NAMES.admin, ROLE_NAMES.editor, R
 part("The answers");
 const now = teamBeginnerQuestions(false);
 const later = teamBeginnerQuestions(true, TRIAL_DAYS);
-is("four questions", now.map((x) => x.q), ["What are teams and stores here?", "How do I invite someone?", "Can I try it before paying?", "Do I have to share my login?"]);
+is("four questions", now.map((x) => x.q), ["What are teams and stores here?", "How do I invite someone?", "Can I try teams before paying?", "Do I have to share my login?"]);
 is("invite: the studio's own words, in order, and the owner alone", [(() => { const a = answer(now, "How do I invite someone?"); const at = Object.values(TEAM_WORDS).map((w) => a.indexOf(`“${w}”`)); return at.every((x, k) => x >= 0 && (k === 0 || x > at[k - 1])); })(), answer(now, "How do I invite someone?").includes("Only the store's owner manages the team.")], [true, true]);
-is("try before paying: the one shared answer, in a team's words", [answer(now, "Can I try it before paying?"), answer(later, "Can I try it before paying?")], [tryBeforePaying("A team", "a team", false), tryBeforePaying("A team", "a team", true, TRIAL_DAYS)]);
+is("try before paying: the one shared answer, in a team's words", [answer(now, "Can I try teams before paying?"), answer(later, "Can I try teams before paying?")], [tryBeforePaying("A team", "a team", false), tryBeforePaying("A team", "a team", true, TRIAL_DAYS)]);
 is("login: no, each their own", answer(now, "Do I have to share my login?").startsWith("No. Each person signs in with their own email"), true);
 is("invite: the code's days, and nothing kept when unsent", [answer(now, "How do I invite someone?").includes(`for ${INVITE_DAYS} days`), answer(now, "How do I invite someone?").includes("nothing was kept")], [true, true]);
 is("no store said to have a plan while none is on sale", /Stripe account and plan|its own plan\b/.test(answer(now, "What are teams and stores here?")), false);

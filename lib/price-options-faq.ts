@@ -7,7 +7,7 @@
  * the list above six (components/store-product.tsx), what an option hands over
  * on a course, a podcast or something shipped, the checkout reading the price from
  * what was saved (app/api/store/checkout/route.ts), and the shared answer to
- * "Can I try it before paying?" (lib/beginner-faq.ts). No number of sales.
+ * "Can I try price options before paying?" (lib/beginner-faq.ts). No number of sales.
  * Shown first in the price options page's own "Questions" block.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";
@@ -26,11 +26,11 @@ export function optionsBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRI
       a: `Up to ${MAX_OPTIONS} prices on one product, and the buyer picks one. Write what each one includes and they stand side by side to compare; more than six become a list to pick from. Each hands over its own file or link; on a course or podcast every price opens it, and on a product you ship each is a size or a version.`,
     },
     {
-      q: "How do I start one?",
+      q: "How do I add price options?",
       a: `In your studio, on a product with a price, press “${w.first}”. Fill in “${w.what}” and its price, and press “${w.add}”. For the next one, press “${w.next}”. There are no price options on something free, a call, a bundle, a course or podcast sold as a membership, or a product where the buyer names the price.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try price options before paying?",
       a: tryBeforePaying("Price options", "a product's price options", onSale, trialDays),
     },
     {

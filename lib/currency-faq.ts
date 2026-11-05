@@ -33,7 +33,7 @@ export function currencyBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
       a: `Where Stripe offers them for your country, you switch them on in your own Stripe account, not here. After you connect it, the “${w.more}” button in your studio takes you there.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I choose my currency before paying?",
       a: tryBeforePaying("Your currency", "your store's currency", onSale, trialDays),
     },
   ];

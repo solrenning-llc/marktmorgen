@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { pixelChoiceState, type Pixels } from "@/lib/pixels";
+import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
+import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
 import { ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
 
 /**
@@ -30,6 +32,8 @@ type PixelWindow = Window & {
   ttq?: unknown[] & Record<string, unknown>;
   TiktokAnalyticsObject?: string;
   pintrk?: Fn;
+  twq?: Fn;
+  rdt?: Fn;
 };
 
 export type PixelEvent =
@@ -181,7 +185,51 @@ function startPinterest(w: PixelWindow, id: string) {
   w.pintrk("page");
 }
 
-function track(w: PixelWindow, pixels: Pixels, event: Exclude<PixelEvent, null> | { type: "checkout" }) {
+/**
+ * X's base code, written out (613 [WP12]; lib/x-pixel.ts has the calls): a
+ * queue that takes calls until X's script arrives, then `config` with the
+ * pixel's ID. A visitor who never said yes (allowed only because their
+ * country does not ask first) is sent with X's `restricted_data_use`.
+ */
+function startX(w: PixelWindow, id: string, restricted: boolean) {
+  if (!w.twq) {
+    const n = function (...args: unknown[]) {
+      if (typeof n.exe === "function") (n.exe as (...a: unknown[]) => void)(...args);
+      else (n.queue as unknown[]).push(args);
+    } as Fn;
+    n.version = "1.1";
+    n.queue = [];
+    w.twq = n;
+    script(X_SCRIPT);
+  }
+  w.twq(...xConfigCall(id, restricted));
+}
+
+/**
+ * Reddit's base code, written out (613 [WP12] unit 2; lib/reddit-pixel.ts has
+ * the calls): a queue until Reddit's script arrives, `init` (marked Limited
+ * Data Use for a visitor who never said yes) and the page visit. Never an
+ * email or other identifier.
+ */
+function startReddit(w: PixelWindow, id: string, limited: boolean, place: Place) {
+  if (!w.rdt) {
+    const n = function (...args: unknown[]) {
+      if (typeof n.sendEvent === "function") (n.sendEvent as (...a: unknown[]) => void)(...args);
+      else (n.callQueue as unknown[]).push(args);
+    } as Fn;
+    n.callQueue = [];
+    w.rdt = n;
+    script(redditScript(id));
+  }
+  w.rdt(...redditInitCall(id, limited, place));
+  w.rdt("track", "PageVisit");
+}
+
+function track(w: PixelWindow, pixels: Pixels, event: Exclude<PixelEvent, null> | { type: "checkout" }, restricted = true) {
+  const toReddit = w.rdt ? redditTrackCall(pixels, event) : null;
+  if (toReddit && w.rdt) w.rdt(...toReddit);
+  const toX = w.twq ? xEventCall(pixels, event, restricted) : null;
+  if (toX && w.twq) w.twq(...toX);
   const ttq = w.ttq as (Record<string, (...args: unknown[]) => void>) | undefined;
   if (event.type === "purchase") {
     const money = { value: event.value, currency: (event.currency ?? "usd").toUpperCase() };
@@ -210,6 +258,7 @@ export function StorePixels({
   pixels,
   names,
   askFirst,
+  place = { country: null, region: null },
   event = null,
 }: {
   handle: string;
@@ -219,6 +268,8 @@ export function StorePixels({
   names: string;
   /** True where the visitor has to say yes before anything loads. */
   askFirst: boolean;
+  /** Where the visitor is, for Reddit's Limited Data Use (lib/reddit-pixel.ts placeOf). */
+  place?: Place;
   event?: PixelEvent;
 }) {
   // "unknown" until the browser has been asked, so the server's page and the
@@ -250,9 +301,13 @@ export function StorePixels({
     start("google", pixels.google, startGoogle);
     start("tiktok", pixels.tiktok, startTikTok);
     start("pinterest", pixels.pinterest, startPinterest);
+    // Said yes on this store, or only allowed because this country does not ask first.
+    const restricted = readChoice(handle) !== "yes";
+    start("x", pixels.x, (win, id) => startX(win, id, restricted));
+    start("reddit", pixels.reddit, (win, id) => startReddit(win, id, restricted, place));
 
     if (event?.type === "purchase" && once(`nl_px_sent:${event.id}`)) {
-      track(w, pixels, event);
+      track(w, pixels, event, restricted);
       // The same purchase from our server now, where the creator set it up
       // (lib/ad-events.ts), rather than at the server's next pass over the
       // store's checkouts: asked only here, where the pixels were allowed to run.
@@ -265,7 +320,7 @@ export function StorePixels({
     }
     if (event?.type === "lead" && !started.has(`lead:${event.productId}`)) {
       started.add(`lead:${event.productId}`);
-      track(w, pixels, event);
+      track(w, pixels, event, restricted);
     }
 
     // A buy button leaves the page for Stripe at once. The event is sent
@@ -274,12 +329,12 @@ export function StorePixels({
       const form = e.target instanceof HTMLFormElement ? e.target : null;
       if (!form || !form.hasAttribute("data-checkout") || form.dataset.sent === "1") return;
       if (typeof form.requestSubmit !== "function") {
-        track(w, pixels, { type: "checkout" });
+        track(w, pixels, { type: "checkout" }, restricted);
         return;
       }
       e.preventDefault();
       form.dataset.sent = "1";
-      track(w, pixels, { type: "checkout" });
+      track(w, pixels, { type: "checkout" }, restricted);
       const submitter = e.submitter instanceof HTMLElement ? e.submitter : undefined;
       window.setTimeout(() => {
         form.requestSubmit(submitter as HTMLButtonElement | undefined);
@@ -289,7 +344,7 @@ export function StorePixels({
     };
     document.addEventListener("submit", onSubmit, true);
     return () => document.removeEventListener("submit", onSubmit, true);
-  }, [state, pixels, event, handle]);
+  }, [state, pixels, event, handle, place]);
 
   if (state === "unknown") return null;
 

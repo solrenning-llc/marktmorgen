@@ -6,7 +6,7 @@
  * (app/signin/confirm/page.tsx), the store form's
  * fields and button (components/handle-form.tsx), the live demo linked at the
  * end of every feature page (components/topic-page.tsx), and the shared
- * answer to "Can I try it before paying?" (lib/beginner-faq.ts). No number of
+ * answer to "Can I try a store page before paying?" (lib/beginner-faq.ts). No number of
  * stores, visits or sales. Shown first in the store page's own "Questions"
  * block.
  */
@@ -24,11 +24,11 @@ export function storeBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL
       a: "Your own page at marktmorgen.com/@yourname, with an address you choose: your store's name, a line about it, your photo if you add one, your links and the products you list. It is made to be read on a phone.",
     },
     {
-      q: "How do I start one?",
+      q: "How do I start my store page?",
       a: `Press “${START_WORDS.start}”, type your email and press “${START_WORDS.email}”. Open the link we email you and press “${START_WORDS.confirm}”, then fill in “${START_WORDS.address}”, “${START_WORDS.name}” and, if you like, “${START_WORDS.line}”, and press “${START_WORDS.create}”. No password is needed.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try a store page before paying?",
       a: tryBeforePaying("A store page", "your page", onSale, trialDays),
     },
     {

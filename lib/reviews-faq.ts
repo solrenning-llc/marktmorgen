@@ -14,7 +14,7 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { PLAN_TITLES } from "@/lib/plan";
 
 /** The studio's own words. */
-export const REVIEWS_WORDS = { tool: "Reviews", all: "Every review", reply: "Reply", edit: "Edit your reply", post: "Post the reply", ask: "Asking for reviews", askBox: "Email buyers once to ask for a review", save: "Save" } as const;
+export const REVIEWS_WORDS = { tool: "Reviews", all: "Every review", reply: "Reply", edit: "Edit your reply", post: "Post the reply", ask: "Asking for reviews", askBox: "Email buyers to ask for a review", save: "Save" } as const;
 
 export function reviewsBeginnerQuestions(onSale = PLANS_ON_SALE): { q: string; a: string }[] {
   const w = REVIEWS_WORDS;
@@ -28,10 +28,10 @@ export function reviewsBeginnerQuestions(onSale = PLANS_ON_SALE): { q: string; a
       a: `In your studio, open “${w.tool}”; “${w.all}” lists them all. Under a review, press “${w.reply}” (or “${w.edit}”), write your answer and press “${w.post}”: it goes under the review wherever the review shows.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I get reviews before I pay for a plan?",
       a: onSale
         ? "Yes, once your store can take payments, its trial included: your Stripe account connected and your plan or its trial running. A buyer who pays then can review what they bought."
-        : `Your studio's “${w.tool}” page is there with no card, but a review needs a paid order, and while paid plans are not on sale, a new store cannot take payments. The live demo store takes no reviews, because its purchases cost nothing.`,
+        : `Not yet: your studio's “${w.tool}” page is there with no card, but a review needs a paid order, and while paid plans are not on sale, a new store cannot take payments. The live demo store takes no reviews, because its purchases cost nothing.`,
     },
   ];
 }

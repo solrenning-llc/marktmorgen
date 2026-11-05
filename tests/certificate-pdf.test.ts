@@ -24,6 +24,7 @@ const sheet = {
   checkLine: "Check it at marktmorgen.com/@harbor/certificate/abcdefgh12345678",
   stamp: "",
   accent: "#5a36ee",
+  lang: "en",
 };
 
 async function main(): Promise<void> {

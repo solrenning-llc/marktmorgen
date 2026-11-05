@@ -159,8 +159,8 @@ async function everyFamily(world: World, tag: string): Promise<void> {
       await redisPipeline([["SET", key, JSON.stringify({ s: s.statsId, probe: tag })]]);
     } else if (rule.how === "index" && prefix !== "nl:plan:ended") {
       // (The stores whose plan ended are read by the daily job as stores: a probe there would be looked at as one.)
-      // (The stores whose members are held is a sorted set, as lib/closing-holds.ts keeps it.)
-      if (prefix === "nl:closing:held" || prefix === "nl:closing:final") await redisPipeline([["ZADD", prefix, 1, `${s.sid}|probe-${tag}`]]);
+      // Member holds, final closings and billing-coverage holds are sorted sets; generic indexes may be sets.
+      if (prefix === "nl:closing:held" || prefix === "nl:closing:final" || prefix === "nl:held:stores") await redisPipeline([["ZADD", prefix, 1, `${s.sid}|probe-${tag}`]]);
       else await addMember(prefix.endsWith(":") ? `${prefix}2026-11` : prefix, `${s.sid}|probe-${tag}`);
     } else if (rule.how === "expires") {
       await redisPipeline([["SET", `${prefix}${sha(`${prefix}${tag}`).slice(0, 32)}`, JSON.stringify({ s: s.statsId }), "EX", Math.min(rule.days, 2) * 86_400]]);
@@ -214,7 +214,10 @@ async function reachedThroughRecords(world: World, tag: string, pdf: ProductFile
 }
 
 /** The days a family's keys that name no store are kept at the most, as CLOSING declares them. */
-function keptDays(key: string): number {
+function keptDays(key: string, terminalSale = false): number {
+  // Only the terminal sources seeded below have this deadline; pending
+  // physical mail is a company obligation with no expiration.
+  if (terminalSale && key.startsWith("nl:ship:done:")) return 400;
   const rule = ruleOf(key);
   return rule?.how === "expires" || rule?.how === "lapses" ? rule.days : rule && "rest" in rule ? rule.rest ?? 0 : 0;
 }
@@ -229,7 +232,8 @@ async function soldThrough(world: World, stripe: StripeWorld, tag: string, pdf: 
   stripe.sessions.push({ id: session, account: s.stripeAccountId, object: "checkout.session", status: "complete", payment_status: "paid", created: Math.floor(at / 1000), amount_total: 4_900, currency: "usd", payment_intent: pi, subscription: sub, customer_details: { email: "tess.taylor@example.com", name: "Tess Taylor", address: { country: "US" } }, total_details: { amount_tax: 0, amount_discount: 0 }, metadata: { store: s.handle, product: world.plain, gift } });
   stripe.memberships.push({ id: sub, account: s.stripeAccountId, status: "active", cancel_at_period_end: false, metadata: { store: s.handle } });
   const keys = [...giftKeys(gift, pi), preorderPiKey(pi), adsSubKey(sub), shippedKey(session), movedKey(session), confirmedKey(session), copyKey(session, pdf), copyKey(pi, pdf)];
-  for (const key of keys) await redisPipeline([["SET", key, JSON.stringify({ s: s.sid, e: "tess.taylor@example.com" }), "EX", Math.min(300, keptDays(key)) * 86_400]]);
+  // This fixture represents a terminal physical source. Pending sources have no TTL.
+  for (const key of keys) await redisPipeline([["SET", key, JSON.stringify({ s: s.sid, e: "tess.taylor@example.com" }), "EX", Math.min(300, keptDays(key, true)) * 86_400]]);
   return keys;
 }
 
@@ -276,6 +280,8 @@ export async function runClosingJourney(is: Check, sent: Sent[], stripe: StripeW
   keep.store = (await storeForEmail(KEEPER))!;
   const keepFolder = await storeFolder(KEEPER);
   await everyFamily(keep, "keeping");
+  const [heldIndexType] = await redisPipeline([["TYPE", "nl:held:stores"]]);
+  is("the billing-coverage index fixture uses the sorted-set type its actual reader requires", heldIndexType, "zset");
   const reachedKeeping = await reachedThroughRecords(keep, "keeping", keepingPdf);
   const ended = Date.UTC(2026, 10, 2, 12, 0, 0);
   const soldKeeping = await soldThrough(keep, stripe, "keeping", keepingPdf, ended - 5 * DAY);
@@ -357,9 +363,9 @@ export async function runClosingJourney(is: Check, sent: Sent[], stripe: StripeW
   const company = suspects.filter((key) => ruleOf(key)?.how === "company");
   console.log(`  (kept as the company's: ${company.map((key) => key.replace(/[0-9a-f]{24,}/g, "…")).join(", ")})`);
   const byThemselves = suspects.filter((key) => {
-    const days = keptDays(key);
+    const days = keptDays(key, soldClosing.includes(key));
     const ttl = ttlOf.get(key) ?? -1;
-    return ruleOf(key)?.how !== "company" && days > 0 && ttl > 0 && ttl <= days * 86_400;
+    return (ruleOf(key)?.how !== "company" || (soldClosing.includes(key) && key.startsWith("nl:ship:done:"))) && days > 0 && ttl > 0 && ttl <= days * 86_400;
   });
   console.log(`  (gone by themselves later: ${byThemselves.length}, of ${[...new Set(byThemselves.map((key) => closingFamilyOf(key)))].join(", ")})`);
   is("of what the closed store made, and of what names it, only the company's records and what is gone by itself within its days are left", suspects.filter((key) => !company.includes(key) && !byThemselves.includes(key)), []);

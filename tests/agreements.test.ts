@@ -184,7 +184,18 @@ async function main(): Promise<void> {
   const signedA = (await readAgreement(a.id))!;
   const sig = signedA.versions[1].signature!;
   is("signed, with the name typed, the time, the version's fingerprint, and the sentence checked word for word", [statusOf(signedA, now), sig.name, sig.sha256, sig.consent, sig.consentVersion, typeof sig.at], ["signed", "Dana Reyes", revised.version.sha256, AGREEMENT_WORDS.en.consent, CONSENT_VERSION, "number"]);
-  const raw = JSON.stringify([...redis.keys()].filter((k) => k.startsWith("nl:agree:")).map((k) => redis.run(["GET", k])));
+  // Inspect every agreement value, including its non-string indexes.
+  const raw = JSON.stringify([...redis.keys()].filter((k) => k.startsWith("nl:agree:")).map((key) => {
+    switch (redis.run(["TYPE", key])) {
+      case "string": return redis.run(["GET", key]);
+      case "hash": return redis.run(["HGETALL", key]);
+      case "set": return redis.run(["SMEMBERS", key]);
+      case "zset": return redis.run(["ZRANGEBYSCORE", key, "-inf", "+inf"]);
+      case "list": return redis.run(["LRANGE", key, 0, -1]);
+      case "none": return null;
+      default: throw new Error("Unrecognized synthetic agreement value type");
+    }
+  }));
   is("only a one-way code from the internet address: the address itself is kept nowhere", [sig.ipHash.length, raw.includes("203.0.113.7")], [64, false]);
   is("the address typed is not kept beside the signature", JSON.stringify(sig).includes("CLIENT@"), false);
   is("signed once: a second signature on it is refused", await where({ version: "2", sha256: revised.version.sha256 }), `https://marktmorgen.com/@maracoach/sign/${a.id}?notice=closed`);
@@ -196,26 +207,30 @@ async function main(): Promise<void> {
   const html = Buffer.from(copies[0].attachments![0].content, "base64").toString("utf8");
   is("each carries the exact text and the record, and an HTML file with the same", [copies[0].text.includes(revised.version.text), copies[0].text.includes(revised.version.sha256), html.includes("Four months, not three."), html.includes(revised.version.sha256), /<script/i.test(html)], [true, true, true, true, false]);
   is("the file escapes what was typed", signedCopyHtml(store, signedA, { ...revised.version, text: "<script>x</script>" }, sig).includes("&lt;script&gt;x&lt;/script&gt;"), true);
-  // The store's emails for the month, used: the copies do not go, the signature stands.
+  // Use a legitimately signed agreement whose copies have NEVER been sent.
+  // Replaying signedA would recover its accepted receipts without a new send
+  // or debit, so it cannot exercise refusal of new mail at a full allowance.
+  const second = (await listAgreements(store))!.find((x) => x.id !== a.id)!;
+  const third = (await listAgreements(store))!.find((x) => statusOf(x, now) === "open" && x.id !== second.id)!;
+  const thirdV = (await readVersion(third, 1))!;
+  const direct = await signAgreement(store, third.id, { n: 1, sha256: thirdV.sha256, name: "Dana Reyes", email: "client@example.com", consent: true, ip: "198.51.100.4" }, "Dana Reyes", now);
+  if (!direct.ok) throw new Error("not signed");
   const window = allowanceWindow(store, now)!;
   const keys = [...redis.keys()].filter((k) => k.startsWith("nl:allow:email:") && k.endsWith(window.id));
   for (const k of keys) redis.run(["SET", k, String(STORE_ALLOWANCES.creator.email)]);
   const mailsBefore = mails.length;
-  const none = await measure("signed copies with the month's emails used (meter refuses, record)", () => sendSignedCopies(store, signedA, revised.version, sig, now));
+  const none = await measure("signed copies with the month's emails used (meter refuses, record)", () => sendSignedCopies(store, direct.agreement, direct.version, direct.signature, now));
   is("with the store's emails used, no copy goes", [none, mails.length - mailsBefore], [{ signer: false, creator: false }, 0]);
   for (const k of keys) redis.run(["SET", k, "1"]);
-  const second = (await listAgreements(store))!.find((x) => x.id !== a.id)!;
   const secondV = (await readVersion(second, 1))!;
   const signedSecond = await measure("sign through the route, with its two signed copies (rate limit, public request, studio check, lock, record, version read, two emails)", async () => {
     const r = await signForm({ ...fields, agreement: second.id, sha256: secondV.sha256 }, { "x-forwarded-for": "203.0.113.8" });
     return r.headers.get("location");
   });
   is("another signed through the route", signedSecond, `https://marktmorgen.com/@maracoach/sign/${second.id}?notice=signed`);
-  const third = (await listAgreements(store))!.find((x) => statusOf(x, now) === "open")!;
-  const thirdV = (await readVersion(third, 1))!;
-  const direct = await signAgreement(store, third.id, { n: 1, sha256: thirdV.sha256, name: "Dana Reyes", email: "client@example.com", consent: true, ip: "198.51.100.4" }, "Dana Reyes", now);
-  if (!direct.ok) throw new Error("not signed");
-  await measure("signed copies (two emails through the meter, record)", () => sendSignedCopies(store, direct.agreement, direct.version, direct.signature, now));
+  const beforeRestoredCopies = mails.length;
+  const restoredCopies = await measure("signed copies (two emails through the meter, record)", () => sendSignedCopies(store, direct.agreement, direct.version, direct.signature, now));
+  is("with room restored, the original signed copies go once to both sides", [restoredCopies, mails.length - beforeRestoredCopies], [{ signer: true, creator: true }, 2]);
 
   part("A version changed in storage is never shown or signed");
   const fourth = (await listAgreements(store))!.find((x) => statusOf(x, now) === "open")!;

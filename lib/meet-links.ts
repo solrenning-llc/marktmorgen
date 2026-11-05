@@ -39,6 +39,7 @@
  * `meetingFor` is the one function anything else that needs a meeting —
  * a community event, later — calls, with a scope of its own.
  */
+import { whereOf } from "@/lib/call-place";
 import { type MeetProvider, type CallSetup, isGroup } from "@/lib/call-setup";
 import {
   type MeetRecord,
@@ -516,6 +517,8 @@ export async function callMeeting(input: {
   const { store, product, session, start, end } = input;
   const setup = product.call;
   if (!store.callsId) return null;
+  // In person (lib/call-place.ts): no meeting, not even on a team host's own calendar.
+  if (whereOf(setup).kind === "place") return null;
   const organizer = input.team?.hosts[0];
   const target = organizer && setup.meet !== "zoom" ? await hostWriteTarget(store, organizer).catch(() => null) : null;
   const provider = target ? "google" : setup.meet;

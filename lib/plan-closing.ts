@@ -363,6 +363,8 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
       ]
     : [];
   const unpaused = (news?.notHeld ?? 0) + (news?.overLimit ?? 0);
+  // Both counts read, and both none: the only case the notice may say nobody is charged again.
+  const allPaused = news?.notHeld === 0 && news?.overLimit === 0;
   // What the closing day refunds is giveBackUnused (lib/closing-refunds.ts):
   // only the members whose last payment was written down when their payments
   // were paused, from the creator's own balance, within the closing's limit.
@@ -412,7 +414,10 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
       `Your Marktmorgen plan for ${name} ended on ${dateWords(endedAt)}.`,
       "",
       kind === "ended" ? "Your store is still there and nothing has been removed." : "Nothing has been removed yet.",
-      "Since your plan ended, none of your members is charged again, and they keep their access.",
+      // Said only once every membership's payments are known to be paused
+      // (lib/closing-holds.ts): a member the hold did not reach, or could not
+      // pause, can still be charged, and the notice says so below.
+      allPaused ? "Since your plan ended, none of your members is charged again, and they keep their access." : "Your members keep their access until your store closes.",
       `On ${dateWords(day)}, ${CLOSING_DAYS} days after your plan ended, your store closes:`,
       "",
       "  - its files are removed: the files your products hand over, your lessons' videos and",

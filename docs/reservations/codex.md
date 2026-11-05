@@ -39,3 +39,5 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex P | 274 [AX1], 540 [CU1]: keep the selected course structure stable while saving | codex/p-course-template-pending | `components/course-template-picker.tsx`, `tests/course-template-picker-pending.test.ts` | 04/11/2026 |
 | Codex M | 310 [AX2], 274 [AX1]: 44px targets for moving and removing collection products | codex/m-collection-targets | `components/collections-editor.tsx`, `tests/e2e/collections-acknowledgment.mjs`, `tests/collections-editor-accessibility.test.ts` | 04/11/2026 |
 | Codex P | 427 [VR1]: malformed certificate status evidence never becomes valid or permanent | codex/p-certificate-record-evidence | `lib/certificate.ts`, `tests/certificate-record-evidence.test.ts` | 04/11/2026 |
+
+| Codex Q | Privacy: reject partial or malformed Redis evidence before importing deleted contacts | codex/q-contacts-read-evidence | `lib/contacts.ts`, `tests/contacts-read-evidence.test.ts` | 04/11/2026 23h30 |

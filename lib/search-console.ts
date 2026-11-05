@@ -172,19 +172,48 @@ export function readRows(json: unknown): SearchRow[] {
 }
 
 /**
+ * A kept answer, read back only in the shape it was written (Codex T on
+ * #2684): null ("Google did not answer", kept an hour) or the window and its
+ * rows. Anything else is not used (undefined) and Google is asked again.
+ */
+function keptSearches(raw: string): StoreSearches | null | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  const day = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+  const count = (n: unknown) => typeof n === "number" && Number.isFinite(n) && n >= 0;
+  if (!day(v.from) || !day(v.to) || !Array.isArray(v.rows) || v.rows.length > SEARCH_ROWS) return undefined;
+  const rows: SearchRow[] = [];
+  for (const row of v.rows) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) return undefined;
+    const r = row as Record<string, unknown>;
+    if (typeof r.query !== "string" || !r.query || !count(r.clicks) || !count(r.impressions) || !count(r.position)) return undefined;
+    rows.push({ query: r.query, clicks: r.clicks as number, impressions: r.impressions as number, position: r.position as number });
+  }
+  return { from: v.from as string, to: v.to as string, rows };
+}
+
+/**
  * The searches that found one store, kept a day. Null when our side is not
  * connected, the store is on a domain of its own, or Google did not answer.
  */
 export async function storeSearches(store: Store, now = Date.now()): Promise<StoreSearches | null> {
   if (!store.statsId || !isRedisConfigured() || !searchConsoleConfigured() || store.domain) return null;
   if (!SITE_URL.startsWith(SEARCH_CONSOLE_SITE.replace(/\/$/, ""))) return null;
-  const [cached, conn] = await redisPipeline([["GET", cacheKey(store.statsId)], ["GET", CONN]]);
+  const reply: unknown = await redisPipeline([["GET", cacheKey(store.statsId)], ["GET", CONN]]);
+  // Two answers or not known: never a guess at the store's searches.
+  if (!Array.isArray(reply) || reply.length !== 2) return null;
+  const [cached, conn] = reply as unknown[];
   if (typeof cached === "string") {
-    try {
-      return JSON.parse(cached) as StoreSearches | null;
-    } catch {
-      // Read again below.
-    }
+    const kept = keptSearches(cached);
+    if (kept !== undefined) return kept;
+    // Not in its shape: read again below.
   }
   let refresh = "";
   try {

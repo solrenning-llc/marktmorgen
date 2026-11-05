@@ -54,7 +54,7 @@ async function main() {
  }
  // All rows and counts stay real; replace only the supplementary SMEMBERS for blocked students.
  hits=0;inject=cs=>cs.some(c=>c[0]==="SMEMBERS"&&c[1]===`nl:course:${course.id}:blocked`)?cs.map(c=>c[0]==="SMEMBERS"&&c[1]===`nl:course:${course.id}:blocked`?null:redis.run(c)):undefined;
- let blocked=await read();is("blocked list unknown injection reached",hits,1);is("blocked list unknown is unavailable, not blocked=false",[blocked.status,blocked.body.error],[502,"unavailable"]);console.log("OBSERVED blocked",JSON.stringify(blocked));
+ const blocked=await read();is("blocked list unknown injection reached",hits,1);is("blocked list unknown is unavailable, not blocked=false",[blocked.status,blocked.body.error],[502,"unavailable"]);console.log("OBSERVED blocked",JSON.stringify(blocked));
  inject=null;control=await read();is("native control after faults: row and block still there",[control.status,control.body.data?.length,control.body.data?.[0]?.blocked],[200,1,true]);
  part("Fresh login: complete EXISTS only; the real passkey route refuses an ended session");
  const session=await openSession(owner);

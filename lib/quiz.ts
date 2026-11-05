@@ -32,7 +32,7 @@ import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rule
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
-import { SET_AND_VALUES_TAKE } from "@/lib/redis-take";
+import { SET_AND_VALUES_TAKE, UnknownReply, exactReplies } from "@/lib/redis-take";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
 
@@ -567,22 +567,46 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
  */
 export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string, room?: DataStore): Promise<number> {
   if (!courses.length || !isRedisConfigured()) return 0;
-  const replies = await redisPipeline(
-    courses.map((c) => {
-      const keys = [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])];
-      return ["EVAL", SET_AND_VALUES_TAKE, keys.length, ...keys];
-    }),
+  const what = "the deletion of a student's quiz tries";
+  const replies = exactReplies(
+    await redisPipeline(
+      courses.map((c) => {
+        const keys = [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])];
+        return ["EVAL", SET_AND_VALUES_TAKE, keys.length, ...keys];
+      }),
+    ),
+    courses.length,
+    what,
   );
   let records = 0;
+  let unknown = false;
   const freed: { slot: string; bytes: number }[] = [];
   courses.forEach((c, i) => {
-    const [passed, values, gone] = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
-    records += Number(gone) || 0;
+    // Exactly {the passes, one value per lesson key, how many keys went}; any
+    // other shape leaves this course's deletion unknown, and its room kept.
+    const reply = replies[i];
+    const [passed, values, gone] = Array.isArray(reply) && reply.length === 3 ? (reply as unknown[]) : [];
+    if (
+      !Array.isArray(passed) ||
+      !passed.every((lessonId) => typeof lessonId === "string") ||
+      !Array.isArray(values) ||
+      values.length !== c.lessonIds.length * 2 ||
+      !values.every((raw) => raw === null || typeof raw === "string" || typeof raw === "number") ||
+      typeof gone !== "number" ||
+      !Number.isInteger(gone) ||
+      gone < 0
+    ) {
+      unknown = true;
+      return;
+    }
+    records += gone;
     const bytes =
-      (Array.isArray(passed) ? passed : []).reduce((sum: number, lessonId) => sum + dataBytes([String(lessonId)], 1), 0) +
-      (Array.isArray(values) ? values : []).reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
+      passed.reduce((sum: number, lessonId) => sum + dataBytes([lessonId as string], 1), 0) +
+      values.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
     if (bytes > 0) freed.push({ slot: TRIES_SLOT(c.courseId), bytes });
   });
+  // What was confirmed taken comes back; a course whose reply is unknown keeps its room.
   if (room && freed.length) await giveData(room, freed);
+  if (unknown) throw new UnknownReply(what);
   return records;
 }

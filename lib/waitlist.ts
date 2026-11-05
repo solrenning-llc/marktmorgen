@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, noteData, takeData } from "@/lib/store-data";
-import { HASH_SWAP_IF, HASH_TAKE_ALL, HASH_TAKE_FIELD, takenPairs } from "@/lib/redis-take";
+import { HASH_SWAP_IF, HASH_TAKE_ALL, HASH_TAKE_FIELD, UnknownReply, exactReplies, takenPairs } from "@/lib/redis-take";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
@@ -287,7 +287,14 @@ function placeBytes(sid: string, productId: string, email: string, raw: string):
  */
 async function takeList(room: DataStore, sid: string, productId: string, at = Date.now()): Promise<void> {
   const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, listKey(sid, productId)]]);
-  const places = takenPairs(taken);
+  let places: [string, string][];
+  try {
+    places = takenPairs(taken, "a launched waitlist's deletion");
+  } catch (error) {
+    // Unknown whether the list went: nothing is given back, the room erring fuller.
+    console.error("launching a waitlist: its deletion was not confirmed, so its room stays counted", error);
+    return;
+  }
   const freed = places.reduce((sum, [email, raw]) => sum + placeBytes(sid, productId, email, raw), 0);
   const kept = places.reduce((sum, [email, raw]) => {
     const entry = parseEntry(raw);
@@ -487,13 +494,18 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string, room?: DataStore): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, p), address])) : [];
+  const what = "the deletion of a person's waitlist places";
+  // One reply per product, each the place or a confirmed none (null); a
+  // pipeline that answered another number of replies is unknown as a whole.
+  const replies = productIds.length ? exactReplies(await redisPipeline(productIds.map((p) => ["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, p), address])), productIds.length, what) : [];
   const freed = productIds.flatMap((p, i) => {
     const raw = replies[i];
     return typeof raw === "string" ? [{ slot: waitSlot(p), bytes: placeBytes(sid, p, address, raw) }] : [];
   });
+  // What was confirmed taken comes back; a place whose reply is unknown keeps its room.
   if (room && freed.length) await giveData(room, freed);
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
+  if (replies.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReply(what);
   return freed.length + blanked;
 }
 

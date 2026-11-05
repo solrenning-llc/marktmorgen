@@ -51,10 +51,39 @@ for i = 2, #KEYS do values[i - 1] = redis.call("GET", KEYS[i]) end
 local gone = redis.call("DEL", unpack(KEYS))
 return {members, values, gone}`;
 
-/** HGETALL's answer as pairs, whether it came flat (the REST API) or as an object. */
-export function takenPairs(raw: unknown): [string, string][] {
+/**
+ * A reply that is not exactly what was asked for: too few or too many
+ * replies, or one of the wrong shape. What the command did is then unknown,
+ * so nothing is taken for gone and no room is given back; the caller throws
+ * it on, and a person's deletion reports its module as incomplete.
+ */
+export class UnknownReply extends Error {
+  constructor(what: string) {
+    super(`Redis answered ${what} with a reply it was not asked for; its outcome is unknown`);
+    this.name = "UnknownReply";
+  }
+}
+
+/** The pipeline's replies, exactly `count` of them, or UnknownReply. */
+export function exactReplies(replies: unknown, count: number, what: string): unknown[] {
+  if (!Array.isArray(replies) || replies.length !== count) throw new UnknownReply(what);
+  return replies;
+}
+
+/** A count Redis answered (DEL, HDEL, SREM and the like): a whole number from zero, or UnknownReply. */
+export function replyCount(raw: unknown, what: string): number {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0) throw new UnknownReply(what);
+  return raw;
+}
+
+/**
+ * HGETALL's answer (HASH_TAKE_ALL's) as pairs: only a flat list of strings of
+ * even length, as the REST API answers it; an empty list is a confirmed empty
+ * hash. Anything else (nothing, a list cut short, another shape) is UnknownReply.
+ */
+export function takenPairs(raw: unknown, what = "a hash's deletion"): [string, string][] {
+  if (!Array.isArray(raw) || raw.length % 2 !== 0 || !raw.every((item) => typeof item === "string")) throw new UnknownReply(what);
   const out: [string, string][] = [];
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) out.push([String(raw[i]), String(raw[i + 1])]);
-  else if (raw && typeof raw === "object") for (const [k, v] of Object.entries(raw as Record<string, unknown>)) out.push([k, String(v)]);
+  for (let i = 0; i < raw.length; i += 2) out.push([raw[i] as string, raw[i + 1] as string]);
   return out;
 }

@@ -36,7 +36,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
-import { HASH_DEL_IF, HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { HASH_DEL_IF, HASH_TAKE_ALL, exactReplies, replyCount, takenPairs } from "@/lib/redis-take";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -225,9 +225,13 @@ export async function takeGiven(statsId: string, email: string, productId: strin
 export async function forgetImportedPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  // Read and deleted in one step: two deletions at once give back once.
-  const [taken, who] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), address]]);
-  const given = takenPairs(taken);
+  // Read and deleted in one step: two deletions at once give back once. A
+  // reply that is not exactly the two asked for throws (UnknownReply): nothing
+  // is taken for gone and nothing is given back.
+  const what = "the deletion of a person's imported purchases";
+  const [taken, who] = exactReplies(await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), address]]), 2, what);
+  const given = takenPairs(taken, what);
+  const unlisted = replyCount(who, what);
   if (room && given.length) {
     // What an import or the API's gift took from the room comes back as it was
     // counted; what an order wrote comes back to the orders' part, at the field's own share.
@@ -241,7 +245,7 @@ export async function forgetImportedPerson(statsId: string | null, email: string
     if (imported > 0) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: imported }]);
     await releaseOrderData(room, ordered);
   }
-  return (given.length ? 1 : 0) + (Number(who) || 0);
+  return (given.length ? 1 : 0) + unlisted;
 }
 
 function json(raw: string): Record<string, unknown> | null {

@@ -42,7 +42,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { HASH_TAKE_ALL, exactReplies, replyCount, takenPairs } from "@/lib/redis-take";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { saleChannel } from "@/lib/stats";
@@ -653,12 +653,16 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
  * Deletes the team's notes about one person (lib/person-erasure.ts), and
  * gives back to `room`, when it is given, what each note took when it was
  * added: its own bytes and its person's place. The notes are read and
- * deleted in one step, so two deletions at once give them back once.
+ * deleted in one step, so two deletions at once give them back once. A reply
+ * that is not exactly the two asked for throws (UnknownReply): the notes are
+ * not taken for gone and nothing is given back.
  */
 export async function forgetNotesPerson(statsId: string | null, person: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON_KEY.test(person) || !isRedisConfigured()) return 0;
-  const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]);
-  const notes = takenPairs(taken);
+  const what = "the deletion of a person's notes";
+  const [taken, who] = exactReplies(await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]), 2, what);
+  const notes = takenPairs(taken, what);
+  replyCount(who, what);
   const freed = notes.reduce((sum, [id, json]) => sum + noteTaken(person, id, json), 0);
   if (room && freed > 0) await giveData(room, [{ slot: NOTES_SLOT, bytes: freed }]);
   return notes.length ? 1 : 0;

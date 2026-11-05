@@ -38,7 +38,7 @@
 import { redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { HASH_TAKE_ALL, exactReplies, takenPairs } from "@/lib/redis-take";
 
 /** Where members' devices are counted in the store's data room (lib/store-data.ts). */
 const DEVICES_SLOT = "cm:ps";
@@ -217,11 +217,13 @@ export async function pushMembers(id: string, to: string[], alert: MemberAlert):
 /**
  * Deletes the devices one member let us notify (lib/community-erasure.ts),
  * read and deleted in one step, and gives back to `room`, when it is given,
- * what each took, once.
+ * what each took, once. A reply that is not exactly the one asked for throws
+ * (UnknownReply), and nothing is given back.
  */
 export async function forgetPushPerson(id: string, who: string, room?: DataStore): Promise<number> {
-  const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, pushKey(id, who)]]);
-  const devices = takenPairs(taken);
+  const what = "the deletion of a member's devices";
+  const [taken] = exactReplies(await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, pushKey(id, who)]]), 1, what);
+  const devices = takenPairs(taken, what);
   const freed = devices.reduce((sum, [endpoint, held]) => sum + dataBytes([endpoint, held], 1), 0);
   if (room && freed > 0) await giveData(room, [{ slot: DEVICES_SLOT, bytes: freed }]);
   return devices.length ? 1 : 0;

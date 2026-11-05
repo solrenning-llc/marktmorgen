@@ -95,6 +95,7 @@ export const ROW_ELEMENT_NAMES: Record<RowElementKind, string> = {
   button: "Button",
   image: "Picture",
   video: "Video",
+  "video-window": "Video in a window",
 };
 
 /** Each icon's name as a person reads it. */
@@ -279,6 +280,8 @@ export function rowElementProblem(element: RowElement): string | null {
     }
     case "image":
       return element.decorative || hasWords(element.picture.alt) ? null : "Say what the picture shows, for someone who cannot see it, or mark it as decoration.";
+    case "video-window":
+      return hasWords(element.label) ? null : "Write the button's words, so visitors know it opens a video, or remove this part.";
     case "icon":
     case "video":
       return null;

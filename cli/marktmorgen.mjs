@@ -18,7 +18,7 @@
  *
  *   marktmorgen tools                        what this key can do
  *   marktmorgen <tool> [--days 7|30|90] [--cursor <next>]
- *                                            one tool, its answer as JSON
+ *                                            one tool, its result
  *   marktmorgen help                         this text
  *
  * Exit codes: 0 done; 1 the tool answered with an error; 2 the command or
@@ -39,7 +39,7 @@ Type your key at the prompt, not as part of a command saved in shell history.
 
 Commands:
   marktmorgen tools                  List what your key can do.
-  marktmorgen <tool> [options]       Run one tool and print its answer as JSON.
+  marktmorgen <tool> [options]       Run one tool and print its result.
   marktmorgen help                   Show this text.
 
 Options:

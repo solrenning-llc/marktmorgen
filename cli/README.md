@@ -30,7 +30,7 @@ node marktmorgen.mjs get_revenue_by_channel --days 7
 node marktmorgen.mjs list_products
 ```
 
-`tools` lists what your key can do. Any tool prints its answer as JSON. Tools about a stretch of time take `--days 7`, `--days 30` or `--days 90` (30 when left out); `list_products` takes `--cursor` with the `next` value of the page before.
+`tools` lists what your key can do. Text results are printed as text. Other content is printed as JSON. Tools about a stretch of time take `--days 7`, `--days 30` or `--days 90` (30 when left out); `list_products` takes `--cursor` with the `next` value of the page before.
 
 Exit codes: 0 done, 1 the tool answered with an error, 2 the command or the key was refused, or Marktmorgen could not be reached.
 

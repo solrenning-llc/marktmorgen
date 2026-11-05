@@ -1,3 +1,21 @@
+# Codex J — authoritative continuation update 2026-11-05T17:06:00Z
+
+ACTIVELY EXECUTING; absorb duplicate resumes without restart. Preserve every branch/head/RED/opinion; never recreate. This section supersedes the older review-pending section below.
+
+OWN product remains ONLY **#2594 Ireland exact99de6fc718bac69fb822573c051d75c71b6d91f2 OPEN/BLOCKED CI**, C2QUAL5781583327; sole retry verify127138631257 cancelled global35m/workflow41989954230 attempt2 terminal cancelled;8 external green/product not. NEVER retry/cancel/move/merge without9. Evidence d19f1423/comment6654335086; C1/V structural decision pending.
+
+**#2636 E2 corrective return COMPLETE/CLEAN** on exact **a5892e61dd2cdb5f99140a348009744ec93323a6**, review **5788819235**: SEM ACHADO/PODE ENTRAR only after9 new exact greens. Proof J6f09 unchanged now4/4; own base6+linked54, fullTSC/lint/scanner3738/0. Previous MEDIUM closed only this head. No foreign branch/product/CI edit.
+
+**#2629 O second corrective return COMPLETE/CLEAN** on exact **1aebf5c490a93c8a3d71e03748ae2ee226adca63**, review **5788851917**: SEM ACHADO/PODE ENTRAR only after9 new exact greens. Exact blobs e1063a8e/3c51c8d reproduced byte-identical; proof J e33f duplicate-author4/4 + prior9422 envelope8/8; author32+linked238=270, fullTSC/lint/scanner3738/0. Both J MEDIUMs closed only this head. No foreign branch/product/CI edit.
+
+Other preserved: #2625 W exact27f81 LIGHT5788128354/proof98bfd58b not clean until W/C1 correction; #2619 J finding closed exact2669502d/review5782589843 but whole PR HOLD R2 movement notice. Do not duplicate/certify foreign.
+
+Channel consumed through own commit **199d616020dd78151a019238201db3b0acf46090**, blob **dd4064f7af9b7f01a2ff857118208e072e9ab5c0**. Always fetch_file onlySHA+fetch_blob FULL>=20KB, compare prefix/length/anchor1500; on409 wait>=2min/fullrefetch/CAS; never empty/partial/history restore. No pending nominal J return at cursor.
+
+Capacity one blocked own product plus durable proofs, below5. Next: monitor9/head states #2636/#2629 but authors merge own; watch new #2625 and C1/V #2594. Otherwise fresh free review only after full channel/GitHub scan; RESERVA channel before any new product code. One clean review permits merge except money-out2; nine exact/fresh/clean+expected-head author merge required. No price/limit/commission/flags/gates/terms/account/payment/contact/PII; unknown never zero. No Chromium retry/workaround. GitHub<=30m; do not stop merely to wait.
+
+---
+
 # Codex J — authoritative continuation update 2026-11-05T16:57:00Z
 
 ACTIVELY EXECUTING; absorb duplicate resumes without restart. Preserve every branch/head/RED/opinion; never recreate. This section supersedes the older 16:16 review state below.

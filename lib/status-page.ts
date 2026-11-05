@@ -72,6 +72,13 @@ export const STATUS_COUNT_COMMANDS = 2;
 export const STATUS_READ_COMMANDS = STATUS_CHECKS.length;
 /** How long an instance answers from its last reading without the database. */
 export const STATUS_MEMORY_MS = 60_000;
+/**
+ * How long an instance's last reading may stand in when the hour's reads are
+ * used up (Revisor 1's light on #2545): shown with its own time, so the page
+ * says when it was read, never as a reading made now. Older than this, the
+ * page says it did not read.
+ */
+export const STATUS_HOLD_MS = 2 * 3_600_000;
 /** Times one address may make one instance count in an hour (lib/local-limit.ts). */
 export const STATUS_COUNTS_PER_ADDRESS_PER_HOUR = 5;
 
@@ -219,6 +226,12 @@ export function forgetStatusMemory(): void {
   usedUpHour = -1;
 }
 
+/** With the hour used up: this instance's last real reading while it is recent enough, else "not read". */
+function heldOrHour(now: number): StatusReading {
+  if (remembered && remembered.limit === "none" && remembered.database === "answered" && now >= remembered.builtAt && now - remembered.builtAt <= STATUS_HOLD_MS) return remembered;
+  return notRead(now, "answered", "hour");
+}
+
 function notRead(now: number, database: StatusReading["database"], limit: StatusLimit): StatusReading {
   return {
     builtAt: now,
@@ -238,7 +251,7 @@ function notRead(now: number, database: StatusReading["database"], limit: Status
 export async function readStatus({ now = Date.now(), address = "unknown" }: { now?: number; address?: string } = {}): Promise<StatusReading> {
   if (!isRedisConfigured()) return notRead(now, "unset", "none");
   if (remembered && now >= remembered.builtAt && now - remembered.builtAt < STATUS_MEMORY_MS) return remembered;
-  if (usedUpHour === hourOf(now)) return notRead(now, "answered", "hour");
+  if (usedUpHour === hourOf(now)) return heldOrHour(now);
   if (!withinLocalLimit("status-count", address, STATUS_COUNTS_PER_ADDRESS_PER_HOUR, HOUR_MS, now)) return notRead(now, "answered", "address");
   let reading: StatusReading;
   try {
@@ -253,7 +266,7 @@ export async function readStatus({ now = Date.now(), address = "unknown" }: { no
       reading = notRead(now, "answered", "count-unread");
     } else if (seen > STATUS_VIEWS_PER_HOUR) {
       usedUpHour = hourOf(now);
-      return notRead(now, "answered", "hour");
+      return heldOrHour(now);
     } else {
       // One history for each check, each read in full, or none of them: a missing one is unknown, never empty.
       const histories = statusReplyValues(await redisPipeline(STATUS_CHECKS.map((c) => ["LRANGE", c.key, 0, STATUS_RUNS_KEPT - 1])), STATUS_READ_COMMANDS, STATUS_READ_COMMANDS)?.map(parseRuns);

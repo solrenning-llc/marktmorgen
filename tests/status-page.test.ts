@@ -26,7 +26,7 @@
 import { readFileSync } from "node:fs";
 import {
   STATUS_CHECKS, STATUS_COUNTS_PER_ADDRESS_PER_HOUR, STATUS_COUNT_COMMANDS, STATUS_MEMORY_MS, STATUS_READ_COMMANDS, STATUS_RUNS_KEPT,
-  STATUS_STALE_HOURS, STATUS_VIEWS_PER_HOUR, describeStatus, forgetStatusMemory, notReadReason, parseRuns, readStatus, statusRunCommands,
+  STATUS_HOLD_MS, STATUS_STALE_HOURS, STATUS_VIEWS_PER_HOUR, describeStatus, forgetStatusMemory, notReadReason, parseRuns, readStatus, statusRunCommands,
   statusRunResult, statusViewKey, summarizeRuns,
 } from "@/lib/status-page";
 import {
@@ -165,6 +165,25 @@ async function main(): Promise<void> {
   is("the instance that found the hour used up sends nothing more in it", [seen.length, reading.limit], [0, "hour"]);
   reading = await readStatus({ now: NOW + HOUR, address: `other-${addressN}` });
   is("the next hour reads again", [reading.limit, reading.checks[0].summary.state], ["none", "passed"]);
+
+  part("With the hour used up, an instance shows its last reading, with its time, rather than nothing (Revisor 1's light)");
+  redis.clear();
+  redis.run(["LPUSH", MAIL.key, run(NOW - 2 * HOUR, true)]);
+  redis.run(["SET", hour, String(STATUS_VIEWS_PER_HOUR - 1)]);
+  const kept = await fresh();
+  is("the instance reads, the 60th of the hour", [kept.limit, kept.checks[0].summary.state], ["none", "passed"]);
+  addressN += 1;
+  const after = await readStatus({ now: NOW + 2 * STATUS_MEMORY_MS, address: `held-${addressN}` });
+  is("the 61st, on the same instance: its last reading, read at its own time, never a pass made up now", [after.limit, after.builtAt, after.checks[0].summary.state], ["none", NOW, "passed"]);
+  is("and the page says when that reading was made", describeStatus(after).builtAt, describeStatus(kept).builtAt);
+  seen = watch();
+  addressN += 1;
+  const later = await readStatus({ now: NOW + 3 * STATUS_MEMORY_MS, address: `held-${addressN}` });
+  unwatch();
+  is("the hour marked used up: the same reading again, with no database command", [seen.length, later.builtAt, later.limit], [0, NOW, "none"]);
+  addressN += 1;
+  const old = await readStatus({ now: NOW + STATUS_HOLD_MS + 1, address: `held-${addressN}` });
+  is("a reading older than STATUS_HOLD_MS is not shown in its place", old.builtAt === NOW, false);
 
   part("Within a minute, an instance answers from memory, with no database command");
   redis.clear();

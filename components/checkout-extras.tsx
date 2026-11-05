@@ -449,7 +449,18 @@ function PlanBlock({
           e.preventDefault();
           onSend(
             several
-              ? { plan: { payments, interval, options: Object.fromEntries(product.options.map((option) => [option.id, (each[option.id] ?? "").trim()])) } }
+              ? {
+                  plan: {
+                    payments,
+                    interval,
+                    // A price off sale needs no payment (642 [WG2]); one left empty is not sent.
+                    options: Object.fromEntries(
+                      product.options
+                        .filter((option) => !option.offSale || (each[option.id] ?? "").trim())
+                        .map((option) => [option.id, (each[option.id] ?? "").trim()]),
+                    ),
+                  },
+                }
               : { plan: { payments, interval, price: price.trim() } },
             "Payment plan saved.",
           );
@@ -510,6 +521,7 @@ function PlanBlock({
                     <label htmlFor={`${id}-o-${option.id}`} className="text-sm text-ink">
                       <span className="font-semibold">{option.label}</span>
                       <span className="text-ink-soft">{` \u00b7 ${formatMoney(option.priceCents, currency)}`}</span>
+                      {option.offSale ? <span className="block text-xs text-ink-soft">Off sale, so no payment is needed. Fill it in to have one ready if you put it back on sale.</span> : null}
                       {short ? <span className="block text-xs text-ink-soft">{`${payments} of these come to less than ${formatMoney(option.priceCents, currency)}.`}</span> : null}
                     </label>
                     <input
@@ -520,7 +532,7 @@ function PlanBlock({
                       onChange={(e) => setEach((was) => ({ ...was, [option.id]: e.target.value }))}
                       className="field"
                       aria-invalid={short || undefined}
-                      required
+                      required={!option.offSale}
                     />
                   </div>
                 );

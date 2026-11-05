@@ -42,6 +42,6 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
     else await journey();
    }finally{await radio.close();}
   }
-  console.log("AX2_KEYBOARD_FOCUS_REGRESSIONS:"+JSON.stringify({coveredThirteenthRejected:true,clearThirteenPassed:true,wrappedInlinePassed:true,scope:"Native focus and fragment-center hit tests in disposable documents; not a visual contrast or full obstruction audit."}));
+  console.log("AX2_KEYBOARD_FOCUS_REGRESSIONS:"+JSON.stringify({coveredThirteenthRejected:true,clearThirteenPassed:true,wrappedInlinePassed:true,opaqueRadiosPassed:2,transparentRadioRejected:true,scope:"Native focus and fragment-center hit tests in disposable documents; not a visual contrast or full obstruction audit."}));
  } finally {await context.close();}
 }

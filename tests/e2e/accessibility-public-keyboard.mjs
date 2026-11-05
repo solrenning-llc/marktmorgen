@@ -39,7 +39,12 @@ export async function checkPublicKeyboardCycle({page,path,is}) {
    if(!node||node===document.body||node===document.documentElement)return {outside:false,key:null};
    const box=node.getBoundingClientRect();
    const style=getComputedStyle(node),radio=node instanceof HTMLInputElement&&node.type==="radio";
-   const outlined=style.outlineStyle==="solid"&&parseFloat(style.outlineWidth)>=3&&style.outlineColor!=="transparent"&&!style.outlineColor.replaceAll(" ","").endsWith(",0)");
+   const color=style.outlineColor.trim().toLowerCase();
+   // Computed rgb(r,g,b) is opaque even when its blue channel is zero.
+   // Only an explicit alpha (legacy rgba or slash notation) can make it clear.
+   const alpha=color.includes("/")?color.slice(color.lastIndexOf("/")+1,-1):/^(?:rgba|hsla)\(/.test(color)?color.slice(color.lastIndexOf(",")+1,-1):"1";
+   const painted=Boolean(color)&&color!=="transparent"&&Number.isFinite(parseFloat(alpha))&&parseFloat(alpha)>0;
+   const outlined=style.outlineStyle==="solid"&&parseFloat(style.outlineWidth)>=3&&painted;
    return {outside:false,key:nodes.indexOf(node),visible:radio?outlined:node.matches(":focus-visible"),focusVisible:node.matches(":focus-visible"),outlined,outlineWidth:style.outlineWidth,outlineStyle:style.outlineStyle,outlineColor:style.outlineColor,width:box.width,height:box.height,checked:node instanceof HTMLInputElement?node.checked:null};
   });
   let focusChecks=0;
@@ -60,7 +65,8 @@ export async function checkPublicKeyboardCycle({page,path,is}) {
     },target,{timeout:3000});
     focusChecks++;
    } catch(error) {
-    console.log("AX2_KEYBOARD_OBSCURED:"+JSON.stringify({path,key,actual:await read()}));
+    const geometry=await target.evaluate(node=>({tag:node.tagName,id:node.id,text:node.textContent?.trim().slice(0,100),scrollY,viewport:{width:innerWidth,height:innerHeight},fragments:[...node.getClientRects()].map(rect=>{const x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);return {left:rect.left,top:rect.top,width:rect.width,height:rect.height,hitTag:hit?.tagName,hitId:hit?.id,hitClass:typeof hit?.className==="string"?hit.className:"",inside:Boolean(hit&&(hit===node||node.contains(hit)))};})}));
+    console.log("AX2_KEYBOARD_OBSCURED:"+JSON.stringify({path,key,actual:await read(),geometry}));
     throw new Error("Keyboard focus obscured on "+path+" at target "+key,{cause:error});
    } finally {await target.dispose();}
   };

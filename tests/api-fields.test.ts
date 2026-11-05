@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   is("without fields, the products as before", [plain.status, Array.isArray(plain.body.data), "next" in plain.body], [200, true, true]);
   const bad = await get(leads, "/api/v1/leads?fields=Bad-Name");
   is("a bad name on a real route: 400 fields", [bad.status, bad.body.error], [400, "fields"]);
-  const routes = ["products", "leads", "members", "students", "store", "bookings", "affiliates"];
+  const routes = ["products", "leads", "members", "students", "store", "bookings", "affiliates", "codes"];
   is("every list, Store and Bookings choose fields", routes.every((r) => readFileSync(`app/api/v1/${r}/route.ts`, "utf8").includes("apiOkFields(request,")), true);
   is("documented for developers", readFileSync("app/developers/page.tsx", "utf8").includes("/api/v1/leads?fields=email,agreed"), true);
 

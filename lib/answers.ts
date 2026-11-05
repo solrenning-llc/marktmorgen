@@ -16,6 +16,7 @@
  * and the day, for the creator to read. Never who asked.
  */
 import { placeLine } from "@/lib/call-place";
+import { listedLengths } from "@/lib/call-lengths";
 import { windowId } from "@/lib/allowance-window";
 import { SHIP_REGIONS, activeShipping } from "@/lib/shipping";
 import { createHash } from "node:crypto";
@@ -114,6 +115,9 @@ export function priceWords(product: Listing, currency: string, tiers: readonly s
     const orYearly = yearly ? ` Or ${money(yearly.cents)} a year, which saves ${money(yearlySaving(product.priceCents, yearly))}.` : "";
     return `${intro ? introLineEnglish(money(intro.cents), intro.count, product.recurring.interval, regular) : regular}.${orYearly}`;
   }
+  // A call with several lengths (lib/call-lengths.ts): each length with its own price, as its booking page offers them.
+  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
+  if (lengths.length) return `The buyer picks how long the call is, each length at its own price: ${lengths.map((l) => `${l.minutes} minutes for ${money(l.cents)}`).join("; ")}. Paid once.`;
   const pwyw = activePwyw(product);
   if (pwyw) return `The buyer chooses the price, from ${money(product.priceCents)} up.`;
   const plan = activePlan(product);
@@ -181,6 +185,33 @@ export function factsFor(store: Store, product: Listing, about: string, page: Sa
           );
         }
         break;
+      case "row": {
+        // What each column shows, in the page's order: never a button's address (an answer has no links), never a
+        // decorative picture; a described picture and a video say their words (375 [TB1]).
+        const said = (element: (typeof block.columns)[number][number]): string => {
+          switch (element.kind) {
+            case "heading":
+            case "subheading":
+            case "paragraph":
+              return element.text;
+            case "list":
+              return element.items.map((item) => `- ${item}`).join("\n");
+            case "icon":
+              return element.label;
+            case "button":
+              return element.label ? `A button: ${element.label}` : "";
+            case "image":
+              return element.decorative || !element.picture.alt ? "" : `A picture: ${element.picture.alt}`;
+            case "video":
+              return element.title ? `A video: ${element.title}` : "";
+            default:
+              return "";
+          }
+        };
+        const columns = block.columns.map((column) => column.map(said).filter(Boolean).join("\n")).filter(Boolean);
+        if (columns.length) parts.push(`Columns on the page:\n${columns.join("\n\n")}`);
+        break;
+      }
       default:
         break;
     }

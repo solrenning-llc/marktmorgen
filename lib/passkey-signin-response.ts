@@ -4,7 +4,7 @@ export type PasskeyAnswer =
   | { ok: true; next: "/studio"; options?: never }
   | { ok: false; error: string };
 
-const ERRORS = new Set(["not_recognised", "rate_limited", "unavailable", "server_error"]);
+const ERRORS = new Set(["not_recognised", "rate_limited", "unavailable", "busy", "server_error"]);
 
 export function passkeyAnswer(httpOK: boolean, raw: unknown, action: "options" | "verify"): PasskeyAnswer {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, error: "server_error" };

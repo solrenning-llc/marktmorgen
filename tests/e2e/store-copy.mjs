@@ -343,7 +343,7 @@ try {
   is("unmatched search can be reset", await owner.getByText("No campaigns match these filters.", { exact: true }).isVisible(), true);
   await owner.getByRole("button", { name: "Show all campaigns", exact: true }).click();
   is("browsing spends no server previews", previews, 0);
-  await owner.getByRole("button", { name: "Set up the Build a launch waitlist campaign", exact: true }).click();
+  await owner.getByRole("button", { name: "Set up this campaign: Build a launch waitlist", exact: true }).click();
   await owner.getByLabel("Name, for you", { exact: true }).waitFor();
   is("choosing a campaign starts one server preview", previews, 1);
   await owner.getByLabel("Name, for you", { exact: true }).fill("Browser waitlist campaign");

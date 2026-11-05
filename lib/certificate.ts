@@ -52,7 +52,27 @@ export type Certificate = {
   issuedAt: number;
   /** When the creator withdrew it; 0 while it stands. */
   withdrawnAt: number;
+  /**
+   * The last moment it is valid, in seconds (639 [GL7](32)), fixed when it is
+   * issued from the course's validity then; absent is for good.
+   */
+  validUntil?: number;
 };
+
+/** A moment `months` calendar months after `seconds`, in UTC: the 31st of a short month falls on its last day. */
+export function monthsAfter(seconds: number, months: number): number {
+  const d = new Date(seconds * 1000);
+  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()));
+  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d.getUTCDate(), last));
+  return Math.floor(target.getTime() / 1000);
+}
+
+/** Whether a certificate still certifies now, by its own validity: withdrawn, expired, or standing. */
+export function standingOf(c: Pick<Certificate, "withdrawnAt" | "validUntil">, nowSeconds: number): "withdrawn" | "expired" | "valid" {
+  if (c.withdrawnAt > 0) return "withdrawn";
+  return c.validUntil && nowSeconds > c.validUntil ? "expired" : "valid";
+}
 
 export function newCertificateId(): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -80,7 +100,7 @@ export function cleanName(raw: unknown): string | null {
  * links to. The student checks it and saves it there themselves; nothing is
  * posted for them. The parameters are LinkedIn's "Add to Profile" ones.
  */
-export function linkedInAddUrl(certificate: Pick<Certificate, "id" | "title" | "creator" | "issuedAt">, pageUrl: string): string {
+export function linkedInAddUrl(certificate: Pick<Certificate, "id" | "title" | "creator" | "issuedAt" | "validUntil">, pageUrl: string): string {
   const issued = new Date(certificate.issuedAt * 1000);
   const query = new URLSearchParams({
     startTask: "CERTIFICATION_NAME",
@@ -91,6 +111,12 @@ export function linkedInAddUrl(certificate: Pick<Certificate, "id" | "title" | "
     certId: certificate.id,
     certUrl: pageUrl,
   });
+  // A certificate that expires says when, on the same form (639 [GL7](32)).
+  if (certificate.validUntil) {
+    const until = new Date(certificate.validUntil * 1000);
+    query.set("expirationYear", String(until.getUTCFullYear()));
+    query.set("expirationMonth", String(until.getUTCMonth() + 1));
+  }
   return `https://www.linkedin.com/profile/add?${query}`;
 }
 
@@ -123,6 +149,7 @@ function parseCertificate(raw: unknown): Certificate | null {
       email: typeof value.email === "string" ? value.email : "",
       issuedAt: typeof value.issuedAt === "number" ? value.issuedAt : 0,
       withdrawnAt: typeof value.withdrawnAt === "number" ? value.withdrawnAt : 0,
+      ...(typeof value.validUntil === "number" && value.validUntil > 0 ? { validUntil: value.validUntil } : {}),
     };
   } catch {
     return null;
@@ -191,6 +218,8 @@ export async function issueCertificate(input: {
     issuedAt: Math.floor(Date.now() / 1000),
     withdrawnAt: 0,
   };
+  // The course's validity now, fixed on this certificate (639 [GL7](32)).
+  if (input.course.certificateMonths) certificate.validUntil = monthsAfter(certificate.issuedAt, input.course.certificateMonths);
   // The record is written before the student's slot is claimed (changed
   // 17 October 2026). Claiming first left a moment in which the slot named
   // a certificate not yet written, and a second press arriving then read it

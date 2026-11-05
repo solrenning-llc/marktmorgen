@@ -1,4 +1,5 @@
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
+import { IDLE_WARN_DAYS } from "@/lib/affiliate-idle-rules";
 import {CERTIFICATE_PRIVACY} from "@/lib/path-certificate";
 import {PATH_WORDING_PRIVACY} from "@/lib/path-wording-rules";
 import {RETURN_PRIVACY_LINE} from "@/lib/path-return-rules";
@@ -27,7 +28,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 2, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -797,6 +798,20 @@ export default function PrivacyPage() {
           of the address and network address that asked for a link for one
           hour.
         </p>
+        <p id="members-letters">
+          <strong className="text-black">An email kept for members.</strong>{" "}
+          When a creator publishes an email on their store for the buyers of
+          some products only, we decide who may read it by looking up the
+          email address a person types on the creator&apos;s own Stripe
+          account, on that creator&apos;s list for something free, or among
+          the buyers the creator brought over from another platform, and we
+          email that address a link that works for one hour. The link and the
+          address it was sent to are kept for that hour. Using it sets the
+          same cookie for that store a course and a community use, for 90
+          days. The answer about whether an address may read it is kept for
+          up to five minutes, and, to limit abuse, one-way hashes of the
+          address and network address that asked for a link for one hour.
+        </p>
         <p id="live-events">
           <strong className="text-black">Live events in a community.</strong>{" "}
           When a member says they are coming to a creator&apos;s live event
@@ -1012,8 +1027,9 @@ export default function PrivacyPage() {
           one-way hash of the visitor&apos;s network address and browser for
           two days. When a purchase counts, we note which product, when, what
           was paid before tax and in all, the share it earns, and whether it was
-          credited by a click, by a discount code or by the buyer already
-          belonging to that affiliate &mdash; and never the buyer&apos;s name or
+          credited by a click, by a discount code, by the buyer already
+          belonging to that affiliate or by the buyer having been that
+          affiliate&apos;s confirmed lead &mdash; and never the buyer&apos;s name or
           email address. Where a creator credits memberships and payment plans,
           the affiliate, the share and the terms ride on the subscription in the
           creator&apos;s own Stripe account, and each payment is read from there
@@ -1024,7 +1040,13 @@ export default function PrivacyPage() {
           such clicks, and nothing about the visitor. A creator may give one of their own discount codes to
           one affiliate, and then a purchase that used that code counts for them
           with no cookie involved; what we keep for that is which code belongs
-          to which affiliate, and nothing about whoever typed it. A creator may
+          to which affiliate, and nothing about whoever typed it. A creator who
+          pays affiliates per lead may also credit a one-off purchase to the
+          affiliate who brought the buyer as a confirmed lead before they
+          bought. This applies only when no link, code or earlier purchase
+          already credits it. To find it, we compare the email address the
+          order was paid with against that program&apos;s leads. Nothing is
+          kept for it beyond what any credited purchase keeps. A creator may
           also ask that a buyer credited to an affiliate stays credited to them
           for every later purchase. Where they have, we keep a one-way hash of
           the buyer&apos;s email address together with the store&apos;s own id,
@@ -1043,7 +1065,12 @@ export default function PrivacyPage() {
           and sales, and the payments the creator records to them with the
           date and reference the creator types. An affiliate who signs in to
           their page keeps a cookie named <code>nl_aff_</code> followed by the
-          store&apos;s address, for 30 days. Where a creator pays affiliates
+          store&apos;s address, for 30 days. Where a creator chooses to take
+          out affiliates with no sale and no lead for a time they set, we keep
+          the date each affiliate was last warned. Before an affiliate is taken
+          out, we email them at the address they joined with, at least {IDLE_WARN_DAYS} days
+          ahead. An affiliate taken out keeps their records, as when a creator
+          removes them by hand. Where a creator pays affiliates
           per lead (since October 18, 2026) &mdash; an email sign-up to their
           list the person confirmed, a free product claimed from its emailed
           link, or a booked call that took place &mdash; the affiliate the
@@ -1183,10 +1210,12 @@ export default function PrivacyPage() {
           deleted when the creator disconnects the server.
         </p>
         <p id="stamping">
-          <strong className="text-black">Stamped PDFs.</strong> When a creator
-          switches on stamping for a product, every page of the PDF a buyer
-          downloads carries the buyer&apos;s email address, the date and the
-          end of the order number. The stamped copy is made by our own code, is
+          <strong className="text-black">Stamped PDFs and EPUBs.</strong> When a
+          creator switches on stamping for a product, every page of the PDF a
+          buyer downloads carries the buyer&apos;s email address, the date and
+          the end of the order number, and an EPUB carries the same line
+          hidden inside the book&apos;s files, where reading apps do not show
+          it but a copy keeps it. The stamped copy is made by our own code, is
           kept privately beside the creator&apos;s file so a later download
           gets the same copy, and is deleted with that file; a note of which
           copy belongs to which sale is kept for about 400 days. Anyone the
@@ -1347,6 +1376,17 @@ export default function PrivacyPage() {
           asked works for 400 days, and pressing it keeps a
           one-way hash of the address for that store for good, so that store
           never asks again.
+          When the creator asks for an AI summary of a product&apos;s reviews,
+          the words of up to 60 of its newest reviews shown on its page are
+          sent to Anthropic, with any email address, phone number or web
+          address taken out and without the name or address of whoever wrote
+          them. A summary is kept at most once a week for each product, but a
+          try that fails or finds no theme can be made again at once, and each
+          try sends those words again. The summary it returns keeps only the
+          themes and how many reviews say each, never a review&apos;s words,
+          who wrote it or which reviews were read; it is kept for 8 days, with
+          the time it was made, and is deleted at once when a review it
+          counted is deleted, hidden, refunded or rewritten.
         </p>
         <p id="video-rooms">
           <strong className="text-black">Video rooms.</strong> When a creator
@@ -1770,7 +1810,15 @@ export default function PrivacyPage() {
             reviews and the words searched for on the store that found
             nothing, from the last 90 days, never with a name, and with any
             email address, phone number or web address in them taken out
-            first;
+            first. When a creator asks for the summary of one product&apos;s
+            reviews, it receives the words of up to 60 of that product&apos;s
+            newest reviews shown on its page, with any email address, phone
+            number or web address taken out and without the name or address
+            of whoever wrote them; a summary is kept at most once a week for
+            each product, but a try that fails or finds no theme can be made
+            again at once and sends those words again; the summary keeps only
+            its themes and their counts, for 8 days, and is deleted at once
+            when a review it counted is deleted, hidden, refunded or rewritten;
           </li>
           <li>
             <strong className="text-black">Unsplash</strong>, which serves the
@@ -1976,6 +2024,12 @@ export default function PrivacyPage() {
           names your address into a stage they chose; it starts only while you
           are on their list and agreed to hear from them, and nothing new is
           kept about you for it beyond the deal and the workflow&apos;s record.
+          An automatic email sequence may start when you sign a creator&apos;s
+          proposal or agreement, or pay a payment request they sent you, for the address it was sent to.
+          It starts only while you are on their list and agreed to hear from
+          them. Signing or paying never adds you to the list. The only new things kept for
+          it are the sequence&apos;s own record, described above, and its
+          emails waiting to be sent.
         </p>
         <p>
           A community&apos;s posts, comments, pictures and member records are
@@ -2076,7 +2130,7 @@ export default function PrivacyPage() {
           <p>
             What is deleted: your place on the store&apos;s list and every link
             in its emails to you; what its team noted about you (its fields,
-            notes and deals); your form answers with their quiz results and
+            notes, deals and tasks); your form answers with their quiz results and
             scores, inbox conversations, reviews
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;

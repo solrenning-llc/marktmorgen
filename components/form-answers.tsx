@@ -7,9 +7,11 @@ import type { FormDealMatch } from "@/lib/form-deal";
 
 type ResponseRow = FormResponse & { opportunityRef?: string };
 
-export function FormAnswers({ form, latest, total, canReview, blocked, existingDeals, existingDealsAvailable = false, onReview }: {
+export function FormAnswers({ form, latest, total, canReview, blocked, existingDeals, existingDealsAvailable = false, onReview, pdfBase = "" }: {
   form: FormDef; latest: ResponseRow[]; total: number; canReview: boolean; blocked: boolean;
   existingDeals: FormDealMatch[]; existingDealsAvailable?: boolean; onReview: (response: ResponseRow) => void;
+  /** Where one answer is downloaded as a tagged PDF, the form's id and then the answer's added (639 [GL7](26)); "" for none. */
+  pdfBase?: string;
 }) {
   const [query, setQuery] = useState("");
   const [outcome, setOutcome] = useState("");
@@ -81,6 +83,7 @@ export function FormAnswers({ form, latest, total, canReview, blocked, existingD
                 {scored ? <th scope="col" className="py-2 pr-4 font-semibold">Score</th> : null}
                 {form.outcomes.length ? <th scope="col" className="py-2 pr-4 font-semibold">Result</th> : null}
                 {canReview ? <th scope="col" className="py-2 pr-4 font-semibold">CRM</th> : null}
+                {pdfBase ? <th scope="col" className="py-2 pr-4 font-semibold">PDF</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -91,6 +94,17 @@ export function FormAnswers({ form, latest, total, canReview, blocked, existingD
                   {scored ? <td className="py-2 pr-4 whitespace-nowrap">{scoreText(response)}</td> : null}
                   {form.outcomes.length ? <td className="py-2 pr-4">{form.outcomes.find(item => item.id === response.outcome)?.title ?? ""}</td> : null}
                   {canReview ? <td className="py-2 pr-4"><button type="button" className="btn btn-secondary btn-sm" disabled={blocked || !existingDealsAvailable || !response.opportunityRef} onClick={() => response.opportunityRef && onReview(response)}>{response.opportunityRef && linkedRefs.has(response.opportunityRef) ? "View opportunity" : "Review as opportunity"}</button></td> : null}
+                  {pdfBase ? (
+                    <td className="py-2 pr-4">
+                      {response.id ? (
+                        <a className="btn btn-secondary btn-sm whitespace-nowrap" href={`${pdfBase}${encodeURIComponent(form.id)}&response=${encodeURIComponent(response.id)}`} download>
+                          Download as PDF<span className="sr-only">{`: the answer sent ${new Date(response.at * 1000).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}`}</span>
+                        </a>
+                      ) : (
+                        <span className="text-ink-soft">Not available for this older answer</span>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

@@ -97,6 +97,16 @@ export function StudioHeader({
                 })}
               </ul>
               <div className="mt-1 border-t border-line pt-1">
+                {stores.length > 1 ? (
+                  <Link
+                    href={"/studio/totals?store=" + encodeURIComponent(current.sid)}
+                    prefetch={false}
+                    className="flex min-h-[44px] items-center gap-2 rounded-[12px] px-3 py-2 text-sm font-semibold text-violet-deep hover:bg-paper focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-brand"
+                  >
+                    <Icon name="chart" size={16} />
+                    All your stores added up
+                  </Link>
+                ) : null}
                 {room ? (
                   <Link
                     href="/studio/new"

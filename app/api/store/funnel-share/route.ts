@@ -4,10 +4,10 @@ import { countStudio, jsonAccess } from "@/lib/studio-route";
 import { can } from "@/lib/team-roles";
 import { fileHeaders } from "@/lib/request-guard";
 import { FUNNEL_ID } from "@/lib/page-funnel";
-import { type BundleOutline, type FunnelBundle, leftOutWords, outlineOf, planImport, readBundle } from "@/lib/funnel-bundle";
+import { type BundleOutline, type FunnelBundle, type PlanLine, leftOutWords, outlineOf, planImport, readBundle } from "@/lib/funnel-bundle";
 import { collectBundle, importBundle, receiverOf } from "@/lib/funnel-bundle-store";
 import { MONTH_USE_SECONDS, countUse, createShare, listShares, openShare, revokeShare, shareMonthKey, storeMonthKey, storeUseKey } from "@/lib/funnel-share-store";
-import { funnelStarter } from "@/lib/funnel-starters";
+import { funnelStarter, starterBeforeLines, starterOutline } from "@/lib/funnel-starters";
 import {
   DEFAULT_SHARE_DAYS,
   IMPORTS_PER_SHARE_MONTH,
@@ -40,7 +40,8 @@ const shown = (entry: { id: string; name: string; funnelId: string; createdAt: n
 
 type Source =
   | { ok: true; kind: "code"; shareId: string; from: string; outline: BundleOutline; bundle: FunnelBundle | null }
-  | { ok: true; kind: "file" | "starter"; from: string; outline: BundleOutline; bundle: FunnelBundle }
+  | { ok: true; kind: "file"; from: string; outline: BundleOutline; bundle: FunnelBundle }
+  | { ok: true; kind: "starter"; from: string; outline: BundleOutline; bundle: FunnelBundle; before: PlanLine[] }
   | { ok: false; response: Response };
 
 /**
@@ -54,7 +55,8 @@ async function sourceOf(body: Record<string, unknown>, store: Store, want: "prev
   if (typeof body.starter === "string") {
     const starter = funnelStarter(text(body.starter, 40));
     if (!starter) return { ok: false, response: refuse("unknown", 404) };
-    return { ok: true, kind: "starter", from: "Marktmorgen", outline: outlineOf(starter.bundle), bundle: starter.bundle };
+    // What to do first is said with what to fill in, and again once it is made.
+    return { ok: true, kind: "starter", from: "Marktmorgen", outline: starterOutline(starter), bundle: starter.bundle, before: starterBeforeLines(starter) };
   }
   if (body.bundle !== undefined) {
     const read = readBundle(body.bundle, { maxBytes: limits.bundleBytes });
@@ -233,6 +235,7 @@ export async function POST(request: NextRequest) {
       let bundle: FunnelBundle;
       let mapping: Record<string, string>;
       let left: string[] = [];
+      let before: PlanLine[] = [];
       let name: string | undefined = text(body.name, 60) || undefined;
       if (action === "clone") {
         const funnelId = text(body.funnel, 10);
@@ -250,12 +253,13 @@ export async function POST(request: NextRequest) {
         if (!source.ok) return source.response;
         bundle = source.bundle!;
         mapping = mappingOf(body.products);
+        if (source.kind === "starter") before = source.before;
       }
       // Counted before anything is written, and kept when it fails: an attempt costs reads as well.
       if (!(await countUse(storeMonthKey(statsId, "import", month), limits.importsPerMonth, MONTH_USE_SECONDS))) return refuse("imports_full", 429, { limit: limits.importsPerMonth });
       const result = await importBundle(ref, store, bundle, mapping, name);
       if (!result.ok) return refuse(result.error, result.error === "setup_incomplete" ? 500 : 400, { lines: result.lines ?? [] });
-      return Response.json({ ok: true, funnel: result.funnel, pages: result.pages, lines: result.lines, left });
+      return Response.json({ ok: true, funnel: result.funnel, pages: result.pages, lines: [...before, ...result.lines], left });
     }
 
     return refuse("invalid");

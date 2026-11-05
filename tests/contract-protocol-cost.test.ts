@@ -49,3 +49,70 @@ test("an unknown bound or overflowing annual retention cannot become a partial m
  assert.equal(contractProtocolInfrastructureCosts({...input,scale_year:{...input.scale_year,retainedBytes:Number.MAX_SAFE_INTEGER,retentionMonths:Number.MAX_SAFE_INTEGER,storageCopies:Number.MAX_SAFE_INTEGER}}),null);
  assert.ok(contractProtocolInfrastructureCosts(input));
 });
+
+
+test("an unpriced category in any monthly or annual profile refuses the whole contract comparison", () => {
+ for (const key of CONTRACT_KEYS) {
+  for (const unreviewedSupplier of [null, 0, 100_000]) {
+   const input = profiles();
+   const value = {...input, [key]: {...input[key], unreviewedSupplier}};
+   assert.equal(contractProtocolInfrastructureCosts(value), null, `${key}: ${unreviewedSupplier}`);
+  }
+ }
+ assert.ok(contractProtocolInfrastructureCosts(profiles()));
+});
+
+test("the original matrix and every original profile reject proxies before any projection", () => {
+ for (const key of CONTRACT_KEYS) {
+  const input = profiles();
+  const target = {...input[key], unreviewedSupplier: 100_000};
+  const hidden = new Proxy(target, {ownKeys: () => Object.keys(input[key])});
+  assert.equal(contractProtocolInfrastructureCosts({...input, [key]: hidden}), null, key);
+  assert.equal(contractProtocolInfrastructureCosts({...input, [key]: new Proxy(input[key], {})}), null, key);
+ }
+ const input = profiles();
+ const hiddenMatrix = new Proxy({...input, unpricedPlan: input.creator_month}, {
+  ownKeys: () => [...CONTRACT_KEYS],
+ });
+ assert.equal(contractProtocolInfrastructureCosts(hiddenMatrix), null);
+ assert.equal(contractProtocolInfrastructureCosts(new Proxy(input, {})), null);
+ let getters = 0;
+ const computed = Object.defineProperty({...input}, "creator_month", {
+  enumerable: true, get(){ getters++; return input.creator_month; },
+ });
+ assert.equal(contractProtocolInfrastructureCosts(computed), null);
+ assert.equal(getters, 0);
+ const changedByTrap = profiles();
+ const original = changedByTrap.creator_month;
+ changedByTrap.creator_month = new Proxy(original, {
+  ownKeys() {
+   Object.defineProperty(changedByTrap, "creator_year", {
+    enumerable: true, get(){ getters++; return input.creator_year; },
+   });
+   return Object.keys(original);
+  },
+ });
+ assert.equal(contractProtocolInfrastructureCosts(changedByTrap), null);
+ assert.equal(getters, 0, "a trap must not cause another profile's getter to run");
+ assert.deepEqual(contractProtocolInfrastructureCosts(Object.freeze({...input})), contractProtocolInfrastructureCosts(input));
+ assert.deepEqual(contractProtocolInfrastructureCosts(Object.assign(Object.create(null), input)), contractProtocolInfrastructureCosts(input));
+});
+
+test("an inherited setter cannot discard a priced contract row", () => {
+ const input = profiles();
+ const previous = Object.getOwnPropertyDescriptor(Object.prototype, "creator_month");
+ let setters = 0;
+ try {
+  Object.defineProperty(Object.prototype, "creator_month", {
+   configurable: true, set(){ setters++; },
+  });
+  const output = contractProtocolInfrastructureCosts(input);
+  assert.ok(output);
+  assert.equal(Object.hasOwn(output, "creator_month"), true);
+  assert.equal(output.creator_month.infrastructureCents, 3);
+  assert.equal(setters, 0);
+ } finally {
+  if (previous) Object.defineProperty(Object.prototype, "creator_month", previous);
+  else delete (Object.prototype as Record<string, unknown>).creator_month;
+ }
+});

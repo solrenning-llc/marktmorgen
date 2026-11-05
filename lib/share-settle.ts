@@ -73,7 +73,7 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
   const charge = await onAccount(
     "GET",
     fee.account,
-    `/charges/${encodeURIComponent(fee.charge)}?expand[]=dispute&expand[]=invoice&expand[]=payment_intent`,
+    `/charges/${encodeURIComponent(fee.charge)}?expand[]=invoice&expand[]=payment_intent`,
     undefined,
     READ_VERSION,
   );
@@ -86,8 +86,32 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
   }
   const amount = num(charge.amount);
   const refunded = num(charge.amount_refunded);
-  const dispute = charge.dispute as { status?: unknown } | string | null;
-  const lostDispute = charge.disputed === true && typeof dispute === "object" && dispute !== null && dispute.status === "lost";
+  let lostDispute = false;
+  if (charge.disputed === true) {
+    // Charge.dispute is absent at READ_VERSION. Ask the same connected
+    // account for a complete, bounded list tied to this exact charge.
+    const listed = await onAccount("GET", fee.account,
+      `/disputes?${new URLSearchParams({ charge: fee.charge, limit: "100" })}`, undefined, READ_VERSION);
+    const statuses = new Set(["lost", "won", "needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed"]);
+    const rows = listed?.data;
+    if (listed?.object !== "list" || listed.has_more !== false || !Array.isArray(rows) || rows.length < 1 || rows.length > 100) {
+      throw new Error("Dispute evidence is incomplete");
+    }
+    const seen = new Set<string>();
+    for (const raw of rows) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Dispute evidence is malformed");
+      const row = raw as Record<string, unknown>;
+      const disputedCharge = typeof row.charge === "string" ? row.charge : str((row.charge as { id?: unknown } | null)?.id);
+      const id = str(row.id), status = str(row.status);
+      if (row.object !== "dispute" || !/^du_[A-Za-z0-9]+$/.test(id) || seen.has(id)
+        || disputedCharge !== fee.charge || !statuses.has(status)
+        || str(row.currency).toLowerCase() !== str(charge.currency).toLowerCase()) {
+        throw new Error("Dispute evidence does not match the charge");
+      }
+      seen.add(id);
+      if (status === "lost") lostDispute = true;
+    }
+  }
 
   const invoice = charge.invoice as Record<string, unknown> | string | null;
   if (invoice && typeof invoice === "object") {

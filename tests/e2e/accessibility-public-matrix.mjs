@@ -1,3 +1,4 @@
+import {checkContentFocusTarget,checkCompiledContentTargets} from "./skip-content-focus.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {readFileSync} from "node:fs";
@@ -15,6 +16,7 @@ let browser,failed=0,cases=0;const gaps=[];
 try{
  let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error(output);try{up=(await fetch(origin)).ok;}catch{}if(up)break;await new Promise(resolve=>setTimeout(resolve,500));}if(!up)throw Error("Local app unavailable "+output);
  browser=await driver.launch();console.log("PUBLIC_MATRIX_ENGINE:"+JSON.stringify({requested:engine,actual:driver.name(),version:browser.version()}));
+ if(process.env.AX2_PUBLIC_STANDARD==="true")await checkCompiledContentTargets({browser,root});
  for(const path of ["/","/pricing","/signin"])for(const width of [320,390,768,1280,1920])for(const mode of ["baseline","text-spacing","reduced-motion","forced-colors","reflow-320",...(process.env.AX2_PUBLIC_STANDARD==="true"?["dark"]:[])]){
   const viewportWidth=mode==="reflow-320"?320:width;
   const context=await browser.newContext({...(mode==="dark"?{colorScheme:"dark"}:{}),viewport:{width:viewportWidth,height:900},serviceWorkers:"block",reducedMotion:mode==="reduced-motion"?"reduce":"no-preference",forcedColors:mode==="forced-colors"?"active":"none"});
@@ -116,6 +118,7 @@ try{
    if(report.incomplete.length)gaps.push({path,width,mode,manualReview:report.incomplete});
    console.log("PUBLIC_MATRIX_CASE:"+JSON.stringify({engine,path,width,mode,viewportWidth,writes,foreign,...report,errors}));
    if(report.violations.length||errors.length||writes)failed++;
+   if(mode==="baseline"&&width===390)await checkContentFocusTarget({context,origin,path});
    // After preserving the baseline audit, exercise a real mobile-to-desktop
    // change. A CSS-hidden drawer must not retain its scroll lock or focus.
    if(path==="/pricing"&&width===390&&mode==="baseline"){ // VS1: the shared drawer is on every page but the home page and /pricing, which share the home page's short menu; it is exercised on a feature page, after the /pricing audit above.

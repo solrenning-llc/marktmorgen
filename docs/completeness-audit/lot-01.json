@@ -183,7 +183,7 @@
     {
      "what": "hreflang",
      "status": "present",
-     "evidence": "docs/site-languages.md:25",
+     "evidence": "docs/site-languages.md:25 (long line; quote: \"reciprocal hreflang links only to equivalent published pages, with an intentional x-default destination\")",
      "where_it_should_be": ""
     },
     {

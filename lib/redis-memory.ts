@@ -590,6 +590,23 @@ export class MemoryRedis {
           }
           return removed;
         }
+        // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
+        if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, room, target, limit, month, size, json] = args;
+          const taken = this.storeData([room, limit, "0", month, "s", "card", size]);
+          if (Array.isArray(taken) && taken[0] === 1) {
+            this.data.set(target, json);
+            this.until.delete(target);
+          }
+          return taken;
+        }
+        if (key.startsWith("-- marktmorgen:card-drop:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, room, target, limit, month, seen] = args;
+          const held = this.run(["GET", target]);
+          if ((typeof held === "string" ? held : "") !== seen) return [2, 0];
+          if (typeof held === "string") this.run(["DEL", target]);
+          return this.storeData([room, limit, "1", month, "s", "card", "0"]);
+        }
         if (key.startsWith("-- marktmorgen:path-write:v1\n")) {
           const count=Number(args[0]);
           if(!((count===2 && args.length===9)||(count===4 && args.length===12)))return [-1,0];

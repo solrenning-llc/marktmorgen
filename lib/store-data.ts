@@ -170,6 +170,20 @@ function argsOf(changes: DataChange[], nowMs: number): (string | number)[] | nul
   return out;
 }
 
+/**
+ * What a script that ran TAKE_DATA answered ({state, total}), read as run
+ * reads it: for a write that takes its room in the same script as itself
+ * (lib/creator-card.ts, lib/path.ts).
+ */
+export function dataTakenOf(store: DataStore, reply: unknown, nowSeconds = Date.now() / 1000): DataTaken {
+  const room = dataRoomFor(store, nowSeconds);
+  const [state, total] = Array.isArray(reply) ? reply.map(Number) : [NaN, NaN];
+  const used = Number.isFinite(total) ? total : 0;
+  if (state === 1) return { ok: true, used };
+  if (state === 0) return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
+  return { ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." };
+}
+
 async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number): Promise<DataTaken> {
   const room = dataRoomFor(store, nowSeconds);
   const unknown = (used = 0): DataTaken => ({ ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." });
@@ -179,11 +193,7 @@ async function run(store: DataStore, changes: DataChange[], always: boolean, now
   if (!key || !args || !isRedisConfigured()) return unknown();
   try {
     const [reply] = await redisPipeline([["EVAL", TAKE_DATA, 1, key, contentRoomFor(store, nowSeconds), always ? "1" : "0", monthOf(nowSeconds * 1000), ...args]]);
-    const [state, total] = Array.isArray(reply) ? reply.map(Number) : [NaN, NaN];
-    const used = Number.isFinite(total) ? total : 0;
-    if (state === 1) return { ok: true, used };
-    if (state === 0) return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
-    return unknown(used);
+    return dataTakenOf(store, reply, nowSeconds);
   } catch (error) {
     console.error("could not count a store's data", error);
     return unknown();

@@ -10,7 +10,7 @@ import {
   openSession,
   sessionCookie,
 } from "@/lib/auth";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinEssentialLimit } from "@/lib/request-guard";
 import { logTeam, peekInvite, spendInvite } from "@/lib/team";
 import { ROLE_NAMES } from "@/lib/team-roles";
 import { noticeCreator } from "@/lib/account-notice";
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: `${origin}${path}` } });
 
-  if (!(await withinLimit("join", clientAddress(request), TRIES_PER_HOUR, 60 * 60))) {
+  if (!(await withinEssentialLimit("join", clientAddress(request), TRIES_PER_HOUR, 60 * 60))) {
     return away("/signin?status=invite-slow");
   }
 

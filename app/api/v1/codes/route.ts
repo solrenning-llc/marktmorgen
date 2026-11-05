@@ -1,6 +1,7 @@
-import { apiAdder, apiError, apiOk, apiStore, apiWriter } from "@/lib/api-guard";
-import { apiOkFields } from "@/lib/api-fields";
-import { codeOut, refusalWords } from "@/lib/api-codes";
+import { apiAdder, apiError, apiOk, apiStore, apiWriter, takeMoreApi } from "@/lib/api-guard";
+import { apiOkFields, badFields } from "@/lib/api-fields";
+import { apiReadUnits, codesWork } from "@/lib/api-read-rules";
+import { CODE_FIELDS, codeOut, refusalWords } from "@/lib/api-codes";
 import { createCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
 import { setHasDiscounts, storeRef, type Store } from "@/lib/store";
@@ -22,6 +23,12 @@ export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
   if (!selling(store)) return notSelling();
+  // A ?fields= that cannot be answered is refused before any further request is taken or anything read.
+  const bad = badFields(request, CODE_FIELDS);
+  if (bad) return bad;
+  // One page of the creator's Stripe account, taken before it is read (lib/api-read-rules.ts, codesWork).
+  const refused = await takeMoreApi(store, apiReadUnits(codesWork()));
+  if (refused) return refused;
   try {
     const list = await listCodes(store.stripeAccountId as string);
     return list.state === "ok" ? apiOkFields(request, { data: list.codes.map(codeOut) }) : unreadable();

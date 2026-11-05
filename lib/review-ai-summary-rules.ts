@@ -29,6 +29,16 @@ export const SUMMARY_REFRESH_SECONDS = 7 * 86_400;
 export type SummaryInput = { id: number; text: string };
 export type SummaryTheme = { title: string; reviews: number };
 
+/** Endings of web addresses that are no English word: after a dot, always an address ("MySite.Tv"). */
+const ADDRESS_ENDINGS = new Set(["com", "net", "org", "io", "co", "app", "dev", "tv", "de", "uk", "br", "ai", "info", "biz", "xyz", "fm", "gg", "ly"]);
+/** Endings that are also words ("Studio"): an address only after a name (a capital or a digit in it: "Coach.Academy"), else a sentence ("the course.Studio was"). */
+const WORD_ENDINGS = new Set(["academy", "studio", "shop", "store", "online", "site", "me", "us", "blog", "live", "art", "design", "club"]);
+/** Whether "before.After" is a web address rather than two sentences run together. */
+function endsAddress(before: string, after: string): boolean {
+  const ending = after.toLowerCase();
+  return ADDRESS_ENDINGS.has(ending) || (WORD_ENDINGS.has(ending) && /[\p{Lu}\p{N}]/u.test(before));
+}
+
 /** A review's words as they may be sent: one line, short, with addresses, handles, phone numbers and links taken out. */
 export function cleanReviewText(value: string): string {
   const one = value
@@ -39,8 +49,12 @@ export function cleanReviewText(value: string): string {
     .replace(/\b[\p{L}\p{N}._-]+\s+(?:at|\(at\)|\[at\])\s+[\p{L}\p{N}-]+\s+(?:dot|\(dot\)|\[dot\])\s+[a-z]{2,}\b/giu, "[email]")
     .replace(/(?<![\p{L}\p{N}])@[A-Za-z0-9_.]{2,}/gu, "[handle]")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
-    // A web address without http or www ("more at janesmith.dev/shop") is a link too.
-    .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/\S*)?\b/gi, "[link]")
+    // A dot before a capitalised word ("the course.Loved it") ends a sentence, so a space is put after it and the
+    // words are kept; unless it is a web address's ending (endsAddress: "JaneSmith.Dev", "Coach.Academy") or goes on to a path or a further dot.
+    .replace(/([\p{L}\p{N}]+)\.(\p{Lu}\p{Ll}+)\b(?!\/|\.\p{L})/gu, (whole, before: string, after: string) => (endsAddress(before, after) ? whole : `${before}. ${after}`))
+    // A web address without http or www ("more at janesmith.dev/shop") is a link too; ".js" is a library's name
+    // ("Node.js"), never a web address's ending.
+    .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}(?:\/\S*)?\b/gi, "[link]")
     // A phone number in any digits (Arabic-Indic, fullwidth), seven digits or more.
     .replace(/\+?\p{Nd}(?:[\p{Nd}\s().-]*\p{Nd}){6,}/gu, "[number]")
     .replace(/\s+/g, " ")

@@ -61,9 +61,13 @@ npx zapier test
 
 ## Cost and the 60% floor
 
-No new cost line. Every call a Zap makes is one of the store's own API
+No new cost line. Every call a Zap makes counts as the store's own API
 requests of its plan (`API_RATE`, `takeAllowance`), which
-`tests/spend-floor.test.ts` already holds to the floor. The webhook endpoints a
+`tests/spend-floor.test.ts` already holds to the floor: one for a call that
+reads only the store, and more for a read that reads more than one request's
+worth (`lib/api-read-rules.ts`). The samples of events shown while a Zap is
+set up (`GET /api/v1/events`) read the newest deliveries at their most, so each
+counts as 5 (`1 + apiReadUnits(eventsWork())`), taken before it reads. The webhook endpoints a
 Zap adds use the store's own webhook deliveries, already counted and bounded.
 
 ## Before it is published (do not skip)

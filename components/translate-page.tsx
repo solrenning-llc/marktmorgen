@@ -64,13 +64,18 @@ export function TranslatePage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "translate", product: productId, language: to, page: sent }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: SalesPage; left?: number; error?: string };
-      if (data.ok && data.value) {
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: { page?: SalesPage; untranslated?: number }; left?: number; error?: string };
+      if (data.ok && data.value?.page) {
         if (typeof data.left === "number") setLeft(data.left);
-        const applied = onResult(data.value, sent);
+        const applied = onResult(data.value.page, sent);
+        // A block whose translated words would not fit came back as it was (lib/page-translate.ts, keepEveryBlock): said, never hidden.
+        const kept = typeof data.value.untranslated === "number" && data.value.untranslated > 0 ? data.value.untranslated : 0;
+        const keptWords = kept
+          ? ` ${kept === 1 ? "One block was" : `${kept} blocks were`} left in the old language, because the translated words were too long for it: change ${kept === 1 ? "it" : "them"} by hand.`
+          : "";
         setNote(
           applied
-            ? { error: false, text: `Translated into ${LANGUAGES[to].english}. Read it through, then press Save. Undo puts the words back as they were.` }
+            ? { error: false, text: `Translated into ${LANGUAGES[to].english}.${keptWords} Read it through, then press Save. Undo puts the words back as they were.` }
             : { error: true, text: "The page changed while it was being translated, so nothing was replaced. Translate it again." },
         );
         return;

@@ -26,7 +26,7 @@ part("A pipeline they may only see");
 const seen = draw([FIRST_PIPELINE_ID]);
 is("its deals are shown", seen.includes("Deal d000000001"), true);
 is("with nothing that changes them: no new deal, no move, no edit, no remove", [seen.includes("New deal"), seen.includes("Move Deal d000000001"), />Edit</.test(seen), seen.includes('aria-label="Remove Deal d000000001"')], [false, false, false, false]);
-is("its stages cannot be changed, and it says why and whom to ask", [seen.includes("Change Sales and its stages"), seen.includes("You can see this pipeline but not change it. Ask the store&#x27;s owner to change your access.")], [false, true]);
+is("its stages cannot be changed, and it says why and whom to ask", [seen.includes("Change Sales and its stages"), seen.includes("You can see this pipeline but not change it. Ask the store’s owner to change your access.")], [false, true]);
 
 is("nor a copy of it offered; a new pipeline of their own still is", [seen.includes("Duplicate “Sales”"), seen.includes("New pipeline")], [false, true]);
 const agenda = (onEdit?: (d: Deal) => void) => renderToStaticMarkup(createElement(DealAgenda, { deals: [{ ...deal("d000000001", "lead00"), nextAction: "Call back", dueDate: "2026-11-05" }], stages: DEFAULT_STAGES, currency: "usd", today: "2026-11-04", disabled: false, onEdit }));

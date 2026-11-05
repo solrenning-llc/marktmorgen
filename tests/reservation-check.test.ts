@@ -97,6 +97,15 @@ test("the cost and test registries never block: each agent adds its own rows (in
   assert.equal(conflicts({ text: lanesOnly, branch: "codex/mail", changed: ["tests/plan-cost-registry.ts", "tests/test-config.mjs"], agentFiles: reserved }).found.length, 0);
 });
 
+test("the key-family registries and the tests' Redis emulator never block: each agent adds its own entries (inbox CX-46)", () => {
+  const shared = ["lib/data-families.ts", "tests/store-data-registry.ts", "lib/redis-memory.ts"];
+  const reserved = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", `| Claude 2 | x | claude2/x | ${shared.map((f) => "`" + f + "`").join(", ")} | 04/11/2026 |\n`) }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: shared, agentFiles: reserved }).found.length, 0);
+  // A file next to them that is not shared still blocks.
+  const other = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", "| Claude 2 | x | claude2/x | `lib/redis.ts` | 04/11/2026 |\n") }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: ["lib/redis.ts"], agentFiles: other }).found.length, 1);
+});
+
 test("the old table is still read while it exists", () => {
   assert.deepEqual(conflicts({ text: sample, branch: "claude3/y", changed: ["lib/call-deposit.ts"], agentFiles: files }).found.map((r: { agent: string }) => r.agent), ["claude 2"]);
 });

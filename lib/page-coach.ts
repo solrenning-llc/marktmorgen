@@ -20,7 +20,7 @@ import { PAGE_TEST_PAID_WORDS, PAGE_TEST_RUNNING_WORDS } from "@/lib/headline-te
  *
  * Pure, so the studio's editor and the server ask the same function.
  */
-import { type BlockKind, type PageBlock, type SalesPage, picturesOf } from "@/lib/sales-page";
+import { type BlockKind, type PageBlock, type RowElement, type SalesPage, picturesOf } from "@/lib/sales-page";
 import type { PageFacts } from "@/lib/page-facts";
 import { vagueLinkTitle } from "@/lib/link-purpose";
 
@@ -82,6 +82,9 @@ const filled = (block: PageBlock): boolean => {
       return Boolean(block.product);
     case "form":
       return Boolean(block.form);
+    case "booking":
+      // Not offered and not drawn yet (552 [BB1] unit 1): a block nobody sees counts for nothing.
+      return false;
     case "quotes":
       return block.items.length > 0;
     case "row":
@@ -92,6 +95,22 @@ const filled = (block: PageBlock): boolean => {
   }
 };
 
+/** A row's parts (375 [TB1]); none for any other block. */
+const partsOf = (block: PageBlock): RowElement[] => (block.kind === "row" ? block.columns.flat() : []);
+
+/**
+ * The words of each button a block draws: a button block's, and each of a
+ * row's buttons, the page's own and those leading elsewhere alike.
+ */
+const buttonWords = (block: PageBlock): string[] =>
+  block.kind === "cta" ? [block.label] : partsOf(block).flatMap((part) => (part.kind === "button" ? [part.label] : []));
+
+/** Whether a block draws the page's own button (to buy or sign up): a button block, or a row's button with no address. */
+const ownButton = (block: PageBlock): boolean => block.kind === "cta" || partsOf(block).some((part) => part.kind === "button" && !part.url);
+
+/** Whether a row shows the inside: a picture it describes (a decorative one shows nothing) or a video. */
+const rowShows = (block: PageBlock): boolean => partsOf(block).some((part) => part.kind === "video" || (part.kind === "image" && !part.decorative));
+
 /** Every check, in the order the coach lists them. */
 export function coachChecks(input: CoachInput): CoachCheck[] {
   const blocks = input.page.blocks.filter(filled);
@@ -99,7 +118,8 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
   const count = (kind: "benefits" | "inside" | "steps" | "faq") =>
     blocks.reduce((n, b) => (b.kind === kind ? n + b.items.length : n), 0);
   const hero = blocks[0]?.kind === "hero" ? blocks[0] : null;
-  const ctas = blocks.map((b, i) => (b.kind === "cta" ? i : -1)).filter((i) => i >= 0);
+  // The page's own buttons, a row's among them (375 [TB1]); a row's button leading elsewhere is not one.
+  const ctas = blocks.map((b, i) => (ownButton(b) ? i : -1)).filter((i) => i >= 0);
   const free = input.free;
   const checks: CoachCheck[] = [
     {
@@ -188,7 +208,7 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
         id: "show",
         label: "A look inside",
         why: "Pages of the book, a screen of the course, a lesson to watch: showing the inside beats describing it.",
-        done: has("pictures") || has("video") || blocks.some((b) => b.kind === "feature" && b.picture),
+        done: has("pictures") || has("video") || blocks.some((b) => (b.kind === "feature" && b.picture) || rowShows(b)),
         weight: 2,
         add: "pictures",
       },
@@ -215,9 +235,10 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
     });
   }
   // A button's own words say what it does (274 [AX1] Part A item 6; WCAG 2.4.4, 2.4.9): a screen reader may list
-  // the buttons by their words alone. An empty label keeps the page's own words, which do.
-  const vagueButtons = [...blocks, ...(input.page.variant?.blocks ?? [])].filter((b) => b.kind === "cta" && b.label.trim() && vagueLinkTitle(b.label)).length;
-  if (blocks.some((b) => b.kind === "cta")) {
+  // the buttons by their words alone. An empty label keeps the page's own words, which do. A row's buttons are
+  // buttons too (375 [TB1]), those leading elsewhere included: their words must say where.
+  const vagueButtons = [...blocks, ...(input.page.variant?.blocks ?? [])].flatMap(buttonWords).filter((label) => label.trim() && vagueLinkTitle(label)).length;
+  if (blocks.some((b) => buttonWords(b).length > 0)) {
     checks.push({
       id: "button_words",
       label: vagueButtons ? `Every button says what it does (${vagueButtons === 1 ? "1 does not" : `${vagueButtons} do not`})` : "Every button says what it does",

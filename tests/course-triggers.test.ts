@@ -22,31 +22,24 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 const HOUR = 3_600_000;
 const realNow = Date.now;
 let shift = 0;
 Date.now = () => realNow() + shift;
 
-const sent: { to: string; subject: string }[] = [];
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (url.hostname === "api.resend.com") {
-    type Sent = { to: string | string[]; subject: string };
-    const body = JSON.parse(String(init?.body)) as Sent | Sent[];
-    const all = Array.isArray(body) ? body : [body];
-    for (const m of all) sent.push({ to: [m.to].flat()[0], subject: m.subject });
-    return json(Array.isArray(body) ? { data: all.map((_, i) => ({ id: `email_${sent.length}_${i}` })) } : { id: `email_${sent.length}` });
-  }
-  return json({ object: "list", data: [], has_more: false });
-}) as typeof fetch;
-
-const to = (subject: string) => sent.filter((m) => m.subject === subject).map((m) => m.to).sort();
+const mail = installSesMailFixture({
+  fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
+});
+const to = (subject: string) =>
+  mail.ses.filter((message) => message.subject === subject).flatMap((message) => message.to).sort();
 const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   process.env.STRIPE_SECRET_KEY = "sk_test_course_triggers_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_course_triggers_only_a_stand_in";
 
@@ -130,6 +123,7 @@ async function main(): Promise<void> {
   await run();
   is("somebody who never agreed to hear from the creator is not written to", to("You finished it"), ["ana@example.com"]);
 
+  mail.restore();
   done();
 }
 

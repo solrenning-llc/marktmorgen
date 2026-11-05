@@ -406,9 +406,11 @@ async function main(): Promise<void> {
   };
   const keptDeal = (await crm(owner, { action: "deal", deal: { title: "Kept", email: "", cents: 1, stage: checked.stages[0].id, note: "" } })).body.deal!.id;
   const keptPipes = String((await redisPipeline([["GET", pipesKey]]))[0]);
+  // A field kept with every person's answers: the locked session's save below would take it away (C2-76's rule, lib/two-step.ts).
+  is("(a field saved)", (await crm(owner, { action: "fields", fields: [{ id: "lkfld1", name: "Company", type: "text", options: [] }] })).status, 200);
   const keptFields = (await redisPipeline([["GET", `nl:crm:fields:${statsId}`]]))[0];
   const tried = [await asLocked({ action: "fields", fields: [] }), await asLocked({ action: "unpipeline", id: other.id, moveTo: checked.stages[0].id }), await asLocked({ action: "undeal", id: keptDeal })];
-  is("saving the fields, removing a pipeline and removing a deal are refused as locked", tried.map((t) => [t.status, t.body.error]), [[403, "locked"], [403, "locked"], [403, "locked"]]);
+  is("taking a field away, removing a pipeline and removing a deal are refused as locked", tried.map((t) => [t.status, t.body.error]), [[403, "locked"], [403, "locked"], [403, "locked"]]);
   is("and nothing was taken away", [(await redisPipeline([["HGET", dealsKey, keptDeal]]))[0] !== null, String((await redisPipeline([["GET", pipesKey]]))[0]) === keptPipes, (await redisPipeline([["GET", `nl:crm:fields:${statsId}`]]))[0] === keptFields], [true, true, true]);
   const stillOpen = await asLocked({ action: "deal", version: await versionOf(keptDeal), deal: { id: keptDeal, title: "Kept, renamed" } });
   is("changing a deal is not", [stillOpen.status, stillOpen.body.ok], [200, true]);

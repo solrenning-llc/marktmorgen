@@ -19,27 +19,20 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { type CapturedMail, installSesMailFixture } from "./ses-mail-fixture";
 
 const OWNER = "owner@example.com";
-type Message = { to: string[]; subject: string; html: string };
-/** Every request to the sender, each a batch of messages, in the order they were made. */
-const batches: Message[][] = [];
-
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
-    batches.push(JSON.parse(String(init?.body)) as Message[]);
-    return new Response(JSON.stringify({ data: [] }));
-  }
-  return new Response("{}", { status: 404 });
-}) as typeof fetch;
-
-const subjectsOf = (batch: Message[]) => [...new Set(batch.map((m) => m.subject))];
-const campaignsOf = (batch: Message[]) => [...new Set(batch.flatMap((m) => [...m.html.matchAll(/utm_campaign=([a-z0-9-]+)/g)].map((found) => found[1])))];
+const mail = installSesMailFixture();
+const subjectsOf = (messages: CapturedMail[]) => [...new Set(messages.map((message) => message.subject))];
+const campaignsOf = (messages: CapturedMail[]) => [...new Set(messages.flatMap((message) =>
+  [...message.html.matchAll(/utm_campaign=([a-z0-9-]+)/g)].map((found) => found[1])
+))];
 const today = () => new Date().toISOString().slice(0, 10);
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   process.env.RESEND_API_KEY = "re_test_subject_test_only_a_stand_in";
 
   part("What a test may be");
@@ -113,21 +106,29 @@ async function main(): Promise<void> {
   const created = await ask();
   if (!created.ok) throw new Error(`no broadcast: ${created.reason}`);
   const id = created.broadcast.id;
-  batches.length = 0;
+  mail.clearCaptured();
   let b = (await advanceBroadcast(id, storeForHandle, Date.now() + 60_000))!;
+  const testedMail = mail.ses.slice();
   is("it is waiting, and no subject is chosen yet", [b.status, b.test?.winner], ["waiting", ""]);
   is("a fifth of 120 went: twelve of each", [b.sent, b.test?.a, b.test?.b], [24, 12, 12]);
-  is("in two batches that never mix the subjects", batches.map((batch) => [batch.length, subjectsOf(batch)]), [[12, ["The plan is here"]], [12, ["Forty dinners, one plan"]]]);
-  is("each subject's links carry its own tag", batches.map(campaignsOf), [[variantCampaign(id, "a")], [variantCampaign(id, "b")]]);
-  is("the tag is one for everybody who got that subject, never one each", new Set(batches[0].map((m) => m.html.match(/href="([^"]*utm_campaign[^"]*)"/)?.[1])).size, 1);
-  const tested = batches.flat().map((m) => m.to[0]);
+  is("the two subject groups keep their order and never mix", testedMail.map((message) => message.subject), [
+    ...Array(12).fill("The plan is here"),
+    ...Array(12).fill("Forty dinners, one plan"),
+  ]);
+  is("each subject's links carry its own tag",
+    [campaignsOf(testedMail.slice(0, 12)), campaignsOf(testedMail.slice(12))],
+    [[variantCampaign(id, "a")], [variantCampaign(id, "b")]]);
+  is("the tag is one for everybody who got that subject, never one each",
+    new Set(testedMail.slice(0, 12).map((message) => message.html.match(/href="([^"]*utm_campaign[^"]*)"/)?.[1])).size, 1);
+  is("list variants never fall through to Resend", mail.resend.length, 0);
+  const tested = testedMail.flatMap((message) => message.to);
   is("nobody got both", new Set(tested).size, 24);
   const endsAt = b.test?.endsAt ?? 0;
   is("the rest are due four hours on", Math.abs(endsAt - (Math.floor(Date.now() / 1000) + 4 * 3_600)) <= 5, true);
 
-  batches.length = 0;
+  mail.clearCaptured();
   b = (await advanceBroadcast(id, storeForHandle, Date.now() + 60_000))!;
-  is("asked again before the time is up, nothing more goes", [batches.length, b.sent, b.status, b.test?.endsAt === endsAt], [0, 24, "waiting", true]);
+  is("asked again before the time is up, nothing more goes", [mail.attempts.length, b.sent, b.status, b.test?.endsAt === endsAt], [0, 24, "waiting", true]);
 
   part("The better one goes to the rest");
   const statsId = store.statsId as string;
@@ -139,14 +140,16 @@ async function main(): Promise<void> {
   const held = JSON.parse(String(redis.run(["GET", key]))) as { test: { endsAt: number } };
   held.test.endsAt = Math.floor(Date.now() / 1000) - 1;
   redis.run(["SET", key, JSON.stringify(held)]);
-  batches.length = 0;
+  mail.clearCaptured();
   b = (await advanceBroadcast(id, storeForHandle, Date.now() + 60_000))!;
+  const restMail = mail.ses.slice();
   is("it is sent, to all 120", [b.status, b.sent, b.total], ["sent", 120, 120]);
   is("the second subject won, on the counts", [b.test?.winner, b.test?.visits], ["b", { a: 2, b: 5 }]);
   is("and the reason is kept for the studio", b.test?.why, "The second subject brought 5 visits to your store from 12 emails, against 2 from 12, so the rest got it.");
-  is("the other 96 got it, in one batch", batches.map((batch) => [batch.length, subjectsOf(batch)]), [[96, ["Forty dinners, one plan"]]]);
-  is("under the email's own tag", batches.map(campaignsOf), [[broadcastCampaign(id)]]);
-  const everyone = [...tested, ...batches.flat().map((m) => m.to[0])];
+  is("the other 96 got the second subject through SES", [restMail.length, subjectsOf(restMail)], [96, ["Forty dinners, one plan"]]);
+  is("under the email's own tag", campaignsOf(restMail), [broadcastCampaign(id)]);
+  is("the remaining list never falls through to Resend", mail.resend.length, 0);
+  const everyone = [...tested, ...restMail.flatMap((message) => message.to)];
   is("everybody on the list got exactly one email", [everyone.length, new Set(everyone).size], [120, 120]);
 
   part("What the studio adds up");
@@ -163,12 +166,13 @@ async function main(): Promise<void> {
   const gone: string[] = [];
   for (let i = 0; i < 40; i += 1) gone.push(`reader${i}@example.com`);
   redis.run(["HDEL", leadsKey(listId), ...gone]);
-  batches.length = 0;
+  mail.clearCaptured();
   const shrunk = (await advanceBroadcast(later.broadcast.id, storeForHandle, Date.now() + 60_000))!;
-  is("everyone left gets the first subject, at once", [shrunk.status, shrunk.sent, batches.map(subjectsOf)], ["sent", 80, [["One more thing"]]]);
+  is("everyone left gets the first subject through SES", [shrunk.status, shrunk.sent, mail.ses.length, subjectsOf(mail.ses), mail.resend.length], ["sent", 80, 80, ["One more thing"], 0]);
   is("and it is recorded that no test was run", [shrunk.test?.skipped, shrunk.test?.winner], [true, ""]);
   is("what was read back is what was saved", (await readBroadcast(later.broadcast.id))?.test?.skipped, true);
 
+  mail.restore();
   done();
 }
 

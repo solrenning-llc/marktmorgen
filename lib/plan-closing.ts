@@ -348,32 +348,42 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
       ]
     : [];
   const unpaused = (news?.notHeld ?? 0) + (news?.overLimit ?? 0);
+  // What the closing day refunds is giveBackUnused (lib/closing-refunds.ts):
+  // only the members whose last payment was written down when their payments
+  // were paused, from the creator's own balance, within the closing's limit.
+  // A member whose payments were not paused may never be in it, so the
+  // creator is asked to refund that time; and the notice never says a refund
+  // is made that the code may not make.
+  const notMade = "A refund your Stripe balance does not cover, or one past this closing's limit, is not made: after that day, please check your Stripe account and refund what is left yourself.";
   const holds = news && (news.notHeld === null || news.overLimit === null)
     ? [
         "We could not check just now whether every membership's payments are paused.",
         `Every membership ends on ${dateWords(day)}. If a member is charged before then, please refund them from Stripe.`,
+        `For a member whose payments were not paused, what they paid for after ${dateWords(day)} may not be refunded for you: after that day, please check your members in Stripe and refund that time yourself.`,
         "",
       ]
     : unpaused > 0
     ? [
         `${unpaused} ${unpaused === 1 ? "membership's payments are" : "memberships' payments are"} not paused${news?.notHeld ? " yet: we try again every day" : ""}${news?.overLimit ? `${news?.notHeld ? ", and some are" : ":"} past this closing's limit` : ""}.`,
         `Every one of them ends on ${dateWords(day)}. If a member is charged before then, please refund them from Stripe.`,
+        `What these members paid for after ${dateWords(day)} may not be refunded for you: after that day, please check each of them in Stripe and refund that time yourself.`,
         "",
       ]
     : [];
   const members = news && news.members === null
     ? [
         `We could not check just now which members paid for time after ${dateWords(day)}.`,
-        `On ${dateWords(day)} each of them is given back the unused part of their last payment, from your own`,
-        "Stripe account, if its balance covers it. Marktmorgen never pays it and never takes it.",
+        `On ${dateWords(day)} we try to refund, from your own Stripe account, the unused part of the last payment of each member whose payments we paused.`,
+        notMade,
+        "Marktmorgen never pays it and never takes it.",
         "",
       ]
     : news && news.members !== null && news.members > 0 && news.unused
     ? [
         `${news.members} ${news.members === 1 ? "member has" : "members have"} paid for time after ${dateWords(day)}: ${news.unused} in all.`,
-        `On ${dateWords(day)} each is given back the unused part of their last payment, from your own`,
-        "Stripe account, if its balance covers it. You can give it back sooner, after checking",
-        "each amount, from your studio. Marktmorgen never pays it and never takes it.",
+        `On ${dateWords(day)} we try to refund each of them the unused part of their last payment, from your own Stripe account.`,
+        notMade,
+        "You can refund it sooner, after checking each amount, from your studio. Marktmorgen never pays it and never takes it.",
         "",
       ]
     : [];
@@ -449,15 +459,18 @@ export function readHoldCounts(value: unknown): { failed: number; over: number }
  * What members paid for past the day, as `unusedSummary` answers it, with its
  * totals written as money; null when the answer is not a count with one
  * total per currency to go with it (members but no total, a total but no
- * members, an amount that is not money). Null is said as "could not be
- * checked", never as no member at all.
+ * members, more currencies than members, a currency twice in any case, an
+ * amount that is not money). Null is said as "could not be checked", never
+ * as no member at all.
  */
 export function readUnusedSummary(value: unknown): { members: number; unused: string } | null {
   if (!value || typeof value !== "object") return null;
   const { members, totals } = value as { members?: unknown; totals?: unknown };
   if (!isCount(members) || !Array.isArray(totals)) return null;
   const money = totals.every((t) => t && typeof t === "object" && typeof (t as { cur?: unknown }).cur === "string" && /^[a-z]{3}$/i.test((t as { cur: string }).cur) && isCount((t as { amount?: unknown }).amount) && (t as { amount: number }).amount > 0);
-  if (!money || (members > 0) !== (totals.length > 0)) return null;
+  if (!money || (members > 0) !== (totals.length > 0) || totals.length > members) return null;
+  // One total per currency, whatever its case: a currency twice is not a summary we wrote.
+  if (new Set((totals as { cur: string }[]).map((t) => t.cur.toLowerCase())).size !== totals.length) return null;
   try {
     return { members, unused: (totals as { cur: string; amount: number }[]).map((t) => formatMoney(t.amount, t.cur)).join(" and ") };
   } catch {

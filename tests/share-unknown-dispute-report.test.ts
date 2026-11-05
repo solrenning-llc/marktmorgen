@@ -63,6 +63,12 @@ test('a transport failure is still failed without inventing an unknown status',a
  assert.equal(counts.failed,1);assert.equal(counts.complete,false);assert.equal(calls.filter(c=>c.method==='POST').length,0);
  assert.equal(diagnostic.unknownDisputes,0);assert.deepEqual(diagnostic.unknownDisputeFees,[]);
 });
+test('a known lost row cannot override a later unknown dispute status',async()=>{
+ const {counts,calls}=await world({reply:{object:'list',has_more:false,data:[{...row,id:'du_KnownLost0001',status:'lost'},row]}}),diagnostic=counts as unknown as Diagnostic;
+ assert.equal(counts.failed,1);assert.equal(counts.complete,false);
+ assert.equal(counts.gaveBack,0);assert.equal(calls.filter(c=>c.method==='POST').length,0);
+ assert.equal(diagnostic.unknownDisputes,1);assert.deepEqual(diagnostic.unknownDisputeFees,[fee.id]);
+});
 test('known states remain ordinary, including the confirmed lost-dispute refund',async()=>{
  for(const status of ['won','needs_response','under_review','warning_needs_response','warning_under_review','warning_closed','lost']){
   const {counts,calls}=await world({reply:{object:'list',has_more:false,data:[{...row,status}]}}),diagnostic=counts as unknown as Diagnostic;

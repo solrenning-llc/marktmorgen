@@ -6,14 +6,12 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |
 | Codex F | 309 [EM1], CX-85: campaign prototype regression; lib/mail-revenue.ts shared with #2192 by explicit inbox exception | codex/f-mail-revenue-proto | `tests/mail-revenue-proto.test.ts` | 04/11/2026 |
 
 | Codex A3 | CX-101(3) / CX-102(c): confirm a mail route before creating course tokens and retain recoverable fallback refusals; stacked on own #2338, email.ts shared only between these own units | codex/a3-c97b-mail-readiness | `lib/learn.ts`, `lib/email.ts`, `tests/course-link-mail-unavailable.test.ts`, `tests/course-link-mail-world.ts`, `tests/durable-mail-refusal.test.ts` | 04/11/2026 |
 
 | Codex C2 | 465 [MR2]: reject cost-list Proxies that hide unknown entries before computing remaining resource allowance | codex/c-mr2-cost-envelope-proxy | `lib/cost-envelope.ts`, `tests/cost-envelope-proxy.test.ts` | 04/11/2026 |
 | Codex C | 473 [TX3]: serializable own sales evidence | codex/c-tx3-sales-evidence | `lib/tax-sales-counter.ts`, `tests/tax-sales-counter.test.ts` | 04/11/2026 |
-| Codex C | 472 [TX2]: complete explicit incoming-exchange evidence | codex/c-tx2-exchange-evidence | `lib/receiving-costs.ts`, `tests/receiving-most-correct.test.ts` | 04/11/2026 |
 | Codex I | Reviewer 3 C79: all unowned buyer orders findings (CX-95) | codex/i-c79-orders | `app/[handle]/orders/page.tsx`, `components/bundle-delivery.tsx`, `tests/orders-page-bounds.test.ts`, `tests/bundle-delivery-regions.test.ts` (app/globals.css compartilhado sem reserva, só o bloco de foco da loja — CX-95/CX-97), `lib/buyer-words/orders.ts`, `tests/e2e/orders-list-actions.mjs`, `tests/e2e/accessibility-buyer-actions.mjs` | 04/11/2026 |
 | Codex H | 310 [AX2]: copied answer links preserve native modified navigation | codex/h-copy-link-native | `components/copy-link.tsx`, `tests/copy-link-native.test.ts` | 04/11/2026 |
 | Codex F | 476 [TX6]: residual tax risks, aggravating facts and design mitigations; historical research preserved | codex/f-tax-residual-risks | `docs/tax-uncertainty.md`, `tests/tax-residual-risks.test.ts` | 04/11/2026 |
@@ -41,4 +39,5 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex P | 274 [AX1], 540 [CU1]: keep the selected course structure stable while saving | codex/p-course-template-pending | `components/course-template-picker.tsx`, `tests/course-template-picker-pending.test.ts` | 04/11/2026 |
 | Codex M | 310 [AX2], 274 [AX1]: 44px targets for moving and removing collection products | codex/m-collection-targets | `components/collections-editor.tsx`, `tests/e2e/collections-acknowledgment.mjs`, `tests/collections-editor-accessibility.test.ts` | 04/11/2026 |
 | Codex P | 427 [VR1]: malformed certificate status evidence never becomes valid or permanent | codex/p-certificate-record-evidence | `lib/certificate.ts`, `tests/certificate-record-evidence.test.ts` | 04/11/2026 |
+| Codex P | 274 [AX1], 103 [E2-LESSON-MEDIA]: malformed caption blocks never become a silently truncated successful upload | codex/p-caption-whole-file | `lib/captions.ts`, `tests/captions.test.ts` | 04/11/2026 |
 | Codex M | 310 [AX2], 274 [AX1]: predictable keyboard focus and named controls when adding, moving and removing store questions | codex/m-faq-editor-focus | `components/faq-editor.tsx`, `tests/e2e/faq-acknowledgment.mjs`, `tests/faq-editor-focus.test.ts` | 04/11/2026 23h00 |

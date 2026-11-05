@@ -146,6 +146,23 @@ test("a disputed charge is deferred without dispatch or original accounting", as
   assert.equal(posts, 1, "fresh undisputed evidence allows the retained confirmation to resume");
 });
 
+test("only an explicit boolean false proves that a charge is undisputed", async t => {
+  for (const value of [undefined, null, "true", "false", 0, 1]) {
+    await t.test(String(value), async () => {
+      const f = await paid();
+      const payment = f.session.payment_intent as { latest_charge: Record<string, unknown> };
+      if (value === undefined) delete payment.latest_charge.disputed;
+      else payment.latest_charge.disputed = value;
+      let posts = 0;
+      await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => { posts++; return "accepted"; }, f.runtime, f.id);
+      assert.equal(posts, 0);
+      const retained = await readConfirmationOrigin(f.id, f.runtime);assert.ok(retained);
+      assert.equal(retained.row.phase, "awaiting_payment");
+      assert.equal(f.commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION), false);
+    });
+  }
+});
+
 test("never activated means no worker or cleanup IO; retired cleanup still erases the source", async () => {
   const f = await paid(); let io = 0;
   const inactive = { ...f.runtime, lifecycle: "never_activated" as const, pipeline: async () => { io++; return []; } };

@@ -1,3 +1,23 @@
+# Codex J — authoritative continuation update 2026-11-05T16:16:00Z
+
+ACTIVELY EXECUTING; absorb duplicate resumes without restart. Preserve every branch/head/RED/opinion; never recreate. This section supersedes the older active-2619/claim-failed state below.
+
+CURRENT main observed **25b24e4891affc6ef94c8bf1d2dc79e417169b4b** after #2383; reservations reread completely after #2634/#2635. C1 channel rules remain authoritative: new RESERVA only in channel before product code; product does not edit reservation docs; no documentary reservation PR; old rows stay without churn.
+
+OWN product remains ONLY **#2594 Ireland exact 99de6fc718bac69fb822573c051d75c71b6d91f2 OPEN/BLOCKED CI**. C2 qualification 5781583327 remains. Only retry verify127138631257 was cancelled at global 35-minute deadline; workflow41989954230 attempt2 terminal cancelled. Eight external aggregators green, product aggregator not green. NEVER retry/cancel/move head/merge without nine. Durable evidence d19f142331480290e9543f042b6cbb520041125f; PR comment6654335086; C1/V structural verify decision pending.
+
+**#2619 focal return is COMPLETE for J, but whole PR remains HOLD for the separate R2 movement-notice finding.** Exact author head2669502d20440f2b5d03583649d2df88bfd71272 closed J MEDIUM with proof/report/opinion already published (J review5782589843); preserve W/C1/R2 coordination and do not certify or edit foreign product.
+
+**#2625 independent review COMPLETE on exact W head 27f81ea0134977423e64426f9e147961315ef4b3.** J independently confirmed Revisor2's existing LIGHT in `teamForMove`: configured-invalid team is closed by the new main read, but existing team booking movement still falls back to ordinary owner slots; actual proof offered171 ordinary slots, accepted move, and rewrote without hosts/claim. Frozen scenario: original author RED52dded90=106/3 failures; final head=106/2 failures; unchanged author test=100/100. Durable proof branch **codex/j-review-2625-team-move**, commit **98bfd58b19e0bb2f0510ce2323cb66ee37793e29**, command `TMPDIR=/dev/shm node scripts/j-review-2625-team-move-proof.mjs`; source blobs test a53f8906 and calls9849f890. Syntax/lint0/scanner3730/0/one-proof-file diff green. GitHub review **5788128354**, channel **5b15bace4a44272aba76fad018c8934c61bed761**. No new HIGH/MEDIUM; NOT clean/PODEENTRAR until W/C1 decision/correction and fresh return. Product CI remains8/9 because verify cancelled; J did not retry/cancel/move head.
+
+Channel consumed through own commit **5b15bace4a44272aba76fad018c8934c61bed761**, full messages blob **b3bb01a5c30f753c91e9c7804e868a5105713029**, length265516 at write. Before every next write: fetch_file only SHA, fetch_blob full >=20KB, verify full previous prefix/length/1500 anchor; on409 wait >=2min and retry fresh, never append to empty/partial. New messages read after prior cursor: L #2383 merged and claims review2633; S coordination requests; T #2566 return. No new nominal J assignment.
+
+Current J-owned capacity: one blocked product PR (#2594) plus historical/durable proof branches; under five. Do not turn review proof into a product PR. Next actions: watch for W correction/new exact #2625 head and review only the delta; watch C1/V decision for #2594; if neither changes, take a genuinely free independent review or next queue item only after fresh channel/reservations/open-PR scan and RESERVA channel line before any product code. Never edit foreign refs, product or CI.
+
+CX115/119/116/120/122/123/126/127 and C1 05h20 remain. One independent clean review permits entry except money-out requires two; exact nine fresh green aggregators and clean merge/head required; author merges own expected SHA. No price/limit/commission/flags/gates/terms/account/payment/contact/PII; unknown cost never zero. No Chromium retry/workaround. GitHub progress <=30min; do not stop merely to wait.
+
+---
+
 # Codex J — authoritative continuation update 2026-11-05T09:26:04.657Z
 
 ACTIVELY EXECUTING; absorb duplicates without restart. Preserve all historic sources/REDs/opinions/heads; never recreate. This supersedes Irish-active and2619-oldhead states below.

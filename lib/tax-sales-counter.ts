@@ -91,6 +91,8 @@ export function countTaxSales(value: unknown): TaxSalesCount {
     if (!ledger) return unknown();
     const target = data(ledger.place, PLACE_KEYS);
     if (!target || !place(target) || !currency(ledger.currency)) return unknown();
+    // Probe only after both place fields are validated primitive own data.
+    structuredClone(ledger.place);
     if (!day(ledger.periodStart) || !day(ledger.periodEnd)
       || !day(ledger.coverageFrom) || !day(ledger.coverageThrough)) return unknown();
     if (ledger.periodStart > ledger.periodEnd) return invalid();
@@ -121,6 +123,9 @@ export function countTaxSales(value: unknown): TaxSalesCount {
       ids.add(entry.id);
       if (entry.amountMinor === null || entry.amountMinor === undefined) return unknown();
       if (typeof entry.amountMinor !== "number" || !Number.isSafeInteger(entry.amountMinor) || entry.amountMinor < 0) return invalid();
+      // A Proxy can forge complete descriptors. Probe the original leaf after
+      // validating every scalar, before any later trap can alter this branch.
+      structuredClone(field.value);
       // Require a single evidenced currency, including excluded rows: the
       // snapshot cannot silently treat a foreign-currency amount as local.
       if (entry.currency !== ledger.currency) return unknown();
@@ -134,6 +139,10 @@ export function countTaxSales(value: unknown): TaxSalesCount {
       totals[position] += BigInt(entry.amountMinor);
       applicableEntries += 1;
     }
+    // Child probes must finish before either parent: cloning live parents
+    // earlier could execute a getter introduced by a still-unchecked Proxy.
+    structuredClone(entries);
+    structuredClone(value);
     const maximum = BigInt(Number.MAX_SAFE_INTEGER);
     if (totals.settled + totals.reserved + totals.proposed > maximum) return invalid();
     return {

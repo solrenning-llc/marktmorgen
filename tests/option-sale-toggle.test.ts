@@ -19,7 +19,7 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addOption, addProduct, claimHandle, editOption, ensureStatsId, setOptionOnSale, setProductLink, setStripeAccount, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, claimHandle, editOption, ensureStatsId, setOptionOnSale, setProductExtras, setProductLink, setStripeAccount, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { sellableOptions } from "@/lib/product-option";
 import { membershipCacheKey, numbersFrom, type Sub } from "@/lib/membership-numbers";
@@ -104,11 +104,25 @@ async function main(): Promise<void> {
   delete (Object.prototype as Record<string, unknown>).polluted;
   is("no reading at all: unknown", membersOn(null, "a"), null);
 
+  part("A payment plan needs no payment for a price off sale");
+  const book = await addProduct(OWNER, "Plan Book", "", "30", null);
+  if (!book.ok) throw new Error("no book");
+  for (const [label, price] of [["Basic", "30"], ["Plus", "60"]]) if (!(await addOption(OWNER, book.product.id, label, price)).ok) throw new Error("no book option");
+  const [b1, b2] = (await readProduct((await storeForEmail(OWNER))!, book.product.id))!.options.map((o) => o.id);
+  for (const id of [b1, b2]) await setProductLink(OWNER, id, `https://example.com/${id}`);
+  const plan = { payments: 3, interval: "month" as const, amountCents: 2000, options: { [b2]: 2000 } };
+  is("with both on sale, a plan that leaves one out is refused", (await setProductExtras(OWNER, book.product.id, { plan }) as { reason?: string }).reason, "plan_price");
+  await setOptionOnSale(OWNER, b1, false);
+  is("with that one off sale, the same plan is saved", (await setProductExtras(OWNER, book.product.id, { plan })).ok, true);
+
   part("The editor");
   const editor = readFileSync("components/product-editor.tsx", "utf8");
   is("it sends the sale action with a boolean", /action: "sale", id: option\.id, onSale: /.test(editor), true);
   is("it asks for the count of the product", /action: "count", id: product\.id/.test(editor), true);
   is("an unknown count links to Memberships instead of saying 0", /href="\/studio\/memberships"/.test(editor), true);
+  const extras = readFileSync("components/checkout-extras.tsx", "utf8");
+  is("the plan form asks no payment for a price off sale, and says why", [/required=\{!option\.offSale\}/.test(extras), /option\.offSale \? [^\n]*Off sale/.test(extras)], [true, true]);
+  is("an empty payment for a price off sale is left out of what is sent", /filter\(\(option\) => !option\.offSale \|\| \(each\[option\.id\] \?\? ""\)\.trim\(\)\)/.test(extras), true);
   done();
 }
 

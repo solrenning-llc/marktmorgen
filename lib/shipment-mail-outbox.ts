@@ -193,11 +193,12 @@ local op, expected, supplied = ARGV[1], ARGV[2], ARGV[3]
 local now, maxbytes = tonumber(ARGV[4]), tonumber(ARGV[5])
 if not now or now < 0 or not maxbytes or maxbytes > 131072 then return {'unknown'} end
 local types = {'string','string','zset','set','set','hash','hash','set','string','string'}
-local seen = {}
+local seen, kinds = {}, {}
 for i=1,10 do
  if not KEYS[i] or seen[KEYS[i]] then return {'unknown'} end
  seen[KEYS[i]] = true
  local kind = redis.call('TYPE',KEYS[i]).ok
+ kinds[i]=kind
  if kind ~= 'none' and kind ~= types[i] then return {'unknown'} end
 end
 local raw = redis.call('GETRANGE',KEYS[1],0,maxbytes)
@@ -221,13 +222,17 @@ local function pool(key)
  return {n,b}
 end
 local function drop()
+ if op=='cancel' then
+  redis.call('HDEL',KEYS[6],'refused:'..r.id)
+  redis.call('HDEL',KEYS[7],'refused:'..r.person..':'..r.id)
+ end
  local a,b=pool(KEYS[6]),pool(KEYS[7])
  -- Erasure is never blocked by corrupt financial counters. Keep an uncertain
  -- reserve charged rather than releasing any amount that cannot be proved.
  if a and b and a[1]>=1 and b[1]>=1 and a[2]>=r.bytes and b[2]>=r.bytes then
   redis.call('HINCRBY',KEYS[6],'items',-1); redis.call('HINCRBY',KEYS[6],'bytes',-r.bytes)
   redis.call('HINCRBY',KEYS[7],'items',-1); redis.call('HINCRBY',KEYS[7],'bytes',-r.bytes)
-  if b[1]==1 and b[2]==r.bytes then redis.call('DEL',KEYS[7]) end
+  if b[1]==1 and b[2]==r.bytes then redis.call('HDEL',KEYS[7],'items','bytes') end
  end
  redis.call('DEL',KEYS[1]); redis.call('ZREM',KEYS[3],r.id)
  redis.call('SREM',KEYS[4],r.id); redis.call('SREM',KEYS[5],r.id); redis.call('SREM',KEYS[8],r.id)
@@ -265,6 +270,11 @@ if op == 'enqueue' then
  end
  if not b then if redis.call('SCARD',KEYS[4])~=0 then return {'unknown'} end; b={0,0} end
  if a[1]>=p.globalItems or b[1]>=p.storeItems or a[2]+n.bytes>p.globalBytes or b[2]+n.bytes>p.storeBytes then return {'full'} end
+ -- Reserve finite room for a refused summary before this row can exist.
+ -- Expiring metadata is separate from the live items/bytes counters.
+ local gh=kinds[6]=='none' and 0 or redis.call('HLEN',KEYS[6])
+ local sh=kinds[7]=='none' and 0 or redis.call('HLEN',KEYS[7])
+ if gh+a[1]>=10002 or sh+b[1]>=10002 then return {'full'} end
  redis.call('HSET',KEYS[6],'items',a[1]+1,'bytes',a[2]+n.bytes)
  redis.call('HSET',KEYS[7],'items',b[1]+1,'bytes',b[2]+n.bytes)
  redis.call('SET',KEYS[1],supplied)
@@ -310,7 +320,7 @@ if op == 'claim' then
  end
 elseif op == 'dispatch' then
  if r.state~='preparing' or r.owner~=ARGV[7] or r.leaseUntil<now then return {'held',raw} end
- r.state='dispatching'; r.leaseUntil=0; r.next=0
+ r.state='dispatching'; r.leaseUntil=now+60000; r.next=0
 elseif op == 'defer' then
  if r.state~='preparing' or r.owner~=ARGV[7] then return {'held',raw} end
  r.state='queued'; r.owner=''; r.leaseUntil=0; r.next=now+p.retryMilliseconds
@@ -319,7 +329,19 @@ elseif op == 'not-accepted' then
  r.state='queued'; r.owner=''; r.next=now+p.retryMilliseconds
 elseif op == 'refused' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
- r.state='refused'; r.next=0
+ -- Save only non-content outcome evidence, with individual field expiry.
+ -- These HASHes already exist and their cardinality was reserved at enqueue.
+ local summary=cjson.encode({state='refused',at=now,session=r.session})
+ local gf,sf='refused:'..r.id,'refused:'..r.person..':'..r.id
+ -- Refuse unsupported expiry BEFORE writing any metadata or dropping custody.
+ local supported=redis.pcall('HEXPIRE',KEYS[6],34560000,'XX','FIELDS',1,gf)
+ if type(supported)~='table' or supported.err then return {'unknown'} end
+ redis.call('HSET',KEYS[6],gf,summary)
+ local ge=redis.call('HEXPIRE',KEYS[6],34560000,'FIELDS',1,gf)
+ redis.call('HSET',KEYS[7],sf,summary)
+ local se=redis.call('HEXPIRE',KEYS[7],34560000,'FIELDS',1,sf)
+ if type(ge)~='table' or ge[1]~=1 or type(se)~='table' or se[1]~=1 then return {'unknown'} end
+ drop(); return {'refused'}
 elseif op == 'accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
  drop(); return {'accepted'}
@@ -633,6 +655,77 @@ function ownArray(value: unknown, maximum = 3): unknown[] | null {
     return out;
   } catch { return null; }
 }
+/** Minimal refusal evidence has no recipient, sender, subject or body. */
+type RefusedRecord = { state: "refused"; at: number; session: string };
+function refusedRecord(raw: unknown): RefusedRecord | null {
+  try {
+    if (typeof raw !== "string" || Buffer.byteLength(raw) > 1024) return null;
+    const value = data(JSON.parse(raw));
+    return value && Object.keys(value).length === 3 && value.state === "refused" && integer(value.at) && typeof value.session === "string" && SESSION.test(value.session)
+      ? value as unknown as RefusedRecord : null;
+  } catch { return null; }
+}
+
+/** Snapshot cardinality/field size precede every value read. Individual HASH
+ * field expiry removes each link at400days, even if the HASH is reused. */
+export const SHIPMENT_MAIL_REFUSED_SCRIPT = `-- marktmorgen:shipment-refused:v1
+local op,field,expected=ARGV[1],ARGV[2],ARGV[3]
+for i=1,#KEYS do
+ local t=redis.call('TYPE',KEYS[i]).ok
+ if t~='none' and t~='hash' then return {0} end
+end
+if op=='one' then
+ if redis.call('HSTRLEN',KEYS[1],field)>1024 then return {0} end
+ return {1,redis.call('HGET',KEYS[1],field) or ''}
+elseif op=='list' then
+ if redis.call('HLEN',KEYS[1])>10002 then return {0} end
+ local fields=redis.call('HKEYS',KEYS[1]); local out={}
+ for _,f in ipairs(fields) do
+  if string.sub(f,1,8)=='refused:' then
+   if #f~=137 or not string.match(string.sub(f,9,72),'^[a-f0-9]+$') or string.sub(f,73,73)~=':' or not string.match(string.sub(f,74),'^[a-f0-9]+$') then return {0} end
+   if field=='' or string.sub(f,1,#field)==field then
+    if redis.call('HSTRLEN',KEYS[1],f)>1024 then return {0} end
+    table.insert(out,f); table.insert(out,redis.call('HGET',KEYS[1],f))
+   end
+  end
+ end
+ return {1,out}
+elseif op=='erase' then
+ local gf='refused:'..string.sub(field,-64)
+ if redis.call('HSTRLEN',KEYS[1],gf)>1024 or redis.call('HSTRLEN',KEYS[2],field)>1024 then return {0} end
+ local g,s=redis.call('HGET',KEYS[1],gf),redis.call('HGET',KEYS[2],field)
+ if (g and g~=expected) or (s and s~=expected) then return {0} end
+ redis.call('HDEL',KEYS[1],gf); redis.call('HDEL',KEYS[2],field)
+ return {1}
+end
+return {0}
+`;
+
+async function refusedOf(statsId: string, fingerprint: string | undefined, pipeline: ShipmentMailPipeline): Promise<{ field: string; raw: string; record: RefusedRecord }[]> {
+  const reply = ownArray(await pipeline([["EVAL", SHIPMENT_MAIL_REFUSED_SCRIPT, 1, storePool(statsId), "list", fingerprint === undefined ? "" : `refused:${fingerprint}:`, ""]]));
+  const result = reply?.length === 1 ? ownArray(reply[0], 2) : null;
+  const values = result?.length === 2 && result[0] === 1 ? ownArray(result[1], SHIPMENT_MAIL_MAX_INDEX_ITEMS * 2) : null;
+  if (!values || values.length % 2) throw Error("Shipment refusal snapshot is unknown");
+  const seen = new Set<string>(), out: { field: string; raw: string; record: RefusedRecord }[] = [];
+  for (let i = 0; i < values.length; i += 2) {
+    const field = values[i], raw = values[i + 1];
+    if (typeof field !== "string" || !/^refused:[a-f0-9]{64}:[a-f0-9]{64}$/.test(field) || seen.has(field) || (fingerprint !== undefined && !field.startsWith(`refused:${fingerprint}:`))) throw Error("Shipment refusal index is unknown");
+    const record = refusedRecord(raw);
+    if (!record || shipmentMailId(statsId, record.session) !== field.slice(-64)) throw Error("Shipment refusal ownership is unknown");
+    seen.add(field); out.push({ field, raw: raw as string, record });
+  }
+  return out;
+}
+async function forgetRefused(statsId: string, fingerprint: string | undefined, pipeline: ShipmentMailPipeline): Promise<number> {
+  const rows = await refusedOf(statsId, fingerprint, pipeline);
+  for (const row of rows) {
+    const answer = ownArray(await pipeline([["EVAL", SHIPMENT_MAIL_REFUSED_SCRIPT, 2, POOL, storePool(statsId), "erase", row.field, row.raw]]));
+    const result = answer?.length === 1 ? ownArray(answer[0], 1) : null;
+    if (!result || result.length !== 1 || result[0] !== 1) throw Error("Shipment refusal erasure is unconfirmed");
+  }
+  return rows.length;
+}
+
 async function mutate(op: string, row: Row, expected: string, p: ShipmentMailPolicy | null, runtime: ShipmentMailRuntime, owner = ""): Promise<unknown[] | null> {
   const pipeline = runtime.pipeline ?? redisPipeline;
   try {
@@ -659,7 +752,16 @@ export async function shipmentMailStatus(statsId: string | null, session: string
   if (lifecycle(runtime) === "never_activated") return { state: "not_recorded", delayed: false };
   if (!["active", "retired"].includes(lifecycle(runtime))) return null;
   const found = await read(shipmentMailId(statsId, session), runtime.pipeline ?? redisPipeline);
-  return found === "unknown" ? null : found ? view(found.row, (runtime.now ?? Date.now)()) : { state: "not_recorded", delayed: false };
+  if (found === "unknown") return null;
+  if (found) return view(found.row, (runtime.now ?? Date.now)());
+  try {
+    const reply = ownArray(await (runtime.pipeline ?? redisPipeline)([["EVAL", SHIPMENT_MAIL_REFUSED_SCRIPT, 1, POOL, "one", `refused:${shipmentMailId(statsId, session)}`, ""]]));
+    const result = reply?.length === 1 ? ownArray(reply[0], 2) : null;
+    if (!result || result.length !== 2 || result[0] !== 1 || typeof result[1] !== "string") return null;
+    if (!result[1]) return { state: "not_recorded", delayed: false };
+    const terminal = refusedRecord(result[1]);
+    return terminal && terminal.session === session ? { state: "refused", delayed: false } : null;
+  } catch { return null; }
 }
 
 export async function enqueueShipmentMail(input: { statsId: string | null; session: string; authorizedAt: number; shipped: { at: number; tracking: string }; message: ShipmentMailMessage }, runtime: ShipmentMailRuntime = {}): Promise<{ ok: true; mail: ShipmentMailView } | { ok: false; reason: "unknown" | "full" }> {
@@ -794,9 +896,10 @@ export async function forgetShipmentMail(statsId: string | null | undefined, ema
   const got = ownArray(await pipeline([["TYPE", index], ["SCARD", index]]));
   if (!got || !["none", "set"].includes(String(got[0])) || !integer(got[1]) || got[1] > SHIPMENT_MAIL_MAX_INDEX_ITEMS) throw Error("Shipment mail deletion index is unknown");
   if (got[1] === 0) {
+    const erased = await forgetRefused(statsId, email === undefined ? undefined : person(email), pipeline);
     const completed = ownArray(await pipeline([["PEXPIRE", fence, SHIPMENT_MAIL_ERASURE_FENCE_MS]]));
     if (!completed || completed.length !== 1 || completed[0] !== 1) throw Error("Shipment mail erasure completion was not confirmed");
-    return 0;
+    return erased;
   }
   const result = ownArray(await pipeline([["SMEMBERS", index]]));
   const ids = result?.length === 1 && Array.isArray(result[0]) ? result[0] as unknown[] : null;
@@ -809,6 +912,7 @@ export async function forgetShipmentMail(statsId: string | null | undefined, ema
     if (changed?.[0] !== "canceled") throw Error("Shipment mail deletion was not confirmed");
     deleted++;
   }
+  deleted += await forgetRefused(statsId, email === undefined ? undefined : person(email), pipeline);
   const completed = ownArray(await pipeline([["PEXPIRE", fence, SHIPMENT_MAIL_ERASURE_FENCE_MS]]));
   if (!completed || completed.length !== 1 || completed[0] !== 1) throw Error("Shipment mail erasure completion was not confirmed");
   return deleted;
@@ -823,10 +927,11 @@ export async function shipmentMailOf(statsId: string, email: string, runtime: Sh
   const pipeline = runtime.pipeline ?? redisPipeline, fingerprint = person(email), index = personIndex(statsId, fingerprint);
   const counts = ownArray(await pipeline([["TYPE", index], ["SCARD", index]]));
   if (!counts || counts.length !== 2 || !["none", "set"].includes(String(counts[0])) || !integer(counts[1]) || counts[1] > SHIPMENT_MAIL_MAX_INDEX_ITEMS) throw Error("Shipment copy index is unknown");
-  if (counts[0] === "none" && counts[1] === 0) return [];
+  const terminal = await refusedOf(statsId, fingerprint, pipeline);
+  if (counts[0] === "none" && counts[1] === 0) return terminal.map(({ record }) => ({ checkout: record.session, state: record.state, at: record.at }));
   const reply = ownArray(await pipeline([["SMEMBERS", index]])), ids = reply?.length === 1 ? ownArray(reply[0], SHIPMENT_MAIL_MAX_INDEX_ITEMS) : null;
   if (!ids || ids.length !== counts[1] || ids.some(id => typeof id !== "string" || !HASH.test(id)) || new Set(ids).size !== ids.length) throw Error("Shipment copy index is incomplete");
-  const out: unknown[] = [];
+  const out: unknown[] = terminal.map(({ record }) => ({ checkout: record.session, state: record.state, at: record.at }));
   for (const id of ids) {
     const found = await read(String(id), pipeline);
     if (!found || found === "unknown" || found.row.statsId !== statsId || found.row.person !== fingerprint) throw Error("Shipment copy source is unknown");

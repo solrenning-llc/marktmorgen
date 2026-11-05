@@ -33,6 +33,8 @@ def evidence(redis):
                   admissionsUntil=now + 86400000)
     failures = []
     checks = 0
+    profiles = {}
+    made = set()
 
     def check(name, got, want):
         nonlocal checks
@@ -55,56 +57,111 @@ def evidence(redis):
                 prefix + "store:" + store, prefix + "person:" + store + ":" + person,
                 prefix + "pool", prefix + "pool:" + store, prefix + "all",
                 prefix + "closed:" + store, prefix + "erased:" + store + ":" + person]
+        made.update(keys)
         answer = apply("enqueue", row, keys, "", now)
         assert answer[0] == "queued", answer
         return row, keys
 
     def apply(op, row, keys, raw, at, owner="c" * 48):
-        return redis.command("EVAL", lua, 10, *keys, op, raw, json.dumps(row), at, 131072, json.dumps(policy), owner)
+        def stats(text):
+            return {m[1]: int(m[2]) for m in re.finditer(r"^cmdstat_([^:]+):calls=(\d+),", text, re.M)}
+        redis.command("MULTI")
+        redis.command("INFO", "COMMANDSTATS")
+        redis.command("EVAL", lua, 10, *keys, op, raw, json.dumps(row), at, 131072, json.dumps(policy), owner)
+        redis.command("INFO", "COMMANDSTATS")
+        before, result, after = redis.command("EXEC")
+        a, b = stats(before), stats(after)
+        count = sum(b.get(k, 0) - a.get(k, 0) for k in a.keys() | b.keys()) - 1
+        profiles.setdefault(op, []).append(count)
+        return result
 
-    row, keys = setup("refusal")
-    raw = redis.command("GET", keys[0])
-    prepared = apply("claim", row, keys, raw, now)
-    assert prepared[0] == "preparing"
-    dispatched = apply("dispatch", row, keys, prepared[1], now)
-    assert dispatched[0] == "dispatching"
-    refused = apply("refused", row, keys, dispatched[1], now)
-    check("a provider refusal is explicitly acknowledged", refused[0], "refused")
-    check("refusal releases the global pending slot", redis.command("HGET", keys[5], "items"), "0")
-    check("refusal releases the pending store slot", redis.command("HGET", keys[6], "items") in (None, "0"), True)
-    retained = redis.command("GET", keys[0])
-    check("refusal removes the sealed message", not retained or not json.loads(retained).get("sealed"), True)
-    check("refusal starts the matching shipment retention", redis.command("TTL", keys[1]), 400 * 86400)
-    check("refusal cannot remain due for automatic sending", redis.command("ZSCORE", keys[2], row["id"]), None)
-
-    row, keys = setup("unknown_dispatch")
-    prepared = apply("claim", row, keys, redis.command("GET", keys[0]), now)
-    dispatched = apply("dispatch", row, keys, prepared[1], now)
-    record = json.loads(dispatched[1])
-    check("dispatch owns a finite future reservation", record.get("leaseUntil", 0) > now, True)
-    replay = apply("claim", row, keys, dispatched[1], now + 600000)
-    check("an expired dispatch reservation never authorizes another POST", replay[0] == "preparing", False)
-
-    # Fenced and unsupported rows currently stay at the front of the same
-    # bounded 25-member read. Their evidence must survive but must not keep
-    # excluding later eligible work from every worker visit.
-    for kind in ("fenced", "unsupported"):
-        row, keys = setup(kind, store="synthetic_" + kind)
+    if redis.command("EXISTS", "nl:ship:mail:pool", "nl:ship:mail:all", "nl:ship:mail:due") != 0:
+        raise RuntimeError("The synthetic shipment-evidence namespace is not empty")
+    try:
+        row, keys = setup("refusal")
         raw = redis.command("GET", keys[0])
-        if kind == "fenced":
-            redis.command("SET", keys[8], "synthetic erasure fence")
-        else:
-            changed = json.loads(raw)
-            changed["reviewId"] = "SYNTHETIC_OTHER_REVIEW"
-            raw = json.dumps(changed)
-            redis.command("SET", keys[0], raw)
-        answer = apply("claim", row, keys, raw, now)
-        check(kind + " never grants dispatch permission", answer[0] == "preparing", False)
-        score = redis.command("ZSCORE", keys[2], row["id"])
-        check(kind + " does not stay eligible at this same instant", score is None or float(score) > now, True)
-        check(kind + " preserves immutable protected evidence", redis.command("GET", keys[0]), raw)
-    print(f"{checks} checks, {len(failures)} failing")
-    return bool(failures)
+        prepared = apply("claim", row, keys, raw, now)
+        assert prepared[0] == "preparing"
+        dispatched = apply("dispatch", row, keys, prepared[1], now)
+        assert dispatched[0] == "dispatching"
+        refused = apply("refused", row, keys, dispatched[1], now)
+        check("a provider refusal is explicitly acknowledged", refused[0], "refused")
+        check("refusal releases the global pending slot", redis.command("HGET", keys[5], "items"), "0")
+        check("refusal releases the pending store slot", redis.command("HGET", keys[6], "items") in (None, "0"), True)
+        retained = redis.command("GET", keys[0])
+        check("refusal removes the sealed message", not retained or not json.loads(retained).get("sealed"), True)
+        check("refusal starts the matching shipment retention", redis.command("TTL", keys[1]), 400 * 86400)
+        check("refusal cannot remain due for automatic sending", redis.command("ZSCORE", keys[2], row["id"]), None)
+        minimal = dict(state="refused", at=now, session=row["session"])
+        global_field = "refused:" + row["id"]
+        person_field = "refused:" + row["person"] + ":" + row["id"]
+        global_summary = redis.command("HGET", keys[5], global_field)
+        person_summary = redis.command("HGET", keys[6], person_field)
+        check("global status contains only the agreed minimal data", json.loads(global_summary) if global_summary else None, minimal)
+        check("personal status contains only the agreed minimal data", json.loads(person_summary) if person_summary else None, minimal)
+        check("global terminal field expires independently after400days", redis.command("HTTL", keys[5], "FIELDS", 1, global_field), [400 * 86400])
+        check("personal terminal field expires independently after400days", redis.command("HTTL", keys[6], "FIELDS", 1, person_field), [400 * 86400])
+        read_match = re.search(r"export const SHIPMENT_MAIL_REFUSED_SCRIPT = `([^`]+)`;", source)
+        assert read_match and "${" not in read_match[1]
+        reader = read_match[1]
+        def terminal(op, selected, field, expected=""):
+            return redis.command("EVAL", reader, len(selected), *selected, op, field, expected)
+        check("real status Lua reads the exact terminal summary", terminal("one", [keys[5]], global_field), [1, global_summary])
+        check("real copy Lua snapshots the person's linked summary", terminal("list", [keys[6]], "refused:" + row["person"] + ":"), [1, [person_field, person_summary]])
+        check("a wrong erase witness cannot delete terminal evidence", terminal("erase", [keys[5], keys[6]], person_field, "wrong"), [0])
+        check("the wrong witness left the actual summary untouched", redis.command("HGET", keys[5], global_field), global_summary)
+        redis.command("HSET", keys[5], global_field, "x" * 1025)
+        check("oversized status is refused before returning its body", terminal("one", [keys[5]], global_field), [0])
+        redis.command("HSET", keys[5], global_field, global_summary)
+        redis.command("HEXPIRE", keys[5], 400 * 86400, "FIELDS", 1, global_field)
+        check("real erasure Lua confirms removal of both terminal links", terminal("erase", [keys[5], keys[6]], person_field, global_summary), [1])
+        check("terminal erasure removes both copies", [redis.command("HGET", keys[5], global_field), redis.command("HGET", keys[6], person_field)], [None, None])
+        check("terminal erasure cannot refund the pending hold twice", redis.command("HGET", keys[5], "items"), "0")
+
+
+        row, keys = setup("unknown_dispatch")
+        prepared = apply("claim", row, keys, redis.command("GET", keys[0]), now)
+        dispatched = apply("dispatch", row, keys, prepared[1], now)
+        record = json.loads(dispatched[1])
+        check("dispatch owns a finite future reservation", record.get("leaseUntil", 0) > now, True)
+        replay = apply("claim", row, keys, dispatched[1], now + 600000)
+        check("an expired dispatch reservation never authorizes another POST", replay[0] == "preparing", False)
+
+        # Fenced and unsupported rows currently stay at the front of the same
+        # bounded 25-member read. Their evidence must survive but must not keep
+        # excluding later eligible work from every worker visit.
+        for kind in ("fenced", "unsupported"):
+            row, keys = setup(kind, store="synthetic_" + kind)
+            raw = redis.command("GET", keys[0])
+            if kind == "fenced":
+                redis.command("SET", keys[8], "synthetic erasure fence")
+            else:
+                changed = json.loads(raw)
+                changed["reviewId"] = "SYNTHETIC_OTHER_REVIEW"
+                raw = json.dumps(changed)
+                redis.command("SET", keys[0], raw)
+            answer = apply("claim", row, keys, raw, now)
+            check(kind + " never grants dispatch permission", answer[0] == "preparing", False)
+            score = redis.command("ZSCORE", keys[2], row["id"])
+            check(kind + " does not stay eligible at this same instant", score is None or float(score) > now, True)
+            check(kind + " preserves immutable protected evidence", redis.command("GET", keys[0]), raw)
+        # Reserved terminal metadata must be bounded before another paid enqueue.
+        for index in range(10000):
+            redis.command("HSET", "nl:ship:mail:pool", "refused:" + hashlib.sha256(("capacity" + str(index)).encode()).hexdigest(), "synthetic")
+        ident = hashlib.sha256(b"capacity-candidate").hexdigest()
+        candidate = dict(row, id=ident, session="cs_test_capacitycandidate0001", person="e" * 64, reviewId=policy["reviewId"], bytes=12000)
+        capacity_keys = ["nl:ship:mail:row:" + ident, "nl:ship:done:" + candidate["session"], "nl:ship:mail:due", "nl:ship:mail:store:capacity", "nl:ship:mail:person:capacity:" + candidate["person"], "nl:ship:mail:pool", "nl:ship:mail:pool:capacity", "nl:ship:mail:all", "nl:ship:mail:closed:capacity", "nl:ship:mail:erased:capacity:" + candidate["person"]]
+        made.update(capacity_keys)
+        candidate["statsId"] = "capacity"
+        capacity = apply("enqueue", candidate, capacity_keys, "", now)
+        check("terminal evidence capacity is reserved before enqueue", capacity, ["full"])
+        check("a capacity refusal writes neither private payload nor origin", redis.command("EXISTS", capacity_keys[0], capacity_keys[1]), 0)
+        print(json.dumps({"eval_and_internal_max": {op: max(values) for op, values in profiles.items()}, "supplier_invoice": False, "actual_funding": None}))
+        print(f"{checks} checks, {len(failures)} failing")
+        return bool(failures)
+    finally:
+        if made:
+            redis.command("DEL", *sorted(made))
 
 
 def main():

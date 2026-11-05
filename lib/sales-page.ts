@@ -106,7 +106,9 @@ export type BlockKind =
   | "feature"
   | "product"
   | "quotes"
-  | "form";
+  | "form"
+  | "row"
+  | "booking";
 
 export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "hero", label: "Hero", hint: "The big headline at the top, with the product's picture or a video." },
@@ -130,6 +132,8 @@ export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "product", label: "Another product", hint: "One of your other products, with its picture, price and a link to its own page: what goes well with this one." },
   { kind: "facts", label: "By the numbers", hint: "Lessons, episodes, buyers, the average rating: counted for you from the store, never typed, and always up to date." },
   { kind: "form", label: "Form", hint: "One of your forms, surveys or quizzes, made under Forms: the questions, and where the answers lead. On your own pages." },
+  // On a product's page only: not in SITE_KINDS (lib/site-page-rules.ts) nor in a saved section (lib/saved-blocks.ts, NOT_IN_SECTIONS).
+  { kind: "row", label: "Columns", hint: "One to three columns side by side, each with headings, words, a list, icons, buttons, pictures or a video. One column on a phone." },
 ];
 
 export type VideoProvider = "youtube" | "vimeo" | "loom";
@@ -302,6 +306,25 @@ export type QuotesBlock = { id: string; kind: "quotes"; heading: string; items: 
 /** One of the store's forms, surveys or quizzes (lib/forms.ts), by its id: only on the store's own pages. */
 export type FormBlock = { id: string; kind: "form"; heading: string; form: string };
 
+/**
+ * One of the store's calls, booked from the page itself (552 [BB1], added
+ * 4 November 2026): a paid call, a call also sold in packages, or a free
+ * intro call (551 [FB1]), by its product id. Only the id and an optional
+ * heading are kept, so the call's name, length and place are always today's,
+ * read from the call itself; a call taken off, made a draft or no longer a
+ * call is simply not drawn. Unit 1 draws a link to the call's own booking
+ * page (/@<store>/book/<id>); the time picker inside the block comes with
+ * unit 2, from the same picker and the same times, never a second way of
+ * booking.
+ *
+ * One per page (MAX_BOOKING_BLOCKS), as the reviews have one place: two would
+ * ask a visitor the same question twice, and once the picker is in the block
+ * each one reads the call's times, so a second one would double the reads for
+ * nothing.
+ */
+export type BookingBlock = { id: string; kind: "booking"; product: string; heading: string };
+export const MAX_BOOKING_BLOCKS = 1;
+
 /** An https address as it will be linked, or "" when it is not one: no other scheme, no login in it, no address on this machine. */
 export function quoteUrl(raw: unknown): string {
   if (typeof raw !== "string") return "";
@@ -329,6 +352,91 @@ export function quoteHost(url: string): string {
 }
 
 export type FeatureBlock = { id: string; kind: "feature"; heading: string; body: string; picture: Picture | null; side: "left" | "right" };
+
+/**
+ * A row of one, two or three columns, each a short list of small elements
+ * (added 4 November 2026, queue item 375 [TB1], unit 1): the rows ClickFunnels'
+ * editor is built from, held to the same rules as every other block. Each
+ * element is plain text with a fixed shape, one of the creator's own
+ * pictures, or a video from one of the three players; a button leads to the
+ * page's own checkout, or to an https address checked like a quote's
+ * (quoteUrl). On a phone the columns become one, in reading order: the first
+ * column's elements, then the second's, then the third's.
+ *
+ * Left out, and why: audio (no block keeps an audio file of its own; a file
+ * would need the claim and delete rules pictures have in
+ * lib/sales-page-store.ts) and a video that opens in a window (the page has
+ * no such window for a video yet; the picture viewer's dialog,
+ * components/picture-viewer.tsx, is the pattern to reuse when it comes).
+ */
+export const MIN_ROW_COLUMNS = 1;
+export const MAX_ROW_COLUMNS = 3;
+/** Elements in one column, and in a whole row: a full row weighs no more than a full questions block. */
+export const MAX_COLUMN_ELEMENTS = 8;
+export const MAX_ROW_ELEMENTS = 12;
+export const MAX_ROW_PARAGRAPH = 1_500;
+export const MAX_ROW_LIST_ITEMS = 8;
+export const MAX_ICON_LABEL = 80;
+
+/**
+ * The icons a row may show, by name: each one of the site's own drawings
+ * (components/icons.tsx), so nothing is loaded from elsewhere. Written here,
+ * not imported, for the reason REVIEW_ID_PATTERN is; the type check in
+ * components/sales-blocks.tsx holds every name to a drawing that exists.
+ */
+export const ROW_ICONS = [
+  "check",
+  "check-circle",
+  "star",
+  "shield",
+  "gift",
+  "clock",
+  "calendar",
+  "book",
+  "chat",
+  "target",
+  "bolt",
+  "sparkle",
+  "lock",
+  "globe",
+  "user",
+  "users",
+  "mail",
+  "phone",
+  "play",
+  "video",
+  "camera",
+  "music",
+  "mic",
+  "cap",
+  "chart",
+  "key",
+  "pin",
+  "download",
+  "info",
+] as const;
+export type RowIcon = (typeof ROW_ICONS)[number];
+
+/**
+ * One small element of a row's column. An icon with no label is decoration,
+ * hidden from screen readers; with one, the label is what it says. A picture
+ * needs the words that describe it unless it is marked decorative. A button
+ * with an address needs words of its own: the page's default label names
+ * the checkout. An empty address is the page's own checkout.
+ */
+export type RowElement =
+  | { kind: "heading"; text: string }
+  | { kind: "subheading"; text: string }
+  | { kind: "paragraph"; text: string }
+  | { kind: "list"; items: string[] }
+  | { kind: "icon"; name: RowIcon; label: string }
+  | { kind: "button"; label: string; url: string }
+  | { kind: "image"; picture: Picture; decorative: boolean }
+  | { kind: "video"; video: Video; title: string };
+export type RowElementKind = RowElement["kind"];
+export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subheading", "paragraph", "list", "icon", "button", "image", "video"];
+
+export type RowBlock = { id: string; kind: "row"; columns: RowElement[][] };
 
 /**
  * Where a block shows (added 8 October 2026): on every screen, which is
@@ -373,6 +481,8 @@ export type PageBlock = { screens?: BlockShow; saved?: string } & (
   | ProductBlock
   | QuotesBlock
   | FormBlock
+  | RowBlock
+  | BookingBlock
 );
 
 export type SalesPage = {
@@ -716,11 +826,148 @@ function parseUntil(raw: unknown): number {
   return typeof raw === "number" && Number.isInteger(raw) && raw > 1_600_000_000 && raw < 4_102_444_800 ? raw : 0;
 }
 
-/** The pictures one block shows: a pictures block's, or a picture beside words. */
+/** The pictures one block shows: a pictures block's, a picture beside words, or a row's pictures. */
 export function picturesOf(block: PageBlock): Picture[] {
   if (block.kind === "pictures") return block.items;
   if (block.kind === "feature" && block.picture) return [block.picture];
+  if (block.kind === "row") return block.columns.flatMap((column) => column.flatMap((element) => (element.kind === "image" ? [element.picture] : [])));
   return [];
+}
+
+/**
+ * How many pictures every block but the one at `index` shows, by picturesOf
+ * (a row's included): what the editor takes from MAX_PAGE_PICTURES before it
+ * offers room for one more, so it never offers what the save then refuses.
+ */
+export function picturesOutside(blocks: readonly PageBlock[], index: number): number {
+  return blocks.reduce((n, block, i) => (i === index ? n : n + picturesOf(block).length), 0);
+}
+
+/**
+ * One element of a row, made safe to use; null when it cannot be one: an
+ * unknown kind, no words where words are the element, an icon not on the
+ * list, a button address that is not https (javascript:, data: and the
+ * like are never links), a picture that is not one of the store's own or
+ * that has no description and is not marked decorative, a video that is not
+ * one of the three players.
+ */
+export function parseRowElement(raw: unknown): RowElement | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  switch (value.kind) {
+    case "heading": {
+      const text = line(value.text, MAX_HEADING);
+      return text ? { kind: "heading", text } : null;
+    }
+    case "subheading": {
+      const text = line(value.text, MAX_SUBHEADLINE);
+      return text ? { kind: "subheading", text } : null;
+    }
+    case "paragraph": {
+      const text = lines(value.text, MAX_ROW_PARAGRAPH);
+      return text ? { kind: "paragraph", text } : null;
+    }
+    case "list": {
+      const items = Array.isArray(value.items) ? value.items.map((item) => line(item, MAX_ITEM)).filter(Boolean).slice(0, MAX_ROW_LIST_ITEMS) : [];
+      return items.length ? { kind: "list", items } : null;
+    }
+    case "icon": {
+      const name = (ROW_ICONS as readonly unknown[]).includes(value.name) ? (value.name as RowIcon) : null;
+      return name ? { kind: "icon", name, label: line(value.label, MAX_ICON_LABEL) } : null;
+    }
+    case "button": {
+      const label = line(value.label, MAX_CTA_LABEL);
+      const sent = typeof value.url === "string" ? value.url.trim() : "";
+      if (!sent) return { kind: "button", label, url: "" };
+      const url = quoteUrl(sent);
+      return url && label ? { kind: "button", label, url } : null;
+    }
+    case "image": {
+      const picture = parsePicture(value.picture);
+      if (!picture) return null;
+      if (value.decorative === true) return { kind: "image", picture: { ...picture, alt: "" }, decorative: true };
+      return picture.alt ? { kind: "image", picture, decorative: false } : null;
+    }
+    case "video": {
+      const video = parseVideo(value.video);
+      return video ? { kind: "video", video, title: line(value.title, MAX_HEADING) } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * A row's columns, made safe to use; null when the row is not one: not one
+ * to three columns, or a column that is not a list. Elements that cannot be
+ * one are dropped, each column keeps at most MAX_COLUMN_ELEMENTS, and the
+ * row at most MAX_ROW_ELEMENTS, counted in reading order.
+ */
+function parseRowColumns(raw: unknown): RowElement[][] | null {
+  if (!Array.isArray(raw) || raw.length < MIN_ROW_COLUMNS || raw.length > MAX_ROW_COLUMNS) return null;
+  if (!raw.every((column) => Array.isArray(column))) return null;
+  let room = MAX_ROW_ELEMENTS;
+  return (raw as unknown[][]).map((column) => {
+    const kept = column
+      .slice(0, MAX_COLUMN_ELEMENTS * 2)
+      .map(parseRowElement)
+      .filter((element): element is RowElement => element !== null)
+      .slice(0, Math.min(MAX_COLUMN_ELEMENTS, room));
+    room -= kept.length;
+    return kept;
+  });
+}
+
+/**
+ * Whether one element is kept with every word it was sent with: what was
+ * sent, made one line or several the same way the reading makes it but
+ * never cut short, is what was kept. A list's empty lines are left out
+ * before its points are counted, here as in parseRowElement.
+ */
+function rowElementWhole(raw: unknown, kept: RowElement): boolean {
+  const value = raw as Record<string, unknown>;
+  const whole = (text: unknown) => line(text, Infinity);
+  switch (kept.kind) {
+    case "heading":
+    case "subheading":
+      return whole(value.text) === kept.text;
+    case "paragraph":
+      return lines(value.text, Infinity) === kept.text;
+    case "list": {
+      const sent = Array.isArray(value.items) ? value.items.map(whole).filter(Boolean) : [];
+      return sent.length === kept.items.length && sent.every((item, i) => item === kept.items[i]);
+    }
+    case "icon":
+    case "button":
+      return whole(value.label) === kept.label;
+    case "image": {
+      const picture = (value.picture ?? {}) as Record<string, unknown>;
+      // A picture marked as decoration has its description taken out on purpose.
+      return whole(picture.caption) === kept.picture.caption && (kept.decorative || whole(picture.alt) === kept.picture.alt);
+    }
+    case "video":
+      return whole(value.title) === kept.title;
+  }
+}
+
+/** Whether a row as sent keeps every element it was sent with, whole, within the limits: what blocksProblem tells back. */
+function rowSentWhole(raw: Record<string, unknown>): boolean {
+  const columns = raw.columns;
+  if (!Array.isArray(columns) || columns.length < MIN_ROW_COLUMNS || columns.length > MAX_ROW_COLUMNS) return false;
+  if (!columns.every((column) => Array.isArray(column) && column.length <= MAX_COLUMN_ELEMENTS)) return false;
+  const all = (columns as unknown[][]).flat();
+  if (all.length > MAX_ROW_ELEMENTS) return false;
+  return all.every((element) => {
+    const kept = parseRowElement(element);
+    return kept !== null && rowElementWhole(element, kept);
+  });
+}
+
+/** Whether a booking block as sent can be kept whole: a call's id, and no heading or one within MAX_HEADING (never cut short). */
+function bookingSentWhole(raw: Record<string, unknown>): boolean {
+  if (typeof raw.product !== "string" || !PRODUCT_ID_PATTERN.test(raw.product)) return false;
+  if (raw.heading === undefined) return true;
+  return typeof raw.heading === "string" && line(raw.heading, Infinity).length <= MAX_HEADING;
 }
 
 /** Every picture file a page shows, each once: what is kept when the page is saved, and deleted when it is not. */
@@ -870,6 +1117,13 @@ function parseBlock(raw: unknown): PageBlock | null {
     }
     case "form":
       return { id, kind: "form", heading, form: typeof value.form === "string" && /^[a-z0-9]{10}$/.test(value.form) ? value.form : "" };
+    case "row": {
+      const columns = parseRowColumns(value.columns);
+      return columns ? { id, kind: "row", columns } : null;
+    }
+    // Kept whole or not at all: without a call it books nothing, and its heading is never cut short (blocksProblem tells it back).
+    case "booking":
+      return bookingSentWhole(value) ? { id, kind: "booking", product: value.product as string, heading } : null;
     default:
       return null;
   }
@@ -893,6 +1147,7 @@ function parseBlocks(list: unknown, pictures: Set<string>): PageBlock[] {
     pictures.add(path);
   };
   let reviews = false;
+  let bookings = 0;
   for (const entry of list.slice(0, MAX_BLOCKS * 2)) {
     const block = parseBlock(entry);
     if (!block || seen.has(block.id)) continue;
@@ -905,6 +1160,10 @@ function parseBlocks(list: unknown, pictures: Set<string>): PageBlock[] {
       if (reviews) continue;
       reviews = true;
     }
+    if (block.kind === "booking") {
+      if (bookings >= MAX_BOOKING_BLOCKS) continue;
+      bookings += 1;
+    }
     // Pictures are counted across the page, and one file is shown once.
     if (block.kind === "pictures") {
       block.items = block.items.filter((picture) => {
@@ -916,6 +1175,16 @@ function parseBlocks(list: unknown, pictures: Set<string>): PageBlock[] {
     if (block.kind === "feature" && block.picture) {
       if (!room(block.picture.path)) block.picture = null;
       else keep(block.picture.path);
+    }
+    if (block.kind === "row") {
+      block.columns = block.columns.map((column) =>
+        column.filter((element) => {
+          if (element.kind !== "image") return true;
+          if (!room(element.picture.path)) return false;
+          keep(element.picture.path);
+          return true;
+        }),
+      );
     }
     seen.add(block.id);
     blocks.push(block);
@@ -991,6 +1260,8 @@ export type PageProblem =
   | "shape"
   | "too_big"
   | "same_version"
+  | "row"
+  | "booking"
   | null;
 
 /** The rules of one version's blocks, told back; `kept` is that version as parsed. */
@@ -999,6 +1270,8 @@ function blocksProblem(sent: unknown[], kept: PageBlock[]): PageProblem {
   const kinds = sent.map((b) => (b && typeof b === "object" ? (b as { kind?: unknown }).kind : null));
   if (kinds.slice(1).includes("hero")) return "hero_first";
   if (kinds.filter((k) => k === "reviews").length > 1) return "two_reviews";
+  // One booking block a page, with a call chosen and its heading whole.
+  if (kinds.filter((k) => k === "booking").length > MAX_BOOKING_BLOCKS) return "booking";
   for (const block of sent) {
     const value = block && typeof block === "object" ? (block as Record<string, unknown>) : {};
     if (value.kind === "hero" && value.media === "video" && !parseVideo(value.video)) return "video";
@@ -1016,11 +1289,18 @@ function blocksProblem(sent: unknown[], kept: PageBlock[]): PageProblem {
         if (typeof row.text === "string" && row.text.trim() && !quoteUrl(row.url)) return "quote_link";
       }
     }
+    // A row with no columns or more than three, too many elements, or an element that cannot be kept as sent.
+    if (value.kind === "row" && !rowSentWhole(value)) return "row";
+    if (value.kind === "booking" && !bookingSentWhole(value)) return "booking";
   }
   // A picture sent that was not kept: not a picture, a second copy of one, or past what a page holds.
   const sentPictures = sent.reduce<number>((n, b) => {
-    const value = b && typeof b === "object" ? (b as { kind?: unknown; items?: unknown; picture?: unknown }) : {};
+    const value = b && typeof b === "object" ? (b as { kind?: unknown; items?: unknown; picture?: unknown; columns?: unknown }) : {};
     if (value.kind === "feature") return n + (value.picture ? 1 : 0);
+    if (value.kind === "row" && Array.isArray(value.columns)) {
+      const elements = value.columns.flatMap((column) => (Array.isArray(column) ? column : []));
+      return n + elements.filter((element) => element && typeof element === "object" && (element as { kind?: unknown }).kind === "image").length;
+    }
     const items = value.kind === "pictures" ? value.items : null;
     return n + (Array.isArray(items) ? items.length : 0);
   }, 0);
@@ -1092,6 +1372,10 @@ export function emptyBlock(kind: BlockKind, id = newBlockId()): PageBlock {
       return { id, kind, heading: "What people say", items: [] };
     case "form":
       return { id, kind, heading: "", form: "" };
+    case "row":
+      return { id, kind, columns: [[], []] };
+    case "booking":
+      return { id, kind, product: "", heading: "" };
   }
 }
 
@@ -1271,6 +1555,11 @@ export function keepPictures(page: SalesPage, keep: ReadonlySet<string>): { page
       dropped += 1;
       return { ...block, picture: null };
     }
+    if (block.kind === "row") {
+      const columns = block.columns.map((column) => column.filter((element) => element.kind !== "image" || keep.has(element.picture.path)));
+      dropped += picturesOf(block).length - picturesOf({ ...block, columns }).length;
+      return { ...block, columns };
+    }
     return block;
   });
   return { page: { ...page, blocks }, dropped };
@@ -1297,6 +1586,10 @@ export function copyOfPage(page: SalesPage): { blocks: PageBlock[]; picturesLeft
     if (block.kind === "feature" && block.picture) {
       picturesLeft += 1;
       return { ...block, id, picture: null };
+    }
+    if (block.kind === "row") {
+      picturesLeft += picturesOf(block).length;
+      return { ...block, id, columns: block.columns.map((column) => column.filter((element) => element.kind !== "image")) };
     }
     return { ...block, id } as PageBlock;
   });

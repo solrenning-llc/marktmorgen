@@ -20,6 +20,7 @@ const SHORT_WORDS: Record<CurrencyShortfall["what"], string> = {
   offer: "Offer after paying",
   plan: "Each payment of the payment plan",
   deposit: "Deposit paid on the site, before the rest in person",
+  length: "Price of another length of the call",
 };
 
 /** The ways to pay, grouped the way a buyer thinks of them, each group with the one thing worth knowing. */
@@ -109,6 +110,13 @@ export function PaymentsPanel({
         const n = data.running ?? 1;
         setError(
           `${n === 1 ? "A membership or payment plan is" : `${n} memberships and payment plans are`} still running on your Stripe account, charging in ${currency.toUpperCase()}. Stripe keeps charging ${n === 1 ? "it" : "them"} in ${currency.toUpperCase()} whatever the store says, so the currency can be changed once the last one has ended or been canceled.`,
+        );
+        return;
+      }
+      if (data.error === "series") {
+        const n = data.running ?? 1;
+        setError(
+          `${n === 1 ? "A series of calls is" : `${n} series of calls are`} still running. ${n === 1 ? "It keeps" : "Each keeps"} charging in the currency it was booked in until its last session, whatever you choose here. So the currency can be changed once the last one is over or canceled. Nothing was changed.`,
         );
         return;
       }

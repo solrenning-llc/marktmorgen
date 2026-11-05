@@ -17,8 +17,9 @@
  *                  downloading the store's own data are never refused.
  *   api            every request to the REST API with one of the store's
  *                  keys (lib/api-guard.ts).
- *   inbox          a message that arrives in the store's inbox: a visitor's
- *                  chat, a contact form (lib/inbox.ts).
+ *   inbox          a conversation in the store's inbox: a visitor's chat, a
+ *                  contact form, or one the creator begins with one of their
+ *                  affiliates (lib/inbox.ts).
  *   email          the emails a store's own paths send that are neither its
  *                  monthly emails (lib/mail.ts) nor an order's: inbox notices
  *                  and replies, a purchase sent again, contact-form and

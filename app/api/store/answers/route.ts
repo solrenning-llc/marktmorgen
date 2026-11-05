@@ -10,7 +10,8 @@ import { clearMissed } from "@/lib/answers";
  * What a store's pages say to buyers is the "page" permission.
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "page", 6_000);
+  // Emptying the list of missed questions cannot be undone: named apart (lib/two-step.ts).
+  const guarded = await guardStoreWrite(request, "page", 6_000, (sent) => (sent.clear === true ? "clear" : ""));
   if (!guarded.ok) return guarded.response;
   try {
     if (guarded.body.clear === true) {

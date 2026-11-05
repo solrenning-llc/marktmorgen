@@ -74,7 +74,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ content: [{ type: "text", text: JSON.stringify({ themes: [{ title: "Loved the guide", ids: loved }, { title: "Wants it printable", ids: rest }] }) }] });
   }
   if (url.hostname === "api.resend.com") return json({ id: "email_1" });
-  if (url.hostname.endsWith("stripe.com")) return json({ object: "list", data: [], has_more: false });
+  if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
   return realFetch(input as string, init);
 }) as typeof fetch;
 

@@ -1,9 +1,9 @@
 /** Synthetic creator-authored manifests, never claimed as vendor exports. */
-import { COURSE_IMPORT_FORMAT, MAX_COURSE_IMPORT_BYTES, previewCourseImport } from "@/lib/course-import";
+import { COURSE_IMPORT_FORMAT, MAX_COURSE_IMPORT_BYTES, previewCourseImport, type CourseImportLesson } from "@/lib/course-import";
 import { MAX_MODULES, MAX_LESSONS, MAX_LESSON_FILES, MAX_ITEM_TITLE, MAX_BODY_LENGTH } from "@/lib/course";
 import { done, is, part } from "./check";
 
-const lesson = () => ({ title: "Welcome", text: "First paragraph.\n\nSecond paragraph.", video: "media/welcome.mp4", files: ["files/worksheet.pdf"] });
+const lesson = (): CourseImportLesson => ({ title: "Welcome", text: "First paragraph.\n\nSecond paragraph.", video: "media/welcome.mp4", files: ["files/worksheet.pdf"] });
 const manifest = () => ({ format: COURSE_IMPORT_FORMAT, ownsContent: true, title: "A course", modules: [{ title: "Start here", lessons: [lesson()] }] });
 const read = (value: unknown) => previewCourseImport(JSON.stringify(value));
 const good = read(manifest());
@@ -12,7 +12,7 @@ is("a creator-authored file can be previewed", good.ok, true);
 is("the full outline and text stay in their original order", good.ok ? good.draft : null, { title: "A course", modules: manifest().modules });
 is("all assets are local references only", good.ok ? good.assets : null, ["media/welcome.mp4", "files/worksheet.pdf"]);
 is("size, video duration and supplier cost stay unknown", good.ok ? [good.state, good.lessonCount, good.storageBytes, good.videoSeconds, good.costUsd] : null, ["preview_only", 1, null, null, null]);
-const textOnly = manifest(); textOnly.modules[0].lessons[0] = { ...lesson(), video: null as unknown as string, files: [], text: "Texto próprio — 日本語" };
+const textOnly = manifest(); textOnly.modules[0].lessons[0] = { ...lesson(), video: null, files: [], text: "Texto próprio — 日本語" };
 is("a text-only course keeps Unicode", read(textOnly).ok, true);
 const shared = manifest(); shared.modules[0].lessons.push(lesson());
 const sharedPreview = read(shared);
@@ -53,6 +53,8 @@ let touched = 0;
 const trap = new Proxy({}, { get() { touched++; throw Error("must not inspect"); }, ownKeys() { touched++; throw Error("must not inspect"); } });
 for (const raw of [trap, new String("{}"), true, 5, "", "{", "null", "[]", "x".repeat(MAX_COURSE_IMPORT_BYTES + 1)]) is("not a bounded JSON string: refused", previewCourseImport(raw).ok, false);
 is("no user getter or proxy trap ran", touched, 0);
+const wide = previewCourseImport('"' + "é".repeat(MAX_COURSE_IMPORT_BYTES / 2) + '"');
+is("the parsing ceiling counts UTF-8 bytes, before parsing", wide.ok ? null : wide.reason, "Choose a course outline JSON file no larger than 16 MiB.");
 is("an explicit prototype key is refused", previewCourseImport(JSON.stringify(manifest()).replace('"title":"A course"', '"__proto__":{"polluted":true},"title":"A course"')).ok, false);
 is("Object.prototype is unchanged", Object.hasOwn(Object.prototype, "polluted"), false);
 const originalFetch = globalThis.fetch;

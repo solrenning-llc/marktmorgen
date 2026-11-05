@@ -1,3 +1,34 @@
+# Codex D2 — exact blocked checkpoint, November 5, 2026,23:53 UTC
+
+This latest section supersedes older pending-return and watcher instructions below. Fresh channel, rotated archive2334, Codex inbox and exact PR metadata read. No active Codex implementation was confirmed, so this continuation did not discard itself as a duplicate.
+
+Five own products are still OPEN and unchanged, each freshly confirmed8SUCCESS plus one terminal non-success:
+-2425 Canada a59658003c203080589961337979b3d67efce448:8success+cancelled.
+-2445 Swiss9e82e9ea79e25f21f94342d4d8ae14c5226e841c:8success+cancelled.
+-2596 South Africa b465b26050865b1d1728c3531f4d20ccb2e0c7fd:8success+cancelled.
+-2633 Chile e9b7e3dc07540aa97a6b72055917b8a3019f6701:8success+failure.
+-2647 Korea90a269a86bb92869e9616cc839331e2647e5f493:8success+failure.
+
+No merge is eligible, no sixth product can open, and the known terminal causes do not justify another retry. Canada/Swiss/Africa unique retries remain exhausted; Korea macOS retry passed and is consumed. No tests or old proofs were rerun without a code delta. No head move, cancellation, product/reservation edit, bypass, author-branch edit or merge.
+
+## Exact missing dependencies
+
+2632 is still OPEN atf183d78fd326c404c5a75fd6a3b9328b9fe24c94. C3's base-reservation explanation remains applicable: C1/V must remove V's released script reservation from MAIN via normal PR incorporation; then C3 integrates once, obtains nine new exact-head successes and incorporates2632 normally. Deleting the line only inside2632 does not resolve the checker, which reads BASE. D2 does not own that reservation or controller branch.
+
+Then D2 integrates necessary main once into the five own PRs, preserves the two reviewed product blobs each, validates linked tests/types/lint/scanner/diff and obtains nine NEW exact-head successes before expected_head_sha merge with applicable review. Existing review/retry history below is preserved. Africa's P qualification remains recorded; do not substitute a duplicate review.
+
+## Review and fiscal state
+
+E2#2605 remains unchanged atb18bea42f0042401900c9a885103e318f80bda0e. D2 focal review5793305504 is ALREADY published SEM ACHADO/PODE ENTRAR subject to main/conflict coordination and nine new checks. The E2 archive's earlier statement that D2 was pending is superseded by that published review and channeld3d490a9. No second full/focal review is needed for identical product blobs. Proof e035eb746e49e151379aad6852b048f9275729a4 and all REDs remain durable.
+
+2692 remains unchanged at35e670e3cf35a9997821bd5e47bb104afb9f6453. D2 replay MEDIUM remains closed by unchanged proof9/9 and latest review5793265992/reporta753ea19. R2 studio-page outage MEDIUM remains OPEN. C2 reports WIP but still lacks nominal C1/A3 permission for the home-page hunks; WIP is not a new READY head. No repeat or blanket clearance.
+
+Fiscal malformed-present enabled MEDIUM37a8d453 remains OPEN, no nominal correction assignment found in channel or archive. Five own slots are occupied. The pure TX4/TX3 read-only default audit and proof are already completed; no fabricated sixth unit or duplicate audit.
+
+No new E2 return or unclaimed nominal D2 request was found. Current external reviews are already controlled by their announced reviewers; no duplicate review. This run is fully blocked for D2's authorized queue. Preserve all work and resume only when an actionable head/comment/assignment or the legitimate shared merge changes these dependencies. No continuing watcher is certified active; the historical local watcher was bounded to one hour.
+
+# Prior full checkpoint and evidence ledger
+
 # Codex D2 — continuation checkpoint, November 5, 2026,22:54 UTC
 
 Read this latest section first; it supersedes pending claim/return instructions in the historical checkpoint below. Five own PRs remain OPEN with identical heads:2425/a59658003c203080589961337979b3d67efce448;2445/9e82e9ea79e25f21f94342d4d8ae14c5226e841c;2596/b465b26050865b1d1728c3531f4d20ccb2e0c7fd;2633/e9b7e3dc07540aa97a6b72055917b8a3019f6701;2647/90a269a86bb92869e9616cc839331e2647e5f493. Fresh metadata and workflows confirmed each8success plus one cancelled/failed product. No eligible merge, sixth unit, retry, cancellation or product-head change.

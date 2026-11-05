@@ -41,3 +41,5 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex P | 274 [AX1], 540 [CU1]: keep the selected course structure stable while saving | codex/p-course-template-pending | `components/course-template-picker.tsx`, `tests/course-template-picker-pending.test.ts` | 04/11/2026 |
 | Codex M | 310 [AX2], 274 [AX1]: 44px targets for moving and removing collection products | codex/m-collection-targets | `components/collections-editor.tsx`, `tests/e2e/collections-acknowledgment.mjs`, `tests/collections-editor-accessibility.test.ts` | 04/11/2026 |
 | Codex P | 427 [VR1]: malformed certificate status evidence never becomes valid or permanent | codex/p-certificate-record-evidence | `lib/certificate.ts`, `tests/certificate-record-evidence.test.ts` | 04/11/2026 |
+
+| Codex O | 427 [VR1], 113 [E2-COMMUNITY-MODERATION]: confirmed cooldown, sequence and write replies for community chat | codex/o-community-chat-ack | `lib/community-chat.ts`, `app/api/store/community/chat/route.ts`, `lib/buyer-words/community.ts`, `tests/community-chat-acknowledgment.test.ts` | 04/11/2026 |

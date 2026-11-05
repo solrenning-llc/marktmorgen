@@ -100,16 +100,18 @@ const partsOf = (block: PageBlock): RowElement[] => (block.kind === "row" ? bloc
 
 /**
  * The words of each button a block draws: a button block's, and each of a
- * row's buttons, the page's own and those leading elsewhere alike.
+ * row's buttons, the page's own, those leading elsewhere and those that open
+ * a video in a window alike.
  */
 const buttonWords = (block: PageBlock): string[] =>
-  block.kind === "cta" ? [block.label] : partsOf(block).flatMap((part) => (part.kind === "button" ? [part.label] : []));
+  block.kind === "cta" ? [block.label] : partsOf(block).flatMap((part) => (part.kind === "button" || part.kind === "video-window" ? [part.label] : []));
 
 /** Whether a block draws the page's own button (to buy or sign up): a button block, or a row's button with no address. */
 const ownButton = (block: PageBlock): boolean => block.kind === "cta" || partsOf(block).some((part) => part.kind === "button" && !part.url);
 
-/** Whether a row shows the inside: a picture it describes (a decorative one shows nothing) or a video. */
-const rowShows = (block: PageBlock): boolean => partsOf(block).some((part) => part.kind === "video" || (part.kind === "image" && !part.decorative));
+/** Whether a row shows the inside: a picture it describes (a decorative one shows nothing), a video, or a video in a window. */
+const rowShows = (block: PageBlock): boolean =>
+  partsOf(block).some((part) => part.kind === "video" || part.kind === "video-window" || (part.kind === "image" && !part.decorative));
 
 /** Every check, in the order the coach lists them. */
 export function coachChecks(input: CoachInput): CoachCheck[] {

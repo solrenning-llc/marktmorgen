@@ -45,5 +45,94 @@
   "ciCost": "unknown, never zero",
   "scope": "No workflow, timeout, assertion, product or head change; no manual cancellation.",
   "rerunAcceptedMinuteUTC": "2026-11-05 05:44 UTC",
-  "latestRunAttempt": 2
+  "latestRunAttempt": 2,
+  "retry_final": {
+    "id": 127074590695,
+    "status": "completed",
+    "conclusion": "success",
+    "started": "2026-11-05T05:53:42Z",
+    "completed": "2026-11-05T06:23:11Z",
+    "steps": [
+      {
+        "name": "Set up job",
+        "result": "success",
+        "started": "2026-11-05T05:53:42Z",
+        "completed": "2026-11-05T05:53:43Z"
+      },
+      {
+        "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "result": "success",
+        "started": "2026-11-05T05:53:43Z",
+        "completed": "2026-11-05T05:53:46Z"
+      },
+      {
+        "name": "Run actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+        "result": "success",
+        "started": "2026-11-05T05:53:46Z",
+        "completed": "2026-11-05T05:53:48Z"
+      },
+      {
+        "name": "Run npm ci",
+        "result": "success",
+        "started": "2026-11-05T05:53:48Z",
+        "completed": "2026-11-05T05:53:56Z"
+      },
+      {
+        "name": "Lint",
+        "result": "success",
+        "started": "2026-11-05T05:53:56Z",
+        "completed": "2026-11-05T05:55:15Z"
+      },
+      {
+        "name": "Behavior regressions",
+        "result": "success",
+        "started": "2026-11-05T05:55:15Z",
+        "completed": "2026-11-05T06:05:10Z"
+      },
+      {
+        "name": "Production build and route types",
+        "result": "success",
+        "started": "2026-11-05T06:05:10Z",
+        "completed": "2026-11-05T06:06:51Z"
+      },
+      {
+        "name": "Verify reviewed development dependencies stay outside runtime",
+        "result": "success",
+        "started": "2026-11-05T06:06:51Z",
+        "completed": "2026-11-05T06:06:51Z"
+      },
+      {
+        "name": "Agreements signed with a link, in a browser",
+        "result": "success",
+        "started": "2026-11-05T06:06:51Z",
+        "completed": "2026-11-05T06:09:07Z"
+      },
+      {
+        "name": "Copying a whole store, in a browser",
+        "result": "success",
+        "started": "2026-11-05T06:09:07Z",
+        "completed": "2026-11-05T06:23:09Z"
+      },
+      {
+        "name": "Post Run actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+        "result": "success",
+        "started": "2026-11-05T06:23:09Z",
+        "completed": "2026-11-05T06:23:09Z"
+      },
+      {
+        "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "result": "success",
+        "started": "2026-11-05T06:23:09Z",
+        "completed": "2026-11-05T06:23:09Z"
+      },
+      {
+        "name": "Complete job",
+        "result": "success",
+        "started": "2026-11-05T06:23:09Z",
+        "completed": "2026-11-05T06:23:09Z"
+      }
+    ],
+    "elapsed_seconds": 1769
+  },
+  "next": "Only final product aggregate remained queued after successful retry. Do not retry or cancel again; require all nine exact-head successful aggregates before normal own merge."
 }

@@ -19,7 +19,7 @@ const STATS = "statsunk01";
 const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 const SCOPE = "https://uri.paypal.com/payments/payouts openid";
-type Mode = "ok" | "garbled" | "empty" | "no-id" | "dropped" | "server" | "funds" | "nameless";
+type Mode = "ok" | "garbled" | "empty" | "no-id" | "dropped" | "server" | "funds" | "nameless" | "blank-name" | "blank-error";
 let mode: Mode = "ok";
 let made = 0;
 let reads = 0;
@@ -34,6 +34,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (mode === "funds") return json({ name: "INSUFFICIENT_FUNDS", message: "Sender does not have sufficient funds." }, 422);
     // A 4xx without PayPal's own error name (review of Codex G on #2681): not PayPal's refusal, so not known.
     if (mode === "nameless") return new Response("Bad Request", { status: 400 });
+    // A name that is empty or only spaces is no name (review of Codex G on #2681, 4725f07a).
+    if (mode === "blank-name") return json({ name: "   ", message: "?" }, 400);
+    if (mode === "blank-error") return json({ error: "" }, 400);
     // Every other mode: PayPal made the batch, the creator's money is leaving.
     made += 1;
     const id = `BATCH${made}ABC`;
@@ -107,13 +110,15 @@ async function main(): Promise<void> {
   const studioWords = /unknown: "([^"]+)"/.exec(readFileSync("components/paypal-payouts.tsx", "utf8"))?.[1] ?? "";
   is("the studio's words for it", [studioWords.includes("Nothing was sent"), studioWords.includes("we do not know whether it was paid"), studioWords.includes("PayPal activity")], [false, true, true]);
 
-  part("A 4xx without PayPal's own error name is not a refusal: kept on its way");
-  await seed(store);
-  made = 0;
-  mode = "nameless";
-  const nameless = await payWithPayPal(store);
-  is("unknown, never 'nothing was sent'", nameless.ok ? "paid" : nameless.reason, "unknown");
-  is("both stay on their way", (await onTheirWay(store)).size, 2);
+  for (const blank of ["nameless", "blank-name", "blank-error"] as const) {
+    part(`A 4xx without PayPal's own error name (${blank}) is not a refusal: kept on its way`);
+    await seed(store);
+    made = 0;
+    mode = blank;
+    const nameless = await payWithPayPal(store);
+    is("unknown, never 'nothing was sent'", nameless.ok ? "paid" : nameless.reason, "unknown");
+    is("both stay on their way", (await onTheirWay(store)).size, 2);
+  }
 
   for (const fault of ["no answer", "an error"] as const) {
     part(`PayPal made the batch, and writing its id got ${fault}: nobody is paid twice (review of Codex G on #2681, GRAVE)`);

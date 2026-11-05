@@ -1,6 +1,6 @@
 /** Unknown thread reads must not delete a parent and leave its replies behind. */
 import { addComment, deleteComment, lessonComments, readComment } from "@/lib/lesson-comments";
-import { CREATOR_AUTHOR, serializeComment } from "@/lib/lesson-comments-rules";
+import { CREATOR_AUTHOR, MAX_LESSON_THREADS, serializeComment } from "@/lib/lesson-comments-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -16,8 +16,8 @@ async function main() {
     if (!reply.ok) throw Error("Reply fixture missing");
     return { parent: parent.comment, reply: reply.comment };
   }
-  type Mode = "parent-missing" | "parent-extra" | "parent-invalid" | "parent-mismatch" | "index-missing" | "index-extra" | "index-invalid" | "index-duplicate" | "rows-missing" | "rows-short" | "rows-invalid" | "rows-mismatch" | "rows-wrong-lesson";
-  const modes: Mode[] = ["parent-missing", "parent-extra", "parent-invalid", "parent-mismatch", "index-missing", "index-extra", "index-invalid", "index-duplicate", "rows-missing", "rows-short", "rows-invalid", "rows-mismatch", "rows-wrong-lesson"];
+  const modes = ["parent-missing", "parent-extra", "parent-invalid", "parent-mismatch", "parent-getter", "parent-inherited", "index-missing", "index-extra", "index-invalid", "index-duplicate", "index-sparse", "index-overflow", "rows-missing", "rows-short", "rows-extra", "rows-sparse", "rows-invalid", "rows-mismatch", "rows-wrong-lesson"] as const;
+  let getters = 0;
   part("Complete thread evidence before destructive work");
   try {
     for (const mode of modes) {
@@ -31,17 +31,23 @@ async function main() {
           if (mode === "parent-extra") return [parentRaw, null] as never;
           if (mode === "parent-invalid") return ["broken JSON"] as never;
           if (mode === "parent-mismatch") return [serializeComment({ ...parent, id: "mismatch0001" })] as never;
+          if (mode === "parent-getter") return Object.defineProperty(new Array(1), "0", { get() { getters++; return parentRaw; } }) as never;
+          if (mode === "parent-inherited") return Object.setPrototypeOf(new Array(1), [parentRaw]) as never;
         }
         if (commands[0]?.[0] === "ZREVRANGE" && commands[0][1] === index) {
           if (mode === "index-missing") return [] as never;
           if (mode === "index-extra") return [[reply.id, parent.id], []] as never;
           if (mode === "index-invalid") return [["bad-id"]] as never;
           if (mode === "index-duplicate") return [[parent.id, parent.id]] as never;
+          if (mode === "index-sparse") return [new Array(2)] as never;
+          if (mode === "index-overflow") return [Array.from({ length: MAX_LESSON_THREADS * 4 + 1 }, (_, i) => `overflow${String(i).padStart(4, "0")}`)] as never;
         }
         if (commands[0]?.[0] === "HMGET" && commands[0][1] === hash) {
           const rows = commands[0].slice(2).map(id => id === parent.id ? parentRaw : replyRaw);
           if (mode === "rows-missing") return [] as never;
           if (mode === "rows-short") return [[rows[0]]] as never;
+          if (mode === "rows-extra") return [rows, null] as never;
+          if (mode === "rows-sparse") return [new Array(rows.length)] as never;
           if (mode === "rows-invalid") return [rows.map((raw, i) => i === 0 ? "broken JSON" : raw)] as never;
           if (mode === "rows-mismatch") return [rows.map((raw, i) => i === 0 ? serializeComment({ ...reply, id: "mismatch0001" }) : raw)] as never;
           if (mode === "rows-wrong-lesson") return [rows.map((raw, i) => i === 0 ? serializeComment({ ...reply, lesson: "lessontwo002" }) : raw)] as never;
@@ -55,6 +61,7 @@ async function main() {
       is(`${mode}: no destructive command or storage adjustment after unknown evidence`, destructive, 0);
       is(`${mode}: both stored comments stay available for a confirmed retry`, await original([["HGET", hash, parent.id], ["HGET", hash, reply.id]]), [parentRaw, replyRaw]);
     }
+    is("a reply getter is never executed as deletion evidence", getters, 0);
     part("Confirmed data keeps the ordinary behavior");
     const { parent, reply } = await seed();
     is("the real reader retains both comments in order", (await lessonComments(course, lesson)).map(comment => comment.id), [reply.id, parent.id]);

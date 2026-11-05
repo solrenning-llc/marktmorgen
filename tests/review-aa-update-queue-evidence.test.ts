@@ -1,10 +1,9 @@
 /** Exercise the real queued worker: unknown erasure evidence must not permit email. */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceUpdate, readUpdateJob, startUpdate } from "@/lib/product-updates";
+import { advanceUpdate, startUpdate } from "@/lib/product-updates";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { suppressCommand } from "@/lib/suppression";
 import { usedThisMonth } from "@/lib/mail";
 import { windowId } from "@/lib/allowance-window";
 import { store as redis } from "./redis-stub";

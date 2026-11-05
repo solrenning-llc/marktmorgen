@@ -13,19 +13,21 @@ import { COURSE_TEMPLATES, applyTemplate, draftWords, opensWords, type CourseTem
  */
 export function CourseTemplatePicker({
   course,
+  initialTemplate,
   busy,
   save,
   onSkip,
   onApplied,
 }: {
   course: Course;
+  initialTemplate?: CourseTemplate["id"] | null;
   busy: boolean;
   /** The course editor's own save, which shows the course kept and any error. */
   save: (payload: Record<string, unknown>) => Promise<{ ok?: boolean; course?: Course }>;
   onSkip: () => void;
   onApplied: (kept: Course) => void;
 }) {
-  const [chosen, setChosen] = useState<CourseTemplate | null>(null);
+  const [chosen, setChosen] = useState<CourseTemplate | null>(() => COURSE_TEMPLATES.find((template) => template.id === initialTemplate) ?? null);
   // Made once per pick, so the draft's ids (and the list keys) stay the same while the page draws again.
   const draft = useMemo(() => {
     if (!chosen?.modules.length) return null;

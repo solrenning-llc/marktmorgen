@@ -29,19 +29,42 @@ export type ContractFundingContext={termsSnapshot:string;review:CommercialMargin
 export const CURRENT_CONTRACT_FUNDING_POLICY:ContractFundingPolicy|null=null;
 const integer=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
 const bounded=(n:unknown):n is number=>integer(n)&&n<=CONTRACT_FUNDING_RULES.maxInteger;
-/** Keep the original dispute evidence ahead of any canonical projection. Data
- * descriptors avoid executing an accessor while the shared assessor rejects
- * Proxy-forged or incomplete dispute records. */
-function originalPlanPaymentDisputes(context:unknown):ReturnType<typeof assessPlanPaymentDisputeCosts> {
+/** Capture the original review once, ahead of any canonical projection. Data
+ * descriptors avoid executing accessors; the plain shallow shell prevents a
+ * context or review wrapper from substituting a later dispute graph. */
+function originalContractFundingContext(context:unknown):{
+ context:ContractFundingContext;
+ disputes:NonNullable<ReturnType<typeof assessPlanPaymentDisputeCosts>>;
+}|null {
  try{
   if(!context||typeof context!=='object'||Array.isArray(context))return null;
+  const contextKeys=Reflect.ownKeys(context);
+  if(contextKeys.some(key=>typeof key!=='string')||contextKeys.length!==2||!contextKeys.includes('termsSnapshot')||!contextKeys.includes('review'))return null;
+  const termsField=Object.getOwnPropertyDescriptor(context,'termsSnapshot');
   const reviewField=Object.getOwnPropertyDescriptor(context,'review');
-  if(!reviewField||!Object.hasOwn(reviewField,'value')||!reviewField.enumerable)return null;
+  if(!termsField||!Object.hasOwn(termsField,'value')||!termsField.enumerable||
+   !reviewField||!Object.hasOwn(reviewField,'value')||!reviewField.enumerable)return null;
   const review=reviewField.value;
   if(!review||typeof review!=='object'||Array.isArray(review))return null;
   const disputesField=Object.getOwnPropertyDescriptor(review,'planPaymentDisputes');
   if(!disputesField||!Object.hasOwn(disputesField,'value')||!disputesField.enumerable)return null;
-  return assessPlanPaymentDisputeCosts(disputesField.value);
+  const disputes=assessPlanPaymentDisputeCosts(disputesField.value);
+  if(!disputes)return null;
+  const reviewKeys=Reflect.ownKeys(review);
+  if(reviewKeys.some(key=>typeof key!=='string')||!reviewKeys.includes('planPaymentDisputes'))return null;
+  const capturedReview=Object.create(Object.getPrototypeOf(review)===null?null:Object.prototype) as CommercialMarginReview;
+  for(const key of reviewKeys as string[]){
+   const field=key==='planPaymentDisputes'?disputesField:Object.getOwnPropertyDescriptor(review,key);
+   if(!field||!Object.hasOwn(field,'value')||!field.enumerable)return null;
+   Object.defineProperty(capturedReview,key,{value:field.value,enumerable:true,writable:true,configurable:true});
+  }
+  const termsAgain=Object.getOwnPropertyDescriptor(context,'termsSnapshot');
+  const reviewAgain=Object.getOwnPropertyDescriptor(context,'review');
+  const disputesAgain=Object.getOwnPropertyDescriptor(review,'planPaymentDisputes');
+  if(!termsAgain||!Object.hasOwn(termsAgain,'value')||!termsAgain.enumerable||termsAgain.value!==termsField.value||
+   !reviewAgain||!Object.hasOwn(reviewAgain,'value')||!reviewAgain.enumerable||reviewAgain.value!==review||
+   !disputesAgain||!Object.hasOwn(disputesAgain,'value')||!disputesAgain.enumerable||disputesAgain.value!==disputesField.value)return null;
+  return {context:{termsSnapshot:termsField.value,review:capturedReview},disputes};
  }catch{return null;}
 }
 /** Stable own-data financial evidence, without executing accessors or toJSON. */
@@ -106,8 +129,9 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  // Scoped TX may fund a contract only when it is bound to this exact policy,
  // the actual admission time and the complete existing liability horizon.
  // Inspect original data first: the canonical clone must not erase presence.
- const disputes=originalPlanPaymentDisputes(context);
- if(!disputes)return null;
+ const original=originalContractFundingContext(context);
+ if(!original)return null;
+ const disputes=original.disputes;context=original.context;
  const taxState=customerTaxContractContextState(context);
  if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,now))return null;
  // Stabilize both original inputs together. A Proxy can offer one value to
@@ -115,10 +139,10 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  // decide calculations, financial bindings and the returned liability period.
  const encoded=canonicalFinancialSnapshot({policy,context});
  if(!encoded)return null;
- // The descriptor-only snapshot above rejects accessors without executing
- // them. Native cloning then rejects any remaining Proxy wrapper before it
- // can substitute a different graph between validation and projection.
- try{structuredClone({policy,context});}catch{return null;}
+ // Recheck the captured descriptor graph after serialization. A later Proxy
+ // may mutate an earlier object after its bytes were visited; descriptor-only
+ // validation observes that change without executing an introduced getter.
+ if(!canonicalFinancialSnapshot(context.review))return null;
  const captured=JSON.parse(encoded) as {policy:ContractFundingPolicy|null;context:ContractFundingContext};
  const p=captured.policy;context=captured.context;
  if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,now))return null;

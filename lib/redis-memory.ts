@@ -120,9 +120,9 @@ export class MemoryRedis {
           this.run(json === "" ? ["DEL", notes] : ["SET", notes, json]);
           return 1;
         }
-        // lib/assistant-memory-store.ts MEMORY_FORGET: the lock and the notes deleted in one step.
-        if (key.startsWith("-- marktmorgen:amem-forget:v1\n") && args[0] === "2" && args.length === 3) {
-          this.run(["DEL", args[1]]);
+        // lib/assistant-memory-store.ts MEMORY_FORGET: the lock made the forgetting's own and the notes deleted in one step.
+        if (key.startsWith("-- marktmorgen:amem-forget:v2\n") && args[0] === "2" && args.length === 5) {
+          this.run(["SET", args[1], args[3], "EX", args[4]]);
           return this.run(["DEL", args[2]]);
         }
         // CX-67: existing exposure reservation used by held-store company work.

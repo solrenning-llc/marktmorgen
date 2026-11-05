@@ -12,7 +12,7 @@ import {store as redis} from './redis-stub';import {ROOM} from './data-room';
 const stats='G2MemoryEvidence',room={...ROOM,sid:'g2-memory-room'},key=`nl:amem:${stats}`;
 // The record's write and delete as they are sent now: a SET or DEL, or the scripts that hold them (MEMORY_WRITE, MEMORY_FORGET).
 const sets=(c:(string|number)[])=>(c[0]==='SET'&&c[1]===key)||(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:amem-write:v1')&&c[4]===key&&c[6]!=='');
-const dels=(c:(string|number)[])=>(c[0]==='DEL'&&c[1]===key)||(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:amem-forget:v1')&&c[4]===key);
+const dels=(c:(string|number)[])=>(c[0]==='DEL'&&c[1]===key)||(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:amem-forget:v2')&&c[4]===key);
 globalThis.fetch=async()=>{throw Error('No external service in G2 review');};
 async function fixture(){redis.clear();assert.equal((await keepNote(stats,{kind:'preference',text:'Write in a warm voice.'},room)).ok,true);return String(redis.run(['GET',key]));}
 test('control: ordinary note writes and confirmed forgetting preserve the contract',async()=>{

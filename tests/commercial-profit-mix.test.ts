@@ -175,3 +175,26 @@ test('hidden, symbolic and executable source categories are rejected without rea
  }
  assert.equal(calls,0);
 });
+
+test('additional root financial categories are unknown even when zero or labelled as metadata',()=>{
+ for(const key of ['unreviewedSupplierCents','privateContext','notes']){
+  for(const amount of [null,0,100_000]){
+   const input=Object.assign(fixture(),{[key]:amount});
+   assert.equal(commercialProfitMix(input).reason,'unknown',`${key}: ${amount}`);
+  }
+ }
+});
+
+test('an auxiliary root Proxy cannot erase an unpriced cost while the encoder reads metadata',()=>{
+ const base=fixture();
+ const row=Object.assign(base.sources.training!,{unreviewedSupplierCents:null});
+ let reads=0;
+ let input:CommercialProfitMixInput&{aux?:object};
+ const aux=new Proxy({}, {ownKeys(){reads++;delete (row as Partial<typeof row>).unreviewedSupplierCents;delete input.aux;return [];}});
+ input={aux,...base};
+ const result=commercialProfitMix(input);
+ assert.equal(result.reason,'unknown');
+ assert.equal(result.totalNetProfitCents,null);
+ assert.equal(reads,0,'extra root fields are refused before their values are traversed');
+ assert.equal(Object.hasOwn(row,'unreviewedSupplierCents'),true);
+});

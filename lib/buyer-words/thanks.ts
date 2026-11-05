@@ -95,7 +95,7 @@ const en = {
   groupBoughtFor: (store: string, forWhom: string, price: string) => ` from ${store} for ${forWhom}, for ${price}.`,
   groupBought: (store: string, price: string) => ` from ${store}, for ${price}.`,
   groupSend: (title: string) =>
-    `Send it to the people it is for. Each one opens it and types their own email address; a link arrives in their inbox, and opening it puts ${title} on that address, as if they had bought it.`,
+    `Send it to the people it is for. Each one opens it and types their own email address. If the email with the link reaches them, opening it puts ${title} on that address, as if they had bought it.`,
   groupTakeOne: (people: number) => `Take a place yourself the same way: you paid for ${people}, and you are one of them only if you take one.`,
   groupDemo:
     "This is the demo store, which sends no email, so it makes no link and hands out no places. On a real store this page shows one link to pass on, and the same link is in your receipt: each person opens it, types their own email and has it on their own address.",
@@ -301,7 +301,7 @@ const es: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` a ${store} para ${forWhom}, por ${price}.`,
   groupBought: (store, price) => ` a ${store}, por ${price}.`,
   groupSend: (title) =>
-    `Envíalo a las personas para quienes es. Cada una lo abre y escribe su propia dirección de email; le llega un enlace a su bandeja de entrada, y al abrirlo ${title} queda en esa dirección, como si lo hubiera comprado.`,
+    `Envíalo a las personas para quienes es. Cada una lo abre y escribe su propia dirección de email. Si le llega el email con el enlace, al abrirlo ${title} queda en esa dirección, como si lo hubiera comprado.`,
   groupTakeOne: (people) => `Toma tú una plaza de la misma manera: pagaste por ${people}, y solo ocupas una si la tomas.`,
   groupDemo:
     "Esta es la tienda de demostración, que no envía emails, así que no crea ningún enlace ni reparte plazas. En una tienda real, esta página muestra un enlace para compartir, y el mismo enlace está en tu recibo: cada persona lo abre, escribe su propio email y lo tiene en su propia dirección.",
@@ -496,7 +496,7 @@ const fr: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` auprès de ${store} pour ${forWhom}, pour ${price}.`,
   groupBought: (store, price) => ` auprès de ${store}, pour ${price}.`,
   groupSend: (title) =>
-    `Envoyez-le aux personnes concernées. Chacune l'ouvre et saisit sa propre adresse e-mail${S}; un lien arrive dans sa boîte de réception, et l'ouvrir met ${title} sur cette adresse, comme si elle l'avait acheté.`,
+    `Envoyez-le aux personnes concernées. Chacune l'ouvre et saisit sa propre adresse e-mail${S}; si l'e-mail contenant le lien lui parvient, l'ouvrir met ${title} sur cette adresse, comme si elle l'avait acheté.`,
   groupTakeOne: (people) =>
     `Prenez vous-même une place de la même façon${S}: vous avez payé pour ${people}, et vous n'en faites partie que si vous en prenez une.`,
   groupDemo: `Ceci est la boutique de démonstration, qui n'envoie aucun e-mail, elle ne crée donc aucun lien et ne distribue aucune place. Dans une vraie boutique, cette page affiche un lien à transmettre, et le même lien figure sur votre reçu${S}: chaque personne l'ouvre, saisit son propre e-mail et l'a sur sa propre adresse.`,
@@ -694,7 +694,7 @@ const de: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` bei ${store} für ${forWhom}, für ${price}.`,
   groupBought: (store, price) => ` bei ${store}, für ${price}.`,
   groupSend: (title) =>
-    `Schicken Sie ihn an die Personen, für die er gedacht ist. Jede öffnet ihn und gibt ihre eigene E-Mail-Adresse ein; ein Link kommt in ihr Postfach, und wer ihn öffnet, hat ${title} auf dieser Adresse, als hätte er es gekauft.`,
+    `Schicken Sie ihn an die Personen, für die er gedacht ist. Jede öffnet ihn und gibt ihre eigene E-Mail-Adresse ein. Falls die E-Mail mit dem Link sie erreicht, wird ${title} beim Öffnen dieser Adresse zugeordnet, als hätte sie es gekauft.`,
   groupTakeOne: (people) => `Nehmen Sie selbst auf dieselbe Weise einen Platz: Sie haben für ${people} bezahlt und gehören nur dazu, wenn Sie einen nehmen.`,
   groupDemo:
     "Dies ist der Demo-Shop, der keine E-Mails verschickt, daher erstellt er keinen Link und vergibt keine Plätze. In einem echten Shop zeigt diese Seite einen Link zum Weitergeben, und derselbe Link steht auf Ihrer Quittung: Jede Person öffnet ihn, gibt ihre eigene E-Mail ein und hat es auf ihrer eigenen Adresse.",
@@ -891,7 +891,7 @@ const it: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` da ${store} per ${forWhom}, per ${price}.`,
   groupBought: (store, price) => ` da ${store}, per ${price}.`,
   groupSend: (title) =>
-    `Mandalo alle persone a cui è destinato. Ognuna lo apre e scrive il proprio indirizzo email; arriva un link nella sua casella, e aprirlo mette ${title} su quell'indirizzo, come se l'avesse comprato.`,
+    `Mandalo alle persone a cui è destinato. Ognuna lo apre e scrive il proprio indirizzo email. Se le arriva l'email con il link, aprendolo ${title} viene associato a quell'indirizzo, come se l'avesse comprato.`,
   groupTakeOne: (people) => `Prendi anche tu un posto allo stesso modo: hai pagato per ${people}, e ne fai parte solo se ne prendi uno.`,
   groupDemo:
     "Questo è il negozio dimostrativo, che non invia email, quindi non crea nessun link e non assegna posti. In un negozio vero, questa pagina mostra un link da passare, e lo stesso link è nella tua ricevuta: ogni persona lo apre, scrive la propria email e lo ha sul proprio indirizzo.",
@@ -1088,7 +1088,7 @@ const nl: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` bij ${store} voor ${forWhom}, voor ${price}.`,
   groupBought: (store, price) => ` bij ${store}, voor ${price}.`,
   groupSend: (title) =>
-    `Stuur hem naar de mensen voor wie hij is. Ieder opent hem en typt een eigen e-mailadres; er komt een link in hun inbox, en wie die opent, heeft ${title} op dat adres, alsof ze het zelf kochten.`,
+    `Stuur hem naar de mensen voor wie hij is. Ieder opent hem en typt een eigen e-mailadres. Als de e-mail met de link aankomt, staat ${title} na het openen op dat adres, alsof die persoon het zelf kocht.`,
   groupTakeOne: (people) => `Neem zelf op dezelfde manier een plek: je betaalde voor ${people}, en je hoort er alleen bij als je er een neemt.`,
   groupDemo:
     "Dit is de demowinkel, die geen e-mails verstuurt, dus hij maakt geen link en deelt geen plekken uit. In een echte winkel toont deze pagina één link om door te geven, en dezelfde link staat op je bon: ieder opent hem, typt een eigen e-mailadres en heeft het op een eigen adres.",
@@ -1285,7 +1285,7 @@ const pt: ThanksWords = {
   groupBoughtFor: (store, forWhom, price) => ` a ${store} para ${forWhom}, por ${price}.`,
   groupBought: (store, price) => ` a ${store}, por ${price}.`,
   groupSend: (title) =>
-    `Envie-a às pessoas a quem se destina. Cada uma abre-a e escreve o próprio endereço de email; chega uma ligação à caixa de correio, e abri-la põe ${title} nesse endereço, como se o tivesse comprado.`,
+    `Envie-a às pessoas a quem se destina. Cada uma abre-a e escreve o próprio endereço de email. Se o email com a ligação lhe chegar, ao abri-la ${title} fica associado a esse endereço, como se o tivesse comprado.`,
   groupTakeOne: (people) => `Fique também com um lugar da mesma forma: pagou por ${people}, e só faz parte delas se ficar com um.`,
   groupDemo:
     "Esta é a loja de demonstração, que não envia emails, por isso não cria nenhuma ligação nem distribui lugares. Numa loja real, esta página mostra uma ligação para partilhar, e a mesma ligação está no seu recibo: cada pessoa abre-a, escreve o próprio email e fica com ele no próprio endereço.",

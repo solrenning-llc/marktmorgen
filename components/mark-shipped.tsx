@@ -67,8 +67,8 @@ export function MarkShipped({
         <p className="mt-0.5 text-ink-soft">The address is on this payment in your Stripe dashboard.</p>
       )}
       {done ? (
-        <div className="mt-2">
-          <p className="font-semibold text-ink" role="status">{`Marked as shipped on ${day(done.at)}.`}</p>
+        <div className="mt-2" role="status">
+          <p className="font-semibold text-ink">{`Marked as shipped on ${day(done.at)}.`}</p>
           {!mail ? (
             <p className="mt-1">The email&apos;s status has not been confirmed here.</p>
           ) : mail.state === "not_recorded" ? (

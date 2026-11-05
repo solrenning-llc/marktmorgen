@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { adContext } from "@/lib/ad-context";
 import { checkAdText } from "@/lib/ad-creative-check";
 import { CAMPAIGN_TAG, LANDING_REFUSALS, landingFrom, landingPage } from "@/lib/campaign-landing";
-import { MAX_LANDINGS, readLandings, removeLanding, saveLanding } from "@/lib/campaign-landing-store";
+import { LandingsUnreadable, LandingsWriteUnconfirmed, MAX_LANDINGS, readLandings, removeLanding, saveLanding } from "@/lib/campaign-landing-store";
 import { readListing } from "@/lib/catalog";
 import { readPage } from "@/lib/sales-page-store";
 import { StoreFullError } from "@/lib/store";
@@ -80,6 +80,9 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, landing: made.landing, warnings: check.warnings, landings: await readLandings(store.statsId, product.id) }, { headers: NO_STORE });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    // Not read exactly: nothing was saved (Codex G and J, #1947/#1950). Its answer lost: it may have been, so the page is read again.
+    if (error instanceof LandingsUnreadable) return Response.json({ ok: false, error: "unavailable", message: error.message }, { status: 503 });
+    if (error instanceof LandingsWriteUnconfirmed) return Response.json({ ok: false, error: "unconfirmed", message: error.message }, { status: 503 });
     console.error("saving a campaign landing failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

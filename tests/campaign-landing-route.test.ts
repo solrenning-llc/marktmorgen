@@ -53,6 +53,27 @@ async function main(): Promise<void> {
   is("listed for the studio", (await get(product)).body.landings?.map((one) => one.headline), ["Cook a real dinner in twenty minutes"]);
   is("kept in the store", (await readLandings(store.statsId, product)).length, 1);
 
+  part("Codex J (#1950): a read answered short never lets a save erase the landings already kept");
+  const landingKey = `nl:product:landing:${store.statsId}:${product}`;
+  for (const shape of [[], [undefined], ["{broken"]] as unknown[][]) {
+    const pipeline = redis.pipeline;
+    let cut = false;
+    redis.pipeline = async (commands) => {
+      if (!cut && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === landingKey) {
+        cut = true;
+        return shape;
+      }
+      return pipeline(commands);
+    };
+    let other: { status: number; body: { ok?: boolean; error?: string } };
+    try {
+      other = await save({ campaign: "fall-sale" });
+    } finally {
+      redis.pipeline = pipeline;
+    }
+    is(`answered ${JSON.stringify(shape)}: 503, not saved, and "spring-sale" still kept`, [cut, other.status, other.body.ok, other.body.error, (await readLandings(store.statsId, product)).map((one) => one.campaign)], [true, 503, false, "unavailable", ["spring-sale"]]);
+  }
+
   part("Refused by the ad check, on the server");
   const price = await save({ campaign: "wrong-price", text: "Yours for $19 only." });
   is("a price that is not the product's", [price.status, price.body.error, price.body.refusals?.map((one) => one.rule)], [409, "not_checked", ["price_mismatch"]]);

@@ -182,7 +182,10 @@ export async function POST(request: Request) {
     }
     if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
     if (params.name === "list_bundle_choices") return result(id, said(await bundleChoicesTool(store, params.arguments ?? {})));
-    if (params.name === "get_imports") return result(id, said(await importsTool(store)));
+    if (params.name === "get_imports") {
+      const imports = await importsTool(store);
+      return result(id, imports ? said(imports) : said({ error: "Your imports could not be read just now. This is not an empty history; try again in a moment." }, true));
+    }
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));
     if (params.name === "get_affiliates") return result(id, said(await affiliatesTool(store)));

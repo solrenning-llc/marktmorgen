@@ -29,7 +29,7 @@ import { readTaskFor } from "@/lib/assignment";
 import { readPage, readVersions } from "@/lib/sales-page-store";
 import { readSections } from "@/lib/saved-block-store";
 import { PICKER_PAGE, bundleChoicesPage, choiceCursor, choiceQuery } from "@/lib/bundle-choices";
-import { storeImports } from "@/lib/imports";
+import { storeImportsRead } from "@/lib/imports";
 import type { PageBlock } from "@/lib/sales-page";
 import { type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
 import { expectedShareB, readCounts } from "@/lib/headline-test";
@@ -560,9 +560,10 @@ export async function bundleChoicesTool(store: Store, args: Record<string, unkno
   // A page at a time, each inside the one API request it pays for (Codex A3, #1933): never the whole catalog in one call.
   const listed = await bundleChoicesPage(store, { owner, query: choiceQuery(args.search), after: choiceCursor(args.cursor) });
   return {
-    note: `Products that may go in a bundle, in the creator's order, ${PICKER_PAGE} a page, each with can_go_in, and why_not saying why it cannot. To read the next page, call again with cursor set to next_cursor; next_cursor is null on the last page. matches counts the products not ruled out by their kind, each checked on its own page. price is in the smallest unit of the store's currency. hidden products are not listed on the store page.`,
+    note: `Products that may go in a bundle, in the creator's order, ${PICKER_PAGE} a page, each with can_go_in, and why_not saying why it cannot. To read the next page, call again with cursor set to next_cursor; next_cursor is null on the last page. matches counts the products not ruled out by their kind (null with a search, which looks through the products a stretch at a time, so a page may hold fewer than 20 or none and still have a next_cursor); unsearched counts the products in that stretch whose name is not ready to search yet: list without a search to see them. price is in the smallest unit of the store's currency. hidden products are not listed on the store page.`,
     next_cursor: listed.next === null ? null : String(listed.next),
     matches: listed.matches,
+    unsearched: listed.unsearched,
     products: listed.products.map((p) => ({ id: p.id, title: p.title, price: p.priceCents, what: p.what, hidden: p.hidden, can_go_in: p.why === null, why_not: p.why })),
   };
 }
@@ -574,7 +575,9 @@ export async function bundleChoicesTool(store: Store, args: Record<string, unkno
  * themselves, and not the report of rows left out, which holds addresses.
  */
 export async function importsTool(store: Store) {
-  const jobs = await storeImports(store);
+  // Only Redis's exact answers: anything else is unknown, said so by the route, never an empty history (Codex A3, #1933).
+  const jobs = await storeImportsRead(store);
+  if (jobs === null) return null;
   return {
     note: "Newest first, at most ten. started_at and finished_at are in milliseconds since 1970 (UTC); finished_at is 0 while it runs. added were brought in, already were there, skipped were left out on purpose (no consent, unsubscribed, a repeated row), errors could not be brought in: the creator downloads that report in the studio.",
     imports: jobs.map((job) => ({

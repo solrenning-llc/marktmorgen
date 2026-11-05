@@ -75,29 +75,62 @@ async function main(): Promise<void> {
     const made = await addDraftProducts(OWNER, Array.from({ length: 100 }, (_, i) => ({ title: `Synthetic guide ${String(i).padStart(3, "0")}`, summary: "", priceCents: 1900, link: "https://example.com/guide" })));
     if (!made.ok) throw new Error("No synthetic drafts");
     const original = redis.pipeline.bind(redis);
-    const seen = new Set<string>();
-    const reads: number[] = [];
-    let cursor: string | null | undefined = undefined;
-    let calls = 0;
-    do {
+    const listingGet = (c: (string | number)[]) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]));
+    const measured = async (args: Record<string, unknown>) => {
       const commands: (string | number)[][] = [];
       redis.pipeline = async (batch) => {
         commands.push(...batch);
         return original(batch);
       };
-      let page: Answer;
       try {
-        page = await call("list_bundle_choices", { search: "synthetic guide", ...(cursor ? { cursor } : {}) });
+        return { answer: await call("list_bundle_choices", args), commands };
       } finally {
         redis.pipeline = original;
       }
-      calls += 1;
-      reads.push(commands.filter((c) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]))).length);
-      for (const p of page.value.products as Choice[]) seen.add(p.id);
-      cursor = page.value.next_cursor as string | null;
-    } while (cursor && calls < 10);
-    is("100 products in five pages, every one of them seen once", [calls, seen.size], [5, 100]);
-    is("no page reads more than 20 listings", Math.max(...reads) <= 20, true);
+    };
+    const walk = async (args: Record<string, unknown>) => {
+      const seen = new Set<string>();
+      const reads: number[] = [];
+      const all: number[] = [];
+      let cursor: string | null | undefined = undefined;
+      let calls = 0;
+      do {
+        const { answer, commands } = await measured({ ...args, ...(cursor ? { cursor } : {}) });
+        calls += 1;
+        reads.push(commands.filter(listingGet).length);
+        all.push(commands.length);
+        for (const p of answer.value.products as Choice[]) seen.add(p.id);
+        cursor = answer.value.next_cursor as string | null;
+      } while (cursor && calls < 20);
+      return { seen, reads, all, calls };
+    };
+    const everything = await walk({});
+    is("the 103 products that may go in, in six pages, every one seen once", [everything.calls, everything.seen.size], [6, 103]);
+    is("no page reads more than 20 listings", Math.max(...everything.reads) <= 20, true);
+
+    part("Codex A3 (#1933) 1: the catalog is never read or healed whole in one call, its names cached or not");
+    const catalogId = (await storeForEmail(OWNER))!.catalog.id;
+    await redis.pipeline([["DEL", `nl:catalog:${catalogId}:t`]]);
+    const cold = await measured({});
+    is("without the cached names, a page still reads its own 20 listings and nothing more", [cold.commands.filter(listingGet).length <= 20, cold.commands.some((c) => c[0] === "HGETALL" || c[0] === "HSET")], [true, false]);
+    const coldSearch = await measured({ search: "synthetic guide" });
+    is("a search then reads no listing it cannot match, and says what it could not search", [coldSearch.commands.filter(listingGet).length, (coldSearch.answer.value.unsearched as number) > 0, coldSearch.commands.some((c) => c[0] === "HGETALL" || c[0] === "HSET")], [0, true, false]);
+    is("every call stays inside one API request's commands", Math.max(cold.commands.length, coldSearch.commands.length, ...everything.all) <= 20 + 4 + 8, true);
+
+    part("Codex A3 (#1933) 2: imports that cannot be read are said so, never an empty history");
+    for (const [label, broken] of [["the list", "LRANGE"], ["a job", "GET"]] as const) {
+      const real = redis.pipeline.bind(redis);
+      await redis.pipeline([["LPUSH", `nl:imports:list:${store.sid}`, "b".repeat(24)], ["SET", `nl:import:${"b".repeat(24)}`, "{}"]]);
+      redis.pipeline = async (batch) => (batch.some((c) => c[0] === broken && (/import/.test(String(c[1])))) ? [] : real(batch));
+      let unread: Answer;
+      try {
+        unread = await call("get_imports");
+      } finally {
+        redis.pipeline = real;
+      }
+      is(`${label} answered short: an error, not imports: []`, [unread.isError, "imports" in unread.value], [true, false]);
+      await redis.pipeline([["DEL", `nl:imports:list:${store.sid}`, `nl:import:${"b".repeat(24)}`]]);
+    }
 
     part("Imports, as counts only");
     is("none yet", (await call("get_imports")).value.imports, []);

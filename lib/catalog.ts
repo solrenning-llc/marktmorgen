@@ -901,6 +901,29 @@ export async function readCards(store: Store): Promise<Map<string, Card>> {
   return found;
 }
 
+/**
+ * The cached cards of just these ids, in one HMGET and nothing more: no
+ * listing is read and nothing is healed, so its cost is known before it is
+ * sent (the MCP tool list_bundle_choices, a page at a time; Codex A3 on
+ * #1933). An id whose card is not cached yet answers null. Throws when the
+ * answer is not one value for each id.
+ */
+export async function cachedCards(store: Store, ids: string[]): Promise<Map<string, Card | null>> {
+  const out = new Map<string, Card | null>();
+  if (!ids.length) return out;
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const inline = new Map(catalog.inline.map((p) => [p.id, { id: p.id, title: p.title, priceCents: p.priceCents, page: p.page } as Card]));
+    for (const id of ids) out.set(id, inline.get(id) ?? null);
+    return out;
+  }
+  if (!catalog.id || !isRedisConfigured()) throw new Error("the product cards could not be read");
+  const [reply] = await redisPipeline([["HMGET", titlesKey(catalog.id), ...ids]]);
+  if (!Array.isArray(reply) || reply.length !== ids.length || reply.some((v) => v !== null && typeof v !== "string")) throw new Error("the product cards could not be read");
+  ids.forEach((id, i) => out.set(id, typeof reply[i] === "string" ? parseCard(id, reply[i] as string) : null));
+  return out;
+}
+
 /** Just the names, for the screens that want nothing else. */
 export async function readTitles(store: Store): Promise<Map<string, string>> {
   return new Map([...(await readCards(store))].map(([id, card]) => [id, card.title]));

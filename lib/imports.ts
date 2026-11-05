@@ -325,6 +325,22 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
   return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
 }
 
+/**
+ * The store's imports, read only on Redis's exact answers (the MCP tool
+ * get_imports; Codex A3 on #1933): a list from LRANGE, then a text or null
+ * for each GET. Any other answer is null, unknown, never an empty history.
+ */
+export async function storeImportsRead(store: Store): Promise<ImportJob[] | null> {
+  if (!store.sid || !isRedisConfigured()) return null;
+  const [ids] = await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]);
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) return null;
+  const list = (ids as string[]).filter((id) => IMPORT_ID_PATTERN.test(id));
+  if (!list.length) return [];
+  const raws: unknown = await redisPipeline(list.map((id) => ["GET", jobKey(id)]));
+  if (!Array.isArray(raws) || raws.length !== list.length || raws.some((raw) => raw !== null && typeof raw !== "string")) return null;
+  return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
+}
+
 export type StartProblem = "busy" | "too_many" | "consent" | "email" | "list" | "store" | "unavailable" | "stripe" | "stopped";
 
 /** What an import is started with, as the studio sends it. */

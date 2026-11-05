@@ -6,7 +6,7 @@
  * offered exactly what the creator's own picker offers, with the same reason
  * when a product cannot go in. Moved here unchanged from the route.
  */
-import { BUMP_CHOICES, idsOfKind, readCards, readListings } from "@/lib/catalog";
+import { BUMP_CHOICES, cachedCards, idsOfKind, productIds, readCards, readListings } from "@/lib/catalog";
 import { whyNotInBundle } from "@/lib/bundle-rules";
 import type { Store } from "@/lib/store";
 
@@ -87,18 +87,44 @@ export function choiceCursor(raw: unknown): number {
   return Math.max(0, n);
 }
 
+/** Names looked through for a search in one call (one HMGET of the cached cards), and the products shown then. */
+export const SEARCH_STRETCH = 100;
+export const SEARCH_PAGE = PICKER_PAGE - 1;
+
 /**
- * One page for the MCP tool list_bundle_choices (Codex A3 on #1933): at most
- * PICKER_PAGE listings read, what one API request pays for, in the creator's
- * own order from `after`, each with why it cannot go in a bundle; and where
- * the next page starts, or null at the end. Nothing past the page is read, so
- * an agent sees the whole catalog a page at a time, each page inside what
- * it paid. `matches` counts the products the store's index leaves in, each
- * checked when its page is read.
+ * One page for the MCP tool list_bundle_choices (Codex A3 on #1933, twice):
+ * the ids are chosen first, from the store's own index that its record
+ * already holds (nothing read), and only then are those read: without a
+ * search, the PICKER_PAGE listings from the cursor; with one, the cached
+ * names of the next SEARCH_STRETCH ids in one HMGET, then the listings of at
+ * most SEARCH_PAGE that match. The whole catalog is never read or healed in
+ * one call: each call stays inside the one API request it pays for. A
+ * product whose name is not cached yet cannot be searched, and is counted in
+ * `unsearched`, never read for free. `next` is where the next page starts,
+ * null at the end; `matches` is how many may go in by their kind, without a
+ * search, and null with one (each stretch is searched as it comes).
  */
-export async function bundleChoicesPage(store: Store, input: { owner: string; query: string; after: number }): Promise<{ products: BundleChoice[]; matches: number; next: number | null }> {
-  const named = await candidatesOf(store, input.owner, input.query);
-  const from = Math.min(Math.max(0, input.after), named.length);
-  const listed = await readListings(store, named.slice(from, from + PICKER_PAGE).map((card) => card.id));
-  return { products: listed.map(choiceOf), matches: named.length, next: from + PICKER_PAGE < named.length ? from + PICKER_PAGE : null };
+export async function bundleChoicesPage(store: Store, input: { owner: string; query: string; after: number }): Promise<{ products: BundleChoice[]; matches: number | null; next: number | null; unsearched: number }> {
+  const ruledOut = new Set([...idsOfKind(store, "recurring"), ...idsOfKind(store, "call")]);
+  const withOptions = new Set(store.catalog.items.filter((item) => item.options.length > 0).map((item) => item.id));
+  const ids = productIds(store).filter((id) => id !== input.owner && !ruledOut.has(id) && !withOptions.has(id));
+  const from = Math.min(Math.max(0, input.after), ids.length);
+  if (!input.query) {
+    const listed = await readListings(store, ids.slice(from, from + PICKER_PAGE));
+    return { products: listed.map(choiceOf), matches: ids.length, next: from + PICKER_PAGE < ids.length ? from + PICKER_PAGE : null, unsearched: 0 };
+  }
+  const stretch = ids.slice(from, from + SEARCH_STRETCH);
+  const cards = await cachedCards(store, stretch);
+  const found: string[] = [];
+  let unsearched = 0;
+  let at = from;
+  for (const id of stretch) {
+    if (found.length >= SEARCH_PAGE) break;
+    at += 1;
+    const card = cards.get(id);
+    if (!card) unsearched += 1;
+    else if (card.title.toLowerCase().includes(input.query)) found.push(id);
+  }
+  const listed = await readListings(store, found);
+  return { products: listed.map(choiceOf), matches: null, next: at < ids.length ? at : null, unsearched };
 }

@@ -22,6 +22,7 @@
  *   nl:verified:cursor      where the last daily pass stopped
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { types } from "node:util";
 import { readFullNumbers } from "@/lib/mcp-tools";
 import { readTitles } from "@/lib/catalog";
 import { type Store, storesAfter } from "@/lib/store";
@@ -90,7 +91,7 @@ function parse(raw: unknown): Verified | null {
     const value: unknown = JSON.parse(raw);
     if (!recordWith(value, ["day", "at", "currency", "salesRead", "windows", "channels", "products", "countries"])) return null;
     if (typeof value.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.day) || !count(value.at) || !Number.isSafeInteger(value.at * 1000) || new Date(value.at * 1000).toISOString().slice(0, 10) !== value.day) return null;
-    if (typeof value.currency !== "string" || !/^[a-z]{3}$/.test(value.currency) || typeof value.salesRead !== "boolean") return null;
+    if (typeof value.currency !== "string" || !/^[a-zA-Z]{3}$/.test(value.currency) || typeof value.salesRead !== "boolean") return null;
     const money = (v: unknown) => value.salesRead ? count(v) : v === null;
     if (!recordWith(value.windows, ["d7", "d30", "d90"]) || !Object.values(value.windows).every(w => recordWith(w, ["visitors", "views", "checkouts", "sales", "cents"]) && count(w.visitors) && count(w.views) && count(w.checkouts) && money(w.sales) && money(w.cents))) return null;
     // These are the existing writer's list ceilings, not a new display limit.
@@ -98,6 +99,9 @@ function parse(raw: unknown): Verified | null {
     if (!Array.isArray(value.products) || value.products.length > 8 || !value.products.every(p => recordWith(p, ["title", "sales", "cents"]) && typeof p.title === "string" && count(p.sales) && count(p.cents))) return null;
     if (!Array.isArray(value.countries) || value.countries.length > 6 || !value.countries.every(c => recordWith(c, ["country", "share"]) && typeof c.country === "string" && typeof c.share === "number" && Number.isFinite(c.share) && c.share >= 0 && c.share <= 1)) return null;
     if (!value.salesRead && (value.products.length || value.countries.length)) return null;
+    // The writer uses JSON.stringify. A duplicate member must not silently
+    // select which saved count or availability flag is presented as known.
+    if (JSON.stringify(value) !== raw) return null;
     return value as Verified;
   } catch {
     return null;
@@ -108,7 +112,7 @@ function parse(raw: unknown): Verified | null {
 export async function readVerified(store: Pick<Store, "statsId">): Promise<Verified | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const reply = await redisPipeline([["GET", key(store.statsId)]]);
-  if (!Array.isArray(reply) || reply.length !== 1) return null;
+  if (types.isProxy(reply) || !Array.isArray(reply) || reply.length !== 1) return null;
   const slot = Object.getOwnPropertyDescriptor(reply, "0");
   return slot && Object.hasOwn(slot, "value") ? parse(slot.value) : null;
 }

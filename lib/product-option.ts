@@ -144,7 +144,10 @@ export type ProductOption = {
    * (sellableOptions leaves it out, so every page and every checkout path,
    * an old link included, refuses it), while whoever bought or subscribes on
    * it keeps what they have: delivery reads options by id, never through
-   * sellableOptions, and renewals bill the price Stripe already holds.
+   * sellableOptions, and renewals bill the price Stripe already holds. A
+   * member invited to move here on it from another platform keeps it too:
+   * their invitation, not yet kept, opens it (withInvitedOption,
+   * lib/move-members.ts), and nothing else does.
    * Absent on every option written before this existed, which is on sale.
    */
   offSale?: true;
@@ -278,6 +281,25 @@ export function namedPriceGone(product: { options: { id: string }[] }, optionId:
  * with nothing to hand over is not a price on sale: the link opens nothing
  * and no email or reminder names it.
  */
+/**
+ * The product as one invited member sees it (642 [WG2], C4-20261105-1945-C2-2): the option their invitation
+ * recorded back on sale, and only it, so the price they already paid elsewhere is kept here. Every other option,
+ * and the product for everyone else, is untouched; the same object comes back when there is nothing to change.
+ * Used only on the moving-in path, after the invitation was read by its token and found not yet kept.
+ */
+export function withInvitedOption<T extends { options: ProductOption[] }>(product: T, optionId: string): T {
+  if (!optionId) return product;
+  const at = product.options.findIndex((option) => option.id === optionId);
+  if (at < 0 || product.options[at].offSale !== true) return product;
+  const options = product.options.map((option, index) => {
+    if (index !== at) return option;
+    const kept = { ...option };
+    delete kept.offSale;
+    return kept;
+  });
+  return { ...product, options };
+}
+
 export function namedPriceOffered(product: Listing, optionId: string): boolean {
   if (namedPriceGone(product, optionId)) return false;
   return !optionId || sellableOptions(product).some((option) => option.id === optionId);

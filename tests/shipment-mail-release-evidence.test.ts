@@ -4,6 +4,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkShipped } from "@/components/mark-shipped";
+import { markShipped, doneKey } from "@/lib/shipments";
+import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { enqueueShipmentMail, runShipmentMail, shipmentMailStatus } from "@/lib/shipment-mail-outbox";
 import { shipmentOutboxFixture, shipmentPolicy } from "./shipment-mail-outbox-fixture";
 import { store } from "./redis-stub";
@@ -34,6 +36,45 @@ async function main(): Promise<void> {
   is("until a server status confirms it, missing acceptance is not asserted", html.includes("acceptance was not recorded"), false);
   const status = html.match(/<p\b[^>]*role="status"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? "";
   is("the shipment status region excludes the email detail line", /acceptance|email/i.test(status), false);
+  part("Real fulfillment remains possible when protected mail cannot be retained");
+  store.clear();
+  const owner = "shipment-release@example.test";
+  await claimHandle(owner, "releaseevidence", "Synthetic release", "");
+  await ensureStatsId(owner);
+  await setStripeAccount(owner, "acct_NRelease01");
+  const creator = (await storeForEmail(owner))!;
+  const priorFetch = globalThis.fetch, priorKey = process.env.STRIPE_SECRET_KEY;
+  const originalPipeline = store.pipeline;
+  process.env.STRIPE_SECRET_KEY = "sk_test_shipping_only_a_stand_in";
+  let recipient: unknown = "buyer@example.test", providerReads = 0;
+  globalThis.fetch = (async (url, init) => {
+    const request = new URL(String(url));
+    if (request.hostname !== "api.stripe.com" || (init?.method ?? "GET") !== "GET") throw Error("No external or sending request allowed");
+    providerReads++;
+    return new Response(JSON.stringify({ id: input.session, status: "complete", payment_status: "paid", metadata: { store: creator.handle, ship: "yes" }, customer_details: { email: recipient } }));
+  }) as typeof fetch;
+  try {
+    const fullRuntime = { ...runtime, pipeline: async (commands: (string | number)[][]) => commands.map(command => command[0] === "EVAL" ? ["full"] : null) };
+    const full = await markShipped(creator, input.session, "", now / 1000, fullRuntime);
+    is("a full mail pool does not prevent marking the paid order shipped", full.ok, true);
+    is("a full mail pool explicitly reports no recorded email", full.ok ? full.mail : null, { state: "not_recorded", delayed: false });
+    store.run(["DEL", doneKey(input.session)]);
+    recipient = null;
+    const winner = { at: now / 1000 - 1, tracking: "https://example.test/winning-tracking" };
+    store.pipeline = async commands => {
+      if (commands.some(command => command[0] === "SET" && command[1] === doneKey(input.session))) {
+        store.run(["SET", doneKey(input.session), JSON.stringify(winner), "EX", 400 * 86400]);
+      }
+      return originalPipeline(commands);
+    };
+    const raced = await markShipped(creator, input.session, "https://example.test/losing-tracking", now / 1000, runtime);
+    is("a simultaneous marker returns the real winning shipment", raced.ok ? raced.shipped : null, winner);
+    is("re-reading the winning mark never submits a provider message", [raced.ok && raced.emailed, providerReads], [false, 2]);
+  } finally {
+    globalThis.fetch = priorFetch;
+    store.pipeline = originalPipeline;
+    if (priorKey === undefined) delete process.env.STRIPE_SECRET_KEY; else process.env.STRIPE_SECRET_KEY = priorKey;
+  }
   done();
 }
 main().catch(error => { console.error(error); process.exit(1); });

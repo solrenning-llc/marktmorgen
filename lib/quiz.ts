@@ -436,7 +436,7 @@ function exactAttemptReply(reply: unknown): [string | null, string | null] {
 
 function storedCount(raw: string | null): number {
   if (raw === null) return 0;
-  if (!/^[1-9]\\d*$/.test(raw)) throw new QuizAttemptReadError();
+  if (!/^[1-9]\d*$/.test(raw)) throw new QuizAttemptReadError();
   const count = Number(raw);
   if (!Number.isSafeInteger(count)) throw new QuizAttemptReadError();
   return count;

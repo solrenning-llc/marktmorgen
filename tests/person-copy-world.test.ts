@@ -9,6 +9,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { storeForEmail } from "@/lib/store";
 import { ERASERS, erasePerson, erasureScope } from "@/lib/person-erasure";
 import { COPY_PLAN, copyPerson } from "@/lib/person-copy";
+import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-mail-outbox";
 import { OWNER, makeWorld, seedPerson } from "./erasure-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -27,11 +28,18 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(OWNER))!;
 
   part("Before the erasure");
+  // This world exercises production readers. Protected mail has never been
+  // activated, so it must hold nothing here. Activation requires seeding and
+  // copying real pending rows in this world, not extending an allowlist.
+  is("the protected-mail fixture exclusion requires never activated", CURRENT_SHIPMENT_MAIL_LIFECYCLE, "never_activated");
+  const mailKeys = () => [...redis.keys()].filter(key => key.startsWith("nl:ship:mail:") || key.startsWith("nl:order-confirmation:"));
+  is("the world has no protected-mail records to omit", mailKeys(), []);
   const copy = await copyPerson((await erasureScope(store, person))!);
   const found = new Set(copy.sections.map((s) => s.module));
   const copied = Object.entries(COPY_PLAN).filter(([, p]) => p.how === "copied").map(([m]) => m);
   console.log(`  (copied modules with nothing for them: ${copied.filter((m) => !found.has(m)).join(", ") || "none"})`);
   is("every module that keeps something about them is in their copy", copied.filter((m) => !found.has(m)), EXPECTED_EMPTY);
+  is("inactive mail readers created no records", mailKeys(), []);
   const text = JSON.stringify(copy);
   is("the other person's address is not in it", text.includes(other), false);
   is("the store's owner's is not either", text.includes(OWNER), false);
@@ -49,7 +57,7 @@ async function main(): Promise<void> {
 }
 
 /** Modules seedPerson writes nothing to for a person (see the log line above). */
-const EXPECTED_EMPTY: string[] = ["lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/gifts.ts", "lib/group-buy.ts", "lib/preorders.ts", "lib/call-packages.ts", "lib/meet-records.ts", "lib/shipments.ts", "lib/closing-buyers.ts", "lib/closing-holds.ts"];
+const EXPECTED_EMPTY: string[] = ["lib/shipment-mail-outbox.ts", "lib/order-confirmation-outbox.ts", "lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/gifts.ts", "lib/group-buy.ts", "lib/preorders.ts", "lib/call-packages.ts", "lib/meet-records.ts", "lib/shipments.ts", "lib/closing-buyers.ts", "lib/closing-holds.ts"];
 
 main().catch((error) => {
   console.error(error);

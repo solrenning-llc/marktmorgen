@@ -31,6 +31,11 @@ const GOALS: Record<string, StarterGoal> = {
   "recorded-workshop": "teaching",
   "digital-product": "sales",
   "course-launch": "teaching",
+  "physical-product": "sales",
+  "printed-book": "sales",
+  "branded-apparel": "sales",
+  "course-kit": "sales",
+  "homemade-food": "sales",
 };
 
 /** Derived from the actual bundle so the preview cannot drift from what is created. */
@@ -76,6 +81,8 @@ export const NICHE_FIT: Record<StarterNiche, Record<string, string>> = {
     "recorded-workshop": "For a recorded class that leads to your program.",
     "course-launch": "For a full course, with what it covers laid out.",
     "guide-signup": "For a free guide that starts your list.",
+    "printed-book": "For a printed book or workbook you ship.",
+    "course-kit": "For a kit people use alongside your course.",
   },
   cooks: {
     "guide-signup": "For a free recipe guide that starts your list.",
@@ -83,18 +90,24 @@ export const NICHE_FIT: Record<StarterNiche, Record<string, string>> = {
     membership: "For recipes or plans as a course members open while they pay, which you can add to.",
     "course-free-lesson": "For one cooking lesson people take free before the full course.",
     "launch-waitlist": "For a cookbook or program you are still preparing.",
+    "printed-book": "For a printed cookbook you ship.",
+    "homemade-food": "For food you make and ship, once you have checked the rules for selling it.",
   },
   fitness: {
     membership: "For workouts or plans as a course members open while they pay, which you can add to.",
     "recorded-workshop": "For a recorded class that leads to your program.",
     "course-launch": "For a full training program, with its modules laid out.",
     "paid-call": "For one-to-one sessions people book and pay for.",
+    "course-kit": "For equipment or a printed plan that goes with your program.",
     "guide-signup": "For a free guide that starts your list.",
   },
   designers: {
     "digital-product": "For presets, templates or files people download.",
     "paid-call": "For a review or consultation people book and pay for.",
     "launch-waitlist": "For a collection you are still preparing.",
+    "physical-product": "For prints or pieces you make and ship.",
+    "branded-apparel": "For clothing printed with your designs.",
+    "printed-book": "For a printed book of your work.",
     "guide-signup": "For a free guide that starts your list.",
   },
 };

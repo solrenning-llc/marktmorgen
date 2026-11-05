@@ -17,11 +17,18 @@
  *
  * Bounded like the library's link: a few asks an hour from one network
  * address and for one email address, one email per ask (taken from the
- * first store's figure for such emails), and each store's own erasure
- * counted against that store's studio figure (lib/person-erasure.ts).
+ * figure for such emails of the first of the stores with room, only up to the
+ * share a visitor's typed address may take, as the sign-up box's are), and
+ * each store's own erasure counted against that store's studio figure
+ * (lib/person-erasure.ts). Asked from one store that has no room, the page
+ * says from which day it can be asked again and gives the published privacy
+ * contact. Asked for every store, the answer is "sent" whatever happened,
+ * since anything else would depend on which stores know the address, and the
+ * page that answer opens always gives the same contact.
  *
  *   nl:erase:link:<hash of a token>  { e: address, s: [store ids still to do] }, an hour
  */
+import { after } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -31,6 +38,9 @@ import { type Store, storeForHandle, storeForId } from "@/lib/store";
 import { leadsKey } from "@/lib/contacts";
 import { storesKnownFor } from "@/lib/buyer-library";
 import { erasePerson } from "@/lib/person-erasure";
+import { allowanceWindow } from "@/lib/allowance-window";
+import { allowancesUsedStrict } from "@/lib/store-allowance";
+import { allowanceFor, askedCeiling } from "@/lib/store-allowance-rules";
 import {
   ERASE_ASKS_PER_ADDRESS_HOUR,
   ERASE_ASKS_PER_IP_HOUR,
@@ -47,7 +57,36 @@ const PRESS_MS = 40_000;
 
 type Grant = { e: string; s: string[] };
 
-export type EraseAsk = "sent" | "email" | "limited" | "error";
+/** "full": asked from one store, it has no room in its share for a visitor's address (askedCeiling). Never asked for every store. */
+export type EraseAsk = "sent" | "email" | "limited" | "error" | "full";
+
+/** What an ask came to; `opens`, with "full": the start (00:00 UTC) of the first whole day the store's share is open again, in ms, when it is known. */
+export type EraseAnswer = { status: EraseAsk; opens?: number };
+
+type Room = { state: "room" } | { state: "full"; opens: number } | { state: "unknown" };
+
+/**
+ * Whether the store's access emails have room for one more to an address a
+ * visitor typed (the share takeAllowance gives `asked`), read before the email
+ * is taken so a link is sent from a store that can send it. "full" says from
+ * which day its share is open again (0 when that is not known): the page shows
+ * a day, not a time, so a window that ends during a day (23:30 UTC) counts
+ * from the next one, never from a day it is still full on.
+ */
+async function askedRoom(store: Store, now = Date.now()): Promise<Room> {
+  const row = (await allowancesUsedStrict(store, ["transactional"], now).catch(() => null))?.[0];
+  if (!row) return { state: "unknown" };
+  if (row.used + 1 <= askedCeiling(row.figure)) return { state: "room" };
+  const window = allowanceWindow(store, now);
+  const opens = window && askedCeiling(allowanceFor(store, "transactional", window.end / 1000)) > 0 ? nextWholeDay(window.end) : 0;
+  return { state: "full", opens };
+}
+
+const DAY_MS = 86_400_000;
+/** The moment itself when it is 00:00 UTC, otherwise 00:00 UTC of the day after. */
+export const nextWholeDay = (ms: number) => Math.ceil(ms / DAY_MS) * DAY_MS;
+
+const sooner = (a: number, b: number) => (a && b ? Math.min(a, b) : a || b);
 
 /** Whether this store holds the address: on its list, or as a buyer or a joiner it noted. */
 async function knows(store: Store, email: string, known: Set<string>): Promise<boolean> {
@@ -57,71 +96,177 @@ async function knows(store: Store, email: string, known: Set<string>): Promise<b
   return Number(held) === 1;
 }
 
+/** The same, as the status alone. */
+export async function requestErasureLink(input: { email: string; ip: string; origin: string; handle?: string }): Promise<EraseAsk> {
+  return (await askErasureLink(input)).status;
+}
+
 /**
  * Emails a link that deletes this address from one store (by its address on
  * Marktmorgen) or from every store that knows it. "sent" whether or not any
  * does; nothing is sent when none does.
+ *
+ * Asked from one store, that store's room is read before whether it knows the
+ * address, so a full store answers "full" (with the day it opens again) for
+ * every address; the request already names the store.
+ *
+ * Asked for every store, the email is taken from the share of the first of the
+ * stores that know the address with room for a visitor's address (askedRoom),
+ * so one store whose share a stranger spent does not stop the link. The answer
+ * is always "sent": "full" or "error" would only ever come to an address some
+ * store knows, so after a stranger spent one store's share they would tell who
+ * buys there (review C4-7). The page that answer opens always gives the
+ * published privacy contact, for a link that does not arrive.
  */
-export async function requestErasureLink(input: { email: string; ip: string; origin: string; handle?: string }): Promise<EraseAsk> {
+export async function askErasureLink(input: { email: string; ip: string; origin: string; handle?: string }): Promise<EraseAnswer> {
   const raw = input.email.trim();
-  if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
-  if (!isRedisConfigured() || !isSenderConfigured()) return "error";
+  if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return { status: "email" };
+  if (!isRedisConfigured() || !isSenderConfigured()) return { status: "error" };
   const email = normaliseEmail(raw);
-  if (!(await withinLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return "limited";
-  if (!(await withinLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return "limited";
-  const known = new Set(await storesKnownFor(email));
-  const stores: Store[] = [];
+  if (!(await withinLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "limited" };
+  if (!(await withinLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "limited" };
   if (input.handle) {
     const store = await storeForHandle(input.handle).catch(() => null);
-    if (store?.sid && (await knows(store, email, known))) stores.push(store);
-  } else {
-    for (const sid of [...known].slice(0, MAX_ERASE_STORES)) {
+    if (store?.sid) {
+      // The store's room is read before anything about the address: "full" comes to every address alike.
+      const room = await askedRoom(store);
+      if (room.state === "full") return { status: "full", ...(room.opens ? { opens: room.opens } : {}) };
+      // Whether the store knows the address, and the email, only after the answer (review of #2101, inbox
+      // C4-15 (3)(a)): their time, and a send that fails or finds the room just taken, would only ever come to
+      // an address the store knows. They go to the server's log; the page always gives the privacy contact.
+      afterAnswer(async () => {
+        const known = new Set(await storesKnownFor(email));
+        if (!(await knows(store, email, known))) return;
+        const answer = await emailLink([store], email, input.origin);
+        if (answer.status !== "sent") console.warn(`a deletion link asked from one store was not emailed: ${answer.status} (store ${store.sid})`);
+      });
+    }
+    return { status: "sent" };
+  }
+  // Every store: which stores know the address, and the email, only after the answer, for the same reason.
+  afterAnswer(async () => {
+    const stores: Store[] = [];
+    for (const sid of (await storesKnownFor(email)).slice(0, MAX_ERASE_STORES)) {
       const store = await storeForId(sid).catch(() => null);
       if (store?.sid) stores.push(store);
     }
+    if (!stores.length) return;
+    const answer = await emailLink(stores, email, input.origin);
+    if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status} (stores ${stores.map((s) => s.sid).join(",")})`);
+  });
+  return { status: "sent" };
+}
+
+/**
+ * Runs what depends on the address after the answer is sent (as lib/buyer-orders.ts does): inside the
+ * route's time, or at once and unwaited when there is no request to wait for. What fails goes to the log.
+ */
+function afterAnswer(task: () => Promise<void>): void {
+  const run = () =>
+    task().catch((error: unknown) => {
+      console.error("emailing a deletion link failed", error);
+    });
+  try {
+    after(run);
+  } catch {
+    void run();
   }
-  if (!stores.length) return "sent";
+}
+
+/**
+ * Emails the link from the first of these stores with room for a visitor's
+ * address: "sent", "full" (none had room, with the soonest day one opens
+ * again) or "error" (the sender failed).
+ */
+async function emailLink(stores: Store[], email: string, origin: string): Promise<EraseAnswer> {
   const token = randomBytes(32).toString("hex");
   const grant: Grant = { e: email, s: stores.map((s) => s.sid) };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]);
   const names = stores.map((s) => s.name).slice(0, 10);
   const more = stores.length - names.length;
-  const sent = await sendEmail({
-    meter: { by: "store", store: stores[0], kind: "transactional" },
-    from: NIMBUS_FROM,
-    to: email,
-    subject: stores.length === 1 ? `Delete your data from ${stores[0].name}` : "Delete your data from stores on Marktmorgen",
-    text: [
-      stores.length === 1
-        ? `Someone asked to delete everything ${stores[0].name} keeps about this address on Marktmorgen.`
-        : `Someone asked to delete everything these stores on Marktmorgen keep about this address: ${names.join(", ")}${more > 0 ? ` and ${more} more` : ""}.`,
-      "",
-      "To see what will be deleted and what has to be kept, and to delete it, open this link within an hour:",
-      "",
-      `${input.origin}/privacy/delete?token=${token}`,
-      "",
-      "Nothing is deleted until you press the button on that page. If you did not ask for this, ignore this email: nobody can delete your data without it.",
-    ].join("\n"),
-  });
-  return sent ? "sent" : "error";
+  const text = [
+    stores.length === 1
+      ? `Someone asked to delete everything ${stores[0].name} keeps about this address on Marktmorgen.`
+      : `Someone asked to delete everything these stores on Marktmorgen keep about this address: ${names.join(", ")}${more > 0 ? ` and ${more} more` : ""}.`,
+    "",
+    "To see what will be deleted and what has to be kept, and to delete it, open this link within an hour:",
+    "",
+    `${origin}/privacy/delete?token=${token}`,
+    "",
+    "Nothing is deleted until you press the button on that page. If you did not ask for this, ignore this email: nobody can delete your data without it.",
+  ].join("\n");
+  let full = false;
+  let opens = 0;
+  for (const sender of stores) {
+    const room = await askedRoom(sender);
+    if (room.state === "unknown") continue;
+    if (room.state === "full") {
+      full = true;
+      opens = sooner(opens, room.opens);
+      continue;
+    }
+    const sent = await sendEmail({
+      // `asked` (MM-SA-05): the address was typed by a visitor, and a store knows every address on its
+      // list, which a stranger can fill through the sign-up box, so these links take only the share of
+      // the access emails such confirmations may (askedCeiling); the rest is kept for buyers' own links.
+      meter: { by: "store", store: sender, kind: "transactional", asked: true },
+      from: NIMBUS_FROM,
+      to: email,
+      subject: stores.length === 1 ? `Delete your data from ${stores[0].name}` : "Delete your data from stores on Marktmorgen",
+      text,
+    });
+    if (sent) return { status: "sent" };
+    // Its share was spent between the read and the send: the next store is asked. Any other
+    // failure (the sender) is not passed on to another store's share, which it would only spend.
+    const after = await askedRoom(sender);
+    if (after.state !== "full") {
+      full = false;
+      break;
+    }
+    full = true;
+    opens = sooner(opens, after.opens);
+  }
+  await redisPipeline([["DEL", linkKey(token)]]).catch(() => {});
+  return full ? { status: "full", ...(opens ? { opens } : {}) } : { status: "error" };
 }
 
 /** The address a live link was sent to, and the stores it still deletes from; null when it has run out. */
 export async function readErasureLink(token: string): Promise<{ email: string; stores: Store[] } | null> {
   if (!ERASE_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
+  const reply = await redisPipeline([["GET", linkKey(token)]]);
+  if (!exactGrantReply(reply, 1)) throw new Error("Your data could not be checked. Try again.");
+  const [raw] = reply;
+  if (raw === null) return null;
   const grant = parseGrant(raw);
-  if (!grant) return null;
-  const stores = (await Promise.all(grant.s.map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
+  if (!grant) throw new Error("Your data could not be checked. Try again.");
+  const stores = await Promise.all(grant.s.map(async (sid) => {
+    const store = await storeForId(sid);
+    // A missing store record cannot prove that no personal data remains.
+    // Do not show only part of the scope the person is about to delete.
+    if (!store) throw new Error("Your data could not be checked. Try again.");
+    return store;
+  }));
   return { email: grant.e, stores };
+}
+
+/** An absent response slot is not Redis's confirmed null for a missing key. */
+function exactGrantReply(reply: unknown, length: number): reply is unknown[] {
+  if (!Array.isArray(reply) || reply.length !== length) return false;
+  for (let i = 0; i < length; i++) if (!Object.hasOwn(reply, i)) return false;
+  return true;
 }
 
 function parseGrant(raw: unknown): Grant | null {
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Partial<Grant>;
-    if (typeof v.e !== "string" || !EMAIL_PATTERN.test(v.e) || !Array.isArray(v.s)) return null;
-    return { e: v.e, s: v.s.filter((s): s is string => typeof s === "string" && STORE_ID.test(s)).slice(0, MAX_ERASE_STORES) };
+    if (typeof v.e !== "string" || !EMAIL_PATTERN.test(v.e) || !Array.isArray(v.s) || v.s.length === 0 || v.s.length > MAX_ERASE_STORES) return null;
+    const ids = new Set<string>();
+    for (const sid of v.s) {
+      if (typeof sid !== "string" || !STORE_ID.test(sid) || ids.has(sid)) return null;
+      ids.add(sid);
+    }
+    return { e: v.e, s: [...ids] };
   } catch {
     return null;
   }
@@ -144,9 +289,14 @@ export type EraseDone = {
 export async function confirmErasure(token: string, now = Date.now()): Promise<EraseDone> {
   if (!ERASE_TOKEN.test(token) || !isRedisConfigured()) return { state: "gone", deleted: [], later: [] };
   const key = linkKey(token);
-  const [raw, ttl] = await redisPipeline([["GET", key], ["TTL", key]]);
+  const reply = await redisPipeline([["GET", key], ["TTL", key]]);
+  // Unknown scope stays pending without consuming or rewriting its grant.
+  const pending: EraseDone = { state: "more", deleted: [], later: [] };
+  if (!exactGrantReply(reply, 2)) return pending;
+  const [raw, ttl] = reply;
+  if (raw === null && ttl === -2) return { state: "gone", deleted: [], later: [] };
   const grant = parseGrant(raw);
-  if (!grant) return { state: "gone", deleted: [], later: [] };
+  if (!grant || typeof ttl !== "number" || !Number.isSafeInteger(ttl) || ttl <= 0) return pending;
   const deleted: string[] = [];
   const later: string[] = [];
   for (const sid of grant.s) {
@@ -155,7 +305,12 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
       continue;
     }
     const store = await storeForId(sid).catch(() => null);
-    if (!store) continue;
+    if (!store) {
+      // Unknown is still to do: never discard the grant and claim completion
+      // while this store's data could not even be reached.
+      later.push(sid);
+      continue;
+    }
     const result = await erasePerson(store, grant.e, { kind: "person" }).catch(() => ({ ok: false as const, reason: "unavailable" as const }));
     if (!result.ok) {
       later.push(sid);
@@ -165,7 +320,7 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
     await tellOwner(store, grant.e).catch((error: unknown) => console.error("telling a store's owner about a deletion failed", error));
   }
   if (later.length) {
-    await redisPipeline([["SET", key, JSON.stringify({ e: grant.e, s: later } satisfies Grant), "EX", Math.max(60, Number(ttl) || ERASE_LINK_SECONDS)]]);
+    await redisPipeline([["SET", key, JSON.stringify({ e: grant.e, s: later } satisfies Grant), "EX", Math.max(60, ttl)]]);
     return { state: "more", deleted, later };
   }
   await redisPipeline([["DEL", key]]);

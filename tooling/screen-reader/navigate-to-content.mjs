@@ -94,4 +94,7 @@ export async function navigateToContent(reader,page,kind,foreground){
  }finally{
   await page.evaluate(()=>document.getElementById("__guidepup_marker__")?.remove());
  }
+ // Item chooser interaction can leave the cursor at a later heading.
+ // Establish the area start only after removing the temporary marker.
+ await reader.perform(voiceOverKeyCodeCommands.moveToAreaTop,{capture:false});
 }

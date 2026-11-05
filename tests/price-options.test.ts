@@ -20,7 +20,9 @@ import {
   claimHandle,
   editOption,
   ensureStatsId,
+  removeOption,
   setProductCourse,
+  setProductLink,
   setStripeAccount,
   setSubscription,
   storeForEmail,
@@ -31,11 +33,14 @@ import {
   MAX_OPTION_DETAILS,
   MAX_OPTION_DETAIL_LENGTH,
   comparable,
+  handsOver,
   parseDetails,
   parseOptions,
   startingOption,
 } from "@/lib/product-option";
 import { canSellProduct, sellableOptions } from "@/lib/store-checkout";
+import { optionRemovalWords } from "@/lib/price-review";
+import { formatMoney } from "@/lib/money";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -110,6 +115,30 @@ async function main(): Promise<void> {
   store = (await storeForEmail(OWNER))!;
   sold = (await readProduct(store, course.product.id))!;
   is("an edit without details keeps them", [sold.options[0].label, sold.options[0].details], ["Course only", ["All 12 lessons"]]);
+
+  part("Removing the only price that hands anything over");
+  // A digital product with no file of its own: "Basic" has a link, "Pro" has nothing yet.
+  const brushes = await addProduct(OWNER, "Brush set", "", "15", null);
+  if (!brushes.ok) throw new Error("no brush set");
+  await addOption(OWNER, brushes.product.id, "Basic", "15");
+  await addOption(OWNER, brushes.product.id, "Pro", "25");
+  store = (await storeForEmail(OWNER))!;
+  const basicId = (await readProduct(store, brushes.product.id))!.options[0].id;
+  await setProductLink(OWNER, basicId, "https://example.com/brushes-basic");
+  store = (await storeForEmail(OWNER))!;
+  const brushSet = (await readProduct(store, brushes.product.id))!;
+  const withoutBasic = { ...brushSet, options: brushSet.options.filter((o) => o.id !== basicId) };
+  is("sold through Basic's link; the studio's rule reads the same", [canSellProduct(store, brushSet), handsOver(brushSet)], [true, true]);
+  is("without Basic, Pro is offered to nobody and the checkout refuses it; the studio's rule reads the same", [sellableOptions(withoutBasic).length, canSellProduct(store, withoutBasic), handsOver(withoutBasic)], [0, false, false]);
+  const said = optionRemovalWords(
+    { hasFile: false, delivers: true, extra: false },
+    { options: brushSet.options.length, interval: null, hidden: false, ownPriceCents: brushSet.priceCents, missing: null, ownDelivery: false, sellsBefore: handsOver(brushSet), sellsAfter: handsOver(withoutBasic), payments: 0, introKept: false, yearlyKept: false, planBefore: false, planAfter: false },
+    (cents) => formatMoney(cents, "usd"),
+  );
+  is("removing Basic, with Pro still there, says it cannot be bought", said, "Anyone who bought at it can no longer get its file or link from their order. No other price hands anything over, so this cannot be bought until one has a file or link.");
+  const gone = await removeOption(OWNER, basicId);
+  store = (await storeForEmail(OWNER))!;
+  is("and once removed, it really cannot be bought", [gone.ok, canSellProduct(store, (await readProduct(store, brushes.product.id))!)], [true, false]);
 
   part("A course sold as a membership");
   const club = await addProduct(OWNER, "Bread club", "", "9", { interval: "month", payments: 0, trialDays: 0 });

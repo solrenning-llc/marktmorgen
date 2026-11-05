@@ -1,8 +1,8 @@
 /**
  * Several lengths for one call, each with its own price (637 [GL5], unit 1;
  * added 2 November 2026): the rules, browser-safe. Booking and charging the
- * chosen length are unit 2 (below); the editor and the pages that say each
- * length come next.
+ * chosen length are unit 2, the pages that say each length units 2b and 2c,
+ * the editor unit 3 (below).
  *
  *   - One to MAX_CALL_LENGTHS lengths, each one of the lengths a call may
  *     have (CALL_LENGTHS in lib/call-setup.ts), none twice, kept shortest
@@ -46,14 +46,25 @@
  * (lib/call-setup.ts, readSetup). Already right: the busy times, reminders,
  * invites and calendar feed read each booking's own end.
  *
- * Before any creator can save several lengths (the editor, the next unit),
- * every place that says a call's length or price must say each length: the
- * booking page's times and prices per length (app/[handle]/book/[product]),
- * the store page and its facts (lib/page-facts.ts, components/
- * store-product.tsx, the assistant's facts), the thanks page's line for the
- * order (it says the product's price), the checkout reminder's price
- * (lib/checkout-recovery.ts) and the editor itself (components/
- * call-editor.tsx, which saves the product's price as the shortest's).
+ * The booking page offers each length with its price (unit 2b,
+ * offeredLengths), and the store says them wherever it says a call's length
+ * or price (unit 2c, listedLengths): the card, its price and button, the
+ * page's facts, the Store assistant's facts (lib/answers.ts), the product
+ * page's structured data and the checkout reminder.
+ *
+ * Unit 3 lets a creator save them (components/call-editor.tsx, "Other
+ * lengths"; app/api/store/call): the call's own length first, at the
+ * product's price, each other one longer at its own, checked here with the
+ * store's currency, the product's package and team (readCallLengths); a
+ * stored list sent from outside is refused. A call with several lengths takes
+ * no package (lib/store.ts, setCallPackage, and setProductCall reads it
+ * again under its write) and no team (app/api/store/call-team). The team is
+ * kept apart from the product, so a team set at the very moment the lengths
+ * are saved can still pass both: the charge stays right (holdAndCheckout
+ * books a team at the call's own length only), but the store would say the
+ * lengths; closing that needs the team and the call in one write. The public API (lib/api-read.ts) still gives only the call's
+ * own price: a `lengths` field there waits on its documentation
+ * (app/developers), open in other pull requests.
  */
 import { CALL_LENGTHS, type CallSetup, type Range, openSlots } from "@/lib/call-setup";
 import { type Currency, priceInRange, rangeWords, readMoney } from "@/lib/money";
@@ -90,6 +101,46 @@ export function lengthsProblemWords(problem: LengthsProblem, currency: Currency,
     case "team":
       return "A call booked with your team has one length for now. Keep one length, or book it on your own calendar.";
   }
+}
+
+/** The studio's words when an other length is not longer than the call's own (app/api/store/call answers "shorter"). */
+export const SHORTER_LENGTH = "Each other length has to be longer than the call's own length. Pick a longer one, or make the call's own length shorter.";
+/** The studio's words when the call's own line (the product's price) is outside the currency's range: it is not typed in the lengths. */
+export const OWN_PRICE = "This product's price is outside what your store's currency allows for a call. Change the product's price first, then add the other lengths.";
+
+/**
+ * What the studio's lengths editor says for a refused save (app/api/store/call:
+ * `problem`, `index` counted from the call's own line, 0, and `minutes`), and
+ * which of its rows to mark (`row`, counted from 1, the first other length;
+ * null when the problem is not on a row it shows). Line 0 is the call's own
+ * length at the product's price, which is not typed there: a price problem on
+ * it is the product's price, and "cheaper" on it can only mean a row shorter
+ * than it, priced above it, so it is said as the shorter row it is, never as a
+ * price to raise that cannot be changed there.
+ */
+export function lengthsRefusal(reply: { problem: string; index?: number; minutes?: number }, currency: Currency): { message: string; row: number | null; problem: string } {
+  const row = typeof reply.index === "number" && reply.index > 0 ? reply.index : null;
+  if (reply.index === 0 && reply.problem === "price") return { message: OWN_PRICE, row: null, problem: "price" };
+  if (reply.problem === "shorter" || (reply.index === 0 && reply.problem === "cheaper")) return { message: SHORTER_LENGTH, row, problem: "shorter" };
+  return { message: lengthsProblemWords(reply.problem as LengthsProblem, currency, reply.minutes), row, problem: reply.problem };
+}
+
+/** Whether the editor marks a row's price, not its length, for a problem the server sent: a price out of range, or one below a shorter length's (3.3.1). */
+export function problemOnPrice(problem: string): boolean {
+  return problem === "price" || problem === "cheaper";
+}
+
+/**
+ * The row (counted from 1, the first other length) of the first other length
+ * shorter than the call's own, from the lengths as the editor sent them, or
+ * null: said as "shorter" before any price comparison it would make fail.
+ */
+export function shorterRow(extra: readonly unknown[], ownMinutes: number): number | null {
+  const at = extra.findIndex((row) => {
+    const minutes = row && typeof row === "object" ? Number((row as Record<string, unknown>).minutes) : NaN;
+    return Number.isFinite(minutes) && minutes < ownMinutes;
+  });
+  return at < 0 ? null : at + 1;
 }
 
 const WHOLE = /^\d{1,4}$/;
@@ -173,6 +224,39 @@ export function bookingLength(setup: Pick<CallSetup, "kind" | "minutes" | "lengt
   // A price changed elsewhere since the lengths were saved: the setup's own length still sells, at the price now; no other does.
   const lengths = setup.lengths?.length && setup.lengths[0].minutes === setup.minutes && setup.lengths[0].cents === priceCents ? setup.lengths : [own];
   return chosenLength(lengths, asked);
+}
+
+/**
+ * The lengths a booking page offers, so it never offers one that cannot be
+ * booked (holdAndCheckout): the call's, while the first is still its own at
+ * the product's price (bookingLength); none from a package, with a deposit or
+ * on a team of any kind, which book the call's own length only.
+ */
+export function offeredLengths(
+  setup: Pick<CallSetup, "kind" | "minutes" | "lengths" | "deposit">,
+  priceCents: number,
+  context: { pkg: boolean; team: boolean },
+): CallLength[] {
+  const lengths = setup.lengths ?? [];
+  if (context.pkg || context.team || setup.deposit) return [];
+  return setup.kind === "weekly" && lengths.length > 1 && lengths[0].minutes === setup.minutes && lengths[0].cents === priceCents ? lengths : [];
+}
+
+/**
+ * The lengths a store's pages say a call has (its card, price, facts, the
+ * assistant's facts, its structured data): the ones its booking page offers
+ * a buyer who is not booking from a package (offeredLengths). A call with
+ * several lengths is never a team event (readCallLengths refuses it, and the
+ * team route must too), so none is said for one that cannot be booked.
+ */
+export function listedLengths(setup: Pick<CallSetup, "kind" | "minutes" | "lengths" | "deposit">, priceCents: number): CallLength[] {
+  return offeredLengths(setup, priceCents, { pkg: false, team: false });
+}
+
+/** The lengths in minutes as the store's language lists them: "30 or 60", "30, 45 or 60". */
+export function lengthList(lengths: readonly CallLength[], locale: string): string {
+  const numbers = new Intl.NumberFormat(locale);
+  return new Intl.ListFormat(locale, { type: "disjunction" }).format(lengths.map((l) => numbers.format(l.minutes)));
 }
 
 /**

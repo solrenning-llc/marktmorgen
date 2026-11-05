@@ -115,3 +115,18 @@ test("the mission page puts both lines in the list their state belongs to", () =
   assert.ok(mission.includes("...(paypal ? [] : [paypalCheckoutLine(false)]),"));
   assert.ok(mission.includes("calendarEventsMissionLine(calendarSync),"));
 });
+
+test("every place that says how old a host's calendar may be says the server's figure", async () => {
+  const { STALE_SECONDS, SYNC_SECONDS } = await import("@/lib/host-calendar");
+  const { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } = await import("@/lib/team-scheduling-rules");
+  assert.equal(HOST_STALE_MINUTES * 60, STALE_SECONDS);
+  assert.equal(HOST_SYNC_MINUTES * 60, SYNC_SECONDS);
+  // The studio's editor, the host's calendar card, the help and the feature page read the figure, never type it.
+  for (const file of ["components/team-event-editor.tsx", "components/host-calendar.tsx", "lib/help-content.ts", "lib/feature-pages.ts"]) {
+    const source = readFileSync(file, "utf8");
+    assert.doesNotMatch(source, /last read more than \d+ minutes ago|more than \d+ minutes old|at most every \d+ minutes while someone is looking at a booking page/, file);
+  }
+  assert.match(readFileSync("components/team-event-editor.tsx", "utf8"), /last read more than \$\{HOST_STALE_MINUTES\} minutes ago/);
+  assert.match(readFileSync("components/host-calendar.tsx", "utf8"), /more than \$\{HOST_STALE_MINUTES\} minutes old/);
+  assert.ok(PAGES.includes(`last read more than ${HOST_STALE_MINUTES} minutes ago`));
+});

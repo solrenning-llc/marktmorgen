@@ -104,6 +104,12 @@ export type Course = {
    */
   certificateMonths?: number;
   /**
+   * Whether each lesson video shows the signed-in student's email and the
+   * day they joined over it (602 [WP1], lib/video-stamp.ts). Off until the
+   * creator switches it on; left out of courses saved before it existed.
+   */
+  stampVideo?: boolean;
+  /**
    * The day the course begins, in seconds, or null for a course with no
    * fixed start. This is the one thing that decides whether a course is a
    * cohort or not, and it changes nothing else about it.
@@ -197,7 +203,7 @@ export function parseCourse(raw: unknown): Course | null {
     const startsAt =
       typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
     const months = readCertificateMonths(value.certificateMonths);
-    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt };
+    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}) };
   } catch {
     return null;
   }

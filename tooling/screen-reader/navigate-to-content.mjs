@@ -17,13 +17,21 @@ export async function navigateToContent(reader,page,kind,foreground){
    catch(error){console.error("AX2_NVDA_NATIVE_FOREGROUND_UNKNOWN:"+JSON.stringify({stage,error:String(error)}));}
   }
   let switches=0;
-  async function confirmForeground(stage,canSwitch=true){
-   let changed=false;
+  async function confirmForeground(stage,canSwitch=true,activatePage=false){
+   let changed=false,activated=false;
    for(;;){
     await reader.perform(NVDAKeyCodeCommands.reportTitle);
     const windowTitle=(await reader.lastSpokenPhrase()).replace(/\s+/g," ").trim().toLowerCase();
     console.log("AX2_NVDA_WINDOW_FOCUS:"+JSON.stringify({attempt:switches,stage,pageTitle,windowTitle}));
     if(windowTitle.startsWith(pageTitle))return changed;
+    if(activatePage&&!activated){
+     // The exact native title check observed that another application owns the
+     // foreground. Reactivate the already selected page, then prove its title;
+     // Playwright focus alone never counts as evidence.
+     activated=true;changed=true;
+     await page.bringToFront();
+     continue;
+    }
     if(!canSwitch||switches===10)throw Error("NVDA foreground window did not match the synthetic page title ("+stage+")");
     switches++;
     await reader.perform({keyCode:[WindowsKeyCodes.Escape],modifiers:[WindowsModifiers.Alt]},{capture:false});
@@ -52,7 +60,7 @@ export async function navigateToContent(reader,page,kind,foreground){
   await observeNativeForeground("after document reset");
   // Preparation can lose native focus after the initial title was proved.
   // Reacquire it within the same ten-switch budget, never retry a heading assertion.
-  if(await confirmForeground("after preparation")){
+  if(await confirmForeground("after preparation",true,true)){
    await reader.perform({keyCode:[WindowsKeyCodes.Home],modifiers:[WindowsModifiers.Control]});
    await observeNativeForeground("after final document reset");
    await confirmForeground("after final document reset",false);

@@ -34,7 +34,7 @@ export type DraftedStep = { delayHours: number; subject: string; body: string };
 
 // Mail clients also link www names and bare domains followed by a path.
 // A word/email boundary avoids interpreting an address inside somebody's email.
-const ADDRESS = /https?:\/\/[^\s<>()"']+|(?<![\w@.-])(?:www\.[^\s<>()"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?\/[^\s<>()"']*)/gi;
+const ADDRESS = /https?:\/\/[^\s<>()"']+|(?<![\w@.-])(?:\/\/(?:[^\s<>()"'\/]*@)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?\/[^\s<>()"']*|www\.[^\s<>()"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?\/[^\s<>()"']*)/gi;
 
 /**
  * The body without any line that holds a web address other than `allowed`:
@@ -47,7 +47,7 @@ export function keepOwnLinks(body: string, allowed: readonly string[]): string {
   const bare = new Set([...own].map(link => link.replace(/^https?:\/\//i, "")));
   const ours = (found: string) => {
     const key = protocolKey(found).replace(/[.,;:!?]+$/, "").replace(/\/+$/, "");
-    return /^https?:\/\//i.test(key) ? own.has(key) : bare.has(key);
+    return /^https?:\/\//i.test(key) ? own.has(key) : bare.has(key.replace(/^\/\//, ""));
   };
   return body
     .split("\n")

@@ -6,7 +6,7 @@ import {COMMISSION_LIVE} from '@/lib/plan';
 import {SHARING_INDEX} from '@/lib/platform-share';
 import {claimHandle,setStripeAccount,storeForEmail,storeRef} from '@/lib/store';
 import {store as redis} from './redis-stub';
-const fee={id:'fee_UnknownState0001',account:'acct_UnknownState0001',charge:'ch_UnknownState0001',amount:625,amount_refunded:0,currency:'usd'};
+const fee={id:'fee_UnknownState0001',account:'acct_Receipt0001',charge:'ch_UnknownState0001',amount:625,amount_refunded:0,currency:'usd'};
 const row={id:'du_UnknownState0001',object:'dispute',charge:fee.charge,currency:'usd',status:'future_status'};
 const now=1800000000;
 type Diagnostic={unknownDisputes:number;unknownDisputeFees:string[]};

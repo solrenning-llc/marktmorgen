@@ -1,0 +1,344 @@
+=== /tmp/g2681-payout-proof.log ===
+=== g-2681-payout-promotion.proof.ts ===
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  ok    both still waiting, no read of a batch id PayPal never gave
+  ok    and still on their way
+
+What the creator is told never says nothing was sent
+  ok    the payday email says it is not known, and to look at PayPal
+  ok    the studio's words for it
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  ok    the next press pays both, once
+  ok    both on their way under the real batch
+
+G: promotion failure never loses the last durable evidence after PayPal accepted
+  ok    missing-ack: failure was injected
+  ok    missing-ack: PayPal accepted one batch
+  FAIL  missing-ack: both affiliates remain excluded
+        expected 2
+        got      0
+  FAIL  missing-ack: no second payment after promotion failure
+        expected 1
+        got      2
+G promotion outcome missing-ack { ok: true, batch: 'BATCH1ABC', people: 2, cents: 4500 } { made: 2 }
+  ok    command-error: failure was injected
+  ok    command-error: PayPal accepted one batch
+  FAIL  command-error: both affiliates remain excluded
+        expected 2
+        got      0
+  FAIL  command-error: no second payment after promotion failure
+        expected 1
+        got      2
+G promotion outcome command-error { ok: false, reason: 'error' } { made: 2 }
+
+G: an unnamed HTTP 4xx is not PayPal's named refusal evidence
+  FAIL  unnamed4xx: unknown instead of nothing sent
+        expected "unknown"
+        got      "error"
+  FAIL  unnamed4xx: still on their way
+        expected 2
+        got      0
+
+43 checks, 6 failing.
+
+
+=== /tmp/g2681-sales-meta-proof.log ===
+=== g-2681-sales-recovery.proof.ts ===
+
+Captured, the answer unreadable: kept for the sweep, handed over once PayPal is read
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+Captured, the answer without the buyer's address: kept for the sweep
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+A pending order read back garbled stays watched
+  ok    pending
+  ok    still watched after a garbled read
+  ok    handed over once PayPal completes it
+
+A capture read back garbled at the end of its refund window is not taken for 'not refunded'
+  ok    still watched, to be asked again
+
+G: completed order missing its captures remains recoverable
+  ok    unknown capture queued
+  FAIL  partial COMPLETED object stays queued
+        expected true
+        got      false
+  FAIL  recovered complete order handed over once
+        expected 1
+        got      0
+
+13 checks, 2 failing.
+
+=== g-2681-meta-cost.proof.ts ===
+
+A real read first
+  ok    read
+  ok    today's spend is $30.00
+
+Insights answered garbled: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered no-data: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered rows-not-list: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered page2-garbled: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+  ok    overflow: positive baseline read
+  ok    overflow: positive baseline cost
+  FAIL  overflow: unknown or incomplete is not complete read
+        expected false
+        got      true
+  FAIL  overflow: prior cost retained
+        expected 3000
+        got      0
+G actual cost overflow 0
+  ok    invalid-date: positive baseline read
+  ok    invalid-date: positive baseline cost
+  FAIL  invalid-date: unknown or incomplete is not complete read
+        expected false
+        got      true
+  FAIL  invalid-date: prior cost retained
+        expected 3000
+        got      0
+G actual cost invalid-date 0
+  ok    invalid-paging: positive baseline read
+  ok    invalid-paging: positive baseline cost
+  FAIL  invalid-paging: unknown or incomplete is not complete read
+        expected false
+        got      true
+  FAIL  invalid-paging: prior cost retained
+        expected 3000
+        got      100
+G actual cost invalid-paging 100
+  ok    cap20: positive baseline read
+  ok    cap20: positive baseline cost
+  FAIL  cap20: unknown or incomplete is not complete read
+        expected false
+        got      true
+  FAIL  cap20: prior cost retained
+        expected 3000
+        got      2000
+G actual cost cap20 2000
+
+26 checks, 8 failing.
+
+
+=== /tmp/g2681-red-final-files.log ===
+=== paypal-payouts-unknown.test.ts ===
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  FAIL  both affiliates stay on their way
+        expected ["aaaaaaaaaaaa","bbbbbbbbbbbb"]
+        got      []
+  FAIL  a second press sends no new batch
+        expected 1
+        got      2
+  FAIL  and says there is nothing to pay now
+        expected "nothing"
+        got      "paid"
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  FAIL  both affiliates stay on their way
+        expected ["aaaaaaaaaaaa","bbbbbbbbbbbb"]
+        got      []
+  FAIL  a second press sends no new batch
+        expected 1
+        got      2
+  FAIL  and says there is nothing to pay now
+        expected "nothing"
+        got      "paid"
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  FAIL  both affiliates stay on their way
+        expected ["aaaaaaaaaaaa","bbbbbbbbbbbb"]
+        got      []
+  FAIL  a second press sends no new batch
+        expected 1
+        got      2
+  FAIL  and says there is nothing to pay now
+        expected "nothing"
+        got      "paid"
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  FAIL  both affiliates stay on their way
+        expected ["aaaaaaaaaaaa","bbbbbbbbbbbb"]
+        got      []
+  FAIL  a second press sends no new batch
+        expected 1
+        got      2
+  FAIL  and says there is nothing to pay now
+        expected "nothing"
+        got      "paid"
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  FAIL  both affiliates stay on their way
+        expected ["aaaaaaaaaaaa","bbbbbbbbbbbb"]
+        got      []
+  FAIL  a second press sends no new batch
+        expected 1
+        got      2
+  FAIL  and says there is nothing to pay now
+        expected "nothing"
+        got      "paid"
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  FAIL  both still waiting, no read of a batch id PayPal never gave
+        expected [2,0,0,0]
+        got      [0,0,0,0]
+  FAIL  and still on their way
+        expected 2
+        got      0
+
+What the creator is told never says nothing was sent
+  FAIL  the payday email says it is not known, and to look at PayPal
+        expected [false,true,true]
+        got      [true,false,false]
+  FAIL  the studio's words for it
+        expected [false,true,true]
+        got      [false,false,false]
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  ok    the next press pays both, once
+  ok    both on their way under the real batch
+
+33 checks, 19 failing.
+
+=== paypal-sales-shape.test.ts ===
+
+Captured, the answer unreadable: kept for the sweep, handed over once PayPal is read
+  ok    not reported as paid yet
+  FAIL  the order is kept for the sweep
+        expected true
+        got      false
+  FAIL  the sweep hands it over, once
+        expected [1,true]
+        got      [0,false]
+
+Captured, the answer without the buyer's address: kept for the sweep
+  ok    not reported as paid yet
+  FAIL  the order is kept for the sweep
+        expected true
+        got      false
+  FAIL  the sweep hands it over, once
+        expected 1
+        got      0
+
+A pending order read back garbled stays watched
+  ok    pending
+  FAIL  still watched after a garbled read
+        expected true
+        got      false
+  FAIL  handed over once PayPal completes it
+        expected 1
+        got      0
+
+A capture read back garbled at the end of its refund window is not taken for 'not refunded'
+  FAIL  still watched, to be asked again
+        expected true
+        got      false
+
+10 checks, 7 failing.
+
+=== meta-ads-shape.test.ts ===
+
+A real read first
+  ok    read
+  ok    today's spend is $30.00
+
+Insights answered garbled: not a read, nothing erased
+  FAIL  not counted as read
+        expected false
+        got      true
+  FAIL  the spend already read is kept
+        expected 3000
+        got      0
+
+Insights answered no-data: not a read, nothing erased
+  FAIL  not counted as read
+        expected false
+        got      true
+  FAIL  the spend already read is kept
+        expected 3000
+        got      0
+
+Insights answered rows-not-list: not a read, nothing erased
+  FAIL  not counted as read
+        expected false
+        got      true
+  FAIL  the spend already read is kept
+        expected 3000
+        got      0
+
+Insights answered page2-garbled: not a read, nothing erased
+  FAIL  not counted as read
+        expected false
+        got      true
+  FAIL  the spend already read is kept
+        expected 3000
+        got      100
+
+10 checks, 8 failing.
+

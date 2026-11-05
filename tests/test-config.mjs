@@ -52,7 +52,7 @@ export function testAliases(file,root,here){
  }
  if(file==='path-growth-facts.test.ts')for(const name of ['redis','catalog','broadcasts','reviews'])aliases['@/lib/'+name]=join(here,'path-growth-world.ts');
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
- if(file==='digital-consent.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-physical.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-open.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
@@ -138,20 +138,3 @@ export function testAliases(file,root,here){
  if(file==='closing-plan-routes.test.ts'){
   aliases['@/lib/studio-route']=join(here,'closing-route-studio.ts');
   aliases['@/lib/opening']=join(here,'closing-route-opening.ts');
-  aliases['@/lib/contract-funding']=join(here,'closing-route-funding.ts');
- }
- if(file==='email-disconnect-idempotent.test.ts'){
-  aliases['next/server']=join(here,'next-server-after-world.ts');
-  aliases['@/lib/account-notice']=join(here,'email-disconnect-world.ts');
- }
- if(['commercial-review-input.test.ts','commercial-terms-snapshot.test.ts','net-margin.test.ts','customer-base.test.ts','plan-revenue-ceilings.test.ts','commercial-ai-coverage.test.ts','exposure-release.test.ts'].includes(file))aliases['@/lib/llc-fixed-costs']=join(here,'llc-fixed-approved-policy.ts');
- if(file==='commercial-llc-costs.test.ts'){
-  aliases['@/lib/llc-fixed-costs']=join(here,'llc-retention-approved-policy.ts');
-  aliases['@/lib/upload-budget-policy']=join(here,'upload-budget-approved-policy.ts');
-  aliases['@/lib/ai-spend-policy']=join(here,'commercial-ai-approved-policy.ts');
- }
- if(["contract-admission-ack.test.ts","contract-funding.test.ts","contract-resource-window.test.ts","contract-routes.test.ts","restart-activation-ack.test.ts","restart-recovery-ack.test.ts","restart-result-ack.test.ts","restart-submission-ack.test.ts"].includes(file))aliases['@/lib/llc-fixed-costs']=join(here,'llc-fixed-approved-policy.ts');
- if(file==='file-download-refusals.test.ts')aliases['@/lib/studio-route']=join(here,'file-download-refusals-world.ts');
- return aliases;
-}
-export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

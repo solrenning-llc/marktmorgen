@@ -65,6 +65,25 @@ function oneReply(reply: unknown): unknown {
   return dataSlot(reply, 0);
 }
 
+function confirmedCommentWrite(reply: unknown, hasParent: boolean): boolean {
+  const expected = hasParent ? 5 : 4;
+  if (!Array.isArray(reply) || reply.length !== expected) return false;
+  const values: number[] = [];
+  try {
+    for (let index = 0; index < expected; index += 1) {
+      const value = dataSlot(reply, index);
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return false;
+      values.push(value);
+    }
+  } catch {
+    return false;
+  }
+  return values[0] === 1
+    && values[1] === 1
+    && values[2] === 1
+    && (!hasParent || values[4] >= 1);
+}
+
 export async function commentsOn(courseId: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const [off] = await redisPipeline([["GET", offKey(courseId)]]);
@@ -120,7 +139,7 @@ export async function readComment(courseId: string, id: string): Promise<LessonC
 
 export type AddResult =
   | { ok: true; comment: LessonComment; parent: LessonComment | null }
-  | { ok: false; reason: "empty" | "name" | "parent" | "replies" | "full" };
+  | { ok: false; reason: "empty" | "name" | "parent" | "replies" | "full" | "unknown" };
 
 /**
  * Writes a comment. A student's name is the one they give now, or the one
@@ -175,13 +194,14 @@ export async function addComment(input: {
     hidden: false,
   };
   await needData(input.room, [{ slot: COMMENTS_SLOT(input.courseId), bytes: commentBytes(comment) }]);
-  await redisPipeline([
+  const written = await redisPipeline([
     ["HSET", commentsKey(input.courseId), comment.id, serializeComment(comment)],
     ["ZADD", lessonKey(input.courseId, input.lessonId), now, comment.id],
     ["ZADD", allKey(input.courseId), now, comment.id],
     ["ZREMRANGEBYRANK", allKey(input.courseId), 0, -RECENT_KEPT - 1],
     ...(parent ? [["HINCRBY", repliesKey(input.courseId), parent.id, 1] as (string | number)[]] : []),
   ]);
+  if (!confirmedCommentWrite(written, parent !== null)) return { ok: false, reason: "unknown" };
   return { ok: true, comment, parent };
 }
 

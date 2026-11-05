@@ -48,6 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1398,12 +1399,18 @@ async function freshStore(fields: {
  */
 export async function storesAfter(cursor: string): Promise<{ stores: Store[]; next: string }> {
   if (!isRedisConfigured()) return { stores: [], next: "0" };
-  const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", "nl:store:owner:*", "COUNT", 200]]);
-  if (!Array.isArray(reply) || reply.length < 2) return { stores: [], next: "0" };
-  const next = String(reply[0]);
-  const keys = Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
+  // Read exactly (CX-123 rule 24, C4-20261105-2100-C2-5): a SCAN reply out of shape is unknown, never the end of
+  // the list, so a job is said as failed and its saved cursor stays where it was instead of finishing the pass.
+  const scanned = repliesFor(await redisPipeline([["SCAN", cursor, "MATCH", "nl:store:owner:*", "COUNT", 200]]), 1);
+  const reply = scanned ? scanned[0] : null;
+  if (!Array.isArray(reply) || reply.length !== 2 || typeof reply[0] !== "string" || !/^\d+$/.test(reply[0])) throw new UnknownReplyError("a scan of stores");
+  const next = reply[0];
+  const keys = stringList(reply[1]);
+  if (!keys) throw new UnknownReplyError("a scan of stores");
   if (keys.length === 0) return { stores: [], next };
-  const values = await redisPipeline(keys.map((key) => ["GET", key]));
+  // One reply a store, each its record or nil (deleted since the SCAN, skipped); anything else is unknown.
+  const values = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  if (!values || values.some((value) => value !== null && typeof value !== "string")) throw new UnknownReplyError("a page of stores");
   const stores = values.map(parseStore).filter((store): store is Store => store !== null);
   return { stores, next };
 }

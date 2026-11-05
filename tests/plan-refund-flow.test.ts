@@ -57,6 +57,20 @@ async function main() {
     is("bounded reads without any provider write",[reads,writes],[31,0]);
   }finally{globalThis.fetch=fetchBefore;}
 
+  part("An unreadable earlier refund cannot end the real flow");
+  const unreadable = await paidShop({at:NOW-40*DAY,stopSet:true});
+  const unreadableStore = await unreadable.store();
+  globalThis.fetch=(async (input,init)=>{
+    const url=String(input instanceof Request?input.url:input);
+    if((init?.method??"GET")==="GET"&&url.includes("/v1/refunds?"))return new Response(JSON.stringify({data:[{...valid,amount:null,metadata:{plan_refund:unreadableStore.sid}}],has_more:false}),{status:200,headers:{"content-type":"application/json"}});
+    return fetchBefore(input,init);
+  }) as typeof fetch;
+  try{
+    const outcome=await refundAndEndPlan(unreadableStore,NOW);
+    is("no confirmed refund or ending from an unreadable amount",[outcome.ok,unreadable.sub().status,unreadable.sub().cancel_at_period_end,unreadable.refunds().length], [false,"active",true,0]);
+    is("undecidable note retained for a later read",typeof await unreadable.note(),"string");
+  }finally{globalThis.fetch=fetchBefore;await redisPipeline([["HDEL",ENDING_KEY,unreadableStore.sid]]);}
+
   part("Refunded and ended, in the safe order");
   const a = await paidShop();
   world.calls = [];

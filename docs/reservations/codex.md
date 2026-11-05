@@ -9,7 +9,6 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |
 | Codex F | 309 [EM1], CX-85: campaign prototype regression; lib/mail-revenue.ts shared with #2192 by explicit inbox exception | codex/f-mail-revenue-proto | `tests/mail-revenue-proto.test.ts` | 04/11/2026 |
 
-| Codex principal | CX-56(3): prove lost-dispute application fee reversal using pinned dispute list | codex/share-lost-dispute-proof | `lib/share-settle.ts`, `tests/share-lost-dispute.test.ts`, `tests/platform-share.test.ts`, `docs/share-lost-dispute-proof.md` | 04/11/2026 |
 | Codex F | 309 [EM1], CX-89: erasure delivery fixture waits for the observed completion; production erasure untouched | codex/f-erasure-delivery-wait | `tests/erasure-request-full.test.ts` | 04/11/2026 |
 
 | Codex C | 465 [MR2]: complete protocol infrastructure profiles | codex/c-mr2-protocol-evidence | `lib/spend-cost-table.ts`, `tests/protocol-infrastructure-cost.test.ts`, `tests/contract-protocol-cost.test.ts`, `lib/contract-protocol-cost.ts` | 04/11/2026 |

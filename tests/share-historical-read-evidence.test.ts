@@ -55,7 +55,7 @@ test('confirmed empty history is a complete zero and may advance the cursor',asy
 for(const[label,events]of [
  ['missing envelope',{}],['null data',{object:'list',data:null,has_more:false}],['missing more',{object:'list',data:[]}],['text more',{object:'list',data:[],has_more:'false'}],['more without cursor',page([],true)],['malformed row',page([{}])],['missing event id',page([{data:event.data}])],['missing fee and charge',page([{id:event.id,data:{object:{}}}])],['malformed row after a refundable fee',page([event,{}])],['duplicate event id',page([event,event])],
 ]as const)test('unconfirmed historical event page: '+label,async()=>unconfirmed(await world({events})));
-for(const indexes of [[],[undefined],[[],undefined],[null,[]],[[],[],[]],[[123],[]]])test('unconfirmed historical store index '+JSON.stringify(indexes),async()=>{
+for(const indexes of [[],[undefined],[[],undefined],[null,[]],[[],[],[]],[[123],[]],Array(2)])test('unconfirmed historical store index '+JSON.stringify(indexes),async()=>{
  const r=await world({indexes});unconfirmed(r);assert.equal(r.eventPages,0,'do not read stores from an unconfirmed index');
 });
 for(const cursor of [[],[undefined],[''],['-1'],['1.5'],[0]])test('unconfirmed saved history cursor '+JSON.stringify(cursor),async()=>{

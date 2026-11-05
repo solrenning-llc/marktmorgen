@@ -527,6 +527,25 @@ test("an API reading that reads more than a page takes further requests that cov
   }
   const mcp = read("app/api/mcp/route.ts");
   for (const call of ["membershipsTool(store, charge)", "emailsTool(store, charge)", "affiliatesTool(store, charge)", "products(store, cursor, charge)", "productsTool(store, data, days, { hold, charge })", "apiNumbers(store, "]) assert.ok(mcp.includes(call), call);
+  // And every tool the server lists, not only those named above (Codex G2 on #1933): its handler pays before it reads.
+  const listed = [...read("lib/mcp-catalog.ts").matchAll(/\bname: "([a-z_]+)"/g)].map((m) => m[1]).filter((name) => name !== "marktmorgen");
+  const windowed = mcp.slice(mcp.indexOf("const windowed"), mcp.indexOf("const tool = typeof params.name"));
+  const paying = ["paid(", "charge", "hold(", "apiNumbers(", "answer(await"];
+  for (const name of listed) {
+    if (name === "get_store") continue;
+    if (windowed.includes(`${name}: (data)`)) continue;
+    // A proposal (propose_*) is prepared through the map of prepares, paid for by payFor before it reads.
+    if (name.startsWith("propose_")) {
+      assert.ok(mcp.slice(mcp.indexOf("const prepares"), mcp.indexOf("const prepares") + 400).includes(`${name}:`), `${name} is prepared by the route`);
+      assert.ok(mcp.includes("await payFor(agent.store, PROPOSE_MOST,"), `${name} pays for what it reads before it reads`);
+      continue;
+    }
+    const at = mcp.indexOf(`"${name}"`);
+    assert.ok(at > 0, `${name} is handled by the route`);
+    const next = mcp.indexOf("\n    if (params.name ===", at + name.length + 2);
+    const handler = mcp.slice(at, next > 0 ? next : undefined);
+    assert.ok(paying.some((token) => handler.includes(token)), `${name} pays for what it reads before it reads`);
+  }
   const page = apiReadUnits(studentsPageWork(200, 0));
   console.log(`API readings: a page of 200 students takes ${page} more, the bookings ${apiReadUnits(bookingsWork(true))} more, an empty program ${apiReadUnits(bookWork({ kept: true, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 0 }, BOOK_STRIPE_PAGES))} more`);
 });

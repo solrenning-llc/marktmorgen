@@ -20,6 +20,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { admitRead, admitting } from "@/lib/read-meter";
 import { type DataStore, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import {
@@ -107,6 +108,12 @@ export async function changeBook<T>(store: DataStore & { statsId: string }, chan
   const [held] = await redisPipeline([["SET", lockKey(statsId), owner, "NX", "EX", LOCK_SECONDS]]);
   if (held === null) throw new BookBusy();
   try {
+    // Read by an agent (the MCP propose tools), the book is measured under its lock, where it cannot grow, and its
+    // read admitted before it is made (lib/read-meter.ts; Codex G2 on #1933); refused, nothing of it is read.
+    if (admitting()) {
+      const [size] = await redisPipeline([["STRLEN", bookKey(statsId)]]);
+      if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || !(await admitRead(size))) throw new BookReadRefused();
+    }
     const book = await readBook(statsId, now);
     const { book: next, result } = await change(book);
     if (next) {
@@ -119,6 +126,14 @@ export async function changeBook<T>(store: DataStore & { statsId: string }, chan
     // Only our own hold is let go: one that ran out and was taken by another change is left to it.
     const [mine] = await redisPipeline([["GET", lockKey(statsId)]]);
     if (mine === owner) await redisPipeline([["DEL", lockKey(statsId)]]);
+  }
+}
+
+/** The proposals book could not be read: its read was not admitted (an agent's requests did not cover it) or not measured. */
+export class BookReadRefused extends Error {
+  constructor() {
+    super("the proposals book's read was not admitted");
+    this.name = "BookReadRefused";
   }
 }
 

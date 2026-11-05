@@ -1,9 +1,11 @@
-import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import { type Settle, apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import type { Store } from "@/lib/store";
 import { proposeDescription, proposeSummary, proposeTitle } from "@/lib/agent-propose";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
-import { BUNDLE_CHOICES_MOST, COURSE_OUTLINE_MOST, RANGE_PRODUCTS_NAMED, SALES_PAGES, liveMost, rangeMost, IMPORTS_MOST, LESSON_MOST, SAVED_BLOCKS_MOST, PAGE_READING_MOST, PAGE_TEST_MOST, PAGE_VERSIONS_MOST, PRODUCT_TEXT_MOST, SALES_PAGE_MOST, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
-import { metered } from "@/lib/read-meter";
+import { PROPOSE_MOST, measuredReadWork, BUNDLE_CHOICES_MOST, COURSE_OUTLINE_MOST, RANGE_PRODUCTS_NAMED, SALES_PAGES, liveMost, rangeMost, IMPORTS_MOST, LESSON_MOST, SAVED_BLOCKS_MOST, PAGE_READING_MOST, PAGE_TEST_MOST, PAGE_VERSIONS_MOST, PRODUCT_TEXT_MOST, SALES_PAGE_MOST, type ReadWork, apiReadUnits, settledUnits } from "@/lib/api-read-rules";
+import { type ReadMeter, metered, withAdmission } from "@/lib/read-meter";
+import { BookReadRefused } from "@/lib/agent-book";
 import { CourseTooLarge, READ_COURSE_WITHIN_CALLS } from "@/lib/course";
 import { apiNumbers } from "@/lib/api-numbers";
 import { summaryOf } from "@/lib/stats-report";
@@ -71,6 +73,52 @@ export async function GET() {
 /** The most one JSON-RPC message may weigh: far past any call a tool takes. */
 const MAX_RPC_BYTES = 16_000;
 
+/**
+ * A read paid for before it is made (Codex G2 on #1933): set aside at `most`; inside, a measured read (the proposals
+ * book) is admitted at what it weighs before it is read (lib/read-meter.ts, withAdmission); every database call is
+ * counted (metered), and the whole is settled at what was read and sent, before anything is sent, across what was set
+ * aside. A refusal is the one that refused, with nothing more read.
+ */
+async function payFor<T>(store: Store, most: ReadWork, read: () => Promise<T>): Promise<{ refusal: Response } | { value: T; meter: ReadMeter; settle: (work: Partial<ReadWork>) => Promise<Response | null> }> {
+  const first = apiReadUnits(most);
+  const opened = await holdMoreApi(store, first);
+  if (opened instanceof Response) return { refusal: opened };
+  const holds: { settle: Settle; units: number }[] = [{ settle: opened, units: first }];
+  let refusal: Response | null = null;
+  const admit = async (bytes: number) => {
+    const units = apiReadUnits(measuredReadWork(bytes));
+    const more = await holdMoreApi(store, units);
+    if (more instanceof Response) {
+      refusal = more;
+      return false;
+    }
+    holds.push({ settle: more, units });
+    return true;
+  };
+  const held = () => holds.reduce((n, h) => n + h.units, 0);
+  // What is due is settled across what was set aside, in order; the last takes or gives back the rest.
+  const settleAll = async (due: number) => {
+    let left = due;
+    for (const [i, h] of holds.entries()) {
+      const part = i === holds.length - 1 ? left : Math.min(left, h.units);
+      left -= part;
+      const refused = await h.settle(part);
+      if (refused) return refused;
+    }
+    return null;
+  };
+  let value: T;
+  let meter: ReadMeter;
+  try {
+    ({ value, meter } = await metered(() => withAdmission(admit, read)));
+  } catch (error) {
+    if (!(error instanceof BookReadRefused) || !refusal) throw error;
+    // Not admitted: what was read before is settled, and the refusal said.
+    return { refusal };
+  }
+  return { value, meter, settle: (work) => settleAll(settledUnits(work, held())) };
+}
+
 export async function POST(request: Request) {
   let message: Rpc;
   try {
@@ -104,7 +152,16 @@ export async function POST(request: Request) {
       const refusal = (await agent.json().catch(() => null)) as { message?: unknown } | null;
       return failure(id, -32001, typeof refusal?.message === "string" ? refusal.message : "This key cannot prepare changes for you to confirm.");
     }
-    return result(id, await prepares[asked.name as keyof typeof prepares](agent.store, agent.keyId, asked.arguments ?? {}));
+    // Paid for before it reads, as every tool past the door: the listing and description, the book once measured.
+    const run = await payFor(agent.store, PROPOSE_MOST, () => prepares[asked.name as keyof typeof prepares](agent.store, agent.keyId, asked.arguments ?? {}));
+    const refusedWords = async (refusal: Response) => {
+      const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be done just now. Try again in a moment.");
+    };
+    if ("refusal" in run) return refusedWords(run.refusal);
+    const sent = Buffer.byteLength(JSON.stringify(run.value));
+    const refused = await run.settle({ commands: run.meter.commands, bytes: run.meter.bytes, sent, roundTrips: run.meter.trips });
+    return refused ? refusedWords(refused) : result(id, run.value);
   }
 
   const store = await apiStore(request);
@@ -134,16 +191,15 @@ export async function POST(request: Request) {
     // A tool of the creator's own records (631 [AA1]): set aside at its most before it reads anything, metered as it
     // reads, and settled at what it read and sends before it is sent (Codex G2 on #1933). Not read, nothing is shown.
     const paid = async (most: ReadWork, read: () => Promise<unknown>, unavailable: string | (() => string), scriptCalls = 0, stripePages = 0) => {
-      const held = apiReadUnits(most);
-      const settle = await hold(held);
-      if (settle instanceof Response) return refusedWith(settle);
       // Every database call the tool makes is counted (lib/read-meter.ts): commands, trips and the bytes answered.
-      const { value, meter } = await metered(read);
+      const run = await payFor(store, most, read);
+      if ("refusal" in run) return refusedWith(run.refusal);
+      const { value, meter } = run;
       const out = value === null || value === undefined ? said({ error: typeof unavailable === "function" ? unavailable() : unavailable }, true) : said(value);
       // A script's own calls are billed one by one beside it: counted for each script the tool ran.
       // Stripe's pages are not counted by the meter: the tool's most of them is settled (more, never less, than read).
       const work = { stripePages, commands: meter.commands + (meter.commands > 0 ? scriptCalls : 0), bytes: meter.bytes, sent: Buffer.byteLength(out.content[0].text), roundTrips: meter.trips };
-      const refused = await settle(settledUnits(work, held));
+      const refused = await run.settle(work);
       return refused ? refusedWith(refused) : result(id, out);
     };
     const days = windowOf(params.arguments?.days);

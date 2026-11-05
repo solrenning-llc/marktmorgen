@@ -521,3 +521,11 @@ export function rangeMost(span: number, beforeKept: boolean, sales: boolean, str
     roundTrips: 1 + (sales ? 2 : 0) + 1,
   };
 }
+/**
+ * A proposal by an agent (the MCP propose tools, lib/agent-propose.ts) at its most, before the proposals book: up to
+ * three reads of the product's listing and its long description, the book's lock taken, the book measured under it,
+ * written and the lock let go. The book's own read is admitted once measured, at what it weighs (lib/agent-book.ts).
+ */
+export const PROPOSE_MOST: ReadWork = { commands: 10, bytes: 3 * LISTING_BYTES + ABOUT_READ_BYTES, sent: 2_048, stripePages: 0, roundTrips: 9 };
+/** What reading a measured record of `bytes` adds, escaped once more as it is answered. */
+export const measuredReadWork = (bytes: number): ReadWork => ({ commands: 1, bytes: 2 * bytes, sent: 0, stripePages: 0, roundTrips: 1 });

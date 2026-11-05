@@ -8,7 +8,7 @@ import type { Store } from "@/lib/store";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
 import { MAX_ABOUT_LENGTH, cleanAbout } from "@/lib/product-about";
 import { DataRoomError } from "@/lib/store-data";
-import { BookBusy, addProposal } from "@/lib/agent-book";
+import { BookBusy, BookReadRefused, addProposal } from "@/lib/agent-book";
 import { type AgentKind, PRODUCT_DESCRIPTION, PRODUCT_SUMMARY, PRODUCT_TITLE } from "@/lib/agent-kinds";
 
 type Answer = { content: { type: "text"; text: string }[]; isError: boolean };
@@ -38,6 +38,8 @@ async function keep(store: Store, keyId: string, kind: AgentKind, product: strin
   } catch (error) {
     if (error instanceof DataRoomError) return answer({ error: "The store has no room for this proposal right now." }, true);
     if (error instanceof BookBusy) return answer({ error: "Another change is being made to the proposals right now. Try again in a moment." }, true);
+    // Not admitted: the route says why (the store's API requests), with nothing of the book read.
+    if (error instanceof BookReadRefused) throw error;
     console.error(`proposing a ${what} failed`, error);
     return answer({ error: "The proposal could not be kept just now. Try again in a moment." }, true);
   }

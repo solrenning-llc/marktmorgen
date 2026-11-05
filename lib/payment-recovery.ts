@@ -42,6 +42,7 @@
  * anybody's Stripe dashboard for it to work.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { formatMoney } from "@/lib/money";
@@ -69,6 +70,8 @@ const CARD_LOOKUPS = 20;
 const SENT_SECONDS = 90 * 86_400;
 /** At most this many failed renewals written about per store per run. */
 const PER_STORE = 100;
+/** Pages of past-due memberships read in one run, PER_STORE each. */
+const FAILED_PAGES = 5;
 
 const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -193,8 +196,19 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
   const query = new URLSearchParams({ status: "past_due", limit: String(PER_STORE) });
   query.append("expand[]", "data.latest_invoice");
   query.append("expand[]", "data.customer");
-  const listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown };
-  const subs = (Array.isArray(listed.data) ? listed.data : []) as Sub[];
+  // Every past-due membership, page after page while there is time (CX-123 rule 24, L6): a page that is not a list
+  // stops this store's run, said as failed, never read as "nobody is behind".
+  const subs: Sub[] = [];
+  let after = "";
+  for (let page = 0; page < FAILED_PAGES && Date.now() < deadline; page += 1) {
+    if (after) query.set("starting_after", after);
+    const listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown; has_more?: unknown };
+    if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of past-due memberships");
+    subs.push(...(listed.data as Sub[]));
+    const last = (listed.data as Sub[]).at(-1)?.id;
+    if (listed.has_more === false || typeof last !== "string" || !SUB_PATTERN.test(last)) break;
+    after = last;
+  }
   const mine = subs.filter((s) => handles.has(s.metadata?.store ?? ""));
   if (!mine.length) return 0;
 
@@ -218,23 +232,31 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
     // Which email is due: the first, or a later one the creator chose, on
     // its day. A first email from before reminders existed holds "1", not a
     // time, and is left as the only one.
-    const [first, second, third] = await redisPipeline([
+    // Read exactly (CX-123 rule 24, L6): three answers, the first mark absent (nil) or text, each later one 0 or 1.
+    // Anything else is unknown and no email is chosen on it this run.
+    const marks = repliesFor(await redisPipeline([
       ["GET", sentKey(account, invoiceId)],
       ["EXISTS", stepKey(account, invoiceId, 2)],
       ["EXISTS", stepKey(account, invoiceId, 3)],
-    ]);
+    ]), 3);
+    if (!marks) continue;
+    const [first] = marks;
+    const second = countOf(marks[1]);
+    const third = countOf(marks[2]);
+    if ((first !== null && typeof first !== "string") || second === null || third === null || second > 1 || third > 1) continue;
     let step = 0;
-    if (first === null || first === undefined) step = 1;
+    if (first === null) step = 1;
     else {
       const firstAt = Number(first);
-      if (Number.isFinite(firstAt) && firstAt > 1e12) step = reminderDue(store.dunning.reminders, firstAt, 1 + Number(second) + Number(third), Date.now());
+      if (Number.isFinite(firstAt) && firstAt > 1e12) step = reminderDue(store.dunning.reminders, firstAt, 1 + second + third, Date.now());
     }
     if (!step) continue;
     const key = step === 1 ? sentKey(account, invoiceId) : stepKey(account, invoiceId, step);
 
-    // Claimed before anything is done, so a second run does not write twice.
-    const [claimed] = await redisPipeline([["SET", key, String(Date.now()), "NX", "EX", SENT_SECONDS]]);
-    if (claimed === null) continue;
+    // Claimed before anything is done, so a second run does not write twice: ours only on an exact OK. Anything else
+    // is unknown, and the claim, which may be ours, is kept: never an email twice (CX-123 rule 24, L6).
+    const claim = repliesFor(await redisPipeline([["SET", key, String(Date.now()), "NX", "EX", SENT_SECONDS]]), 1);
+    if (!claim || claim[0] !== "OK") continue;
 
     try {
       // First, so the card that pays becomes the one the next renewal uses.
@@ -353,7 +375,9 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     query.append("expand[]", "data.customer");
     if (after) query.set("starting_after", after);
     const listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown; has_more?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as RunningSub[];
+    // A page that is not a list is not "no running memberships" (CX-123 rule 24, L6): the cursor is not moved.
+    if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of running memberships");
+    const rows = listed.data as RunningSub[];
     for (const sub of rows) {
       if (!handles.has(sub.metadata?.store ?? "")) continue;
       // Ending, or paused: no payment for a card to miss.
@@ -398,14 +422,17 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     if (!subId) continue;
     // A member who saved a new card and closed the tab before Stripe sent
     // them back: their card is set now, and there is nothing to tell them.
-    const [pending] = await redisPipeline([["GET", openKey(account, subId)]]);
+    const open = repliesFor(await redisPipeline([["GET", openKey(account, subId)]]), 1);
+    // Unknown whether a card update is waiting: no notice on a guess.
+    if (!open || (open[0] !== null && typeof open[0] !== "string")) continue;
+    const pending = open[0];
     if (typeof pending === "string") {
       const finished = await finishCardUpdate(store, pending);
       if (finished === "updated" || finished === "paid" || finished === "declined") continue;
     }
     const key = cardKey(account, subId, card.id);
-    const [claimed] = await redisPipeline([["SET", key, String(Date.now()), "NX", "EX", CARD_SENT_SECONDS]]);
-    if (claimed === null) continue;
+    const claim = repliesFor(await redisPipeline([["SET", key, String(Date.now()), "NX", "EX", CARD_SENT_SECONDS]]), 1);
+    if (!claim || claim[0] !== "OK") continue;
     try {
       const token = await cardLink(account, customer, subId);
       const mail = cardNoticeEmail({

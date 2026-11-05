@@ -90,10 +90,10 @@ test("cost, abuse, retention and deletion remain bounded before activation", () 
   assert.match(text, /no finite launch budget.*verified supplier and infrastructure costs/is);
 });
 
-test("the queue records the study once in Group B at MQ2 criterion f", () => {
+test("the queue extends existing item 639 once in Group B at MQ2 criterion f", () => {
   const queue = readQueue();
-  assert.equal((queue.match(/641\. \[EXT1\]/g) ?? []).length, 1);
-  assert.ok(queue.includes("641 [EXT1] | B"));
-  assert.match(queue, /641 \[EXT1\][^\n]*criterion \(f\)|641 \[EXT1\][^\n]*critério \(f\)/i);
-  assert.match(queue, /559 \[CM3\][^\n]*, 641 \[EXT1\], 40 \[G2\]/);
+  assert.equal((queue.match(/639\. \[GL7\]/g) ?? []).length, 1);
+  assert.ok(queue.includes("639 [GL7](36) | B"));
+  assert.match(queue, /639 \[GL7\]\(36\)[^\n]*criterion \(f\)|639 \[GL7\]\(36\)[^\n]*critério \(f\)/i);
+  assert.match(queue, /559 \[CM3\][^\n]*, 639 \[GL7\]\(36\), 40 \[G2\]/);
 });

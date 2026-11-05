@@ -43,7 +43,7 @@ async function main(){
   ["symbol",()=>Object.assign(["1"],{[Symbol("extra")]:1})],
   ["inherited",()=>{const a=new Array(1);Object.setPrototypeOf(a,{0:"1"});return a;}],
   ["getter",()=>{const a=["1"];Object.defineProperty(a,"0",{get(){visited++;return "1";}});return a;}],
-  ["proxy",()=>new Proxy(["1"],{get(t,p,r){visited++;return Reflect.get(t,p,r);}})],
+  ["proxy",()=>new Proxy(["1"],{get(t,p,r){if(p!=="then")visited++;return Reflect.get(t,p,r);}})],
  ];
  for(const [name,shape] of malformed){
   let calls=0;

@@ -15,6 +15,11 @@ import { physicalPaidFixture } from "./order-confirmation-paid-fixture";
 import { shipmentMailId } from "@/lib/shipment-mail-outbox";
 import { store as redis } from "./redis-stub";
 import { shipmentOutboxFixture, shipmentPolicy } from "./shipment-mail-outbox-fixture";
+import { confirmPurchase, confirmationKey } from "@/lib/purchase-email";
+import { ADMITTED_FIELD, admitOrders } from "@/lib/order-admission";
+import { storeOrdersThisMonth } from "@/lib/orders";
+import { storeFolder, storeRef } from "@/lib/store";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 process.env.NIMBUS_DATA_KEY = "SYNTHETIC_ONLY_CONFIRMATION_ORIGIN_KEY_2026";
 globalThis.fetch = async () => { throw Error("No external service is allowed in this proof"); };
@@ -92,6 +97,35 @@ function originId() {
   const key = [...redis.keys()].find(k => k.startsWith("nl:order-confirmation:row:"));
   assert.ok(key); return key.slice("nl:order-confirmation:row:".length);
 }
+
+test("paid legacy accounting precedes SES and an unknown send never releases another checkout's hold", async () => {
+  const f = await fixture();
+  const held = await admitOrders(f.store, 2);
+  assert.ok(held.ok);
+  const folder = await storeFolder(storeRef(f.store));
+  const open = `nl:orders:open:${folder}`;
+  const sessionId = "cs_test_C97PaidLegacyAccounting001";
+  const session = { id: sessionId, status: "complete", payment_status: "paid", mode: "payment",
+    created: Math.floor(Date.now()/1000), amount_total: 4000, currency: "usd",
+    metadata: { store: f.store.handle, product: f.product.id, [ADMITTED_FIELD]: String(held.hour) },
+    customer_details: { email: "c97-legacy-buyer@example.test" } };
+  const beforePost: unknown[] = [];
+  const mail = installSesMailFixture({ onSes: async () => {
+    beforePost.push([await storeOrdersThisMonth(f.store), redis.run(["HGET", open, String(held.hour)])]);
+    throw Error("Synthetic lost SES acceptance acknowledgement");
+  } });
+  try {
+    mail.configure(); await mail.setReady(true);
+    assert.equal(await confirmPurchase(f.store, sessionId, session), "failed");
+    assert.equal(await storeOrdersThisMonth(f.store), 1, "paid order is counted even when acceptance is unknown");
+    assert.deepEqual(beforePost, [[1, "1"]], "count and settlement precede the actual provider POST");
+    assert.equal(redis.run(["GET", confirmationKey(sessionId)]), null, "unknown acceptance is never sent");
+    assert.equal(await confirmPurchase(f.store, sessionId, session), "failed");
+    assert.equal(await storeOrdersThisMonth(f.store), 1, "replay cannot count twice");
+    assert.equal(redis.run(["HGET", open, String(held.hour)]), "1", "replay preserves the other checkout's hold");
+    assert.equal(mail.calls.ses, 1, "sticky SES claim blocks duplicate delivery");
+  } finally { mail.restore(); }
+});
 
 test("the real physical checkout reserves a protected source and returns only its CAS winner", async () => {
   const f = await fixture();

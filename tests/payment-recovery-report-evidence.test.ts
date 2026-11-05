@@ -26,7 +26,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   reads += 1;
   return new Response(JSON.stringify(body), { status: 200 });
 }) as typeof fetch;
-const reset = (pages = [page([invoice()])]) => { redis.clear(); replies = pages; reads = 0; writes = 0; fault = null; };
+const reset = (pages: unknown[] = [page([invoice()])]) => { redis.clear(); replies = pages; reads = 0; writes = 0; fault = null; };
 async function refuses(name: string, fresh = true) {
   let refused = false;
   try { await recoveryReport(store, fresh, now); } catch { refused = true; }

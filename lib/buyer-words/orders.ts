@@ -66,7 +66,7 @@ const en = {
   emailYouPaidWith: "The email you paid with",
   emailMe: "Email me my purchases",
   formNote: (store: string) =>
-    `If that address bought something from ${store}, a link to all of it usually arrives within a minute and works for 24 hours. We say the same thing whether or not it did, so nobody can use this page to find out who bought what.`,
+    `If that address bought something from ${store}, we try to email a link to all of it. Any link sent works for 24 hours. We say the same thing whether or not it did, so nobody can use this page to find out who bought what.`,
   checkInbox: "Check your inbox",
   sentBody: (store: string) =>
     `If that address bought something from ${store}, a link is normally on its way. It comes from ${store} via Marktmorgen and can take a few minutes. If it is not there, look in spam.`,
@@ -161,6 +161,7 @@ const en = {
   checkingOlder: "Checking older purchases…",
   olderShown: (count: number) =>
     count === 0 ? "None of the purchases checked can be opened again." : count === 1 ? "1 more purchase is now on the list." : `${count} more purchases are now on the list.`,
+  olderBatchShown: (count: number) => count === 0 ? "No purchases in this batch can be opened again." : count === 1 ? "This page shows 1 purchase from this batch." : `This page shows ${count} purchases from this batch.`,
   olderFailed: "Older purchases could not be checked just now. Try again in a moment.",
   /** The pages drawn without JavaScript (app/[handle]/orders/page.tsx): a bundle's products, or a batch of older purchases, and the way back. */
   backToList: "Back to all your purchases",
@@ -339,7 +340,7 @@ const es: OrdersWords = {
   emailYouPaidWith: "El email con el que pagaste",
   emailMe: "Envíame mis compras por email",
   formNote: (store) =>
-    `Si esa dirección le compró algo a ${store}, normalmente en menos de un minuto llega un enlace a todo ello, que funciona durante 24 horas. Decimos lo mismo tanto si compró como si no, para que nadie pueda usar esta página para averiguar quién compró qué.`,
+    `Si esa dirección le compró algo a ${store}, intentamos enviarle por email un enlace a todo ello. Cualquier enlace enviado funciona durante 24 horas. Decimos lo mismo tanto si compró como si no, para que nadie pueda usar esta página para averiguar quién compró qué.`,
   checkInbox: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
     `Si esa dirección le compró algo a ${store}, normalmente el enlace va en camino. Llega de ${store} vía Marktmorgen y puede tardar unos minutos. Si no está, mira en la carpeta de spam.`,
@@ -418,6 +419,7 @@ const es: OrdersWords = {
   checkingOlder: "Comprobando compras anteriores…",
   olderShown: (count) =>
     count === 0 ? "Ninguna de las compras comprobadas se puede volver a abrir." : count === 1 ? "1 compra más está ahora en la lista." : `${count} compras más están ahora en la lista.`,
+  olderBatchShown: (count) => count === 0 ? "No se puede volver a abrir ninguna compra de este grupo." : count === 1 ? "Esta página muestra 1 compra de este grupo." : `Esta página muestra ${count} compras de este grupo.`,
   olderFailed: "No se han podido comprobar las compras anteriores ahora. Inténtalo de nuevo en un momento.",
   backToList: "Volver a todas tus compras",
   olderTitle: "Compras anteriores",
@@ -581,7 +583,7 @@ const fr: OrdersWords = {
   emailYouPaidWith: "L'e-mail avec lequel vous avez payé",
   emailMe: "M'envoyer mes achats par e-mail",
   formNote: (store) =>
-    `Si cette adresse a acheté quelque chose chez ${store}, un lien vers tous ses achats arrive généralement en moins d'une minute et reste valable 24${S}heures. Nous affichons le même message dans tous les cas, pour que personne ne puisse se servir de cette page pour savoir qui a acheté quoi.`,
+    `Si cette adresse a acheté quelque chose chez ${store}, nous essayons de lui envoyer par e-mail un lien vers tous ses achats. Tout lien envoyé reste valable 24${S}heures. Nous affichons le même message dans tous les cas, pour que personne ne puisse se servir de cette page pour savoir qui a acheté quoi.`,
   checkInbox: "Consultez votre boîte de réception",
   sentBody: (store) =>
     `Si cette adresse a acheté quelque chose chez ${store}, le lien est normalement en route. Il vient de ${store} via Marktmorgen et peut mettre quelques minutes. S'il n'y est pas, regardez dans les spams.`,
@@ -659,6 +661,7 @@ const fr: OrdersWords = {
   checkingOlder: "Vérification des achats plus anciens…",
   olderShown: (count) =>
     count === 0 ? "Aucun des achats vérifiés ne peut être rouvert." : count < 2 ? "1 achat de plus figure maintenant dans la liste." : `${count}${S}achats de plus figurent maintenant dans la liste.`,
+  olderBatchShown: (count) => count === 0 ? "Aucun achat de ce groupe ne peut être rouvert." : count === 1 ? "Cette page présente 1 achat de ce groupe." : `Cette page présente ${count} achats de ce groupe.`,
   olderFailed: "Les achats plus anciens ne peuvent pas être vérifiés pour le moment. Réessayez dans un instant.",
   backToList: "Retour à tous vos achats",
   olderTitle: "Achats plus anciens",
@@ -821,7 +824,7 @@ const de: OrdersWords = {
   emailYouPaidWith: "Die E-Mail-Adresse, mit der Sie bezahlt haben",
   emailMe: "Meine Käufe per E-Mail senden",
   formNote: (store) =>
-    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, kommt ein Link zu allem in der Regel innerhalb einer Minute an und gilt 24 Stunden. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand über diese Seite herausfinden kann, wer was gekauft hat.`,
+    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, versuchen wir, per E-Mail einen Link zu allem zu senden. Jeder gesendete Link gilt 24 Stunden. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand über diese Seite herausfinden kann, wer was gekauft hat.`,
   checkInbox: "Sehen Sie in Ihrem Posteingang nach",
   sentBody: (store) =>
     `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link normalerweise unterwegs. Er kommt von ${store} über Marktmorgen und kann ein paar Minuten dauern. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
@@ -900,6 +903,7 @@ const de: OrdersWords = {
   checkingOlder: "Ältere Käufe werden geprüft…",
   olderShown: (count) =>
     count === 0 ? "Keiner der geprüften Käufe kann erneut geöffnet werden." : count === 1 ? "1 weiterer Kauf steht jetzt in der Liste." : `${count} weitere Käufe stehen jetzt in der Liste.`,
+  olderBatchShown: (count) => count === 0 ? "Kein Kauf aus dieser Gruppe kann erneut geöffnet werden." : count === 1 ? "Diese Seite zeigt 1 Kauf aus dieser Gruppe." : `Diese Seite zeigt ${count} Käufe aus dieser Gruppe.`,
   olderFailed: "Ältere Käufe können gerade nicht geprüft werden. Versuchen Sie es gleich noch einmal.",
   backToList: "Zurück zu all Ihren Käufen",
   olderTitle: "Ältere Käufe",
@@ -1066,7 +1070,7 @@ const it: OrdersWords = {
   emailYouPaidWith: "L'email con cui hai pagato",
   emailMe: "Inviami i miei acquisti via email",
   formNote: (store) =>
-    `Se quell'indirizzo ha acquistato qualcosa da ${store}, di solito entro un minuto arriva un link a tutto, valido per 24 ore. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi ha comprato cosa.`,
+    `Se quell'indirizzo ha acquistato qualcosa da ${store}, proviamo a inviare via email un link a tutto. Ogni link inviato è valido per 24 ore. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi ha comprato cosa.`,
   checkInbox: "Controlla la tua casella di posta",
   sentBody: (store) =>
     `Se quell'indirizzo ha acquistato qualcosa da ${store}, di norma il link è in arrivo. Arriva da ${store} tramite Marktmorgen e può richiedere qualche minuto. Se non lo trovi, guarda nella cartella spam.`,
@@ -1145,6 +1149,7 @@ const it: OrdersWords = {
   checkingOlder: "Verifica degli acquisti precedenti…",
   olderShown: (count) =>
     count === 0 ? "Nessuno degli acquisti verificati può essere riaperto." : count === 1 ? "1 acquisto in più è ora nell'elenco." : `${count} acquisti in più sono ora nell'elenco.`,
+  olderBatchShown: (count) => count === 0 ? "Nessun acquisto di questo gruppo può essere riaperto." : count === 1 ? "Questa pagina mostra 1 acquisto di questo gruppo." : `Questa pagina mostra ${count} acquisti di questo gruppo.`,
   olderFailed: "Non è stato possibile verificare gli acquisti precedenti ora. Riprova tra un momento.",
   backToList: "Torna a tutti i tuoi acquisti",
   olderTitle: "Acquisti precedenti",
@@ -1307,7 +1312,7 @@ const nl: OrdersWords = {
   emailYouPaidWith: "Het e-mailadres waarmee je hebt betaald",
   emailMe: "Mail me mijn aankopen",
   formNote: (store) =>
-    `Als met dat adres iets is gekocht bij ${store}, komt er meestal binnen een minuut een link naar alles, die 24 uur werkt. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie wat heeft gekocht.`,
+    `Als met dat adres iets is gekocht bij ${store}, proberen we per e-mail een link naar alles te sturen. Elke verstuurde link werkt 24 uur. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie wat heeft gekocht.`,
   checkInbox: "Kijk in je inbox",
   sentBody: (store) =>
     `Als met dat adres iets is gekocht bij ${store}, is de link normaal gesproken onderweg. Hij komt van ${store} via Marktmorgen en kan een paar minuten duren. Staat hij er niet, kijk dan in je spam.`,
@@ -1385,6 +1390,7 @@ const nl: OrdersWords = {
   checkingOlder: "Oudere aankopen worden gecontroleerd…",
   olderShown: (count) =>
     count === 0 ? "Geen van de gecontroleerde aankopen kan opnieuw worden geopend." : count === 1 ? "1 aankoop extra staat nu in de lijst." : `${count} aankopen extra staan nu in de lijst.`,
+  olderBatchShown: (count) => count === 0 ? "Geen aankoop uit deze groep kan opnieuw worden geopend." : count === 1 ? "Deze pagina toont 1 aankoop uit deze groep." : `Deze pagina toont ${count} aankopen uit deze groep.`,
   olderFailed: "Oudere aankopen kunnen nu niet worden gecontroleerd. Probeer het zo opnieuw.",
   backToList: "Terug naar al je aankopen",
   olderTitle: "Oudere aankopen",
@@ -1547,7 +1553,7 @@ const pt: OrdersWords = {
   emailYouPaidWith: "O email com que pagou",
   emailMe: "Enviar-me as minhas compras por email",
   formNote: (store) =>
-    `Se esse endereço comprou algo a ${store}, uma ligação para tudo chega normalmente em menos de um minuto e funciona durante 24 horas. Dizemos o mesmo quer tenha comprado quer não, para que ninguém possa usar esta página para descobrir quem comprou o quê.`,
+    `Se esse endereço comprou algo a ${store}, tentamos enviar-lhe por email uma ligação para tudo. Qualquer ligação enviada funciona durante 24 horas. Dizemos o mesmo quer tenha comprado quer não, para que ninguém possa usar esta página para descobrir quem comprou o quê.`,
   checkInbox: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
     `Se esse endereço comprou algo a ${store}, a ligação normalmente está a caminho. Chega de ${store} via Marktmorgen e pode demorar alguns minutos. Se não estiver lá, veja na pasta de spam.`,
@@ -1626,6 +1632,7 @@ const pt: OrdersWords = {
   checkingOlder: "A verificar compras anteriores…",
   olderShown: (count) =>
     count === 0 ? "Nenhuma das compras verificadas pode ser aberta novamente." : count === 1 ? "Mais 1 compra está agora na lista." : `Mais ${count} compras estão agora na lista.`,
+  olderBatchShown: (count) => count === 0 ? "Nenhuma compra deste grupo pode ser aberta novamente." : count === 1 ? "Esta página mostra 1 compra deste grupo." : `Esta página mostra ${count} compras deste grupo.`,
   olderFailed: "Não foi possível verificar as compras anteriores agora. Tente novamente daqui a pouco.",
   backToList: "Voltar a todas as suas compras",
   olderTitle: "Compras anteriores",

@@ -374,7 +374,7 @@ async function main() {
     firstLetter.text.includes("none of your members is charged again"),
     firstLetter.text.includes("we email everyone who bought from it"),
     /1 member has paid for time after .*: \$/.test(firstLetter.text),
-    firstLetter.text.includes("each is given back the unused part of their last payment"),
+    firstLetter.text.includes("we try to refund the unused part of each member's last payment, from your own Stripe account."),
     firstLetter.text.includes(`Starting a plan again before ${closesOn}`),
   ], [true, true, true, true, true]);
   is("it names the exact last moment, in UTC, as the studio and the checkout count it, and no longer says a plan can be started until the day itself", [/Starting a plan again before [A-Z][a-z]+ \d{1,2}, \d{4},? (at )?\d{1,2}:\d{2}\s?[AP]M UTC keeps your store/.test(firstLetter.text), firstLetter.text.includes("On that day itself")], [true, false]);
@@ -798,7 +798,7 @@ async function main() {
   process.env.COMPANY_POSTAL_ADDRESS = POSTAL;
 
   part("What the creator's notices and studio say");
-  const letter = closingLetter("ended", "Anna Shop", E, E + CLOSING_DAYS * DAY, E, { buyersBy: E + (CLOSING_DAYS - 7) * DAY, untold: 0, members: 1, unused: "$10" });
+  const letter = closingLetter("ended", "Anna Shop", E, E + CLOSING_DAYS * DAY, E, { buyersBy: E + (CLOSING_DAYS - 7) * DAY, untold: 0, members: 1, unused: "$10", notHeld: 0, overLimit: 0 });
   is("the letter says the members' charges stopped, when buyers are told and the refund, from the first", [letter.text.includes("none of your members is charged again"), letter.text.includes("at least 7 days before your store closes"), letter.text.includes("1 member has paid for time after")], [true, true, true]);
   const studio = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
   is("the studio says buyers are told and when, and leads to the review screen", [studio.includes("we email everyone who bought from it, once, from Marktmorgen"), studio.includes('"closing-refunds"')], [true, true]);

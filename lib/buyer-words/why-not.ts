@@ -24,7 +24,7 @@ const es: WhyNotWords = {
   close: "Cerrar",
 };
 const fr: WhyNotWords = {
-  question: "Avant de partir : quelque chose vous retient-il d’acheter ?",
+  question: "Avant de partir : quelque chose vous retient-il d’acheter ?",
   note: "Un clic, et cela aide à améliorer cette page. Rien sur vous n’est gardé.",
   choices: { price: "Le prix", fit: "Je ne sais pas si c’est pour moi", details: "J’ai besoin de plus de détails", later: "Je déciderai plus tard", other: "Autre chose" },
   thanks: "Merci.",

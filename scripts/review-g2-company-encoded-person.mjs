@@ -2,7 +2,7 @@ import {build} from 'esbuild';
 import {spawnSync} from 'node:child_process';
 import {mkdirSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {testAliases,testEnvironment} from './tests/test-config.mjs';
+import {testAliases,testEnvironment} from '../tests/test-config.mjs';
 const root=process.cwd(); mkdirSync('.review-output',{recursive:true}); let failures=0;
 for (const file of process.argv.slice(2)) {
  const name=file.endsWith('.test.ts')?file:file+'.test.ts';const outfile=resolve('.review-output',name+'.cjs');

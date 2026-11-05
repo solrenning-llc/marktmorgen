@@ -19,7 +19,7 @@ const STATS = "statsunk01";
 const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 const SCOPE = "https://uri.paypal.com/payments/payouts openid";
-type Mode = "ok" | "garbled" | "empty" | "no-id" | "dropped" | "server" | "funds";
+type Mode = "ok" | "garbled" | "empty" | "no-id" | "dropped" | "server" | "funds" | "nameless";
 let mode: Mode = "ok";
 let made = 0;
 let reads = 0;
@@ -32,6 +32,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: SCOPE, expires_in: 32400 });
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
     if (mode === "funds") return json({ name: "INSUFFICIENT_FUNDS", message: "Sender does not have sufficient funds." }, 422);
+    // A 4xx without PayPal's own error name (review of Codex G on #2681): not PayPal's refusal, so not known.
+    if (mode === "nameless") return new Response("Bad Request", { status: 400 });
     // Every other mode: PayPal made the batch, the creator's money is leaving.
     made += 1;
     const id = `BATCH${made}ABC`;
@@ -104,6 +106,43 @@ async function main(): Promise<void> {
   is("the payday email says it is not known, and to look at PayPal", [email.text.includes("Nothing left your PayPal"), email.text.includes("we do not know whether it was paid"), email.text.includes("PayPal activity")], [false, true, true]);
   const studioWords = /unknown: "([^"]+)"/.exec(readFileSync("components/paypal-payouts.tsx", "utf8"))?.[1] ?? "";
   is("the studio's words for it", [studioWords.includes("Nothing was sent"), studioWords.includes("we do not know whether it was paid"), studioWords.includes("PayPal activity")], [false, true, true]);
+
+  part("A 4xx without PayPal's own error name is not a refusal: kept on its way");
+  await seed(store);
+  made = 0;
+  mode = "nameless";
+  const nameless = await payWithPayPal(store);
+  is("unknown, never 'nothing was sent'", nameless.ok ? "paid" : nameless.reason, "unknown");
+  is("both stay on their way", (await onTheirWay(store)).size, 2);
+
+  for (const fault of ["no answer", "an error"] as const) {
+    part(`PayPal made the batch, and writing its id got ${fault}: nobody is paid twice (review of Codex G on #2681, GRAVE)`);
+    await seed(store);
+    made = 0;
+    mode = "ok";
+    const real = redis.pipeline.bind(redis);
+    let hit = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const first = commands[0];
+      if (!hit && first?.[0] === "HSET" && first[1] === "nl:pp:open:statsunk01" && !String(first[2]).startsWith("?")) {
+        hit = true;
+        // As Codex G's proof: the write of the id fails, and any HDEL sent with it in the same pipeline still runs.
+        const removed = await real(commands.filter((c) => c[0] === "HDEL"));
+        if (fault === "an error") throw new Error("Synthetic: the write of the batch's id failed, the HDEL beside it ran");
+        return [undefined, ...removed];
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await payWithPayPal(store);
+    } finally {
+      redis.pipeline = real;
+    }
+    is("the write of its id failed", hit, true);
+    is("both stay on their way", (await onTheirWay(store)).size, 2);
+    await payWithPayPal(store);
+    is("a second press sends no new batch", made, 1);
+  }
 
   part("A batch PayPal refused by name (insufficient funds): owed, paid on the next press");
   await seed(store);

@@ -21,7 +21,7 @@ delete process.env.META_GRAPH_BASE;
 delete process.env.META_GRAPH_VERSION;
 
 const today = new Date().toISOString().slice(0, 10);
-type Insights = "real" | "garbled" | "no-data" | "page2-garbled" | "rows-not-list";
+type Insights = "real" | "garbled" | "no-data" | "page2-garbled" | "rows-not-list" | "huge-spend" | "no-such-day" | "next-not-text" | "endless";
 let insights: Insights = "real";
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -42,6 +42,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (insights === "garbled" && !second) return new Response("<html>Sorry, something went wrong.</html>", { status: 200 });
     if (insights === "no-data" && !second) return json({ paging: {} });
     if (insights === "rows-not-list" && !second) return json({ data: { campaign_id: "1" } });
+    // Reviews of Codex G on #2681: rows the lines would leave out, a next page that is not a link, more pages than one read takes.
+    if (insights === "huge-spend" && !second) return json({ data: [{ campaign_id: "1", campaign_name: "Reel", spend: "999999999999999.00", date_start: today, publisher_platform: "instagram" }] });
+    if (insights === "no-such-day" && !second) return json({ data: [{ campaign_id: "1", campaign_name: "Reel", spend: "1.00", date_start: "2026-99-99", publisher_platform: "instagram" }] });
+    if (insights === "next-not-text" && !second) return json({ data: [{ campaign_id: "1", campaign_name: "Reel", spend: "1.00", date_start: today, publisher_platform: "instagram" }], paging: { next: 123 } });
+    if (insights === "endless") return json({ data: [], paging: { next: "https://graph.facebook.com/v25.0/act_333/insights?after=page2&access_token=x" } });
     if (second) return insights === "page2-garbled" ? new Response("", { status: 200 }) : json({ data: [] });
     return json({
       data: [{ campaign_id: "1", campaign_name: "Reel", spend: insights === "real" ? "30.00" : "1.00", date_start: today, publisher_platform: "instagram" }],
@@ -67,7 +72,7 @@ async function main(): Promise<void> {
   is("read", await readMetaSpend(statsId, store.currency), "read");
   is("today's spend is $30.00", await metaCents(statsId), 3000);
 
-  for (const shape of ["garbled", "no-data", "rows-not-list", "page2-garbled"] as const) {
+  for (const shape of ["garbled", "no-data", "rows-not-list", "page2-garbled", "huge-spend", "no-such-day", "next-not-text", "endless"] as const) {
     part(`Insights answered ${shape}: not a read, nothing erased`);
     insights = shape;
     const result = await readMetaSpend(statsId, store.currency);

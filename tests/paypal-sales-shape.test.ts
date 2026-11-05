@@ -146,6 +146,25 @@ async function main(): Promise<void> {
     is("handed over once PayPal completes it", handed.filter((h) => h === order).length, 1);
   }
 
+  part("A paid order read back COMPLETED without its captures stays watched (review of Codex G on #2681)");
+  {
+    const order = await open();
+    captureAnswer = (o) => {
+      orders.set(o, completed(o, "49.00"));
+      return new Response("<html>lost</html>", { status: 201 });
+    };
+    orders.set(order, { id: order, status: "PAYER_ACTION_REQUIRED" });
+    orderRead = "garbled";
+    await captureOrder(store, order);
+    orderRead = "real";
+    orders.set(order, { id: order, status: "COMPLETED" });
+    await watchPayPal(store, Date.now() + 30_000, on);
+    is("still watched", await stillPending(store, order), true);
+    orders.set(order, completed(order, "49.00"));
+    await watchPayPal(store, Date.now() + 30_000, on);
+    is("handed over once PayPal shows the capture", handed.filter((h) => h === order).length, 1);
+  }
+
   part("A capture read back garbled at the end of its refund window is not taken for 'not refunded'");
   {
     const order = await open();

@@ -125,6 +125,19 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
+        if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, notes, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(json === "" ? ["DEL", notes] : ["SET", notes, json]);
+          return 1;
+        }
+        // lib/assistant-memory-store.ts MEMORY_FORGET: the lock made the forgetting's own and the notes deleted in one step.
+        if (key.startsWith("-- marktmorgen:amem-forget:v3\n") && args[0] === "2" && args.length === 5) {
+          this.run(["SET", args[1], args[3], "EX", args[4]]);
+          const length = this.run(["STRLEN", args[2]]);
+          return [this.run(["DEL", args[2]]), length];
+        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;

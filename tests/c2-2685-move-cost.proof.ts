@@ -2,13 +2,13 @@ import { POST } from "@/app/api/store/move/open/route";
 import { NextRequest } from "next/server";
 import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 /** Opt-in delta proof: an unreadable kept state must not reopen an off-sale invitation price. */
-import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
+import { withConsent } from "./digital-consent-fixture";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
-import { inviteMembers, noteKept, openMove, readInvite, readMove } from "@/lib/move-members";
+import { inviteMembers, readInvite } from "@/lib/move-members";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
-import { done, is, part } from "./check";
+import { done, is } from "./check";
 
 let checkouts=0;
 globalThis.fetch=(async(input,init)=>{
@@ -21,22 +21,6 @@ globalThis.fetch=(async(input,init)=>{
  if((init?.method??"GET")==="GET")return new Response(JSON.stringify({object:"list",data:[],has_more:false}));
  return new Response(null,{status:404});
 }) as typeof fetch;
-
-function markOffSale(id:string){
- const visit=(v:unknown):unknown=>{
-  if(Array.isArray(v))return v.map(visit);
-  if(!v||typeof v!=="object")return v;
-  const out=Object.fromEntries(Object.entries(v).map(([key,value])=>[key,visit(value)]));
-  if(out.id===id&&typeof out.priceCents==="number"&&"label"in out)out.offSale=true;
-  return out;
- };
- for(const key of redis.keys()){
-  if(redis.run(["TYPE",key])!=="string")continue;
-  const raw=redis.run(["GET",key]);
-  if(typeof raw!=="string"||!raw.includes(id))continue;
-  try{redis.run(["SET",key,JSON.stringify(visit(JSON.parse(raw)))]);}catch{}
- }
-}
 
 async function main(){
  redis.clear();process.env.STRIPE_SECRET_KEY="sk_test_c2_move_kept_only";
@@ -55,7 +39,7 @@ async function main(){
   {email:"fresh@example.com",productId:club.product.id,option:plus,renews:Math.floor(Date.now()/1000)+20*86400},
  ]);
  const [field,freshField]=fields;if(!field||!freshField)throw Error("invite fixture failed");
- const invite=(await readInvite(store.statsId!,field))!,fresh=(await readInvite(store.statsId!,freshField))!;
+ const fresh=(await readInvite(store.statsId!,freshField))!;
  const originalFetch=globalThis.fetch;
  let gets=0,bytes=0,paidBefore=-1;
  const units=()=>redis.keys().filter(key=>key.startsWith("nl:traffic:r:")).reduce((sum,key)=>sum+Number(redis.run(["GET",key])),0);

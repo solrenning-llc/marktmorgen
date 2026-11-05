@@ -68,7 +68,7 @@ test("D2: nonzero observations retain both warnings and never copy unrelated tex
 });
 test("D2: operations never authenticate absent or incomplete financial accounting", () => {
   assert.equal(companyMonthlyMarginPresentation(null, NOW, null, serialized), null);
-  const data = fixture(); delete data.sources[COMMERCIAL_PROFIT_SOURCES[0]];
+  const data = fixture(); Reflect.deleteProperty(data.sources, COMMERCIAL_PROFIT_SOURCES[0]);
   assert.equal(companyMonthlyMarginPresentation(data, NOW, null, serialized), null);
 });
 test("D2: presentation performs no fetch and freezes its output", () => {

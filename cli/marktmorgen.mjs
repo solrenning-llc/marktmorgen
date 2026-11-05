@@ -125,9 +125,14 @@ async function call(fetchImpl, url, key, method, params) {
       (tool.description === undefined || typeof tool.description === "string") && object(tool.inputSchema) &&
       tool.inputSchema.type === "object" && (tool.inputSchema.properties === undefined || object(tool.inputSchema.properties)))) return unconfirmed();
   } else {
-    if (!Array.isArray(body.result.content) || !body.result.content.every((item) =>
-      object(item) && typeof item.type === "string" && (item.type !== "text" || typeof item.text === "string")) ||
+    if (!Array.isArray(body.result.content) ||
       (Object.hasOwn(body.result, "isError") && typeof body.result.isError !== "boolean")) return unconfirmed();
+    // This CLI presents text only. Validate the entire answer before printing
+    // any of it: neither an unknown type nor an unsupported image/audio/resource
+    // block can silently become an empty or partial successful answer.
+    if (!body.result.content.every((item) => object(item) && item.type === "text" && typeof item.text === "string")) {
+      return { error: "The server returned unsupported or invalid content. This CLI displays text only. Nothing was retried." };
+    }
   }
   return { result: body.result };
 }

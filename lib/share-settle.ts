@@ -148,6 +148,9 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     undefined,
     READ_VERSION,
   );
+  if (!charge || typeof charge !== "object" || Array.isArray(charge) || charge.id !== fee.charge || typeof charge.disputed !== "boolean") {
+    throw new UnknownAmount(fee.id, "Charge identity or dispute flag is unknown");
+  }
   // Everything below is worked out in the charge's own currency. A fee Stripe
   // reports in another one cannot be compared with it here, so it is left
   // as it is rather than given back by a sum in two currencies.
@@ -332,12 +335,13 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
       let feeId = event.fee;
       if (event.charge) {
         const charge = await onAccount("GET", account, `/charges/${encodeURIComponent(event.charge)}`, undefined, READ_VERSION);
+        if (!charge || typeof charge !== "object" || Array.isArray(charge) || charge.id !== event.charge) throw new UnknownFeeList("Historical charge identity was not confirmed");
         feeId = historicalFeeReference(charge.application_fee);
       }
       if (feeId === null) continue;
       try {
         const fee = readFee(await onPlatform("GET", `/application_fees/${encodeURIComponent(feeId)}`));
-        if (!fee || fee.id !== feeId || fee.account !== account) throw new UnknownAmount(feeId, "Historical application fee identity was not confirmed");
+        if (!fee || fee.id !== feeId || fee.account !== account || (event.charge && fee.charge !== event.charge)) throw new UnknownAmount(feeId, "Historical application fee identity was not confirmed");
         counts.fees += 1;
         const back = await settleFee(fee, nowSeconds, live);
         if (back > 0) {

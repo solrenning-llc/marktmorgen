@@ -37,6 +37,17 @@ async function main() {
   inherited[1] = value;
   Object.setPrototypeOf(inherited, Object.assign(Object.create(Array.prototype), { 0: "00000001" }));
   is("inherited slot is unknown", refuses(() => parseNotes(inherited)), true);
+  for (const stored of [
+    '{"day":"2026-11-03","day":"2026-11-04","text":"Published the course"}',
+    '{"day":"2026-11-04","text":"An earlier note","text":"Published the course"}',
+  ]) is("duplicate JSON members cannot choose a note's history", refuses(() => parseNotes(["00000001", stored])), true);
+  let proxyTraps = 0;
+  const executable = new Proxy([...pair], {
+    get(target, field, receiver) { proxyTraps++; return Reflect.get(target, field, receiver); },
+    getOwnPropertyDescriptor(target, field) { proxyTraps++; return Reflect.getOwnPropertyDescriptor(target, field); },
+  });
+  is("an executable hash proxy is unknown", refuses(() => parseNotes(executable)), true);
+  is("no hash proxy trap ran", proxyTraps, 0);
 
   part("The actual reader requires one complete response, including an empty hash");
   for (const reply of [[], [null], [[] , []], [["00000001"]]]) {
@@ -48,6 +59,14 @@ async function main() {
   is("actual confirmed missing hash remains empty", await readNotes(stats), []);
   is("no statistics id performs no read", await readNotes(null), []);
   is("only the configured read ran", commands.length, 1);
+  reset();
+  let envelopeTraps = 0;
+  changeReading(() => new Proxy([[]], {
+    get(target, field, receiver) { envelopeTraps++; return Reflect.get(target, field, receiver); },
+    getOwnPropertyDescriptor(target, field) { envelopeTraps++; return Reflect.getOwnPropertyDescriptor(target, field); },
+  }));
+  is("an executable response proxy is unknown", await refusesRead(), true);
+  is("no envelope proxy trap ran", envelopeTraps, 0);
 
   part("An incomplete read must never authorize deletion of existing chart notes");
   const corruptions = [

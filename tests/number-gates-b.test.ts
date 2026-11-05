@@ -14,7 +14,9 @@
  *   - app/api/store/licence/route.ts: the per-connection window before the
  *     store's licence check reads nothing of the store on an unknown count;
  *   - lib/letter-access.ts: asking for a link never schedules the email, and
- *     opening one never lets a browser in, on an unknown count;
+ *     opening one never lets a browser in, on an unknown count; the open
+ *     route (app/api/store/letters/open/route.ts) then answers 503 in the
+ *     store's words, never a bare server error;
  *   - lib/assignment.ts takeRoom: an unknown INCRBY never takes the room for
  *     an upload, and never gives back (DECRBY) bytes it cannot say it took;
  *   - lib/community-events.ts withinEventWrites: an unknown count never lets
@@ -26,6 +28,10 @@
 import { NextRequest } from "next/server";
 import { GET as exportRoute } from "@/app/api/store/export/route";
 import { GET as licenceRoute } from "@/app/api/store/licence/route";
+import { GET as letterOpenRoute } from "@/app/api/store/letters/open/route";
+import { createHash } from "node:crypto";
+import { storeKey } from "@/lib/learn";
+import { letterWords } from "@/lib/buyer-words/letters";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { requestLetterLink, spendLetterOpen } from "@/lib/letter-access";
@@ -230,6 +236,28 @@ async function main(): Promise<void> {
   is("a confirmed count within the opens lets it in", await spendLetterOpen(token), true);
   arm(opensCounter, [null, 11, 3_000]);
   is("a confirmed count past the opens is refused as before", await spendLetterOpen(token), false);
+
+  part("Opening an emailed link, through the route");
+  // A real link, kept as the route reads it, for this store; the opens counter alone does not answer.
+  const routeToken = "cd".repeat(32);
+  const grantKey = `nl:letters:link:${createHash("sha256").update(`nimbus-letter:${routeToken}`).digest("hex").slice(0, 40)}`;
+  await redis.pipeline([["SET", grantKey, JSON.stringify({ e: "reader@example.com", k: storeKey(store), h: store.handle, l: "0123456789abcdef0123" })]]);
+  const openCall = async () => {
+    const response = await settled(() => letterOpenRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${routeToken}`)));
+    if (response === "threw") return { status: 500, body: "threw", cookie: false };
+    return { status: response.status, body: await response.text(), cookie: (response.headers.get("Set-Cookie") ?? "") !== "" };
+  };
+  for (const [label, reply] of UNKNOWN_TRIPLES) {
+    arm(opensCounter, reply);
+    const answer = await openCall();
+    is(`${label}: the route says, in the store's words, to try again, and lets no browser in`, [answer.status, answer.body, answer.cookie], [503, letterWords(store.language).linkBusy, false]);
+  }
+  arm(opensCounter, null);
+  const let_in = await openCall();
+  is("a confirmed count within the opens still lets the browser in", [let_in.status, let_in.cookie], [303, true]);
+  arm(opensCounter, [null, 11, 3_000]);
+  const used = await openCall();
+  is("a confirmed count past the opens is still gone, as before", [used.status, used.body], [410, letterWords(store.language).linkGone]);
 
   part("Room for a handed-in file");
   const room = "numbergatesroom";

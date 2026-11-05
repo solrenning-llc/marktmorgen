@@ -28,9 +28,9 @@
  * and file, so nobody is paid twice. Request bodies follow PayPal's published
  * OpenAPI description (payments_payouts_batch_v1).
  */
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { canSeal, seal, unseal } from "@/lib/secret-box";
+import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
@@ -235,8 +235,16 @@ export function payableLines(book: Book, away: Set<string>): BatchLine[] {
 
 /** The address a line is paid to, as the body sends it. */
 const receiverOf = (line: BatchLine) => payAddress(line.affiliate).slice(0, 127);
-/** Its fingerprint, kept with a batch on its way instead of the address (review of Codex H2 on #2681). */
-const receiverPrint = (address: string) => createHash("sha256").update(address).digest("hex");
+/**
+ * Its fingerprint, kept with a batch on its way instead of the address (review of Codex H2 on #2681): an HMAC
+ * under a key derived from the server's own secret, so it cannot be turned back by guessing addresses (Revisor 2's
+ * privacy note). Empty when there is no secret: then the batch keeps none and a retry is left for a manual check.
+ */
+const RECEIVER_PRINT_LABEL = "paypal-payout-receiver/v1";
+function receiverPrint(address: string): string {
+  const key = deriveKey(RECEIVER_PRINT_LABEL);
+  return key ? createHmac("sha256", key).update(address).digest("hex") : "";
+}
 
 /** The body PayPal is sent for one batch (payments_payouts_batch_v1, create_payout_request). */
 export function batchBody(store: Store, lines: BatchLine[], senderBatchId: string): string {
@@ -362,7 +370,10 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const auth = await bearer(store);
       if (!auth) return { ok: false, reason: "reconnect" };
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;
-      const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => ({ a: l.affiliate.id, c: l.cents, r: receiverPrint(receiverOf(l)) })) };
+      const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => {
+        const r = receiverPrint(receiverOf(l));
+        return { a: l.affiliate.id, c: l.cents, ...(r ? { r } : {}) };
+      }) };
       // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
       // or if it never answers, nobody in it can be put in another batch or payout file. Redis must say it holds it.
       const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;

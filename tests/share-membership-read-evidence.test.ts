@@ -113,3 +113,11 @@ for (const appliedWrite of [[], [undefined], [null], ["OK"], [2], [1, 0]]) test(
   const r = await world({ appliedWrite });
   assert.equal(r.counts.complete, false); assert.equal(r.counts.failed, 1); assert.equal(r.counts.listUnknown, 1); assert.equal(r.applied, "625");
 });
+for (const appliedWrite of [[], [undefined], [null], ["OK"], [2], [1, 0]]) test("an unconfirmed live applied-marker write remains unknown: " + JSON.stringify(appliedWrite), async () => {
+  const r = await world({ live: true, reply: page([noFeeMember]), appliedWrite });
+  assert.equal(r.counts.complete, false); assert.equal(r.counts.failed, 1); assert.equal(r.counts.listUnknown, 1); assert.equal(r.applied, null);
+});
+test("an explicit null percentage in the confirmed subscription reply is known zero", async () => {
+  const r = await world({ reply: page([oldMember]), postReply: { id: oldMember.id, object: "subscription", application_fee_percent: null } });
+  assert.equal(r.counts.complete, true); assert.equal(r.counts.failed, 0); assert.equal(r.counts.memberships, 1); assert.equal(r.applied, null);
+});

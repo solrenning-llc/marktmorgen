@@ -162,17 +162,17 @@ async function main(): Promise<void> {
   // A: $100 listed, a 20% code typed, $4 of tax: the fee was set on the least ($80, 500) — exact.
   fees.set("fee_A", { id: "fee_A", account: A, charge: "ch_A", amount: 500, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
   charges.set("ch_A", { id: "ch_A", currency: "usd", amount: 8_400, amount_refunded: 0, disputed: false, payment_intent: { id: "pi_A", metadata: { share_bps: "625" } } });
-  sessions.set("pi_A", { amount_total: 8_400, total_details: { amount_tax: 400, amount_shipping: 0 } });
+  sessions.set("pi_A", { currency: "usd", amount_total: 8_400, total_details: { amount_tax: 400, amount_shipping: 0 } });
   // B: the box could have taken 50%, nobody typed a code; tax included in the price: the fee was set on $50, paid $100 of which $10 tax.
   fees.set("fee_B", { id: "fee_B", account: A, charge: "ch_B", amount: 312, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
   charges.set("ch_B", { id: "ch_B", currency: "usd", amount: 10_000, amount_refunded: 0, disputed: false, payment_intent: { id: "pi_B", metadata: { share_bps: "625" } } });
-  sessions.set("pi_B", { amount_total: 10_000, total_details: { amount_tax: 1_000, amount_shipping: 0 } });
+  sessions.set("pi_B", { currency: "usd", amount_total: 10_000, total_details: { amount_tax: 1_000, amount_shipping: 0 } });
   // C: a $40 offer after checkout, refunded in full.
   fees.set("fee_C", { id: "fee_C", account: A, charge: "ch_C", amount: 250, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
   charges.set("ch_C", { id: "ch_C", currency: "usd", amount: 4_000, amount_refunded: 4_000, disputed: false, payment_intent: { id: "pi_C", metadata: { share_bps: "625", share_base: "4000" } } });
   // D: a membership's payment made while the store was still in its trial.
   fees.set("fee_D", { id: "fee_D", account: A, charge: "ch_D", amount: 125, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
-  charges.set("ch_D", { id: "ch_D", currency: "usd", amount: 2_000, amount_refunded: 0, disputed: false, invoice: { created: NOW - 20 * 86_400, total_excluding_tax: 2_000, subscription_details: { metadata: { store: "maker", share_bps: "625" } } } });
+  charges.set("ch_D", { id: "ch_D", currency: "usd", amount: 2_000, amount_refunded: 0, disputed: false, invoice: { currency: "usd", created: NOW - 20 * 86_400, total_excluding_tax: 2_000, subscription_details: { metadata: { store: "maker", share_bps: "625" } } } });
   // E: a $60 sale whose dispute was lost.
   fees.set("fee_E", { id: "fee_E", account: A, charge: "ch_E", amount: 375, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
   charges.set("ch_E", { id: "ch_E", amount: 6_000, amount_refunded: 0, currency: "usd", disputed: true, payment_intent: { id: "pi_E", metadata: { share_bps: "625", share_base: "6000" } } });

@@ -150,7 +150,7 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     const store = meta.store ? await storeForHandle(meta.store) : null;
     const written = metadataInteger(meta.share_bps), created = num(invoice.created);
     const goods = num(invoice.total_excluding_tax === undefined || invoice.total_excluding_tax === null ? invoice.subtotal : invoice.total_excluding_tax);
-    if (!store || written === null || written > 10_000 || created === null || goods === null) throw new UnknownAmount(fee.id);
+    if (!store || written === null || written > 10_000 || created === null || goods === null || currency(invoice.currency) !== fee.currency) throw new UnknownAmount(fee.id);
     const owedRate = shareBps(store, created, live);
     if (num(owedRate) === null || owedRate > 10_000) throw new UnknownAmount(fee.id);
     const bps = Math.min(written, owedRate);
@@ -170,7 +170,9 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     const intentId = intent && typeof intent === "object" ? str(intent.id) : str(intent);
     if (!intentId) throw new UnknownAmount(fee.id);
     const sessions = await onAccount("GET", fee.account, `/checkout/sessions?payment_intent=${encodeURIComponent(intentId)}&limit=1`, undefined, READ_VERSION);
-    const session = Array.isArray(sessions.data) ? (sessions.data[0] as Record<string, unknown> | undefined) : undefined;
+    if (sessions?.object !== "list" || sessions.has_more !== false || !Array.isArray(sessions.data) || sessions.data.length !== 1) throw new UnknownAmount(fee.id);
+    const session = sessions.data[0] as Record<string, unknown> | null;
+    if (!session || typeof session !== "object" || Array.isArray(session) || currency(session.currency) !== fee.currency) throw new UnknownAmount(fee.id);
     const read = session ? goodsOfSession(session) : null;
     if (read === null) throw new UnknownAmount(fee.id);
     goods = read;
@@ -188,7 +190,7 @@ export async function settleFee(fee: Fee, nowSeconds: number, live = COMMISSION_
   if (owed === null) throw new UnknownAmount(fee.id);
   const back = toGiveBack({ amount, refunded }, owed);
   if (back <= 0) return 0;
-  if (!Number.isSafeInteger(back)) throw new Error("Application fee refund amount is not a safe integer");
+  if (!Number.isSafeInteger(back)) throw new UnknownAmount(fee.id, "Application fee refund amount is not a safe integer");
   const receipt = await onPlatform("POST", `/application_fees/${encodeURIComponent(fee.id)}/refunds`, new URLSearchParams({ amount: String(back) }), {
     // The same difference is never given back twice, however often this runs.
     idempotencyKey: `share-back:${fee.id}:${fee.refunded}:${back}`,

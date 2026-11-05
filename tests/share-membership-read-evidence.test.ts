@@ -11,7 +11,7 @@ const now = Math.floor(Date.now() / 1000), account = "acct_Receipt0001";
 const oldMember = { id: "sub_OldShare0001", status: "active", application_fee_percent: 6.25 };
 const noFeeMember = { id: "sub_NoShare0001", status: "active", application_fee_percent: null };
 const page = (data: unknown[] = [], has_more = false, next_page: unknown = null) => ({ object: "search_result", data, has_more, next_page });
-type Options = { reply?: unknown; pages?: (n: number) => unknown; applied?: unknown[]; appliedWrite?: unknown[]; live?: boolean; postFails?: boolean; postReply?: unknown };
+type Options = { reply?: unknown; pages?: (n: number) => unknown; applied?: unknown[]; appliedWrite?: unknown[]; live?: boolean; postFails?: boolean; postReply?: unknown; historyFailure?: "page" | "request" | "charge" | "marker" };
 async function world(options: Options = {}) {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_fee_refund_only_a_stand_in";
@@ -27,6 +27,7 @@ async function world(options: Options = {}) {
   let searches = 0;
   try {
     redis.pipeline = async commands => {
+      if (options.historyFailure === "marker" && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === "nl:share:read-until") return [null];
       if (commands.length === 1 && commands[0][1] === "nl:share:applied") {
         if (commands[0][0] === "HGET" && options.applied !== undefined) return options.applied;
         if ((commands[0][0] === "HSET" || commands[0][0] === "HDEL") && options.appliedWrite !== undefined) return options.appliedWrite;
@@ -36,7 +37,13 @@ async function world(options: Options = {}) {
     globalThis.fetch = async (input, init) => {
       const url = new URL(String(input)), method = init?.method ?? "GET";
       assert.equal(url.origin, "https://api.stripe.com");
-      if (url.pathname === "/v1/application_fees" || url.pathname === "/v1/events") return Response.json({ object: "list", data: [], has_more: false });
+      if (url.pathname === "/v1/application_fees") return Response.json({ object: "list", data: [], has_more: false });
+      if (url.pathname === "/v1/events") {
+        if (options.historyFailure === "page") return Response.json({});
+        if (options.historyFailure === "request") return Response.json({ error: { message: "Synthetic history refusal" } }, { status: 500 });
+        return Response.json({ object: "list", data: options.historyFailure === "charge" ? [{ id: "evt_MemberHistory0001", data: { object: { charge: "ch_MemberHistory0001" } } }] : [], has_more: false });
+      }
+      if (url.pathname === "/v1/charges/ch_MemberHistory0001") return Response.json({ error: { message: "Synthetic charge refusal" } }, { status: 500 });
       if (url.pathname === "/v1/subscriptions/search") {
         searches += 1;
         return Response.json(options.pages ? options.pages(searches) : options.reply === undefined ? page() : options.reply);
@@ -48,8 +55,8 @@ async function world(options: Options = {}) {
       throw Error("Unexpected synthetic membership request");
     };
     const counts = await settleShares(Date.now() + 60000, now, options.live ?? false);
-    const [applied] = await base([["HGET", "nl:share:applied", ref]]);
-    return { counts, posts, applied, searches };
+    const [applied, readUntil] = await base([["HGET", "nl:share:applied", ref], ["HGET", "nl:share:read-until", ref]]);
+    return { counts, posts, applied, searches, readUntil };
   } finally { redis.pipeline = base; globalThis.fetch = oldFetch; }
 }
 
@@ -120,4 +127,10 @@ for (const appliedWrite of [[], [undefined], [null], ["OK"], [2], [1, 0]]) test(
 test("an explicit null percentage in the confirmed subscription reply is known zero", async () => {
   const r = await world({ reply: page([oldMember]), postReply: { id: oldMember.id, object: "subscription", application_fee_percent: null } });
   assert.equal(r.counts.complete, true); assert.equal(r.counts.failed, 0); assert.equal(r.counts.memberships, 1); assert.equal(r.applied, null);
+});
+for (const historyFailure of ["page", "request", "charge", "marker"] as const) test("unknown historical work does not block an independently confirmed membership reduction: " + historyFailure, async () => {
+  const r = await world({ historyFailure, reply: page([oldMember]) });
+  assert.equal(r.posts.length, 1); assert.equal(r.posts[0].body.get("application_fee_percent"), "0.00");
+  assert.equal(r.counts.memberships, 1); assert.equal(r.applied, null);
+  assert.equal(r.counts.complete, false); assert.equal(r.counts.failed, 1); assert.equal(r.readUntil, null);
 });

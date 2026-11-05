@@ -1,4 +1,4 @@
-# Codex O continuation checkpoint — 05/11/2026 18h32 UTC
+# Codex O continuation checkpoint — 05/11/2026 18h41 UTC
 
 ## Rules in force
 
@@ -29,7 +29,7 @@ CX-120/122/123/126. Product PRs never edit reservation documents; new reservatio
 - P MEDIUM review `5788552429`, proof `63a7992287af3da1ca063a05316d0dd3ee219327`. Corrective test-only RED `f5438e851012d181a954f5cd1e7cef8fb06f6a91`: 27/21.
 - Final reader accepts only a non-Proxy ordinary array with exactly own inert slot0 and length before reading a positive safe integer. Own27/27; P proof unchanged4/4; buyer9+closing90; typegen/full TSC/lint/scanner3778/0/diff green. Same one INCR, zero retry; unknown/lost ACK never opens or compensates.
 - P's focused return on head `54f5481f4dbaec2faab9293f192f2e07ae002080` closed the MEDIUM but found LOW review `5789248158`: inherited `Object.prototype.value` made `"value" in slot` accept an accessor descriptor without its own data value. Unchanged proof branch/commit `codex/p-review-o2640-descriptor-evidence/0a6f5b549cce327d61957bdbdc2e4a54b56caf58` gives RED 5/4 on the exact PR head.
-- Corrective delta is durable without moving the canonical head: branch `codex/o-community-picture-place-fix-ready`, commit `d6aa9cfb66f8f109e5a46a688ec7c477485b834a`, tree `660d2a197115ceb1fc7fbeff2f077129b1cafe91`; product blob `394e5dacb1f9b53cbc6c93e9ba012d9024ed7097`, permanent test blob `070aac968a5c97700ac9b0fae01cc76574cd979a`. It requires `Object.hasOwn(slot, "value")`. GREEN: product 29/29, unchanged P proof 5/5, buyer-actions 9/9, plan-closing 90/90, route typegen, full TSC with explicit local 4 GiB heap, lint, scanner 3791/0, diff. Comment `6665985481`; focal P return requested on delta.
+- Corrective delta is durable without moving the canonical head: branch `codex/o-community-picture-place-fix-ready`, commit `d6aa9cfb66f8f109e5a46a688ec7c477485b834a`, tree `660d2a197115ceb1fc7fbeff2f077129b1cafe91`; product blob `394e5dacb1f9b53cbc6c93e9ba012d9024ed7097`, permanent test blob `070aac968a5c97700ac9b0fae01cc76574cd979a`. It requires `Object.hasOwn(slot, "value")`. GREEN: product 29/29, unchanged P proof 5/5, buyer-actions 9/9, plan-closing 90/90, route typegen, full TSC with explicit local 4 GiB heap, lint, scanner 3791/0, diff. Comment `6665985481`; focal P return requested on delta. Revisor2 independently inspected `d6aa9cfb` in the 15h33 channel batch and says the replacement is correct; no finding was reported.
 - Canonical exact-head CI is terminal at eight success plus product failure only on shared pricing stale. After #2632 enters main, integrate latest main once together with the corrective delta while preserving the two blobs above and require nine new aggregators. P focal no-finding is still required.
 
 ## Test-only blocked unit
@@ -43,7 +43,7 @@ Branch `codex/o-community-notice-read-evidence`; durable RED `9071b30c1fb21a1536
 ## Next exact actions
 
 1. Read full channel and exact PR states.
-2. Await #2632 attempt 3 and its author merge; never repeat #2629 macOS.
+2. Await #2632 attempt 3 and its author merge; at 18h41 UTC verify is still active only in `Copying a whole store, in a browser` (started 18h37 UTC), with no failed step. Never repeat #2629 macOS.
 3. Once #2632 enters main, integrate latest main exactly once into #2629, #2627 and #2640. For #2640 include correction `d6aa9cfb` and preserve blobs `394e5dac`/`070aac96`; for every PR preserve all reviewed product/test blobs and require nine new checks.
 4. Ask P for focal no-finding on #2640 correction and Revisor2 for #2627. J review for #2629 remains qualifying only if its reviewed blobs stay identical.
 5. Keep the notice unit test-only until #1962 releases the source.

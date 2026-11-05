@@ -312,12 +312,16 @@ export type ClosingNews = {
   buyersBy: number | null;
   /** Addresses the store's closing emails did not cover: the creator is asked to tell them. */
   untold: number;
-  members: number;
-  /** "$120 and €40", or "" for none. */
+  /** Members who paid for time past the day, or null when that could not be read (the notice then says so, never "none"). */
+  members: number | null;
+  /** "$120 and €40", or "" for none or for a count that could not be read. */
   unused: string;
-  /** Members whose charges could not be paused yet (tried again every day), and those past the closing's limit (not paused). */
-  notHeld?: number;
-  overLimit?: number;
+  /**
+   * Members whose charges could not be paused yet (tried again every day), and those past the closing's limit (not paused).
+   * Null when the hold could not be read: the notice then says it could not be checked, never that every one is paused.
+   */
+  notHeld?: number | null;
+  overLimit?: number | null;
   /** Its payments were not all read within the closing's cap: some buyers may not be told. */
   capped?: boolean;
 };
@@ -344,14 +348,27 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
       ]
     : [];
   const unpaused = (news?.notHeld ?? 0) + (news?.overLimit ?? 0);
-  const holds = unpaused > 0
+  const holds = news && (news.notHeld === null || news.overLimit === null)
+    ? [
+        "We could not check just now whether every membership's payments are paused.",
+        `Every membership ends on ${dateWords(day)}. If a member is charged before then, please refund them from Stripe.`,
+        "",
+      ]
+    : unpaused > 0
     ? [
         `${unpaused} ${unpaused === 1 ? "membership's payments are" : "memberships' payments are"} not paused${news?.notHeld ? " yet: we try again every day" : ""}${news?.overLimit ? `${news?.notHeld ? ", and some are" : ":"} past this closing's limit` : ""}.`,
         `Every one of them ends on ${dateWords(day)}. If a member is charged before then, please refund them from Stripe.`,
         "",
       ]
     : [];
-  const members = news && news.members > 0 && news.unused
+  const members = news && news.members === null
+    ? [
+        `We could not check just now which members paid for time after ${dateWords(day)}.`,
+        `On ${dateWords(day)} each of them is given back the unused part of their last payment, from your own`,
+        "Stripe account, if its balance covers it. Marktmorgen never pays it and never takes it.",
+        "",
+      ]
+    : news && news.members !== null && news.members > 0 && news.unused
     ? [
         `${news.members} ${news.members === 1 ? "member has" : "members have"} paid for time after ${dateWords(day)}: ${news.unused} in all.`,
         `On ${dateWords(day)} each is given back the unused part of their last payment, from your own`,
@@ -414,18 +431,65 @@ export function closingLetter(kind: "ended" | "month" | "week", name: string, en
   };
 }
 
-/** What a closing store's notice says of its buyers and members today, read from what was written down (no call to Stripe). */
+/** A count as written down: a whole number, never below zero. */
+const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+/**
+ * The hold's counts as `holdCounts` answers them, or null when the answer is
+ * not two counts. Null is said as "could not be checked", never as nothing
+ * left unpaused.
+ */
+export function readHoldCounts(value: unknown): { failed: number; over: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const { failed, over } = value as { failed?: unknown; over?: unknown };
+  return isCount(failed) && isCount(over) ? { failed, over } : null;
+}
+
+/**
+ * What members paid for past the day, as `unusedSummary` answers it, with its
+ * totals written as money; null when the answer is not a count with one
+ * total per currency to go with it (members but no total, a total but no
+ * members, an amount that is not money). Null is said as "could not be
+ * checked", never as no member at all.
+ */
+export function readUnusedSummary(value: unknown): { members: number; unused: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const { members, totals } = value as { members?: unknown; totals?: unknown };
+  if (!isCount(members) || !Array.isArray(totals)) return null;
+  const money = totals.every((t) => t && typeof t === "object" && typeof (t as { cur?: unknown }).cur === "string" && /^[a-z]{3}$/i.test((t as { cur: string }).cur) && isCount((t as { amount?: unknown }).amount) && (t as { amount: number }).amount > 0);
+  if (!money || (members > 0) !== (totals.length > 0)) return null;
+  try {
+    return { members, unused: (totals as { cur: string; amount: number }[]).map((t) => formatMoney(t.amount, t.cur)).join(" and ") };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a closing store's notice says of its buyers and members today, read
+ * from what was written down (no call to Stripe). A read that fails or
+ * answers in a shape we do not expect is carried as null, which the notice
+ * says it could not check: an unknown is never written as none.
+ */
 export async function closingNews(store: Store, endedAt: number, day: number, untold: number, capped = false): Promise<ClosingNews> {
-  const summary = await unusedSummary(store, day).catch(() => ({ members: 0, totals: [] as { cur: string; amount: number }[] }));
-  const counts = await holdCounts(await storeFolder(storeRef(store))).catch(() => ({ failed: 0, over: 0 }));
+  const summary = await unusedSummary(store, day).then(readUnusedSummary, (error) => {
+    console.error("plan-closing: the members who paid past a closing store's day could not be read for its notice", error);
+    return null;
+  });
+  const counts = await storeFolder(storeRef(store))
+    .then(holdCounts)
+    .then(readHoldCounts, (error) => {
+      console.error("plan-closing: a closing store's paused memberships could not be read for its notice", error);
+      return null;
+    });
   return {
-    notHeld: counts.failed,
-    overLimit: counts.over,
+    notHeld: counts ? counts.failed : null,
+    overLimit: counts ? counts.over : null,
     capped,
     buyersBy: tellsBuyers(endedAt) ? day - BUYER_NOTICE_DAYS * DAY_MS : null,
     untold,
-    members: summary.members,
-    unused: summary.totals.map((t) => formatMoney(t.amount, t.cur)).join(" and "),
+    members: summary ? summary.members : null,
+    unused: summary ? summary.unused : "",
   };
 }
 

@@ -18,7 +18,7 @@ for (const [label, blank, newline] of [
 ] as const) {
   test(`${label}: a later reservation remains enforced through the real conflict checker`, () => {
     const text = [...reservationHeading, first, blank, second].join(newline);
-    assert.deepEqual(reservations(text, "codex").map((r: { file: string }) => r.file), ["lib/first.ts", "lib/second.ts"]);
+    assert.deepEqual(reservations(text).map((r: { file: string }) => r.file), ["lib/first.ts", "lib/second.ts"]);
     const result = conflicts({ text: denseLanes, branch: "claude3/probe", changed: ["lib/second.ts"], agentFiles: ownFile(text) });
     assert.equal(result.me, "claude 3");
     assert.deepEqual(result.found.map((r: { file: string }) => r.file), ["lib/second.ts"]);
@@ -34,7 +34,7 @@ for (const [label, blank, newline] of [
 for (const boundary of ["## A different section", "This is prose outside the table."]) {
   test(`reservations stop at ${boundary} even after internal blank lines`, () => {
     const text = [...reservationHeading, first, "", boundary, "", "| Agent | Item | Branch | Files | Since |", "| --- | --- | --- | --- | --- |", second].join("\n");
-    assert.deepEqual(reservations(text, "codex").map((r: { file: string }) => r.file), ["lib/first.ts"]);
+    assert.deepEqual(reservations(text).map((r: { file: string }) => r.file), ["lib/first.ts"]);
   });
   test(`lanes stop at ${boundary} without consuming a later table`, () => {
     const text = [...laneHeading, laneRows[0], "", boundary, "", "| Agent | Prefix | Lane |", "| --- | --- | --- |", laneRows[2]].join("\n");

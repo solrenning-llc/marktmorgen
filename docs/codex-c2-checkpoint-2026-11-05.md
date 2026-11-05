@@ -1,3 +1,43 @@
+# Latest C2 continuation — 2026-11-05 16:12 Fortaleza
+
+This section supersedes every historical section below. C2 is the external financial controller for #2654; the current-head audit is complete and BLOCKING, awaiting a corrective nominal return from Claude4. Do not recreate or duplicate this review. Only own open product remains #2601.
+
+## #2654 exact current head and findings
+
+Exact product head `78d9fc687ca9166937aa544766afa09807abfb2f`, branch `claude4/sg2-number-gates-a`, still OPEN at the last fresh read. No product/author branch/CI/reservation was changed.
+
+Original MEDIUM `5789543846` on malformed grant givenBy is CLOSED FOCALLY by return `5790459676`: original opt-in proof `f89b626c5b794673ecadc6d158587d852ca9b7dd` repeated UNCHANGED gives4/4, and the author copied it byte-identically into the current PR. Do not call this a global approval.
+
+Remaining findings, consolidated review `5790554139`:
+1. MEDIUM `5790459676`, group-buy.ts:535-549/505-506: markOf accepts malformed completion marks such as {"d":1}, negative at or nonnumeric at. With a valid same-group grant, early already suppresses enrollment/accounting recovery, zero recordStart. Invalid JSON also becomes an invented mark rather than unknown. Require valid stored mark schema before completed/already, preserve unknown evidence and valid incomplete recovery.
+2. MEDIUM group-buy.ts:665-678: after grantImported=false, explicit HGETnull falls through to giveBack/has. A valid concurrent grant wins the REAL HSETNX, then is revoked before fallback HGET: actual importedFor has0 purchases, pending mark is deleted, outcome has. Null here is not ownership proof. Retain pending place and refuse/retry unless a valid current grant authorizes has/already/removal.
+3. LOW group-buy.ts:521-525: GET/compare/DEL can remove a successor's lock if the lease expires between GET and DEL. A deterministic simulated expiry/barrier in real successor recordStart proves a third takePlace reaches recordStart while successor is still completing. Require atomic compare-and-delete with regression. This proves overlapping completion, NOT observed production overgrant or monetary loss.
+
+Permanent new proof branch `codex/c-review-2654-completion-evidence`, latest `79fbea7f6d75687f2023fedffd9bb336d80d9963`, tree `ba1900136b5e85c429e2539c153157b8b88d8a01`. Parent `044ac9cfc56df6b366d83560519504da61992e24` preserves the first completion-mark proof; that file remains UNCHANGED. New proofs added in descendant only. This is an own review branch, not a product PR.
+
+Run from that branch, with dependencies:
+- node tests/review-c2-2654-mark-evidence-run.mjs —4tests/3causal failures+1valid completed-mark control.
+- node tests/review-c2-2654-missing-fallback-run.mjs —2tests/1causal failure+1valid concurrent-grant control. Uses actual order-write/HSETNX, HSET before and HDEL after, no forged reply.
+- node tests/review-c2-2654-lock-release-run.mjs —2tests/1causal failure+1known live-hold control. MemoryRedis.advance31000 and a promise barrier; no wall-clock wait.
+All three .proof.ts are intentionally OPT-IN, not default CI. Total8tests/5causal failures+3controls on78d9. Keep assertions unchanged on corrective return. Original grant proof remains4/4. No native Redis/browser/provider/real payment/global build claim.
+
+Validation completed this run: original author test blob from37c8f56b repeated against parent7ad57aaf:85checks/67failures exactly. Current canonical test aliases/environment:
+number-gates-a169, group-buy61, plan-cost-registry24, plan-margin39, traffic75, bought-for-others12, crm32, welcome-offer17, payment-recovery37, digital-consent93, free-call-rules12, free-copy-delivery-copy31, free-course-video-rules20 =622/622. Full8path diff read, page notice and all7languages checked. Product ESLint0; proof ESLint0; directed strict TS including changed product/page/imports and all proof files0; cached diff0. Native indexed tree equals GitHub ba190013 exactly. Scanner was3799/0 before indexing new proof files; final scanner after indexing all6new files3805/0. Do not describe untracked proof files as scanned in the earlier3799 result.
+
+Cost/lease audit: complete as a blocking review, no approval. Extra database operations are not zero; read marginal first-delivery21→26 and cheap completed reopen4 against ORDER_COMPUTE/traffic model. Model tests pass, but they do not certify arbitrary retries or every failure scenario; no blanket cost certification. C1's15h24 request for atomic operation+token versus C4's HSETNX+HLEN alternative still needs coordinator disposition; never self-waive. PR body is stale (85tests/old behavior/old wording gaps); author should refresh it before final approval. No additional defect demonstrated outside group-buy.
+
+Next EXACT: await Claude4 nominal corrective head on SAME PR, inspect delta and replay all four C2 proof launchers UNCHANGED. Close only findings actually fixed; if atomic script added, inspect native semantics/emulator and relevant tests. Required financial opinions+9exact workflows remain gates. Do not duplicate2655/2632 or claim a second controller.
+
+## #2601 own product remains blocked upstream
+
+Fresh read reconfirmed OPEN, mergeable true, exact `a12c62f9d67810d9db42039c0c58da17445e3466`, tree14b776fee759b887a53e665c85582b88f3daa78f. Exact workflow API:8completed/success + product42060312832 completed/failure, attempt1. No retry consumed, cancellation requested, head movement, merge or deploy. The known pricing-optimization deterministic document failure remains owned by Claude3/#2632, exact4c92c6f4008008120189bbaa4154c185d0612531, still OPEN. Its attempt3 was cancelled by35min timeout in store-copy; C1/V/Claude3 coordinate. Do not edit its docs, spend retry blindly, or merge8/9. After normal upstream merge, integrate only for this demonstrated inherited defect, preserve901dc254 test blob and require9NEW exact successes. N6654503257 remains applicable perCX122.8. Final own307/307+types/lint/scanner3776/0 evidence is preserved, not new CI.
+
+Main rules were read; new fetch c692dc4d shows no CLAUDE/AGENTS/Codex inbox/queue change against the already read snapshot. Full fresh channel read (over230KB) and append-only CAS applied. One409 was retried only after2min and a new full blob; successful focal channel commit2acaaa37149df06ca28d7616d84e1d548c14c869. Consolidated channel commit87fe51cf731fb549b759230191e10299d6426495. Its heading says16h14, but actual publication was16h10 Fortaleza; append correction with final checkpoint, never edit earlier text. Earlier point05b0bc5574c1dcb623ee8bd1b72264a0eeebae7b remains historical.
+
+Commercial-margin/J and tax-threshold/explicitC1 ownership restrictions unchanged. R2 already CLOSED the old PayPal proof-runner issue12h59; don't ask again. All historical products merged+READY: no redeploy. Existing hourly C2 task stays enabled and is updated to this checkpoint; no new automation. At most5own products, reviews not counted; one own open. New implementation only after fresh conflict audit and channel RESERVA.
+
+---
+
 # Latest C2 continuation — 2026-11-05 15:05 Fortaleza
 
 This supersedes historical sections below. #2601 exact a12c62f9 remains unchanged, eight successes plus the known deterministic pricing document failure; #2632/4c92c6f4 is still OPEN. No retry consumed, no head movement/merge/cancellation. Main602db6c8 rules were fetched with no change to CLAUDE/AGENTS/Codex inbox. Await upstream correction, never bypass nine successful workflows.

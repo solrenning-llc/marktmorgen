@@ -339,23 +339,22 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     if (snapshot.dealIds.size + deals.length > MAX_DEALS) return refuse("too_many", tooManyDealsSentence(deals.length, MAX_DEALS - snapshot.dealIds.size));
     if (!held) return { ok: true, summary };
 
-    // The room first, then the month's rows; nothing is written until both are taken.
-    const room = importRoom(snapshot.raw, pipelines, deals);
-    await needData(store, room.take);
+    // The month's rows first, then the room: the room's work for each deal is done only for rows the month still has,
+    // so a file refused for the month costs nothing per deal (Codex J on #2048). Nothing is written until both are taken.
     const rows = await takeImportRows(store, file.rows.length, now, options.bytes ?? 0);
     if (!rows.ok) {
-      // Nothing was written: the room goes back. A failure to give it back leaves it counted (more, never less) and is logged.
-      await giveData(store, room.back).catch((error: unknown) => console.error("giving back a HubSpot import's room failed", error));
       if (rows.reason === "unavailable") return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
       return refuse("rows_month", `Your store can bring in ${rowsWords(rows.limit)} a month from files, and this file would go past that. Nothing was brought in. Bring it in when your next billing month starts, or bring in a smaller file.`, rows.limit);
     }
     counted = rows.counted;
+    const room = importRoom(snapshot.raw, pipelines, deals);
+    await needData(store, room.take);
     await writeImport(statsId, held, snapshot.raw, pipelines, deals, store);
     counted = 0;
     return { ok: true, summary: { ...summary, written: true } };
   } catch (error) {
     // The month's rows go back only when the step surely wrote nothing; unconfirmed, they stay counted, as the room does.
-    if (counted && (error instanceof CrmSchemaConflict || error instanceof CrmDealsFull || error instanceof CrmLockLost || error instanceof LockBusyError)) await giveImportRows(store, counted, now).catch(() => undefined);
+    if (counted && (error instanceof CrmSchemaConflict || error instanceof CrmDealsFull || error instanceof CrmLockLost || error instanceof LockBusyError || error instanceof DataRoomError)) await giveImportRows(store, counted, now).catch(() => undefined);
     if (error instanceof LockBusyError) return refuse("busy", HUBSPOT_IMPORT_WORDS.busy);
     if (error instanceof CrmLockLost) return refuse("lock_lost", HUBSPOT_IMPORT_WORDS.lock_lost);
     if (error instanceof DataRoomError) return refuse("store_full", error.message);

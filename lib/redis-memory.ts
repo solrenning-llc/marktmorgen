@@ -354,13 +354,15 @@ export class MemoryRedis {
           this.run(["ZADD", queue, score, next]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
-          const target = args[1];
+        if (key.startsWith("-- marktmorgen:crm-pipelines-save:v3\n") && args[0] === "2" && args.length === 6) {
+          const [, target, lock, expected, record, token] = args;
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
-          if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
-          this.data.set(target, args[3]);
+          const length = held === undefined ? [] : [new TextEncoder().encode(held).length];
+          if (this.run(["GET", lock]) !== token) return [-2, ...length];
+          if ((held ?? "") !== expected) return [-1, ...length];
+          this.data.set(target, record);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {

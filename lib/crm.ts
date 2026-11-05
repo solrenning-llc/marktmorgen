@@ -254,9 +254,21 @@ async function dealSnapshot(statsId: string): Promise<{ id: string; before: stri
   return out;
 }
 
-/** Saves the pipelines only over the exact record read before (one key, compare and set): a concurrent change is never overwritten. */
-export const SAVE_CRM_PIPELINES = `-- marktmorgen:crm-pipelines-save:v2
+/**
+ * Saves the pipelines only while the store's CRM lock KEYS[2] is still the
+ * change's own (ARGV[3]) and only over the exact record read before: a
+ * concurrent change is never overwritten, and a change whose lock ran out
+ * writes nothing, in the same step as the write (Codex J on #2048: a check
+ * before the script left an import room to land a deal in a stage this then
+ * removed). {-2, length} when the lock is not ours, {-1, length} when the
+ * record changed, the length of what is kept now (none without a record).
+ */
+export const SAVE_CRM_PIPELINES = `-- marktmorgen:crm-pipelines-save:v3
 local current = redis.call("GET", KEYS[1])
+if redis.call("GET", KEYS[2]) ~= ARGV[3] then
+  if current then return {-2, string.len(current)} end
+  return {-2}
+end
 if (current or "") ~= ARGV[1] then
   if current then return {-1, string.len(current)} end
   return {-1}
@@ -279,9 +291,16 @@ async function writePipelines(statsId: string, held: Held, snapshotRaw: string, 
   await needData(room, [{ slot: PIPES_SLOT, bytes: dataBytes([record], 1), set: true }]);
   let saved: unknown;
   try {
-    saved = await redisPipeline([["EVAL", SAVE_CRM_PIPELINES, 1, pipesKey(statsId), snapshotRaw, record]]);
+    saved = await redisPipeline([["EVAL", SAVE_CRM_PIPELINES, 2, pipesKey(statsId), held.key, snapshotRaw, record, held.token]]);
   } catch { throw new CrmSchemaWriteUnconfirmed(); }
-  const lost = changedLength(Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined);
+  const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
+  const unheld = changedLength(answer, -2);
+  if (unheld !== undefined) {
+    // The lock was not ours when the write ran: nothing was written, the room goes back to what is kept now.
+    await giveData(room, [{ slot: PIPES_SLOT, bytes: unheld === null ? 0 : dataBytesOfLength(unheld, 1), set: true }]).catch(() => {});
+    throw new CrmLockLost();
+  }
+  const lost = changedLength(answer);
   if (lost !== undefined) {
     // Nothing was written: the room goes back to what the record kept there now weighs, as the script measured it in
     // the same step (the write that changed it meanwhile sized the room to itself, never to the snapshot read here).
@@ -336,8 +355,8 @@ async function changePipelines(statsId: string, held: Held, change: { pipeline?:
  * A compare-and-set script's "changed" answer (SAVE_CRM_PIPELINES, MOVE_CRM_DEAL): the UTF-8 length of the record
  * there now, null when there is none, undefined for any other answer.
  */
-function changedLength(answer: unknown): number | null | undefined {
-  if (!Array.isArray(answer) || answer[0] !== -1) return undefined;
+function changedLength(answer: unknown, code: -1 | -2 = -1): number | null | undefined {
+  if (!Array.isArray(answer) || answer[0] !== code) return undefined;
   if (answer.length === 1) return null;
   return answer.length === 2 && Number.isSafeInteger(answer[1]) && answer[1] >= 0 ? answer[1] : undefined;
 }
@@ -623,11 +642,11 @@ export class CrmDealsFull extends Error {
  *   KEYS: deals hash, pipelines record, first pipeline's stages copy
  *   ARGV: expected pipelines, new pipelines or "", stages copy, ceiling, then id, deal pairs
  */
-export const IMPORT_CRM_DEALS = `-- marktmorgen:crm-deals-import:v2
+export const IMPORT_CRM_DEALS = `-- marktmorgen:crm-deals-import:v3
 local current = redis.call("GET", KEYS[2]) or ""
-local n = (#ARGV - 4) / 2
+local n = (#ARGV - 5) / 2
 local taken = {}
-for i = 5, #ARGV, 2 do
+for i = 6, #ARGV, 2 do
   local there = redis.call("HGET", KEYS[1], ARGV[i])
   if there then
     taken[#taken + 1] = ARGV[i]
@@ -639,6 +658,7 @@ local function refused(code)
   for _, value in ipairs(taken) do reply[#reply + 1] = value end
   return reply
 end
+if redis.call("GET", KEYS[4]) ~= ARGV[5] then return refused(-4) end
 if current ~= ARGV[1] then return refused(-1) end
 if #taken > 0 then return refused(-2) end
 if redis.call("HLEN", KEYS[1]) + n > tonumber(ARGV[4]) then return refused(-3) end
@@ -646,16 +666,16 @@ if ARGV[2] ~= "" then
   redis.call("SET", KEYS[2], ARGV[2])
   redis.call("SET", KEYS[3], ARGV[3])
 end
-for i = 5, #ARGV, 2 do redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1]) end
+for i = 6, #ARGV, 2 do redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1]) end
 return {n}`;
 
 /** What IMPORT_CRM_DEALS answered: written, or refused with what is kept now; null when the answer is not one of those. */
-function importReply(reply: unknown, sent: number): { written: true } | { written: false; code: -1 | -2 | -3; current: string; there: Map<string, string> } | null {
+function importReply(reply: unknown, sent: number): { written: true } | { written: false; code: -1 | -2 | -3 | -4; current: string; there: Map<string, string> } | null {
   if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) return null;
   const answer: unknown[] = reply[0];
   if (answer.length === 1 && answer[0] === sent) return { written: true };
   const [code, current, ...pairs] = answer;
-  if ((code !== -1 && code !== -2 && code !== -3) || typeof current !== "string" || pairs.length % 2 !== 0) return null;
+  if ((code !== -1 && code !== -2 && code !== -3 && code !== -4) || typeof current !== "string" || pairs.length % 2 !== 0) return null;
   const there = new Map<string, string>();
   for (let i = 0; i < pairs.length; i += 2) {
     if (typeof pairs[i] !== "string" || typeof pairs[i + 1] !== "string") return null;
@@ -685,8 +705,8 @@ export async function writeImport(statsId: string, held: Held, snapshotRaw: stri
   let reply: unknown;
   try {
     reply = await redisPipeline([[
-      "EVAL", IMPORT_CRM_DEALS, 3, dealsKey(statsId), pipesKey(statsId), stagesKey(statsId),
-      snapshotRaw, pipelines ? JSON.stringify(pipelines) : "", pipelines ? JSON.stringify(pipelines[0].stages) : "", MAX_DEALS,
+      "EVAL", IMPORT_CRM_DEALS, 4, dealsKey(statsId), pipesKey(statsId), stagesKey(statsId), held.key,
+      snapshotRaw, pipelines ? JSON.stringify(pipelines) : "", pipelines ? JSON.stringify(pipelines[0].stages) : "", MAX_DEALS, held.token,
       ...deals.flatMap((deal) => [deal.id, JSON.stringify(deal)]),
     ]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
@@ -704,7 +724,7 @@ export async function writeImport(statsId: string, held: Held, snapshotRaw: stri
   } catch {
     // The room is put right as far as it can be; nothing was written either way.
   }
-  throw answer.code === -3 ? new CrmDealsFull() : new CrmSchemaConflict();
+  throw answer.code === -3 ? new CrmDealsFull() : answer.code === -4 ? new CrmLockLost() : new CrmSchemaConflict();
 }
 
 /** The title and note of these deals as saved, by id (empty for one that is not there or cannot be read): what an import checks a deal it would bring in again against. */

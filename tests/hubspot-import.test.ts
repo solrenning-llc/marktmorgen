@@ -61,14 +61,15 @@ async function paidStore(handle: string): Promise<{ store: Store; owner: string;
 
 /**
  * IMPORT_CRM_DEALS (lib/crm.ts) as Redis runs it, for the in-memory store this test uses: its own shim, so
- * lib/redis-memory.ts stays as it is on main. All or nothing: -1 when the pipelines changed, -2 when an id is
- * taken (with each one there), -3 past the ceiling; otherwise the pipelines (when sent) and every deal.
+ * lib/redis-memory.ts stays as it is on main. All or nothing: -4 when the CRM lock is not the import's own, -1
+ * when the pipelines changed, -2 when an id is taken (with each one there), -3 past the ceiling; otherwise the
+ * pipelines (when sent) and every deal.
  */
 function runDealsImportLikeRedis(): void {
   const plain = redis.pipeline.bind(redis);
-  const isImport = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]) === IMPORT_CRM_DEALS && c[2] === 3 && c.length >= 10 && (c.length - 10) % 2 === 0;
+  const isImport = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]) === IMPORT_CRM_DEALS && c[2] === 4 && c.length >= 12 && (c.length - 12) % 2 === 0;
   const run = async (c: (string | number)[]): Promise<unknown> => {
-    const [deals, pipes, stages, expected, next, copy, max, ...pairs] = c.slice(3).map(String);
+    const [deals, pipes, stages, lock, expected, next, copy, max, token, ...pairs] = c.slice(3).map(String);
     const [held] = await plain([["GET", pipes]]);
     const current = typeof held === "string" ? held : "";
     const ids = pairs.filter((_, i) => i % 2 === 0);
@@ -77,6 +78,9 @@ function runDealsImportLikeRedis(): void {
       const [there] = await plain([["HGET", deals, id]]);
       if (typeof there === "string") taken.push(id, there);
     }
+    // Only while the store's CRM lock is still the import's own, in the same step as the write (Codex J on #2048).
+    const [owner] = await plain([["GET", lock]]);
+    if (owner !== token) return [-4, current, ...taken];
     if (current !== expected) return [-1, current, ...taken];
     if (taken.length) return [-2, current, ...taken];
     const [size] = await plain([["HLEN", deals]]);
@@ -473,6 +477,48 @@ async function main(): Promise<void> {
   const nobody = await call({ action: "save", ...first }, "");
   is("no session is refused", [nobody.status, nobody.body.error], [401, "signed_out"]);
   is("nothing written by any of them", await dealCount(statsId), 11);
+
+  part("Codex J on #2048: a pipeline write is fenced by its lock in the same step, even after the lock ran out");
+  const leaseStore = await paidStore("jhublease");
+  const leaseId = leaseStore.store.statsId!;
+  await importHubSpotDeals(leaseStore.store, {header:HEADER, rows:[row("jold", "Old deal", "Offer sent", "Sales")]}, {write:true});
+  const [leasePipe] = await readPipelines(leaseId);
+  const leaseOffer = leasePipe.stages.find(s=>s.name==="Offer sent")!;
+  const leaseTalk = leasePipe.stages.find(s=>s.name==="Talking")!;
+  let leaseRaced=false;
+  let leaseImported:HubSpotImportResult|null=null;
+  try{
+    redis.pipeline=async commands=>{
+      if(!leaseRaced && commands.some(c=>c[0]==="EVAL" && String(c[1]).includes("crm-pipelines-save"))){
+        leaseRaced=true;
+        redis.advance(61_000);
+        leaseImported=await importHubSpotDeals(leaseStore.store,{header:HEADER, rows:[row("jnew", "Fresh deal", "Offer sent", "Sales")]},{write:true});
+      }
+      return original(commands);
+    };
+    await savePipelineChange(leaseId,{pipeline:{...leasePipe,stages:leasePipe.stages.filter(s=>s.id!==leaseOffer.id)}},{[leaseOffer.id]:leaseTalk.id},2,leaseStore.store).catch(error=>console.log("Old writer refused",error.name));
+  }finally{redis.pipeline=original;}
+  const leasePipes=await readPipelines(leaseId);
+  const leaseRaw=(await redis.pipeline([["HGET", "nl:crm:deals:"+leaseId,hubSpotDealId("jnew")]]))[0];
+  console.log("Codex J lease reproduction",JSON.stringify({raced:leaseRaced,imported:leaseImported,pipelines:leasePipes,raw:leaseRaw}));
+  is("lease race was exercised and no newly imported deal is orphaned",[leaseRaced,(await readOpportunityReview(leaseId)).available],[true,true]);
+
+
+  part("Codex J on #2048: a file refused for the month does no per-deal room work");
+  const exhausted = await paidStore("jhubcost");
+  await takeImportRows(exhausted.store,IMPORT_ALLOWANCES.creator.rows);
+  const observed:(string|number)[][]=[];
+  let refusedCost:{status:number;body:{error?:string}};
+  try{
+    redis.pipeline=async commands=>{observed.push(...commands.map(c=>[...c]));return original(commands);};
+    refusedCost=await call({action:"save",header:HEADER,currency:"usd",rows:Array.from({length:1000},(_,i)=>row(String(i+1),"Deal "+i,"New","Sales"))},exhausted.session);
+  }finally{redis.pipeline=original;}
+  const slotCounts=observed.filter(c=>c[0]==="EVAL" && String(c[1]).includes("marktmorgen:store-data:v1")).map(c=>(c.length-7)/3);
+  const billedLowerBound=observed.length+slotCounts.reduce((n,slots)=>n+3+2*slots,0);
+  const exhaustedRows=(await original([["GET",`nl:imports:rows:${exhausted.store.sid}:${windowId(exhausted.store,Date.now())}`]]))[0];
+  console.log("Codex J exhausted quota reproduction",JSON.stringify({status:refusedCost.status,error:refusedCost.body.error,wire:observed.length,slotCounts,billedLowerBound,rows:exhaustedRows}));
+  is("refused file consumes no per-deal data-room writes after rows were already exhausted",[refusedCost.status,slotCounts.every(n=>n===0)],[429,true]);
+
 
   done();
 }

@@ -201,7 +201,7 @@ export default async function BlogPostPage({
             <dl className="mt-5 space-y-5">{post.faq.map(item=><div key={item.q}><dt className="font-semibold text-ink">{item.q}</dt><dd className="mt-2 leading-relaxed text-ink-soft">{item.a}</dd></div>)}</dl>
           </section> : null}
 
-          {post.faq?.length ? <nav aria-label="More creator guides" className="mt-10"><h2 className="t-h3">Continue with the next kind of offer</h2><ul className="mt-4 space-y-2">{CREATOR_GUIDE_SLUGS.filter(slug=>slug!==post.slug).map(slug=><li key={slug}><Link href={"/blog/"+slug} prefetch={false} className="link inline-flex min-h-11 items-center">{postBySlug(slug)!.title}</Link></li>)}</ul></nav> : null}
+          {CREATOR_GUIDE_SLUGS.some(slug=>slug===post.slug) ? <nav aria-label="More creator guides" className="mt-10"><h2 className="t-h3">Continue with the next kind of offer</h2><ul className="mt-4 space-y-2">{CREATOR_GUIDE_SLUGS.filter(slug=>slug!==post.slug).map(slug=><li key={slug}><Link href={"/blog/"+slug} prefetch={false} className="link inline-flex min-h-11 items-center">{postBySlug(slug)!.title}</Link></li>)}</ul></nav> : null}
           <ShareRow url={`${SITE_URL}/blog/${post.slug}`} title={post.title} />
 
           <aside className="surface-night on-dark mt-16 overflow-hidden rounded-[var(--r-xl)] p-8 sm:p-10">

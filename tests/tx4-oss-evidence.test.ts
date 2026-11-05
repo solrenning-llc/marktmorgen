@@ -19,7 +19,7 @@ test('TX4 OSS evidence distinguishes official guidance, legal access gaps and co
  assert.match(text,/EUR-Lex.*anti-bot/i);
  assert.match(text,/não comprova.*enquadramento.*LLC/i);
  assert.match(text,/opcional.*não dispensa.*IVA/i);
- assert.match(text,/não União.*Union OSS.*IOSS/s);
+ assert.match(text,/não União[\s\S]*Union OSS[\s\S]*IOSS/);
 });
 
 test('TX4 OSS evidence preserves recurring returns, deadlines, currency and long-tail record costs',()=>{
@@ -35,7 +35,7 @@ test('TX4 OSS evidence never turns unpriced compliance into a zero fixed cost or
  assert.ok(line);assert.equal(line.fullMonthlyUsdCents,null);assert.equal(line.fullAnnualUsdCents,null);assert.equal(line.reserveReviewed,false);
  assert.deepEqual([LLC_FIXED_COST_ALLOCATION.marktmorgenBps,LLC_FIXED_COST_ALLOCATION.hazelsongBps],[10000,0]);
  for(const fact of ['vat-oss-and-local-compliance','desconhecido','orçamento','câmbio','armazenamento','após o encerramento','Depende do dono'])assert.ok(text.includes(fact),fact);
- assert.match(text,/nenhum cadastro.*submissão.*pagamento.*contato/s);
+ assert.match(text,/nenhum cadastro[\s\S]*submissão[\s\S]*pagamento[\s\S]*contato/);
  assert.match(text,/100%.*Marktmorgen/);
  assert.doesNotMatch(text,/(?:US\$|USD|€|EUR)\s*0(?:[,.]0+)?\b/i);
 });

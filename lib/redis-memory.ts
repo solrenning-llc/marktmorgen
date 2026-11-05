@@ -861,6 +861,14 @@ export class MemoryRedis {
         const held = this.data.get(key);
         return typeof held === "string" ? Buffer.byteLength(held, "utf8") : 0;
       }
+      case "APPEND": {
+        // APPEND key value: the value added at the end of the string (made when there is none); answers the new length.
+        const held = this.data.get(key);
+        if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+        const next = (held ?? "") + args[0];
+        this.data.set(key, next);
+        return Buffer.byteLength(next, "utf8");
+      }
       case "ZSCAN": {
         // ZSCAN key cursor [COUNT n]: everything at once, member and score, the cursor back at "0", as HSCAN does.
         const flat: string[] = [];

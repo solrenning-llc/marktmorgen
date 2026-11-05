@@ -7,17 +7,14 @@
  *      the new address has its own passkeys or two-step login, which it has not.
  * Synthetic only.
  */
-import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
-import { emailForSession, openSession, sendMoveLink } from "@/lib/auth";
+import { openSession, sendMoveLink } from "@/lib/auth";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
-import { claimHandle, storeForEmail } from "@/lib/store";
-import { RESET_DAYS, cancelReset, enterLocked, finishSetup, holdSignIn, lockedUntil, resetIfDue, startSetup, twoStepOn } from "@/lib/two-step";
-import { liveSecondStep } from "@/lib/second-step-gate";
-import { listPasskeys, pendingNow, scheduleRemoval } from "@/lib/passkeys";
+import { claimHandle } from "@/lib/store";
+import { cancelReset, enterLocked, finishSetup, holdSignIn, lockedUntil, startSetup, twoStepOn } from "@/lib/two-step";
+import { listPasskeys } from "@/lib/passkeys";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
-import { makePasskey } from "./passkey-world";
-import { advance, store as redis } from "./redis-stub";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
@@ -42,12 +39,10 @@ const restore = () => {
   redis.pipeline = real;
 };
 const on = (verb: string, prefix: string) => (command: Command) => command[0] === verb && String(command[1]).startsWith(prefix);
-const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const ORIGIN = "https://marktmorgen.com";
 const form = (url: string, fields: Record<string, string>) =>
   new NextRequest(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields) });
 const codeTo = (to: string) => /Your code: (\d{6})/.exec([...mails].reverse().find((m) => m.to === to)?.text ?? "")?.[1] ?? "";
-const lastTo = (to: string) => [...mails].reverse().find((m) => m.to === to);
 
 async function turnOnApp(email: string, session: string, backup: string): Promise<void> {
   const setup = await startSetup(email, session, backup);

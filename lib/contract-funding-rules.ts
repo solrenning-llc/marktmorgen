@@ -7,7 +7,6 @@ import { customerTaxCollectionState, customerTaxContractContextState, customerTa
 import { assessMinimumCustomerBase } from '@/lib/customer-base-rules';
 import { fundedExposureDetails } from '@/lib/funded-exposure-rules';
 import type { CommercialMarginReview, MarginScenario } from '@/lib/commercial-margin';
-import { types as nodeTypes } from 'node:util';
 export const CONTRACT_KEYS=['creator_month','creator_year','pro_month','pro_year','scale_month','scale_year'] as const;
 export type ContractKey=typeof CONTRACT_KEYS[number];
 export const CONTRACT_ADMISSION_COVERAGE={checkout:true,planSwitch:true,pauseRestart:false,resourceAllocations:false,renewals:false,settlementAndReserveReconciliation:false} as const;
@@ -30,13 +29,20 @@ export type ContractFundingContext={termsSnapshot:string;review:CommercialMargin
 export const CURRENT_CONTRACT_FUNDING_POLICY:ContractFundingPolicy|null=null;
 const integer=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
 const bounded=(n:unknown):n is number=>integer(n)&&n<=CONTRACT_FUNDING_RULES.maxInteger;
+const inertProxyDetector:((value:unknown)=>boolean)|null=(()=>{
+ try{
+  if(typeof process==='undefined'||typeof process.getBuiltinModule!=='function')return null;
+  const util=process.getBuiltinModule('node:util');
+  return util?.types?.isProxy??null;
+ }catch{return null;}
+})();
 /** Admit only an inert own-data graph before any financial observation. Node's
- * Proxy detector does not invoke traps, so a wrapper cannot wait for a last
- * traversal and then replace evidence that was already checked. */
+ * Proxy detector is acquired without a static browser import and does not
+ * invoke traps. A runtime without it fails closed before observing the graph. */
 function inertOwnDataGraph(value:unknown,active=new WeakSet<object>(),depth=0):boolean{
  try{
   if(value===null||typeof value==='string'||typeof value==='boolean'||typeof value==='number')return true;
-  if((typeof value!=='object'&&typeof value!=='function')||nodeTypes.isProxy(value))return false;
+  if((typeof value!=='object'&&typeof value!=='function')||!inertProxyDetector||inertProxyDetector(value))return false;
   if(typeof value==='function'||depth>30||active.has(value))return false;
   const proto=Object.getPrototypeOf(value);
   if(!Array.isArray(value)&&proto!==Object.prototype&&proto!==null)return false;

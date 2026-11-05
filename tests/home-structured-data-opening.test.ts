@@ -68,7 +68,7 @@ test("the home FAQ rendered for visitors and its markup agree about availability
   let calls = 0;
   globalThis.fetch = (async () => { calls++; throw new Error("Unexpected network request"); }) as typeof fetch;
   try {
-    const html = render(createElement(Faq, { questions }));
+    const html = render(Faq({ questions }));
     if (!PLANS_ON_SALE) {
       assert.match(html, /Plans are not on sale yet, so selling starts the day they open\./);
       assert.ok(application.description?.includes("paid plans are not on sale yet"));

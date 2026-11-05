@@ -292,9 +292,11 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   // there for the day after.
   const day = `nl:backup:ran:${dayOf(now)}`;
   try {
-    const [, count] = await redisPipeline([["SET", day, "0", "NX", "EX", 2 * 86_400], ["INCRBY", day, 1]]);
-    const runs = Number(count);
-    if (!Number.isSafeInteger(runs) || runs < 1) return (await letGo(), { ok: false, reason: "mark_error" });
+    // Read in its exact shape only (CX-123 rule 24, Codex G's MEDIUM): two replies, the SET's "OK" or null, and
+    // the INCRBY's own integer. Anything else (true, [1], "01", a missing reply) is unknown and lets no run start.
+    const reply: unknown = await redisPipeline([["SET", day, "0", "NX", "EX", 2 * 86_400], ["INCRBY", day, 1]]);
+    const runs = Array.isArray(reply) && reply.length === 2 && (reply[0] === null || reply[0] === "OK") ? reply[1] : undefined;
+    if (typeof runs !== "number" || !Number.isSafeInteger(runs) || runs < 1) return (await letGo(), { ok: false, reason: "mark_error" });
     if (runs > BACKUP_RUNS_PER_DAY) return (await letGo(), { ok: false, reason: "already_ran" });
   } catch {
     await letGo();

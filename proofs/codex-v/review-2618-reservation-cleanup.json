@@ -1,0 +1,504 @@
+{
+  "reviewedHead": "5ad6f63d2a515e63cd917630cb6822366d26b23f",
+  "base": "a4c4ac4def25c3a29c464df8a66be1ada516743e",
+  "author": "Codex V",
+  "date": "2026-11-05",
+  "scope": "Independent documentation cleanup review. No product source or author branch changed.",
+  "diffChecks": [
+    {
+      "path": "docs/reservations/claude4.md",
+      "baseBlob": "0ff7a369781b4748720eab3947199e63946b041b",
+      "headBlob": "5c669b3a4390c54cbaa7dc68617c2110a25655f9",
+      "removedRows": 5,
+      "onlyExactRemovals": true,
+      "retainedLinesUnchanged": true
+    },
+    {
+      "path": "docs/reservations/codex.md",
+      "baseBlob": "839bfb53086ed2ba54f62bd337dd9db163e0d84b",
+      "headBlob": "bbd8ba5847cf256780e5ae4a0f3a561991ffb190",
+      "removedRows": 28,
+      "onlyExactRemovals": true,
+      "retainedLinesUnchanged": true
+    }
+  ],
+  "branchQueries": {
+    "template": "GET /repos/solrenning-llc/marktmorgen/pulls?state=all&per_page=100&head=solrenning-llc:BRANCH",
+    "requests": 33,
+    "perQueryLimit": 100,
+    "allQueriesBelowLimit": true,
+    "allReturnedHeadsExact": true,
+    "allHaveMergedPullRequest": true,
+    "noneHaveOpenPullRequest": true
+  },
+  "branches": [
+    {
+      "branch": "claude4/row-picture-arrival",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2202,
+          "state": "closed",
+          "merged_at": "2026-11-04T18:56:10Z",
+          "head": "bca3f53de6b135ba62abce1238582447764f4844"
+        }
+      ]
+    },
+    {
+      "branch": "claude4/bk1-parts",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2219,
+          "state": "closed",
+          "merged_at": "2026-11-04T19:42:39Z",
+          "head": "e416f1933a9ce70fe8b58cdb4386ae8c290e5104"
+        }
+      ]
+    },
+    {
+      "branch": "claude4/review-lights",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2158,
+          "state": "closed",
+          "merged_at": "2026-11-04T17:55:04Z",
+          "head": "d38f98506150a47c5163ca41c26e2db1202c1d20"
+        }
+      ]
+    },
+    {
+      "branch": "claude4/kj1-demo-lights",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2176,
+          "state": "closed",
+          "merged_at": "2026-11-05T05:57:35Z",
+          "head": "50ec21ec2bb4af5adf36e840da11d1710dc9c488"
+        }
+      ]
+    },
+    {
+      "branch": "claude4/sg1-mm-sa-29",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2524,
+          "state": "closed",
+          "merged_at": "2026-11-05T07:25:56Z",
+          "head": "5ffd265e257c9ee173663ecd20a8d1f794421904"
+        }
+      ]
+    },
+    {
+      "branch": "codex/c-mr2-cost-envelope-proxy",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2410,
+          "state": "closed",
+          "merged_at": "2026-11-05T04:01:15Z",
+          "head": "c9da0b09c3f2f9d12ba91bb53a558de8bf01081b"
+        }
+      ]
+    },
+    {
+      "branch": "codex/c-tx3-sales-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2224,
+          "state": "closed",
+          "merged_at": "2026-11-05T05:37:41Z",
+          "head": "fc471783e3d43ec8a823aaeb0e7dfe6b650fedf0"
+        }
+      ]
+    },
+    {
+      "branch": "codex/i-c79-orders",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2286,
+          "state": "closed",
+          "merged_at": "2026-11-05T04:05:16Z",
+          "head": "2e5f6e73ae93fd50f62267d43ba748eb2dff94fe"
+        }
+      ]
+    },
+    {
+      "branch": "codex/h-dr1-mail-events",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2321,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:24:22Z",
+          "head": "a9630b6403e458fd742c6f5d4efbc7ae05922fe0"
+        }
+      ]
+    },
+    {
+      "branch": "codex/d-tx4-cbe-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2324,
+          "state": "closed",
+          "merged_at": "2026-11-05T06:02:07Z",
+          "head": "c47a36ea785f9f6a1657439ece9065e39908b9ff"
+        }
+      ]
+    },
+    {
+      "branch": "codex/j-mr2-profit-costs",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2351,
+          "state": "closed",
+          "merged_at": "2026-11-05T07:04:57Z",
+          "head": "112709592fc1966c218d4e5afeba61ef0cf8ee83"
+        }
+      ]
+    },
+    {
+      "branch": "codex/k-home-skip-focus",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2345,
+          "state": "closed",
+          "merged_at": "2026-11-05T02:42:49Z",
+          "head": "64fff64396c5d97a2322e50e47380f0be74e8a42"
+        }
+      ]
+    },
+    {
+      "branch": "codex/d-tx4-delaware-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2347,
+          "state": "closed",
+          "merged_at": "2026-11-05T03:53:16Z",
+          "head": "25cdbabaf952086a803f883f164dffcdd1fc8acf"
+        }
+      ]
+    },
+    {
+      "branch": "codex/i2-share-unknown-dispute-report",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2360,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:08:13Z",
+          "head": "92aa2d2408f1786ee587f16221988ca779469359"
+        }
+      ]
+    },
+    {
+      "branch": "codex/k-help-search-progressive",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2354,
+          "state": "closed",
+          "merged_at": "2026-11-05T04:18:51Z",
+          "head": "28beae5e84e8a3fa5af24080f6d48dca32c693cb"
+        }
+      ]
+    },
+    {
+      "branch": "codex/d-tx4-irpf-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2339,
+          "state": "closed",
+          "merged_at": "2026-11-05T05:48:44Z",
+          "head": "934296b5ac63b23f2a3597308012c4837661c5a6"
+        }
+      ]
+    },
+    {
+      "branch": "codex/j-tx4-oss-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2361,
+          "state": "closed",
+          "merged_at": "2026-11-05T03:41:53Z",
+          "head": "933ad19001cac896aa7b81b5b07d36626f31b238"
+        }
+      ]
+    },
+    {
+      "branch": "codex/j-tx4-uk-vat-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2372,
+          "state": "closed",
+          "merged_at": "2026-11-05T06:31:04Z",
+          "head": "bbce344af4f3b8c1f72ae3bb231709d7365cd4c9"
+        }
+      ]
+    },
+    {
+      "branch": "codex/o-community-report-queue",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2391,
+          "state": "closed",
+          "merged_at": "2026-11-05T07:15:56Z",
+          "head": "27cabbd99f594a2f09c3edeb529565a1848e611b"
+        }
+      ]
+    },
+    {
+      "branch": "codex/n-mail-button-contrast",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2389,
+          "state": "closed",
+          "merged_at": "2026-11-05T06:30:01Z",
+          "head": "39a30ad26b9b2188630b68bda557ccc1fb6eecac"
+        }
+      ]
+    },
+    {
+      "branch": "codex/p-course-template-pending",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2386,
+          "state": "closed",
+          "merged_at": "2026-11-05T02:38:13Z",
+          "head": "8ac5b49fa1dffa0385f10b3bd30f2e09823ec314"
+        }
+      ]
+    },
+    {
+      "branch": "codex/m-collection-targets",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2402,
+          "state": "closed",
+          "merged_at": "2026-11-05T04:32:59Z",
+          "head": "25cd2eeeb8dc6fe7cc88f0f5fe15c39f2f2ff1aa"
+        }
+      ]
+    },
+    {
+      "branch": "codex/p-certificate-record-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2392,
+          "state": "closed",
+          "merged_at": "2026-11-05T03:35:59Z",
+          "head": "c3eb91a61ccceeeb8313edd3b9c4fd5939fa826c"
+        }
+      ]
+    },
+    {
+      "branch": "codex/p-caption-whole-file",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2405,
+          "state": "closed",
+          "merged_at": "2026-11-05T03:36:04Z",
+          "head": "bccfc3f9e5467e639873b08bfef9523ece9a76aa"
+        }
+      ]
+    },
+    {
+      "branch": "codex/u-join-confirmation-copy",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2469,
+          "state": "closed",
+          "merged_at": "2026-11-05T05:28:27Z",
+          "head": "89c75f93204e65b99383e8e2cb7901ed4ca40320"
+        }
+      ]
+    },
+    {
+      "branch": "codex/o-community-chat-ack",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2434,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:09:34Z",
+          "head": "a3098668d2be39376a8e0ef2347f6cc28c136b98"
+        }
+      ]
+    },
+    {
+      "branch": "codex/p-course-finish-claim",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2487,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:33:51Z",
+          "head": "dd4895cc085bfb3a5869b7b2c6fddfc8c338a0d1"
+        }
+      ]
+    },
+    {
+      "branch": "codex/e-mr2-customer-cost-proxy",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2419,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:08:22Z",
+          "head": "dda5a78473dd32782ca21677c3effad69fbd3b93"
+        }
+      ]
+    },
+    {
+      "branch": "codex/w-host-calendar-read-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2495,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:28:22Z",
+          "head": "15dc5ce12fa72dcc1860ae8191050e2b5ce84d67"
+        }
+      ]
+    },
+    {
+      "branch": "codex/e-mr2-customer-base-proxy",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2510,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:09:58Z",
+          "head": "7d1e7f3ca2306a40aa103648615bcc3152b4c464"
+        }
+      ]
+    },
+    {
+      "branch": "codex/n-community-mail-read-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2555,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:44:38Z",
+          "head": "6ac18d0fafd36408a06e7056c1a1ab47fcb271b8"
+        }
+      ]
+    },
+    {
+      "branch": "codex/n-sequence-schemeless-links",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2558,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:34:45Z",
+          "head": "f8139a1c98915e97918262f07161301773f25d34"
+        }
+      ]
+    },
+    {
+      "branch": "codex/j-tx4-germany-vat-evidence",
+      "count": 1,
+      "complete": true,
+      "exact": true,
+      "prs": [
+        {
+          "number": 2585,
+          "state": "closed",
+          "merged_at": "2026-11-05T08:15:47Z",
+          "head": "5bde79a51d3d668e385a1987c398ef70ee06cd0f"
+        }
+      ]
+    }
+  ],
+  "publicDataScan": {
+    "scope": "Both final changed Markdown files using scripts/check_public_data.py findings()",
+    "files": 2,
+    "findings": 0
+  },
+  "limitations": "No behavioral code changes. No global app types, browser, native Redis, provider or complete CI claimed. Nine final aggregate workflows still required."
+}

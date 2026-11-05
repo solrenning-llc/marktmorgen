@@ -4,22 +4,10 @@ import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
 import { dropStamped } from "@/lib/pdf-stamp";
-import { deliveredFile, readDelivery, type Listing } from "@/lib/catalog";
-import { readPodcast } from "@/lib/podcast";
+import { deliveredFile, readDelivery } from "@/lib/catalog";
+import { audioPlayedBy } from "@/lib/podcast";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-
-/**
- * The audio of each episode of this product's private podcast, which lives in the product's own folder beside its
- * file (app/api/store/podcast): an empty set for a product that is not a podcast, null when the episodes cannot be
- * read. Unknown is never "none": the caller refuses to put the file on, and keeps a file it would have deleted.
- */
-async function episodeAudio(product: Listing | null | undefined): Promise<Set<string> | null> {
-  if (!product?.podcast) return new Set();
-  const podcast = await readPodcast(product.podcast.id).catch(() => null);
-  if (!podcast || podcast.id !== product.podcast.id) return null;
-  return new Set(podcast.episodes.map((episode) => episode.pathname));
-}
 
 /**
  * Puts the file that was just uploaded onto the product, or takes it off.
@@ -68,9 +56,14 @@ export async function POST(request: NextRequest) {
       // the file off or replacing it later can never delete an episode's audio. Today a podcast takes no file
       // (lib/store.ts changeDelivery) and an option's file sits in the option's own folder, so this is a defence for
       // a record written before those rules. Episodes that cannot be read refuse the file, nothing written.
-      const audio = await episodeAudio(delivery?.product);
-      if (!audio) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
-      if (audio.has(pathname)) return Response.json({ ok: false, error: "in_use" }, { status: 400 });
+      // Only for the product itself: an option's file is in the option's own folder (ownsPath above), where no
+      // episode is, so a bonus file on a podcast's price option is never held up by its episodes.
+      if (!delivery) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      if (!delivery.option) {
+        const audio = await audioPlayedBy(delivery.product);
+        if (!audio) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+        if (audio.has(pathname)) return Response.json({ ok: false, error: "in_use" }, { status: 400 });
+      }
 
       const found = await head(pathname);
       file = {
@@ -95,9 +88,11 @@ export async function POST(request: NextRequest) {
     // Nor an episode's audio (a record written before a podcast took no file): read after the write, kept when the
     // episodes cannot be read. A file left behind costs storage; an episode deleted from under a feed costs listeners.
     const removed = result.removed;
-    // A read that throws is unknown (kept); one that finds nothing falls back to what was read before the write.
-    const after = removed ? await readDelivery(result.store, id).then((found) => found ?? delivery, () => undefined) : null;
-    const stillPlayed = !removed ? new Set<string>() : after === undefined ? null : await episodeAudio(after?.product);
+    // A read that throws is unknown (kept); one that finds nothing falls back to what was read before the write, and
+    // when neither found the product, audioPlayedBy answers unknown (kept), never "no episodes".
+    const stillPlayed = !removed
+      ? new Set<string>()
+      : await readDelivery(result.store, id).then((found) => audioPlayedBy((found ?? delivery)?.product)).catch(() => null);
     if (removed && removed.pathname !== file?.pathname && stillPlayed && !stillPlayed.has(removed.pathname)) {
       await del(removed.pathname).catch((error: unknown) => {
         console.error("could not delete the replaced file", error);

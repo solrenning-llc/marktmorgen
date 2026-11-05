@@ -40,3 +40,5 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex M | 310 [AX2], 274 [AX1]: 44px targets for moving and removing collection products | codex/m-collection-targets | `components/collections-editor.tsx`, `tests/e2e/collections-acknowledgment.mjs`, `tests/collections-editor-accessibility.test.ts` | 04/11/2026 |
 | Codex P | 427 [VR1]: malformed certificate status evidence never becomes valid or permanent | codex/p-certificate-record-evidence | `lib/certificate.ts`, `tests/certificate-record-evidence.test.ts` | 04/11/2026 |
 | Codex P | 274 [AX1], 103 [E2-LESSON-MEDIA]: malformed caption blocks never become a silently truncated successful upload | codex/p-caption-whole-file | `lib/captions.ts`, `tests/captions.test.ts` | 04/11/2026 |
+
+| Codex Q | 427 [VR1], 506 [SG1]: erasure keeps stores whose lookup is unknown instead of claiming completion | codex/q-erasure-store-evidence | `lib/erasure-request.ts`, `tests/erasure-store-read-evidence.test.ts` | 04/11/2026 |

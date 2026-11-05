@@ -1,0 +1,13 @@
+import { join } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+const root = process.argv[2]; const here = join(root, "tests"); const entry = process.argv[3];
+const { build } = (await import(pathToFileURL(join(root, "node_modules/esbuild/lib/main.js")).href)).default;
+const { testAliases, testEnvironment } = await import(pathToFileURL(join(here, "test-config.mjs")).href);
+const out = mkdtempSync(join(tmpdir(), "rv-")); process.on("exit", () => rmSync(out, { recursive: true, force: true }));
+const bundle = join(out, "p.cjs");
+await build({ entryPoints: [entry], bundle: true, platform: "node", format: "cjs", outfile: bundle, logLevel: "error", alias: { ...testAliases("move-invite-off-sale.test.ts", root, here), "~t": here }, nodePaths: [join(root, "node_modules")] });
+const r = spawnSync(process.execPath, [bundle], { encoding: "utf8", env: testEnvironment(process.env) });
+console.log(r.stdout); console.log((r.stderr || "").slice(0, 2000)); process.exit(r.status ?? 1);

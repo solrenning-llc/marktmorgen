@@ -1,5 +1,7 @@
 /** Partial Redis evidence must never put an erased person back on a list. */
 import { importContactRows, importContacts, leadsKey, previewContactRows, agreedKey, MAX_LEADS, type ImportedContact } from "@/lib/contacts";
+import { addRows, finishUpload, runImport, startImport } from "@/lib/imports";
+import { claimHandle, ensureListId, ensureStatsId, storeForEmail } from "@/lib/store";
 import { suppressCommand } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -75,6 +77,36 @@ async function main(): Promise<void> {
     is("erased contact remains absent", redis.run(["HGET", leadsKey(list), emails[1]]), null);
     is("erasure marker is kept", typeof redis.run(["HGET", `nl:erased:${list}`, String(suppressCommand(list, emails[1])[2])]), "string");
   }
+  part("The real import job keeps its place and retries the same rows");
+  redis.clear();
+  const owner = "contacts-retry@example.com";
+  await claimHandle(owner, "contactsretry", "Contacts Retry", "");
+  await ensureStatsId(owner);
+  await ensureListId(owner);
+  const store = (await storeForEmail(owner))!;
+  const realList = store.listId!;
+  redis.run(suppressCommand(realList, emails[1]));
+  const start = await startImport(store, owner, "contacts", { expected: 2, file: "contacts.csv", agreed: true });
+  if (!start.ok) throw new Error(`import did not start: ${start.reason}`);
+  await addRows(store, start.job.id, rows.map((r, i) => [String(i + 2), r.email, r.name, ""]));
+  await finishUpload(store, start.job.id);
+  const original = redis.pipeline.bind(redis);
+  const log = console.error;
+  const errors: unknown[][] = [];
+  console.error = (...args: unknown[]) => { errors.push(args); };
+  redis.pipeline = async (commands: Command[]) => {
+    const reply = await original(commands);
+    return commands.some((c) => c[0] === "HMGET" && c[1] === `nl:erased:${realList}`) ? reply.slice(0, -1) : reply;
+  };
+  try {
+    const held = await runImport(start.job.id, Date.now() + 10_000);
+    is("partial evidence does not advance or mark either row imported", [held?.done, held?.counts.added, held?.cursor], [0, 0, { batch: 0, row: 0 }]);
+    is("the job records a retryable unknown reading", errors.some((args) => args.some((value) => value instanceof Error && /not imported.*try again/i.test(value.message))), true);
+    is("no contact is written while erasure evidence is unknown", redis.run(["HLEN", leadsKey(realList)]), 0);
+  } finally { redis.pipeline = original; console.error = log; }
+  const finished = await runImport(start.job.id, Date.now() + 10_000);
+  is("the same rows can finish after a confirmed reading", [finished?.state, finished?.done, finished?.counts.added, finished?.counts.skipped], ["done", 2, 1, 1]);
+  is("the erased person is still absent after retry", redis.run(["HGET", leadsKey(realList), emails[1]]), null);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

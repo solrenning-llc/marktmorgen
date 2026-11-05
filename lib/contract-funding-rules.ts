@@ -29,6 +29,21 @@ export type ContractFundingContext={termsSnapshot:string;review:CommercialMargin
 export const CURRENT_CONTRACT_FUNDING_POLICY:ContractFundingPolicy|null=null;
 const integer=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
 const bounded=(n:unknown):n is number=>integer(n)&&n<=CONTRACT_FUNDING_RULES.maxInteger;
+/** Keep the original dispute evidence ahead of any canonical projection. Data
+ * descriptors avoid executing an accessor while the shared assessor rejects
+ * Proxy-forged or incomplete dispute records. */
+function originalPlanPaymentDisputes(context:unknown):ReturnType<typeof assessPlanPaymentDisputeCosts> {
+ try{
+  if(!context||typeof context!=='object'||Array.isArray(context))return null;
+  const reviewField=Object.getOwnPropertyDescriptor(context,'review');
+  if(!reviewField||!Object.hasOwn(reviewField,'value')||!reviewField.enumerable)return null;
+  const review=reviewField.value;
+  if(!review||typeof review!=='object'||Array.isArray(review))return null;
+  const disputesField=Object.getOwnPropertyDescriptor(review,'planPaymentDisputes');
+  if(!disputesField||!Object.hasOwn(disputesField,'value')||!disputesField.enumerable)return null;
+  return assessPlanPaymentDisputeCosts(disputesField.value);
+ }catch{return null;}
+}
 /** Stable own-data financial evidence, without executing accessors or toJSON. */
 export function canonicalFinancialSnapshot(value:unknown):string|null {
  const active=new WeakSet<object>();
@@ -91,6 +106,8 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  // Scoped TX may fund a contract only when it is bound to this exact policy,
  // the actual admission time and the complete existing liability horizon.
  // Inspect original data first: the canonical clone must not erase presence.
+ const disputes=originalPlanPaymentDisputes(context);
+ if(!disputes)return null;
  const taxState=customerTaxContractContextState(context);
  if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,now))return null;
  // Stabilize both original inputs together. A Proxy can offer one value to
@@ -105,8 +122,6 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  if(!reviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
  const review=JSON.parse(reviewEncoded) as CommercialMarginReview|null;
  if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
- const disputes=assessPlanPaymentDisputeCosts(review.planPaymentDisputes);
- if(!disputes)return null;
  const until=iso(p.admissionsUntil),through=iso(p.liabilitiesThrough);
  if(until===null||through===null||until<now.getTime()||p.reviewedLiabilityTailDays===null)return null;
  const monthDays=contractCoverageDays('month',p.reviewedLiabilityTailDays),yearDays=contractCoverageDays('year',p.reviewedLiabilityTailDays);

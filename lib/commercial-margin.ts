@@ -193,7 +193,9 @@ function commercialReviewData(review:CommercialMarginReview|null):CommercialMarg
  const encoded=canonicalFinancialSnapshot(original);
  if(encoded===null)return null;
  const data=JSON.parse(encoded) as CommercialMarginReview;
- return customerTaxCollectionState(data)===taxState?data:null;
+ // Keep the detached null-prototype data for all later checks: parsing the
+ // encoding must not reintroduce inherited assertions into the calculation.
+ return customerTaxCollectionState(data)===taxState?original:null;
 }
 export function commercialMarginReady(review:CommercialMarginReview|null=CURRENT_COMMERCIAL_MARGIN_REVIEW):boolean{
  const data=commercialReviewData(review);

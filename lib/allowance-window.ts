@@ -151,6 +151,44 @@ export function allowanceWindow(store: WindowFields, now = Date.now()): Allowanc
   return { id: day(start), start, end: addMonthsMs(start, 1), billing: true };
 }
 
+/**
+ * The window a store's allowances will be counted in at `atMs`, as its plan
+ * stands now: allowanceWindow when that already tells it (the window running
+ * then, a trial, the calendar month), and past a renewing period's end the
+ * periods that follow it (a monthly plan's next months, a yearly plan's next
+ * year cut into months on its own day). Null when, as the plan stands, nothing
+ * pays for that moment: the plan set to end before it, or its period unknown.
+ * What a use written down now and made then holds in (lib/broadcasts.ts, a
+ * scheduled email's reading of its buyers). Only a projection: whoever holds in
+ * it checks, when the moment comes, that the window running then is this one.
+ */
+export function windowAt(store: WindowFields, atMs: number): AllowanceWindow | null {
+  if (!Number.isFinite(atMs)) return null;
+  const known = allowanceWindow(store, atMs);
+  if (known) return known;
+  if (standingOf(store, atMs / 1000) !== "paid" || !store.subscriptionId) return null;
+  const period = store.period;
+  if (!isPeriod(period) || !period.renews || atMs < period.end * 1000) return null;
+  const yearly = store.cycle === "year";
+  const step = yearly ? 12 : 1;
+  // Stripe counts every period from its anchor, not from the last period's end: an anchor on the 29th to the 31st
+  // is cut to a short month's last day and comes back after it (31 January, 28 February, 31 March). Of the period's
+  // two ends, the later day of the month is the anchor's (the other may have been cut), so the next ends are that one
+  // moved by whole periods, each cut to its month as Stripe cuts it.
+  const startMs = period.start * 1000;
+  const endMs = period.end * 1000;
+  const anchor = new Date(endMs).getUTCDate() >= new Date(startMs).getUTCDate() ? endMs : startMs;
+  const offset = anchor === endMs ? 0 : step;
+  // At most a year and a day ahead is ever asked (lib/broadcasts.ts, MAX_SCHEDULE_DAYS); bounded all the same.
+  for (let k = 0; k < 40; k += 1) {
+    const start = addMonthsMs(anchor, offset + k * step);
+    const end = addMonthsMs(anchor, offset + (k + 1) * step);
+    if (atMs < start) return null;
+    if (atMs < end) return yearly ? monthOfPeriod({ start: start / 1000, end: end / 1000, renews: true }, "year", atMs) : { id: day(start), start, end, billing: true };
+  }
+  return null;
+}
+
 /** The window's name, or null: what a counter's key carries. */
 export function windowId(store: WindowFields, now = Date.now()): string | null {
   return allowanceWindow(store, now)?.id ?? null;

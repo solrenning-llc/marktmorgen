@@ -63,8 +63,8 @@ is("the summary and the status take focus without being tab stops, with a 3 px r
 
 part("The page");
 const page = readFileSync("app/studio/reviews/page.tsx", "utf8");
-is("opening the page only reads what was made, never makes one", page.includes("readReviewSummary(store.statsId, p.id)") && !page.includes("makeReviewSummary"), true);
-is("and the week's last time, kept after a delete", page.includes("lastAt: await lastReviewSummaryAt(store.statsId, p.id)"), true);
+is("opening the page only reads what was made, never makes one, every product's in one request", page.includes("await readReviewSummaries(store.statsId, summed.map((p) => p.id))") && !page.includes("makeReviewSummary") && !page.includes("readReviewSummary(store.statsId, p.id)"), true);
+is("and the week's last time, kept after a delete", page.includes("lastAt: keptSummaries.get(p.id)?.lastAt ?? 0"), true);
 const screen = readFileSync("components/review-ai-summaries.tsx", "utf8");
 is("every refusal in plain words", ["few", "used", "busy", "off", "slow", "failed"].every((k) => new RegExp(`${k}: ["\x60]`).test(screen)), true);
 

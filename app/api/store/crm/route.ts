@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { StoreFullError } from "@/lib/store-full";
 import { guardStoreWrite } from "@/lib/store-request";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { ensureStatsId } from "@/lib/store";
 import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
 import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
@@ -8,7 +10,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
+import { CrmFieldsKept, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -18,6 +20,7 @@ const MAX_BODY_BYTES = 20_000;
  * for whoever may read orders with buyers' addresses ("orders"):
  *
  *   { action: "fields", fields }               saves the fields; a field taken away takes its answers
+ *                                              (not from a session let in without its second step)
  *   { action: "value", person, field, value }   one person's answer to one field; "" clears it
  *   { action: "stages", stages }               saves the first pipeline's stages (older studio pages)
  *   { action: "pipeline", pipeline, moves }     saves one pipeline, or adds one with a new id;
@@ -49,7 +52,10 @@ export async function POST(request: NextRequest) {
       const sent = Array.isArray(body.fields) ? body.fields : [];
       const fields = parseFields(sent);
       if (fields.length !== Math.min(sent.length, 10) || sent.length > 10) return refuse("fields");
-      return Response.json({ ok: true, fields: await writeFields(statsId, fields) });
+      // A field left out takes its answers off every person: a session let in without its
+      // second step keeps every field (lib/two-step.ts), checked against the fields as written.
+      const keepAll = await lockedFor(request, "orders", "fields-remove");
+      return Response.json({ ok: true, fields: await writeFields(statsId, fields, keepAll) });
     }
     if (body.action === "value") {
       const field = (await readFields(statsId)).find((f) => f.id === body.field);
@@ -154,6 +160,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof CrmSchemaReadUnavailable) return refuse("crm_schema_read_unavailable", 503);
     if (error instanceof CrmSchemaWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
     if (error instanceof CrmSchemaConflict) return refuse("crm_conflict", 409);
+    if (error instanceof CrmFieldsKept) return refusedJson("locked");
     if (error instanceof CrmDealReadUnavailable) return refuse("crm_deal_read_unavailable", 503);
     if (error instanceof CrmDealWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
     console.error("saving a store's fields or deals failed", error);

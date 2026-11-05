@@ -125,7 +125,7 @@ export async function createAgreement(store: Store, draft: AgreementDraft, now =
     createdAt: now,
     expiresAt: now + SIGN_MS,
     state: "open",
-    versions: [{ n: 1, sha256: version.sha256, createdAt: now, signature: null }],
+    versions: [{ n: 1, sha256: version.sha256, title: version.title, createdAt: now, signature: null }],
     sent: [],
     failed: "",
     payRequest: draft.payRequest,
@@ -215,6 +215,13 @@ export async function agreementOf(store: Pick<Store, "sid">, id: string): Promis
  * what is stored is still the fingerprint recorded for it, so a page never
  * shows, and nobody signs, a text that is not the one recorded.
  */
+/** Whether a version's own key is there, without reading its text: for a list that shows only its title. */
+export async function versionExists(a: Pick<Agreement, "id" | "versions">, n: number): Promise<boolean> {
+  if (!a.versions.some((m) => m.n === n) || !isRedisConfigured()) return false;
+  const [there] = await redisPipeline([["EXISTS", versionKey(a.id, n)]]);
+  return Number(there) === 1;
+}
+
 export async function readVersion(a: Pick<Agreement, "id" | "versions">, n: number): Promise<AgreementVersion | null> {
   const mark = a.versions.find((m) => m.n === n);
   if (!mark || !isRedisConfigured()) return null;
@@ -279,14 +286,15 @@ export async function reviseAgreement(store: Store, id: string, draft: Agreement
     if (!may.ok) return { ok: false, reason: "not_now", message: may.why };
     const n = (latestOf(a)?.n ?? 0) + 1;
     const version = makeVersion(store, a, draft, n, now);
-    const room = await takeData(store, [{ until: a.createdAt + KEEP_MS, bytes: versionRoomBytes(version) }], now);
+    // The version's own key, and its title kept in the record's mark of it (the record's growth room is for signatures and sends).
+    const room = await takeData(store, [{ until: a.createdAt + KEEP_MS, bytes: versionRoomBytes(version) + dataBytes([version.title], 1) }], now);
     if (!room.ok) return room.reason === "full" ? { ok: false, reason: "full", message: room.message } : unavailable();
     const [written] = await redisPipeline([["SET", versionKey(a.id, n), JSON.stringify(version), "NX", "EX", keepSeconds(a, now)]]);
     // A version's key is written once: never over one already there.
     if (written === null) return unavailable();
     const next: Agreement = {
       ...a,
-      versions: [...a.versions, { n, sha256: version.sha256, createdAt: now, signature: null }],
+      versions: [...a.versions, { n, sha256: version.sha256, title: version.title, createdAt: now, signature: null }],
       expiresAt: now + SIGN_MS,
       payRequest: draft.payRequest,
       failed: "",

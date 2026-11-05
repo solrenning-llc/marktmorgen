@@ -3,6 +3,8 @@ import { DataRoomError } from "@/lib/store-data";
 import { after } from "next/server";
 import { storeForEmail, storeForHandle } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { CREATOR, createPost, readConfig } from "@/lib/community";
 import { ITEM_ID } from "@/lib/community-text";
 import {
@@ -122,6 +124,8 @@ export async function POST(request: NextRequest) {
       if (!current) return fail("unknown", 404);
       const input = readEventInput(body, config, Date.now(), current);
       if (typeof input === "string") return fail(input);
+      // A new time is emailed to everyone coming: not from a session let in without its second step (lib/two-step.ts).
+      if ((input.start !== current.start || input.minutes !== current.minutes) && (await lockedFor(request, "events", "move"))) return refusedJson("locked");
       const refused = await meetRefused(input, current);
       if (refused) return refused;
       const changed = await editEvent(store, eventId, input);

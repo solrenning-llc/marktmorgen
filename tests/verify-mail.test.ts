@@ -137,6 +137,14 @@ async function main(): Promise<void> {
 
   part("Resend, with every link holding");
   process.env.RESEND_WEBHOOK_SECRET = `whsec_${SECRET_BYTES.toString("base64")}`;
+  process.env.RESEND_API_KEY = "re_unreviewed_synthetic_only";
+  const withoutProof = await verifyMailLoop(Date.now() + 100);
+  is("missing fallback proof is a recorded gap, never a failed delivery loop", withoutProof.find((c) => c.check === "Resend's loop"), {
+    check: "Resend's loop", ok: true, detail: "not checked: reviewed Resend fallback proof is missing",
+  });
+  is("the unproved sender creates no delivery probes", resendTook.length, 0);
+  is("the skipped sender creates no temporary list", leftBehind(), []);
+  process.env.RESEND_API_KEY = "re_test_check_only_a_stand_in";
   const good = await verifyMailLoop(Date.now() + 20_000);
   is("the bounce and the spam report both come back", good.slice(0, 2).map((c) => [c.check, c.ok]), [
     ["Resend: a list email's bounce comes back with its tags and takes the address off", true],

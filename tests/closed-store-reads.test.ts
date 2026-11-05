@@ -16,7 +16,7 @@ import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { finishClosed, renewalsAskToday, renewalsLate, renewalsMayClose, RENEWAL_LATE_GAP_DAYS, RENEWAL_TRY_DAYS } from "@/lib/plan-closing";
 import { COMMAND, PREPARE_COMMANDS } from "./plan-cost-registry";
-import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PRUNE_KEPT_KEY, PRUNE_KEY, RESCAN_MS, SCAN_RESTARTS, UNREAD_TRIES, closedDataLine, closedDataNow, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { type Batched, DUE_KEY, FOLLOWERS, LEFT_WALKS, PRUNE_KEPT_KEY, PRUNE_KEY, RESCAN_MS, SCAN_RESTARTS, UNREAD_TRIES, closedDataLine, closedDataNow, PAGE_TRIES, PARKED_GAP_MS, PARKED_TRIES, PREPARE_TRIES, STOPPED_AT, WALK_GAP_MS, retryCommandsAtMost, deleteSalesTraces, eraseClosed, markDue, marksOf, stopRenewals } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
   later();
   const bea = await closing("beaclosing");
   failing((c) => c[0] === "ZREM" && c[1] === DUE_KEY && c[2] === bea);
-  failing((c) => c[0] === "HLEN");
+  failing((c) => c[0] === "HLEN" && c[1] === "nl:closed:batch");
   const crashed = await quietly(() => run().then(() => "ran", () => "stopped"));
   const inBatch = async () => (await real([["HEXISTS", "nl:closed:batch", bea]]))[0];
   is("prepared, then taking it out of line failed and the run stopped: in the walk's batch, its record gone, still in line", [crashed, await inBatch(), await storeForEmail(bea), await dueScore(bea) !== null], ["stopped", 1, null, true]);
@@ -574,6 +574,28 @@ async function main(): Promise<void> {
   redis.pipeline = before;
   is("the gap does not read it any more", reads.includes(PRUNE_KEPT_KEY), false);
   await real([["DEL", PRUNE_KEPT_KEY], ["HDEL", "nl:closed:walk", "unread:nl:orders:folders:s"]]);
+  });
+
+  await section("Sixth review: dates are never marks; a move to kept stopped half-way is done again; ids no list owes go, lists or not", async () => {
+  await walkedOut([], 2);
+  const yan = (await storeForEmail(await closing("yandates")))!;
+  const { marks } = await marksOf(yan);
+  is("no date or time among a store's marks", marks.filter((id) => /^\d{4}-\d{2}-\d{2}/.test(id)), []);
+  await real([["ZREM", DUE_KEY, storeRef(yan)]]);
+  const key = "zed@example.com";
+  const sid = "3".repeat(32);
+  await real([
+    // Given up on, and its move stopped after the kept write: its rows are in both.
+    ["HSET", "nl:closed:walk", "unread:nl:orders:folders:t", UNREAD_TRIES, "kept:nl:orders:folders:t", 1],
+    ["HSET", PRUNE_KEY, `nl:orders:folders:t|${key}|${sid}`, 1, `marks|${key}|${sid}`, JSON.stringify({ marks: ["c".repeat(32)], keyMarks: [] })],
+    ["HSET", PRUNE_KEPT_KEY, `nl:orders:folders:t|${key}|${sid}`, 1, `marks|${key}|${sid}`, JSON.stringify({ marks: ["c".repeat(32)], keyMarks: [] })],
+    // Ids no row owes by, with no list waiting at all.
+    ["HSET", PRUNE_KEY, `marks|orphan@example.com|${"4".repeat(32)}`, JSON.stringify({ marks: ["e".repeat(32)], keyMarks: [] })],
+  ]);
+  later();
+  await quietly(run);
+  is("the gap moves the rows again and lets the orphan ids go: nothing left in what it reads, the kept rows counted once", [(await real([["HLEN", PRUNE_KEY]]))[0], (await real([["HLEN", PRUNE_KEPT_KEY]]))[0], (await closedDataNow())?.owedKept], [0, 2, 1]);
+  await real([["DEL", PRUNE_KEPT_KEY], ["HDEL", "nl:closed:walk", "unread:nl:orders:folders:t", "kept:nl:orders:folders:t"]]);
   });
 
   done();

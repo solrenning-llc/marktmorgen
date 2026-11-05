@@ -9,9 +9,10 @@
  *   - whether the database answered when the results were read.
  *
  * A check with no result in the last STATUS_STALE_HOURS is Unknown, never
- * Passed; a malformed run is dropped, never counted as a pass; a database
- * that does not answer, or none set up, makes the page say the results were
- * not read, not that there were none.
+ * Passed; a reply is read only in exactly the shape asked for, and a
+ * malformed run, field or history makes the reading unknown, never a shorter
+ * or empty history; a database that does not answer, or none set up, makes
+ * the page say the results were not read, not that there were none.
  *
  * The page is drawn for each request, with no host page cache (no source in
  * this repository prices one). An instance answers from its last reading for
@@ -128,11 +129,15 @@ async function main(): Promise<void> {
   is("the window's first day (30 days with today) counts, the moment before it does not", [mail.runs, mail.passed, mail.failed, mail.since], [5, 2, 3, firstDay]);
   is("the failures, newest first", mail.failures, [NOW - HOUR, NOW - 2 * DAY, firstDay]);
 
-  part("A run that cannot be read is dropped, never taken for a pass; runs come back newest first");
-  is("malformed runs dropped", parseRuns(["{broken", JSON.stringify({ at: "x", ok: true }), JSON.stringify({ at: 1, ok: "true" }), JSON.stringify([1]), 7, null, run(NOW, false)]), [{ at: NOW, ok: false }]);
-  is("not a list: nothing", parseRuns("nope"), []);
-  is("no more than kept are read", parseRuns(Array.from({ length: STATUS_RUNS_KEPT + 5 }, (_, i) => run(NOW - i * HOUR, true))).length, STATUS_RUNS_KEPT);
-  is("read in any order, given newest first", parseRuns([run(NOW - 2 * HOUR, true), run(NOW, false), run(NOW - HOUR, null)]).map((r) => r.at), [NOW, NOW - HOUR, NOW - 2 * HOUR]);
+  part("A history with a run that cannot be read is unknown, never a shorter one; runs come back newest first");
+  for (const bad of ["{broken", JSON.stringify({ at: "x", ok: true }), JSON.stringify({ at: 1, ok: "true" }), JSON.stringify([1]), JSON.stringify({ at: 1 }), JSON.stringify({ at: 1, ok: true, more: 1 }), 7, null]) {
+    is(`a history holding ${JSON.stringify(bad)} is unknown`, parseRuns([run(NOW, false), bad]), null);
+  }
+  is("not a list: unknown, not empty", parseRuns("nope"), null);
+  is("an empty list is an empty history", parseRuns([]), []);
+  is("exactly as many as kept are read", parseRuns(Array.from({ length: STATUS_RUNS_KEPT }, (_, i) => run(NOW - i * HOUR, true)))?.length, STATUS_RUNS_KEPT);
+  is("more than kept is not the reply asked for: unknown", parseRuns(Array.from({ length: STATUS_RUNS_KEPT + 1 }, (_, i) => run(NOW - i * HOUR, true))), null);
+  is("read in any order, given newest first", parseRuns([run(NOW - 2 * HOUR, true), run(NOW, false), run(NOW - HOUR, null)])?.map((r) => r.at), [NOW, NOW - HOUR, NOW - 2 * HOUR]);
   is("summarized in any order, the newest is the last", summarizeRuns([{ at: NOW - 2 * HOUR, ok: true }, { at: NOW - HOUR, ok: false }], NOW).last, { at: NOW - HOUR, ok: false });
   is("a run from the future is not a pass now", summarizeRuns([{ at: NOW + HOUR, ok: true }], NOW).state, "unknown");
 
@@ -199,14 +204,47 @@ async function main(): Promise<void> {
   }
   is("in true words", describeStatus(reading).rows[1].when, "Not read: the count of visits this hour could not be read");
 
+  part("Only a reply of exactly the shape asked for is read; anything else is unknown, never an empty history");
+  async function shaped(alter: (batch: Batch, answers: unknown[]) => unknown) {
+    redis.clear();
+    redis.run(["LPUSH", MAIL.key, run(NOW - HOUR, false)]);
+    redis.run(["LPUSH", CHECKOUT.key, run(NOW - HOUR, true)]);
+    redis.pipeline = async (batch) => alter(batch, await oldPipeline.call(redis, batch)) as unknown[];
+    try { return await fresh(); } finally { unwatch(); }
+  }
+  const unread = (r: Awaited<ReturnType<typeof fresh>>) => [r.database, r.checks.map((c) => [c.summary.state, c.summary.runs])];
+  const NOTHING = ["no-answer", [["unknown", 0], ["unknown", 0]]];
+  is("control: the exact replies are read", unread(await shaped((_b, a) => a)), ["answered", [["failed", 1], ["passed", 1]]]);
+  const isCount = (b: Batch) => b[0]?.[0] === "INCR";
+  const isRead = (b: Batch) => b[0]?.[0] === "LRANGE";
+  is("EXPIRE acknowledged with 0: unknown", unread(await shaped((b, a) => isCount(b) ? [a[0], 0] : a)), NOTHING);
+  is("EXPIRE acknowledged with \"1\": unknown", unread(await shaped((b, a) => isCount(b) ? [a[0], "1"] : a)), NOTHING);
+  is("a count reply that is not a list: unknown", unread(await shaped((b, a) => isCount(b) ? { 0: a[0], 1: 1, length: 2 } : a)), NOTHING);
+  is("a count reply with a hole: unknown", unread(await shaped((b, a) => isCount(b) ? [, 1] : a)), NOTHING);
+  is("a count reply whose value is a getter: unknown, never run", unread(await shaped((b, a) => {
+    if (!isCount(b)) return a;
+    const r: unknown[] = [0, 1];
+    Object.defineProperty(r, 0, { get: () => { throw new Error("ran a getter"); } });
+    return r;
+  })), NOTHING);
+  is("an extra history in the reply: unknown", unread(await shaped((b, a) => isRead(b) ? [...a, []] : a)), NOTHING);
+  is("a history that is not a list: unknown, never empty", unread(await shaped((b, a) => isRead(b) ? [a[0], null] : a)), NOTHING);
+  is("a history longer than asked for: unknown", unread(await shaped((b, a) => isRead(b) ? [a[0], Array.from({ length: STATUS_RUNS_KEPT + 1 }, () => run(NOW - HOUR, true))] : a)), NOTHING);
+  is("a run that is not text: unknown, never dropped", unread(await shaped((b, a) => isRead(b) ? [[...(a[0] as unknown[]), 7], a[1]] : a)), NOTHING);
+  is("a run that cannot be read: unknown, never dropped from the count", unread(await shaped((b, a) => isRead(b) ? [[...(a[0] as unknown[]), "{broken"], a[1]] : a)), NOTHING);
+  is("a run with a field more than kept: unknown", unread(await shaped((b, a) => isRead(b) ? [[JSON.stringify({ at: NOW - HOUR, ok: false, why: "x" })], a[1]] : a)), NOTHING);
+  reading = await shaped((b, a) => isRead(b) ? [a[0]] : a);
+  is("in words: not read, never \"no failed run\"", [describeStatus(reading).rows.map((r) => r.result), notReadReason(reading)],
+    [["Did not answer", "Unknown", "Unknown"], "Not read: the database did not answer, or its answer could not be read"]);
+
   part("The database does not answer, or none is set up: the results were not read, never \"none recorded\"");
   redis.pipeline = async () => { throw new Error("synthetic outage"); };
   reading = await fresh();
   unwatch();
   is("did not answer", [reading.database, reading.limit], ["no-answer", "none"]);
   const down = describeStatus(reading);
-  is("every check row says it was not read", down.rows.slice(1).map((r) => [r.result, r.when]), [["Unknown", "Not read: the database did not answer"], ["Unknown", "Not read: the database did not answer"]]);
-  is("and the history says so too", notReadReason(reading), "Not read: the database did not answer");
+  is("every check row says it was not read", down.rows.slice(1).map((r) => [r.result, r.when]), [["Unknown", "Not read: the database did not answer, or its answer could not be read"], ["Unknown", "Not read: the database did not answer, or its answer could not be read"]]);
+  is("and the history says so too", notReadReason(reading), "Not read: the database did not answer, or its answer could not be read");
   const unset = describeStatus({ ...reading, database: "unset" });
   is("no database set up: said as such", unset.rows.slice(1).map((r) => r.when), ["Not read: no database is set up where this page was put together", "Not read: no database is set up where this page was put together"]);
 

@@ -12,10 +12,13 @@
  *     nothing, and the page never says Passed for it.
  *   - Whether the database answered when the results were read.
  *
- * A check with no result in the last STATUS_STALE_HOURS is Unknown, a run
- * that cannot be read is dropped (never counted as a pass), and when the
- * database did not answer or is not set up, the page says the results were
- * not read rather than that there were none.
+ * A check with no result in the last STATUS_STALE_HOURS is Unknown. A reply
+ * is read only in exactly the shape asked for (statusReplyValues, parseRuns):
+ * a missing or extra field, a value of another kind, a history longer than
+ * asked for or a run that cannot be read makes the whole reading unknown,
+ * never an empty or shorter history (CX-123 rule 24). When the database did
+ * not answer, answered in another shape or is not set up, the page says the
+ * results were not read rather than that there were none.
  *
  * Its cost is the company's (MR item 2). The page is drawn for each request,
  * with no host page cache (no source in this repository prices one), and:
@@ -100,20 +103,49 @@ export function statusRunResult(checks: readonly { ok: boolean; loop?: boolean }
   return checks.some((c) => c.loop === true) ? true : null;
 }
 
-/** The runs read back, newest first; anything that is not exactly a time and a true, false or null is dropped. */
-export function parseRuns(raw: unknown): StatusRun[] {
-  if (!Array.isArray(raw)) return [];
+/**
+ * The values of a reply that is a plain list of `min` to `max` entries, read
+ * from its own data fields without running anything it holds (as
+ * withinEssentialLimit in lib/request-guard.ts reads its reply); null for
+ * anything else: not a list, a length out of range, a hole or a getter.
+ */
+export function statusReplyValues(reply: unknown, min: number, max: number): unknown[] | null {
+  if (!Array.isArray(reply)) return null;
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  if (!length || !Object.hasOwn(length, "value") || !Number.isSafeInteger(length.value) || length.value < min || length.value > max) return null;
+  const values: unknown[] = [];
+  for (let i = 0; i < length.value; i += 1) {
+    const entry = Object.getOwnPropertyDescriptor(reply, String(i));
+    if (!entry || !Object.hasOwn(entry, "value")) return null;
+    values.push(entry.value);
+  }
+  return values;
+}
+
+/**
+ * One check's runs as read back, newest first: a list of at most
+ * STATUS_RUNS_KEPT texts, each exactly {"at":<ms>,"ok":<true|false|null>}.
+ * Null when anything in it is not so: a history that cannot be read in full
+ * is unknown, never a shorter one (a dropped run could be a failure).
+ */
+export function parseRuns(raw: unknown): StatusRun[] | null {
+  const items = statusReplyValues(raw, 0, STATUS_RUNS_KEPT);
+  if (!items) return null;
   const runs: StatusRun[] = [];
-  for (const item of raw.slice(0, STATUS_RUNS_KEPT)) {
-    if (typeof item !== "string") continue;
+  for (const item of items) {
+    if (typeof item !== "string") return null;
+    let value: unknown;
     try {
-      const value: unknown = JSON.parse(item);
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      const { at, ok } = value as { at?: unknown; ok?: unknown };
-      if (typeof at === "number" && Number.isFinite(at) && at > 0 && (typeof ok === "boolean" || ok === null)) runs.push({ at, ok });
+      value = JSON.parse(item);
     } catch {
-      /* A run that cannot be read is not a result. */
+      return null;
     }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const keys = Object.keys(value);
+    if (keys.length !== 2 || !Object.hasOwn(value, "at") || !Object.hasOwn(value, "ok")) return null;
+    const { at, ok } = value as { at: unknown; ok: unknown };
+    if (typeof at !== "number" || !Number.isFinite(at) || at <= 0 || !(typeof ok === "boolean" || ok === null)) return null;
+    runs.push({ at, ok });
   }
   return runs.sort((a, b) => b.at - a.at);
 }
@@ -172,7 +204,7 @@ export type StatusReading = {
   /** When the results were read (or found not readable). */
   builtAt: number;
   limit: StatusLimit;
-  /** Whether the database answered; "unset" where no database is set up (a build without one). */
+  /** Whether the database answered, in exactly the shape asked for; "unset" where no database is set up (a build without one). */
   database: "answered" | "no-answer" | "unset";
   checks: { id: (typeof STATUS_CHECKS)[number]["id"]; name: string; untested: string; summary: StatusSummary }[];
 };
@@ -211,21 +243,26 @@ export async function readStatus({ now = Date.now(), address = "unknown" }: { no
   let reading: StatusReading;
   try {
     const key = statusViewKey(now);
-    const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, STATUS_VIEW_KEY_SECONDS]]);
-    const seen = typeof count === "number" ? count : typeof count === "string" && /^\d+$/.test(count) ? Number(count) : NaN;
-    if (!Number.isSafeInteger(seen) || seen < 1) {
+    // Exactly the two answers asked for, the second EXPIRE's 1 (the key it was just counted in exists);
+    // anything else is not an answer, and the reading is unknown.
+    const counted = statusReplyValues(await redisPipeline([["INCR", key], ["EXPIRE", key, STATUS_VIEW_KEY_SECONDS]]), STATUS_COUNT_COMMANDS, STATUS_COUNT_COMMANDS);
+    if (!counted || counted[1] !== 1) throw new Error("status: the count's reply is not the one asked for");
+    const seen = counted[0];
+    if (typeof seen !== "number" || !Number.isSafeInteger(seen) || seen < 1) {
       // A count that cannot be read is not room to read.
       reading = notRead(now, "answered", "count-unread");
     } else if (seen > STATUS_VIEWS_PER_HOUR) {
       usedUpHour = hourOf(now);
       return notRead(now, "answered", "hour");
     } else {
-      const answers = await redisPipeline(STATUS_CHECKS.map((c) => ["LRANGE", c.key, 0, STATUS_RUNS_KEPT - 1]));
+      // One history for each check, each read in full, or none of them: a missing one is unknown, never empty.
+      const histories = statusReplyValues(await redisPipeline(STATUS_CHECKS.map((c) => ["LRANGE", c.key, 0, STATUS_RUNS_KEPT - 1])), STATUS_READ_COMMANDS, STATUS_READ_COMMANDS)?.map(parseRuns);
+      if (!histories || histories.some((runs) => runs === null)) throw new Error("status: the histories' reply is not the one asked for");
       reading = {
         builtAt: now,
         limit: "none",
         database: "answered",
-        checks: STATUS_CHECKS.map((c, i) => ({ id: c.id, name: c.name, untested: c.untested, summary: summarizeRuns(parseRuns(answers[i]), now) })),
+        checks: STATUS_CHECKS.map((c, i) => ({ id: c.id, name: c.name, untested: c.untested, summary: summarizeRuns(histories[i]!, now) })),
       };
     }
   } catch {
@@ -246,7 +283,7 @@ export type StatusRow = { what: string; result: "Answered" | "Did not answer" | 
 /** Why the runs were not read, in words, or null when they were. */
 export function notReadReason(reading: StatusReading): string | null {
   const nextHour = statusTime((hourOf(reading.builtAt) + 1) * HOUR_MS);
-  if (reading.database === "no-answer") return "Not read: the database did not answer";
+  if (reading.database === "no-answer") return "Not read: the database did not answer, or its answer could not be read";
   if (reading.database === "unset") return "Not read: no database is set up where this page was put together";
   if (reading.limit === "hour") return `Not read: this page was opened more than ${STATUS_VIEWS_PER_HOUR} times this hour. It reads the results again from ${nextHour}`;
   if (reading.limit === "address") return `Not read: this page was opened many times from your network this hour. It reads the results again for you from ${nextHour}`;

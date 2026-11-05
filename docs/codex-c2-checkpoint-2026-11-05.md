@@ -1,3 +1,11 @@
+# Fresh independent feedback — 2026-11-05
+
+Newest full channel after CAS retry includes Revisor2's16h57 independent confirmation: composition11e461251 passes188checks. R2 separately reports LOW in unchanged stringList (in exact copied fixture and shared main helper): inherited array position accepted by reply[i]. This is NOT a regression added by C2, and does not negate conditional counter-gate188/188, but must be forwarded to C4/C1/S/shared owner. DO NOT edit the byte-identical proposed-helper fixture to pretend source is fixed; do not self-close R2 or expand into occupied shared product. Scope of C2 current blocker is still actual2654 repliesFor; stringList LOW is separately coordinated. Preserve exact f01e99d5 fixture and original RED. A future source helper change requires a new exact fixture/record, preserving this one by history.
+
+Latest channel checkpoint successful794824b02550d64142243c36f913db2adcfb8cc8 after2min/full reread. Q confirms #2632 verify127479975553 reservation-check15/16, product aggregator still waitsWebKit, eight other runs success; no retries or merge. No new nominal2654 head. Existing C2 task remains active for temporary external coordination, not a duplicate or cancelled task. Other current state/evidence below unchanged.
+
+---
+
 # Latest C2 continuation — 2026-11-05 16:57 Fortaleza
 
 This section supersedes earlier CI/dependency snapshots, without closing any finding on an unchanged head.

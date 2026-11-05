@@ -39,9 +39,12 @@ async function main(){
  const traffic=commands.filter(c=>c.some(x=>String(x).startsWith('nl:traffic:')));
  const waitingCommands=commands.filter(c=>c.some(x=>/^nl:(agree|payreq):/.test(String(x))));
  console.log('REPEATED_PAGE',JSON.stringify({waitingIndexReads:indexes.length,waitingCommands:waitingCommands.length,commands:commands.length,trafficCounters:traffic.length,externalCalls}));
- const beforeInvalid=commands.length;
- await LibraryPage({searchParams:Promise.resolve({token:'0'.repeat(64)})});
- assert.equal(commands.length,beforeInvalid,'instrumentation restored before negative control');
+ const invalidCommands:(string|number)[][]=[];
+ try{
+  redis.pipeline=async batch=>{invalidCommands.push(...batch.map(c=>[...c]));return original(batch);};
+  await LibraryPage({searchParams:Promise.resolve({token:'0'.repeat(64)})});
+ }finally{redis.pipeline=original;}
+ assert.equal(invalidCommands.some(c=>c.some(x=>/^nl:(agree|payreq):/.test(String(x)))),false,'an invalid library token cannot read waiting records');
  assert.equal(externalCalls,0);
  let failed=0;
  try{assert.match(line,/11|at least|or more/,'a capped list is not an exact total');}catch(e){failed++;console.error(String(e));}

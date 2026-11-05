@@ -9,7 +9,9 @@ import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { libraryOwner, storesBoughtFrom } from "@/lib/buyer-library";
-import { waitingFor, waitingLine } from "@/lib/buyer-waiting";
+import { WAITING_LATER, waitingFor, waitingLine } from "@/lib/buyer-waiting";
+import { LIBRARY_WAITING_UNITS } from "@/lib/public-read-rules";
+import { takePublicRequest } from "@/lib/traffic";
 import { requestsOpen } from "@/lib/payment-requests";
 
 export const metadata: Metadata = {
@@ -45,9 +47,15 @@ export default async function LibraryPage({ searchParams }: Params) {
     for (const store of stores) {
       const base = storeBase(store);
       const open = canRecover(store) ? await ordersLinkFor(store, email, base).catch(() => null) : null;
-      // What waits on them there (lib/buyer-waiting.ts), shown only where its orders page opens to act on it.
-      const found = open ? await waitingFor(store, email).catch(() => null) : null;
-      const waiting = found ? waitingLine({ ...found, requests: requestsOpen(store) ? found.requests : [] }) : "";
+      // What waits on them there (lib/buyer-waiting.ts), shown only where its orders page opens to act on it, and read only
+      // once that store's buyer requests paid for the read (LIBRARY_WAITING_UNITS; Codex J on #1969). Without them nothing is
+      // read, and the card says it will show again soon. Payment requests are read only where they take payment.
+      let waiting = "";
+      if (open) {
+        const paid = await takePublicRequest(store, "buyer", Date.now(), LIBRARY_WAITING_UNITS).catch(() => false);
+        const found = paid ? await waitingFor(store, email, undefined, requestsOpen(store)).catch(() => null) : null;
+        waiting = !paid ? WAITING_LATER : waitingLine(found ?? { requestsTotal: 0, agreementsTotal: 0, unread: true });
+      }
       shelves.push({ store, open, waiting });
     }
     shelves.sort((a, b) => a.store.name.localeCompare(b.store.name, "en"));

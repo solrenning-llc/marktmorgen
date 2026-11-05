@@ -70,7 +70,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
   } else {
     const charge = path.match(/^\/charges\/([^/]+)$/);
-    if (charge && method === "GET") return json(charges.get(charge[1]) ?? {});
+    if (charge && method === "GET") {
+      const row = charges.get(charge[1]);
+      return json(row ? { object: "charge", ...row } : {});
+    }
     if (path === "/disputes" && method === "GET") {
       const chargeId=url.searchParams.get("charge");
       return json({ object: "list", has_more: false, data: chargeId === "ch_E" ? [{ id: "du_ShareLost01", object: "dispute", charge: chargeId, currency: "usd", status: "lost" }] : [] });

@@ -148,8 +148,8 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     undefined,
     READ_VERSION,
   );
-  if (!charge || typeof charge !== "object" || Array.isArray(charge) || charge.id !== fee.charge || typeof charge.disputed !== "boolean") {
-    throw new UnknownAmount(fee.id, "Charge identity or dispute flag is unknown");
+  if (!charge || typeof charge !== "object" || Array.isArray(charge) || charge.object !== "charge" || charge.id !== fee.charge || typeof charge.disputed !== "boolean") {
+    throw new UnknownAmount(fee.id, "Charge identity or dispute evidence is unknown");
   }
   // Everything below is worked out in the charge's own currency. A fee Stripe
   // reports in another one cannot be compared with it here, so it is left
@@ -335,7 +335,7 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
       let feeId = event.fee;
       if (event.charge) {
         const charge = await onAccount("GET", account, `/charges/${encodeURIComponent(event.charge)}`, undefined, READ_VERSION);
-        if (!charge || typeof charge !== "object" || Array.isArray(charge) || charge.id !== event.charge) throw new UnknownFeeList("Historical charge identity was not confirmed");
+        if (!charge || typeof charge !== "object" || Array.isArray(charge) || charge.object !== "charge" || charge.id !== event.charge) throw new UnknownFeeList("Historical charge identity was not confirmed");
         feeId = historicalFeeReference(charge.application_fee);
       }
       if (feeId === null) continue;

@@ -31,7 +31,7 @@ test("monthly report preserves refusal of a supplier cost hidden by a Proxy", ()
 });
 
 test("transparent and revoked proxies cannot be laundered into accounting snapshots", () => {
-  for (const position of ["root", "sources", ...COMMERCIAL_PROFIT_SOURCES]) {
+  for (const position of ["root", "sources", ...COMMERCIAL_PROFIT_SOURCES] as const) {
     const input = fixture();
     const value = position === "root" ? input : position === "sources" ? input.sources : input.sources[position]!;
     const wrapped = Proxy.revocable(value, {});

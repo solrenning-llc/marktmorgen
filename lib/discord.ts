@@ -134,11 +134,14 @@ export async function serverName(serverId: string): Promise<string | null> {
 function readRole(raw: unknown): DiscordRole | null {
   const role = (raw ?? {}) as Record<string, unknown>;
   if (typeof role.id !== "string" || !SNOWFLAKE.test(role.id)) return null;
+  // Its place decides whether the bot can give it: one that is not Discord's whole number is not known, never
+  // place 0 (which would sit below the bot and be offered) (CX-123 rule 24).
+  if (typeof role.position !== "number" || !Number.isSafeInteger(role.position) || role.position < 0) return null;
   return {
     id: role.id,
     name: typeof role.name === "string" ? role.name.slice(0, 100) : "",
-    color: Number(role.color) || 0,
-    position: Number(role.position) || 0,
+    color: typeof role.color === "number" && Number.isSafeInteger(role.color) && role.color >= 0 ? role.color : 0,
+    position: role.position,
     managed: role.managed === true,
   };
 }
@@ -150,7 +153,10 @@ export async function serverRoles(serverId: string): Promise<{ roles: DiscordRol
   if (roles?.status !== 200 || !Array.isArray(roles.data) || typeof botId !== "string") return null;
   const all = roles.data.map(readRole).filter((r): r is DiscordRole => r !== null);
   const member = await call(`/guilds/${serverId}/members/${botId}`).catch(() => null);
-  const held = new Set(Array.isArray((member?.data as { roles?: unknown } | null)?.roles) ? ((member!.data as { roles: unknown[] }).roles as string[]) : []);
+  // The bot's own roles decide what it can give: not read, or not a list of ids, is not known, never "none".
+  const own = (member?.data as { roles?: unknown } | null)?.roles;
+  if (member?.status !== 200 || !Array.isArray(own) || !own.every((id) => typeof id === "string")) return null;
+  const held = new Set(own as string[]);
   const botTop = Math.max(0, ...all.filter((role) => held.has(role.id)).map((role) => role.position));
   return { roles: all, botTop };
 }

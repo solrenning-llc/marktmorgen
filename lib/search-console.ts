@@ -151,13 +151,19 @@ export function searchWindow(now = Date.now()): { from: string; to: string } {
 
 /** Google's rows, made ours: the search, clicks, how often shown, and the average place, rounded to a tenth. */
 export function readRows(json: unknown): SearchRow[] {
-  const rows = (json as { rows?: unknown })?.rows;
-  if (!Array.isArray(rows)) return [];
+  // Google leaves `rows` out when nothing was found; anything else out of its shape is not known, never 0 clicks
+  // or no searches (CX-123 rule 24): thrown, so the caller keeps "Google did not answer" for an hour.
+  if (json === null || typeof json !== "object" || Array.isArray(json)) throw new Error("Search Console answered in a shape that could not be read");
+  const rows = (json as { rows?: unknown }).rows;
+  if (rows === undefined) return [];
+  if (!Array.isArray(rows)) throw new Error("Search Console's rows could not be read");
+  const count = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
   return rows
     .map((row) => {
-      const r = row as { keys?: unknown; clicks?: unknown; impressions?: unknown; position?: unknown };
+      const r = (row ?? {}) as { keys?: unknown; clicks?: unknown; impressions?: unknown; position?: unknown };
+      if (!count(r.clicks) || !count(r.impressions) || !count(r.position)) throw new Error("A Search Console row could not be read");
       const query = Array.isArray(r.keys) && typeof r.keys[0] === "string" ? r.keys[0].slice(0, 200) : "";
-      return { query, clicks: Number(r.clicks) || 0, impressions: Number(r.impressions) || 0, position: Math.round((Number(r.position) || 0) * 10) / 10 };
+      return { query, clicks: r.clicks as number, impressions: r.impressions as number, position: Math.round((r.position as number) * 10) / 10 };
     })
     .filter((r) => r.query && r.impressions > 0)
     .slice(0, SEARCH_ROWS);

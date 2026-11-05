@@ -265,9 +265,11 @@ export async function settleAllUsage(meter: Meter, now = Date.now()): Promise<Se
   if (today.getUTCDate() <= SETTLE_DAYS) runs.unshift([monthBefore(month), true]);
   for (const [which, final] of runs) {
     for (const folder of await meter.folders(which)) {
-      // A store inside what every plan covers has nothing to settle, and is not asked about further.
-      if ((await meter.measured(folder, which)) <= meter.covered) continue;
       try {
+        // A store inside what every plan covers has nothing to settle, and is not asked about further.
+        // A figure that cannot be read (it throws: audit SG2, CX-123 rule 24) leaves only this store
+        // for the next run, logged below; the others go on.
+        if ((await meter.measured(folder, which)) <= meter.covered) continue;
         results.push(await settleUsage(meter, folder, which, final, now));
       } catch (error) {
         console.error(`settling a store's ${meter.name} failed`, error);

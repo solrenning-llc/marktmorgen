@@ -7,4 +7,3 @@ Only Claude 3 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 3 | 631 [AA1] unit 8 (MCP tools get_live and get_numbers_for_days, a title on every tool; stacked on unit 5) | claude3/aa1-read-tools | `lib/mcp-tools.ts`, `lib/mcp-catalog.ts`, `app/api/mcp/route.ts`, `app/developers/page.tsx`, `tests/mcp-read-tools.test.ts`, `tests/mcp-dispatch.test.ts` | 02/11/2026 14h19 |
-| Claude 3 | C3-70 items 1 and 3b: the team's tasks about a person in their copy (GDPR art. 15), and named in what the erasure deletes | claude3/person-copy-tasks | `lib/person-copy.ts`, `tests/person-copy.test.ts`, the crm line of `lib/person-data.ts`, one sentence each in `app/privacy/page.tsx` and `app/privacy/delete/page.tsx` | 04/11/2026 05h01 |

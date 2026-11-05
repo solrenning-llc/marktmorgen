@@ -180,7 +180,7 @@
     {
      "what": "Leitura dos fatos com cota reservada",
      "status": "present",
-     "evidence": "lib/path-growth-facts.ts:15 readPathGrowth (usa readProductsStrict de lib/catalog.ts, pathBuyerReview de lib/reviews.ts, listBroadcastsStrict); lib/path-growth-money.ts; tests/plan-cost-registry.ts:1722 PATH_GROWTH_READ e tests/plan-cost-registry.test.ts:1140",
+     "evidence": "lib/path-growth-facts.ts:15 readPathGrowth (usa readProductsStrict de lib/catalog.ts, pathBuyerReview de lib/reviews.ts, listBroadcastsStrict); lib/path-growth-money.ts; tests/plan-cost-registry.ts:1722 PATH_GROWTH_READ e tests/plan-cost-registry.ts:1140",
      "where_it_should_be": ""
     },
     {
@@ -313,7 +313,7 @@
      "where_it_should_be": ""
     }
    ],
-   "complement": ""
+   "complement": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar a lista de recursos em docs/marktmorgen-path.md (linha 293, item 5, \"Optional paid, reserved and fact-checked AI mission wording — pending\"), que ainda diz \"pending\"; o recurso foi entregue por este item (PR #619) e a seção própria do documento (\"## Optional paid wording (ordered item 5)\", a partir da linha 354) já o descreve."
   },
   {
    "n": 74,
@@ -757,7 +757,7 @@
    "n": 88,
    "tag": "B2-ADDRESS-ACKNOWLEDGMENT",
    "state": "done",
-   "state_evidence": "queue.md:3175 still says 'em andamento; branch codex/address-confirmation', but queue.md:3201 'item88/PR635 incorporado19/10/2026 22:12:37 ... entrega53 confirmada ... esta evidência posterior registra sua conclusão'. queue.md:530 MQ1(b) keeps the protected position. The later blocks extracted with item 88 (PR639 details, PR640, PR642, PR644, section S) belong to other items (B2 4/140/141, S1–S12) and were not audited here.",
+   "state_evidence": "queue.md:3175 still says 'em andamento; branch codex/address-confirmation', but queue.md:3201 'item88/PR635 incorporado19/10/2026 22:12:37 ... entrega53 confirmada ... esta evidência posterior registra sua conclusão'. queue.md:530 MQ1(b) keeps the protected position. The later blocks extracted with item 88 (PR639 details, PR640, PR642, PR644, section S) belong to other items (B2 4/140/141, S1–S12) and were not audited here. | Estado corrigido nesta auditoria com a prova do merge (C4-20261105-1940-C5-4): PR #635, commit 4eabb47abec4c03e9309f4376c55df512a7e34e6, 19/10/2026 22h12 Fortaleza",
    "asks": [
     {
      "what": "Success requires HTTP ok, boolean ok, no error and normalized returned address equal to the requested one",
@@ -784,7 +784,8 @@
      "where_it_should_be": ""
     }
    ],
-   "complement": ""
+   "complement": "",
+   "state_fix": "PR #635, commit 4eabb47abec4c03e9309f4376c55df512a7e34e6, 19/10/2026 22h12 Fortaleza"
   },
   {
    "n": 89,
@@ -1071,8 +1072,8 @@
   {
    "n": 140,
    "tag": "B2-SAFE-ERROR-MESSAGES",
-   "state": "in progress",
-   "state_evidence": "queue.md:2129 'Estado: em andamento; branch codex/safe-error-messages' (no merge/publication line found in queue.md for this item); queue.md:582 MQ1(b) 'andamento/posição protegidos'. The work is however in main history: commit c4acf5c91 'Keep unexpected form error names on the existing safe fallback message' (19/10/2026).",
+   "state": "done",
+   "state_evidence": "queue.md:2129 'Estado: em andamento; branch codex/safe-error-messages' (no merge/publication line found in queue.md for this item); queue.md:582 MQ1(b) 'andamento/posição protegidos'. The work is however in main history: commit c4acf5c91 'Keep unexpected form error names on the existing safe fallback message' (19/10/2026). | Estado corrigido nesta auditoria com a prova do merge (C4-20261105-1940-C5-4): PR #643, commit 59f8e30f2c336e6bb7088711a66667703fcf9fcc, 19/10/2026 23h15 Fortaleza",
    "asks": [
     {
      "what": "Sign-in form uses only own messages; __proto__/constructor fall back to generic text",
@@ -1099,13 +1100,14 @@
      "where_it_should_be": ""
     }
    ],
-   "complement": ""
+   "complement": "",
+   "state_fix": "PR #643, commit 59f8e30f2c336e6bb7088711a66667703fcf9fcc, 19/10/2026 23h15 Fortaleza"
   },
   {
    "n": 141,
    "tag": "B2-PAUSE-ACKNOWLEDGMENT",
    "state": "done",
-   "state_evidence": "Header queue.md:2137 still says 'em andamento; branch codex/pause-acknowledgment', but queue.md:3241-3243 '### PR644 — conclusão ... Incorporado19/10/2026 às23:50:49 ... Entrega59 ... 56casos ... item141 está concluído'.",
+   "state_evidence": "Header queue.md:2137 still says 'em andamento; branch codex/pause-acknowledgment', but queue.md:3241-3243 '### PR644 — conclusão ... Incorporado19/10/2026 às23:50:49 ... Entrega59 ... 56casos ... item141 está concluído'. | Estado corrigido nesta auditoria com a prova do merge (C4-20261105-1940-C5-4): PR #644, commit ca31becced39e7e15ec7b8ff1746336ba6860861, 19/10/2026 23h50 Fortaleza",
    "asks": [
     {
      "what": "Client requires HTTP ok, ok===true, no error and numeric pause equal to the chosen value",
@@ -1138,7 +1140,8 @@
      "where_it_should_be": ""
     }
    ],
-   "complement": ""
+   "complement": "",
+   "state_fix": "PR #644, commit ca31becced39e7e15ec7b8ff1746336ba6860861, 19/10/2026 23h50 Fortaleza"
   },
   {
    "n": 142,

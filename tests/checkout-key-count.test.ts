@@ -11,6 +11,7 @@
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { DEFAULT_KEYS } from "@/lib/key-setup";
+import { outOfKeys } from "@/lib/licence-keys";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { POST as cartRoute } from "@/app/api/store/cart/route";
 import { withConsent } from "./digital-consent-fixture";
@@ -127,6 +128,28 @@ async function main(): Promise<void> {
     is(`a cart whose pool's count ${as === "throws" ? "fails to load" : `answers ${as}`}: the cart's error, Stripe never reached`, await openCart(as), ["https://marktmorgen.com/@keycountshop?cart=error#cart", 0]);
   }
   is("an accessor-backed Redis slot is never executed, in a cart either", accessorReads, 0);
+
+  part("Only an own data property certifies the count");
+  const priorValue = Object.getOwnPropertyDescriptor(Object.prototype, "value");
+  Object.defineProperty(Object.prototype, "value", { configurable: true, value: 1 });
+  try {
+    answer = "accessor";
+    let direct: unknown;
+    try {
+      direct = await outOfKeys((await storeForEmail(owner))!, app.product);
+    } catch {
+      direct = "throws";
+    } finally {
+      answer = "real";
+    }
+    is("an inherited descriptor value is rejected by the count boundary itself", direct, "throws");
+    is("an inherited descriptor value cannot certify one product", await open("accessor"), ["https://marktmorgen.com/@keycountshop?status=error", 0]);
+    is("an inherited descriptor value cannot certify a cart", await openCart("accessor"), ["https://marktmorgen.com/@keycountshop?cart=error#cart", 0]);
+    is("the accessor remains unexecuted under inherited pollution", accessorReads, 0);
+  } finally {
+    if (priorValue) Object.defineProperty(Object.prototype, "value", priorValue);
+    else delete (Object.prototype as { value?: unknown }).value;
+  }
 
   done();
 }

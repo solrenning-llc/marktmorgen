@@ -6,7 +6,7 @@ import {store as redis} from "../../tests/redis-stub";
 
 // Only the GET boundary is substituted. No session, account, payment,
 // provider call, write or complete orders journey is exercised.
-const store = {stripeAccountId:"acct_TestGrantEvidence"} as Store;
+const store = {stripeAccountId:"acct_K2Proof"} as Store;
 const token = "b".repeat(64);
 const email = "buyer@example.com";
 const raw = JSON.stringify({a:store.stripeAccountId,e:email});

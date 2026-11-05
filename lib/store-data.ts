@@ -177,11 +177,13 @@ function argsOf(changes: DataChange[], nowMs: number): (string | number)[] | nul
  */
 export function dataTakenOf(store: DataStore, reply: unknown, nowSeconds = Date.now() / 1000): DataTaken {
   const room = dataRoomFor(store, nowSeconds);
-  const [state, total] = Array.isArray(reply) ? reply.map(Number) : [NaN, NaN];
-  const used = Number.isFinite(total) ? total : 0;
-  if (state === 1) return { ok: true, used };
-  if (state === 0) return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
-  return { ok: false, reason: "unknown", used, room, message: "This can't be saved right now. Try again in a minute." };
+  // Read exactly (Codex G2, #1961): {state, total}, the state the number 0 (full) or 1 (taken) and the total a safe
+  // whole number of bytes, 0 or more. Anything else (missing, null, text, negative, an extra item) is not a receipt.
+  const exact = Array.isArray(reply) && reply.length === 2 && (reply[0] === 0 || reply[0] === 1) && typeof reply[1] === "number" && Number.isSafeInteger(reply[1]) && reply[1] >= 0;
+  if (!exact) return { ok: false, reason: "unknown", used: 0, room, message: "This can't be saved right now. Try again in a minute." };
+  const used = reply[1] as number;
+  if (reply[0] === 1) return { ok: true, used };
+  return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
 }
 
 async function run(store: DataStore, changes: DataChange[], always: boolean, nowSeconds: number): Promise<DataTaken> {

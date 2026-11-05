@@ -163,6 +163,14 @@ export async function readCreatorCard(statsId: string | null): Promise<CreatorCa
   }
 }
 
+/** A card save whose answer could not be confirmed: it may or may not have been written. */
+export class CardSaveUnconfirmed extends Error {
+  constructor() {
+    super("We could not confirm your business card was saved. Reload the page to see what it is now, then save again if it is not what you saved.");
+    this.name = "CardSaveUnconfirmed";
+  }
+}
+
 /** Keeps a card as sent, after its room is taken; refused with the rule's reason, and then nothing is written. */
 export async function saveCreatorCard(statsId: string, raw: Record<string, unknown>, room: DataStore): Promise<{ ok: true; card: CreatorCard } | { ok: false; error: CardRefusal }> {
   const read = readCard(raw);
@@ -173,11 +181,13 @@ export async function saveCreatorCard(statsId: string, raw: Record<string, unkno
   const key = dataKey(room);
   if (!key || !isRedisConfigured()) throw new Error("the store's data room could not be counted");
   const now = Date.now();
-  const [reply] = await redisPipeline([["EVAL", SAVE_CARD, 2, key, cardKey(statsId), contentRoomFor(room, now / 1000), monthOf(now), dataBytes([json], 1), json]]);
-  const taken = dataTakenOf(room, reply, now / 1000);
-  if (taken.ok) return read;
-  if (taken.reason === "full") throw new DataRoomError(taken);
-  throw new Error("the store's data room could not be counted");
+  const replies: unknown = await redisPipeline([["EVAL", SAVE_CARD, 2, key, cardKey(statsId), contentRoomFor(room, now / 1000), monthOf(now), dataBytes([json], 1), json]]);
+  // The one script's answer, exactly: anything else does not show the card and its room were written, nor that they
+  // were not; it is said as not confirmed, and what was counted stays (Codex G2, #1961).
+  const taken = Array.isArray(replies) && replies.length === 1 ? dataTakenOf(room, replies[0], now / 1000) : null;
+  if (taken?.ok) return read;
+  if (taken?.reason === "full") throw new DataRoomError(taken);
+  throw new CardSaveUnconfirmed();
 }
 
 /**

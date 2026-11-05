@@ -47,6 +47,8 @@ const commentBytes = (comment: LessonComment) => dataBytes([serializeComment(com
 const RECENT_KEPT = 1_000;
 /** The most comments of every kind one lesson keeps. */
 const LESSON_KEPT = MAX_LESSON_THREADS * 4;
+/** The largest lesson index admitted by the existing thread and reply caps. */
+const LESSON_INDEX_KEPT = LESSON_KEPT * (MAX_REPLIES + 1);
 
 function commentsFrom(raw: unknown): LessonComment[] {
   return Array.isArray(raw) ? raw.map(parseComment).filter((c): c is LessonComment => c !== null) : [];
@@ -308,12 +310,12 @@ export async function deleteComment(courseId: string, id: string, room: DataStor
   if (raw === null) return 0;
   const comment = deletionComment(raw, id);
   if (!comment) throw unreadableComments();
-  const receipt = oneReply(await redisPipeline([["EVAL", DELETE_THREAD, 4, commentsKey(courseId), lessonKey(courseId, comment.lesson), allKey(courseId), repliesKey(courseId), id, comment.lesson, LESSON_KEPT, ENTRY_BYTES, DATA_STEP_BYTES]]));
+  const receipt = oneReply(await redisPipeline([["EVAL", DELETE_THREAD, 4, commentsKey(courseId), lessonKey(courseId, comment.lesson), allKey(courseId), repliesKey(courseId), id, comment.lesson, LESSON_INDEX_KEPT, ENTRY_BYTES, DATA_STEP_BYTES]]));
   if (!Array.isArray(receipt) || receipt.length !== 2) throw unreadableComments();
   const count = dataSlot(receipt, 0), freed = dataSlot(receipt, 1);
   if (typeof count !== "number" || !Number.isSafeInteger(count) || typeof freed !== "number" || !Number.isSafeInteger(freed)) throw unreadableComments();
   if (count === 0 && freed === 0) return 0;
-  if (count < 1 || count > LESSON_KEPT || freed < 1) throw unreadableComments();
+  if (count < 1 || count > MAX_REPLIES + 1 || freed < 1) throw unreadableComments();
   await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
   return count;
 }

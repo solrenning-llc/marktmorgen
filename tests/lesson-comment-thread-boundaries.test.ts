@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { addComment, deleteComment, readComment } from "@/lib/lesson-comments";
-import { CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
+import { CREATOR_AUTHOR, MAX_LESSON_THREADS, serializeComment } from "@/lib/lesson-comments-rules";
 import { COURSE_ID_PATTERN } from "@/lib/course";
 import { dataKey } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
@@ -120,4 +120,31 @@ test("two deletions with the same snapshot cannot release room belonging to an u
   assert.ok(await readComment(course, other.comment.id));
   assert.ok(afterFirst > 0);
   assert.equal(held(), afterFirst);
+});
+
+test("replies above the lesson reader window do not block creator moderation", async () => {
+  const s = await seed(), index = `nl:lc:${course}:l:${lesson}`;
+  const readerWindow = MAX_LESSON_THREADS * 4;
+  let sample = "";
+  for (let i = 0; i < readerWindow - 1; i += 1) {
+    const id = `kept${i.toString(36).padStart(8, "0")}`;
+    sample ||= id;
+    const comment = {
+      id,
+      lesson,
+      by: CREATOR_AUTHOR,
+      name: "",
+      text: "Unrelated retained comment",
+      at: 200 + i,
+      parent: null,
+      hidden: false,
+    };
+    redis.run(["HSET", hash, id, serializeComment(comment)]);
+    redis.run(["ZADD", index, comment.at, id]);
+  }
+  assert.equal(Number(redis.run(["ZCARD", index])), readerWindow + 1);
+  assert.equal(await deleteComment(course, s.parent.id, ROOM), 2);
+  assert.equal(await readComment(course, s.parent.id), null);
+  assert.equal(await readComment(course, s.reply.id), null);
+  assert.ok(await readComment(course, sample));
 });

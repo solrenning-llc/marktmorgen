@@ -1,4 +1,4 @@
-# Codex O continuation checkpoint — 05/11/2026 17h15 UTC
+# Codex O continuation checkpoint — 05/11/2026 18h32 UTC
 
 ## Rules in force
 
@@ -21,14 +21,16 @@ CX-120/122/123/126. Product PRs never edit reservation documents; new reservatio
 - J's first MEDIUM proof `9422e4cc8e34ae0cbd86d86717c04ab44d5d18e5` is closed (8/8 unchanged).
 - J's second MEDIUM review `5788655968`, proof `e33f4070a69c1a9ceaa7feacab1355a7a2fe559a`, exposed duplicate author keys. Durable test-only RED `fa5b54093c06190cac0e5f90e47760116cbe50d9`: own32/30.
 - Final reader scans and decodes top-level JSON keys before `JSON.parse` and rejects every repeated key before last-value normalization. Own32/32; new J proof unchanged4/4; linked245/245; typegen/full TSC/lint/scanner3738/0/diff green. One read/one command/zero retry.
-- J focal review `5788851917`: SEM ACHADO / PODE ENTRAR on this exact head. Exact-head CI at 17h15 UTC: seven aggregators success; product-checks run `42070004847` active; real-readers run `42070004925` active after its single isolated retry. The first macOS reader job failed only with V8 heap OOM at about 2037 MiB while Windows passed; the one allowed job retry is already consumed and must never be repeated. PR status comment `6664277110`. Preserve head while executors are active. Merge only after all nine exact aggregators succeed.
+- J focal review `5788851917`: SEM ACHADO / PODE ENTRAR on this exact head. Exact-head CI is terminal: eight aggregators success; real-readers retry succeeded; product-checks run `42070004847` failed only the shared untouched `pricing-optimization.test.ts` stale artifacts owned by #2632. The single macOS retry is consumed and must never be repeated. PR status comment `6664277110`. Do not move the head until #2632 enters main; then integrate latest main once, preserve the reviewed product/test blobs, require nine new aggregators, and merge only when all nine succeed.
 
 ### #2640 — exact community picture-place acknowledgement
 
 - Branch `codex/o-community-picture-place-evidence`; exact head `54f5481f4dbaec2faab9293f192f2e07ae002080`, tree `0940d7123e420361cc9128b0ff5837d86414567a`, main `a2424fb949ecdd5047c43a6c625eeb5e0c4f8c91` integrated.
 - P MEDIUM review `5788552429`, proof `63a7992287af3da1ca063a05316d0dd3ee219327`. Corrective test-only RED `f5438e851012d181a954f5cd1e7cef8fb06f6a91`: 27/21.
 - Final reader accepts only a non-Proxy ordinary array with exactly own inert slot0 and length before reading a positive safe integer. Own27/27; P proof unchanged4/4; buyer9+closing90; typegen/full TSC/lint/scanner3778/0/diff green. Same one INCR, zero retry; unknown/lost ACK never opens or compensates.
-- P focal return is still absent. Exact-head CI at 17h15 UTC: eight aggregators success; product-checks run `42069037730` remains active because browser work continues, but verify job `127392415206` failed only the shared untouched `pricing-optimization.test.ts` stale artifacts (`7642` versus `7643`) owned by open #2632. Do not retry or move the head while the run remains active. After #2632 enters, integrate latest main once while preserving both product/test blobs and require nine new aggregators; P focal return is still required.
+- P's focused return on head `54f5481f4dbaec2faab9293f192f2e07ae002080` closed the MEDIUM but found LOW review `5789248158`: inherited `Object.prototype.value` made `"value" in slot` accept an accessor descriptor without its own data value. Unchanged proof branch/commit `codex/p-review-o2640-descriptor-evidence/0a6f5b549cce327d61957bdbdc2e4a54b56caf58` gives RED 5/4 on the exact PR head.
+- Corrective delta is durable without moving the canonical head: branch `codex/o-community-picture-place-fix-ready`, commit `d6aa9cfb66f8f109e5a46a688ec7c477485b834a`, tree `660d2a197115ceb1fc7fbeff2f077129b1cafe91`; product blob `394e5dacb1f9b53cbc6c93e9ba012d9024ed7097`, permanent test blob `070aac968a5c97700ac9b0fae01cc76574cd979a`. It requires `Object.hasOwn(slot, "value")`. GREEN: product 29/29, unchanged P proof 5/5, buyer-actions 9/9, plan-closing 90/90, route typegen, full TSC with explicit local 4 GiB heap, lint, scanner 3791/0, diff. Comment `6665985481`; focal P return requested on delta.
+- Canonical exact-head CI is terminal at eight success plus product failure only on shared pricing stale. After #2632 enters main, integrate latest main once together with the corrective delta while preserving the two blobs above and require nine new aggregators. P focal no-finding is still required.
 
 ## Test-only blocked unit
 
@@ -41,7 +43,7 @@ Branch `codex/o-community-notice-read-evidence`; durable RED `9071b30c1fb21a1536
 ## Next exact actions
 
 1. Read full channel and exact PR states.
-2. Let the active #2629 and #2640 executors finish without head churn. Never repeat the #2629 macOS retry.
-3. If #2629 reaches nine exact successes, merge normally with expected head `1aebf5c490a93c8a3d71e03748ae2ee226adca63`; J review is already qualifying.
-4. Await Claude1/V coordination of #2632. Once it enters main, integrate latest main once into #2627 and #2640 while preserving their reviewed product/test blobs; require nine new checks. #2627 also needs focal Revisor2 return; #2640 needs P focal return.
+2. Await #2632 attempt 3 and its author merge; never repeat #2629 macOS.
+3. Once #2632 enters main, integrate latest main exactly once into #2629, #2627 and #2640. For #2640 include correction `d6aa9cfb` and preserve blobs `394e5dac`/`070aac96`; for every PR preserve all reviewed product/test blobs and require nine new checks.
+4. Ask P for focal no-finding on #2640 correction and Revisor2 for #2627. J review for #2629 remains qualifying only if its reviewed blobs stay identical.
 5. Keep the notice unit test-only until #1962 releases the source.

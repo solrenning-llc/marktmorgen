@@ -103,6 +103,24 @@ async function main() {
       console.log(`MEASURE largest writer fields: ${bytes} bytes`);
     } finally { redis.pipeline = pipeline; }
   });
+  await check("writer-permitted JSON escapes fit the registered transfer ceiling", async () => {
+    const day = new Date(now).toISOString().slice(0, 10);
+    await pipeline([["HSET", `nl:cotrouble:${sid}`, day, "0"]]);
+    await noteCheckoutTrouble(store, new StripeError(500, "\u0000".repeat(60), "\u0000".repeat(300)), now);
+    let bytes = 0;
+    redis.pipeline = async (batch) => {
+      const reply = await pipeline(batch);
+      bytes += Buffer.byteLength(JSON.stringify(batch)) + Buffer.byteLength(JSON.stringify(reply));
+      return reply;
+    };
+    try {
+      const found = await readTroubleStrict(sid, now);
+      assert.equal(found?.week, 1);
+      assert.equal(found?.last?.message.length, 300);
+      console.log(`MEASURE JSON escapes: ${bytes} bytes`);
+      assert.ok(bytes <= CHECKOUT_TROUBLE_READ.bytes, `${bytes} exceeds registered ${CHECKOUT_TROUBLE_READ.bytes}`);
+    } finally { redis.pipeline = pipeline; }
+  });
   console.log(`${checks} checks passed`);
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

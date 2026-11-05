@@ -12,7 +12,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { DATA_STEP_BYTES, ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { newItemId } from "@/lib/course";
 import { cleanLine, cleanText } from "@/lib/community-text";
 import {
@@ -82,6 +82,93 @@ function confirmedCommentWrite(reply: unknown, hasParent: boolean): boolean {
     && values[1] === 1
     && values[2] === 1
     && (!hasParent || values[4] >= 1);
+}
+
+/** A reply is admitted and written with its still-present parent in one Redis turn. */
+const WRITE_REPLY = `-- marktmorgen:lesson-comment-reply:v1
+local raw = redis.call("HGET", KEYS[1], ARGV[1])
+if not raw then return {0, 0, 0, 0, 0} end
+local ok, parent = pcall(cjson.decode, raw)
+if not ok or type(parent) ~= "table" or parent.id ~= ARGV[1] or parent.l ~= ARGV[2] or (parent.r ~= nil and parent.r ~= cjson.null) then return {0, 0, 0, 0, 0} end
+local replies = tonumber(redis.call("HGET", KEYS[4], ARGV[1]) or "0")
+local most = tonumber(ARGV[6])
+if not replies or replies < 0 or replies >= most then return {0, 0, 0, 0, 0} end
+local kept = redis.call("HSET", KEYS[1], ARGV[3], ARGV[4])
+local lesson = redis.call("ZADD", KEYS[2], ARGV[5], ARGV[3])
+local newest = redis.call("ZADD", KEYS[3], ARGV[5], ARGV[3])
+local trimmed = redis.call("ZREMRANGEBYRANK", KEYS[3], 0, -tonumber(ARGV[7]) - 1)
+local count = redis.call("HINCRBY", KEYS[4], ARGV[1], 1)
+return {kept, lesson, newest, trimmed, count}`;
+
+/**
+ * Deletes one reply, or a parent and every reply visible in its bounded
+ * lesson index, in one Redis turn. It returns only the confirmed count and
+ * the exact room bytes represented by the stored canonical JSON. A malformed
+ * link or index returns unknown before any mutation.
+ */
+const DELETE_THREAD = `-- marktmorgen:lesson-comment-thread-delete:v1
+local target = ARGV[1]
+local lesson = ARGV[2]
+local most = tonumber(ARGV[3])
+local entry = tonumber(ARGV[4])
+local step = tonumber(ARGV[5])
+local function validId(value)
+  return type(value) == "string" and string.len(value) == 12 and string.match(value, "^[a-z0-9]+$") ~= nil
+end
+local function parsed(raw, expected)
+  local ok, comment = pcall(cjson.decode, raw)
+  if not ok or type(comment) ~= "table" or comment.id ~= expected or comment.l ~= lesson or type(comment.b) ~= "string" or type(comment.t) ~= "string" then return nil, false end
+  local parent = comment.r
+  if parent == cjson.null then parent = nil end
+  if parent ~= nil and not validId(parent) then return nil, false end
+  return parent, true
+end
+local raw = redis.call("HGET", KEYS[1], target)
+if not raw then return {0, 0} end
+local parent, ok = parsed(raw, target)
+if not ok then return {-1, 0} end
+local gone = {{target, raw}}
+local known = {[target] = true}
+if parent == nil then
+  local ids = redis.call("ZRANGE", KEYS[2], 0, most)
+  if #ids > most then return {-1, 0} end
+  for _, id in ipairs(ids) do
+    local row = redis.call("HGET", KEYS[1], id)
+    if not row then return {-1, 0} end
+    local linked, rowOk = parsed(row, id)
+    if not rowOk then return {-1, 0} end
+    if linked == target and not known[id] then
+      known[id] = true
+      table.insert(gone, {id, row})
+    end
+  end
+else
+  local count = tonumber(redis.call("HGET", KEYS[4], parent) or "")
+  if not count or count < 1 then return {-1, 0} end
+end
+local freed = 0
+for _, row in ipairs(gone) do
+  freed = freed + math.floor((string.len(row[2]) + entry * 4 + step - 1) / step) * step
+end
+for _, row in ipairs(gone) do
+  redis.call("HDEL", KEYS[1], row[1])
+  redis.call("ZREM", KEYS[2], row[1])
+  redis.call("ZREM", KEYS[3], row[1])
+  redis.call("HDEL", KEYS[4], row[1])
+end
+if parent ~= nil then redis.call("HINCRBY", KEYS[4], parent, -1) end
+return {#gone, freed}`;
+
+function deletionComment(raw: unknown, expectedId: string): LessonComment | null {
+  const comment = parseComment(raw);
+  if (!comment || comment.id !== expectedId || typeof raw !== "string") return null;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (value.r !== undefined && value.r !== null && (typeof value.r !== "string" || !COMMENT_ID_PATTERN.test(value.r))) return null;
+    return comment;
+  } catch {
+    return null;
+  }
 }
 
 export async function commentsOn(courseId: string): Promise<boolean> {
@@ -194,13 +281,14 @@ export async function addComment(input: {
     hidden: false,
   };
   await needData(input.room, [{ slot: COMMENTS_SLOT(input.courseId), bytes: commentBytes(comment) }]);
-  const written = await redisPipeline([
-    ["HSET", commentsKey(input.courseId), comment.id, serializeComment(comment)],
-    ["ZADD", lessonKey(input.courseId, input.lessonId), now, comment.id],
-    ["ZADD", allKey(input.courseId), now, comment.id],
-    ["ZREMRANGEBYRANK", allKey(input.courseId), 0, -RECENT_KEPT - 1],
-    ...(parent ? [["HINCRBY", repliesKey(input.courseId), parent.id, 1] as (string | number)[]] : []),
-  ]);
+  const written = parent
+    ? oneReply(await redisPipeline([["EVAL", WRITE_REPLY, 4, commentsKey(input.courseId), lessonKey(input.courseId, input.lessonId), allKey(input.courseId), repliesKey(input.courseId), parent.id, input.lessonId, comment.id, serializeComment(comment), now, MAX_REPLIES, RECENT_KEPT]]))
+    : await redisPipeline([
+        ["HSET", commentsKey(input.courseId), comment.id, serializeComment(comment)],
+        ["ZADD", lessonKey(input.courseId, input.lessonId), now, comment.id],
+        ["ZADD", allKey(input.courseId), now, comment.id],
+        ["ZREMRANGEBYRANK", allKey(input.courseId), 0, -RECENT_KEPT - 1],
+      ]);
   if (!confirmedCommentWrite(written, parent !== null)) return { ok: false, reason: "unknown" };
   return { ok: true, comment, parent };
 }
@@ -215,27 +303,19 @@ export async function setHidden(courseId: string, id: string, hidden: boolean): 
 
 /** Deletes a comment, and the answers under it, and gives back their room. Returns how many went. */
 export async function deleteComment(courseId: string, id: string, room: DataStore): Promise<number> {
-  const comment = await readComment(courseId, id);
-  if (!comment) return 0;
-  const gone = [comment.id];
-  let freed = commentBytes(comment);
-  if (comment.parent === null) {
-    for (const other of await lessonComments(courseId, comment.lesson)) {
-      if (other.parent === comment.id) {
-        gone.push(other.id);
-        freed += commentBytes(other);
-      }
-    }
-  }
-  await redisPipeline([
-    ["HDEL", commentsKey(courseId), ...gone],
-    ["ZREM", lessonKey(courseId, comment.lesson), ...gone],
-    ["ZREM", allKey(courseId), ...gone],
-    ["HDEL", repliesKey(courseId), comment.id],
-    ...(comment.parent ? [["HINCRBY", repliesKey(courseId), comment.parent, -1] as (string | number)[]] : []),
-  ]);
+  if (!isRedisConfigured() || !COMMENT_ID_PATTERN.test(id)) return 0;
+  const raw = oneReply(await redisPipeline([["HGET", commentsKey(courseId), id]]));
+  if (raw === null) return 0;
+  const comment = deletionComment(raw, id);
+  if (!comment) throw unreadableComments();
+  const receipt = oneReply(await redisPipeline([["EVAL", DELETE_THREAD, 4, commentsKey(courseId), lessonKey(courseId, comment.lesson), allKey(courseId), repliesKey(courseId), id, comment.lesson, LESSON_KEPT, ENTRY_BYTES, DATA_STEP_BYTES]]));
+  if (!Array.isArray(receipt) || receipt.length !== 2) throw unreadableComments();
+  const count = dataSlot(receipt, 0), freed = dataSlot(receipt, 1);
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || typeof freed !== "number" || !Number.isSafeInteger(freed)) throw unreadableComments();
+  if (count === 0 && freed === 0) return 0;
+  if (count < 1 || count > LESSON_KEPT || freed < 1) throw unreadableComments();
   await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
-  return gone.length;
+  return count;
 }
 
 /** The course's newest comments, for the studio, and how many came since it last looked. */

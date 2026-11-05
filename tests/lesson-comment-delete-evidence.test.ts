@@ -25,7 +25,6 @@ async function main() {
       const parentRaw = serializeComment(parent), replyRaw = serializeComment(reply);
       let destructive = 0;
       redis.pipeline = async commands => {
-        destructive += commands.filter(command => !["HGET", "GET", "HMGET", "ZREVRANGE"].includes(String(command[0]))).length;
         if (commands[0]?.[0] === "HGET" && commands[0][1] === hash && commands[0][2] === parent.id) {
           if (mode === "parent-missing") return [] as never;
           if (mode === "parent-extra") return [parentRaw, null] as never;
@@ -34,6 +33,22 @@ async function main() {
           if (mode === "parent-getter") return Object.defineProperty(new Array(1), "0", { get() { getters++; return parentRaw; } }) as never;
           if (mode === "parent-inherited") return Object.setPrototypeOf(new Array(1), [parentRaw]) as never;
         }
+        if (commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:lesson-comment-thread-delete:v1\n")) {
+          if (mode === "index-missing") return [] as never;
+          if (mode === "index-extra") return [[2, 1_248], null] as never;
+          if (mode === "index-invalid") return [["2", 1_248]] as never;
+          if (mode === "index-duplicate") return [[2, 1_248, 0]] as never;
+          if (mode === "index-sparse") return [new Array(2)] as never;
+          if (mode === "index-overflow") return [[MAX_LESSON_THREADS * 4 + 1, 1_248]] as never;
+          if (mode === "rows-missing") return [0] as never;
+          if (mode === "rows-short") return [[2]] as never;
+          if (mode === "rows-extra") return [[2, 1_248, 0]] as never;
+          if (mode === "rows-sparse") return [new Array(2)] as never;
+          if (mode === "rows-invalid") return [[2, "1248"]] as never;
+          if (mode === "rows-mismatch") return [[-1, 0]] as never;
+          if (mode === "rows-wrong-lesson") return [[2, -1]] as never;
+        }
+        destructive += commands.filter(command => !["HGET", "GET", "HMGET", "ZREVRANGE"].includes(String(command[0]))).length;
         if (commands[0]?.[0] === "ZREVRANGE" && commands[0][1] === index) {
           if (mode === "index-missing") return [] as never;
           if (mode === "index-extra") return [[reply.id, parent.id], []] as never;

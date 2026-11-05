@@ -57,11 +57,11 @@ for (const applied of [false, true]) {
       const parent = await question(), original = redis.pipeline.bind(redis);
       let intercepted = 0, answerId = "", claimed = false, getterReads = 0;
       redis.pipeline = async (commands) => {
-        if (commands.length === 5 && commands[0][0] === "HSET" && commands[0][1] === `nl:lc:${course}:c`) {
+        if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:lesson-comment-reply:v1\n")) {
           intercepted++;
-          answerId = String(commands[0][2]);
+          answerId = String(commands[0][9]);
           if (applied) await original(commands);
-          return reply.make(() => { getterReads++; }) as never;
+          return [reply.make(() => { getterReads++; })] as never;
         }
         return original(commands);
       };

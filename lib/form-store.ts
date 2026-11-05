@@ -18,6 +18,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { type FormDef, type FormResponse, FORM_RESPONSE_ID, FORM_ID, KEPT_RESPONSES, MAX_FORMS, parseForm } from "@/lib/forms";
 
 const formsKey = (statsId: string) => `nl:forms:${statsId}`;
@@ -192,21 +193,25 @@ return out`;
  * Deletes every response one person gave to any of the store's forms
  * (lib/person-erasure.ts), and gives back to `room` exactly what each one
  * took when it was kept (addResponse): the script answers each response it
- * removed, by form, with how many times it was there.
+ * removed, by form, with how many times it was there. A reply that is not
+ * exactly that throws UnknownReply (lib/redis-exact.ts).
  */
 export async function forgetFormsPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const forms = await readForms(statsId);
   if (!forms.length) return 0;
-  const [reply] = await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]);
-  const list = Array.isArray(reply) ? reply : [];
+  const what = "the deletion of a person's form responses";
+  const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]), 1, what);
+  // Exactly {form's place, response, times removed} for each: any other shape
+  // leaves the deletion unknown (UnknownReply), and nothing is given back.
+  const list = plainList(reply);
+  if (!list || list.length % 3 !== 0) throw new UnknownReply(what);
   let removed = 0;
   const freed = new Map<string, number>();
-  for (let i = 0; i + 2 < list.length; i += 3) {
-    const form = forms[Number(list[i]) - 1];
-    const raw = list[i + 1];
-    const n = Number(list[i + 2]);
-    if (!form || typeof raw !== "string" || !Number.isSafeInteger(n) || n < 1) continue;
+  for (let i = 0; i < list.length; i += 3) {
+    const [at, raw, n] = [list[i], list[i + 1], list[i + 2]];
+    const form = typeof at === "number" && Number.isInteger(at) ? forms[at - 1] : undefined;
+    if (!form || typeof raw !== "string" || typeof n !== "number" || !Number.isSafeInteger(n) || n < 1) throw new UnknownReply(what);
     removed += n;
     freed.set(form.id, (freed.get(form.id) ?? 0) + dataBytes([raw], 1) * n);
   }

@@ -13,6 +13,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { newItemId } from "@/lib/course";
 import { cleanLine, cleanText } from "@/lib/community-text";
 import {
@@ -409,15 +410,24 @@ return {name or "", gone}`;
  * lib/learn.ts emailKey. What they took goes back to `room` as the other
  * deletions here give it back: each comment at commentBytes, and the name
  * kept once (a name typed again was charged again; that part is not known,
- * so it stays counted, never less than kept).
+ * so it stays counted, never less than kept). A reply that is not exactly
+ * what was asked for throws UnknownReply (lib/redis-exact.ts).
  */
 export async function forgetLessonCommentsPerson(courseId: string, lessonIds: string[], who: string, room?: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [reply] = await redisPipeline([
-    ["EVAL", FORGET_LESSON_COMMENTS, 4 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), namesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, ...lessonIds],
-  ]);
-  const [name, raws] = Array.isArray(reply) ? reply : ["", []];
-  const gone = Array.isArray(raws) ? raws : [];
+  const what = "the deletion of a student's lesson comments";
+  const [reply] = exactReplies(
+    await redisPipeline([
+      ["EVAL", FORGET_LESSON_COMMENTS, 4 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), namesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, ...lessonIds],
+    ]),
+    1,
+    what,
+  );
+  // Exactly {the name ("" for none), the comments taken}: any other shape
+  // leaves the deletion unknown (UnknownReply), and nothing is given back.
+  const [name, raws] = exactReplies(reply, 2, what);
+  const gone = plainList(raws);
+  if (typeof name !== "string" || !gone || !gone.every((raw) => typeof raw === "string")) throw new UnknownReply(what);
   if (room) {
     const freed = takenBytes(gone) + (typeof name === "string" && name ? dataBytes([who, name], 1) : 0);
     if (freed > 0) await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);

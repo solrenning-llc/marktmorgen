@@ -1,3 +1,4 @@
+import { types } from 'node:util';
 import { assessCustomerWorstCase, MINIMUM_NET_MARGIN_BPS, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from '@/lib/net-margin-rules';
 
 export const CUSTOMER_BASE_RULES = {
@@ -47,10 +48,10 @@ function ownReviewData(record: unknown, key: string): unknown {
  */
 export function assessMinimumCustomerBase(units: CustomerBaseUnit[], fixed: CustomerBaseReview | null): CustomerBaseAssessment {
   try {
-    if (!Array.isArray(units) || Object.getPrototypeOf(units) !== Array.prototype) return stopped('unknown');
+    if (types.isProxy(units) || !Array.isArray(units) || Object.getPrototypeOf(units) !== Array.prototype) return stopped('unknown');
     const length = ownReviewData(units, 'length');
     if (!cents(length) || length === 0 || Reflect.ownKeys(units).length !== length + 1) return stopped('unknown');
-    if (!fixed || typeof fixed !== 'object' || Array.isArray(fixed)) return stopped('unknown');
+    if (!fixed || typeof fixed !== 'object' || types.isProxy(fixed) || Array.isArray(fixed)) return stopped('unknown');
     if (![Object.prototype, null].includes(Object.getPrototypeOf(fixed))
       || Reflect.ownKeys(fixed).length !== FIXED_REVIEW_KEYS.length) return stopped('unknown');
     // Capture the complete fixed review. Projecting only expected fields could

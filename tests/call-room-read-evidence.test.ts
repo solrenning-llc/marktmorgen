@@ -26,6 +26,8 @@ for (const [label, reply] of Object.entries({
   unreadableRoom: ["https://example.com/not-a-generated-room", null, null, null],
   brokenMeeting: [null, null, "{broken", null],
   unknownMeeting: [null, null, "{}", null],
+  unknownMeetingStatus: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "https://meet.google.com/abc-defg-hij" }), null],
+  wrongMeetingScope: [null, null, JSON.stringify({ provider: "google", scope: "c:another-store:b:another-booking", link: "https://meet.google.com/abc-defg-hij", gone: false }), null],
 })) {
   test(`unknown room evidence never silently switches to a fallback: ${label}`, async () => {
     initial = reply;
@@ -58,7 +60,7 @@ test("the room already given to the booking is preserved", async () => {
 });
 
 test("a confirmed meeting record keeps the link it gave", async () => {
-  initial = [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "https://meet.google.com/abc-defg-hij" }), null];
+  initial = [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "https://meet.google.com/abc-defg-hij", gone: false }), null];
   assert.deepEqual(await roomsFor("calls-evidence", [ask]), ["https://meet.google.com/abc-defg-hij"]);
 });
 

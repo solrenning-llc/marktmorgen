@@ -58,7 +58,7 @@ test("complete plain, frozen and null-prototype fixed reviews preserve the minim
   assert.equal(assessMinimumCustomerBase(units(), { ...fixed(), reviewedPayingCustomers: 1 }).reviewedBaseSufficient, false);
   assert.equal(assessMinimumCustomerBase(units(), { ...fixed(), monthlyFixedCostsCeilingCents: null }).minimumCustomers, null);
 });
-test("fixed review fields are captured once without getters or ordinary property reads", () => {
+test("fixed review fields are captured once, but an unverifiable Proxy cannot approve the base", () => {
   const counts = new Map<PropertyKey, number>();
   let reads = 0;
   const review = new Proxy(fixed(), {
@@ -68,7 +68,7 @@ test("fixed review fields are captured once without getters or ordinary property
       return Reflect.getOwnPropertyDescriptor(target, key);
     },
   });
-  assert.deepEqual(assessMinimumCustomerBase(units(), review), calculated);
+  assert.deepEqual(assessMinimumCustomerBase(units(), review), unknown);
   assert.equal(reads, 0);
   for (const key of Object.keys(fixed())) assert.equal(counts.get(key), 1, key);
   for (const key of Object.keys(fixed())) {

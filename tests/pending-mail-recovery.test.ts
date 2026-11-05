@@ -182,7 +182,7 @@ test('normal physical workers recover original cap holds through real Lua and fi
    const checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);
    session=f.sessions.get(checkout.id)!;
    Object.assign(session,{status:'complete',payment_status:'paid',amount_total:4000,customer_details:{email:'buyer@example.test'},
-    payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false}},
+    payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false,disputed:false}},
     shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
    confirmationId=originId();
   }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}
@@ -321,7 +321,7 @@ for (const count of [101,1000]) test(`both normal workers recover ${count} genui
   const checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);
   const session=f.sessions.get(checkout.id)!;
   Object.assign(session,{status:'complete',payment_status:'paid',amount_total:4000,customer_details:{email:'buyer@example.test'},
-   payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false}},
+   payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false,disputed:false}},
    shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
   }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}
   const confirmationId=originId(),source=await readConfirmationOrigin(confirmationId,f.runtime);assert.ok(source);
@@ -348,7 +348,8 @@ for (const count of [101,1000]) test(`both normal workers recover ${count} genui
    const input={statsId:'synthetic_paged_recovery_'+count,session:'cs_test_PagedRecovery'+count+String(i).padStart(4,'0'),authorizedAt:clock,
     shipped:{at:Math.floor(clock/1000),tracking:'https://example.test/track/'+i},
     message:{from:'Store <mail@example.test>',to:'buyer@example.test',subject:'Original '+count+' '+i,text:'Immutable original '+i,replyTo:'owner@example.test'}};
-   assert.equal((await enqueueShipmentMail(input,runtime)).ok,true);
+   const queued=await enqueueShipmentMail(input,runtime);
+   assert.equal(queued.ok,true,queued.ok?'':JSON.stringify({index:i,result:queued,pool:await pipeline([['HGETALL',pool]]),at:now(),authorizedAt:clock}));
    const id=shipmentMailId(input.statsId,input.session);originals.set(input.message.subject,JSON.stringify(input.message));
    assert.equal((await runShipmentMail(now()+30000,async()=> 'waiting',runtime,id)).waiting,1);
   }
@@ -503,7 +504,7 @@ test('small funded successor grants compose both normal workers through an unsup
    const checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);
    const session=f.sessions.get(checkout.id)!;
    Object.assign(session,{status:'complete',payment_status:'paid',amount_total:4000,customer_details:{email:'buyer@example.test'},
-    payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false}},
+    payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false,disputed:false}},
     shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
    id=originId();
   }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}

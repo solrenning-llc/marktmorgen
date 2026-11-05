@@ -11,24 +11,14 @@ import {
   sessionCookie,
 } from "@/lib/auth";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { logTeam, memberStores, peekInvite, spendInvite } from "@/lib/team";
+import { logTeam, peekInvite, spendInvite } from "@/lib/team";
 import { ROLE_NAMES } from "@/lib/team-roles";
 import { noticeCreator } from "@/lib/account-notice";
 import { storeCookie, studioPath } from "@/lib/studio-route";
-import { accountStores } from "@/lib/store";
-import { listPasskeys } from "@/lib/passkeys";
+import { hasAccount } from "@/lib/account-exists";
 
 /** Taps one connection may make in an hour. */
 const TRIES_PER_HOUR = 20;
-
-/**
- * Whether an address already has an account here: a store of its own, a
- * place on another store's team, or a passkey.
- */
-async function hasAccount(email: string): Promise<boolean> {
-  const [owned, member, passkeys] = await Promise.all([accountStores(email), memberStores(email), listPasskeys(email)]);
-  return owned.length > 0 || member.length > 0 || passkeys.length > 0;
-}
 
 /**
  * Taking an invitation to a store's team (lib/team.ts).
@@ -49,7 +39,8 @@ async function hasAccount(email: string): Promise<boolean> {
  *   - for an address that has no account yet, the tap proves the inbox is
  *     theirs, so it logs them in as that address with the store open;
  *   - for an address that already has an account (a store, another team, a
- *     passkey), the invitation only puts them on the team. It does not log
+ *     passkey, two-step login; lib/account-exists.ts), the invitation only
+ *     puts them on the team. It does not log
  *     in: a link that stays good for seven days must not be a seven-day key
  *     to an existing account, whose own login links last fifteen minutes.
  *     They log in the usual way and find the store in their studio.
@@ -96,7 +87,13 @@ export async function POST(request: NextRequest) {
   const { store, member } = joined;
 
   await logTeam(store.sid, { who: member.email, role: member.role, what: `Joined the team as ${ROLE_NAMES[member.role]}` });
-  after(() => noticeCreator(store, { kind: "team-joined", who: member.email, role: ROLE_NAMES[member.role] }));
+  const tell = () => noticeCreator(store, { kind: "team-joined", who: member.email, role: ROLE_NAMES[member.role] });
+  // After the answer, inside the route's time; at once, unwaited, where there is no request to wait for (a test).
+  try {
+    after(tell);
+  } catch {
+    void tell().catch((error: unknown) => console.error("telling the owner about a new teammate failed", error));
+  }
 
   // Already logged in as this address: nothing about the session changes.
   if (signedInAs) {

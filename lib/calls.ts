@@ -740,7 +740,8 @@ export function callCheckoutBody(input: {
     "payment_intent_data[metadata][kind]": "call",
     "payment_intent_data[metadata][start]": String(start),
     success_url: `${origin}/@${store.handle}/thanks?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
+    // Back from Stripe's page, the length chosen is still chosen (3.3.7).
+    cancel_url: `${origin}/@${store.handle}/book/${product.id}${length && length.minutes !== product.call?.minutes ? `?length=${length.minutes}` : ""}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
   // The creator's cancellation deadline (lib/call-setup.ts, cancelHours): said before paying; never for a session from a package, which pays nothing here.
@@ -819,6 +820,25 @@ export function callCheckoutBody(input: {
   return body;
 }
 
+/**
+ * The listed site an embedded calendar booked from, kept on the sale: written
+ * after everything else (the platform's share included, lib/platform-share.ts),
+ * and only while Stripe's fifty metadata fields have room, as
+ * lib/store-checkout.ts writes it, so it is never what stops a booking.
+ */
+export function keepEmbedSite(body: URLSearchParams, site: string | null | undefined, fromPackage: boolean): void {
+  if (!site || !/^https:\/\//.test(site) || fromPackage) return;
+  // Back from Stripe's page, the listed site stays with the booking page, so a second try is still the site's (3.3.7).
+  const cancel = body.get("cancel_url");
+  if (cancel) {
+    const url = new URL(cancel);
+    url.searchParams.set("site", site.slice(0, 700));
+    body.set("cancel_url", url.toString());
+  }
+  if ([...body.keys()].filter((key) => key.startsWith("metadata[")).length >= 50) return;
+  body.set("metadata[embed_site]", site.slice(0, 300));
+}
+
 /** The API version a checkout with nothing to pay is made at (lib/call-packages.ts). */
 export const NO_COST_VERSION = "2026-08-26.dahlia";
 
@@ -850,6 +870,8 @@ export async function holdAndCheckout(input: {
   channel?: Record<string, string>;
   /** The length the buyer chose, in minutes, on a call with several (lib/call-lengths.ts); none is the setup's own. */
   minutes?: unknown;
+  /** The listed site the calendar embedded there booked from, already checked against the creator's list (app/api/store/book). */
+  embedSite?: string | null;
 }): Promise<HoldResult> {
   const { store, product, start, origin } = input;
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
@@ -921,6 +943,8 @@ export async function holdAndCheckout(input: {
       const mayComeOff = store.hasDiscounts && shareBps(store) > 0 && !input.code ? await codesMayTakeOff(store.stripeAccountId, store.currency) : [];
       applyShare(body, store, { recurring: false, least: leastPaid(linesTotal(body).cents, mayComeOff) });
     }
+    // Kept on the sale last, after the share (keepEmbedSite).
+    keepEmbedSite(body, input.embedSite, Boolean(pkg));
 
     // A session from a package is a checkout with nothing to pay, which Stripe
     // takes only at API version 2023-08-16 or later
@@ -996,13 +1020,17 @@ function offerFrom(product: CallListing, now: number, seats: TeamBusy[], session
  * Every open time or session for a call product, or null when it cannot be
  * read, and the paid calls read on the way, for catchUpBookings.
  */
-export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null) {
+export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null, minutes?: number | null) {
+  // One of a call's lengths (lib/call-lengths.ts): its times, at that length. Never on a team, whose hosts' times are read
+  // at the setup's own length: there the length asked is not read, and `team` says so, so the page offers no lengths.
+  const atLength = Boolean(minutes && product.call.kind === "weekly" && minutes !== product.call.minutes && product.call.lengths?.some((l) => l.minutes === minutes));
   try {
     const now = Date.now();
     const { busy, paid, blocked, sessions } = await readBusy(store, now);
     const whole = await activeTeam(store, product);
     // A team event type the plan or the team no longer allows: nothing on offer.
-    if (whole === "closed") return { days: [], left: {}, sessions: [], paid };
+    if (whole === "closed") return { days: [], left: {}, sessions: [], paid, team: true };
+    if (atLength && !whole) product = { ...product, call: { ...product.call, minutes: minutes as number } };
     if (whole) {
       // A team that lets buyers choose: who they may pick, and only the chosen host's times once they have.
       const hosts = hostChoices(whole);
@@ -1011,9 +1039,9 @@ export async function slotsForProduct(store: Store, product: CallListing, pick?:
       const team = narrowed && narrowed !== "changed" ? narrowed : whole;
       // The page is where each host's calendar is read again, when its last reading is old.
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true });
-      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked };
+      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked, team: true };
     }
-    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid };
+    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid, team: false };
   } catch {
     return null;
   }

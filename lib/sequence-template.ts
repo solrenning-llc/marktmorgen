@@ -21,11 +21,11 @@ export const MAX_SEQUENCE_FILE_BYTES = 150_000;
 export const SEQUENCE_SUBJECT_MAX = 150;
 export const SEQUENCE_BODY_MAX = 20_000;
 
-/** The template as a file: its header and two example emails. */
+/** The template as a file: its header and two example emails. Their preview is left empty: an email in a sequence has no preview text yet, so the reader takes it out and lists it (lib/sequence-import.ts). */
 export function sequenceTemplateCsv(): string {
   return [
     csvLine([...SEQUENCE_TEMPLATE]),
-    csvLine(["1", "0", "Welcome! Here is your guide", "Everything you need to start", "Hi,\n\nThank you for joining. Your guide is on my store.\n\nTalk soon"]),
+    csvLine(["1", "0", "Welcome! Here is your guide", "", "Hi,\n\nThank you for joining. Your guide is on my store.\n\nTalk soon"]),
     csvLine(["2", "3", "A tip for your first week", "", "Hi again,\n\nHere is one thing that helps most people in their first week."]),
   ].join("\n");
 }

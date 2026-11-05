@@ -146,6 +146,19 @@ export async function publishedPosts(statsId: string | null, page: number): Prom
   return { posts, total: Number(total) || 0 };
 }
 
+/** How many posts are out, counted with one command; null when it cannot be counted (lib/store-sitemap.ts, sitemapSize). */
+export async function publishedTotal(statsId: string | null): Promise<number | null> {
+  if (!statsId) return 0;
+  if (!isRedisConfigured()) return null;
+  try {
+    const [total] = await redisPipeline([["ZCARD", pubKey(statsId)]]);
+    const n = Number(total);
+    return Number.isSafeInteger(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One post, whole; null when there is none by that id. */
 export async function readPost(statsId: string | null, id: string): Promise<Post | null> {
   if (!statsId || !isRedisConfigured() || !POST_ID.test(id)) return null;

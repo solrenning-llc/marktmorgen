@@ -65,7 +65,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   },
   {
     name: "get_affiliates",
-    description: "The affiliate program's terms and each affiliate by their link's code: clicks, sales, earned, paid, owed, payable now, and anything held for review and why. No addresses.",
+    description: "The affiliate program's terms and each affiliate by their link's code: clicks, sales, earned, paid, owed, payable now, and anything held for review and why. No addresses. It reads the whole program, so it counts as several of the store's API requests, more as the program grows.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },

@@ -40,7 +40,7 @@ const honestUnavailable = new Map<string, Array<[string, string]>>([
   ["lib/takedown.ts", [["report", 'return "error"']]],
 ]);
 for (const [file, cases] of honestUnavailable) {
-  const lines = read(file).split("\\n");
+  const lines = read(file).split("\n");
   for (const [scope, refusal] of cases) {
     const line = lines.find((candidate) => candidate.includes(`withinEssentialLimit("${scope}"`)) ?? "";
     is(`${file}: ${scope} says unavailable rather than blaming the person`, line.includes(refusal), true);

@@ -1,23 +1,47 @@
-# Codex O continuation checkpoint
+# Codex O continuation checkpoint — 05/11/2026 14h55 Fortaleza
+
+## Rules in force
+
+CX-120/122/123/126. Product PRs never edit reservation documents; new reservations are channel-only. At most five own product units. No force, direct main, head movement during active executors absent a real finding, pricing/limits/commissions/flags/gates/PII/provider contact or paid IO without a prior counted ceiling. One qualifying independent no-finding review and exactly nine successful aggregators on the exact head are required. Never touch #2316 or community-dm.
 
 ## Current product PRs
 
-- #2418: codex/o-community-reward-evidence, head 7bd3eb3d3ecc17e5ca920681329f8a815d09ae07. Review J5779133107 remains applicable. Eight aggregators successful. Original form-opportunity-redis failure was reproduced by A3 as external INFO command observation noise; its one isolated rerun passed (job127127318131). That attempt exposed external cancellation of verify127127365383. The workflow ended cancelled; ONE isolated rerun of that different verify was accepted in this turn, now job127131778737, Behavior regressions. Do not rerun it again. Merge only nine successful aggregators on the exact head.
-- #2549: codex/o-community-push-erasure-evidence, head 0fa2e125c1061862dfb134567b49ea52dcb1da38. L5779906457 remains applicable because the product blobs are unchanged. Eight aggregators successful. ONE isolated rerun of cancelled verify127091725708 was accepted in the prior turn and is now127127320586, Agreements signed with a link, in a browser. Do not repeat it. Do not edit the head during active executors.
-- Already merged: #2391 d54b16c77b59d04738b238ea015ccdda917a08c5; #2550 0f30fd7414630ee20d72a226de730a497f8a9a99; #2434 b0f4c098e7b03ec3529f91c6c76097a7aa37f579.
+### #2627 — community points copy
 
-## New test-only unit
+- Branch `codex/o-community-points-copy-evidence`; remote head `1330a3ca31bc390fd5e0b89a1cebe72938cda8ae`.
+- Revisor2's MEDIUM was corrected with durable RED/proof and atomic decrement. Product blob `b4ffee5aab0dd1b6918477ce9466c6fd8b2e69fb`; linked points fixture blob `95a73fc8f3a8dac4cc209144a002fb9382a0bbe3`.
+- CI on that head: eight aggregators success; product-checks run `42065014112` failed verify `127377115449`.
+- Shared failure: stale `pricing-optimization.test.ts`, owned by open #2632. No retry.
+- Causal failure: the remote copy proof blob `f7b48e476b1401dbd5caec0d23e845c6409a5dd0` contradicted its own explicit legacy-negative control by later requiring a negative day to be unknown. Local reviewed correction removes only that contradictory vector; blob `ffcf65525c36f1f10dbe487c5043613ad92a1d6e`. Focused proof 34/34; points29, reward60, person-copy20, trace10, world9, person-data20 and store-data7: total189 green. PR comment `6664082777`.
+- Do not publish another head until #2632 enters main. Then integrate latest main once while overlaying the three exact blobs above (using the corrected copy-proof blob), require nine new aggregators and ask Revisor2 for focal return. No old check counts.
 
-Branch codex/o-community-notice-read-evidence, RED9071b30c1fb21a1536d79c974d5c140e43b4d2f2, based on main7e0ff90ae4fef7e9eca746dcfc22a6aaf7eccf59. Only tests/community-notice-read-evidence.test.ts added; exact local and remote blob4484c1b4ab5804989ff82761ce3496ccaaf3ecc0. No product PR opened while RED.
+### #2629 — community chat personal copy
 
-Real noticesFor, unreadCount and allNoticesOf with synthetic Redis pipeline replies:24 checks,17 causal failures and7 controls. Missing/extra envelopes, null lists and invalid seen markers falsely become zero or empty lists. Invalid stored JSON is omitted from a purported complete copy. Invalid/odd WITHSCORES vectors are accepted. The read attempts one existing pipeline only; no new IO or retries.
+- Branch `codex/o-community-chat-copy-evidence`; exact head `1aebf5c490a93c8a3d71e03748ae2ee226adca63`, tree `d977b702c37df0f2f0ff7a5ef6a6a7ed34c7c255`, main `156f1bfc5d4108650399220074de7f0b08dcf88a` integrated.
+- J's first MEDIUM proof `9422e4cc8e34ae0cbd86d86717c04ab44d5d18e5` is closed (8/8 unchanged).
+- J's second MEDIUM review `5788655968`, proof `e33f4070a69c1a9ceaa7feacab1355a7a2fe559a`, exposed duplicate author keys. Durable test-only RED `fa5b54093c06190cac0e5f90e47760116cbe50d9`: own32/30.
+- Final reader scans and decodes top-level JSON keys before `JSON.parse` and rejects every repeated key before last-value normalization. Own32/32; new J proof unchanged4/4; linked245/245; typegen/full TSC/lint/scanner3738/0/diff green. One read/one command/zero retry.
+- Focal return requested from J in the channel. Current exact-head CI was 1 success and eight active/queued at last check. Preserve head. Merge only after J says no finding and all nine exact aggregators succeed.
 
-Build/run with esbuild and testAliases(file, root, root+'/tests') plus testEnvironment(process.env), as tests/run.mjs. Focused ESLint and git diff --check passed. Public scanner after staging the proof:3707 tracked files,0 corrections. Full local tsc --noEmit --incremental false ended137 without diagnostic; it is NOT a passing type check. No native Redis, provider or browser ran locally.
+### #2640 — exact community picture-place acknowledgement
 
-The channel reservation preceded the first test commit (channel0e38f5ef). Full audit:140 open PR lists,0 errors; lib/community-notify.ts appears only in #1962 as inherited #2550 erasure changes. Exact patch inspected. Coordination requested from Claude3/C1 before modifying the module; not yet granted at this checkpoint. Product readers have NOT been edited or reserved. Continue with a fresh inbox/channel read; after nominal release, extend channel reservation, fix the three readers, rerun this unchanged RED and linked tests/types/lint/scanner, integrate main, request independent review, require nine new aggregators.
+- Branch `codex/o-community-picture-place-evidence`; exact head `54f5481f4dbaec2faab9293f192f2e07ae002080`, tree `0940d7123e420361cc9128b0ff5837d86414567a`, main `a2424fb949ecdd5047c43a6c625eeb5e0c4f8c91` integrated.
+- P MEDIUM review `5788552429`, proof `63a7992287af3da1ca063a05316d0dd3ee219327`. Corrective test-only RED `f5438e851012d181a954f5cd1e7cef8fb06f6a91`: 27/21.
+- Final reader accepts only a non-Proxy ordinary array with exactly own inert slot0 and length before reading a positive safe integer. Own27/27; P proof unchanged4/4; buyer9+closing90; typegen/full TSC/lint/scanner3778/0/diff green. Same one INCR, zero retry; unknown/lost ACK never opens or compensates.
+- Focal return requested from P. Current exact-head CI was 4 success and five active at last check. Preserve head. Merge only after P says no finding and all nine exact aggregators succeed.
 
-## Other coordination
+## Test-only blocked unit
 
-C1 corrected reservations at05h20: channel RESERVA only; product never edits reservation documents; no reservation-only PR. D2 withdrew duplicate content reviews for #2425/#2445. Existing C2 reviews5779485901/5779513660 explicitly allow preserved blobs after retarget/main. Mechanically confirmed all four document/test blob SHAs identical between reviewed532c/61e and current a5965800/9e82e9ea; do not perform duplicate fiscal reviews.
+Branch `codex/o-community-notice-read-evidence`; durable RED `9071b30c1fb21a1536d79c974d5c140e43b4d2f2`, 24 checks / 17 causal failures / 7 controls in `tests/community-notice-read-evidence.test.ts`. Product `lib/community-notify.ts` remains untouched because #1962 is still open at `3873c4e4be1cf9f3470cbb7f55a076315a86b7a5`, although dependency #2583 merged. Do not edit until nominal release. Push/deviceCount/remember/forget-device remains blocked by its open owner as well.
 
-DeviceCount/remember/forget-device follow-up remains after #2549 merges. Never edit #2316 or community-dm. No force, pricing, limits, commission, flags, gates, PII, supplier contact or live provider action. Next worker starts from this checkpoint and posts the required short channel stop point before finishing.
+## Already merged; never redo
+
+#2391 `d54b16c77b59d04738b238ea015ccdda917a08c5`; #2418 `943d261...`; #2434 `b0f4c098e7b03ec3529f91c6c76097a7aa37f579`; #2549 `e57f198...`; #2550 `0f30fd7414630ee20d72a226de730a497f8a9a99`.
+
+## Next exact actions
+
+1. Read full channel and exact PR states.
+2. Apply any focal review finding before CI/merge.
+3. If #2629 or #2640 has its focal no-finding review plus nine exact successes, merge normally with expected head SHA.
+4. When #2632 is merged, publish one #2627 main-integration head with the corrected proof blob and require nine new checks plus focal Revisor2 return.
+5. Keep the notice unit test-only until #1962 releases the source.

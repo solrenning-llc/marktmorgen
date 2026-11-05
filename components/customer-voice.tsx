@@ -10,8 +10,9 @@ const MESSAGES: Record<string, string> = {
   used: "This month's AI jobs are used up. They come back with your next billing month.",
   off: "This summary is not available right now.",
   busy: "It is already being read. Look again in a minute.",
+  changed: "Your store changed while this was being read (for example, someone was deleted), or it could not be saved, so it was not kept. Read it again. This try counted as one of this month's AI jobs.",
   slow: "A few AI jobs a minute at most. Try again in a moment.",
-  failed: "No summary came back, and nothing was counted. Try again.",
+  failed: "No summary came back. Try again. This try may have counted as one of this month's AI jobs.",
   server_error: "Something went wrong on our side. Nothing was counted; try again in a moment.",
 };
 
@@ -68,7 +69,7 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
         What customers are saying
       </p>
       <p className="mt-1 text-xs text-ink-soft">
-        The last 90 days of what members wrote when leaving, questions your pages could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. Once a month, as one of the month&apos;s AI jobs.
+        The last 90 days of what members wrote when leaving, questions your pages could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
       </p>
       {summary ? (
         <div className="mt-3">

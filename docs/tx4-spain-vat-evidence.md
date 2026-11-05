@@ -30,7 +30,7 @@ Article 163 noniesdecies states that, when Spain is the chosen Member State of i
 
 ## Invoice and operation-record boundaries
 
-Article 163 noniesdecies of Law 37/1992 states that, when Spain is the Member State of identification, a person using the non-Union scheme must issue and deliver invoices adjusted to the regulatory requirements. That conditional Spanish rule is not a finding that the LLC uses the scheme or that a particular transaction requires a particular invoice. Invoice content, timing, language, currency and delivery remain unresolved.
+Article 163 noniesdecies of Law 37/1992 states that a person using the non-Union scheme must issue and deliver invoices adjusted to the regulatory requirements when Spain is the Member State of identification. That conditional Spanish rule is not a finding that the LLC uses the scheme or that a particular transaction requires a particular invoice. Invoice content, timing, language, currency and delivery remain unresolved.
 
 The current [Spanish VAT Regulation, Royal Decree 1624/1992](https://www.boe.es/buscar/act.php?id=BOE-A-1992-28925), checked 2026-11-05, lists the special-scheme operation-record content in Article 61 sexiesdecies. It includes the Member State of consumption, supply type and date, taxable amount and currency, later adjustments, VAT rate and amount, payments and advances, invoice information when issued, customer-location evidence and evidence of returns.
 

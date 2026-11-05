@@ -1,0 +1,30 @@
+import {createRequire} from 'node:module';
+import {readFileSync,writeFileSync,unlinkSync} from 'node:fs';
+import {build} from 'esbuild';
+const root=process.cwd(), require=createRequire(root+'/package.json');
+const {chromium}=require('playwright-core');
+const css=(await require('postcss')([require('@tailwindcss/postcss')({base:root})]).process(readFileSync(root+'/app/globals.css','utf8'),{from:root+'/app/globals.css'})).css;
+const shared=`import React from 'react';import {CollectionsEditor} from '@/components/collections-editor';const element=<CollectionsEditor handle="fixture-store" collections={[{id:"abcd1234",title:"Guides",blurb:"Read at your own pace.",products:["product1","product2"]}]} products={[{id:"product1",title:"First guide"},{id:"product2",title:"Second guide"}]}/>;`;
+const opts={bundle:true,write:false,jsx:'automatic',alias:{'@':root,'next/navigation':root+'/tests/review-n-router.ts'},define:{'process.env.NODE_ENV':'"production"'},logLevel:'error'};
+const ssr=await build({...opts,stdin:{contents:shared+`import{renderToString}from'react-dom/server';export const html=renderToString(element);`,resolveDir:root,loader:'tsx'},platform:'node',format:'cjs'});
+const temp=root+'/tests/.review-n-collections-ssr.cjs';writeFileSync(temp,ssr.outputFiles[0].text);const {html}=require(temp);unlinkSync(temp);
+const client=await build({...opts,stdin:{contents:shared+`import{hydrateRoot}from'react-dom/client';hydrateRoot(document.getElementById('root'),element);`,resolveDir:root,loader:'tsx'},platform:'browser',format:'iife'});
+const {checkCollectionProductTargets}=await import(root+'/tests/e2e/collections-acknowledgment.mjs');
+const results=[];const is=(name,got,want)=>{let ok=JSON.stringify(got)===JSON.stringify(want);results.push({name,got,want,ok});console.log((ok?'ok':'FAIL')+' '+name);};
+const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+try{for(const width of[320,390,1280]){
+ const page=await browser.newPage({viewport:{width,height:900}});let requests=0;const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/*',r=>{requests++;return r.abort()});await page.route('https://collections.test/',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><meta charset="utf-8"><title>Collections hydration review</title><body><main><div id="root">'+html+'</div></main></body></html>'}));
+ await page.goto('https://collections.test/');await page.addStyleTag({content:css});const section=page.locator('[data-collections-editor]');
+ is(width+': SSR editing waits',await section.locator('input,textarea,select,button').evaluateAll(ns=>ns.length>0&&ns.every(n=>n.disabled)),true);
+ is(width+': SSR saving text is truthful',await section.getByRole('button',{name:'Save collections',exact:true}).count(),1);
+ is(width+': SSR Add cannot eat a click',await section.getByRole('button',{name:/Add a collection/}).isDisabled(),true);
+ await page.addScriptTag({content:client.outputFiles[0].text});await page.locator('[data-collections-ready="true"]').waitFor();
+ is(width+': hydrated second move works',await section.getByRole('button',{name:'Move Second guide up',exact:true}).isEnabled(),true);
+ is(width+': first move remains unavailable',await section.getByRole('button',{name:'Move First guide up',exact:true}).isDisabled(),true);
+ await checkCollectionProductTargets({section,is:(n,g,w)=>is(width+': '+n,g,w)});
+ await section.getByRole('button',{name:/Add a collection/}).click();is(width+': Add really creates name field',await section.getByLabel('Collection 2: name',{exact:false}).count(),1);
+ is(width+': no network action',requests,0);is(width+': no page errors',errors,[]);is(width+': reflow',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.close();
+}}finally{await browser.close()}
+console.log(results.filter(x=>x.ok).length+'/'+results.length+' checks passed');if(results.some(x=>!x.ok))process.exitCode=1;

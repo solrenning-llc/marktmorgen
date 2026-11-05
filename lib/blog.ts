@@ -509,7 +509,7 @@ COMMUNITY_PLATFORM_GUIDE,
           },
           {
             title: "Friday",
-            text: "Buy it yourself. Fix whatever annoyed you. Then put the link in your bio and tell people what you made.",
+            text: "Rehearse the checkout in test mode with a test card. Fix whatever annoyed you. Then put the link in your bio and tell people what you made.",
           },
         ],
       },

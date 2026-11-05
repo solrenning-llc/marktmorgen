@@ -5,6 +5,13 @@ import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { makeVoice } from "@/lib/customer-voice";
 
 /**
+ * The request ends before the reading's lock (LOCK_SECONDS, 120 s) runs out,
+ * so a second reading can never start, and be charged as another AI job,
+ * while this one still runs. The model's answer takes 45 s at most (lib/ai.ts).
+ */
+export const maxDuration = 60;
+
+/**
  * This month's summary of what customers are saying (lib/customer-voice.ts):
  * the one already made, or made now, once a month, as one of the month's AI
  * jobs. For whoever may see the numbers.

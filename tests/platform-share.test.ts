@@ -56,10 +56,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (!account) {
     if (method === "GET" && path === "/application_fees") {
       const since = Number(url.searchParams.get("created[gte]")) || 0;
-      return json({ object: "list", data: [...fees.values()].filter((f) => f.created >= since), has_more: false });
+      return json({ object: "list", data: [...fees.values()].filter((f) => f.created >= since).map(f => ({ object: "application_fee", ...f })), has_more: false });
     }
     const one = path.match(/^\/application_fees\/([^/]+)$/);
-    if (one && method === "GET") return fees.has(one[1]) ? json(fees.get(one[1])) : json({ error: { message: "No such fee" } }, 404);
+    if (one && method === "GET") return fees.has(one[1]) ? json({ object: "application_fee", ...fees.get(one[1]) }) : json({ error: { message: "No such fee" } }, 404);
     const back = path.match(/^\/application_fees\/([^/]+)\/refunds$/);
     if (back && method === "POST") {
       const fee = fees.get(back[1])!;

@@ -18,7 +18,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = new URLSearchParams(String(init?.body ?? ""));
   calls.push({ path: url.pathname, method, headers, body });
   if (method === "GET" && url.pathname === "/v1/application_fees") {
-    return Response.json({ object: "list", data: [{ ...fee, amount_refunded: fee.refunded }], has_more: false });
+    return Response.json({ object: "list", data: [{ object: "application_fee", ...fee, amount_refunded: fee.refunded }], has_more: false });
   }
   if (method === "GET" && url.pathname === "/v1/charges/" + fee.charge) {
     return Response.json({ object: "charge", id: fee.charge, currency: "usd", amount: 10000, amount_refunded: 0, disputed: false, invoice: null, payment_intent: { object: "payment_intent", id: "pi_Receipt0001", currency: "usd", amount: 10000, latest_charge: fee.charge, metadata: { share_bps: "0", share_base: "10000" } } });

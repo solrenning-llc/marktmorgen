@@ -81,10 +81,19 @@ const num = (value: unknown): number | null => typeof value === "number" && Numb
 const metadataInteger = (value: unknown): number | null => typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
 const currency = (value: unknown): string | null => typeof value === "string" && /^[a-z]{3}$/.test(value) ? value : null;
 
-function readFee(raw: Record<string, unknown>): Fee | null {
+/** The fee and its expanded references must identify the resources being settled. */
+function readFee(value: unknown): Fee | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (raw.object !== "application_fee") return null;
+  const reference = (value: unknown, kind: string): string => {
+    if (typeof value === "string") return value;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+    const row = value as Record<string, unknown>;
+    return row.object === kind ? str(row.id) : "";
+  };
   const id = str(raw.id);
-  const account = typeof raw.account === "string" ? raw.account : str((raw.account as { id?: unknown } | null)?.id);
-  const charge = typeof raw.charge === "string" ? raw.charge : str((raw.charge as { id?: unknown } | null)?.id);
+  const account = reference(raw.account, "account"), charge = reference(raw.charge, "charge");
   if (!/^fee_[A-Za-z0-9]+$/.test(id) || !/^acct_[A-Za-z0-9]+$/.test(account) || !/^(ch|py)_[A-Za-z0-9]+$/.test(charge)) return null;
   return { id, account, charge, amount: num(raw.amount), refunded: num(raw.amount_refunded), currency: str(raw.currency).toLowerCase() || undefined };
 }

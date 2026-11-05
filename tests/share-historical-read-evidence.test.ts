@@ -7,7 +7,7 @@ import {SHARING_INDEX} from '@/lib/platform-share';
 import {store as redis} from './redis-stub';
 
 const now=1800000000;
-const fee={id:'fee_HistoryRead0001',account:'acct_Receipt0001',charge:'ch_HistoryRead0001',amount:625,amount_refunded:0,currency:'usd'};
+const fee={object:'application_fee',id:'fee_HistoryRead0001',account:'acct_Receipt0001',charge:'ch_HistoryRead0001',amount:625,amount_refunded:0,currency:'usd'};
 const event={id:'evt_HistoryRead0001',data:{object:{application_fee:fee.id}}};
 const page=(data:unknown[]=[],has_more=false)=>({object:'list',has_more,data});
 async function world(options:{events?:unknown;pages?:(number:number)=>unknown;indexes?:unknown[];cursor?:unknown[];cursorWrite?:unknown[];feePatch?:Record<string,unknown>;feeReply?:unknown;chargePatch?:Record<string,unknown>;chargeFails?:boolean}={}){

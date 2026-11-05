@@ -87,6 +87,25 @@ test("the agent coverage table never blocks: each agent adds the rows of its own
   assert.equal(conflicts({ text: lanesOnly, branch: "codex/shipped", changed: ["lib/agent-coverage.ts"], agentFiles: reserved }).found.length, 0);
 });
 
+test("the privacy policy never blocks: each agent adds only its own unit's sentences (inbox C3-37)", () => {
+  const reserved = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", "| Claude 2 | x | claude2/x | `app/privacy/page.tsx` | 04/11/2026 |\n") }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: ["app/privacy/page.tsx"], agentFiles: reserved }).found.length, 0);
+});
+
+test("the cost and test registries never block: each agent adds its own rows (inbox CX-29)", () => {
+  const reserved = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", "| Claude 2 | x | claude2/x | `tests/plan-cost-registry.ts`, `tests/test-config.mjs` | 04/11/2026 |\n") }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "codex/mail", changed: ["tests/plan-cost-registry.ts", "tests/test-config.mjs"], agentFiles: reserved }).found.length, 0);
+});
+
+test("the key-family registries and the tests' Redis emulator never block: each agent adds its own entries (inbox CX-46)", () => {
+  const shared = ["lib/data-families.ts", "tests/store-data-registry.ts", "lib/redis-memory.ts"];
+  const reserved = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", `| Claude 2 | x | claude2/x | ${shared.map((f) => "`" + f + "`").join(", ")} | 04/11/2026 |\n`) }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: shared, agentFiles: reserved }).found.length, 0);
+  // A file next to them that is not shared still blocks.
+  const other = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", "| Claude 2 | x | claude2/x | `lib/redis.ts` | 04/11/2026 |\n") }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: ["lib/redis.ts"], agentFiles: other }).found.length, 1);
+});
+
 test("the old table is still read while it exists", () => {
   assert.deepEqual(conflicts({ text: sample, branch: "claude3/y", changed: ["lib/call-deposit.ts"], agentFiles: files }).found.map((r: { agent: string }) => r.agent), ["claude 2"]);
 });
@@ -95,22 +114,44 @@ test("the real reservations files parse: one per lane, rows name exact paths", (
   const text = readFileSync("docs/reservations.md", "utf8");
   const lanes = lanePrefixes(text);
   const real = readdirSync("docs/reservations").filter((n: string) => n.endsWith(".md")).map((n: string) => ({ path: `docs/reservations/${n}`, text: readFileSync(`docs/reservations/${n}`, "utf8") }));
-  assert.deepEqual(real.map((f: { path: string }) => ownerOfReservationFile(f.path, lanes)).sort(), ["claude 1", "claude 2", "claude 3", "codex"]);
+  assert.deepEqual(real.map((f: { path: string }) => ownerOfReservationFile(f.path, lanes)).sort(), ["claude 1", "claude 2", "claude 3", "claude 4", "codex"]);
   for (const r of allReservations(text, real)) assert.match(r.file, /^[\w.\[\]\/-]+$/, r.file);
 });
 
 test("the real reservations file parses: every lane has a prefix and rows name exact paths", () => {
   const text = readFileSync("docs/reservations.md", "utf8");
   const lanes = lanePrefixes(text);
-  for (const prefix of ["codex/", "claude/", "claude2/", "claude3/"]) assert.ok(lanes.some((l: { prefix: string }) => l.prefix === prefix), prefix);
+  for (const prefix of ["codex/", "claude/", "claude2/", "claude3/", "claude4/"]) assert.ok(lanes.some((l: { prefix: string }) => l.prefix === prefix), prefix);
   for (const r of reservations(text)) assert.match(r.file, /^[\w.\[\]\/-]+$/, r.file);
+});
+
+// Since the rows moved to docs/reservations/<agent>.md, the base's docs/reservations.md has no rows:
+// the CI call must pass the agents' own files too, or nothing is ever refused (Revisor 3, #1855).
+test("the CI inputs carry the agents' own files, so a file another agent reserved there is refused", () => {
+  const base = "1".repeat(40);
+  const shown: Record<string, string> = Object.fromEntries([[`${base}:docs/reservations.md`, lanesOnly], ...files.map((f: { path: string; text: string }) => [`${base}:${f.path}`, f.text])]);
+  const fetched: string[][] = [];
+  const git = (args: string[]) => {
+    // A shallow checkout: the merge commit names its parent, which is not there until fetched by its id.
+    if (args[0] === "cat-file" && args[1] === "-p") return `tree ${"2".repeat(40)}\nparent ${base}\nparent ${"3".repeat(40)}\n`;
+    if (args[0] === "cat-file" && args[1] === "-e") { if (!fetched.length) throw new Error("missing"); return ""; }
+    if (args[0] === "fetch") { fetched.push(args); return ""; }
+    if (args[0] === "show") return shown[args[1]] ?? "";
+    if (args[0] === "diff") return "lib/calls.ts\n";
+    if (args[0] === "ls-tree") return files.map((f: { path: string }) => f.path).join("\n");
+    throw new Error(args.join(" "));
+  };
+  const inputs = pullRequestInputs(git);
+  assert.deepEqual(fetched, [["fetch", "--no-tags", "--quiet", "--depth=1", "origin", base]], "the base is fetched by its own id");
+  const result = report(conflicts({ ...inputs, branch: "claude3/y" }), "claude3/y", inputs.changed.length);
+  assert.equal(result.ok, false, result.lines.join("\n"));
 });
 
 // The real check: on a pull request (GitHub sets GITHUB_HEAD_REF), the files this PR changes
 // against its base must not include a file another agent reserved on the base branch.
 test("this pull request changes no file another agent reserved", { skip: !process.env.GITHUB_HEAD_REF }, () => {
   const branch = process.env.GITHUB_HEAD_REF!;
-  const { text, changed } = pullRequestInputs((args: string[]) => execFileSync("git", args, { encoding: "utf8" }));
-  const result = report(conflicts({ text, branch, changed }), branch, changed.length);
+  const inputs = pullRequestInputs((args: string[]) => execFileSync("git", args, { encoding: "utf8" }));
+  const result = report(conflicts({ ...inputs, branch }), branch, inputs.changed.length);
   assert.ok(result.ok, result.lines.join("\n"));
 });

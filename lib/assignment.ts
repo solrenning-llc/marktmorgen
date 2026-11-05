@@ -8,6 +8,7 @@
  *   nl:course:<course>:tasks:waiting              work waiting for the creator, oldest first
  *   nl:course:<course>:tasks:all                  all the work handed in, by when it last was
  *   nl:tasks:bytes:<store key>                    what the store's students keep handed in, in bytes
+ *   nl:tasks:taken:<hash of a file's path>        the bytes one file took of that room, for an hour (undoTakeRoom)
  *   nl:tasks:doors                                files a student was let upload, by when: handed in, or deleted after a day
  *   nl:course:<course>:tasks:told                 the creator was told of new work this hour
  *
@@ -17,6 +18,7 @@
  * on an assignment the creator does not review, it is done at once; on one
  * they review, when they approve it.
  */
+import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
@@ -41,6 +43,9 @@ const filesKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:
 const waitingKey = (courseId: string) => `nl:course:${courseId}:tasks:waiting`;
 const allKey = (courseId: string) => `nl:course:${courseId}:tasks:all`;
 const bytesKey = (room: string) => `nl:tasks:bytes:${room}`;
+const takenKey = (path: string) => `nl:tasks:taken:${createHash("sha256").update(path).digest("hex").slice(0, 40)}`;
+/** How long a file's mark of the room it took is kept: long enough for the route to give it back at once. */
+const TAKEN_SECONDS = 60 * 60;
 const DOORS_KEY = "nl:tasks:doors";
 /** A file uploaded and not handed in within this long is deleted. */
 export const DOOR_SECONDS = 24 * 60 * 60;
@@ -129,25 +134,58 @@ export async function submissionsOf(courseId: string, rows: { lessonId: string; 
  * now, given back when the file is no longer kept (releaseBytes). `limit`
  * is the store's own (lib/assignment-rules.ts, taskRoomFor).
  *
- * The total is read only in its exact shape (CX-123 rule 24): one reply, a
- * whole number at least the bytes just added. Anything else throws
- * UnknownReplyError, so the work is not handed in and the student is told
- * something went wrong (the route's "server_error"), never that the room is
- * full. Nothing is given back then: whether the INCRBY was applied is not
- * known, and a DECRBY of bytes that never entered would leave room for
- * more than the store's limit. Bytes that did enter stay counted, which
- * only ever refuses sooner (releaseBytes never takes the total below zero).
+ * With the file's `path`, the same round marks that file as having taken
+ * its bytes, for an hour (TAKEN_SECONDS), after the INCRBY: a round cut
+ * short leaves at worst the bytes without the mark, which only refuses
+ * sooner, never a mark without the bytes.
+ *
+ * The total is read only in its exact shape (CX-123 rule 24): one reply for
+ * each command, a whole number at least the bytes just added, and the mark
+ * written. Anything else throws UnknownReplyError, so the work is not
+ * handed in and the student is told something went wrong (the route's
+ * "server_error"), never that the room is full. Whether the INCRBY was
+ * applied is not known then, so nothing is given back here: the caller
+ * gives the bytes back with undoTakeRoom, which does it only when the
+ * file's mark says they entered (a DECRBY of bytes that never entered
+ * would leave room for more than the store's limit).
  */
-export async function takeRoom(room: string, bytes: number, limit: number = MAX_STORE_TASK_BYTES): Promise<boolean> {
+export async function takeRoom(room: string, bytes: number, limit: number = MAX_STORE_TASK_BYTES, path?: string): Promise<boolean> {
   if (!isRedisConfigured() || !Number.isFinite(bytes) || bytes <= 0 || !Number.isSafeInteger(limit) || limit <= 0) return false;
   const added = Math.ceil(bytes);
-  const replies = repliesFor(await redisPipeline([["INCRBY", bytesKey(room), added]]), 1);
+  const marked = typeof path === "string" && path !== "";
+  const replies = repliesFor(
+    await redisPipeline([["INCRBY", bytesKey(room), added], ...(marked ? [["SET", takenKey(path), added, "EX", TAKEN_SECONDS]] : [])]),
+    marked ? 2 : 1,
+  );
   const used = replies ? countOf(replies[0]) : null;
-  if (used === null || used < added) throw new UnknownReplyError("the room taken by handed-in files");
+  if (used === null || used < added || (marked && replies?.[1] !== "OK")) throw new UnknownReplyError("the room taken by handed-in files");
   if (used > limit) {
-    await redisPipeline([["DECRBY", bytesKey(room), added]]);
+    await redisPipeline([["DECRBY", bytesKey(room), added], ...(marked ? [["DEL", takenKey(path)]] : [])]);
     return false;
   }
+  return true;
+}
+
+/**
+ * Gives back the room takeRoom took for this file when its answer was not
+ * known, only if the file's mark says the bytes entered: the mark is
+ * deleted first, and only a DEL that answered exactly 1 (this call removed
+ * it, so no other one will) is followed by the DECRBY, never below zero
+ * (releaseBytes). No mark: the bytes never entered, or were given back
+ * already. An answer of another shape throws UnknownReplyError and gives
+ * nothing back, which only refuses sooner.
+ *
+ * The mark of a file whose room was taken with a known answer is left to
+ * expire: this is called only from the hand-in route's failure on that same
+ * call, and a file's path passes the door once (takeTaskUpload), so a later
+ * releaseBytes of the same bytes never meets this.
+ */
+export async function undoTakeRoom(room: string, bytes: number, path: string): Promise<boolean> {
+  if (!isRedisConfigured() || !Number.isFinite(bytes) || bytes <= 0 || !path) return false;
+  const replies = repliesFor(await redisPipeline([["DEL", takenKey(path)]]), 1);
+  if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("whether a handed-in file took its room");
+  if (replies[0] !== 1) return false;
+  await releaseBytes(room, bytes);
   return true;
 }
 

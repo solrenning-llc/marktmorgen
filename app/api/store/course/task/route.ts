@@ -8,7 +8,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { handIn, releaseBytes, submissionOf, takeRoom, takeTaskUpload } from "@/lib/assignment";
+import { handIn, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
   type HandedFile,
@@ -91,9 +91,10 @@ export async function POST(request: NextRequest) {
           return no("too_big");
         }
         // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
-        // in the store unaccounted for.
-        const roomTaken = await takeRoom(room, found.size, taskRoomFor(store)).catch(async (error: unknown) => {
+        // in the store unaccounted for, and the bytes it may have taken are given back only if its mark says they entered.
+        const roomTaken = await takeRoom(room, found.size, taskRoomFor(store), path).catch(async (error: unknown) => {
           await deleteFile(path).catch(() => {});
+          await undoTakeRoom(room, found.size, path).catch((undoError: unknown) => console.error("giving back a task file's room failed", undoError));
           throw error;
         });
         if (!roomTaken) {

@@ -10,7 +10,10 @@
  * pass, the door noted as the upload route notes it (noteTaskUpload) and the
  * file put in the stand-in file store (tests/buyer-actions-blob.ts). Redis is
  * tests/redis-stub.ts; only the one pipeline that adds to the store's room
- * (INCRBY on its bytes counter) is answered in an unknown shape or fails.
+ * (INCRBY on its bytes counter, with the file's mark) is answered in an
+ * unknown shape or fails. Where it really ran and only its answer was lost,
+ * the bytes come back through the file's mark (undoTakeRoom); where it never
+ * ran, nothing is given back.
  * next/headers is tests/security/next-headers.ts, wired for this file alone
  * in tests/test-config.mjs. Nothing real is reached.
  */
@@ -27,7 +30,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscripti
 import { readProduct } from "@/lib/catalog";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { emailKey, mintPass, passCookieName, recordEnrollment, storeKey } from "@/lib/learn";
-import { noteTaskUpload, saveTask, submissionOf } from "@/lib/assignment";
+import { noteTaskUpload, saveTask, submissionOf, undoTakeRoom } from "@/lib/assignment";
 import { taskFolder } from "@/lib/assignment-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
@@ -106,7 +109,7 @@ async function handIn(w: World): Promise<{ status: number; body: { ok: boolean; 
 function roomCounterAnswers(room: string, answer: () => Promise<unknown[]>): { calls: number } {
   const seen = { calls: 0 };
   redis.pipeline = async (commands: (string | number)[][]) => {
-    if (commands.length === 1 && commands[0][0] === "INCRBY" && commands[0][1] === `nl:tasks:bytes:${room}`) {
+    if (commands[0]?.[0] === "INCRBY" && commands[0][1] === `nl:tasks:bytes:${room}`) {
       seen.calls += 1;
       return answer();
     }
@@ -125,6 +128,11 @@ test("control: with the room counter answering as Redis does, the file is handed
   assert.equal((await submissionOf(w.courseId, w.lessonId, emailKey(BUYER)))?.file?.path, w.path, "the work is handed in with its file");
   const [used] = await realPipeline([["GET", `nl:tasks:bytes:${w.room}`]]);
   assert.equal(Number(used), 1000, "the file's bytes are counted in the store's room");
+  const marks = redis.keys().filter((key) => key.startsWith("nl:tasks:taken:"));
+  assert.equal(marks.length, 1, "the file's room is marked as taken");
+  const [mark, ttl] = await realPipeline([["GET", marks[0]], ["TTL", marks[0]]]);
+  assert.equal(mark, "1000", "with the bytes it took");
+  assert.ok(typeof ttl === "number" && ttl > 0 && ttl <= 3_600, "for an hour at most");
 });
 
 /** Each answer, and whether takeRoom itself names it unknown (a failed call is passed on as it came). */
@@ -161,3 +169,94 @@ for (const [what, answer, named] of UNKNOWN) {
     if (named) assert.ok(logged.some((item) => item instanceof UnknownReplyError), "as the room counter's unknown reply");
   });
 }
+
+/** The room's total, as Redis holds it. */
+async function roomTotal(room: string): Promise<number> {
+  const [used] = await realPipeline([["GET", `nl:tasks:bytes:${room}`]]);
+  return Number(used);
+}
+
+/** Runs the hand-in with console.error caught, and returns what was logged. */
+async function quietly(w: World): Promise<{ result: Awaited<ReturnType<typeof handIn>>; logged: unknown[] }> {
+  const errors: unknown[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => void errors.push(args);
+  try {
+    return { result: await handIn(w), logged: errors.flat() };
+  } finally {
+    console.error = originalError;
+  }
+}
+
+test("a reply lost after the room was really taken: the file is deleted, and the bytes it took come back", async () => {
+  const w = await world("taskroomlost");
+  await realPipeline([["SET", `nl:tasks:bytes:${w.room}`, 5_000]]);
+  // The pipeline runs in Redis for real; only its answer never comes back.
+  const seen = { calls: 0 };
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "INCRBY" && commands[0][1] === `nl:tasks:bytes:${w.room}`) {
+      seen.calls += 1;
+      await realPipeline(commands);
+      throw new Error("the answer was lost");
+    }
+    return realPipeline(commands);
+  };
+  const { result } = await quietly(w);
+  assert.equal(seen.calls, 1);
+  assert.equal(result.body.error, "server_error");
+  assert.ok(deleted.includes(w.path) && !files.has(w.path), "the uploaded file is deleted");
+  assert.equal(await submissionOf(w.courseId, w.lessonId, emailKey(BUYER)), null, "nothing was handed in");
+  assert.equal(await roomTotal(w.room), 5_000, "the room is what it was before");
+  assert.deepEqual(redis.keys().filter((key) => key.startsWith("nl:tasks:taken:")), [], "and the file's mark is gone");
+  redis.pipeline = realPipeline;
+  assert.equal(await undoTakeRoom(w.room, 1_000, w.path), false, "a second giving back finds no mark");
+  assert.equal(await roomTotal(w.room), 5_000, "and gives nothing back twice");
+});
+
+test("a reply lost before the room was taken: nothing is given back that never entered", async () => {
+  const w = await world("taskroomnotrun");
+  await realPipeline([["SET", `nl:tasks:bytes:${w.room}`, 5_000]]);
+  const seen = roomCounterAnswers(w.room, async () => Promise.reject(new Error("never reached Redis")));
+  const { result } = await quietly(w);
+  assert.equal(seen.calls, 1);
+  assert.equal(result.body.error, "server_error");
+  assert.ok(deleted.includes(w.path), "the uploaded file is deleted");
+  assert.equal(await roomTotal(w.room), 5_000, "the room is not given bytes it never took");
+});
+
+test("a lost reply whose giving back also fails: the route still answers, the file is deleted, the room only refuses sooner", async () => {
+  const w = await world("taskroomundo");
+  await realPipeline([["SET", `nl:tasks:bytes:${w.room}`, 5_000]]);
+  let dels = 0;
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "INCRBY" && commands[0][1] === `nl:tasks:bytes:${w.room}`) {
+      await realPipeline(commands);
+      throw new Error("the answer was lost");
+    }
+    if (commands[0]?.[0] === "DEL" && String(commands[0][1]).startsWith("nl:tasks:taken:")) {
+      dels += 1;
+      throw new Error("the giving back was lost too");
+    }
+    return realPipeline(commands);
+  };
+  const { result, logged } = await quietly(w);
+  assert.equal(dels, 1, "the room was asked to give the bytes back once");
+  assert.equal(result.body.error, "server_error");
+  assert.ok(deleted.includes(w.path) && !files.has(w.path), "the uploaded file is deleted");
+  assert.equal(await submissionOf(w.courseId, w.lessonId, emailKey(BUYER)), null, "nothing was handed in");
+  assert.equal(await roomTotal(w.room), 6_000, "the bytes stay counted: the room refuses sooner, never later");
+  assert.ok(logged.includes("giving back a task file's room failed"), "the failed giving back is logged");
+});
+
+test("a full room: refused as before, nothing kept, no mark left", async () => {
+  const w = await world("taskroomfull");
+  const { taskRoomFor } = await import("@/lib/assignment-rules");
+  const limit = taskRoomFor(w.store);
+  await realPipeline([["SET", `nl:tasks:bytes:${w.room}`, limit - 500]]);
+  const result = await handIn(w);
+  assert.equal(result.status, 400);
+  assert.equal(result.body.error, "full");
+  assert.ok(deleted.includes(w.path), "the uploaded file is deleted");
+  assert.equal(await roomTotal(w.room), limit - 500, "the room is what it was");
+  assert.deepEqual(redis.keys().filter((key) => key.startsWith("nl:tasks:taken:")), [], "and no mark is left");
+});

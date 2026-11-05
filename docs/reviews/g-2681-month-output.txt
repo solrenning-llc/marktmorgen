@@ -1,0 +1,657 @@
+=== /tmp/g2681-a2-month.log ===
+=== g-2681-month-envelope.proof.ts ===
+  ok    exact one-command envelope
+  FAIL  extra command reply is unknown
+        expected null
+        got      {"unknown":1,"settled":2,"manual":3}
+  ok    missing command reply is unknown
+  ok    confirmed absent fields are zero
+
+4 checks, 1 failing.
+
+
+=== /tmp/g2681-a2-red.log ===
+=== paypal-payouts-unknown.test.ts ===
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  ok    both still waiting, no read of a batch id PayPal never gave
+  ok    and still on their way
+
+What the creator is told never says nothing was sent
+  ok    the payday email says it is not known, and to look at PayPal
+  ok    the studio's words for it
+
+A 4xx without PayPal's own error name (nameless) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-name) is not a refusal: kept on its way
+  FAIL  unknown, never 'nothing was sent'
+        expected "unknown"
+        got      "error"
+  FAIL  both stay on their way
+        expected 2
+        got      0
+
+A 4xx without PayPal's own error name (blank-error) is not a refusal: kept on its way
+  FAIL  unknown, never 'nothing was sent'
+        expected "unknown"
+        got      "error"
+  FAIL  both stay on their way
+        expected 2
+        got      0
+
+PayPal made the batch, and writing its id got no answer: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+PayPal made the batch, and writing its id got an error: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  ok    the next press pays both, once
+  ok    both on their way under the real batch
+
+45 checks, 4 failing.
+
+
+=== /tmp/g2681-a2-final-proof.log ===
+=== g-2681-blank-refusal.proof.ts ===
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  ok    both still waiting, no read of a batch id PayPal never gave
+  ok    and still on their way
+
+What the creator is told never says nothing was sent
+  ok    the payday email says it is not known, and to look at PayPal
+  ok    the studio's words for it
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  ok    the next press pays both, once
+  ok    both on their way under the real batch
+
+G: promotion failure never loses the last durable evidence after PayPal accepted
+  ok    missing-ack: failure was injected
+  ok    missing-ack: PayPal accepted one batch
+  ok    missing-ack: both affiliates remain excluded
+  ok    missing-ack: no second payment after promotion failure
+G promotion outcome missing-ack { ok: true, batch: 'BATCH1ABC', people: 2, cents: 4500 } { made: 1 }
+  ok    command-error: failure was injected
+  ok    command-error: PayPal accepted one batch
+  ok    command-error: both affiliates remain excluded
+  ok    command-error: no second payment after promotion failure
+G promotion outcome command-error { ok: true, batch: 'BATCH1ABC', people: 2, cents: 4500 } { made: 1 }
+
+G: an unnamed HTTP 4xx is not PayPal's named refusal evidence
+  ok    unnamed4xx: unknown instead of nothing sent
+  ok    unnamed4xx: still on their way
+  ok    blank-name: not a named refusal
+  ok    blank-name: affiliates remain excluded
+  ok    space-name: not a named refusal
+  ok    space-name: affiliates remain excluded
+  ok    blank-error: not a named refusal
+  ok    blank-error: affiliates remain excluded
+  ok    space-error: not a named refusal
+  ok    space-error: affiliates remain excluded
+
+51 checks, all passing.
+
+=== g-2681-recipient-manual.proof.ts ===
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+G: a changed recipient is not replayed; manual review preserves evidence
+  ok    the first request never reached PayPal
+  ok    no replay or new payment after recipient changed
+  ok    unknown evidence now requires a manual check
+  ok    both original people remain excluded
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+
+22 checks, all passing.
+
+=== g-2681-recipient-legacy.proof.ts ===
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)
+  ok    the write of its id failed, the '?' evidence is kept
+  ok    both still on their way
+  ok    a press sends no new batch
+  ok    the next day's try gets the same batch back and settles it, paid once
+
+An affiliate changed their PayPal address before the retry: never sent to another recipient (review of Codex H2 on #2681, GRAVE)
+  ok    no request to PayPal, no batch
+  ok    nothing ever sent to the new address
+  ok    left for the creator's own check
+  ok    the address itself is never kept in the batch, only its fingerprint
+
+The same address: the retry sends the same recipients
+  ok    same recipients as the first request
+
+Before the retry, Stripe's refunds cannot be read: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    waiting for refunds that can be read, not a manual check
+
+Before the retry, Stripe's refunds took back every sale: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    less owed now than was sent: a manual check
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+  ok    absent: no automatic replay
+  ok    absent: requires manual check
+  ok    absent: both people still excluded
+  ok    mismatch: no automatic replay
+  ok    mismatch: requires manual check
+  ok    mismatch: both people still excluded
+  ok    invalid-number: malformed saved shape rejects before sending
+  ok    invalid-number: evidence not modified
+  ok    invalid-text: malformed saved shape rejects before sending
+  ok    invalid-text: evidence not modified
+
+43 checks, all passing.
+
+=== g-2681-reconcile-refunds.proof.ts ===
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+  ok    down: initial request never created a payout
+  ok    G: actual book refuses certainty of current refunds
+  ok    down: no new payout while current entitlement unavailable or zero
+  ok    refunded: initial request never created a payout
+  ok    G: actual book owes zero after full refund
+  ok    refunded: no new payout while current entitlement unavailable or zero
+
+24 checks, all passing.
+
+=== g-2681-reconcile-promotion.proof.ts ===
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+  ok    missing-ack: reconciliation promotion fault reached
+  ok    missing-ack: still one original batch at provider
+  ok    missing-ack: original affiliates remain excluded
+  ok    missing-ack: no new batch after failed reconciliation promotion
+  ok    command-error: reconciliation promotion fault reached
+  ok    command-error: still one original batch at provider
+  ok    command-error: original affiliates remain excluded
+  ok    command-error: no new batch after failed reconciliation promotion
+
+26 checks, all passing.
+
+=== g-2681-sales-recovery.proof.ts ===
+
+Captured, the answer unreadable: kept for the sweep, handed over once PayPal is read
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+Captured, the answer without the buyer's address: kept for the sweep
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+A pending order read back garbled stays watched
+  ok    pending
+  ok    still watched after a garbled read
+  ok    handed over once PayPal completes it
+
+A capture read back garbled at the end of its refund window is not taken for 'not refunded'
+  ok    still watched, to be asked again
+
+G: completed order missing its captures remains recoverable
+  ok    unknown capture queued
+  ok    partial COMPLETED object stays queued
+  ok    recovered complete order handed over once
+
+13 checks, all passing.
+
+=== g-2681-meta-cost.proof.ts ===
+
+A real read first
+  ok    read
+  ok    today's spend is $30.00
+
+Insights answered garbled: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered no-data: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered rows-not-list: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered page2-garbled: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+  ok    overflow: positive baseline read
+  ok    overflow: positive baseline cost
+  ok    overflow: unknown or incomplete is not complete read
+  ok    overflow: prior cost retained
+G actual cost overflow 3000
+  ok    invalid-date: positive baseline read
+  ok    invalid-date: positive baseline cost
+  ok    invalid-date: unknown or incomplete is not complete read
+  ok    invalid-date: prior cost retained
+G actual cost invalid-date 3000
+  ok    invalid-paging: positive baseline read
+  ok    invalid-paging: positive baseline cost
+  ok    invalid-paging: unknown or incomplete is not complete read
+  ok    invalid-paging: prior cost retained
+G actual cost invalid-paging 3000
+  ok    cap20: positive baseline read
+  ok    cap20: positive baseline cost
+  ok    cap20: unknown or incomplete is not complete read
+  ok    cap20: prior cost retained
+G actual cost cap20 3000
+
+26 checks, all passing.
+
+=== paypal-payouts-unknown.test.ts ===
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  ok    both still waiting, no read of a batch id PayPal never gave
+  ok    and still on their way
+
+What the creator is told never says nothing was sent
+  ok    the payday email says it is not known, and to look at PayPal
+  ok    the studio's words for it
+
+A 4xx without PayPal's own error name (nameless) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-name) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-error) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+PayPal made the batch, and writing its id got no answer: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+PayPal made the batch, and writing its id got an error: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  ok    the next press pays both, once
+  ok    both on their way under the real batch
+
+45 checks, all passing.
+
+=== paypal-payouts-reconcile.test.ts ===
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)
+  ok    the write of its id failed, the '?' evidence is kept
+  ok    both still on their way
+  ok    a press sends no new batch
+  ok    the next day's try gets the same batch back and settles it, paid once
+
+An affiliate changed their PayPal address before the retry: never sent to another recipient (review of Codex H2 on #2681, GRAVE)
+  ok    no request to PayPal, no batch
+  ok    nothing ever sent to the new address
+  ok    left for the creator's own check
+  ok    the address itself is never kept in the batch, only its fingerprint
+
+The same address: the retry sends the same recipients
+  ok    same recipients as the first request
+
+Before the retry, Stripe's refunds cannot be read: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    waiting for refunds that can be read, not a manual check
+
+Before the retry, Stripe's refunds took back every sale: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    less owed now than was sent: a manual check
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+
+33 checks, all passing.
+
+=== paypal-sales-shape.test.ts ===
+
+Captured, the answer unreadable: kept for the sweep, handed over once PayPal is read
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+Captured, the answer without the buyer's address: kept for the sweep
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+A pending order read back garbled stays watched
+  ok    pending
+  ok    still watched after a garbled read
+  ok    handed over once PayPal completes it
+
+A paid order read back COMPLETED without its captures stays watched (review of Codex G on #2681)
+  ok    still watched
+  ok    handed over once PayPal shows the capture
+
+A capture read back garbled at the end of its refund window is not taken for 'not refunded'
+  ok    still watched, to be asked again
+
+12 checks, all passing.
+
+=== meta-ads-shape.test.ts ===
+
+A real read first
+  ok    read
+  ok    today's spend is $30.00
+
+Insights answered garbled: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered no-data: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered rows-not-list: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered page2-garbled: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered huge-spend: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered no-such-day: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered next-not-text: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+Insights answered endless: not a read, nothing erased
+  ok    not counted as read
+  ok    the spend already read is kept
+
+18 checks, all passing.
+

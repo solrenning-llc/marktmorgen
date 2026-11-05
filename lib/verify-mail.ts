@@ -44,6 +44,7 @@ import { TRUSTED_TOKEN, hostTokenClaims, isSesConfigured, sesConfig, sesState } 
 import { timed, withCutoff } from "@/lib/fetch-timeout";
 import { resendAccountUsage, resendUsageSince, type ResendAccountUsage, type ResendUsage } from "@/lib/resend-usage";
 import { sesProviderUsage, type SesProviderUsage } from "@/lib/ses-provider-usage";
+import { currentResendFallbackProofIsMissing } from "@/lib/resend-fallback-transport";
 
 export type Check = { check: string; ok: boolean; detail: string };
 
@@ -196,7 +197,8 @@ async function loop(sender: Sender, deadline: number): Promise<Check[]> {
 export async function verifyMailLoop(deadline: number): Promise<Check[]> {
   const out: Check[] = [];
   const senders: Sender[] = [];
-  if (hasResend() && canHearResend()) senders.push("resend");
+  if (hasResend() && canHearResend() && currentResendFallbackProofIsMissing()) out.push({ check: "Resend's loop", ok: true, detail: "not checked: reviewed Resend fallback proof is missing" });
+  else if (hasResend() && canHearResend()) senders.push("resend");
   else out.push({ check: "Resend's loop", ok: true, detail: "not checked: Resend, or the secret that signs its announcements, is not set" });
   const amazon = isSesConfigured() ? await sesState() : null;
   if (amazon?.ready) senders.push("amazon");

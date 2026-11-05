@@ -41,8 +41,11 @@ export async function POST(request: NextRequest) {
       const store = await storeForEmail(ref);
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
       const link = store.links.find((each) => each.id === id);
+      // A link that is not there is refused before anything is taken from the picture door, as a product's is
+      // (app/api/store/image): nothing is put on and nothing is deleted, so the in_use check below always has a link.
+      if (!link) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
       // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
-      if ((await lockedFor(request, "page", "replace")) && link?.image) return refusedJson("locked");
+      if ((await lockedFor(request, "page", "replace")) && link.image) return refusedJson("locked");
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
@@ -62,8 +65,8 @@ export async function POST(request: NextRequest) {
       }
       // A name in the shared folder that is neither fresh from the door nor this link's own may be a product's,
       // another link's, a page's, a buyer's review photo or an email's picture: refused and kept, so taking this
-      // link or its picture off later can never delete it (lib/picture-door.ts). A link that is not there says so.
-      if (link && !fresh.has(path) && link.image?.path !== path) {
+      // link or its picture off later can never delete it (lib/picture-door.ts).
+      if (!fresh.has(path) && link.image?.path !== path) {
         return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }
       image = { path, width, height, bytes: checked.bytes };

@@ -4,9 +4,22 @@ import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
 import { dropStamped } from "@/lib/pdf-stamp";
-import { deliveredFile, readDelivery } from "@/lib/catalog";
+import { deliveredFile, readDelivery, type Listing } from "@/lib/catalog";
+import { readPodcast } from "@/lib/podcast";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+
+/**
+ * The audio of each episode of this product's private podcast, which lives in the product's own folder beside its
+ * file (app/api/store/podcast): an empty set for a product that is not a podcast, null when the episodes cannot be
+ * read. Unknown is never "none": the caller refuses to put the file on, and keeps a file it would have deleted.
+ */
+async function episodeAudio(product: Listing | null | undefined): Promise<Set<string> | null> {
+  if (!product?.podcast) return new Set();
+  const podcast = await readPodcast(product.podcast.id).catch(() => null);
+  if (!podcast || podcast.id !== product.podcast.id) return null;
+  return new Set(podcast.episodes.map((episode) => episode.pathname));
+}
 
 /**
  * Puts the file that was just uploaded onto the product, or takes it off.
@@ -42,7 +55,8 @@ export async function POST(request: NextRequest) {
     // A new file deletes the one there, with the buyers' stamped copies: not from a session let in
     // without its second step (lib/two-step.ts). The id may name a price option, whose file is its
     // own, so the file is read where the id points (readDelivery), not on a product only.
-    if (!detach && (await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(store, id))) return refusedJson("locked");
+    const delivery = await readDelivery(store, id);
+    if (!detach && (await lockedFor(request, "products", "replace")) && deliveredFile(delivery)) return refusedJson("locked");
 
     let file: ProductFile | null = null;
     if (!detach) {
@@ -50,6 +64,13 @@ export async function POST(request: NextRequest) {
       if (!ownsPath(pathname, folder, id)) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
+      // The product's folder also holds its podcast episodes' audio: none of it is ever the product's file, so taking
+      // the file off or replacing it later can never delete an episode's audio. Today a podcast takes no file
+      // (lib/store.ts changeDelivery) and an option's file sits in the option's own folder, so this is a defence for
+      // a record written before those rules. Episodes that cannot be read refuse the file, nothing written.
+      const audio = await episodeAudio(delivery?.product);
+      if (!audio) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+      if (audio.has(pathname)) return Response.json({ ok: false, error: "in_use" }, { status: 400 });
 
       const found = await head(pathname);
       file = {
@@ -71,12 +92,18 @@ export async function POST(request: NextRequest) {
 
     // Best effort, and deliberately after the write. A file left behind costs
     // a fraction of a cent; a product pointing at nothing costs a sale.
-    if (result.removed && result.removed.pathname !== file?.pathname) {
-      await del(result.removed.pathname).catch((error: unknown) => {
+    // Nor an episode's audio (a record written before a podcast took no file): read after the write, kept when the
+    // episodes cannot be read. A file left behind costs storage; an episode deleted from under a feed costs listeners.
+    const removed = result.removed;
+    // A read that throws is unknown (kept); one that finds nothing falls back to what was read before the write.
+    const after = removed ? await readDelivery(result.store, id).then((found) => found ?? delivery, () => undefined) : null;
+    const stillPlayed = !removed ? new Set<string>() : after === undefined ? null : await episodeAudio(after?.product);
+    if (removed && removed.pathname !== file?.pathname && stillPlayed && !stillPlayed.has(removed.pathname)) {
+      await del(removed.pathname).catch((error: unknown) => {
         console.error("could not delete the replaced file", error);
       });
       // Buyers' stamped copies of it go with it.
-      await dropStamped(result.removed);
+      await dropStamped(removed);
     }
 
     return Response.json({ ok: true });

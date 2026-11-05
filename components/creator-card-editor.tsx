@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "@/components/toast";
 import { CreatorCardView } from "@/components/creator-card-view";
 import type { ContactWords } from "@/lib/buyer-words/contact";
@@ -12,7 +12,7 @@ const FIELDS: Field[] = [
   { key: "name", label: "Name on the card", hint: "Your name or your business's, as people know you. Example: Ana Souza.", max: MAX_CARD_NAME, type: "text", autoComplete: "name" },
   { key: "title", label: "What you do (optional)", hint: "A few words. Example: Pottery teacher.", max: MAX_CARD_TITLE, type: "text", autoComplete: "organization-title" },
   { key: "email", label: "Email to show (optional)", hint: "Anyone who opens the card sees it. Example: hello@yourname.com.", max: MAX_CARD_EMAIL, type: "email", autoComplete: "email" },
-  { key: "phone", label: "Phone to show (optional)", hint: "With + and your country code first, so it dials from any country. Example: +44 20 7946 0000.", max: 40, type: "tel", autoComplete: "tel" },
+  { key: "phone", label: "Phone to show (optional)", hint: "With + and your country code first (+1 for the US, +44 for the UK), so it dials from any country.", max: 40, type: "tel", autoComplete: "tel" },
   { key: "website", label: "Your website (optional)", hint: "Its whole address. Example: https://yourname.com.", max: 200, type: "url", autoComplete: "url" },
   { key: "note", label: "A line under your name (optional)", hint: "What people should know. Example: Classes in Lisbon and online.", max: MAX_CARD_NOTE, type: "text", autoComplete: "off" },
 ];
@@ -24,12 +24,37 @@ const FIELDS: Field[] = [
  * by app/api/store/creator-card; deleting it keeps the words on the screen,
  * so saving again puts it back.
  */
+const TEXT_FIELDS = ["name", "title", "email", "phone", "website", "note"] as const;
+
+/**
+ * The card the server answered with, only when the answer is whole: a 2xx
+ * status, `ok` exactly true, no error beside it, and a card with every field
+ * of its own type (Codex G2 on #1963). Anything else is not a confirmation.
+ */
+export function confirmedCard(status: number, answer: unknown): CreatorCard | null {
+  if (status < 200 || status > 299 || !answer || typeof answer !== "object") return null;
+  const { ok, card, error } = answer as { ok?: unknown; card?: unknown; error?: unknown };
+  if (ok !== true || error !== undefined || !card || typeof card !== "object") return null;
+  const fields = card as Record<string, unknown>;
+  if (typeof fields.on !== "boolean" || TEXT_FIELDS.some((key) => typeof fields[key] !== "string")) return null;
+  return { on: fields.on, name: fields.name as string, title: fields.title as string, email: fields.email as string, phone: fields.phone as string, website: fields.website as string, note: fields.note as string };
+}
+
+/** What the screen says when an answer did not confirm what happened: never "saved", never "nothing changed". */
+export const CARD_UNCONFIRMED = "We could not confirm what happened to your card. Your words are still below. Reload the page to see what is kept, then try again.";
+
 export function CreatorCardEditor({ initial, handle, storeName, words, address, look }: { initial: CreatorCard; handle: string; storeName: string; words: ContactWords["card"]; address: string; look: { className: string; style: React.CSSProperties; lang: string } }) {
   const [card, setCard] = useState(initial);
   const [kept, setKept] = useState(initial.on || Boolean(initial.name));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [said, setSaid] = useState("");
+  // Each edit counts here, so an answer to a save sent before it never writes over what was typed since (Codex G2 on #1963).
+  const edits = useRef(0);
+  const edit = (change: (typed: CreatorCard) => CreatorCard) => {
+    edits.current += 1;
+    setCard(change);
+  };
 
   async function send(body: Record<string, unknown>): Promise<CreatorCard | null> {
     setBusy(true);
@@ -37,11 +62,17 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
     setSaid("");
     try {
       const response = await fetch("/api/store/creator-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; card?: CreatorCard; message?: string; error?: string };
-      if (answer.ok && answer.card) return answer.card;
-      setError(answer.message ?? (answer.error === "data_full" ? "Your store's data room is full. Delete something you no longer need first." : "That did not save. Try again in a moment."));
+      const answer: unknown = await response.json().catch(() => null);
+      const confirmed = confirmedCard(response.status, answer);
+      if (confirmed) return confirmed;
+      // A refusal the server explains (a field, a full data room) is said as it is; anything else is not known.
+      const refusal = answer && typeof answer === "object" ? (answer as { ok?: unknown; error?: unknown; message?: unknown }) : null;
+      const refused = response.status >= 400 && response.status < 500 && refusal?.ok === false;
+      if (refused && typeof refusal.message === "string" && refusal.message) setError(refusal.message);
+      else if (refused && refusal.error === "data_full") setError("Your store's data room is full. Delete something you no longer need first.");
+      else setError(CARD_UNCONFIRMED);
     } catch {
-      setError("That did not save. Check your connection and try again.");
+      setError(CARD_UNCONFIRMED);
     } finally {
       setBusy(false);
     }
@@ -50,10 +81,16 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    const sentAt = edits.current;
     const saved = await send({ action: "save", ...card });
     if (!saved) return;
-    setCard(saved);
     setKept(true);
+    if (edits.current !== sentAt) {
+      // Changed while it was saving: what was typed since stays on the screen, not yet saved.
+      setSaid("Your card is saved as it was when you pressed Save. You changed it since: save again to keep the newer words.");
+      return;
+    }
+    setCard(saved);
     const words = saved.on ? "Your card is saved and shown." : "Your card is saved. It is not shown until you turn it on.";
     setSaid(words);
     toast(words);
@@ -62,8 +99,13 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
   async function remove() {
     const left = await send({ action: "remove" });
     if (!left) return;
+    // Deleted only when the card the server now keeps is none: off, with no name.
+    if (left.on || left.name) {
+      setError(CARD_UNCONFIRMED);
+      return;
+    }
     setKept(false);
-    setCard((typed) => ({ ...typed, on: false }));
+    edit((typed) => ({ ...typed, on: false }));
     setSaid("Your card was deleted and is no longer shown. Its words are still below: save to put it back.");
   }
 
@@ -85,7 +127,7 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
                 autoComplete={field.autoComplete}
                 required={field.key === "name" && card.on}
                 aria-describedby={`card-${field.key}-hint`}
-                onChange={(event) => setCard((typed) => ({ ...typed, [field.key]: event.target.value }))}
+                onChange={(event) => edit((typed) => ({ ...typed, [field.key]: event.target.value }))}
               />
               <span id={`card-${field.key}-hint`} className="mt-1 block text-xs text-ink-soft">
                 {field.hint}
@@ -93,7 +135,7 @@ export function CreatorCardEditor({ initial, handle, storeName, words, address, 
             </label>
           ))}
           <label className="flex min-h-11 items-start gap-3 text-sm">
-            <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={card.on} onChange={(event) => setCard((typed) => ({ ...typed, on: event.target.checked }))} aria-describedby="card-on-hint" />
+            <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={card.on} onChange={(event) => edit((typed) => ({ ...typed, on: event.target.checked }))} aria-describedby="card-on-hint" />
             <span>
               <span className="font-semibold text-ink">Show my card</span>
               <span id="card-on-hint" className="block text-ink-soft [overflow-wrap:anywhere]">{`At ${address}, with a Save contact button. Anyone with the address can see it.`}</span>

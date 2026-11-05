@@ -11,6 +11,8 @@ import {
 } from "@/lib/auth";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { isAutomated } from "@/lib/bot-check";
+import { serviceMailKnownUnavailable } from "@/lib/email";
+import { isHouseAddress } from "@/lib/house-store";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -79,7 +81,18 @@ export async function POST(request: NextRequest) {
     // The link always points at this site, whatever host the request named.
     // A store address typed on the home page goes into the link only when it
     // is a valid one (lib/handle-prefill.ts); it is checked again there.
-    await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle));
+    // This global fact says nothing about whether an address has an account,
+    // and refuses before minting a token. It performs no provider/Redis IO.
+    if (serviceMailKnownUnavailable()) {
+      return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    }
+    const sent = await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle));
+    // Sign-in mail is attempted equally for existing and unknown addresses.
+    // The public demo owner is deliberately ignored by sendSignInLink and
+    // retains its neutral response; no creator lookup is introduced here.
+    if (!sent && !isHouseAddress(email)) {
+      return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    }
   } catch (error) {
     console.error("sign-in request failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

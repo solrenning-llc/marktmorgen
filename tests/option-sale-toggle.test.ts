@@ -125,6 +125,18 @@ async function main(): Promise<void> {
   is("an id that is no product is a 404", (await post(session, { action: "invited", id: basic }))[0], 404);
   is("the studio reads it strictly too", [readOptionInvited({ ok: true, invited: { a: 2, b: null, c: -1 } }), readOptionInvited({ ok: true, members: { a: 1 } })], [Object.assign(Object.create(null), { a: 2, b: null, c: null }), null]);
 
+  part("Invitations counted only while they can still be used (Claude 4 on #2690)");
+  const freshInvited = async () => (await post(session, { action: "invited", id: pid }))[1].invited as Record<string, number | null>;
+  const before2 = (await freshInvited())[basic];
+  const invitesHash = `nl:mv:${statsId}`;
+  const longAgo = Math.floor(Date.now() / 1000) - 400 * 86_400;
+  const staleField = "e".repeat(32) + `:${pid}`;
+  redis.run(["HSET", invitesHash, staleField, JSON.stringify({ e: "old@example.com", p: pid, o: basic, r: longAgo, job: "job_old", at: longAgo, t: "a".repeat(40), kept: 0 })]);
+  is("one whose link ran out long ago is not counted as on its way", (await freshInvited())[basic], before2);
+  redis.run(["HSET", invitesHash, staleField, JSON.stringify({ e: "odd@example.com", p: pid, o: basic, r: Math.floor(Date.now() / 1000) + 20 * 86_400, job: "job_odd", at: Math.floor(Date.now() / 1000), t: "b".repeat(40), kept: "x" })]);
+  is("one whose state cannot be read makes the count unknown, never a guess", (await freshInvited())[basic], null);
+  redis.run(["HDEL", invitesHash, staleField]);
+
   part("A write that may not have landed is never said done (Codex Z on #2690)");
   const realPipe = redis.pipeline.bind(redis);
   // The product record's own pipeline: nothing applied, and an empty answer. Everything else as it is.
@@ -209,6 +221,8 @@ async function main(): Promise<void> {
   is("it asks for the count of the product", /action: "count", id: product\.id/.test(editor), true);
   is("an unknown count links to Memberships instead of saying 0", /href="\/studio\/memberships"/.test(editor), true);
   is("it asks for the invitations of the product", /action: "invited", id: product\.id/.test(editor), true);
+  is("it never says an invitation can't be used on a price off sale: it can (Claude 4 on #2690)", /can’t be used while it is off sale/.test(editor), false);
+  is("the count says it is as of the last membership reading", /still pays? on it here, as of your last membership reading/.test(editor), true);
   is("it says the invitations on their way apart, and an unknown number as unknown", [/invited to move here/.test(editor), /couldn’t count the invitations/.test(editor)], [true, true]);
   const extras = readFileSync("components/checkout-extras.tsx", "utf8");
   is("the plan form asks no payment for a price off sale, and says why", [/required=\{!option\.offSale\}/.test(extras), /option\.offSale \? [^\n]*Off sale/.test(extras)], [true, true]);

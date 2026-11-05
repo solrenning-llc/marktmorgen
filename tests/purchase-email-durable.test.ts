@@ -9,12 +9,17 @@ import { test } from "node:test";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { createCheckout } from "@/lib/store-checkout";
-import { bindOrderConfirmationPreintent } from "@/lib/orders";
+import { bindOrderConfirmationPreintent, COMMIT_ORDER_CONFIRMATION } from "@/lib/orders";
 import { CONFIRMATION_ORIGIN_SCRIPT, bindConfirmationOrigin, confirmationOriginRowKey, runOrderConfirmationMail, openConfirmationOrigin, readConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { physicalPaidFixture } from "./order-confirmation-paid-fixture";
 import { shipmentMailId } from "@/lib/shipment-mail-outbox";
 import { store as redis } from "./redis-stub";
 import { shipmentOutboxFixture, shipmentPolicy } from "./shipment-mail-outbox-fixture";
+import { confirmPurchase, confirmationKey } from "@/lib/purchase-email";
+import { ADMITTED_FIELD, admitOrders } from "@/lib/order-admission";
+import { storeOrdersThisMonth } from "@/lib/orders";
+import { storeFolder, storeRef } from "@/lib/store";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
 process.env.NIMBUS_DATA_KEY = "SYNTHETIC_ONLY_CONFIRMATION_ORIGIN_KEY_2026";
 globalThis.fetch = async () => { throw Error("No external service is allowed in this proof"); };
@@ -92,6 +97,128 @@ function originId() {
   const key = [...redis.keys()].find(k => k.startsWith("nl:order-confirmation:row:"));
   assert.ok(key); return key.slice("nl:order-confirmation:row:".length);
 }
+
+test("paid legacy accounting precedes SES and an unknown send never releases another checkout's hold", async () => {
+  const f = await fixture();
+  const held = await admitOrders(f.store, 2);
+  assert.ok(held.ok);
+  const folder = await storeFolder(storeRef(f.store));
+  const open = `nl:orders:open:${folder}`;
+  const sessionId = "cs_test_C97PaidLegacyAccounting001";
+  const session = { id: sessionId, status: "complete", payment_status: "paid", mode: "payment",
+    created: Math.floor(Date.now()/1000), amount_total: 4000, currency: "usd",
+    metadata: { store: f.store.handle, product: f.product.id, [ADMITTED_FIELD]: String(held.hour) },
+    customer_details: { email: "c97-legacy-buyer@example.test" } };
+  const beforePost: unknown[] = [];
+  const mail = installSesMailFixture({ onSes: async () => {
+    beforePost.push([await storeOrdersThisMonth(f.store), redis.run(["HGET", open, String(held.hour)])]);
+    throw Error("Synthetic lost SES acceptance acknowledgement");
+  } });
+  try {
+    mail.configure(); await mail.setReady(true);
+    assert.equal(await confirmPurchase(f.store, sessionId, session), "failed");
+    assert.equal(await storeOrdersThisMonth(f.store), 1, "paid order is counted even when acceptance is unknown");
+    assert.deepEqual(beforePost, [[1, "1"]], "count and settlement precede the actual provider POST");
+    assert.equal(redis.run(["GET", confirmationKey(sessionId)]), null, "unknown acceptance is never sent");
+    assert.equal(await confirmPurchase(f.store, sessionId, session), "failed");
+    assert.equal(await storeOrdersThisMonth(f.store), 1, "replay cannot count twice");
+    assert.equal(redis.run(["HGET", open, String(held.hour)]), "1", "replay preserves the other checkout's hold");
+    assert.equal(mail.calls.ses, 1, "sticky SES claim blocks duplicate delivery");
+  } finally { mail.restore(); }
+});
+
+test("accepted SES followed by a lost consumer mark still counts and settles the order exactly once", async () => {
+  const f = await fixture(), held = await admitOrders(f.store, 2);
+  assert.ok(held.ok);
+  const sessionId = "cs_test_C97ConsumerMarkLost000001";
+  const session = { id: sessionId, status: "complete", payment_status: "paid", mode: "payment",
+    created: Math.floor(Date.now()/1000), amount_total: 4000, currency: "usd",
+    metadata: { store: f.store.handle, product: f.product.id, [ADMITTED_FIELD]: String(held.hour) },
+    customer_details: { email: "c97-mark-buyer@example.test" } };
+  const pipeline = redis.pipeline, mail = installSesMailFixture();
+  try {
+    mail.configure(); await mail.setReady(true);
+    let interrupted = false;
+    redis.pipeline = async commands => {
+      if (!interrupted && commands.some(c => c[0] === "SET" && c[1] === confirmationKey(sessionId) && c[2] === "sent")) {
+        interrupted = true;
+        throw Error("Synthetic crash before the consumer sent marker was saved");
+      }
+      return pipeline(commands);
+    };
+    await assert.rejects(confirmPurchase(f.store, sessionId, session), /Synthetic crash/);
+    redis.pipeline = pipeline;
+    assert.equal(await storeOrdersThisMonth(f.store), 1);
+    assert.equal(mail.calls.ses, 1, "SES accepted before the consumer marker failed");
+    redis.advance(16 * 60_000); // The short consumer claim expires; the SES claim remains.
+    assert.equal(await confirmPurchase(f.store, sessionId, session), "failed");
+    assert.equal(await storeOrdersThisMonth(f.store), 1);
+    const folder = await storeFolder(storeRef(f.store));
+    assert.equal(redis.run(["HGET", `nl:orders:open:${folder}`, String(held.hour)]), "1");
+    assert.equal(redis.run(["GET", confirmationKey(sessionId)]), null);
+    assert.equal(mail.calls.ses, 1);
+  } finally { redis.pipeline = pipeline; mail.restore(); }
+});
+
+test("unpaid, other-store, tip and protected-source checkouts cannot enter legacy accounting", async () => {
+  const f = await fixture(), mail = installSesMailFixture();
+  const base = { status: "complete", payment_status: "paid", mode: "payment", created: Math.floor(Date.now()/1000),
+    amount_total: 4000, currency: "usd", metadata: { store: f.store.handle, product: f.product.id },
+    customer_details: { email: "c97-negative-buyer@example.test" } };
+  try {
+    mail.configure(); await mail.setReady(true);
+    const cases = [
+      { ...base, payment_status: "unpaid" },
+      { ...base, metadata: { ...base.metadata, store: "someone-else" } },
+      { ...base, metadata: { ...base.metadata, kind: "tip" } },
+      { ...base, metadata: { ...base.metadata, mm_order_origin: "physical-v1" } },
+      { ...base, metadata: { ...base.metadata, mm_order_origin: "single-digital-v1" } },
+    ];
+    for (const [i, value] of cases.entries()) {
+      const id = `cs_test_C97NegativeAccounting000${i}`;
+      assert.equal(await confirmPurchase(f.store, id, { ...value, id }), "skip");
+    }
+    assert.equal(await storeOrdersThisMonth(f.store), 0);
+    assert.equal(mail.calls.ses, 0);
+  } finally { mail.restore(); }
+});
+
+test("legacy accounting recovers a refused write and never applies a partial or lost ACK twice", async t => {
+  for (const mode of ["before-count", "partial-replay", "lost-count-ack"] as const) {
+    await t.test(mode, async () => {
+      const f = await fixture(), held = await admitOrders(f.store, 2);assert.ok(held.ok);
+      const id = `cs_test_C97AtomicAccounting${mode.replaceAll("-", "")}001`;
+      const session = { id, status: "complete", payment_status: "paid", mode: "payment", created: Math.floor(Date.now()/1000),
+        amount_total: 4000, currency: "usd", metadata: { store: f.store.handle, product: f.product.id, [ADMITTED_FIELD]: String(held.hour) },
+        customer_details: { email: "atomic-buyer@example.test" } };
+      const original = redis.pipeline, mail = installSesMailFixture();
+      let faulted = false, replay = false;
+      try {
+        mail.configure();await mail.setReady(true);mail.setSesOutcome("lost");
+        redis.pipeline = async commands => {
+          const atomic = commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION);
+          const count = atomic || commands.some(c => c[0] === "INCR" && String(c[1]).startsWith("nl:orders:n:"));
+          const seen = atomic || commands.some(c => c[0] === "SET" && String(c[1]).startsWith("nl:orders:seen:"));
+          if (mode === "before-count" && count && !faulted) { faulted = true;throw Error("Synthetic accounting write refused before application"); }
+          const result = await original(commands);
+          if (mode === "lost-count-ack" && count && !faulted) { faulted = true;throw Error("Synthetic accounting acknowledgement lost after application"); }
+          if (mode === "partial-replay" && replay && seen && !faulted) { faulted = true;return []; }
+          return result;
+        };
+        assert.equal(await confirmPurchase(f.store, id, session), "failed");
+        replay = true;
+        assert.equal(await confirmPurchase(f.store, id, session), "failed");
+        redis.pipeline = original;
+        assert.equal(await storeOrdersThisMonth(f.store), 1, "the paid order is recoverably counted exactly once");
+        const folder = await storeFolder(storeRef(f.store));
+        assert.equal(redis.run(["HGET", `nl:orders:open:${folder}`, String(held.hour)]), "1", "only the other checkout remains held");
+        assert.equal(mail.calls.ses, 1);
+        assert.equal(redis.run(["GET", confirmationKey(id)]), null);
+        assert.equal(faulted, true);
+      } finally { redis.pipeline = original;mail.restore(); }
+    });
+  }
+});
 
 test("the real physical checkout reserves a protected source and returns only its CAS winner", async () => {
   const f = await fixture();

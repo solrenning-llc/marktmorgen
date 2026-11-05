@@ -60,12 +60,7 @@ async function meterCohortReady(meter: EmailMeter): Promise<boolean> {
   return true;
 }
 
-/** Takes a store's figure for `n` emails before they go; true for the meters already counted elsewhere. */
 async function metered(meter: EmailMeter, n: number): Promise<boolean> {
-  if (!(await meterCohortReady(meter))) return false;
-  return takeMeteredAllowance(meter, n);
-}
-async function takeMeteredAllowance(meter: EmailMeter, n: number): Promise<boolean> {
   if (meter.by !== "store") return true;
   const taken = await takeAllowance(meter.store, meter.kind, n, Date.now(), meter.asked === true);
   if (!taken.ok) console.error(`an email was not sent: the store's ${meter.kind} figure (${taken.reason})`);
@@ -99,7 +94,7 @@ function lazyMeter(meter: EmailMeter, n: number): MeterAuthorization {
   return { preflight, beforePost: async () => {
     if (!(await preflight())) return false;
     try {
-      debit ??= takeMeteredAllowance(selected, n);
+      debit ??= metered(selected, n);
       if (await debit === true && sameWindow()) return true;
     } catch { /* Keep the rejected debit promise and any committed effect. */ }
     refused = true;
@@ -314,7 +309,7 @@ const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key)
  * acceptance is unknown, including a pre-existing legacy claim. A claim is
  * not proof of delivery, nor a source-funded lifetime reservation.
  */
-async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey: string | undefined): Promise<boolean | null> {
+async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey: string | undefined, authorization: MeterAuthorization): Promise<boolean | null> {
   const config = sesConfig();
   if (!config || !(await sesReady())) return false;
   // Amazon keeps no record of a key, so the once-only promise is kept here.
@@ -349,7 +344,7 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
       replyTo: oneAddress(message.replyTo),
       headers,
       attachments: message.attachments,
-    });
+    }, authorization.beforePost);
     // A timeout or server error may follow acceptance. Keep any existing
     // claim, report unknown, and make no second SES attempt or Resend send.
     // This does not prove delivery or provide lifetime idempotency.
@@ -381,14 +376,15 @@ export async function sendEmail(message: OneMessage, runtime: ResendTransportRun
   // Keep one identity across awaits and both routes. Preserve the original
   // string and the existing structural contract, including inherited keys.
   const originalIdempotencyKey = message.idempotencyKey;
+  const authorization = lazyMeter(message.meter, 1);
+  if (!(await authorization.preflight())) return false;
   if (isSesConfigured()) {
-    if (!(await metered(message.meter, 1))) return false;
-    const amazon = await viaAmazon(message, to, originalIdempotencyKey);
+    const amazon = await viaAmazon(message, to, originalIdempotencyKey, authorization);
     if (amazon === true) return true;
     if (amazon === null) return false;
-    return viaResend(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
+    return viaResend(message, originalIdempotencyKey, runtime, authorization);
   }
-  return viaResend(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
+  return viaResend(message, originalIdempotencyKey, runtime, authorization);
 }
 
 /** Durable shipment work owns its lifetime claim in the outbox, not the
@@ -571,19 +567,16 @@ async function dispatchBatch(
   if (going.length && (only === "resend"
     ? currentResendFallbackProofIsMissing(runtime)
     : serviceMailKnownUnavailable(runtime))) return "retry";
-  const resendSelected = only === "resend" || !(config && isSesConfigured());
   let authorization: MeterAuthorization | undefined;
   if (going.length) {
-    if (resendSelected) {
-      // Keep the same recipients/content through tags/domain variants and
-      // bind the lazy debit to their filtered, bounded occurrence count.
-      going = going.map(message => ({ ...message,
-        ...(message.headers ? { headers: { ...message.headers } } : {}),
-        ...(message.tags ? { tags: { ...message.tags } } : {}),
-      }));
-      authorization = lazyMeter(meter, going.length);
-      if (!(await authorization.preflight())) return "refused";
-    } else if (!(await metered(meter, going.length))) return "refused";
+    // Keep the same recipients/content through tags/domain variants and
+    // bind the lazy debit to their filtered, bounded occurrence count.
+    going = going.map(message => ({ ...message,
+      ...(message.headers ? { headers: { ...message.headers } } : {}),
+      ...(message.tags ? { tags: { ...message.tags } } : {}),
+    }));
+    authorization = lazyMeter(meter, going.length);
+    if (!(await authorization.preflight())) return "refused";
   }
   let idempotencyKey = batchKey;
   if (config && isSesConfigured() && only !== "resend") {
@@ -637,6 +630,7 @@ async function dispatchBatch(
           original: m,
         })),
         batchKey,
+        authorization?.beforePost,
       );
       await countSesSent(result.taken.length);
       if (result.down) {

@@ -231,7 +231,9 @@ export function isSesConfigured(): boolean {
 
 const base = (config: SesConfig) => `https://email.${config.region}.amazonaws.com`;
 
-async function call(config: SesConfig, method: "GET" | "POST", path: string, body?: string): Promise<Response> {
+class SesPostNotAuthorized extends Error {}
+
+async function call(config: SesConfig, method: "GET" | "POST", path: string, body?: string, beforePost?: () => Promise<boolean>): Promise<Response> {
   const url = `${base(config)}${path}`;
   const key = await sesCredentials(config);
   // No key to sign with is answered as Amazon answers a key it does not
@@ -249,6 +251,9 @@ async function call(config: SesConfig, method: "GET" | "POST", path: string, bod
   // `host` is set by fetch itself, from the address; it was needed for the signature only.
   const { host: _host, ...sent } = headers;
   void _host;
+  // Credentials and the request are ready. A refused/unknown allowance can
+  // never cause a provider POST; borrowing credentials alone costs no mail.
+  if (beforePost && !(await beforePost())) throw new SesPostNotAuthorized("email dispatch was not authorized");
   return timed(SES_TIMEOUT_MS, (signal) => fetch(url, { method, headers: sent, body, cache: "no-store", signal }));
 }
 
@@ -491,7 +496,7 @@ export type SesOutcome = "sent" | "busy" | "account" | "refused";
 
 const ACCOUNT_ERRORS = /AccountSuspended|SendingPaused|MailFromDomainNotVerified|LimitExceeded|AccessDenied|InvalidClientTokenId|SignatureDoesNotMatch|UnrecognizedClient|ExpiredToken|NotFound/i;
 
-export async function sesSend(config: SesConfig, message: SesMessage): Promise<{ outcome: SesOutcome; why: string; uncertain?: true }> {
+export async function sesSend(config: SesConfig, message: SesMessage, beforePost?: () => Promise<boolean>): Promise<{ outcome: SesOutcome; why: string; uncertain?: true }> {
   const payload = JSON.stringify({
     FromEmailAddress: message.from,
     Destination: { ToAddresses: [message.to] },
@@ -516,7 +521,7 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
     ConfigurationSetName: config.configurationSet,
   });
   try {
-    const response = await call(config, "POST", "/v2/email/outbound-emails", payload);
+    const response = await call(config, "POST", "/v2/email/outbound-emails", payload, beforePost);
     if (response.ok) return { outcome: "sent", why: "" };
     // SES can accept a message before returning a server error. This is not
     // a confirmed refusal; sends must not retry or change sender.
@@ -538,6 +543,7 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
     if (ACCOUNT_ERRORS.test(why) || /not verified|sandbox|quota/i.test(why)) return { outcome: "account", why };
     return { outcome: "refused", why };
   } catch (error) {
+    if (error instanceof SesPostNotAuthorized) return { outcome: "refused", why: error.message };
     // A lost response is not proof that SES did not accept the message.
     return { outcome: "busy", why: error instanceof Error ? error.message.slice(0, 200) : "no answer", uncertain: true };
   }
@@ -593,6 +599,7 @@ export async function sesBatch<T extends SesMessage>(
   state: SesState,
   messages: T[],
   batchKey: string,
+  beforePost?: () => Promise<boolean>,
 ): Promise<{ taken: T[]; left: T[]; down: string; uncertain?: true }> {
   const taken: T[] = [];
   const refused = new Set<T>();
@@ -610,7 +617,7 @@ export async function sesBatch<T extends SesMessage>(
       }
       const waveStarted = Date.now();
       const wave = queue.slice(i, i + perSecond);
-      const results = await Promise.all(wave.map((m) => sesSend(config, m)));
+      const results = await Promise.all(wave.map((m) => sesSend(config, m, beforePost)));
       const done: T[] = [];
       results.forEach((result, j) => {
         if (result.uncertain === true) {

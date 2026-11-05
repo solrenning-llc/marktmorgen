@@ -713,6 +713,7 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);
         if (key.startsWith("-- marktmorgen:studio-demo-refuse:v1\n")) return this.studioDemo("refuse", args);
+        if (key.startsWith("-- marktmorgen:studio-demo-session-refuse:v1\n")) return this.studioDemo("sessionRefuse", args);
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
@@ -1016,6 +1017,12 @@ export class MemoryRedis {
       }
       case "SMEMBERS":
         return [...this.set(key)];
+      case "SRANDMEMBER": {
+        // With a positive count, as Redis answers it: that many distinct members at most (the order is Redis's own).
+        const count = Number(args[0]);
+        if (!Number.isSafeInteger(count) || count < 0) throw new Error("ERR value is not an integer or out of range");
+        return [...this.set(key)].slice(0, count);
+      }
       case "SUNION": {
         // Read without making any key, as Redis does; a key of another kind is refused.
         const out = new Set<string>();
@@ -1413,11 +1420,11 @@ export class MemoryRedis {
 
   /**
    * lib/studio-demo.ts: the demo's door (the day and the address) counted, a refusal counted for the
-   * address and the day, a session's record and drafts made, and one action
+   * address and the day or in a live session's record, a session's record and drafts made, and one action
    * counted, step by step as each script runs them, with the commands run
    * inside counted in scriptCalls.
    */
-  private studioDemo(kind: "door" | "refuse" | "seed" | "take", args: string[]): unknown {
+  private studioDemo(kind: "door" | "refuse" | "sessionRefuse" | "seed" | "take", args: string[]): unknown {
     const n = Number(args[0]);
     const keys = args.slice(1, 1 + n);
     const argv = args.slice(1 + n);
@@ -1428,6 +1435,17 @@ export class MemoryRedis {
     const held = this.data.get(keys[0]);
     if (held !== undefined && !(held instanceof Map) && kind !== "seed") throw new Error("WRONGTYPE");
     const hash = held instanceof Map ? held : undefined;
+    if (kind === "sessionRefuse") {
+      // KEYS[1] the session's record; ARGV the session's refusals cap. Never makes a key.
+      this.scriptCalls += 1;
+      if (!hash || hash.get("expiresAt") === undefined) return 0;
+      const r = digits(field(hash, "refused")) ?? 0;
+      if (r < 0) return -1;
+      if (r >= Number(argv[0])) return -4;
+      hash.set("refused", String(r + 1));
+      this.scriptCalls += 1;
+      return 1;
+    }
     if (kind === "refuse") {
       // KEYS[1] the day's addresses; ARGV the address's refusals field, the day's cap, the address's cap, the end (s).
       this.scriptCalls += 1;

@@ -432,6 +432,7 @@ async function main(): Promise<void> {
     "course": ["act:products:lesson-remove", "act:products:module-remove", "act:products:media-remove", "act:products:task-remove", "act:products:quiz-remove", "act:products:withdraw", "act:products:cm-delete", "lockedFor"],
     "course/comment": ["lockedFor"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
+    "creator-card": ["need:settings"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
     "discord": ["need:settings"],
     "file/attach": ["act:products:detach", "lockedFor"],
@@ -551,6 +552,7 @@ async function main(): Promise<void> {
       template: "open:adds", withdraw: "act:products",
     },
     "course/comment": { delete: "lockedFor", hide: "open:reversible", show: "open:reversible" },
+    "creator-card": "need:settings",
     "crm": {
       deal: "open:edits", fields: "lockedFor", pipeline: "open:edits", stages: "open:edits", undeal: "act:orders", value: "open:edits",
       unpipeline: "act:orders",

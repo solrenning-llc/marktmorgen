@@ -56,3 +56,28 @@ test("review findings preserve the evidence and the caller's order", () => {
   assert.equal(findings[0], old);
   assert.equal(findings[1], future);
 });
+
+test("a clock must be a number, never a date-like string or object", () => {
+  const facts = [fact("today", NOW), fact("old", NOW - 120 * DAY)];
+  const clocks: unknown[] = ["2026-11-05T00:00:00Z", new Date(NOW), null, Symbol("clock"), BigInt(1)];
+  for (const clock of clocks) {
+    assert.deepEqual(overdue(facts, clock as number), [facts[1], facts[0]]);
+  }
+});
+
+test("a review window must be a number before any multiplication", () => {
+  const facts = [fact("today", NOW), fact("old", NOW - 120 * DAY)];
+  const windows: unknown[] = [Symbol("days"), BigInt(90), "90", null];
+  for (const window of windows) {
+    assert.deepEqual(overdue(facts, NOW, window as number), [facts[1], facts[0]]);
+  }
+});
+
+test("unknown clocks and windows are rejected without invoking conversion hooks", () => {
+  const facts = [fact("today", NOW), fact("old", NOW - 120 * DAY)];
+  let conversions = 0;
+  const unknown = { [Symbol.toPrimitive]() { conversions++; throw new Error("Must not coerce review evidence"); } };
+  assert.deepEqual(overdue(facts, unknown as unknown as number), [facts[1], facts[0]]);
+  assert.deepEqual(overdue(facts, NOW, unknown as unknown as number), [facts[1], facts[0]]);
+  assert.equal(conversions, 0);
+});

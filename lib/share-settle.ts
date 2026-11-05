@@ -42,7 +42,22 @@ const APPLIED = "nl:share:applied";
 /** When step 2 last read each account's refunds, by store key. */
 const READ_UNTIL = "nl:share:read-until";
 
-export type SettleCounts = { fees: number; gaveBack: number; cents: number; stores: number; memberships: number; failed: number; complete: boolean };
+export type SettleCounts = { fees: number; gaveBack: number; cents: number; stores: number; memberships: number; failed: number; complete: boolean; unknownDisputes: number; unknownDisputeFees: string[] };
+
+/** A separate diagnostic, never permission to refund from unknown evidence. */
+class UnknownDisputeStatus extends Error {
+  constructor(readonly feeId: string) {
+    super("Dispute status is unknown");
+  }
+}
+
+function countSettlementFailure(counts: SettleCounts, error: unknown): void {
+  counts.failed += 1;
+  if (error instanceof UnknownDisputeStatus) {
+    counts.unknownDisputes += 1;
+    if (!counts.unknownDisputeFees.includes(error.feeId)) counts.unknownDisputeFees.push(error.feeId);
+  }
+}
 
 type Fee = { id: string; account: string; charge: string; amount: number; refunded: number; currency?: string };
 
@@ -104,10 +119,11 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
       const disputedCharge = typeof row.charge === "string" ? row.charge : str((row.charge as { id?: unknown } | null)?.id);
       const id = str(row.id), status = str(row.status);
       if (row.object !== "dispute" || !/^du_[A-Za-z0-9]+$/.test(id) || seen.has(id)
-        || disputedCharge !== fee.charge || !statuses.has(status)
+        || disputedCharge !== fee.charge
         || str(row.currency).toLowerCase() !== str(charge.currency).toLowerCase()) {
         throw new Error("Dispute evidence does not match the charge");
       }
+      if (!statuses.has(status)) throw new UnknownDisputeStatus(fee.id);
       seen.add(id);
       if (status === "lost") lostDispute = true;
     }
@@ -193,7 +209,7 @@ async function settleRecent(nowSeconds: number, deadline: number, counts: Settle
           counts.cents += back;
         }
       } catch (error) {
-        counts.failed += 1;
+        countSettlementFailure(counts, error);
         console.error(`settling the share ${fee.id} failed`, error);
       }
     }
@@ -243,7 +259,7 @@ async function settleGivenBack(store: Store, ref: string, nowSeconds: number, de
         }
       } catch (error) {
         if (error instanceof BillingError && error.status === 404) continue;
-        counts.failed += 1;
+        countSettlementFailure(counts, error);
         console.error(`settling a refunded share on ${account} failed`, error);
       }
     }
@@ -289,7 +305,7 @@ async function keepMemberships(store: Store, ref: string, deadline: number, coun
  * those whose memberships still carry one written earlier.
  */
 export async function settleShares(deadline: number, nowSeconds = Date.now() / 1000, live = COMMISSION_LIVE): Promise<SettleCounts> {
-  const counts: SettleCounts = { fees: 0, gaveBack: 0, cents: 0, stores: 0, memberships: 0, failed: 0, complete: true };
+  const counts: SettleCounts = { fees: 0, gaveBack: 0, cents: 0, stores: 0, memberships: 0, failed: 0, complete: true, unknownDisputes: 0, unknownDisputeFees: [] };
   try {
     if (!(await settleRecent(nowSeconds, deadline, counts, live))) counts.complete = false;
   } catch (error) {

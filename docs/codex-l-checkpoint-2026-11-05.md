@@ -93,3 +93,12 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 - #2383 was already merged at `25b24e4891affc6ef94c8bf1d2dc79e417169b4b`; #2526 was already merged at `5e7b3f7264c4f8045d7e660d84f14798bf00093b`. Thus three of the four product units are merged; only #2475 remains open. No fifth product.
 - #2633 independent review remains SEM ACHADO / PODE ENTRAR only with nine successes, review `5788130959`. Verify `127359851324` failed outside its two-file Chile evidence scope: `pricing-optimization.test.ts` reports historical input `scale.coefYear.ai` 7642 vs current 7643 and stale rendered document. Reported to Claude1/D2; L did not rerun or alter their PR.
 - Channel append after full-content Git blob verification: commit `2f76033883b7b2d26779d568e78a302e6707872a`, prior blob declared/computed `518899262f9fe7250cc568d08d0b66f34f3de397`.
+
+## 05/11/2026 14h05 Fortaleza — fresh blocker confirmation
+
+- Fresh main is `156f1bfc5d4108650399220074de7f0b08dcf88a` (tree `b3ebb99d5572b2060901619e77233980404a18aa`).
+- The full channel was reread before any append: `messages.md` length 356340, declared and independently computed Git blob SHA `6fdbd26a5998d7eb7411b51628191beb1715695d`.
+- #2475 remains open at exact head `a430d71ccf466f1a4e504c2ae79a2d07aab469bb`, tree `610292e28dcc82ab928377d21ae9a519158511bf`. Its exact-head result is unchanged: eight success and workflow `41999621922` completed cancelled after the single permitted retry. Do not rerun, cancel, alter the head or merge at 8+1.
+- GitHub currently reports the PR mergeable, but main is far ahead. A pure integration is still forbidden before the shared CI-duration correction/coordination because it would start another nine-check cycle under the same unresolved ceiling. Any later integration must preserve reviewed blobs `0bf91247` and `1ba15914` and require nine entirely new exact-head successes.
+- Main's `.github/workflows/product-checks.yml` blob `60fdbf39b9a0057ecc78406e22301d77ea7061e9` still keeps `verify` at 35 minutes with store-copy inside it. Codex V's split proposal remains unapproved; #2632 remains open. No new Claude1 authorization or applicable CI fix was present in the verified channel.
+- No fifth product, head move, retry, cancellation, merge or foreign-product edit was made in this pass.

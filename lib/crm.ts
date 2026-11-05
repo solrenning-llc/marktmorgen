@@ -596,15 +596,23 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
  * A compare-and-set script's "changed" answer (SAVE_CRM_PIPELINES, MOVE_CRM_DEAL): the UTF-8 length of the record
  * there now, null when there is none, undefined for any other answer.
  */
-function changedLength(answer: unknown): number | null | undefined {
-  if (!Array.isArray(answer) || answer[0] !== -1) return undefined;
+function changedLength(answer: unknown, code: -1 | 3 = -1): number | null | undefined {
+  if (!Array.isArray(answer) || answer[0] !== code) return undefined;
   if (answer.length === 1) return null;
   return answer.length === 2 && Number.isSafeInteger(answer[1]) && answer[1] >= 0 ? answer[1] : undefined;
 }
 
-/** Move only the exact snapshot reviewed; never resurrect a deleted opportunity. */
-export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v3
-if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[4]) or "-1") ~= tonumber(ARGV[5]) then return 3 end
+/**
+ * Move only the exact snapshot reviewed; never resurrect a deleted opportunity. With a run's lease (KEYS[2]), only
+ * while it holds this take's score: otherwise {3, length of the record there now} ({3} when there is none), so the
+ * room goes back to what is kept, never to the record the run read (Codex G2 on #2287).
+ */
+export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v4
+if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[4]) or "-1") ~= tonumber(ARGV[5]) then
+  local kept = redis.call("HGET", KEYS[1], ARGV[1])
+  if kept then return {3, string.len(kept)} end
+  return {3}
+end
 local current = redis.call("HGET", KEYS[1], ARGV[1])
 if not current then return 0 end
 if current ~= ARGV[2] then return {-1, string.len(current)} end
@@ -701,8 +709,12 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
  * there: one deleted since it was read (by its person's deletion, or by
  * someone else) answers 2 and is never written back.
  */
-export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v3
-if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[5]) or "-1") ~= tonumber(ARGV[6]) then return 3 end
+export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v4
+if KEYS[2] and tonumber(redis.call("ZSCORE", KEYS[2], ARGV[5]) or "-1") ~= tonumber(ARGV[6]) then
+  local kept = redis.call("HGET", KEYS[1], ARGV[1])
+  if kept then return {3, string.len(kept)} end
+  return {3}
+end
 local there = redis.call("HEXISTS", KEYS[1], ARGV[1])
 if there == 0 and ARGV[4] == "edit" then return 2 end
 if there == 0 and redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
@@ -742,10 +754,17 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore, ed
   try {
     const keys = take ? [dealsKey(statsId), take.key] : [dealsKey(statsId)];
     const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, keys.length, ...keys, deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? "", ...(take ? [take.member, String(take.score)] : [])]]);
-    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1 && !(edit && saved[0] === 2) && !(take && saved[0] === 3))) throw new CrmDealWriteUnconfirmed();
-    // Full after all, deleted since it was read, or the run taken over: the deal's room goes back.
+    const kept = take && Array.isArray(saved) && saved.length === 1 ? changedLength(saved[0], 3) : undefined;
+    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1 && !(edit && saved[0] === 2) && kept === undefined)) throw new CrmDealWriteUnconfirmed();
+    // The run taken over: nothing written, and the deal's room goes back to the record kept there now, as the script
+    // measured it in the same step (none when there is none), never to nothing under a record that stays.
+    if (kept !== undefined) {
+      await giveData(room, [{ slot: dealSlot(deal.id), bytes: kept === null ? 0 : dataBytesOfLength(utf8Length(deal.id) + kept, 1), set: true }]);
+      return "superseded";
+    }
+    // Full after all, or deleted since it was read: the deal's room goes back.
     if (saved[0] !== 1) await giveData(room, [{ slot: dealSlot(deal.id), bytes: 0, set: true }]);
-    return saved[0] === 3 ? "superseded" : saved[0] === 2 ? "gone" : saved[0] === 1;
+    return saved[0] === 2 ? "gone" : saved[0] === 1;
   } catch { throw new CrmDealWriteUnconfirmed(); }
 }
 
@@ -781,12 +800,14 @@ export async function writeDealOver(statsId: string, deal: Deal, before: string,
   } catch { throw new CrmDealWriteUnconfirmed(); }
   const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
   const lost = changedLength(answer);
-  if (answer !== 1 && answer !== 0 && !(take && answer === 3) && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
+  const kept = take ? changedLength(answer, 3) : undefined;
+  if (answer !== 1 && answer !== 0 && kept === undefined && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
   if (answer === 1) return "saved";
-  // The run was taken over: nothing written, the room as the record kept there now weighs is unknown here, so it is
-  // put back as the record read (more counted, never less, than kept).
-  if (answer === 3) {
-    await giveData(room, [{ slot: dealSlot(deal.id), bytes: dataBytesOfLength(utf8Length(deal.id) + utf8Length(before), 1), set: true }]);
+  // The run was taken over: nothing written, and the room goes back to the record kept there now, as the script
+  // measured it in the same step (none when there is none): never to the record read, which a newer edit may have
+  // made bigger (Codex G2 on #2287).
+  if (kept !== undefined) {
+    await giveData(room, [{ slot: dealSlot(deal.id), bytes: kept === null ? 0 : dataBytesOfLength(utf8Length(deal.id) + kept, 1), set: true }]);
     return "superseded";
   }
   // Nothing written: its room put back to what the record kept there now weighs (the board's own write sized it to

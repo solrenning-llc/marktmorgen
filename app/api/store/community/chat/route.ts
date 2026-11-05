@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
     const name = owner ? store.name : viewer.member?.n || "A member";
     const said = await say(id, config.chat, key, owner, text(body.text, MAX_CHAT_TEXT), name);
     if (!said.ok) {
-      return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : 400 });
+      return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : said.reason === "unknown" ? 503 : 400 });
     }
     return Response.json({ ok: true, message: said.message, name });
   }

@@ -34,8 +34,9 @@ const sameIds = (a: unknown, b: string[]) => Array.isArray(a) && a.length === b.
  */
 export function confirmedCartLink(status: number, data: unknown, ask: CartLinkAsk): string | null {
   if (status < 200 || status > 299 || !data || typeof data !== "object") return null;
-  const answer = data as { ok?: unknown; links?: unknown };
-  if (answer.ok !== true || !Array.isArray(answer.links)) return null;
+  const answer = data as { ok?: unknown; links?: unknown; error?: unknown };
+  // An error named beside an otherwise whole success is not a confirmation (Codex G2 on #1928).
+  if (answer.ok !== true || answer.error !== undefined || !Array.isArray(answer.links)) return null;
   const found = answer.links.filter((raw): raw is { code: string } => {
     if (!raw || typeof raw !== "object") return false;
     const link = raw as { code?: unknown; name?: unknown; target?: unknown };

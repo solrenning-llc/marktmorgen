@@ -115,6 +115,10 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  // decide calculations, financial bindings and the returned liability period.
  const encoded=canonicalFinancialSnapshot({policy,context});
  if(!encoded)return null;
+ // The descriptor-only snapshot above rejects accessors without executing
+ // them. Native cloning then rejects any remaining Proxy wrapper before it
+ // can substitute a different graph between validation and projection.
+ try{structuredClone({policy,context});}catch{return null;}
  const captured=JSON.parse(encoded) as {policy:ContractFundingPolicy|null;context:ContractFundingContext};
  const p=captured.policy;context=captured.context;
  if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,now))return null;

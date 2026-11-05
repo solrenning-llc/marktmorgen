@@ -102,6 +102,26 @@ function parse(raw: unknown): ChatMessage | null {
   }
 }
 
+function copyMessage(raw: unknown): ChatMessage {
+  if (typeof raw !== "string" || !raw) throw new Error("Incomplete community chat record");
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("Incomplete community chat record");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Incomplete community chat record");
+  const message = value as Partial<ChatMessage>;
+  if (!Number.isSafeInteger(message.i) || (message.i as number) <= 0
+    || typeof message.a !== "string" || !message.a
+    || typeof message.text !== "string"
+    || !Number.isSafeInteger(message.at) || (message.at as number) < 0
+    || (message.n !== undefined && (typeof message.n !== "string" || !message.n || message.n.length > 80))) {
+    throw new Error("Incomplete community chat record");
+  }
+  return message as ChatMessage;
+}
+
 export type SaidResult =
   | { ok: true; message: ChatMessage }
   | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly" | "unknown"; wait?: number };
@@ -304,13 +324,7 @@ export async function forgetChatPerson(id: string, who: string): Promise<number>
 
 /** What one member said in the community's room, for the copy of their data (619 [SZ3]): the messages the erasure deletes. Only reads. */
 export async function chatMessagesOf(id: string, who: string): Promise<{ text: string; at: number }[]> {
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", roomKey(id), "-inf", "+inf"]]);
-  return (Array.isArray(raw) ? raw : []).map(String).flatMap((row) => {
-    try {
-      const message = JSON.parse(row) as Partial<ChatMessage>;
-      return message.a === who && typeof message.text === "string" ? [{ text: message.text, at: Number(message.at) || 0 }] : [];
-    } catch {
-      return [];
-    }
-  });
+  const replies = await redisPipeline([["ZRANGEBYSCORE", roomKey(id), "-inf", "+inf"]]);
+  if (!Array.isArray(replies) || replies.length !== 1 || !Array.isArray(replies[0])) throw new Error("Incomplete community chat record");
+  return replies[0].map(copyMessage).flatMap((message) => (message.a === who ? [{ text: message.text, at: message.at }] : []));
 }

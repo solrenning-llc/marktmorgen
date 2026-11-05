@@ -67,6 +67,16 @@ export function isPdf(file: Pick<ProductFile, "contentType" | "name">): boolean 
   return file.contentType === "application/pdf" || (!file.contentType && /\.pdf$/i.test(file.name));
 }
 
+/** Whether a stored file is an EPUB, read the same way (stamped with lib/epub-stamp.ts; 630 [HN6] item 30). */
+export function isEpub(file: Pick<ProductFile, "contentType" | "name">): boolean {
+  return file.contentType === "application/epub+zip" || (!file.contentType && /\.epub$/i.test(file.name));
+}
+
+/** Whether a stored file is one stamping applies to: a PDF, or an EPUB. */
+export function isStampable(file: Pick<ProductFile, "contentType" | "name">): boolean {
+  return isPdf(file) || isEpub(file);
+}
+
 /**
  * What a creator may sell.
  *

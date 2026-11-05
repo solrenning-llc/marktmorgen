@@ -1,5 +1,7 @@
-import { apiAdder, apiError, apiOk, apiStore, apiWriter } from "@/lib/api-guard";
-import { codeOut, refusalWords } from "@/lib/api-codes";
+import { apiAdder, apiError, apiOk, apiStore, apiWriter, takeMoreApi } from "@/lib/api-guard";
+import { apiOkFields, badFields } from "@/lib/api-fields";
+import { apiReadUnits, codeMakeWork, codeStopWork, codesWork } from "@/lib/api-read-rules";
+import { CODE_FIELDS, codeOut, refusalWords } from "@/lib/api-codes";
 import { createCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
 import { setHasDiscounts, storeRef, type Store } from "@/lib/store";
@@ -21,9 +23,15 @@ export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
   if (!selling(store)) return notSelling();
+  // A ?fields= that cannot be answered is refused before any further request is taken or anything read.
+  const bad = badFields(request, CODE_FIELDS);
+  if (bad) return bad;
+  // One page of the creator's Stripe account, taken before it is read (lib/api-read-rules.ts, codesWork).
+  const refused = await takeMoreApi(store, apiReadUnits(codesWork()));
+  if (refused) return refused;
   try {
     const list = await listCodes(store.stripeAccountId as string);
-    return list.state === "ok" ? apiOk({ data: list.codes.map(codeOut) }) : unreadable();
+    return list.state === "ok" ? apiOkFields(request, { data: list.codes.map(codeOut) }) : unreadable();
   } catch (error) {
     console.error("api: codes failed", error);
     return unreadable();
@@ -38,6 +46,9 @@ export async function POST(request: Request) {
   const read = readCodeAsked(body, store.currency);
   if (!read.ok) return apiError(400, read.reason, refusalWords(read, store.currency));
   const { code, off, maxRedemptions, minimum } = read.asked;
+  // Two calls to the creator's Stripe account, taken before either is made (lib/api-read-rules.ts, codeMakeWork).
+  const refused = await takeMoreApi(store, apiReadUnits(codeMakeWork()));
+  if (refused) return refused;
   try {
     const made = await createCode(store.stripeAccountId as string, code, off, maxRedemptions, minimum);
     if (!made.ok) {
@@ -60,6 +71,10 @@ export async function DELETE(request: Request) {
   if (!selling(store)) return notSelling();
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!/^promo_[A-Za-z0-9]{1,200}$/.test(id)) return apiError(400, "id", "Give the code's id, from GET /api/v1/codes.");
+  // The codes read to find it, the call that switches it off and the codes read again and sent, at their most,
+  // taken before Stripe is asked (lib/api-read-rules.ts, codeStopWork).
+  const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));
+  if (refused) return refused;
   try {
     const account = store.stripeAccountId as string;
     // Only a code the store's own list shows, never any id on the account.

@@ -135,6 +135,14 @@ export function parsePaths(raw: unknown): BuyerPaths | null {
   return { at: value.at, starts, next };
 }
 
+/** How many bytes what buyers bought next holds as kept, 0 when none, looked up before it is read by a reading that pays for its size (lib/mcp-tools.ts, productsTool); null when it did not come back. */
+export async function pathsBytes(statsId: string | null): Promise<number | null> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["STRLEN", nextKey(statsId)]]);
+  const bytes = Number(n);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+}
+
 export async function readPaths(statsId: string | null): Promise<BuyerPaths | null> {
   if (!statsId || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", nextKey(statsId)]]);

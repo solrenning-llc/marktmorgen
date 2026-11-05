@@ -23,7 +23,7 @@ const answer = (list: { q: string; a: string }[], q: string) => list.find((x) =>
 part("The studio's own words");
 const box = flat(read("components/pdf-stamp-toggle.tsx")).replace(/&apos;/g, "'");
 is("the box's own label", box.includes(STAMP_WORDS.box), true);
-is("the box shows only once the product has a PDF", /if \(pdfs\.length === 0 && !on\) return null;/.test(box), true);
+is("the box shows only once the product has a PDF, or an EPUB (630 [HN6] item 30)", /if \(pdfs\.length === 0 && epubs\.length === 0 && !on\) return null;/.test(box), true);
 is("the stamp line holds the email, the order's date, the order and personal use; the paid download stamps it, the free one does not", [read("lib/pdf-stamp-line.ts").includes("return `Sold to ${email} on ${day} · order …${order} · for personal use`;"), read("app/api/store/download/route.ts").includes("import { stampedCopy, wantsStamp }"), /stampedCopy|wantsStamp/.test(read("app/api/store/free/download/route.ts"))], [true, true, false]);
 is("the box covers PDFs on price options too", box.includes("const files = [product.file, ...product.options.map((o) => o.file)]"), true);
 is("no upload before a paid plan, setup or trial", [AUTOMATIC_UPLOAD_CAPS.setup.opens, AUTOMATIC_UPLOAD_CAPS.trial.opens], [0, 0]);

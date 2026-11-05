@@ -27,7 +27,7 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
 /** What is deleted, said to the person; lib/person-data.ts says the same to the creator, line by line. */
 const DELETED = [
   "Your place on the store's list, and every link in its emails to you",
-  "What the store's team noted about you: its fields, notes and deals",
+  "What the store's team noted about you: its fields, notes, deals and tasks",
   "Your answers to its forms, your conversations with its inbox, your reviews and their photos, and your places on its waitlists",
   "Your way through its sequences and workflows, and any email still waiting to reach you",
   "Your progress, quiz results, handed-in work, lesson comments and certificates in its courses, and your private podcast feeds",
@@ -56,6 +56,9 @@ export default async function DeletePage({ searchParams }: Params) {
   const token = typeof query.token === "string" && ERASE_TOKEN.test(query.token) ? query.token : "";
   const statusKey = typeof query.status === "string" ? query.status : "";
   const status = STATUS[statusKey];
+  // With "full": the day the link can be asked for again (lib/erasure-request.ts), when it was given and reads as one.
+  const opensAt = typeof query.opens === "string" && /^\d{4}-\d{2}-\d{2}$/.test(query.opens) ? new Date(`${query.opens}T00:00:00Z`) : null;
+  const opensOn = opensAt && !Number.isNaN(opensAt.getTime()) ? opensAt.toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }) : "";
   const handle = typeof query.store === "string" ? query.store.slice(0, 60).toLowerCase() : "";
   const store = handle ? await storeForHandle(handle).catch(() => null) : null;
   const link = token ? await readErasureLink(token).catch(() => null) : null;
@@ -141,6 +144,22 @@ export default async function DeletePage({ searchParams }: Params) {
               {status ? (
                 <p className={`notice ${status.tone === "ok" ? "notice-success" : "notice-error"} mb-6`} role={status.tone === "ok" ? "status" : "alert"}>
                   {status.text}
+                  {statusKey === "sent" ? (
+                    <>
+                      {" "}No email after an hour? Check your spam folder, then write to{" "}
+                      <a href="mailto:support@marktmorgen.com" className="underline underline-offset-4">support@marktmorgen.com</a>{" "}
+                      from this address and ask us to delete your data. We answer within the time the law requires.
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+              {statusKey === "full" ? (
+                <p className="notice notice-error mb-6" role="alert">
+                  Your link can&apos;t be emailed right now: the emails for requests like this are used up for now. Nothing was deleted.{" "}
+                  {opensOn ? `You can ask for it here again from ${opensOn} (UTC). ` : ""}
+                  You don&apos;t have to wait: write to{" "}
+                  <a href="mailto:support@marktmorgen.com" className="underline underline-offset-4">support@marktmorgen.com</a>{" "}
+                  from this address and ask us to delete your data. We answer within the time the law requires.
                 </p>
               ) : null}
               <form action="/api/privacy/erase" method="post" className="card p-6 sm:p-8">

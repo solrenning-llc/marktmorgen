@@ -18,9 +18,9 @@ async function run(options: Options = {}) {
   const subscribed = await setSubscription(owner, { customerId: "cus_JExpanded0001", subscriptionId: "sub_JExpanded0001", active: true, tier: "creator", cycle: "month", shared: true, trialEnds: now - 30 * 86400, period: paidPeriod() });
   assert.ok(subscribed);
   assert.equal(subscribed.subscriptionActive, true);
-  const intent = { object: "payment_intent", id: intentId, metadata: { share_bps: "625", share_base: "8000" }, ...(options.kind === "intent" ? options.patch : {}) };
-  const invoice = { object: "invoice", id: "in_JExpanded0001", currency: "usd", created: now - 3600, subtotal: 8000, total_excluding_tax: 8000, subscription_details: { metadata: { store: "j-expanded", share_bps: "625" } }, ...options.patch };
-  const session = { object: "checkout.session", id: "cs_test_JExpanded0001", payment_intent: intentId, currency: "usd", amount_total: 8000, total_details: { amount_tax: 0, amount_shipping: 0 }, ...options.patch };
+  const intent = { object: "payment_intent", id: intentId, currency: "usd", amount: 10000, amount_received: 10000, status: "succeeded", latest_charge: fee.charge, metadata: { share_bps: "625", share_base: "8000" }, ...(options.kind === "intent" ? options.patch : {}) };
+  const invoice = { object: "invoice", id: "in_JExpanded0001", charge: fee.charge, payment_intent: intentId, total: 10000, amount_paid: 10000, paid: true, status: "paid", currency: "usd", created: now - 3600, subtotal: 8000, total_excluding_tax: 8000, subscription_details: { metadata: { store: "j-expanded", share_bps: "625" } }, ...options.patch };
+  const session = { object: "checkout.session", id: "cs_test_JExpanded0001", payment_intent: intentId, currency: "usd", amount_total: 10000, total_details: { amount_tax: 2000, amount_shipping: 0 }, ...options.patch };
   if (options.kind === "session") delete (intent.metadata as { share_base?: string }).share_base;
   const charge = { object: "charge", id: fee.charge, currency: "usd", amount: 10000, amount_refunded: 0, disputed: false, invoice: options.kind === "invoice" ? invoice : null, payment_intent: intent };
   const previous = globalThis.fetch;
@@ -59,7 +59,7 @@ for (const kind of ["intent", "invoice"] as const) for (const [label, patch] of 
 });
 
 for (const [label, patch] of [["missing kind", { object: undefined }], ["foreign kind", { object: "invoice" }], ["missing identity", { id: undefined }], ["foreign payment intent", { payment_intent: "pi_JForeign0001" }], ["missing payment intent", { payment_intent: undefined }]] as const) test("unconfirmed legacy session cannot authorize money: " + label, async () => {
-  const r = await run({ kind: "session", patch: { amount_total: 1000, ...patch } });
+  const r = await run({ kind: "session", patch: { amount_total: 1000, total_details: { amount_tax: 0, amount_shipping: 0 }, ...patch } });
   assert.equal(r.posts.length, 0, "an unconfirmed or foreign session supplied the financial base for a fee-refund POST");
   assert.equal(r.rejected, true);
 });

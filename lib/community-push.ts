@@ -215,6 +215,11 @@ export async function pushMembers(id: string, to: string[], alert: MemberAlert):
 
 /** Deletes the devices one member let us notify (lib/community-erasure.ts). */
 export async function forgetPushPerson(id: string, who: string): Promise<number> {
-  const [gone] = await redisPipeline([["DEL", pushKey(id, who)]]);
-  return Number(gone) || 0;
+  const reply = await redisPipeline([["DEL", pushKey(id, who)]]);
+  const length = Array.isArray(reply) ? Object.getOwnPropertyDescriptor(reply, "length") : undefined;
+  const gone = Array.isArray(reply) ? Object.getOwnPropertyDescriptor(reply, "0") : undefined;
+  if (length?.value !== 1 || !gone || !("value" in gone) || (gone.value !== 0 && gone.value !== 1)) {
+    throw new Error("Community push erasure was not confirmed");
+  }
+  return gone.value;
 }

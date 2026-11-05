@@ -91,3 +91,61 @@ test('explicit evidenced zero and null-prototype source rows retain their exact 
  assert.equal(result.reason,'known');assert.equal(result.totalNetProfitCents,5400);
  for(const row of result.rows){assert.equal(row.netProfitCents,600);assert.equal(row.shareOfNetProfitBps,1111);}
 });
+
+test('a Proxy cannot hide an additional source cost before the accounting snapshot',()=>{
+ for(const location of ['root','sources','row'] as const){
+  const input=fixture();
+  const row=Object.assign(input.sources.captions!,{unreviewedSupplierCents:null});
+  input.sources.captions=new Proxy(row,{
+   ownKeys(target){return Reflect.ownKeys(target).filter(key=>key!=='unreviewedSupplierCents');},
+  });
+  const wrapped=location==='root'?new Proxy(input,{}):input;
+  if(location==='sources')input.sources=new Proxy(input.sources,{});
+  const result=commercialProfitMix(wrapped);
+  assert.equal(result.reason,'unknown',location);
+  assert.equal(result.totalNetProfitCents,null);
+ }
+});
+
+test('transparent proxies at each accounting boundary are not financial evidence',()=>{
+ for(const location of ['root','sources','row'] as const){
+  const input=fixture();
+  if(location==='sources')input.sources=new Proxy(input.sources,{});
+  if(location==='row')input.sources.captions=new Proxy(input.sources.captions!,{});
+  const result=commercialProfitMix(location==='root'?new Proxy(input,{}):input);
+  assert.equal(result.reason,'unknown',location);
+  assert.equal(result.totalNetProfitCents,null);
+ }
+});
+
+test('an inherited amount cannot replace a required own cost category',()=>{
+ const descriptor=Object.getOwnPropertyDescriptor(Object.prototype,'taxesCents');
+ let calls=0;
+ try{
+  Object.defineProperty(Object.prototype,'taxesCents',{get(){calls++;return 200;},configurable:true});
+  const input=fixture();
+  const row=input.sources.captions! as unknown as Record<string,unknown>;
+  delete row.taxesCents;
+  Object.assign(row,{unreviewedSupplierCents:null});
+  const result=commercialProfitMix(input);
+  assert.equal(result.reason,'unknown');assert.equal(result.totalNetProfitCents,null);
+  assert.equal(result.rows.find(item=>item.source==='captions')!.netProfitCents,null);
+  assert.equal(calls,0);
+ }finally{
+  if(descriptor)Object.defineProperty(Object.prototype,'taxesCents',descriptor);
+  else Reflect.deleteProperty(Object.prototype,'taxesCents');
+ }
+});
+
+test('hidden, symbolic and executable source categories are rejected without reads',()=>{
+ let calls=0;
+ for(const kind of ['hidden','symbol','getter'] as const){
+  const input=fixture();
+  if(kind==='symbol')Object.defineProperty(input.sources.captions!,Symbol('cost'),{value:null,enumerable:true});
+  else Object.defineProperty(input.sources.captions!,'unreviewedSupplierCents',kind==='hidden'
+   ?{value:null,enumerable:false}
+   :{get(){calls++;return 0;},enumerable:true});
+  assert.equal(commercialProfitMix(input).reason,'unknown',kind);
+ }
+ assert.equal(calls,0);
+});

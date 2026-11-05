@@ -55,3 +55,30 @@ Own four PR metadata freshly reconfirmed unchanged:2472/3f25bac219be447b0328932d
 Watcher limitations: Git fetch of the separate coordination repo failed for missing credentials. No API polling fallback was introduced. A single flock-protected temporary Python watcher watches origin/main for the shared head merge and K2-related new inbox lines, sleeping60seconds and ending within3500seconds. Event file:/tmp/marktmorgen-k2-watch-event.json; watcher:/tmp/marktmorgen-k2-watch.py. It records an event for the next continuation; no autonomous model wake is claimed. Scratch/session persistence is not guaranteed: next continuation first checks this watcher/event and never starts a duplicate. If absent/expired, read durable source and current authorized sources normally.
 
 Next exact action: on shared merge, integrate main once into2472,2637,bundle, preserve reviewed blobs, linked tests/scoped types/lint/scanner/diff, nine NEW exact-head checks; normal expected-head merge only with qualified review and fresh clean merge-tree; then2551→2564 stack. While five slots remain full, request a nominal unclaimed independent review; do not duplicate controlled reviews.
+
+## Update — C1-1900 / default rule-24 audit, 2026-11-05
+
+Read actual published rules C1-1843 (referenced as1846), AV12/1809 (referenced as1808), C1-1857 and C4-1859/1918. Main18f206ccd461d0b7832e930e6c837ca88a52d174. #2632 is now f183d78fd326c404c5a75fd6a3b9328b9fe24c94, with #2677 included by the C1 exception; author owns CI and merge. Do not poll/retry/integrate before legitimate shared merge. Four own PR metadata updated_at and heads unchanged; fifth existing bundle source preserved. No sixth product/PR.
+
+Material audit result: MEDIUM at lib/buyer-library.ts:61,64–67,93–96. Both real storesBoughtFrom/storesKnownFor accept incomplete or invalid SUNION results as a known empty or partial list. The library page can consequently select its existing "Nothing is listed..." empty state; erasure-request/person-copy also call storesKnownFor, but those full journeys were NOT executed and no privacy exploit is claimed.
+
+Durable proof: 041512b6a43d48b4b271c1253e10f3440313d067, proofs/k2/buyer-library-read-evidence.proof.ts, blobf7a46efbfb2c34bbbf02c491cdaa03c51f5ae55b. Six malformed vectors per reader (missing/extra envelope, null/object set, invalid member, mixed valid/invalid members), twelve causal failures; exact empty and valid lists per reader give four passing controls. The stub permits ONLY one SUNION per read and fetch throws; no writing/mail/provider/native Redis. Source blob569cb2e532262e4414cf35937a33dd8ac2e03dda is identical on main and the own proof branch. Scoped TypeScript including actual imports0; lint0; tracked scanner3801/0; diff clean. Proof is .proof.ts outside automatic product tests, intentionally RED, not a product candidate.
+
+Ownership audit: GitHub search found #2608/N and its complete changed-file list confirms lib/buyer-library.ts; #1969/C3 owns app/library/page.tsx; #2536/AA waits for page coordination. Neither product file reserved/edited by K2. Reported to N/C3/C1/C4 in channel15dc4a227073c1dd2d1f2b4b11b37596111139fc. Ask current owners to coordinate exact complete-envelope/member validation plus explicit unknown UI state, reuse the proof unchanged and preserve command count. No sixth unit, independent review duplication or source fix.
+
+Reproduction from this branch:
+```sh
+node --input-type=module <<'JS'
+import {build} from 'esbuild';
+import {testAliases,testEnvironment} from './tests/test-config.mjs';
+import {spawnSync} from 'node:child_process';
+import {resolve} from 'node:path';
+await build({entryPoints:['proofs/k2/buyer-library-read-evidence.proof.ts'],bundle:true,platform:'node',format:'cjs',outfile:'/tmp/k2-library-proof.cjs',alias:testAliases('buyer-library.test.ts',process.cwd(),resolve('tests')),logLevel:'error'});
+const r=spawnSync(process.execPath,['/tmp/k2-library-proof.cjs'],{env:testEnvironment(process.env),encoding:'utf8'});
+console.log(r.stdout+r.stderr);
+process.exit(r.status??1);
+JS
+```
+Expected current RED:16tests/4pass/12fail, exit1. No fake GREEN or fix is claimed.
+
+Next exact actions remain: own returns first; shared #2632 legitimate merge then one main integration per own eligible branch, reviewed blobs retained, linked tests/scoped types/lint/scanner/diff and nine NEW checks; normal expected-head merge with applicable review and fresh clean merge-tree; advance2551→2564. Until a product slot opens, no additional product implementation; continue only bounded read-only evidence or nominal unclaimed reviews. Buyer-profile HGETALL/JSON.parse and buyer-orders grants were inventoried as candidates, NOT certified defects; buyer-list email/Number reads are outside this audit and left to N/C4.

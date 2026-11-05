@@ -19,6 +19,9 @@ is("no scheme: read as https", crmUrl("acme.studio/about"), "https://acme.studio
 is("spaces around are trimmed", crmUrl("  example.com  "), "https://example.com/");
 is("never a script, a mailto or a file", [crmUrl("javascript:alert(1)"), crmUrl("mailto:a@example.com"), crmUrl("data:text/html,hi"), crmUrl("file:///etc/passwd"), crmUrl("ftp://example.com")], [null, null, null, null, null]);
 is("never a bare word, a number address or a name with no dot", [crmUrl("hello"), crmUrl("http://127.0.0.1/"), crmUrl("http://localhost/"), crmUrl("https://intranet")], [null, null, null, null]);
+is("a port with no scheme is a host and its port, read as https", [crmUrl("example.com:8080"), crmUrl("example.com:8080/shop")], ["https://example.com:8080/", "https://example.com:8080/shop"]);
+is("a last part in another script, as the browser reads it", [crmUrl("example.\u0440\u0444"), crmUrl("\u4f8b\u3048.\u4e2d\u56fd")], ["https://example.xn--p1ai/", "https://xn--r8jz45g.xn--fiqs8s/"]);
+is("a port never makes a bare word or a number an address", [crmUrl("localhost:3000"), crmUrl("tel:5551234"), crmUrl("127.0.0.1:80")], [null, null, null]);
 is("never with a user and password in it", crmUrl("https://user:pass@example.com"), null);
 is("never with spaces inside", crmUrl("https://example.com/a b"), null);
 const long = `https://example.com/${"a".repeat(MAX_FIELD_VALUE)}`;

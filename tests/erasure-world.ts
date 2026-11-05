@@ -20,6 +20,7 @@ import { setValue, writeDeal, writeFields } from "@/lib/crm";
 import type { CrmField } from "@/lib/crm-rules";
 import { addPersonNote } from "@/lib/buyer-profile";
 import { personKey } from "@/lib/person-key";
+import { addCompany, changeCompanies, linkPerson, newCompanyId } from "@/lib/crm-companies";
 import { addResponse, writeForm } from "@/lib/form-store";
 import { parseForm } from "@/lib/forms";
 import { emailKey, markLesson, mintPass, recordEnrollment, touchStudent } from "@/lib/learn";
@@ -55,6 +56,8 @@ export type World = {
   communityId: string;
   formId: string;
   field: CrmField;
+  /** The store's one company (lib/crm-companies.ts), which each person seeded works at. */
+  company: string;
 };
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -103,6 +106,10 @@ export async function makeWorld(handle = "erase-shop", owner = OWNER): Promise<W
   await writeFields(store.statsId as string, [field]);
   const flow = await saveFlow(store, { name: "Welcome", trigger: "joined", active: true, steps: [{ delayHours: 48, subject: "Hello", body: "Hi there." }] }, { activate: true });
   if (!flow.ok) throw new Error(`no flow: ${JSON.stringify(flow)}`);
+  // A company the store sells to (lib/crm-companies.ts, 639 [GL7](4)): the store's, so it stays when a person goes.
+  const company = newCompanyId();
+  const kept = await changeCompanies(store.statsId as string, ROOM, (companies) => addCompany(companies, { name: "Synthetic school", website: "", note: "" }, company, second()));
+  if (!kept.ok) throw new Error(`a company was not kept: ${kept.error}`);
   store = (await storeForEmail(owner))!;
 
   return {
@@ -115,6 +122,7 @@ export async function makeWorld(handle = "erase-shop", owner = OWNER): Promise<W
     communityId,
     formId,
     field,
+    company,
   };
 }
 
@@ -148,6 +156,9 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await setValue(statsId, person, w.field, "Gold", ROOM);
   await writeDeal(statsId, { id: hex(5), title: `Coaching for ${email}`, email, cents: 50_000, stage: "lead00", note: "Wants a call", createdAt: Date.now(), updatedAt: Date.now() }, ROOM);
   await addPersonNote(statsId, person, OWNER, `Called ${email} about the course`, ROOM);
+  // The company they work at (lib/crm-companies.ts, 639 [GL7](4)): the store's, linked to them by their person key.
+  const linked = await changeCompanies(statsId, ROOM, (companies) => linkPerson(companies, w.company, person));
+  if (!linked.ok) throw new Error(`a person was not linked to a company: ${linked.error}`);
   // A payment request sent them, with its reminder waiting (lib/payment-request-store.ts).
   const billed = await createRequest(store, { email, name: "Tess", lines: [{ text: "Coaching, October", quantity: 1, cents: 48_000 }], note: `For ${email}`, dueDate: "", autoReminders: 1, total: 48_000 }, Date.now());
   if (!billed.ok) throw new Error(`a payment request was not kept: ${billed.message}`);

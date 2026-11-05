@@ -32,8 +32,12 @@ let sessions: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
-    if (url.pathname === "/emails/batch") batches.push(JSON.parse(String(init?.body)) as Message[]);
-    return new Response(JSON.stringify({ id: "email_1", data: [] }));
+    if (url.pathname === "/emails/batch") {
+      const batch = JSON.parse(String(init?.body)) as Message[];
+      batches.push(batch);
+      return Response.json({ data: batch.map((_, i) => ({ id: `synthetic_${i}` })) });
+    }
+    return Response.json({ id: "email_1" });
   }
   const path = url.pathname.replace(/^\/v1/, "");
   const list = (data: unknown[]) => new Response(JSON.stringify({ object: "list", data, has_more: false }));

@@ -46,7 +46,7 @@ import { cartOfferFrom } from "@/lib/cart-offers";
 import { imageUrl } from "@/lib/product-image";
 import { buyersJoin, noteSession } from "@/lib/affiliates";
 import { recordEnrollment } from "@/lib/learn";
-import { upsertContact } from "@/lib/contacts";
+import { orderRoom, upsertContact } from "@/lib/contacts";
 import { listOrder } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
@@ -224,7 +224,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
-      }, { order: store }).catch((error) => console.error("adding a buyer to a list failed", error));
+      }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {
       after(() => confirmPurchase(store, sessionId).catch((error) => console.error("confirming a pre-order failed", error)));
@@ -287,7 +287,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
-      }, { order: store }).catch((error) => console.error("adding a buyer to a list failed", error));
+      }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {
       after(() => confirmPurchase(store, sessionId).catch((error) => console.error("delivering a gift failed", error)));
@@ -351,7 +351,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
-      }, { order: store }).catch((error) => console.error("adding a buyer to a list failed", error));
+      }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {
       await confirmPurchase(store, sessionId).catch((error) => console.error("opening the places of a purchase failed", error));
@@ -415,9 +415,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // it (lib/meet-links.ts), and this page shows that meeting's link.
   // In person: what is left to pay there and a code taken off the whole price, read from the sale
   // (lib/call-deposit.ts); undefined when it could not be read, so the confirmation tries again.
-  // The cancellation deadline promised when paying is read with it, from the same sale.
+  // The cancellation deadline promised when paying is read with it, from the same sale, for every paid call: a
+  // deadline the creator turned off after the sale is still the promise the buyer paid under.
   const sale =
-    sessionId && order.state === "paid" && order.call && (order.product.call?.place || order.product.call?.cancelHours)
+    sessionId && order.state === "paid" && order.call
       ? await paidCall(store, sessionId).then((call) => call, () => undefined)
       : null;
   const due: DueInPerson | null | undefined = sale === undefined ? undefined : sale?.due ?? null;

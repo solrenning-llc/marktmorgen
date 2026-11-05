@@ -635,6 +635,7 @@ function Terms({
   const [payday, setPayday] = useState(String(setting.payday));
   const [hold, setHold] = useState(String(setting.hold));
   const [buyers, setBuyers] = useState(setting.buyers);
+  const [autoApprove, setAutoApprove] = useState(setting.autoApprove === true);
   const [directory, setDirectory] = useState(setting.directory);
   const [numbers, setNumbers] = useState(setting.numbers);
   const [kit, setKit] = useState(setting.kit);
@@ -688,6 +689,7 @@ function Terms({
               payday: Number(payday.trim()),
               hold: Number(hold.trim()),
               buyers,
+              autoApprove,
               lifetime,
               // Only a program that pays per lead has confirmed contacts to credit (lib/affiliate-setting.ts creditsContacts).
               contacts: lead.kind !== "none" && contacts,
@@ -745,8 +747,26 @@ function Terms({
           <span className="text-sm">
             <span className="block font-semibold text-ink">Buyers join without applying</span>
             <span className="block text-ink-soft">
-              The thanks page and the purchase email offer everyone who buys their own link, approved at once. Anyone you
-              declined or removed stays out, and everyone else still applies.
+              The thanks page and the purchase email offer everyone who buys their own link, approved at once. Someone you
+              declined or removed cannot rejoin this way with the same address, and an address that matches one on your list
+              written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Everyone else
+              still applies.
+            </span>
+          </span>
+        </label>
+
+        <label className="mt-3 flex min-h-[44px] cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
+          <input
+            type="checkbox"
+            checked={autoApprove}
+            onChange={(e) => setAutoApprove(e.target.checked)}
+            className="h-5 w-5 shrink-0 accent-[var(--violet)]"
+          />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">Approve every application at once</span>
+            <span className="block text-ink-soft">
+              Anyone who applies gets their link straight away, and you are told who joined; you can remove them at any time.
+              Someone you declined or removed stays out with the same address, and an application whose address matches one on your list written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Off, each application waits for you.
             </span>
           </span>
         </label>
@@ -1404,7 +1424,7 @@ function Member({
             {row.flags.includes("paid-search") ? (
               <li>{`${row.paidClicks.toLocaleString("en-US")} ${row.paidClicks === 1 ? "click" : "clicks"} on their link came from a paid search ad, which your program does not allow.`}</li>
             ) : null}
-            {row.flags.includes("same-address") ? <li>Another affiliate in your program has the same inbox or payout address, written the same or another way.</li> : null}
+            {row.flags.includes("same-address") ? <li>Another affiliate in your program, or someone you declined or removed, has the same inbox or payout address, written the same or another way.</li> : null}
           </ul>
           <button
             type="button"

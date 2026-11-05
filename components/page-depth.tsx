@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
+import { framePlayer, frameTarget, messagePlayer } from "@/lib/player-origin";
 import { WHY_NOT, type WhyNot } from "@/lib/why-not-rules";
 import type { WhyNotWords } from "@/lib/buyer-words/why-not";
 
@@ -113,17 +114,23 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
     const listen = () => {
       for (const frame of document.querySelectorAll<HTMLIFrameElement>(".sp-video iframe")) {
         try {
-          if (frame.src.includes("youtube")) frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), "*");
-          if (frame.src.includes("vimeo")) frame.contentWindow?.postMessage(JSON.stringify({ method: "addEventListener", value: "timeupdate" }), "*");
+          const player = framePlayer(frame.src);
+          // Sent to the frame's own player origin only, never "*" (lib/player-origin.ts).
+          const target = frameTarget(frame.src);
+          if (!target) continue;
+          if (player === "youtube") frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), target);
+          if (player === "vimeo") frame.contentWindow?.postMessage(JSON.stringify({ method: "addEventListener", value: "timeupdate" }), target);
         } catch {}
       }
     };
     // What the players say back: YouTube its time and length, Vimeo its share played.
+    // Only from the exact origin of a player frame this page drew, and only
+    // from that frame's own window (lib/player-origin.ts): any other window
+    // can post a message here too.
     const onMessage = (event: MessageEvent) => {
       if (!videoBlock) return;
-      // Only a video player framed on this page is heard.
-      const player = playerOfOrigin(event.origin);
-      if (!player || ![...document.querySelectorAll<HTMLIFrameElement>(".sp-video iframe")].some((frame) => frame.contentWindow === event.source)) return;
+      const player = messagePlayer(document.querySelectorAll<HTMLIFrameElement>(".sp-video iframe"), event.source, event.origin);
+      if (!player) return;
       let data: unknown = event.data;
       if (typeof data === "string") {
         try {

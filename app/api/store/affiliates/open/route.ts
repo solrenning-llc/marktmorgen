@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
   return new Response(null, {
     status: 303,
     headers: {
-      Location: `${page}?status=${result.created ? "applied" : "welcome"}`,
+      Location: `${page}?status=${result.created ? (result.affiliate.status === "approved" ? "joined" : "applied") : "welcome"}`,
       "Cache-Control": "no-store",
       "Set-Cookie": `${affiliateCookieName(store.handle)}=${result.session}; Path=/; Max-Age=${AFFILIATE_SESSION_SECONDS}; HttpOnly; SameSite=Lax${secure}`,
     },

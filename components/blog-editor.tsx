@@ -116,7 +116,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
     const data = await send({ action: "delete", id: post.id }, "delete");
     if (!data) return;
     setDone(true);
-    toast("Post deleted.");
+    toast(data.countUnavailable ? "Post deleted. The published count could not be confirmed. Reload the blog to check it." : "Post deleted.");
     router.push(back);
     router.refresh();
   }

@@ -33,32 +33,32 @@ test("DR1 evidence links the primary tariff, retry, delivery and byte sources", 
 
 // Independent exact rational oracle: USD numerator / denominator. No supplier,
 // free-tier credit or unknown component enters this compute-only scenario.
-const seconds = 30n;
-const invocationMicroUsdPerMillion = 600_000n;
-const cpuMicroUsdPerHour = 128_000n;
-const memoryMicroUsdPerGbHour = 10_600n;
-const denominator = 3_600_000_000_000_000n;
-const numerator = invocationMicroUsdPerMillion * 3_600n
-  + (seconds * cpuMicroUsdPerHour + seconds * 2n * memoryMicroUsdPerGbHour) * 1_000_000n;
+const seconds = BigInt(30);
+const invocationMicroUsdPerMillion = BigInt(600_000);
+const cpuMicroUsdPerHour = BigInt(128_000);
+const memoryMicroUsdPerGbHour = BigInt(10_600);
+const denominator = BigInt(3_600_000_000_000_000);
+const numerator = invocationMicroUsdPerMillion * BigInt(3_600)
+  + (seconds * cpuMicroUsdPerHour + seconds * BigInt(2) * memoryMicroUsdPerGbHour) * BigInt(1_000_000);
 
 function ceilMicroUsd(emails: number, attempts: number): bigint {
-  const n = numerator * BigInt(emails) * BigInt(attempts) * 1_000_000n;
-  return (n + denominator - 1n) / denominator;
+  const n = numerator * BigInt(emails) * BigInt(attempts) * BigInt(1_000_000);
+  return (n + denominator - BigInt(1)) / denominator;
 }
 
 test("the dated table reproduces the full 30-second IAD compute envelope without rounding down", () => {
   const text = evidence();
   const rows = [
-    [PRO_MONTHLY_EMAILS, 1, 8_707_534n],
-    [PRO_MONTHLY_EMAILS, 4, 34_830_134n],
-    [PRO_MONTHLY_EMAILS, 101, 879_460_867n],
-    [SCALE_MONTHLY_EMAILS, 1, 12_439_334n],
-    [SCALE_MONTHLY_EMAILS, 4, 49_757_334n],
-    [SCALE_MONTHLY_EMAILS, 101, 1_256_372_667n],
+    [PRO_MONTHLY_EMAILS, 1, BigInt(8_707_534)],
+    [PRO_MONTHLY_EMAILS, 4, BigInt(34_830_134)],
+    [PRO_MONTHLY_EMAILS, 101, BigInt(879_460_867)],
+    [SCALE_MONTHLY_EMAILS, 1, BigInt(12_439_334)],
+    [SCALE_MONTHLY_EMAILS, 4, BigInt(49_757_334)],
+    [SCALE_MONTHLY_EMAILS, 101, BigInt(1_256_372_667)],
   ] as const;
   for (const [emails, attempts, expected] of rows) {
     assert.equal(ceilMicroUsd(emails, attempts), expected);
-    const dollars = `${expected / 1_000_000n}.${String(expected % 1_000_000n).padStart(6, "0")}`;
+    const dollars = `${expected / BigInt(1_000_000)}.${String(expected % BigInt(1_000_000)).padStart(6, "0")}`;
     assert.ok(text.includes(`| ${emails} | ${attempts} | ${emails * attempts} | ${dollars} |`));
   }
 });
@@ -66,9 +66,9 @@ test("the dated table reproduces the full 30-second IAD compute envelope without
 test("the 101-attempt compute envelope already exceeds both paid list plans' gross revenue", () => {
   const text = evidence();
   for (const [tier, emails] of [["pro", PRO_MONTHLY_EMAILS], ["scale", SCALE_MONTHLY_EMAILS]] as const) {
-    const worst = numerator * BigInt(emails) * 101n;
-    assert.ok(worst * 100n > BigInt(PLAN_PRICES[tier].month) * denominator);
-    assert.ok(worst * 1_200n > BigInt(PLAN_PRICES[tier].year) * denominator);
+    const worst = numerator * BigInt(emails) * BigInt(101);
+    assert.ok(worst * BigInt(100) > BigInt(PLAN_PRICES[tier].month) * denominator);
+    assert.ok(worst * BigInt(1_200) > BigInt(PLAN_PRICES[tier].year) * denominator);
   }
   assert.ok(text.includes("This rejects the present admission model; it does not establish an actual invoice or measured loss."));
   assert.ok(text.includes("Excluded costs remain unknown or separately chargeable, never zero."));

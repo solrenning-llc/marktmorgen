@@ -72,7 +72,7 @@ for (const raw of [null, {}, [], { mode: "round_robin", hosts: [] }]) {
   test(`an explicitly configured unreadable team closes the call: ${JSON.stringify(raw)}`, async () => {
     reply = () => [[product.id, JSON.stringify(raw)]];
     assert.equal(await activeTeam(store, product), "closed");
-    assert.equal(await slotsForProduct(store, product), null);
+    assert.deepEqual(await slotsForProduct(store, product), { days: [], left: {}, paid: [], sessions: [], team: true });
   });
 }
 

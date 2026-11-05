@@ -122,6 +122,14 @@ export type ContractFundingConfiguration={reviewId:string;binding:string;cashLim
 /** Pure reserve calculation. The caller must also enforce commercialMarginReady
  * and actual admission coverage before enabling real sales. */
 export function contractFundingConfiguration(policy:ContractFundingPolicy|null,context:ContractFundingContext,now=new Date()):ContractFundingConfiguration|null {
+ if(!inertProxyDetector||!now||typeof now!=='object'||inertProxyDetector(now))return null;
+ let nowMs:number;
+ try{
+  if(Object.getPrototypeOf(now)!==Date.prototype||Reflect.ownKeys(now).length!==0)return null;
+  nowMs=Date.prototype.getTime.call(now);
+ }catch{return null;}
+ if(!Number.isFinite(nowMs))return null;
+ const observedAt=new Date(nowMs);
  // Scoped TX may fund a contract only when it is bound to this exact policy,
  // the actual admission time and the complete existing liability horizon.
  // Reject executable wrappers before the first descriptor or ordinary read.
@@ -136,15 +144,15 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  const disputes=assessPlanPaymentDisputeCosts(sourceDisputesField.value);
  if(!disputes)return null;
  const taxState=customerTaxContractContextState(context);
- if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,now))return null;
+ if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,observedAt))return null;
  const encoded=canonicalFinancialSnapshot({policy,context});
  if(!encoded)return null;
  const captured=parseOwnFinancialJson<{policy:ContractFundingPolicy|null;context:ContractFundingContext}>(encoded);
  if(!captured)return null;
  const p=captured.policy;context=captured.context;
- if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,now))return null;
+ if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,observedAt))return null;
  const reviewEncoded=canonicalFinancialSnapshot(context.review);
- if(!reviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
+ if(!reviewEncoded||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
  const review=parseOwnFinancialJson<CommercialMarginReview|null>(reviewEncoded);
  if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
  const boundDisputesField=Object.getOwnPropertyDescriptor(review,'planPaymentDisputes');
@@ -155,10 +163,10 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
   boundDisputes[key].feesCents===disputes[key].feesCents&&
   boundDisputes[key].lostPaymentWorstCaseCents===disputes[key].lostPaymentWorstCaseCents))return null;
  const until=iso(p.admissionsUntil),through=iso(p.liabilitiesThrough);
- if(until===null||through===null||until<now.getTime()||p.reviewedLiabilityTailDays===null)return null;
+ if(until===null||through===null||until<nowMs||p.reviewedLiabilityTailDays===null)return null;
  const monthDays=contractCoverageDays('month',p.reviewedLiabilityTailDays),yearDays=contractCoverageDays('year',p.reviewedLiabilityTailDays);
  if(monthDays===null||yearDays===null)return null;
- const exposure=fundedExposureDetails(review.fundedExposure,now),fixed=review.companyBase;
+ const exposure=fundedExposureDetails(review.fundedExposure,observedAt),fixed=review.companyBase;
  if(!exposure||!fixed||!integer(fixed.monthlyFixedCostsCeilingCents)||!integer(fixed.monthlyFixedTaxesCeilingCents)||!integer(fixed.reviewedPayingCustomers)||fixed.reviewedPayingCustomers<1||review.allocatedFixedCostsVerified!==true||review.prepaidUsageEnforced!==true||!review.scenarios)return null;
  const fixedWithExposure=fixed.monthlyFixedCostsCeilingCents+exposure.budgetCents;
  if(!Number.isSafeInteger(fixedWithExposure))return null;

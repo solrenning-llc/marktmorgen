@@ -22,7 +22,7 @@ async function world(options:{feeListReply?:unknown;recent?:boolean;historical?:
  }
  const oldFetch=globalThis.fetch;
  const feeReply={...fee,...options.feePatch};
- const chargeReply={id:fee.charge,currency:'usd',amount:10000,amount_refunded:0,disputed:true,payment_intent:{id:'pi_UnknownState0001',metadata:{share_bps:'625',share_base:'10000',buyer_email:'synthetic-buyer@example.test',...options.metadataPatch}},...options.chargePatch};
+ const chargeReply={object:'charge',id:fee.charge,currency:'usd',amount:10000,amount_refunded:0,disputed:true,payment_intent:{id:'pi_UnknownState0001',metadata:{share_bps:'625',share_base:'10000',buyer_email:'synthetic-buyer@example.test',...options.metadataPatch}},...options.chargePatch};
  globalThis.fetch=async(input,init)=>{
   const url=new URL(String(input)),method=init?.method??'GET';calls.push({method,url});
   assert.equal(url.origin,'https://api.stripe.com');
@@ -191,3 +191,8 @@ for (const historical of [false, true]) {
     assert.equal(r.counts.unknownAmounts,1); assert.deepEqual(r.counts.unknownAmountFees,[fee.id]);
   });
 }
+for(const historical of [false,true])for(const object of [undefined,null,'invoice',0,{},[]])test('C4: unknown charge kind cannot authorize a refund '+String(historical)+': '+String(object),async()=>{
+ const r=await world({historical,recent:!historical,metadataPatch:{share_bps:'0'},chargePatch:{object,disputed:false}});
+ assert.equal(r.calls.filter(c=>c.method==='POST').length,0);assert.equal(r.counts.complete,false);assert.equal(r.counts.failed,1);
+ assert.equal(r.counts.unknownAmounts,1);assert.deepEqual(r.counts.unknownAmountFees,[fee.id]);
+});

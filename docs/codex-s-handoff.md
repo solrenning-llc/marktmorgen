@@ -203,3 +203,23 @@ Exact next: E2 corrective2689/Vcorrective2691 returns; repair any new cause with
 Local authoritative return worktrees: s-notes-return-final detached481e26c6 clean (temporarytsconfig removed); s-verified-return-final detached69ef62d5 with the two coverage-corrective paths STAGED and REMOTELY durable in17c33e31 (temporarytsconfig removed). Older dirty worktrees intentionally preserved. Own candidate branches codex/s-stats-notes-review-candidate481e26c6 and codex/s-verified-numbers-review-candidate69ef62d5 are backups, not extra product units/PRs. Fetch final17c33e31 into a fresh copy for further V return; do not reset staged work. /tmp/codex-s-final-candidate-metadata.json records intermediate candidates only, not the latest coverage head.
 
 No globaltsc/browser/nativeRedis/realprovider/deployment/customer availability certification. No tests/CI monitoring process left for S; authenticated channel git fetch is unavailable, and no API polling loop was substituted. Preserve existing hourly safety task; no new automation or disable action.
+
+## Focal review completed / subsequent review claim pending
+
+S returned on2672 exact2b5afd173198f2a03455b6dbb8a935cf55808e75 after C4's nominal request. Announcement channel fd5248c9267f82fb5858b4fe0da6f2a3f5368be4 succeeded BEFORE any proof work. Complete delta from4b888296 is exactlylib/buyer-orders.ts + tests/orders-grant-read-evidence.test.ts; sharedhelper unchanged.
+
+Comment6671401686: original K2 grant MEDIUM CLOSED focally. K2 original blob5917ed7c32514dd27c12e2289137b5544f312b5c reproduced10/6 on predecessor source,10/10 on2b5; author21/21 and linked34orders-open+125sg2+24cost+7data=190pass. Both grant writers serialize{a,e} in that exact order; valid typed address, exactnull, other account and invalidtoken controls preserved.
+
+NEW MEDIUM: unchanged repliesFor accepts Proxy arrays. Actual ordersGrant accepts an executable one-slot GET response and returnsbuyer@example.com while running2consumer descriptor traps(length/0). New proof6checks/2adversefailures+4controls; async transport Promise then-probe counted separately. In-process response contract only, NOT JSONremoteexploit, fullsession/ordersjourney/payment/provider. RejectProxy before reflection and retain plain/frozen/ownslot controls. PriorLOWstringList remains6/2; original hole/accessor counter closure6668269511 is NOT retroactively erased.
+
+All evidence durable codex/s-review-2672-orders-return@7c71c6c251127d5e9a1067ca43b405c19e7e4eff, tree derived from author2b5 plus THREE opt-in proof files ONLY:
+- proofs/k2/orders-grant-read-evidence.proof.ts, byte-identical5917ed7c
+- tests/s2672-string-list-return.proof.ts, byte-identical6dd438571d175f9e117e5e3431ab0f87f7c8e335
+- tests/s2672-orders-proxy.proof.ts,260c6b687b97f8a124092c1e994170c5796e5aea
+Strict scoped types/imports0, lint0, scanner3804/0, diff0. No C4 source/branch/CI/reservation change. Temporarytsconfig removed. Own worktree s-return-2672-orders detached2b5 with three own proof files staged; remote evidence authoritative. Initial external proof launcher could not resolve relativefixture/nextserver; fixed by preserving the proof directory and explicit nodePaths for the predecessor-only /tmp module. No build failure counted as causal RED; successful10/6 replay verified afterward.
+
+E2 returned2689 review5793080643 on481e26c6: bothMEDIUMs CLOSED; occupied UI LOW still open, no general release.2691coverage correction17c33e31 still needs V exact-head return; its original six-case proof is6/6locally. PR descriptions rewritten to current scopes/heads/results and unwaived findings. Five own products remain2473/2507/2516/2689/2691; no sixth, no merge/retry.
+
+Subsequent available review candidate2700: final ef88733bebd83ab5aee71f0a455b751ed9541717 (supersedes2a8 only by documentary main integration). Fresh channel+PR found no reviewer; attempted combined2672report+2700claim append got409. MUST wait2min, read fresh channel, check whether another reviewer claimed2700, then successfully announce before writing proof/review code. Current2700preparation ONLY metadata+git fetch; no test/proof executed and no finding reported. /tmp/s2700-channel-conflict-start records the wait baseline. Do not count the failed append as a claim. Source diff was obtained by connector but no own code was written. If someone claimed during conflict, do not duplicate.
+
+Shared2632 still not merged; latestmain d7bbf9d3 CONFIRMED retains V reservation row97. No inference of row release from2694 cleanup. C1/C3/V remain owners. Five own heads/proofs above preserved; all outstanding coordination requests remain pending.

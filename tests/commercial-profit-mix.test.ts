@@ -198,3 +198,20 @@ test('an auxiliary root Proxy cannot erase an unpriced cost while the encoder re
  assert.equal(reads,0,'extra root fields are refused before their values are traversed');
  assert.equal(Object.hasOwn(row,'unreviewedSupplierCents'),true);
 });
+
+test('a late-row Proxy cannot execute a getter installed on an earlier row (CX-119)',()=>{
+ for(const throws of [false,true]){
+  const input=fixture();let reads=0;
+  input.sources.training=new Proxy(input.sources.training!,{
+   ownKeys(target){
+    Object.defineProperty(input.sources.plan_subscriptions!,'evidence',{
+     enumerable:true,configurable:true,get(){reads++;if(throws)throw new Error('synthetic getter');return 'SYNTHETIC ONLY';},
+    });
+    return Reflect.ownKeys(target);
+   },
+  });
+  const result=commercialProfitMix(input);
+  assert.equal(result.reason,'unknown');assert.equal(result.totalNetProfitCents,null);
+  assert.equal(reads,0,'neither returning nor throwing getters may execute');
+ }
+});

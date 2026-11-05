@@ -36,7 +36,8 @@
  * creator pasted, made in their own ad account; the token is sealed before it
  * is kept (lib/secret-box.ts) and never shown again.
  *
- * What goes with each: the order's id, time, amount, currency and products;
+ * What goes with each: an id made from the order's (adEventId), never the
+ * order's own; its time, amount, currency and products;
  * the buyer's email address hashed with SHA-256, as every platform requires;
  * the network address and browser of the request that opened the checkout;
  * the platforms' own first-party cookies when the browser had them (_fbp,
@@ -54,9 +55,9 @@
  */
 import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { seal, unseal } from "@/lib/secret-box";
+import { deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { toMajor } from "@/lib/money";
@@ -195,7 +196,11 @@ export type ConversionKind = "purchase" | "renewal" | "lead";
 
 export type Conversion = {
   kind: ConversionKind;
-  /** The order's checkout id, the renewal's invoice id, or the lead's own id: the same as the browser's event. */
+  /**
+   * The event's id, the same as the browser's: made from the order's checkout
+   * id or the renewal's invoice id by adEventId, never either of them, or the
+   * lead's own random id (never a key to anything).
+   */
   id: string;
   /** When it happened, in seconds. */
   at: number;
@@ -206,6 +211,35 @@ export type Conversion = {
   /** Whether the buyer had paid this creator before; null when that could not be read. */
   customer: "new" | "returning" | null;
 };
+
+const AD_EVENT_LABEL = "marktmorgen/ad-event-id/v1";
+
+/**
+ * The id an order's ad event goes out with, to every pixel and from the
+ * server alike (506 [SG1], finding E-2). A checkout's id (cs_…) or a PayPal
+ * order's id is a key on this site: whoever has it opens the order's
+ * downloads, the buyer's address, a verified review, Discord, a call's room
+ * and, on PayPal, every purchase made with that address; a renewal's invoice
+ * id is proof of purchase for a review. So the platforms are never given one,
+ * only this: an HMAC-SHA256 of it under a key derived for this use alone from
+ * the server's root secret (lib/secret-box.ts deriveKey), cut to 128 bits.
+ *
+ * The same id in, the same id out, on the thanks page (which computes it on
+ * the server and hands it to the pixels) and in the conversions sent from
+ * here, so each platform still counts the browser's event and the server's
+ * as one purchase. A keyed hash rather than a plain one: a PayPal order id is
+ * short and partly predictable, and a plain hash of it could be checked
+ * against guesses; this cannot without the key, and cannot be turned back.
+ *
+ * Without a root secret it answers "" and nothing is sent with an id at all
+ * (the browser's purchase event and the server's conversion are both
+ * skipped), never the order's own id. That secret is what reads Stripe here
+ * in the first place, so a deployment that sells always has it.
+ */
+export function adEventId(id: string): string {
+  const key = id ? deriveKey(AD_EVENT_LABEL) : null;
+  return key ? `ev_${createHmac("sha256", key).update(id).digest("hex").slice(0, 32)}` : "";
+}
 
 export const sha256 = (text: string) => createHash("sha256").update(text.trim().toLowerCase()).digest("hex");
 
@@ -424,7 +458,8 @@ async function post(platform: ServerPlatform, store: Store, stored: Stored, toke
 /** One conversion to each platform it can go to, and the answers kept for the studio. */
 async function deliver(store: Store, stored: Stored, c: Conversion, buyer: BuyerRequest, now: number): Promise<number> {
   const platforms = targets(store, stored, c);
-  if (!platforms.length || !store.statsId) return 0;
+  // No id made for it (adEventId without a secret): nothing goes, rather than the order's own.
+  if (!platforms.length || !store.statsId || !c.id) return 0;
   const answers: Answers = {};
   await Promise.all(
     platforms.map(async (platform) => {
@@ -569,7 +604,7 @@ function conversionOf(store: Store, session: AdsSession, customer: Conversion["c
   const meta = session.metadata ?? {};
   return {
     kind: "purchase",
-    id: session.id as string,
+    id: adEventId(session.id as string),
     at: typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000),
     cents: typeof session.amount_total === "number" ? session.amount_total : 0,
     currency: typeof session.currency === "string" ? session.currency : store.currency,
@@ -713,7 +748,7 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     const paidAt = Number(row.status_transitions?.paid_at) || Number(row.created) || Math.floor(now / 1000);
     const c: Conversion = {
       kind: "renewal",
-      id: row.id as string,
+      id: adEventId(row.id as string),
       at: paidAt,
       cents: row.amount_paid as number,
       currency: typeof row.currency === "string" ? row.currency : store.currency,

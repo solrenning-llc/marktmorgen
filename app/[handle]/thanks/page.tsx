@@ -79,6 +79,7 @@ import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
 import { listedReturn, listedSite, purchaseReturn } from "@/lib/embed-sites";
 import { eventIdFor } from "@/lib/webhooks";
+import { adEventId } from "@/lib/ad-events";
 import { Suspense } from "react";
 import { NextOfferCard } from "@/components/next-offer-card";
 import { NewTab } from "@/components/new-tab";
@@ -199,7 +200,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-5 text-sm">{t.packageSameLink(order.email ?? t.theAddressYouPaidWith)}</p>
             <StoreTracking
               store={store}
-              event={{ type: "purchase", id: sessionId, value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
+              event={{ type: "purchase", id: adEventId(sessionId), order: sessionId, value: toMajor(order.amount, order.currency), currency: order.currency, productId: order.product.id, title: order.product.title }}
             />
           </div>
         </main>
@@ -252,7 +253,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  order: sessionId,
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -319,7 +321,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  order: sessionId,
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -395,7 +398,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 store={store}
                 event={{
                   type: "purchase",
-                  id: sessionId,
+                  id: adEventId(sessionId),
+                  order: sessionId,
                   value: toMajor(order.amount, order.currency),
                   currency: order.currency,
                   productId: order.product.id,
@@ -1314,7 +1318,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 order.state === "paid" && sessionId
                   ? {
                       type: "purchase",
-                      id: sessionId,
+                      id: adEventId(sessionId),
+                      order: sessionId,
                       value: toMajor(order.amount, order.currency),
                       currency: order.currency,
                       productId: order.product.id,
@@ -1429,7 +1434,7 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
               <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
               <StoreTracking
                 store={store}
-                event={{ type: "purchase", id: order, value: toMajor(ours.cents, ours.currency), currency: ours.currency, productId: product.id, title: product.title }}
+                event={{ type: "purchase", id: adEventId(order), value: toMajor(ours.cents, ours.currency), currency: ours.currency, productId: product.id, title: product.title }}
               />
             </>
           ) : waiting ? (

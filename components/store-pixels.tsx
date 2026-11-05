@@ -37,8 +37,14 @@ type PixelWindow = Window & {
 };
 
 export type PixelEvent =
-  /** `value` is in the currency's own units (27.5 dollars, 2700 yen); `currency` is its ISO code. */
-  | { type: "purchase"; id: string; value: number; currency?: string; productId: string; title: string }
+  /**
+   * `value` is in the currency's own units (27.5 dollars, 2700 yen); `currency` is its ISO code.
+   * `id` is the id the platforms are given, made from the order's on the server
+   * (lib/ad-events.ts adEventId), never the order's own; "" sends nothing.
+   * `order` is the Stripe checkout's own id, sent only to this site's own
+   * server, which then sends the same purchase from there; never to a pixel.
+   */
+  | { type: "purchase"; id: string; order?: string; value: number; currency?: string; productId: string; title: string }
   /** `id`, when the route that took the sign-up sent the same lead from the server (lib/ad-events.ts), so it is counted once. */
   | { type: "lead"; productId: string; id?: string }
   | null;
@@ -306,17 +312,19 @@ export function StorePixels({
     start("x", pixels.x, (win, id) => startX(win, id, restricted));
     start("reddit", pixels.reddit, (win, id) => startReddit(win, id, restricted, place));
 
-    if (event?.type === "purchase" && once(`nl_px_sent:${event.id}`)) {
+    if (event?.type === "purchase" && event.id && once(`nl_px_sent:${event.id}`)) {
       track(w, pixels, event, restricted);
       // The same purchase from our server now, where the creator set it up
       // (lib/ad-events.ts), rather than at the server's next pass over the
       // store's checkouts: asked only here, where the pixels were allowed to run.
-      fetch("/api/store/ads-event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ h: handle, s: event.id }),
-        keepalive: true,
-      }).catch(() => {});
+      if (event.order) {
+        fetch("/api/store/ads-event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ h: handle, s: event.order }),
+          keepalive: true,
+        }).catch(() => {});
+      }
     }
     if (event?.type === "lead" && !started.has(`lead:${event.productId}`)) {
       started.add(`lead:${event.productId}`);

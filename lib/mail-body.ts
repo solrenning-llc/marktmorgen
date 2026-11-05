@@ -89,7 +89,7 @@ export function parseMailBlocks(body: string): MailBlock[] {
         continue;
       }
       const button = line.match(BUTTON);
-      if (button) {
+      if (button && button[1].trim()) {
         out.push({ kind: "button", label: button[1].trim(), href: button[2] });
         continue;
       }

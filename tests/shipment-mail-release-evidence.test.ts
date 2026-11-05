@@ -35,16 +35,24 @@ async function main(): Promise<void> {
   is("person erasure removes the terminal status", await shipmentMailStatus(input.statsId, input.session, runtime), { state: "not_recorded", delayed: false });
 
   part("An explicit no-POST outcome retains custody and its existing retry budget");
-  for (const stage of ["before", "confirmed", "lost"] as const) {
+  for (const stage of ["before", "confirmed", "lost", "slow"] as const) {
     store.clear();
     const noPostWorld = shipmentOutboxFixture();
-    const noPostRuntime = { ...runtime, pipeline: noPostWorld.pipeline };
+    let clock = now;
+    const noPostRuntime = { ...runtime, now: () => clock, pipeline: async (commands: (string | number)[][]) => {
+      const answer = await noPostWorld.pipeline(commands);
+      if (stage === "slow" && commands.some(command => command[0] === "EVAL" && command[13] === "dispatch")) clock = now + 21000;
+      return answer;
+    } };
     const noPostInput = { ...input, statsId: `synthetic_no_post_${stage}`, session: `cs_test_shipmentnopost${stage}01` };
     await enqueueShipmentMail(noPostInput, noPostRuntime);
     const created = noPostWorld.commands.find(command => command[0] === "EVAL")!;
     if (stage === "lost") noPostWorld.loseNext("dispatch");
     const result = await runShipmentMail(now + 20000, async (_message, beforePost) => {
-      if (stage !== "before") await beforePost();
+      if (stage !== "before") {
+        const permission = await beforePost();
+        if (stage === "slow") is("a dispatch acknowledgment after the worker deadline grants no POST", permission, false);
+      }
       return "not_posted";
     }, noPostRuntime);
     is(`${stage}: explicit no POST returns to known waiting`, result, { accepted: 0, waiting: 1, unknown: 0 });

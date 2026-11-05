@@ -127,6 +127,21 @@ def evidence(redis):
         replay = apply("claim", row, keys, dispatched[1], now + 600000)
         check("an expired dispatch reservation never authorizes another POST", replay[0] == "preparing", False)
 
+        row, keys = setup("known_no_post", store="synthetic_no_post")
+        prepared = apply("claim", row, keys, redis.command("GET", keys[0]), now)
+        dispatched = apply("dispatch", row, keys, prepared[1], now)
+        held_before = redis.command("HMGET", keys[5], "items", "bytes")
+        check("a foreign owner cannot settle a no-POST outcome", apply("not-posted", row, keys, dispatched[1], now, owner="d" * 48)[0], "held")
+        check("a malformed old snapshot cannot repair even the same owner", apply("not-posted", row, keys, "not JSON", now)[0], "changed")
+        restored = apply("not-posted", row, keys, prepared[1], now)
+        check("the same preparation witness repairs a lost dispatch ACK", restored[0], "queued")
+        kept = json.loads(redis.command("GET", keys[0]))
+        check("no-POST resets only its state and owner", [kept["state"], kept["owner"], kept["leaseUntil"]], ["queued", "", 0])
+        check("no-POST uses the already reviewed retry delay", kept["next"], now + policy["retryMilliseconds"])
+        check("no-POST retains its original charged check and sealed content", [kept["checks"], kept["sealed"]], [1, row["sealed"]])
+        check("no-POST never releases its pending hold", redis.command("HMGET", keys[5], "items", "bytes"), held_before)
+        check("no-POST cannot turn its source into terminal retention", redis.command("TTL", keys[1]), -1)
+
         # Fenced and unsupported rows currently stay at the front of the same
         # bounded 25-member read. Their evidence must survive but must not keep
         # excluding later eligible work from every worker visit.

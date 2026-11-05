@@ -132,10 +132,20 @@ if not ok then return {-1, 0} end
 local gone = {{target, raw}}
 local known = {[target] = true}
 if parent == nil then
-  local ids = redis.call("ZRANGE", KEYS[2], 0, most)
-  if #ids > most then return {-1, 0} end
-  for _, id in ipairs(ids) do
-    local row = redis.call("HGET", KEYS[1], id)
+  local listed = redis.call("ZRANGE", KEYS[2], 0, most)
+  if #listed > most then return {-1, 0} end
+  local listedRows = {}
+  for first = 1, #listed, 1000 do
+    local ids = {}
+    local last = math.min(first + 999, #listed)
+    for index = first, last do table.insert(ids, listed[index]) end
+    local rows = redis.call("HMGET", KEYS[1], unpack(ids))
+    if #rows ~= #ids then return {-1, 0} end
+    for _, row in ipairs(rows) do table.insert(listedRows, row) end
+  end
+  if #listedRows ~= #listed then return {-1, 0} end
+  for index, id in ipairs(listed) do
+    local row = listedRows[index]
     if not row then return {-1, 0} end
     local linked, rowOk = parsed(row, id)
     if not rowOk then return {-1, 0} end

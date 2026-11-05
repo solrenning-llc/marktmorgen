@@ -82,8 +82,9 @@ const GREEK_LOOKALIKES = /[ΑΒΕΖΗΙΚΜΝΟΡΤΥΧαβγεηικνορτυ�
 
 /** A word that mixes Latin letters with Cyrillic ones, or with Greek look-alikes ("Lаst" with a Cyrillic "а"): a disguise, never a real word. */
 function mixedScriptWord(text: string): string | null {
-  // Read as typed and as folded: some look-alikes (the lunate sigma "ϲ") fold into other letters.
-  for (const [word] of `${text} ${text.normalize("NFKC")}`.matchAll(/\p{L}+/gu)) {
+  // Read as typed, as folded (some look-alikes, the lunate sigma "ϲ", fold into other letters) and as the check reads
+  // the line, without its marks: "L\u200Dаst" is split by the joiner as typed but read as one word (Codex G on #2581).
+  for (const [word] of `${text} ${text.normalize("NFKC")} ${adPlain(text)}`.matchAll(/\p{L}+/gu)) {
     if (!/\p{Script=Latin}/u.test(word)) continue;
     if (/\p{Script=Cyrillic}/u.test(word) || GREEK_LOOKALIKES.test(word)) return word;
   }

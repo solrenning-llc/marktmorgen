@@ -55,6 +55,18 @@ async function main() {
   const zero = verifiedFrom({ ...data, totals: { d7: { ...window, visitors: 0, views: 0, checkouts: 0, sales: 0, cents: 0 }, d30: { ...window, visitors: 0, views: 0, checkouts: 0, sales: 0, cents: 0 }, d90: { ...window, visitors: 0, views: 0, checkouts: 0, sales: 0, cents: 0 }, all: window }, channels: { d7: [], d30: [], d90: [] }, products: [], salesCountries: { d7: [], d30: [], d90: [] } }, new Map(), now);
   is("confirmed zero is not confused with an unknown record", await roundtrip(zero), zero);
 
+  part("Partial paid readings cannot become confirmed shared totals");
+  const partial = verifiedFrom({ ...data, partial: true }, new Map(), now);
+  is("partial producer does not certify sales", partial.salesRead, false);
+  is("partial producer keeps sales unknown", partial.windows.d30.sales, null);
+  is("partial producer keeps revenue unknown", partial.windows.d30.cents, null);
+  is("partial producer does not share product totals", partial.products, []);
+  is("partial producer does not share country totals", partial.countries, []);
+  is("the actual stored reader preserves unavailable paid coverage", (await roundtrip(partial))?.salesRead, false);
+  is("confirmed traffic remains available in a partial paid reading", partial.windows.d30.visitors, window.visitors);
+  is("new producer records identify the coverage-aware contract", (known as unknown as Record<string, unknown>).coverageVersion, 1);
+  is("a legacy snapshot without coverage provenance remains unavailable", await roundtrip(changed("coverageVersion", undefined)), null);
+
   part("A partial JSON object cannot certify any shared numbers");
   for (const field of ["day", "at", "currency", "salesRead", "windows", "channels", "products", "countries", "windows.d7", "windows.d90", "windows.d30.sales", "windows.d30.visitors"]) {
     is("missing " + field + " is unavailable", await roundtrip(changed(field, undefined)), null);

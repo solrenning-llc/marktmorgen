@@ -41,3 +41,5 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex P | 427 [VR1]: malformed certificate status evidence never becomes valid or permanent | codex/p-certificate-record-evidence | `lib/certificate.ts`, `tests/certificate-record-evidence.test.ts` | 04/11/2026 |
 | Codex P | 274 [AX1], 103 [E2-LESSON-MEDIA]: malformed caption blocks never become a silently truncated successful upload | codex/p-caption-whole-file | `lib/captions.ts`, `tests/captions.test.ts` | 04/11/2026 |
 | Codex K2 | CX-111, 310 [AX2]: one server-rendered focus boundary for main content across all routes; public matrix shared only with own #2354 | codex/k-content-focus | `tsconfig.json`, `lib/content-jsx/main-props.ts`, `lib/content-jsx/jsx-runtime.ts`, `lib/content-jsx/jsx-dev-runtime.ts`, `tests/content-focus-routes.test.ts`, `tests/e2e/skip-content-focus.mjs`, `tests/e2e/accessibility-public-matrix.mjs`, `tests/e2e/accessibility-studio-matrix.mjs` | 04/11/2026 |
+
+| Codex Z | 465 [MR2]: independent cost proof for the reserved CRM export reader; no product changes | codex/z-crm-export-cost-proof | `tests/crm-export-cost-proof.test.ts` | 05/11/2026 |

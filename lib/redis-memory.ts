@@ -134,17 +134,6 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
-        // lib/buyer-profile.ts ADD_RUN_NOTE: a run's note, only while the run holds its take at its exact score.
-        if (key.startsWith("-- marktmorgen:person-run-note:v1\n") && args[0] === "3" && args.length === 10) {
-          const [, notes, who, lease, id, json, seconds, member, score, person] = args;
-          const held = this.run(["ZSCORE", lease, member]);
-          if (held === null || Number(held) !== Number(score)) return 3;
-          this.run(["HSET", notes, id, json]);
-          this.run(["EXPIRE", notes, seconds]);
-          this.run(["SADD", who, person]);
-          this.run(["EXPIRE", who, seconds]);
-          return 1;
-        }
         // DR1: one provider receipt and its campaign counter, atomically.
         if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
           const [, daily, receipt, aggregate, count, expiry, limit] = args;

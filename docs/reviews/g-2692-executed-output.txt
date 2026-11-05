@@ -1,0 +1,885 @@
+=== /tmp/g2692-null-metadata.log ===
+=== g-2692-null-metadata.proof.ts ===
+
+Valid Stripe metadata null is not an unknown refund row
+  ok    owned refund control
+  FAIL  owned refund remains readable beside nullable unrelated metadata
+        expected "found"
+        got      "unknown"
+  FAIL  charge outcome remains readable beside nullable unrelated metadata
+        expected "found"
+        got      "unknown"
+  FAIL  explicitly absent metadata is not this store's refund
+        expected "none"
+        got      "unknown"
+  ok    empty object metadata control
+
+Real pending-plan recovery can finish its known refund
+  FAIL  known owned refund ends plan and removes its legacy note
+        expected ["canceled",null]
+        got      ["active","{\"s\":\"sub_flow10001\",\"at\":1796168999,\"t\":1796168999,\"m\":1}"]
+  ok    recovery creates no new refund
+
+7 checks, 4 failing.
+
+
+=== /tmp/g2692-null-metadata-before.log ===
+=== g-2692-null-metadata.proof.ts ===
+
+Valid Stripe metadata null is not an unknown refund row
+  ok    owned refund control
+  ok    owned refund remains readable beside nullable unrelated metadata
+  ok    charge outcome remains readable beside nullable unrelated metadata
+  ok    explicitly absent metadata is not this store's refund
+  ok    empty object metadata control
+
+Real pending-plan recovery can finish its known refund
+  ok    known owned refund ends plan and removes its legacy note
+  ok    recovery creates no new refund
+
+7 checks, all passing.
+plan-refund: store 6e968e7bb20e49cea5b25b819c1e1728's email was not sent (no address or no sender)
+
+
+=== /tmp/g2692-focal.log ===
+=== store-allowance-ack.test.ts ===
+
+Actual paid resource allowance requires confirmed finite consumption
+  ok    uncertain reply refuses: lost
+  ok    exactly one two-command admission: lost
+  ok    committed use retained: lost
+  ok    next confirmation counts both uses: lost
+  ok    uncertain reply refuses: short
+  ok    exactly one two-command admission: short
+  ok    committed use retained: short
+  ok    next confirmation counts both uses: short
+  ok    uncertain reply refuses: string count
+  ok    exactly one two-command admission: string count
+  ok    committed use retained: string count
+  ok    next confirmation counts both uses: string count
+  ok    uncertain reply refuses: boolean count
+  ok    exactly one two-command admission: boolean count
+  ok    committed use retained: boolean count
+  ok    next confirmation counts both uses: boolean count
+  ok    uncertain reply refuses: unknown SET
+  ok    exactly one two-command admission: unknown SET
+  ok    committed use retained: unknown SET
+  ok    next confirmation counts both uses: unknown SET
+  ok    uncertain reply refuses: infinite
+  ok    exactly one two-command admission: infinite
+  ok    committed use retained: infinite
+  ok    next confirmation counts both uses: infinite
+  ok    uncertain reply refuses: fractional
+  ok    exactly one two-command admission: fractional
+  ok    committed use retained: fractional
+  ok    next confirmation counts both uses: fractional
+  ok    uncertain reply refuses: zero
+  ok    exactly one two-command admission: zero
+  ok    committed use retained: zero
+  ok    next confirmation counts both uses: zero
+  ok    uncertain reply refuses: extra member
+  ok    exactly one two-command admission: extra member
+  ok    committed use retained: extra member
+  ok    next confirmation counts both uses: extra member
+  ok    uncertain reply refuses: inherited
+  ok    exactly one two-command admission: inherited
+  ok    committed use retained: inherited
+  ok    next confirmation counts both uses: inherited
+  ok    uncertain reply refuses: accessor
+  ok    exactly one two-command admission: accessor
+  ok    committed use retained: accessor
+  ok    next confirmation counts both uses: accessor
+  ok    uncertain reply refuses: extra property
+  ok    exactly one two-command admission: extra property
+  ok    committed use retained: extra property
+  ok    next confirmation counts both uses: extra property
+  ok    uncertain reply refuses: symbol
+  ok    exactly one two-command admission: symbol
+  ok    committed use retained: symbol
+  ok    next confirmation counts both uses: symbol
+  ok    no getter invoked
+
+A displayed or spending count is exact, or unavailable
+  ok    strict view unavailable: empty
+  ok    single count refuses unknown: empty
+  ok    no retry or replacement reading: empty
+  ok    strict view unavailable: whitespace
+  ok    single count refuses unknown: whitespace
+  ok    no retry or replacement reading: whitespace
+  ok    strict view unavailable: numeric reply to GET
+  ok    single count refuses unknown: numeric reply to GET
+  ok    no retry or replacement reading: numeric reply to GET
+  ok    strict view unavailable: leading zero
+  ok    single count refuses unknown: leading zero
+  ok    no retry or replacement reading: leading zero
+  ok    strict view unavailable: signed
+  ok    single count refuses unknown: signed
+  ok    no retry or replacement reading: signed
+  ok    strict view unavailable: exponent
+  ok    single count refuses unknown: exponent
+  ok    no retry or replacement reading: exponent
+  ok    strict view unavailable: fraction
+  ok    single count refuses unknown: fraction
+  ok    no retry or replacement reading: fraction
+  ok    strict view unavailable: negative
+  ok    single count refuses unknown: negative
+  ok    no retry or replacement reading: negative
+  ok    strict view unavailable: unsafe
+  ok    single count refuses unknown: unsafe
+  ok    no retry or replacement reading: unsafe
+  ok    strict view unavailable: missing
+  ok    single count refuses unknown: missing
+  ok    no retry or replacement reading: missing
+  ok    strict view unavailable: extra
+  ok    single count refuses unknown: extra
+  ok    no retry or replacement reading: extra
+  ok    strict view unavailable: extra field
+  ok    single count refuses unknown: extra field
+  ok    no retry or replacement reading: extra field
+  ok    strict view unavailable: symbol
+  ok    single count refuses unknown: symbol
+  ok    no retry or replacement reading: symbol
+  ok    strict view unavailable: inherited
+  ok    single count refuses unknown: inherited
+  ok    no retry or replacement reading: inherited
+  ok    strict view unavailable: getter
+  ok    single count refuses unknown: getter
+  ok    no retry or replacement reading: getter
+  ok    strict view unavailable: proxy
+  ok    single count refuses unknown: proxy
+  ok    no retry or replacement reading: proxy
+  ok    confirmed count: null
+  ok    confirmed strict count: null
+  ok    confirmed count: 0
+  ok    confirmed strict count: 0
+  ok    confirmed count: 123
+  ok    confirmed strict count: 123
+  ok    transport failure is unavailable
+
+Only an exact signed decrement authorizes the existing repair
+  ok    no repair from unknown: coerced negative
+  ok    no repair from unknown: extra decrement
+  ok    no repair from unknown: too negative
+  ok    no repair from unknown: getter decrement
+  ok    confirmed negative repair retained
+  ok    no read or decrement getter executed
+
+114 checks, all passing.
+
+=== plan-refund-flow.test.ts ===
+
+Unreadable refund evidence never means zero or confirmed settlement
+  ok    parts amount unknown: null
+  ok    earlier amount unknown: null
+  ok    parts amount unknown: 
+  ok    earlier amount unknown: 
+  ok    parts amount unknown: 123
+  ok    earlier amount unknown: 123
+  ok    parts amount unknown: true
+  ok    earlier amount unknown: true
+  ok    parts amount unknown: -1
+  ok    earlier amount unknown: -1
+  ok    parts amount unknown: 0
+  ok    earlier amount unknown: 0
+  ok    parts amount unknown: 1.5
+  ok    earlier amount unknown: 1.5
+  ok    parts amount unknown: 9007199254740992
+  ok    earlier amount unknown: 9007199254740992
+  ok    parts incomplete evidence is unknown
+  ok    earlier incomplete evidence is unknown
+  ok    parts incomplete evidence is unknown
+  ok    earlier incomplete evidence is unknown
+  ok    parts incomplete evidence is unknown
+  ok    earlier incomplete evidence is unknown
+  ok    parts incomplete evidence is unknown
+  ok    earlier incomplete evidence is unknown
+  ok    parts incomplete evidence is unknown
+  ok    earlier incomplete evidence is unknown
+  ok    a valid row cannot hide an unreadable refund
+  ok    confirmed part still settles
+  ok    confirmed earlier refund still found
+  ok    confirmed empty parts
+  ok    confirmed empty history
+  ok    bounded reads without any provider write
+
+An unreadable earlier refund cannot end the real flow
+  ok    no confirmed refund or ending from an unreadable amount
+  ok    undecidable note retained for a later read
+
+Refunded and ended, in the safe order
+  ok    the first payment comes back and the plan is ended
+  ok    set to stop, then refunded, then ended
+  ok    ended at Stripe
+  ok    its open invoice voided, its draft deleted
+  ok    the store has no plan any more (the closing rules start)
+  ok    no note left
+  ok    no lock left
+
+Never twice
+  ok    a second click: the earlier refund is reported, nothing new
+  ok    two at once: one made, the other told to wait
+  ok    one refund at Stripe
+
+Not owed: the plan goes on as it was
+  ok    outside the 30 days: refused, nothing changed
+  ok    the stop set for it is taken back
+  ok    still paid, invoices untouched, no note
+  ok    a stop the creator had set is left as it was
+
+Failures on the way
+  ok    the stop cannot be set: nothing refunded
+  ok    and no note left
+  ok    Stripe failing at the refund: failed, and the stop KEPT while a refund may still turn up (no renewal meanwhile)
+  ok    the note stays for the daily job
+  ok    the daily job before SETTLE_SECONDS: left, stop still set
+  ok    after it, none found: the stop taken back, the note dropped, the plan untouched
+  ok    and the creator is told by email that nothing was refunded and the plan goes on
+  ok    made at Stripe but the answer lost: found on its own charge (noted before the write), the plan ended
+  ok    made, the answer lost and nothing readable after: the stop stays, the note too
+  ok    the daily job finds it on the charge and ends the plan; nothing renewed in between
+  ok    a pending refund: said so, the plan not ended on it, the stop and the note kept
+  ok    still pending at the daily job: left as it is
+  ok    succeeded: the daily job ends the plan
+  ok    the answer lost after Stripe made it: found by its metadata, the plan ended
+  ok    refunded but not ended yet: said so, the stop and the note stay
+  ok    the daily job ends it, once, and drops the note
+
+Every plan payment inside the guarantee's days (owner, 31/10/2026 15h41)
+  ok    pay 1 Feb, renew 1 Mar, ask 2 Mar: both payments back, the plan ended
+  ok    one email with the whole amount
+  ok    a payment inside the window whose time cannot be read: nothing refunded, the plan goes on
+  ok    only the first of two refunds went through: failed, not ended, the stop kept
+  ok    and it is answered as part of a refund
+  ok    the daily job never ends the plan on part of a refund
+  ok    asked again with the old amount after part of it: not ended, nothing more refunded
+  ok    asked again while a charge's refunds cannot be read: not ended, the note keeps both charges
+  ok    asked again: the rest given back, once, and the plan ended
+
+The add-on
+  ok    the add-on could not be set to stop: the plan's ending is not done, the note stays for the daily job
+  ok    the daily job sets the add-on to stop at the end of its paid month and drops the note
+
+The daily job
+  ok    a store a request is finishing now is left alone
+  ok    refunds unreadable: kept for tomorrow
+  ok    undecidable for 7 days: dropped, the stop taken back
+  ok    and the creator is told the refund could not be confirmed, the plan renews as usual, how to ask again
+  ok    the note of a store that is gone is dropped
+  ok    an exhausted deadline touches nothing
+
+81 checks, all passing.
+plan-refund: store 415d4c3312004afda9e81f057aa3b538's email was not sent (no address or no sender)
+plan-refund: store 415d4c3312004afda9e81f057aa3b538's email was not sent (no address or no sender)
+plan-refund: store 5f5ec294e5654acd912c5e8836c562bd's email was not sent (no address or no sender)
+setting a plan to stop before its refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async setCancelAtPeriodEnd (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11247:24)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11978:9)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12317:51) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async refundPlanPayment (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11576:24)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11984:18)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12322:16) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12161:33)
+    at /tmp/g-2681-proof-Ciy0Sc/1.cjs:11142:29
+    at timed (/tmp/g-2681-proof-Ciy0Sc/1.cjs:6258:19)
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11141:43)
+    at onPlatformAt (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11167:10)
+    at refundPlanPayment (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11576:30)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11984:18)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12338:19)
+plan-refund: store 9e7a575e3744447cb022cf6f75a0e099's email was not sent (no address or no sender)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12161:33)
+    at globalThis.fetch (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12350:12)
+    at /tmp/g-2681-proof-Ciy0Sc/1.cjs:11142:29
+    at timed (/tmp/g-2681-proof-Ciy0Sc/1.cjs:6258:19)
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11141:43)
+    at onPlatformAt (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11167:10)
+    at refundPlanPayment (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11576:30)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11984:18)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12352:17)
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 unknown): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async partsOutcome (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11829:16)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11993:28)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12352:17) {
+  status: 500,
+  code: 'unknown'
+}
+plan-refund: store 4bceea57f2884c01885d02142f20b952's email was not sent (no address or no sender)
+plan-refund: store 5f6965fbc36c4512b71d156bf38808b0's email was not sent (no address or no sender)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12161:33)
+    at /tmp/g-2681-proof-Ciy0Sc/1.cjs:11142:29
+    at timed (/tmp/g-2681-proof-Ciy0Sc/1.cjs:6258:19)
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11141:43)
+    at onPlatformAt (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11167:10)
+    at refundPlanPayment (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11576:30)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11984:18)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12370:22)
+plan-refund: store a11aed341f9f491d8ca69da78190df2d's email was not sent (no address or no sender)
+plan-refund: store d7f0215555054ef88cb4ec4a44909cc0's email was not sent (no address or no sender)
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async refundPlanPayment (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11576:24)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11984:18)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12396:15) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async refundPlanPayment (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11560:22)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11984:18)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12405:18) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async partsOutcome (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11829:16)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11993:28)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12405:18) {
+  status: 500,
+  code: 'api_error'
+}
+reading a store's add-on failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async setCancelAtPeriodEnd (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11247:24)
+    at async syncAssistant (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11646:7)
+    at async endPlanNow (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11907:22)
+    at async finish (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11972:21)
+    at async refundAndEndPlan (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11989:21)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12417:21) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store 8547716b06004cbb9832b277de507076's email was not sent (no address or no sender)
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async partsOutcome (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11829:16)
+    at async finishPlanRefunds (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12034:30)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12433:3) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11158:11)
+    at async partsOutcome (/tmp/g-2681-proof-Ciy0Sc/1.cjs:11829:16)
+    at async finishPlanRefunds (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12034:30)
+    at async main (/tmp/g-2681-proof-Ciy0Sc/1.cjs:12437:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: the refund asked for store b059d57ef8da41c99b3b58ca02d7c228 could not be decided in 7 days; its stop is taken back and its note dropped
+
+
+=== /tmp/g2692-red.log ===
+=== store-allowance-ack.test.ts ===
+
+Actual paid resource allowance requires confirmed finite consumption
+  ok    uncertain reply refuses: lost
+  ok    exactly one two-command admission: lost
+  ok    committed use retained: lost
+  ok    next confirmation counts both uses: lost
+  ok    uncertain reply refuses: short
+  ok    exactly one two-command admission: short
+  ok    committed use retained: short
+  ok    next confirmation counts both uses: short
+  ok    uncertain reply refuses: string count
+  ok    exactly one two-command admission: string count
+  ok    committed use retained: string count
+  ok    next confirmation counts both uses: string count
+  ok    uncertain reply refuses: boolean count
+  ok    exactly one two-command admission: boolean count
+  ok    committed use retained: boolean count
+  ok    next confirmation counts both uses: boolean count
+  ok    uncertain reply refuses: unknown SET
+  ok    exactly one two-command admission: unknown SET
+  ok    committed use retained: unknown SET
+  ok    next confirmation counts both uses: unknown SET
+  ok    uncertain reply refuses: infinite
+  ok    exactly one two-command admission: infinite
+  ok    committed use retained: infinite
+  ok    next confirmation counts both uses: infinite
+  ok    uncertain reply refuses: fractional
+  ok    exactly one two-command admission: fractional
+  ok    committed use retained: fractional
+  ok    next confirmation counts both uses: fractional
+  ok    uncertain reply refuses: zero
+  ok    exactly one two-command admission: zero
+  ok    committed use retained: zero
+  ok    next confirmation counts both uses: zero
+  ok    uncertain reply refuses: extra member
+  ok    exactly one two-command admission: extra member
+  ok    committed use retained: extra member
+  ok    next confirmation counts both uses: extra member
+  ok    uncertain reply refuses: inherited
+  ok    exactly one two-command admission: inherited
+  ok    committed use retained: inherited
+  ok    next confirmation counts both uses: inherited
+  ok    uncertain reply refuses: accessor
+  ok    exactly one two-command admission: accessor
+  ok    committed use retained: accessor
+  ok    next confirmation counts both uses: accessor
+  ok    uncertain reply refuses: extra property
+  ok    exactly one two-command admission: extra property
+  ok    committed use retained: extra property
+  ok    next confirmation counts both uses: extra property
+  ok    uncertain reply refuses: symbol
+  ok    exactly one two-command admission: symbol
+  ok    committed use retained: symbol
+  ok    next confirmation counts both uses: symbol
+  ok    no getter invoked
+
+A displayed or spending count is exact, or unavailable
+  FAIL  strict view unavailable: empty
+        expected null
+        got      [{"kind":"studio","used":0,"figure":2000}]
+  FAIL  single count refuses unknown: empty
+        expected true
+        got      false
+  ok    no retry or replacement reading: empty
+  FAIL  strict view unavailable: whitespace
+        expected null
+        got      [{"kind":"studio","used":0,"figure":2000}]
+  FAIL  single count refuses unknown: whitespace
+        expected true
+        got      false
+  ok    no retry or replacement reading: whitespace
+  FAIL  strict view unavailable: numeric reply to GET
+        expected null
+        got      [{"kind":"studio","used":0,"figure":2000}]
+  FAIL  single count refuses unknown: numeric reply to GET
+        expected true
+        got      false
+  ok    no retry or replacement reading: numeric reply to GET
+  FAIL  strict view unavailable: leading zero
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count refuses unknown: leading zero
+        expected true
+        got      false
+  ok    no retry or replacement reading: leading zero
+  FAIL  strict view unavailable: signed
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count refuses unknown: signed
+        expected true
+        got      false
+  ok    no retry or replacement reading: signed
+  FAIL  strict view unavailable: exponent
+        expected null
+        got      [{"kind":"studio","used":100,"figure":2000}]
+  FAIL  single count refuses unknown: exponent
+        expected true
+        got      false
+  ok    no retry or replacement reading: exponent
+  ok    strict view unavailable: fraction
+  FAIL  single count refuses unknown: fraction
+        expected true
+        got      false
+  ok    no retry or replacement reading: fraction
+  ok    strict view unavailable: negative
+  FAIL  single count refuses unknown: negative
+        expected true
+        got      false
+  ok    no retry or replacement reading: negative
+  ok    strict view unavailable: unsafe
+  FAIL  single count refuses unknown: unsafe
+        expected true
+        got      false
+  ok    no retry or replacement reading: unsafe
+  ok    strict view unavailable: missing
+  FAIL  single count refuses unknown: missing
+        expected true
+        got      false
+  ok    no retry or replacement reading: missing
+  ok    strict view unavailable: extra
+  FAIL  single count refuses unknown: extra
+        expected true
+        got      false
+  ok    no retry or replacement reading: extra
+  FAIL  strict view unavailable: extra field
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count refuses unknown: extra field
+        expected true
+        got      false
+  ok    no retry or replacement reading: extra field
+  FAIL  strict view unavailable: symbol
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count refuses unknown: symbol
+        expected true
+        got      false
+  ok    no retry or replacement reading: symbol
+  FAIL  strict view unavailable: inherited
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count refuses unknown: inherited
+        expected true
+        got      false
+  ok    no retry or replacement reading: inherited
+  FAIL  strict view unavailable: getter
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count refuses unknown: getter
+        expected true
+        got      false
+  ok    no retry or replacement reading: getter
+  FAIL  strict view unavailable: proxy
+        expected null
+        got      [{"kind":"studio","used":1,"figure":2000}]
+  FAIL  single count refuses unknown: proxy
+        expected true
+        got      false
+  ok    no retry or replacement reading: proxy
+  ok    confirmed count: null
+  ok    confirmed strict count: null
+  ok    confirmed count: 0
+  ok    confirmed strict count: 0
+  ok    confirmed count: 123
+  ok    confirmed strict count: 123
+  FAIL  transport failure is unavailable
+        expected true
+        got      false
+
+Only an exact signed decrement authorizes the existing repair
+  FAIL  no repair from unknown: coerced negative
+        expected 1
+        got      2
+  FAIL  no repair from unknown: extra decrement
+        expected 1
+        got      2
+  FAIL  no repair from unknown: too negative
+        expected 1
+        got      2
+  FAIL  no repair from unknown: getter decrement
+        expected 1
+        got      2
+  ok    confirmed negative repair retained
+  FAIL  no read or decrement getter executed
+        expected 0
+        got      8
+
+114 checks, 33 failing.
+
+=== plan-refund-flow.test.ts ===
+
+Unreadable refund evidence never means zero or confirmed settlement
+  FAIL  parts amount unknown: null
+        expected "unknown"
+        got      "none"
+  FAIL  earlier amount unknown: null
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 
+        expected "unknown"
+        got      "none"
+  FAIL  earlier amount unknown: 
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 123
+        expected "unknown"
+        got      "found"
+  FAIL  earlier amount unknown: 123
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: true
+        expected "unknown"
+        got      "partial"
+  FAIL  earlier amount unknown: true
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: -1
+        expected "unknown"
+        got      "none"
+  FAIL  earlier amount unknown: -1
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 0
+        expected "unknown"
+        got      "none"
+  FAIL  earlier amount unknown: 0
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 1.5
+        expected "unknown"
+        got      "partial"
+  FAIL  earlier amount unknown: 1.5
+        expected "unknown"
+        got      "found"
+  FAIL  parts amount unknown: 9007199254740992
+        expected "unknown"
+        got      "found"
+  FAIL  earlier amount unknown: 9007199254740992
+        expected "unknown"
+        got      "found"
+  FAIL  parts incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  parts incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  parts incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "none"
+  ok    parts incomplete evidence is unknown
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "found"
+  FAIL  parts incomplete evidence is unknown
+        expected "unknown"
+        got      "found"
+  FAIL  earlier incomplete evidence is unknown
+        expected "unknown"
+        got      "found"
+  FAIL  a valid row cannot hide an unreadable refund
+        expected "unknown"
+        got      "found"
+  ok    confirmed part still settles
+  ok    confirmed earlier refund still found
+  ok    confirmed empty parts
+  ok    confirmed empty history
+  ok    bounded reads without any provider write
+
+An unreadable earlier refund cannot end the real flow
+  FAIL  no confirmed refund or ending from an unreadable amount
+        expected [false,"active",true,0]
+        got      [true,"canceled",false,0]
+  FAIL  undecidable note retained for a later read
+        expected "string"
+        got      "object"
+
+Refunded and ended, in the safe order
+  ok    the first payment comes back and the plan is ended
+  ok    set to stop, then refunded, then ended
+  ok    ended at Stripe
+  ok    its open invoice voided, its draft deleted
+  ok    the store has no plan any more (the closing rules start)
+  ok    no note left
+  ok    no lock left
+
+Never twice
+  ok    a second click: the earlier refund is reported, nothing new
+  ok    two at once: one made, the other told to wait
+  ok    one refund at Stripe
+
+Not owed: the plan goes on as it was
+  ok    outside the 30 days: refused, nothing changed
+  ok    the stop set for it is taken back
+  ok    still paid, invoices untouched, no note
+  ok    a stop the creator had set is left as it was
+
+Failures on the way
+  ok    the stop cannot be set: nothing refunded
+  ok    and no note left
+  ok    Stripe failing at the refund: failed, and the stop KEPT while a refund may still turn up (no renewal meanwhile)
+  ok    the note stays for the daily job
+  ok    the daily job before SETTLE_SECONDS: left, stop still set
+  ok    after it, none found: the stop taken back, the note dropped, the plan untouched
+  ok    and the creator is told by email that nothing was refunded and the plan goes on
+  ok    made at Stripe but the answer lost: found on its own charge (noted before the write), the plan ended
+  ok    made, the answer lost and nothing readable after: the stop stays, the note too
+  ok    the daily job finds it on the charge and ends the plan; nothing renewed in between
+  ok    a pending refund: said so, the plan not ended on it, the stop and the note kept
+  ok    still pending at the daily job: left as it is
+  ok    succeeded: the daily job ends the plan
+  ok    the answer lost after Stripe made it: found by its metadata, the plan ended
+  ok    refunded but not ended yet: said so, the stop and the note stay
+  ok    the daily job ends it, once, and drops the note
+
+Every plan payment inside the guarantee's days (owner, 31/10/2026 15h41)
+  ok    pay 1 Feb, renew 1 Mar, ask 2 Mar: both payments back, the plan ended
+  ok    one email with the whole amount
+  ok    a payment inside the window whose time cannot be read: nothing refunded, the plan goes on
+  ok    only the first of two refunds went through: failed, not ended, the stop kept
+  ok    and it is answered as part of a refund
+  ok    the daily job never ends the plan on part of a refund
+  ok    asked again with the old amount after part of it: not ended, nothing more refunded
+  ok    asked again while a charge's refunds cannot be read: not ended, the note keeps both charges
+  ok    asked again: the rest given back, once, and the plan ended
+
+The add-on
+  ok    the add-on could not be set to stop: the plan's ending is not done, the note stays for the daily job
+  ok    the daily job sets the add-on to stop at the end of its paid month and drops the note
+
+The daily job
+  ok    a store a request is finishing now is left alone
+  ok    refunds unreadable: kept for tomorrow
+  ok    undecidable for 7 days: dropped, the stop taken back
+  ok    and the creator is told the refund could not be confirmed, the plan renews as usual, how to ask again
+  ok    the note of a store that is gone is dropped
+  ok    an exhausted deadline touches nothing
+
+81 checks, 28 failing.
+plan-refund: store 6e217c45d0e644f8b97080420001c342's email was not sent (no address or no sender)
+plan-refund: store e215dc22e7544fa88e0ac43701bccaa0's email was not sent (no address or no sender)
+plan-refund: store e215dc22e7544fa88e0ac43701bccaa0's email was not sent (no address or no sender)
+plan-refund: store 87d98140b0dd42299eb3744b209fa2db's email was not sent (no address or no sender)
+setting a plan to stop before its refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async setCancelAtPeriodEnd (/tmp/g-2681-proof-7PlVK8/1.cjs:11247:24)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11940:9)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12279:51) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async refundPlanPayment (/tmp/g-2681-proof-7PlVK8/1.cjs:11576:24)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11946:18)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12284:16) {
+  status: 500,
+  code: 'api_error'
+}
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (/tmp/g-2681-proof-7PlVK8/1.cjs:12123:33)
+    at /tmp/g-2681-proof-7PlVK8/1.cjs:11142:29
+    at timed (/tmp/g-2681-proof-7PlVK8/1.cjs:6258:19)
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11141:43)
+    at onPlatformAt (/tmp/g-2681-proof-7PlVK8/1.cjs:11167:10)
+    at refundPlanPayment (/tmp/g-2681-proof-7PlVK8/1.cjs:11576:30)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11946:18)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12300:19)
+plan-refund: store 00a6a49d9ef74c4bba4729ccd3bf8cd3's email was not sent (no address or no sender)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (/tmp/g-2681-proof-7PlVK8/1.cjs:12123:33)
+    at globalThis.fetch (/tmp/g-2681-proof-7PlVK8/1.cjs:12312:12)
+    at /tmp/g-2681-proof-7PlVK8/1.cjs:11142:29
+    at timed (/tmp/g-2681-proof-7PlVK8/1.cjs:6258:19)
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11141:43)
+    at onPlatformAt (/tmp/g-2681-proof-7PlVK8/1.cjs:11167:10)
+    at refundPlanPayment (/tmp/g-2681-proof-7PlVK8/1.cjs:11576:30)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11946:18)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12314:17)
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 unknown): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async partsOutcome (/tmp/g-2681-proof-7PlVK8/1.cjs:11799:16)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11955:28)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12314:17) {
+  status: 500,
+  code: 'unknown'
+}
+plan-refund: store 75d1c840f16e411e90913e00cd25d81e's email was not sent (no address or no sender)
+plan-refund: store dc818612f5744452964659286b9b3029's email was not sent (no address or no sender)
+making a plan refund failed TypeError: fetch failed
+    at globalThis.fetch (/tmp/g-2681-proof-7PlVK8/1.cjs:12123:33)
+    at /tmp/g-2681-proof-7PlVK8/1.cjs:11142:29
+    at timed (/tmp/g-2681-proof-7PlVK8/1.cjs:6258:19)
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11141:43)
+    at onPlatformAt (/tmp/g-2681-proof-7PlVK8/1.cjs:11167:10)
+    at refundPlanPayment (/tmp/g-2681-proof-7PlVK8/1.cjs:11576:30)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11946:18)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12332:22)
+plan-refund: store 9806f41f061d423f8e8030fe0b8fd3a2's email was not sent (no address or no sender)
+plan-refund: store cde5b7a7c2534cb18733199fac9770b5's email was not sent (no address or no sender)
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async refundPlanPayment (/tmp/g-2681-proof-7PlVK8/1.cjs:11576:24)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11946:18)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12358:15) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async refundPlanPayment (/tmp/g-2681-proof-7PlVK8/1.cjs:11560:22)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11946:18)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12367:18) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async partsOutcome (/tmp/g-2681-proof-7PlVK8/1.cjs:11799:16)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11955:28)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12367:18) {
+  status: 500,
+  code: 'api_error'
+}
+reading a store's add-on failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async setCancelAtPeriodEnd (/tmp/g-2681-proof-7PlVK8/1.cjs:11247:24)
+    at async syncAssistant (/tmp/g-2681-proof-7PlVK8/1.cjs:11646:7)
+    at async endPlanNow (/tmp/g-2681-proof-7PlVK8/1.cjs:11869:22)
+    at async finish (/tmp/g-2681-proof-7PlVK8/1.cjs:11934:21)
+    at async refundAndEndPlan (/tmp/g-2681-proof-7PlVK8/1.cjs:11951:21)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12379:21) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store ccae48a3565a4ba79dcfb99fb32b057f's email was not sent (no address or no sender)
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async partsOutcome (/tmp/g-2681-proof-7PlVK8/1.cjs:11799:16)
+    at async finishPlanRefunds (/tmp/g-2681-proof-7PlVK8/1.cjs:11996:30)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12395:3) {
+  status: 500,
+  code: 'api_error'
+}
+reading a plan payment's refunds failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-7PlVK8/1.cjs:11158:11)
+    at async partsOutcome (/tmp/g-2681-proof-7PlVK8/1.cjs:11799:16)
+    at async finishPlanRefunds (/tmp/g-2681-proof-7PlVK8/1.cjs:11996:30)
+    at async main (/tmp/g-2681-proof-7PlVK8/1.cjs:12399:3) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: the refund asked for store 8171248031384824aca3efeea126c695 could not be decided in 7 days; its stop is taken back and its note dropped
+
+
+=== /tmp/g2692-d2-confirm.log ===
+=== g-2692-d2-evidence.proof.ts ===
+
+Distinct refunds can cover distinct noted charges
+  ok    two unique refunds are settled
+
+One refund id cannot be evidence for two different charges
+  FAIL  duplicate refund across charge pages is unknown
+        expected "unknown"
+        got      "found"
+  ok    bounded reader calls and no writes
+
+The real daily settlement must retain a partially refunded plan
+  ok    setup: only one of two payments refunded, plan still active
+  ok    honest charge pages preserve the partial plan and note
+  FAIL  replayed refund id does not end the real subscription
+        expected "active"
+        got      "canceled"
+  FAIL  the undecidable note remains
+        expected "string"
+        got      "object"
+  ok    no additional refund was made
+  ok    exactly two charge pages were read
+
+9 checks, 3 failing.
+making a plan refund failed BillingError: Stripe billing failed (500 api_error): down
+    at onPlatform (/tmp/g-2681-proof-mSwfXs/0.cjs:11130:11)
+    at async refundPlanPayment (/tmp/g-2681-proof-mSwfXs/0.cjs:11548:24)
+    at async refundAndEndPlan (/tmp/g-2681-proof-mSwfXs/0.cjs:11956:18)
+    at async main (/tmp/g-2681-proof-mSwfXs/0.cjs:12266:5) {
+  status: 500,
+  code: 'api_error'
+}
+plan-refund: store e38248634b3a4ee2a778a7f9dc0faab9's email was not sent (no address or no sender)
+

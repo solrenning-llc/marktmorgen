@@ -82,27 +82,54 @@ function request(cookies: Record<string, string>) {
   };
 }
 
-type Browser = { seen: { src: string; page: string }[]; posted: { url: string; body: string }[]; replaced: string[]; local: Map<string, string> };
+type Browser = {
+  seen: { src: string; page: string }[];
+  posted: { url: string; body: string }[];
+  replaced: string[];
+  local: Map<string, string>;
+  /** The addresses Next's router was told of (a history write without Next's own state, once it listens). */
+  router: string[];
+  /** Lets Next's router start listening, as its own effect does after this component's on the first round. */
+  listen(): void;
+};
 
 /**
  * A stand-in browser at `href` (the shape of tests/review-2557-page-url.test.ts):
  * the address, history, storage, the document the scripts are added to and
- * fetch. `session` null is a browser whose tab storage throws.
+ * fetch. `session` null is a browser whose tab storage throws. History is
+ * Next 16's: its state carries `__NA`, and once the router listens
+ * (app-router.js wraps history.replaceState as an own property), a write
+ * without `__NA` moves the router's address too. `routerLate` starts with
+ * the router not yet listening.
  */
-function browserAt(href: string, opts: { session?: Map<string, string> | null; navigation?: string; replaceThrows?: boolean } = {}): Browser {
-  const b: Browser = { seen: [], posted: [], replaced: [], local: new Map() };
+function browserAt(
+  href: string,
+  opts: { session?: Map<string, string> | null; navigation?: string; replaceThrows?: boolean; referrer?: string; routerLate?: boolean } = {},
+): Browser {
   const location = new URL(href) as unknown as URL & { replace(u: string): void };
+  const proto = {
+    state: { __NA: true } as unknown,
+    replaceState(this: { state: unknown }, data: unknown, _t: string, url: string) {
+      if (opts.replaceThrows) throw new Error("SecurityError");
+      this.state = data;
+      location.href = new URL(url, location.href).href;
+    },
+  };
+  const history = Object.create(proto) as typeof proto;
+  history.state = { __NA: true };
+  const listen = () => {
+    (history as unknown as Record<string, unknown>).replaceState = (data: unknown, t: string, url: string) => {
+      if (!(data as { __NA?: unknown } | null)?.__NA && url) b.router.push(new URL(url, location.href).href);
+      proto.replaceState.call(history, (data as object | null) ?? { __NA: true }, t, url);
+    };
+  };
+  const b: Browser = { seen: [], posted: [], replaced: [], local: new Map(), router: [], listen };
+  if (!opts.routerLate) listen();
   location.replace = (u: string) => void b.replaced.push(u);
   const g = globalThis as unknown as Record<string, unknown>;
   for (const name of ["fbq", "_fbq", "gtag", "dataLayer", "ttq", "TiktokAnalyticsObject", "pintrk", "twq", "rdt"]) delete g[name];
   g.location = location;
-  g.history = {
-    state: null,
-    replaceState: (_s: unknown, _t: string, url: string) => {
-      if (opts.replaceThrows) throw new Error("SecurityError");
-      location.href = new URL(url, location.href).href;
-    },
-  };
+  g.history = history;
   const storage = (m: Map<string, string>) => ({
     getItem: (k: string) => m.get(k) ?? null,
     setItem: (k: string, v: string) => void m.set(k, v),
@@ -125,6 +152,7 @@ function browserAt(href: string, opts: { session?: Map<string, string> | null; n
   Object.defineProperty(g, "navigator", { value: { globalPrivacyControl: false }, configurable: true, writable: true });
   g.document = {
     cookie: "",
+    referrer: opts.referrer ?? "",
     readyState: "complete",
     createElement: () => ({}),
     head: { appendChild: (tag: { src?: string }) => b.seen.push({ src: String(tag.src), page: location.href }) },
@@ -141,12 +169,12 @@ function browserAt(href: string, opts: { session?: Map<string, string> | null; n
   return b;
 }
 
-/** The real component, once, with its effects run in place and the pixels allowed. */
-function runPixels(props: Parameters<typeof StorePixels>[0]) {
+/** The real component, once, with its effects run in place and the pixels allowed (or the choice given). */
+function runPixels(props: Parameters<typeof StorePixels>[0], state: "on" | "ask" | "unknown" | "off" = "on") {
   const internals = (React as unknown as Record<string, { H: unknown }>).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
   const before = internals.H;
   internals.H = {
-    useState: () => ["on", () => {}],
+    useState: () => [state, () => {}],
     useEffect: (effect: () => unknown) => void effect(),
     useLayoutEffect: (effect: () => unknown) => void effect(),
     useRef: (v: unknown) => ({ current: v }),
@@ -319,7 +347,51 @@ async function main(): Promise<void> {
   );
   is("no call to any platform names the checkout", Object.entries(calls).filter(([, list]) => list.some((c) => c.includes(SESSION))).map(([p]) => p), []);
   is("the checkout's own id goes only to this site's server", onStripe.posted, [{ url: "/api/store/ads-event", body: JSON.stringify({ h: "harbor", s: SESSION }) }]);
-  is("kept for this tab, under this page", (globalThis as unknown as { sessionStorage: Storage }).sessionStorage.getItem("nl_px_keys:/@harbor/thanks"), JSON.stringify([["session_id", SESSION]]));
+  is(
+    "kept for this tab, under this page: the address it became and the one it was",
+    JSON.parse((globalThis as unknown as { sessionStorage: Storage }).sessionStorage.getItem("nl_px_keys:/@harbor/thanks") ?? "null"),
+    { clean: "https://marktmorgen.com/@harbor/thanks?upsell=no#top", was: `https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}&upsell=no#top` },
+  );
+  is("Next's router is told the cleared address, so it never writes the key back", onStripe.router, ["https://marktmorgen.com/@harbor/thanks?upsell=no#top"]);
+  is(
+    "Meta's automatic configuration (clicked buttons with where they lead) is off before its init",
+    calls.meta.slice(0, 2).map((c) => JSON.parse(c).slice(0, 3)),
+    [["set", "autoConfig", false], ["init", JSON.parse(calls.meta[1])[1]]],
+  );
+
+  part("Before the visitor's choice, and when Next's router listens late");
+  const asked = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}&upsell=no`, { routerLate: true });
+  runPixels(props(sixPixels(), purchase(SESSION, SESSION)), "ask");
+  is("the address is cleared at once, whatever the choice, and no script starts", [here().href, asked.seen.length], ["https://marktmorgen.com/@harbor/thanks?upsell=no", 0]);
+  is("keeping Next's own state on the entry while its router does not listen", (globalThis as unknown as { history: { state: unknown } }).history.state, { __NA: true });
+  asked.listen();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  is("and telling its router the cleared address as soon as it does", asked.router, ["https://marktmorgen.com/@harbor/thanks?upsell=no"]);
+  const early = browserAt(`https://marktmorgen.com/@harbor/free?token=${"f".repeat(48)}`);
+  runPixels(props(sixPixels(), null), "unknown");
+  is("the same before the choice is read", [here().search, early.seen.length], ["", 0]);
+
+  part("A page opened from one whose address named a key");
+  const fromThanks = browserAt("https://marktmorgen.com/@harbor", { referrer: `https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}` });
+  runPixels(props(sixPixels(), null));
+  is("starts no script, which would send that address as where the visitor came from", fromThanks.seen.length, 0);
+  const fromElsewhere = browserAt("https://marktmorgen.com/@harbor", { referrer: "https://example.com/?token=abc" });
+  runPixels(props(sixPixels(), null));
+  is("another site's address is not this site's key", fromElsewhere.seen.length, 6);
+  const fromStore = browserAt("https://marktmorgen.com/@harbor/p/club", { referrer: "https://marktmorgen.com/@harbor?q=knives" });
+  runPixels(props(sixPixels(), null));
+  is("and a page of the store without a key changes nothing", fromStore.seen.length, 6);
+
+  part("Links from a page with pixels to another page of this site");
+  for (const page of ["app/[handle]/thanks/page.tsx", "app/[handle]/free/page.tsx", "app/[handle]/tip/page.tsx", "app/[handle]/book/[product]/page.tsx"]) {
+    const text = readFileSync(page, "utf8");
+    const links = [...text.matchAll(/<Link\s+href=\{([^}]*\}?[^}]*)\}/g)].map((m) => m[1]);
+    is(
+      `${page}: no Next <Link> carries a key (its client move is a history change the scripts count as a view)`,
+      links.filter((h) => /sessionId|session_id|order=|token|pkg|move=|paypal|\bbook\b/.test(h)),
+      [],
+    );
+  }
 
   part("The pixels in a browser: a PayPal thanks page");
   const paypal = browserAt(`https://marktmorgen.com/@harbor/thanks?paypal=${PAYPAL}`);
@@ -346,20 +418,30 @@ async function main(): Promise<void> {
   is("the address is still cleared and the scripts start", [bare.seen.length, bare.seen.filter((s) => s.page.includes(SESSION)).length], [6, 0]);
 
   part("A reload, or a step back, after the address was cleared");
-  const kept = new Map([["nl_px_keys:/@harbor/thanks", JSON.stringify([["session_id", SESSION]])]]);
+  const wasAt = `https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}&upsell=no`;
+  const kept = new Map([["nl_px_keys:/@harbor/thanks", JSON.stringify({ clean: "https://marktmorgen.com/@harbor/thanks?upsell=no", was: wasAt })]]);
   const reload = browserAt("https://marktmorgen.com/@harbor/thanks?upsell=no", { session: kept, navigation: "reload" });
   runPixels(props(sixPixels(), null));
-  is("goes back to the address with the key, so the page shows the order again", reload.replaced, [`https://marktmorgen.com/@harbor/thanks?upsell=no&session_id=${SESSION}`]);
+  is("goes back to the address as it was, so the page shows the order again", reload.replaced, [wasAt]);
   is("and starts no script on the way", reload.seen.length, 0);
-  const back = browserAt("https://marktmorgen.com/@harbor/thanks", { session: new Map(kept), navigation: "back_forward" });
+  const back = browserAt("https://marktmorgen.com/@harbor/thanks?upsell=no", { session: new Map(kept), navigation: "back_forward" });
   runPixels(props(sixPixels(), null));
-  is("the same after a step back", back.replaced, [`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`]);
-  const fresh = browserAt("https://marktmorgen.com/@harbor/thanks", { session: new Map(kept), navigation: "navigate" });
+  is("the same after a step back", back.replaced, [wasAt]);
+  const fresh = browserAt("https://marktmorgen.com/@harbor/thanks?upsell=no", { session: new Map(kept), navigation: "navigate" });
   runPixels(props(sixPixels(), null));
-  is("but a page opened afresh without a key stays as it is", [fresh.replaced, fresh.seen.length], [[], 6]);
+  is("but a page opened afresh stays as it is", [fresh.replaced, fresh.seen.length], [[], 6]);
+  const elsewhere = browserAt("https://marktmorgen.com/@harbor/thanks?product=guide00002", { session: new Map(kept), navigation: "reload" });
+  runPixels(props(sixPixels(), null));
+  is("and another address on the same path is never given that key", elsewhere.replaced, []);
   const other = browserAt("https://marktmorgen.com/@harbor/tip", { session: new Map(kept), navigation: "reload" });
   runPixels(props(sixPixels(), null));
-  is("and another page's key is never put on this one", other.replaced, []);
+  is("nor another page", other.replaced, []);
+  const forged = browserAt("https://marktmorgen.com/@harbor/thanks", {
+    session: new Map([["nl_px_keys:/@harbor/thanks", JSON.stringify({ clean: "https://marktmorgen.com/@harbor/thanks", was: "https://evil.example/@harbor/thanks?session_id=x" })]]),
+    navigation: "reload",
+  });
+  runPixels(props(sixPixels(), null));
+  is("and only ever an address of this page on this site", forged.replaced, []);
 
   part("A purchase sent before ids were derived");
   const before = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`);

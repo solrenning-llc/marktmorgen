@@ -119,8 +119,12 @@ async function main(): Promise<void> {
 
   part("2. Links on the thanks page to other pages of this site");
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
-  const keyed = (thanks.match(/href=\{`\/@\$\{store\.handle\}\/[^`]*\?[^`]*\$\{encodeURIComponent\(sessionId\)\}[^`]*`\}/g) ?? []).filter((h) => !h.includes("/api/"));
+  // Adjusted with the fix (coordinator's decision): the affiliate page takes the order only in its
+  // address, so its link stays, as a plain <a> whose full page load unloads this page's scripts.
+  // What must not exist is a Next <Link>, moved with pushState past the pixels already loaded.
+  const keyed = (thanks.match(/<Link\s+href=\{`\/@\$\{store\.handle\}\/[^`]*\?[^`]*\$\{encodeURIComponent\(sessionId\)\}[^`]*`\}/g) ?? []).filter((h) => !h.includes("/api/"));
   is("none carries the checkout's id (Next moves there with pushState, past pixels already loaded)", keyed, []);
+  is("nor the package's token", /<Link\s+href=\{book\}/.test(thanks), false);
 
   part("3. A reload of another address on the same path");
   const kept = new Map([["nl_px_keys:/@harbor/free", JSON.stringify([["token", TOKEN]])]]);

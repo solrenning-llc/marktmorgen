@@ -47,6 +47,28 @@ test("the proposed event minimizes data and does not create a person profile", (
   assert.match(text, /must not (?:send|store)[\s\S]*full query string[\s\S]*full referrer[\s\S]*IP address/i);
 });
 
+test("campaign tag values reject personal data before normalization", () => {
+  const text = readStudy();
+  for (const fact of [
+    "Campaign tag values must reject personal data",
+    "before any normalization",
+    "email-like",
+    "name-like",
+    "high-entropy identifier",
+    "reject the whole event",
+  ]) assert.ok(text.includes(fact), fact);
+  assert.match(text, /must not (?:strip|hash)[^.]{0,160}(?:email|personal data)[^.]{0,160}(?:keep|retain|store)/i);
+});
+
+test("the official-source ledger records current versions, dates and URLs", () => {
+  const text = readStudy();
+  assert.ok(text.includes("Version 2.0 adopted October 7, 2024; final page October 16, 2024"));
+  assert.ok(text.includes("Last reviewed October 5, 2026"));
+  assert.ok(text.includes("https://docs.whop.com/third-party-integrations/embedded-checkouts/attribute-affiliates-embedded-checkout"));
+  assert.doesNotMatch(text, /https:\/\/docs\.whop\.com\/affiliates\/attribution/);
+  assert.deepEqual(text.split("\n").filter((line) => /[ \t]+$/.test(line)), []);
+});
+
 test("measurement language separates accepted events, visits, people and sales", () => {
   const text = readStudy();
   for (const fact of [

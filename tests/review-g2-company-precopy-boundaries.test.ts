@@ -1,4 +1,4 @@
-/** Identified pre-copy compatibility proof: positive omits only the newly registered copier; all six other denial assertions are unchanged. */
+/** Identified pre-copy proof: positive omits only the newly registered copier; other denial assertions are unchanged. */
 /** Independent real CRM company mutation/erasure/export review; synthetic transport only. */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -41,9 +41,9 @@ test('G2 missing company count cannot become an empty successful page',async()=>
  let result;try{result=await companiesPageData(s.store);}finally{redis.pipeline=original;}
  assert.equal(redis.run(['HLEN',s.hash]),1);assert.equal(result.state,'failed','unknown count became no companies and bypassed paid reading');
 });
-test('G2 applied company write with missing acknowledgement keeps the room it consumed',async()=>{
+for(const receipt of [[],[null]])test('G2 applied company write with unknown acknowledgement keeps its room '+JSON.stringify(receipt),async()=>{
  const s=await seed(),original=redis.pipeline.bind(redis);let ran=0;
- redis.pipeline=async commands=>{if(commands[0]?.[0]==='EVAL'&&String(commands[0][1]).startsWith('-- marktmorgen:crm-companies-write:')){ran++;await original(commands);return [] as never;}return original(commands);};
+ redis.pipeline=async commands=>{if(commands[0]?.[0]==='EVAL'&&String(commands[0][1]).startsWith('-- marktmorgen:crm-companies-write:')){ran++;await original(commands);return receipt as never;}return original(commands);};
  try{await changeCompanies(s.store.statsId!,s.store,c=>addCompany(c,{name:'Applied unknown company',website:'',note:'x'.repeat(300)},'bbbbbbbbbb',101));}finally{redis.pipeline=original;}
  assert.equal(ran,1);assert.equal((await readCompanies(s.store.statsId)).length,2);assert.ok(held(s)>=weight(s),JSON.stringify({held:held(s),required:weight(s)}));
 });

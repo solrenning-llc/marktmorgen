@@ -79,6 +79,7 @@ async function outcome<T>(run: () => Promise<T>): Promise<T | "rejected"> {
 const tests = (commands: (string | number)[][]) => commands.length === 2 && commands[1]?.[0] === "INCR" && String(commands[1]?.[1]).startsWith("nl:rl:hooks:test:");
 const endpointsTold = (commands: (string | number)[][]) => commands[0]?.[0] === "SADD" && String(commands[0]?.[1]).includes(":eps:");
 const dayPlace = (commands: (string | number)[][]) => commands[0]?.[0] === "ZADD" && String(commands[0]?.[1]).includes(":day:");
+const dayNumber = (commands: (string | number)[][]) => commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).includes(":seq:");
 
 /** Replies the minute's [SET NX, INCR] of tests must never be read from. */
 const BAD_COUNTERS: [string, unknown][] = [
@@ -224,6 +225,34 @@ async function main(): Promise<void> {
     rule = null;
     await watchStripe(Date.now() + 10_000);
     is(`markGivenUp, ${label}: the next visit gives it up and tells the endpoint`, [await lines(store), await wait(statsId)], [1, null]);
+  }
+
+  part("A passed-over Stripe event: its number for the day is read only as a whole number from 1 up");
+  for (const [label, reply] of [
+    ["INCR as text", ["1", 1]],
+    ["INCR true", [true, 1]],
+    ["INCR null", [null, 1]],
+    ["INCR zero", [0, 1]],
+    ["INCR fractional", [1.5, 1]],
+    ["INCR negative", [-1, 1]],
+    ["INCR an object", [{ result: 1 }, 1]],
+    ["a reply missing the EXPIREAT", [1]],
+    ["a third, unasked-for reply", [1, 1, 1]],
+    ["a reply that is not a list", { result: 1 }],
+  ] as [string, unknown][]) {
+    const { store, statsId } = await stuckStore();
+    rule = { when: dayNumber, reply };
+    await watchStripe(Date.now() + 10_000);
+    is(`markGivenUp, ${label}: no line written, nothing marked, the event still waits`, [await lines(store), await wait(statsId)], [0, waiting]);
+    rule = null;
+    await watchStripe(Date.now() + 10_000);
+    is(`markGivenUp, ${label}: the next visit gives it up and tells the endpoint`, [await lines(store), await wait(statsId)], [1, null]);
+  }
+  {
+    const { store, statsId } = await stuckStore();
+    rule = { when: dayNumber, reply: [1, 1] };
+    await watchStripe(Date.now() + 10_000);
+    is("markGivenUp: the day's first number (1) still gives it up with its line", [await lines(store), await wait(statsId)], [1, null]);
   }
 
   part("A passed-over Stripe event, exact replies: as before");

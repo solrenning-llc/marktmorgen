@@ -1737,9 +1737,10 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
   }
   const listening = hearing.filter((at) => !over.includes(at));
   // Its own number for the day, so no two events share a place (a repeat's ZADD NX keeps its first one).
-  const [seq] = listening.length ? await redisPipeline([["INCR", givenUpSeqKey(statsId, day)], ["EXPIREAT", givenUpSeqKey(statsId, day), (day + 2) * 86400]]) : [0];
-  if (listening.length && (!Number.isSafeInteger(Number(seq)) || Number(seq) < 1)) throw new Error("the day's passed-over events could not be numbered");
-  const order = now * 1000 + (Number(seq) % 1000);
+  // INCR's whole number from 1 up, one reply for each command (CX-123 rule 24); text or true was read as a number.
+  const seq = listening.length ? countOf(repliesFor(await redisPipeline([["INCR", givenUpSeqKey(statsId, day)], ["EXPIREAT", givenUpSeqKey(statsId, day), (day + 2) * 86400]]), 2)?.[0]) : 0;
+  if (seq === null || (listening.length && seq < 1)) throw new Error("the day's passed-over events could not be numbered");
+  const order = now * 1000 + (seq % 1000);
   const placed = listening.length ? await redisPipeline(listening.flatMap(({ endpoint }) => {
     const key = givenUpDayKey(statsId, day, endpoint.id);
     // Gone at the end of the next UTC day: two days' sets an endpoint at most.

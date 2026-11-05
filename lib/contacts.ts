@@ -318,6 +318,26 @@ export async function isMailable(listId: string, rawEmail: string): Promise<bool
   return contact !== null && mailable(contact);
 }
 
+/** A failed read is unknown, never evidence that an address or erasure is absent. */
+const CONTACT_IMPORT_UNKNOWN = "Contacts were not imported. Try again.";
+function exactImportReply(reply: unknown, length: number): asserts reply is unknown[] {
+  if (!Array.isArray(reply) || reply.length !== length) throw new Error(CONTACT_IMPORT_UNKNOWN);
+  for (let i = 0; i < length; i += 1) {
+    if (!Object.hasOwn(reply, i)) throw new Error(CONTACT_IMPORT_UNKNOWN);
+  }
+}
+function importCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(CONTACT_IMPORT_UNKNOWN);
+  return value;
+}
+function importValues(value: unknown, length: number): (string | null)[] {
+  exactImportReply(value, length);
+  for (const slot of value) {
+    if (slot !== null && typeof slot !== "string") throw new Error(CONTACT_IMPORT_UNKNOWN);
+  }
+  return value as (string | null)[];
+}
+
 /**
  * Brings in addresses the creator says agreed to hear from them, a few
  * hundred per round trip. Nobody who left is put back, and nobody already on
@@ -330,16 +350,18 @@ export async function importContacts(
 ): Promise<{ added: number; already: number; full: boolean; roomFull?: { left: number; message: string } }> {
   if (!isRedisConfigured() || !listId || !emails.length) return { added: 0, already: emails.length, full: false };
   const key = leadsKey(listId);
-  const [size] = await redisPipeline([["HLEN", key]]);
-  let room = MAX_LEADS - (Number(size) || 0);
+  const sizeReply = await redisPipeline([["HLEN", key]]);
+  exactImportReply(sizeReply, 1);
+  let room = MAX_LEADS - importCount(sizeReply[0]);
   const now = new Date().toISOString();
   let added = 0;
   let full = false;
   for (let i = 0; i < emails.length; i += 500) {
     const chunk = emails.slice(i, i + 500);
-    const [rows, prints] = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
-    const found = Array.isArray(rows) ? rows : [];
-    const deleted = Array.isArray(prints) ? prints : [];
+    const reply = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
+    exactImportReply(reply, 2);
+    const found = importValues(reply[0], chunk.length);
+    const deleted = importValues(reply[1], chunk.length);
     const pairs: string[] = [];
     const sizes: { before: Contact | null; next: Contact }[] = [];
     let newlyAgreed = 0;
@@ -496,16 +518,18 @@ export async function previewContactRows(
   // A store whose list is made when its first import starts: everything is new.
   if (!isRedisConfigured() || !listId) return { outcomes: rows.map((row) => decide(null, row)), room: MAX_LEADS };
   const key = leadsKey(listId);
-  const [size, found, prints] = await redisPipeline([
+  const reply = await redisPipeline([
     ["HLEN", key],
     ["HMGET", key, ...rows.map((r) => r.email)],
     suppressedAmongCommand(listId, rows.map((r) => r.email)),
   ]);
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
+  exactImportReply(reply, 3);
+  const size = importCount(reply[0]);
+  const existing = importValues(reply[1], rows.length);
+  const deleted = importValues(reply[2], rows.length);
   return {
     outcomes: rows.map((row, i) => decide(parseContact(existing[i]), row, deleted[i] !== null && deleted[i] !== undefined)),
-    room: Math.max(0, MAX_LEADS - (Number(size) || 0)),
+    room: Math.max(0, MAX_LEADS - size),
   };
 }
 
@@ -535,15 +559,17 @@ export async function previewContactRows(
 export async function importContactRows(listId: string, rows: ImportedContact[], data: DataStore): Promise<ContactOutcome[]> {
   if (!isRedisConfigured() || !listId || rows.length === 0) return rows.map(() => "full");
   const key = leadsKey(listId);
-  const [size, found, prints] = await redisPipeline([
+  const reply = await redisPipeline([
     ["HLEN", key],
     ["HMGET", key, ...rows.map((r) => r.email)],
     suppressedAmongCommand(listId, rows.map((r) => r.email)),
   ]);
-  let room = MAX_LEADS - (Number(size) || 0);
+  exactImportReply(reply, 3);
+  const size = importCount(reply[0]);
+  const existing = importValues(reply[1], rows.length);
+  const deleted = importValues(reply[2], rows.length);
+  let room = MAX_LEADS - size;
   const now = new Date().toISOString();
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
   // Each write, with the fingerprint of what its address held when read.
   const writes: { email: string; value: string; was: string; row: number }[] = [];
   const sizes: { before: Contact | null; next: Contact }[] = [];

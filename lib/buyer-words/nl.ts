@@ -49,9 +49,11 @@ export const nl: BuyerWords = {
   callLive: (dates) => `Livesessie, online, ${dates} ${plural(dates, "datum", "data")} gepland`,
   callGroup: (minutes, seats) => `Groepsgesprek, ${minutes} minuten, tot ${seats} personen, online`,
   callOne: (minutes) => `Gesprek van ${minutes} minuten, online`,
+  callLengths: (list) => `Gesprek van ${list} minuten, online`,
   inPersonLive: (dates) => `Livesessie, ter plaatse, ${dates} ${plural(dates, "datum", "data")} gepland`,
   inPersonGroup: (minutes, seats) => `${minutes} minuten, tot ${seats} personen, ter plaatse`,
   inPersonOne: (minutes) => `${minutes} minuten, ter plaatse`,
+  inPersonLengths: (list) => `${list} minuten, ter plaatse`,
   inPersonLiveNone: "Livesessie, ter plaatse, geen data gepland",
   bundleOf: (count, worth) => `Bundel van ${count} producten${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `${worth} aan producten voor ${price}`,
@@ -81,7 +83,7 @@ export const nl: BuyerWords = {
   buyAsGift: "Koop als cadeau",
   buyAsGiftFor: (price) => `Koop als cadeau — ${price}`,
   giftNote: (store) =>
-    `Je betaalt op de pagina van Stripe. Direct daarna krijgt de ontvanger één e-mail van ${store} met je naam, je bericht en een link om het op het eigen adres te openen. Jij krijgt de bon, geen kopie.`,
+    `Je betaalt op de pagina van Stripe. Na betaling hoort het cadeau bij het adres van de ontvanger. Als de ene e-mail van ${store} aankomt, bevat die je naam, je bericht en een link om het te openen. Jij krijgt de bon, geen kopie.`,
   giftProblems: {
     email: "Dat lijkt geen e-mailadres. Controleer het adres van de ontvanger en probeer het opnieuw.",
     option: "Kies wat je wilt geven en probeer het opnieuw. Er is niets afgeschreven.",
@@ -301,4 +303,9 @@ export const nl: BuyerWords = {
   cardTestMode: "Testmodus: er wordt geen echte kaart belast.",
   cardCheckout: "Veilig betalen via Stripe, in een nieuw tabblad.",
   cardOpens: (store) => `Opent in de winkel van ${store}, in een nieuw tabblad.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} of meer`,
+  plusTax: "+ belasting, indien van toepassing",
+  salePriceUntil: (price, when) => `Actieprijs: ${price}, tot ${when}`,
 };

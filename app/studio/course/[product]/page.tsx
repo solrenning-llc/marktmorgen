@@ -17,6 +17,7 @@ import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
 import { canSellProduct } from "@/lib/store-checkout";
 import { passedFor } from "@/lib/quiz";
 import { certificatesFor } from "@/lib/certificate";
+import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseStart,
   CourseEditor,
@@ -25,6 +26,7 @@ import {
   WithdrawCertificate,
 } from "@/components/course-editor";
 import { readListing } from "@/lib/catalog";
+import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -55,6 +57,7 @@ export default async function StudioCoursePage({
 }) {
   const { product: productId } = await params;
   const query = await searchParams;
+  const initialTemplate = typeof query.template === "string" ? templateById(query.template) : null;
   // Which store, and whether this person's role there has "products" (lib/studio-route.ts).
   const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "products");
   if (!found.ok) {
@@ -189,6 +192,7 @@ export default async function StudioCoursePage({
         />
         <CourseEditor
           productId={product.id}
+          initialTemplate={initialTemplate?.id ?? null}
           openFirst={typeof query.lesson === "string" && lessonsInOrder(course).some(({ lesson }) => lesson.id === query.lesson) ? query.lesson : null}
           initial={course}
           folder={folder}
@@ -235,6 +239,7 @@ export default async function StudioCoursePage({
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <CourseStart productId={product.id} startsAt={course.startsAt} />
             <CertificateSwitch productId={product.id} on={course.certificate} />
+            {course.certificate ? <CertificateValidity productId={product.id} months={course.certificateMonths ?? null} /> : null}
             {course.certificate ? (
               <Link
                 href={`/@${store.handle}/certificate/sample?product=${product.id}`}

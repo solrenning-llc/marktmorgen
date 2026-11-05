@@ -9,6 +9,8 @@ import { storeBase } from "@/lib/purchase-email";
 import { type Affiliate, affiliateByEmail, affiliateLink, affiliatesOn, signInLinkFor } from "@/lib/affiliates";
 import { hubOwner, storesPromoted } from "@/lib/affiliate-hub";
 import { payoutPromise } from "@/lib/affiliate-setting";
+import { noticeFor } from "@/lib/affiliate-notice";
+import { readListings } from "@/lib/catalog";
 import { SITE_URL } from "@/lib/site-url";
 
 export const metadata: Metadata = {
@@ -34,7 +36,22 @@ const STANDING: Record<Affiliate["status"], string> = {
   removed: "Ended by the creator",
 };
 
-type Row = { store: Store; affiliate: Affiliate; link: string | null; open: string | null; on: boolean };
+type Row = { store: Store; affiliate: Affiliate; link: string | null; open: string | null; on: boolean; cut: { day: string; lines: string[] } | null };
+
+/**
+ * A cut the creator announced and that is not in force yet (630 [HN6](2),
+ * lib/affiliate-notice.ts), as it reaches this affiliate: what gets worse for
+ * them and the day. An affiliate with a share of their own keeps it on every
+ * product except one taken out of the program, so only that and the window
+ * are said to them.
+ */
+async function cutFor(store: Store, affiliate: Affiliate): Promise<Row["cut"]> {
+  const pending = store.affiliates.pending;
+  if (!pending || affiliate.status !== "approved") return null;
+  const ids = [...new Set([...Object.keys(store.affiliates.rates), ...Object.keys(pending.rates)])];
+  const titles = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p.title]));
+  return noticeFor(store.affiliates, pending, affiliate.rate ?? null, (id) => titles.get(id) ?? null);
+}
 
 /**
  * An affiliate's page across every store (lib/affiliate-hub.ts): each store
@@ -62,6 +79,7 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
         on,
         link: on && affiliate.status === "approved" ? affiliateLink(store, affiliate.code) : null,
         open: on ? await signInLinkFor(store, email, origin).catch(() => null) : null,
+        cut: on ? await cutFor(store, affiliate) : null,
       });
     }
     // The programs they can work with first, then the rest, each by name.
@@ -89,7 +107,7 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
               <p className="text-ink-soft">{`For ${email}. This page works for 24 hours from the email.`}</p>
               {rows.length ? (
                 <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {rows.map(({ store, affiliate, link, open, on }) => (
+                  {rows.map(({ store, affiliate, link, open, on, cut }) => (
                     <li key={store.sid} className="card flex flex-col p-5" data-hub-store={store.handle}>
                       <div className="flex items-center gap-3">
                         {store.photoId ? (
@@ -114,6 +132,17 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                         </div>
                       ) : null}
                       {on ? <p className="mt-4 text-sm text-ink-soft">{payoutPromise(store.affiliates, store.name)}</p> : null}
+                      {cut ? (
+                        <div className="mt-4 rounded-lg bg-sand/70 px-3 py-2 text-sm" role="note" aria-label={`A change announced by ${store.name}`} data-hub-cut>
+                          <p className="font-semibold text-ink">{`${store.name} gave notice: on ${cut.day} (UTC), these change.`}</p>
+                          <ul className="mt-1 list-disc pl-5 text-ink">
+                            {cut.lines.map((line) => (
+                              <li key={line}>{line}</li>
+                            ))}
+                          </ul>
+                          <p className="mt-1 text-ink-soft">Until then your terms stay as they are, and every sale keeps the share it was made at.</p>
+                        </div>
+                      ) : null}
                       {on && !open ? (
                         <p role="status" className="mt-4 text-sm text-ink-soft">
                           Your numbers could not be opened just now. Try again in a moment, or visit the store for help.

@@ -3,8 +3,8 @@
  * (534 [FQ1], unit 40, lib/audience-faq.ts; added 2 November 2026). Checked:
  * the sign-in page starting a store from an emailed link with no password;
  * the studio's "Take your address" card; the first steps every store's studio
- * lists to the owner, from "Your address" to "Share your address", each done
- * one with a check; the sign-in page saying so when logging in is off; the
+ * lists to the owner, up to five to the first sale, from "Prepare your first
+ * offer" to "Share your address", each done one with a check; the sign-in page saying so when logging in is off; the
  * shared trial answer in both states; the questions first on every page for
  * a kind of creator; no sentence said twice on any of them; no figure.
  */
@@ -13,6 +13,7 @@ import { AUDIENCE_WORDS, audienceBeginnerQuestions } from "@/lib/audience-faq";
 import { tryBeforePaying } from "@/lib/beginner-faq";
 import { TRIAL_DAYS } from "@/lib/plan";
 import { PAGES as SITE_PAGES } from "@/lib/site-pages";
+import { startList } from "@/lib/studio-start-rules";
 import { done, is, part } from "./check";
 
 const read = (file: string) => readFileSync(file, "utf8");
@@ -30,7 +31,9 @@ const form = flat(read("components/handle-form.tsx"));
 is("the store name and the button", [form.includes(` ${w.name} </`), form.includes(`"${w.create}"`)], [true, true]);
 const steps = studio.slice(studio.indexOf("const startSteps: StartStep[] = store ? ["), studio.indexOf("] : []; const connectTestMode"));
 const all3 = [...steps.matchAll(/title: "([^"]+)"/g)].map((m) => m[1]);
-is("the first steps, from the first to the last named, the two always there", [all3[0], all3[all3.length - 1], steps.includes(`{ key: "address", title: "${w.first}"`), steps.includes(`{ key: "share", title: "${w.last}"`)], [w.first, w.last, true, true]);
+// The list shows the steps to the first sale (lib/studio-start-rules.ts): "Your address", always done, is not shown.
+const shown = startList([...steps.matchAll(/\{ key: "([^"]+)", title: "([^"]+)"/g)].map((m) => ({ key: m[1], title: m[2], done: false }))).steps.map((s) => s.title);
+is("the steps to the first sale, from the first to the last named, the two always there", [shown[0], shown[shown.length - 1], all3.includes("Your address"), shown.includes("Your address"), steps.includes(`{ key: "product", title: "${w.first}"`), steps.includes(`{ key: "share", title: "${w.last}"`)], [w.first, w.last, true, false, true, true]);
 is("the list shown to the owner, under its title, with a check on each step done", [studio.includes("{role === \"owner\" ? <StudioStart steps={startSteps}"), flat(read("components/studio-start.tsx")).includes(` ${w.list} </`), read("components/studio-start.tsx").includes('step.done ? <Icon name="check"')], [true, true, true]);
 
 part("The answers, in both states");

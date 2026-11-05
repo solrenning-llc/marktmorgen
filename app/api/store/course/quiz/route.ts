@@ -8,7 +8,7 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
-import { heldBack, passedQuizzes, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
+import { MAX_QUESTIONS, heldBack, passedQuizzes, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
@@ -55,7 +55,9 @@ export async function POST(request: NextRequest) {
 
   let result: Awaited<ReturnType<typeof submitQuiz>>;
   try {
-    result = await submitQuiz(course.id, lessonId, who, quiz, readAnswers(quiz, form), store.sid, windowId(store), store);
+    // The question ids the page showed, so a try drawn from a bank is marked on those (lib/quiz.ts).
+    const shown = String(form.get("shown") ?? "").split(",").filter(Boolean).slice(0, MAX_QUESTIONS);
+    result = await submitQuiz(course.id, lessonId, who, quiz, readAnswers(quiz, form), store.sid, windowId(store), store, shown);
   } catch (error) {
     // No room in the store's data room: the try was not counted (lib/store-data.ts).
     if (error instanceof DataRoomError) return new Response(DATA_FULL_BUYER_WORDS, { status: 409, headers: { "Cache-Control": "no-store" } });
@@ -63,6 +65,10 @@ export async function POST(request: NextRequest) {
   }
   if (!result.ok && result.reason === "usage_limit") return new Response("This store has reached its monthly quiz submission allowance. It resets at the start of the next UTC month.", { status: 429, headers: { "Cache-Control": "no-store" } });
   if (!result.ok && result.reason === "unavailable") return new Response("Quiz submissions are temporarily unavailable. Please try again later.", { status: 503, headers: { "Cache-Control": "no-store" } });
+  // Too soon after the last try, or questions that are no longer this try's:
+  // nothing was counted, and the lesson says why.
+  if (!result.ok && result.reason === "wait") return away(`${base}/${lessonId}#quiz`);
+  if (!result.ok && result.reason === "stale") return away(`${base}/${lessonId}?quiz=stale#quiz`);
   if (result.ok && result.grade.passed) {
     await markLesson(course.id, access.learner.email, lessonId, true, store, true);
     await noteIfFinished(store, product.id, course.id, access.learner.email);

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import {
@@ -49,6 +50,21 @@ function problem(network: SocialNetwork): string {
 }
 
 /**
+ * The keyboard and autofill of a profile's field (487 [IT4], item 2): the
+ * phone keyboard and the person's own number for WhatsApp, the email keyboard
+ * and their own address for email; a handle or a link is not filled in. Each
+ * row is its own autofill section (`section-profile-<row>`), so choosing a
+ * suggestion in one row never fills another: an address never lands in a
+ * WhatsApp row, nor a phone number in an email row, to be shown on the store.
+ */
+export function profileKeyboard(network: SocialNetwork, row: number): { type: "email" | "text"; inputMode?: "tel"; autoComplete: string } {
+  const section = `section-profile-${row}`;
+  if (network === "email") return { type: "email", autoComplete: `${section} email` };
+  if (network === "whatsapp") return { type: "text", inputMode: "tel", autoComplete: `${section} tel` };
+  return { type: "text", autoComplete: "off" };
+}
+
+/**
  * The creator's profiles elsewhere (lib/store-socials.ts), shown under the
  * store's name. A handle or a pasted address both work: a pasted address
  * picks its own network, and each box says where its link will go before
@@ -64,6 +80,11 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
   const [error, setError] = useState("");
   const [bad, setBad] = useState<number[]>([]);
   const used = useMemo(() => new Set(rows.map((r) => r.network)), [rows]);
+  // Empty new rows are left out on save; opening one alone creates no work to lose.
+  const edited = rows.filter(row => row.typed.trim()).map(({ network, typed }) => [network, typed]);
+  const original = socials.map(social => [social.network, typedOf(social)]);
+  const changed = JSON.stringify(edited) !== JSON.stringify(original);
+  useLeaveGuard(open && changed);
 
   function add() {
     const network = SOCIAL_NETWORKS.find((n) => !used.has(n)) ?? "website";
@@ -196,7 +217,8 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
                     id={`${id}-value`}
                     disabled={saving}
                     type={row.network === "email" ? "email" : "text"}
-                    autoComplete="off"
+                    inputMode={profileKeyboard(row.network, row.key).inputMode}
+                    autoComplete={profileKeyboard(row.network, row.key).autoComplete}
                     spellCheck={false}
                     value={row.typed}
                     placeholder={PLACEHOLDER[row.network] ?? "@yourname"}

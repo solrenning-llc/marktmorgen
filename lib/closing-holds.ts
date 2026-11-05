@@ -438,3 +438,26 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
   }
   return out;
 }
+
+/**
+ * While the store is closing: the last payment kept for each of a person's
+ * memberships, to give back the time they paid for, for the copy of their
+ * data (619 [SZ3], lib/person-copy.ts). Only reads.
+ */
+export async function heldPaymentsOf(store: Store, email: string): Promise<(PaidPeriod & { subscription: string })[]> {
+  if (!isRedisConfigured()) return [];
+  const address = email.trim().toLowerCase();
+  const folder = await storeFolder(storeRef(store));
+  const [raw] = await redisPipeline([["HGETALL", paidKey(folder)]]);
+  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  const out: (PaidPeriod & { subscription: string })[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    try {
+      const row = JSON.parse(flat[i + 1]) as PaidPeriod;
+      if (typeof row.e === "string" && row.e.trim().toLowerCase() === address) out.push({ ...row, subscription: flat[i] });
+    } catch {
+      // Not a payment row: skipped, as the closing itself skips it.
+    }
+  }
+  return out;
+}

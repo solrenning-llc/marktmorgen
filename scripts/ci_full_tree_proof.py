@@ -5,7 +5,20 @@ import re
 import subprocess
 import urllib.request
 
-REPO = "viniciussucupira/marktmorgen"
+# This repository's permanent numeric ID: GitHub keeps it when the repository is
+# renamed or moved to another owner, and no fork or copy has it. The API path uses
+# the current name only when the runner proves it is this repository by that ID.
+REPO_ID = 1334793724
+ORIGINAL_REPO = "viniciussucupira/marktmorgen"
+REPO_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/marktmorgen\Z")
+
+def current_repo(env=os.environ):
+    name = env.get("GITHUB_REPOSITORY", "")
+    if env.get("GITHUB_REPOSITORY_ID") == str(REPO_ID) and REPO_NAME.fullmatch(name):
+        return name
+    return ORIGINAL_REPO
+
+REPO = current_repo()
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 WORKFLOWS = {
     "product-checks": {"verify", "form-opportunity-redis", "Mobile render (candidate)", "Cross-browser (firefox)", "Cross-browser (webkit)"},
@@ -37,8 +50,8 @@ def prove_full_tree(candidate, tree, api):
             return False
         run = max(matches, key=lambda r: r["id"])
         if (run.get("status") != "completed" or run.get("conclusion") != "success"
-                or run.get("repository", {}).get("full_name") != REPO
-                or run.get("head_repository", {}).get("full_name") != REPO):
+                or run.get("repository", {}).get("id") != REPO_ID
+                or run.get("head_repository", {}).get("id") != REPO_ID):
             return False
         title = run.get("display_title", "")
         tested = title.removeprefix("PV8 source ")

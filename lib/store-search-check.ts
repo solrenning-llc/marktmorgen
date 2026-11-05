@@ -28,6 +28,12 @@ export type SearchCheck = {
   indexed: boolean;
   /** Whether it is held back because it was suspended after notices about its content (lib/takedown.ts). */
   suspended: boolean;
+  /**
+   * What AI shopping agents (ChatGPT, Perplexity, Google's AI answers) read
+   * the same way (624 [SZ8](42)): the first page's products with no picture,
+   * which their product data then has none of.
+   */
+  agents: { noPicture: string[] };
   /** Visible products on the first page with no one-line summary, by title; and those whose card is not carried. */
   summaries: { missing: string[]; unchecked: number };
   /** Whether the store is on a domain of its own that is live. */
@@ -38,17 +44,22 @@ export function searchCheck(store: Store): SearchCheck {
   const first = store.catalog.items.filter((item) => (item.kind & KIND.hidden) === 0).slice(0, STORE_PAGE_SIZE);
   const cards = new Map(store.catalog.head.map((listing) => [listing.id, listing]));
   const missing: string[] = [];
+  const noPicture: string[] = [];
   let unchecked = 0;
   for (const item of first) {
     const card = cards.get(item.id);
     if (!card) unchecked += 1;
-    else if (!card.hidden && card.summary.trim().length === 0 && !card.about) missing.push(card.title);
+    else if (!card.hidden) {
+      if (card.summary.trim().length === 0 && !card.about) missing.push(card.title);
+      if (!card.image) noPicture.push(card.title);
+    }
   }
   return {
     description: store.bio.trim().length > 0,
     // The store page's own rule (app/[handle]/page.tsx): not suspended, and a visible product or any link.
     indexed: !store.suspended && (visibleCount(store) > 0 || store.links.length > 0),
     suspended: Boolean(store.suspended),
+    agents: { noPicture },
     summaries: { missing, unchecked },
     // Named as the store's address only when it is live and the plan allows it, as the store page does.
     ownDomain: Boolean(store.domain?.liveAt) && canUseDomain(store),
@@ -61,4 +72,20 @@ export const SEARCH_DONE_FOR_YOU: readonly string[] = [
   "Each product page tells search engines its name, its picture when it has one, and its price while it can be bought or picked up (a membership's schedule does not fit that format, so it is named without one).",
   "Your store's questions and answers, and your blog posts, are marked so search engines can read them.",
   "On a domain of your own, search engines are told it is the main address of your store.",
+];
+
+/**
+ * What AI shopping agents and assistants get from a store without the
+ * creator doing anything (624 [SZ8](42)), each what the code does today:
+ * the robots rules open the store to every crawler, AI ones included
+ * (lib/store-sitemap.ts, storeRobots); each product page carries its name,
+ * price, picture and rating as product data (app/[handle]/p/[product]); the
+ * creator's own AI assistant reads the store through the MCP server with an
+ * API key (app/api/mcp, /developers). Nothing here says where an agent will
+ * show the store.
+ */
+export const AGENTS_GET: readonly string[] = [
+  "Your store's public pages are open to AI shopping agents and AI search, the same as to search engines. Buyers' own pages, courses and your community are not.",
+  "Each product page tells them its name, its price while it can be bought, its picture when it has one, and its rating when it has enough reviews to show one.",
+  "Your own AI assistant, such as Claude or ChatGPT, can read your store's numbers, products and pages with an API key you make in your studio.",
 ];

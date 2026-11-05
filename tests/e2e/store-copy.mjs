@@ -67,6 +67,7 @@ import {checkRenameAcknowledgment} from "./rename-acknowledgment.mjs";
 import {checkTaxSaveAcknowledgment} from "./tax-save-acknowledgment.mjs";
 import {checkTaxScope} from "./tax-scope.mjs";
 import {checkComposerAmericanEnglish} from "./us-english-composer.mjs";
+import {checkBlockPickerTurnsWide} from "./block-picker-wide.mjs";
 import {checkPublicAmericanEnglish,checkStudioAmericanEnglish} from "./public-us-english.mjs";
 import {checkPathCertificates} from "./path-certificates.mjs";
 /**
@@ -343,7 +344,7 @@ try {
   is("unmatched search can be reset", await owner.getByText("No campaigns match these filters.", { exact: true }).isVisible(), true);
   await owner.getByRole("button", { name: "Show all campaigns", exact: true }).click();
   is("browsing spends no server previews", previews, 0);
-  await owner.getByRole("button", { name: "Set up the Build a launch waitlist campaign", exact: true }).click();
+  await owner.getByRole("button", { name: "Set up this campaign: Build a launch waitlist", exact: true }).click();
   await owner.getByLabel("Name, for you", { exact: true }).waitFor();
   is("choosing a campaign starts one server preview", previews, 1);
   await owner.getByLabel("Name, for you", { exact: true }).fill("Browser waitlist campaign");
@@ -899,6 +900,7 @@ await checkNudgeAcknowledgment({browser,LOCAL,fixture:pauseFixtures[0],is});
   await checkDisputeReview({browser,LOCAL,fixture:homeDemo,axeSource,is});
   await checkStudioAmericanEnglish({browser,LOCAL,session:growthSession,sid:growthSid,is});
   await checkComposerAmericanEnglish({browser,LOCAL,session:growthSession,sid:growthSid,product:growthProduct,is});
+  await checkBlockPickerTurnsWide({browser,LOCAL,session:growthSession,sid:growthSid,product:growthProduct,is});
   await checkTaxScope({browser,LOCAL,session:growthSession,sid:growthSid,is});
   await checkTaxSaveAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is});
   await checkRenameAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is});

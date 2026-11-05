@@ -50,7 +50,7 @@ jobs:
     timeout-minutes: 35
     env:
       NEXT_TELEMETRY_DISABLED: "1"
-      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ github.repository == 'viniciussucupira/marktmorgen' && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -150,6 +150,22 @@ jobs:
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_order_admission_redis.py
+      - name: Actual Redis durable shipment dispatch checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_shipment_mail_outbox_redis.py
+      - name: Actual Redis original-window order settlement checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_order_confirmation_checkpoint_redis.py
+      - name: Actual Redis protected pre-payment confirmation origin checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_order_confirmation_outbox_redis.py
+      - name: Actual Redis global fallback ownership and clock checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_resend_fallback_budget_redis.py --port 16379
       - name: Synthetic self-hosted HTTP to actual Redis contract
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
@@ -159,7 +175,7 @@ jobs:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_self_hosted_backup_redis.py
       - name: Synthetic two-server Redis migration and private DNS rollback
-        if: ${{ github.repository == 'viniciussucupira/marktmorgen' && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+        if: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
         timeout-minutes: 4
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
@@ -259,7 +275,7 @@ jobs:
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       E2E_BROWSER: ${{ matrix.browser }}
-      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ github.repository == 'viniciussucupira/marktmorgen' && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

@@ -4,7 +4,8 @@
  * does today: the sign-in page that starts a store from an emailed link
  * (app/signin/page.tsx), the studio's "Take your address" card, and the first
  * steps the studio lists for every store (app/studio/page.tsx, startSteps),
- * from "Your address" to "Share your address", shown to the owner. No figure. Shown in
+ * up to five steps to the first sale, from "Prepare your first offer" to
+ * "Share your address" (lib/studio-start-rules.ts), shown to the owner. No figure. Shown in
  * each such page's own "Questions" block.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";
@@ -12,7 +13,7 @@ import { TRIAL_DAYS } from "@/lib/plan";
 import { tryBeforePaying } from "@/lib/beginner-faq";
 
 /** The site's and the studio's own words. */
-export const AUDIENCE_WORDS = { start: "Start your store", address: "Take your address", name: "Store name", create: "Create my store", list: "Getting your store ready", first: "Your address", last: "Share your address" } as const;
+export const AUDIENCE_WORDS = { start: "Start your store", address: "Take your address", name: "Store name", create: "Create my store", list: "Getting your store ready", first: "Prepare your first offer", last: "Share your address" } as const;
 
 export function audienceBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_DAYS): { q: string; a: string }[] {
   const w = AUDIENCE_WORDS;

@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
+import { MemberDiscount } from "@/components/member-discount";
 import { LEAVE_NAMES, STAY_AGES, isLeaveReason, membershipNumbers } from "@/lib/membership-numbers";
 import { channelName } from "@/lib/channel-names";
 import { readListings } from "@/lib/catalog";
@@ -520,6 +521,16 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                       </p>
                     </>
                   ) : null}
+                </section>
+              ) : null}
+
+              {/* One member's discount (616 [WP15](8)): for a role that may change the store's codes. */}
+              {can(access.role, "settings") ? (
+                <section aria-labelledby="member-discount-title" className="card mt-8 p-6 sm:p-8">
+                  <h2 id="member-discount-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Give one member a discount</h2>
+                  <div className="mt-3">
+                    <MemberDiscount titles={Object.fromEntries(titles)} />
+                  </div>
                 </section>
               ) : null}
 

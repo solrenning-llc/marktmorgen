@@ -51,9 +51,11 @@ export const pt: BuyerWords = {
   callLive: (dates) => `Sessão em direto, online, ${dates} ${plural(dates, "data marcada", "datas marcadas")}`,
   callGroup: (minutes, seats) => `Chamada de grupo, ${minutes} minutos, até ${seats} pessoas, online`,
   callOne: (minutes) => `Chamada de ${minutes} minutos, online`,
+  callLengths: (list) => `Chamada de ${list} minutos, online`,
   inPersonLive: (dates) => `Sessão presencial, ${dates} ${plural(dates, "data marcada", "datas marcadas")}`,
   inPersonGroup: (minutes, seats) => `${minutes} minutos, até ${seats} pessoas, presencial`,
   inPersonOne: (minutes) => `${minutes} minutos, presencial`,
+  inPersonLengths: (list) => `${list} minutos, presencial`,
   inPersonLiveNone: "Sessão presencial, sem datas marcadas",
   bundleOf: (count, worth) => `Pacote de ${count} produtos${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `${worth} em produtos por ${price}`,
@@ -83,7 +85,7 @@ export const pt: BuyerWords = {
   buyAsGift: "Comprar como presente",
   buyAsGiftFor: (price) => `Comprar como presente — ${price}`,
   giftNote: (store) =>
-    `Paga na página da Stripe. Logo a seguir, a pessoa recebe um único email de ${store} com o seu nome, a sua mensagem e uma ligação para o abrir com o próprio endereço. Fica com o recibo, não com uma cópia.`,
+    `Paga na página da Stripe. Depois do pagamento, o presente fica associado ao endereço da pessoa. Se o único email de ${store} lhe chegar, contém o seu nome, a sua mensagem e uma ligação para o abrir. Fica com o recibo, não com uma cópia.`,
   giftProblems: {
     email: "Isso não parece um endereço de email. Verifique o endereço do destinatário e tente novamente.",
     option: "Escolha o que quer oferecer e tente novamente. Nada foi cobrado.",
@@ -303,4 +305,9 @@ export const pt: BuyerWords = {
   cardTestMode: "Modo de teste: nenhum cartão real é cobrado.",
   cardCheckout: "Pagamento seguro pela Stripe, num novo separador.",
   cardOpens: (store) => `Abre na loja de ${store}, num novo separador.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} ou mais`,
+  plusTax: "+ impostos, quando aplicáveis",
+  salePriceUntil: (price, when) => `Preço promocional: ${price}, até ${when}`,
 };

@@ -22,6 +22,7 @@ import { askStore, yearlyAskEmail, yearlyAsksThisMonth } from "@/lib/yearly-ask"
 import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { upsertContact } from "@/lib/contacts";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setProductYearly, setStripeAccount, setSubscription, setYearlyAsk, storeForEmail } from "@/lib/store";
+import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -173,6 +174,11 @@ async function main(): Promise<void> {
 
   part("The move");
   is("a figure more than 15 minutes old is not used", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at - 16 * 60), { ok: false, reason: "stale" });
+  await redisPipeline([["SET", "nl:tier:sub_Dana00000001:lock", "another-change", "EX", 60]]);
+  const sentBefore = calls.length;
+  const held = await switchYearly(store, token, "sub_Dana00000001", preview.preview.at);
+  await redisPipeline([["DEL", "nl:tier:sub_Dana00000001:lock"]]);
+  is("another change to the membership holding the lock: busy, never an error, and nothing sent", [held, calls.length - sentBefore], [{ ok: false, reason: "busy" }, 0]);
   declined = true;
   is("a declined card changes nothing", await switchYearly(store, token, "sub_Dana00000001", preview.preview.at), { ok: false, reason: "declined" });
   is("and leaves nothing owed", calls.some((c) => c.path === "/invoices/in_Declined0001/void"), true);

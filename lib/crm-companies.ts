@@ -63,8 +63,8 @@ return 1`;
 
 const MAX_STORED_COMPANY = (MAX_COMPANY_NAME + 200 + MAX_COMPANY_NOTE) * 6 + MAX_COMPANY_PEOPLE * 35 + 256;
 
-/** What the store keeps: its companies, read and checked, and what every record in the hash weighs, read or not. */
-type Stored = { companies: Company[]; weights: Map<string, number> };
+/** What the store keeps: its companies, read and checked, what every record in the hash weighs, read or not, and the text of each record that cannot be read. */
+type Stored = { companies: Company[]; weights: Map<string, number>; unreadable: Map<string, string> };
 
 const weightOf = (id: string, record: string) => dataBytes([id, record], 1);
 
@@ -102,17 +102,21 @@ async function readStored(statsId: string): Promise<Stored> {
   const pairs = pairsOf(await oneReply(["HGETALL", companiesKey(statsId)]));
   const companies: Company[] = [];
   const weights = new Map<string, number>();
+  const unreadable = new Map<string, string>();
   for (const [id, value] of pairs) {
     weights.set(id, weightOf(id, value));
-    if (value.length > MAX_STORED_COMPANY) continue;
+    let company: Company | null = null;
     try {
-      const company = parseCompany(JSON.parse(value));
-      if (company && company.id === id) companies.push(company);
+      company = value.length > MAX_STORED_COMPANY ? null : parseCompany(JSON.parse(value));
     } catch {
-      // A record that cannot be read is left out, never guessed; it is still counted for what it weighs.
+      company = null;
     }
+    // A record that cannot be read is left out of what is shown, never guessed; it is still counted for what it
+    // weighs, and its text is kept for the person's deletion and copy, which must never pass over it (Codex G2, #2574).
+    if (company && company.id === id) companies.push(company);
+    else unreadable.set(id, value);
   }
-  return { companies: companies.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)).slice(0, MAX_COMPANIES), weights };
+  return { companies: companies.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)).slice(0, MAX_COMPANIES), weights, unreadable };
 }
 
 /** The ids of the records kept that cannot be read as companies (round 3, L3). */
@@ -162,7 +166,7 @@ const total = (weights: Map<string, number>) => [...weights.values()].reduce((su
  * "refused" (the lock was lost, nothing written) on its exact 0; anything
  * else is "unconfirmed": it may have landed, so the room it took stays taken.
  */
-async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null, drop: readonly string[] = []): Promise<"written" | "refused" | "unconfirmed"> {
+async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null, drop: readonly string[] = [], rewrite: ReadonlyMap<string, string> = new Map()): Promise<"written" | "refused" | "unconfirmed"> {
   const was = new Map(stored.companies.map((c) => [c.id, c]));
   const now = new Map(after.map((c) => [c.id, c]));
   const weights = new Map(stored.weights);
@@ -178,6 +182,12 @@ async function writeChanges(statsId: string, held: Held, stored: Stored, after: 
     if (now.has(company.id)) continue;
     weights.delete(company.id);
     pairs.push(company.id, "");
+  }
+  // Unreadable records written again with a person taken off them (forgetCompanyPerson): only ones that are there.
+  for (const [id, record] of rewrite) {
+    if (!stored.unreadable.has(id)) continue;
+    weights.set(id, weightOf(id, record));
+    pairs.push(id, record);
   }
   // Unreadable records deleted with the change (round 3, L3): only ones that are there, and never a company read.
   for (const id of drop) {
@@ -262,11 +272,51 @@ export async function forgetCompanyPerson(statsId: string | null, person: string
     const stored = await readStored(statsId);
     const after = unlinkPerson(stored.companies, person);
     const changed = after.filter((c, i) => c.people.length !== stored.companies[i].people.length);
-    if (!changed.length) return 0;
-    const outcome = await writeChanges(statsId, held, stored, after, room);
+    // A record that cannot be read as a company but names the person (Codex G2, #2574): taken off it when its list
+    // of people can be read, everything else in it kept as it is; otherwise the deletion is said not done, never done.
+    const rewrite = new Map<string, string>();
+    for (const [id, raw] of stored.unreadable) {
+      if (!raw.includes(person)) continue;
+      const edited = withoutPerson(raw, person);
+      if (edited === null) throw new Error("a company record that cannot be read names the person: the deletion is not done");
+      rewrite.set(id, edited);
+    }
+    if (!changed.length && !rewrite.size) return 0;
+    const outcome = await writeChanges(statsId, held, stored, after, room, [], rewrite);
     if (outcome !== "written") throw new Error(`companies ${outcome === "refused" ? "busy" : "unconfirmed"}: the person could not be taken off them`);
-    return changed.length;
+    return changed.length + rewrite.size;
   } finally {
     await releaseLock(held);
   }
+}
+
+/**
+ * A record that cannot be read as a company, with `person` taken off its list
+ * of people and everything else kept as it was; null when its list of people
+ * cannot be read, or the person is still named in it after that.
+ */
+function withoutPerson(raw: string, person: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  if (!Array.isArray(record.people)) return null;
+  const edited = JSON.stringify({ ...record, people: record.people.filter((p) => p !== person) });
+  return edited.includes(person) ? null : edited;
+}
+
+/**
+ * The companies a person is linked to, for their copy (lib/person-copy.ts):
+ * CompaniesUnreadable when a record that cannot be read names them, so their
+ * copy is never said complete while it leaves a link out (Codex G2, #2574).
+ */
+export async function companiesOfPerson(statsId: string | null, person: string): Promise<Company[]> {
+  if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
+  const stored = await readStored(statsId);
+  if ([...stored.unreadable.values()].some((raw) => raw.includes(person))) throw new CompaniesUnreadable("a record that cannot be read names this person");
+  return stored.companies.filter((c) => c.people.includes(person));
 }

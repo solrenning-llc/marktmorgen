@@ -77,7 +77,7 @@ import { heldPaymentsOf } from "@/lib/closing-holds";
 import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
-import { readCompanies } from "@/lib/crm-companies";
+import { companiesOfPerson } from "@/lib/crm-companies";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
@@ -201,7 +201,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     ];
   },
   // The store's companies you are linked to, by name and site; the store's note about a company is the store's, left out.
-  "lib/crm-companies.ts": async (s) => (await readCompanies(s.statsId)).filter((c) => c.people.includes(s.person)).map((c) => ({ company: c.name, website: c.website })),
+  "lib/crm-companies.ts": async (s) => (await companiesOfPerson(s.statsId, s.person)).map((c) => ({ company: c.name, website: c.website })),
   "lib/buyer-profile.ts": async (s) => (await readPersonNotes(s.statsId, s.person)).map((n) => ({ note: n.text, at: iso(n.at) })),
   "lib/form-store.ts": async (s) => {
     const out: unknown[] = [];

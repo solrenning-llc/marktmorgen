@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { CARD_REFUSALS, MAX_CARD_EMAIL, MAX_CARD_NAME, MAX_CARD_NOTE, MAX_CARD_TITLE, dropCreatorCard, readCreatorCard, saveCreatorCard } from "@/lib/creator-card";
+import { CARD_REFUSALS, CardSaveUnconfirmed, MAX_CARD_EMAIL, MAX_CARD_NAME, MAX_CARD_NOTE, MAX_CARD_TITLE, dropCreatorCard, readCreatorCard, saveCreatorCard } from "@/lib/creator-card";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });
+    if (error instanceof CardSaveUnconfirmed) return Response.json({ ok: false, error: "unconfirmed", message: error.message }, { status: 503 });
     console.error("saving the business card failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

@@ -4,6 +4,7 @@ import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { passCookieName } from "@/lib/learn";
+import { lockedFor } from "@/lib/two-step";
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import {
   CREATOR,
@@ -120,6 +121,10 @@ export async function POST(request: NextRequest) {
   const id = store.community.id;
   const { config, owner, key } = viewer;
   if (OWNER_ONLY.has(action) && !owner) return back(fromPage, "forbidden");
+  // The creator is known here by the address, not by studioAccess: a session let in without its
+  // second step (lib/two-step.ts) may not email every member nor delete for good, until it is over.
+  const lockedAct = action === "post" && form.get("kind") === "announcement" && form.get("email") === "1" ? "email" : action;
+  if (owner && (await lockedFor(request, "community", lockedAct))) return back(fromPage, "locked");
   // Each act is one of the store's buyer actions, or the creator's studio
   // requests, taken before anything is written (lib/buyer-actions.ts).
   // Deleting what one wrote is not: it can only follow an act that was.

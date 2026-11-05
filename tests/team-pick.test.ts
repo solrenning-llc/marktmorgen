@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");
   is(
     "the page asks with a labeled choice and a button, and sends the chosen host with the time",
-    [page.includes('<form method="get" className="mt-6" data-host-pick="">'), page.includes("<label htmlFor={`host-${product.id}`}"), page.includes('<option value="">{b.hostAny}</option>'), page.includes('<button type="submit" className="btn btn-secondary">{b.hostShow}</button>'), page.includes("host={pickedHost}")],
+    [page.includes('<form method="get" className="mt-6" data-host-pick="">'), page.includes("<label htmlFor={`host-${product.id}`}"), page.includes('<option value="">{b.hostAny}</option>'), page.includes('<button type="submit" className="btn st-btn-ghost">{b.hostShow}</button>'), page.includes("host={pickedHost}")],
     [true, true, true, true, true],
   );
   const picker = readFileSync("components/slot-picker.tsx", "utf8");

@@ -25,7 +25,19 @@ export async function checkClientBundles(root) {
    catch(error){failures.push({file:relative(root,file),errors:error.errors?.map(item=>item.text)??[String(error)]});}
   }
  }));
+ failures.push(...await checkKeptOut(root));
  return {total:entries.length,failed:failures.length,failures};
+}
+/** Server-sized data a buyer's page must never carry: the store assistant's chat only reads two constants of its rules, never the look-alike table (lib/confusables-latin.ts). */
+const KEPT_OUT=[{entry:'components/store-assistant.tsx',module:'lib/confusables-latin.ts'}];
+export async function checkKeptOut(root) {
+ const failures=[];
+ for(const {entry,module} of KEPT_OUT){
+  const result=await build({entryPoints:[join(root,entry)],absWorkingDir:root,bundle:true,write:false,metafile:true,platform:'browser',format:'esm',nodePaths:[join(root,'node_modules')],external:['react','react/*','next/*'],tsconfig:join(root,'tsconfig.json'),logLevel:'silent'});
+  const bytes=Object.values(result.metafile.outputs).reduce((sum,output)=>sum+(output.inputs[module]?.bytesInOutput??0),0);
+  if(bytes)failures.push({file:entry,errors:[`carries ${bytes} bytes of ${module}`]});
+ }
+ return failures;
 }
 if(typeof process !== 'undefined' && process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
  const result=await checkClientBundles(resolve(dirname(fileURLToPath(import.meta.url)),'..'));

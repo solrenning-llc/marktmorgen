@@ -219,7 +219,20 @@ export const emptyBlocksLeft = (): BlocksLeft => ({ pictures: 0, refs: 0, review
  * the same page.
  */
 export function copiedBlocks(blocks: readonly PageBlock[], products: IdMap, forms: IdMap, left: BlocksLeft): PageBlock[] {
-  return blocks.map((original) => {
+  return blocks.flatMap((original): PageBlock[] => {
+    // A booking block (552 [BB1]) books one call: the call's copy, or the block is left out and counted, since
+    // without a call it has nothing to book (lib/sales-page.ts would not keep it). A call is never copied today
+    // (skipReason "call"), so in practice it is always left out.
+    if (original.kind === "booking") {
+      const mapped = products(original.product);
+      if (!mapped) {
+        left.refs += 1;
+        return [];
+      }
+      const block: PageBlock = { ...original, product: mapped };
+      delete block.saved;
+      return [block];
+    }
     const block = { ...original } as PageBlock;
     delete block.saved;
     if (block.kind === "pictures" && block.items.length) {
@@ -229,6 +242,14 @@ export function copiedBlocks(blocks: readonly PageBlock[], products: IdMap, form
     if (block.kind === "feature" && block.picture) {
       left.pictures += 1;
       block.picture = null;
+    }
+    // A row's pictures are the first store's too (375 [TB1]): each one left out and counted, the other parts kept in order.
+    if (block.kind === "row") {
+      const pictures = block.columns.reduce((n, column) => n + column.filter((element) => element.kind === "image").length, 0);
+      if (pictures) {
+        left.pictures += pictures;
+        block.columns = block.columns.map((column) => column.filter((element) => element.kind !== "image"));
+      }
     }
     if (block.kind === "reviews" && block.first.length) {
       left.reviewPicks += block.first.length;
@@ -244,7 +265,7 @@ export function copiedBlocks(blocks: readonly PageBlock[], products: IdMap, form
       if (!mapped) left.refs += 1;
       block.form = mapped;
     }
-    return block;
+    return [block];
   });
 }
 

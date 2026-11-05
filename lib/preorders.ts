@@ -23,7 +23,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { sendEmail } from "@/lib/email";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
-import { refundedInFull } from "@/lib/refunds";
+import { givenBack } from "@/lib/refunds";
 import { canSell } from "@/lib/store-checkout";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -379,7 +379,8 @@ export async function runPreorderReleases(
       try {
         if (entry.pi) {
           const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(entry.pi)}?expand[]=latest_charge`);
-          if (refundedInFull(payment)) {
+          // Refunded in full or lost to a dispute (lib/refunds.ts): never handed over.
+          if (await givenBack(store.stripeAccountId, payment)) {
             await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
             continue;
           }

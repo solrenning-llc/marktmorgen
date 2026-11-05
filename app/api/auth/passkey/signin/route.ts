@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { LockBusyError } from "@/lib/redis-lock";
+import { repairMove } from "@/lib/move-repair";
 import { isRedisConfigured } from "@/lib/redis";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { PASSKEY_COOKIE, signInOptions, signInWith } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, listPasskeys, pendingRemoval, signInOptions, signInWith, unlessSetToGo } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
@@ -48,17 +50,44 @@ export async function POST(request: NextRequest) {
     if (body.action === "verify") {
       const nonce = request.cookies.get(PASSKEY_COOKIE)?.value ?? "";
       const answer = body.response as AuthenticationResponseJSON | undefined;
-      const email = answer && typeof answer === "object" ? await signInWith(nonce, answer) : null;
-      if (!email) return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
+      const signed = answer && typeof answer === "object" ? await signInWith(nonce, answer) : null;
+      const email = signed?.email ?? null;
+      if (!signed || !email) return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
+      // A move left broken is repaired before any session opens, as at every other login (lib/move-repair.ts):
+      // nobody gets into a copy of the store the repair is about to settle. When the repair moved this passkey
+      // to the address that holds the store, the person is asked to try again, and lands there.
+      await repairMove(email).catch((error) => console.error("repairing a broken move failed", error));
+      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
 
+      // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
+      const id = await openSession(email, "passkey", signed.id);
+      // Removed between its check and this session (its wait ran out, applied here first, or it was removed
+      // in the studio): the session it would have opened is closed again, as the removal closes what it opened.
+      const waiting = await pendingRemoval(email);
+      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) {
+        await endSession(id);
+        return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
+      }
       // As with the emailed link: whatever session this browser held before
       // is closed, and only the new one is kept.
       const previous = request.cookies.get(SESSION_COOKIE)?.value;
-      if (previous) await endSession(previous);
-      const id = await openSession(email);
-      // A passkey is the second step: a pending request to turn two-step login off is called off (lib/two-step.ts).
-      await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
-      await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
+      if (previous && previous !== id) await endSession(previous);
+      // A passkey is the second step: a pending request to turn two-step login off is called off, and what
+      // the recovery address opened is closed (lib/two-step.ts). Not by a passkey that is itself set to be
+      // removed (owner C3-88): whoever holds it may not be its owner, so it calls off nothing at all, not its
+      // own removal, not another passkey's (two passkeys set to be removed never keep each other), not the
+      // app's reset, not what the recovery address opened; and the session it opens has no second step
+      // (lib/second-step-gate.ts liveSecondStep).
+      // Read under the account's lock as it was checked (lib/passkeys.ts signInWith), or set to go since.
+      // No login calls a passkey removal off, this one included: only "Keep it" does (lib/passkeys.ts).
+      // Checked again under the account's lock, held while it runs (lib/passkeys.ts unlessSetToGo).
+      const doomed = signed.doomed || waiting?.ids.includes(signed.id) === true;
+      if (!doomed) {
+        await unlessSetToGo(email, signed.id, async () => {
+          await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
+          await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
+        }).catch((error) => console.error("calling off a two-step reset failed", error));
+      }
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));
       response.headers.append("Set-Cookie", `${PASSKEY_COOKIE}=; Path=/api/auth/passkey; Max-Age=0; HttpOnly; SameSite=Strict${secure}`);
@@ -70,6 +99,8 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
+    // Another change to the same passkeys held them past the wait (lib/passkeys.ts): said so, to try again.
+    if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
     console.error("logging in with a passkey failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

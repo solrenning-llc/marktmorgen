@@ -324,11 +324,21 @@ async function countUnknown(what: UnknownCount, now = Date.now()): Promise<void>
 export async function payoutUnknownMonth(month: string): Promise<Record<UnknownCount, number> | null> {
   if (!/^\d{4}-\d{2}$/.test(month) || !isRedisConfigured()) return null;
   try {
-    // One answer, to the one command sent, of exactly three counts (review of Codex G on #2681).
-    const reply: unknown = await redisPipeline([["HMGET", unknownMonthKey(month), "unknown", "settled", "manual"]]);
-    if (!Array.isArray(reply) || reply.length !== 1) return null;
-    const raw: unknown = reply[0];
-    if (!Array.isArray(raw) || raw.length !== 3) return null;
+    // One answer, to the one command sent, of exactly three counts (review of Codex G on #2681), each read only as
+    // the reply's own data: an inherited slot or a getter is not known and is never run (Codex H2 on #2681).
+    const own = (list: unknown, length: number): unknown[] | null => {
+      if (!Array.isArray(list) || list.length !== length) return null;
+      const out: unknown[] = [];
+      for (let i = 0; i < length; i += 1) {
+        const slot = Object.getOwnPropertyDescriptor(list, String(i));
+        if (!slot || !Object.hasOwn(slot, "value")) return null;
+        out.push(slot.value);
+      }
+      return out;
+    };
+    const reply = own(await redisPipeline([["HMGET", unknownMonthKey(month), "unknown", "settled", "manual"]]), 1);
+    const raw = reply ? own(reply[0], 3) : null;
+    if (!raw) return null;
     const [unknown, settled, manual] = raw.map((v) => (v === null ? 0 : typeof v === "string" && /^\d{1,15}$/.test(v) ? Number(v) : NaN));
     return [unknown, settled, manual].every(Number.isSafeInteger) ? { unknown, settled, manual } : null;
   } catch {

@@ -1,14 +1,17 @@
 /** Pure exact-helper extraction in an isolated realm; no global poisoning. */
 import { readFileSync } from "node:fs";
-import { stripTypeScriptTypes } from "node:module";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import { runInNewContext } from "node:vm";
+import type * as TypeScript from "typescript";
 import { done, is } from "./check";
 
 const source = readFileSync("lib/call-reminders.ts", "utf8");
 const start = source.indexOf("function dueQueue(");
 const end = source.indexOf("async function remindBuyer", start);
 if (start < 0 || end < 0) throw Error("Exact helper extraction missing");
-const helper = stripTypeScriptTypes(source.slice(start, end));
+const ts = createRequire(join(process.cwd(), "package.json"))("typescript") as typeof TypeScript;
+const helper = ts.transpileModule(source.slice(start, end), { compilerOptions: { target: ts.ScriptTarget.ES2017 } }).outputText;
 const result = runInNewContext(`${helper}
 const good=dueQueue([[]],1800000000000);
 let getterCalls=0;

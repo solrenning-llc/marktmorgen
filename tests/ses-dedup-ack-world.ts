@@ -1,6 +1,7 @@
 /** Only the authenticated notification boundary is simulated. POST is real. */
-import type { SesEvent } from "../lib/sns";
+import type { SesEvent, SnsMessage } from "../lib/sns";
 export { readSns, readSesEvent, snsUrl } from "../lib/sns";
+export type SesConfig = { roleArn: string; key: null; region: string; configurationSet: string; topicArn: string };
 
 export const world: {
   reply: unknown;
@@ -22,16 +23,16 @@ export async function redisPipeline(commands: (string | number)[][]): Promise<un
   if (world.throws) throw new Error("Synthetic lost claim response");
   return world.reply as unknown[];
 }
-export function sesConfig() {
-  return { region: "us-east-1", topicArn: "arn:aws:sns:us-east-1:000000000000:synthetic" };
+export function sesConfig(): SesConfig {
+  return { roleArn: "synthetic", key: null, region: "us-east-1", configurationSet: "synthetic", topicArn: "arn:aws:sns:us-east-1:000000000000:synthetic" };
 }
 export function isSesConfigured() { return true; }
 /** Signature verification is synthetic; its cryptography is tested by sns.test.ts. */
-export async function verifySns() { return "ok" as const; }
+export async function verifySns(message: SnsMessage, config: SesConfig) { void message; void config; return "ok" as const; }
 export async function recordSesEvent(event: SesEvent) {
   world.events.push(event);
   return "counted" as const;
 }
-export async function withinLimit() { return true; }
-export function clientAddress() { return "synthetic-client"; }
-export async function limited(request: Request) { return request; }
+export async function withinLimit(...args: unknown[]) { void args; return true; }
+export function clientAddress(request: Request) { void request; return "synthetic-client"; }
+export async function limited(request: Request, maxBytes: number) { void maxBytes; return request; }

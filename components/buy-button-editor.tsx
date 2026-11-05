@@ -176,7 +176,7 @@ export function BuyButtonEditor({
 
       {kind === "button" && colorsChanged ? (
         <p className="mt-3 text-sm text-ink-soft">
-          These colors are hard to read. The code uses dark and white so the words are clear.{" "}
+          These colors are hard to read. The code uses readable colors so the words are clear.{" "}
           <Link href="/studio#look" prefetch={false} className="font-semibold underline underline-offset-4">Choose another store color</Link>.
         </p>
       ) : null}

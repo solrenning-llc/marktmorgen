@@ -23,6 +23,14 @@ const read = <T,>(work: Promise<T>, what: string): Promise<Read<T>> =>
     return { ok: false as const };
   });
 
+/*
+ * Only what the code does (rule 27): the closing day tries the refunds this page lists (lib/closing-refunds.ts,
+ * giveBackUnused over unusedRows), and one can still fail. Members the hold never wrote down (past its call
+ * budget, failed, on a payment plan, or paid before it ran) are never listed, so are the creator's to refund.
+ */
+const CAN_FAIL = "A refund can fail, for example when your balance is too low.";
+const UNLISTED = "If someone paid for time after that day and is not listed, refund them in Stripe.";
+
 const dayWords = (ms: number) => new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
 /**
@@ -63,19 +71,19 @@ export default async function ClosingRefundsPage({ searchParams }: Params) {
         </nav>
         <h1 className="t-h2 mt-3">Refund the time your members paid for after your store closes</h1>
         {!closingRead.ok ? (
-          <p className="mt-4 max-w-2xl text-ink-soft">{`We could not check whether your store is closing just now, so no refunds are shown. Please reload this page in a minute to try again. If your store is closing, we try to make the refunds this page lists on its closing day, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this page's list, refund them yourself in Stripe.`}</p>
+          <p className="mt-4 max-w-2xl text-ink-soft">{`We could not check whether your store is closing just now. Please reload this page in a minute. If your store is closing, on its closing day we try to make the refunds this page lists, from your Stripe balance. ${CAN_FAIL} ${UNLISTED}`}</p>
         ) : !closing ? (
           <p className="mt-4 max-w-2xl text-ink-soft">Your store is not closing, so there is nothing to refund here.</p>
         ) : !summaryRead?.ok ? (
-          <p className="mt-4 max-w-2xl text-ink-soft">{`We could not read your members' payments just now, so no refunds are shown. Please reload this page in a minute to try again. Your store is set to close on ${dayWords(closing.day)}. On that day, we try to make the refunds this page lists, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this page's list, refund them yourself in Stripe.`}</p>
+          <p className="mt-4 max-w-2xl text-ink-soft">{`We could not read your members' payments just now. Please reload this page in a minute. Your store is set to close on ${dayWords(closing.day)}. On that day we try to make the refunds this page lists, from your Stripe balance. ${CAN_FAIL} ${UNLISTED}`}</p>
         ) : !rows.length ? (
-          <p className="mt-4 max-w-2xl text-ink-soft">{`No member has paid for time after ${dayWords(closing.day)}, the day your store closes, that is still to be refunded.`}</p>
+          <p className="mt-4 max-w-2xl text-ink-soft">{`This page lists no refund to make. Your store is set to close on ${dayWords(closing.day)}. ${UNLISTED}`}</p>
         ) : (
           <>
             <div className="mt-4 max-w-2xl space-y-3 text-ink-soft">
               <p>{`Your store closes on ${dayWords(closing.day)}. These members paid for time after that day. Each refund is the unused part of their last payment: the payment times the share of its period that falls after that day.`}</p>
               <p>The money comes from your own Stripe account. Marktmorgen never pays it and never takes any of it. If your balance does not cover a refund, that refund is not made, and you are told here.</p>
-              <p>{`If you do nothing, we try to make the same refunds on ${dayWords(closing.day)}, from your Stripe balance. A refund can still fail, for example when your balance is too low. If someone paid for time after that day and is not on this list, refund them yourself in Stripe. Starting a plan again before then keeps your store, and then nothing is refunded.`}</p>
+              <p>{`If you do nothing, we try to make the same refunds on ${dayWords(closing.day)}, from your Stripe balance. ${CAN_FAIL} ${UNLISTED}${closing.today ? "" : " Starting a plan again before then keeps your store, and then nothing is refunded."}`}</p>
             </div>
             <section aria-labelledby="refund-list" className="mt-8">
               <h2 id="refund-list" className="t-h3">{`${rows.length} ${rows.length === 1 ? "refund" : "refunds"}, ${total} in all`}</h2>

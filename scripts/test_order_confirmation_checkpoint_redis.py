@@ -20,9 +20,68 @@ class LocalRedis(Redis):
         self.stream = self.sock.makefile("rb")
 
 
+def measure_commands(client, run):
+    """Count one unchanged application EVAL, isolated from other clients.
+
+    MULTI/EXEC are test infrastructure outside the snapshots. Subtract only
+    the first observer INFO, preserving every command invoked by the Lua.
+    The callback queues exactly one EVAL; it must not inspect its reply.
+    """
+    def counts(raw):
+        assert isinstance(raw, str)
+        return {m[1]: int(m[2]) for m in re.finditer(r"cmdstat_([^:]+):calls=(\d+),", raw)}
+    assert client.command("MULTI") == "OK"
+    try:
+        assert client.command("INFO", "COMMANDSTATS") == "QUEUED"
+        assert run() == "QUEUED"
+        assert client.command("INFO", "COMMANDSTATS") == "QUEUED"
+        executed = client.command("EXEC")
+    except Exception:
+        try:
+            client.command("DISCARD")
+        except Exception:
+            pass
+        raise
+    assert isinstance(executed, list) and len(executed) == 3, executed
+    before, after = counts(executed[0]), counts(executed[2])
+    delta = {name: after.get(name, 0) - before.get(name, 0) for name in set(before) | set(after)}
+    assert delta.get("info", 0) >= 1, delta
+    delta["info"] -= 1
+    assert delta.get("eval") == 1 and delta.get("multi", 0) == 0 and delta.get("exec", 0) == 0, delta
+    assert all(value >= 0 for value in delta.values()), delta
+    return executed[1], sum(delta.values())
+
+
+def measurement_controls():
+    observer = LocalRedis()
+
+    class HealthcheckedRedis(LocalRedis):
+        def command(self, *parts):
+            result = super().command(*parts)
+            # A separate client models a service health check. Its command
+            # must not be charged as an application Lua command.
+            if parts[0] == "INFO":
+                assert observer.command("PING") == "PONG"
+            return result
+
+    client = HealthcheckedRedis()
+    try:
+        result, calls = measure_commands(client, lambda: client.command("EVAL", "return redis.call('PING')", 0))
+        assert result == "PONG" and calls == 2, (result, calls)
+        # An INFO inside the application Lua is real work, unlike the single
+        # observer INFO needed by the measurement itself.
+        _, calls = measure_commands(client, lambda: client.command("EVAL", "return redis.call('INFO','server')", 0))
+        assert calls == 2, calls
+        print("PASS: external health PING is excluded; application PING/INFO remain billed")
+    finally:
+        client.close()
+        observer.close()
+
+
 def main():
     if os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1":
         raise RuntimeError("Run only against disposable CI Redis on loopback")
+    measurement_controls()
     root = Path(__file__).resolve().parents[1]
     source = (root / "lib/orders.ts").read_text(encoding="utf-8")
     match = re.search(r"export const COMMIT_ORDER_CONFIRMATION = `([^`]+)`;", source)
@@ -48,15 +107,10 @@ def main():
     def state():
         return [redis.command("GET", keys[1]), redis.command("HGETALL", keys[2]), redis.command("HGETALL", keys[3])]
 
-    def command_stats():
-        return {m[1]: int(m[2]) for m in re.finditer(r"cmdstat_([^:]+):calls=(\d+),", redis.command("INFO", "COMMANDSTATS")) if m[1] != "info"}
-
     try:
         setup()
-        before = command_stats()
-        assert commit() == 1
-        after = command_stats()
-        commands = sum(n - before.get(name, 0) for name, n in after.items())
+        result, commands = measure_commands(redis, commit)
+        assert result == 1
         assert commands <= 27, commands
         assert state() == ["1", [str(hour), "1"], [str(hour), "8960"]]
         assert redis.command("PTTL", keys[0]) > 399 * 86_400_000

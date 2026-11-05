@@ -2298,3 +2298,31 @@ const pt: GivingWords = {
 };
 
 export const GIVING_WORDS: Record<LanguageCode, GivingWords> = { en, es, fr, de, it, nl, pt };
+
+/** The giving words of a store with this language; English for anything else. */
+export function givingWords(language: unknown): GivingWords {
+  return GIVING_WORDS[parseLanguage(language)];
+}
+
+/**
+ * What the license key box says (components/licence-key-box.tsx), every
+ * sentence already said with the store's name and the product's title in it.
+ */
+export function licenceKeyBoxWords(language: unknown, storeName: string, title?: string) {
+  const g = givingWords(language);
+  return {
+    label: title ? g.keyLabelFor(title) : g.keyLabel,
+    copy: g.copy,
+    copied: g.copied,
+    yours: g.keyYours,
+    revoked: g.keyRevoked(storeName),
+    waiting: g.keyWaiting(storeName),
+    failed: g.keyFailed,
+  };
+}
+
+/** What the box with the link to pass on says (components/group-link-box.tsx). */
+export function groupLinkBoxWords(language: unknown) {
+  const g = givingWords(language);
+  return { label: g.linkToPass, copy: g.copyLink, copied: g.copied };
+}

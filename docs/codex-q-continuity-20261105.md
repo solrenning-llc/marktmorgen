@@ -10,7 +10,7 @@ This is an engineering continuity checkpoint, not a merge/deployment or producti
 | [2448](https://github.com/solrenning-llc/marktmorgen/pull/2448) | codex/q-erasure-store-evidence | e688593dbb7fb26fd5d584d0ea1ad4e62e00e705 | D2: SEM ACHADO / PODE ENTRAR, review5779620544. Nine final green checks required. |
 | [2535](https://github.com/solrenning-llc/marktmorgen/pull/2535) | codex/q-product-update-erasure-evidence | 1be4b3fd41366c11d70b98139ec5da78d8c02815 | AA's queue MEDIUM repaired, return requested in comment6649459112. Await exact-head rereview and nine final green checks. |
 | [2538](https://github.com/solrenning-llc/marktmorgen/pull/2538) | codex/q-review-request-erasure-evidence | 9fa4a700734c81b1b3d9c7e15bcc162396ae974e | Independent review requested, comment6649430431; nine final checks required. |
-| [2541](https://github.com/solrenning-llc/marktmorgen/pull/2541) | codex/q-erasure-list-evidence | 0e960adb85e549319ad67076927e957769187534 | J announced review on this exact head; request6649430650. Nine final checks required. |
+| [2541](https://github.com/solrenning-llc/marktmorgen/pull/2541) | codex/q-erasure-list-evidence | 0e960adb85e549319ad67076927e957769187534 | J: SEM ACHADO / PODE ENTRAR, review5779764553. Nine final checks required. |
 
 No product was merged in this work period. Latest checks of2438 were nine pending workflows;2448 had nine scope checks queued/in progress. These are NOT nine green aggregators. Never cancel/rerun queued CI or move a head merely to escape the queue.
 
@@ -54,7 +54,7 @@ Original RED88a43976b754821a5595f2e2ce9281cce175ee5c:18/17 failures. AA proof cc
 
 Exact three-slot recipient evidence before claim/mint/reserve/send. Unknown schedules the same pending member at the EXISTING one-hour read retry; confirmed erased buyers are excluded after recovery. No command/key/retention/visible limit/provider addition.
 
-Durable RED9540c3e952c617bc7b67363c7afba3d0774f2913:19/18 failures with valid-send control passing. Same final19/19, related reminder56/elsewhere39/mail-from10/erasure32. Typegen/global TypeScript/lint/scanner3597/0/reservation2/diff pass. Both blobs verified.
+Durable RED9540c3e952c617bc7b67363c7afba3d0774f2913:19/18 failures with valid-send control passing. Same final19/19, related reminder56/elsewhere39/mail-from10/erasure32. Typegen/global TypeScript/lint/scanner3597/0/reservation2/diff pass. Both blobs verified. J announced the exact-head independent review in comment6649484108; do not duplicate.
 
 Fixture corrections were documented BEFORE changing the fixture: initial synthetic credential was not allowlisted, replaced with the existing allowlisted synthetic transport credential before durable RED. MemoryRedis lacks ZADD XX; five assertions against native Redis7.4.2 proved exact existing-member-only behavior. ONLY that operation is emulated in the isolated test wrapper. Retry score/recovery assertions were retained; RED rerun on old product. Shared MemoryRedis untouched.
 
@@ -62,7 +62,7 @@ Fixture corrections were documented BEFORE changing the fixture: initial synthet
 
 Same Lua/commands/keys/retention/positional tombstones. One dense reply with nonnegative safe integer required; unknown throws, no replay/false zero. Existing erasePerson catches the failed waitlist part and returns incomplete. Same deletion can recover after exact evidence.
 
-RED ba9231a3de6f50bd562def936ffa0de37123322c:17/16 failures, valid-zero/count control passes. Same final17/17 includes real erasePerson with script not applied/applied-but-ACK-lost; linked erasure32/full21. Typegen/global TypeScript/lint/scanner3601/0/reservation2/diff pass. Whole local/remote tree76ea52d0b478327b8460ecd32a7a21c1e4399b53 identical. Native/browser/provider not rerun; no such claim. J reviewing.
+RED ba9231a3de6f50bd562def936ffa0de37123322c:17/16 failures, valid-zero/count control passes. Same final17/17 includes real erasePerson with script not applied/applied-but-ACK-lost; linked erasure32/full21. Typegen/global TypeScript/lint/scanner3601/0/reservation2/diff pass. Whole local/remote tree76ea52d0b478327b8460ecd32a7a21c1e4399b53 identical. Native/browser/provider not rerun; no such claim. J completed the exact-head review:5779764553, SEM ACHADO / PODE ENTRAR with nine final green checks. Additional waitlist32/tokens6/registries24+7 pass. Independent four controls at codex/j-review-2541-controls/95d5f52d97a7e76aa867b59170383afec24c2c09 confirm thrown transport before/after application, inherited-slot rejection and multi-list/zero behavior. The waitlist HDEL candidate remains explicitly outside this helper-only opinion.
 
 ## Independent review completed for X
 
@@ -86,4 +86,4 @@ npm dependencies installed. Scratch runners /tmp/codex-q-run-tests.mjs and per-w
 
 CLI git fetch works; push lacks credentials. Use GitHub connector blobs/trees/commits/expected-head ref updates. Never force another head or edit another branch. For large files, stdout may silently truncate: apply small unique grouped patches to the exact remote baseline in JS, create_blob, compare SHA with local git hash-object. All published blobs/trees above were verified. Metadata/checks may move after this snapshot: re-read own PR state before merging.
 
-Next: return AA on2535, obtain peer review2538/J2541, resolve coordinator-owned2438 reservation check, then merge each own product only with its final nine greens. Preserve two already qualified may-merge opinions. No all-clear/production claim while these remain.
+Next: return AA on2535 and J on2538, resolve coordinator-owned2438 reservation check, then merge each own product only with its final nine greens. Preserve THREE already qualified may-merge opinions:2438/J,2448/D2,2541/J. No all-clear/production claim while these remain.

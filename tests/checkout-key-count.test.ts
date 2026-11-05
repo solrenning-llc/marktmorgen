@@ -33,7 +33,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 // The pool's count is read with LLEN on the pool's own key; every other
 // command reaches the stand-in Redis unchanged.
-type Answer = "real" | "throws" | "text" | "null" | "negative" | "fraction";
+type Answer = "real" | "throws" | "text" | "null" | "negative" | "fraction" | "empty" | "sparse" | "extra";
 let answer: Answer = "real";
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -41,6 +41,9 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
   if (!asksPool || answer === "real") return realPipeline(commands);
   if (answer === "throws") throw new Error("Synthetic Redis failure reading the key pool");
   const replies = await realPipeline(commands);
+  if (answer === "empty") return [];
+  if (answer === "sparse") return Array(replies.length);
+  if (answer === "extra") return [...replies, 0];
   return replies.map((reply, i) =>
     commands[i][0] === "LLEN" && String(commands[i][1]).endsWith(":pool")
       ? answer === "text" ? "many" : answer === "null" ? null : answer === "negative" ? -1 : 0.5
@@ -83,7 +86,7 @@ async function main(): Promise<void> {
   is("a key left: on to Stripe", await open("real"), ["https://checkout.stripe.com/c/pay/test", 1]);
 
   part("A count that could not be read never sells (SG2, finding 11)");
-  for (const as of ["throws", "text", "null", "negative", "fraction"] as const) {
+  for (const as of ["throws", "text", "null", "negative", "fraction", "empty", "sparse", "extra"] as const) {
     is(`the pool's count ${as === "throws" ? "fails to load" : `answers ${as}`}: the plain error, Stripe never reached`, await open(as), ["https://marktmorgen.com/@keycountshop?status=error", 0]);
   }
 

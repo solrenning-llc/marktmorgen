@@ -6,7 +6,6 @@ import {GET} from '@/app/[handle]/contact/vcard/route';
 import ContactPage,{generateMetadata} from '@/app/[handle]/contact/page';
 import {claimHandle,ensureStatsId,ensureStoreId,setSubscription,storeForEmail} from '@/lib/store';
 import {saveCreatorCard} from '@/lib/creator-card';
-import {takePublicRequest,isResting} from '@/lib/traffic';
 import {store as redis} from './redis-stub';
 import {paidPeriod} from './billing-period-fixture';
 globalThis.fetch=async()=>{throw Error('No external service in G2 review');};

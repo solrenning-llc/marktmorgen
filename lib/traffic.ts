@@ -266,8 +266,11 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
   // past it this connection alone is refused, and nothing is counted against the store.
   if (client && (await overShare(folder, window, whole, client, units, now))) return false;
   const key = requestsKey(folder, window.id);
-  const [count] = await redisPipeline([["INCRBY", key, units]]);
-  const n = Number(count);
+  const reply = await redisPipeline([["INCRBY", key, units]]);
+  // Only Redis's own answer to this one command counts (Codex G2 on #2583):
+  // one reply, an integer at least `units`. Anything else, a `true`, a text
+  // or a second item, is a count that cannot be made: the request is refused.
+  const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
   if (!Number.isSafeInteger(n) || n < units) return false;
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
   return n <= limit;

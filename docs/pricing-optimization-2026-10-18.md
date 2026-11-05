@@ -153,13 +153,13 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |
 | --- | --- | --- | --- | --- | --- | --- |
 | ε = -0.5 | A | $129 | $889 | $1,989 | yes (61.79% / 61.92%; 62.00% / 61.84%; 62.06% / 61.86%) | yes |
-| ε = -0.5 | C | $129 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $889 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $1,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (62.72% / 62.95%; 63.20% / 63.19%; 63.23% / 63.19%) | yes |
+| ε = -0.5 | C | $129 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $889 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $1,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (62.72% / 62.95%; 63.21% / 63.19%; 63.23% / 63.19%) | yes |
 | ε = -1 | A | $129 | $889 | $1,989 | yes (61.79% / 61.92%; 62.00% / 61.84%; 62.06% / 61.86%) | yes |
-| ε = -1 | C | $129 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $889 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $1,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (62.72% / 62.95%; 63.20% / 63.19%; 63.23% / 63.19%) | yes |
+| ε = -1 | C | $129 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $889 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $1,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (62.72% / 62.95%; 63.21% / 63.19%; 63.23% / 63.19%) | yes |
 | ε = -1.5 | A | $79 | $449 | $989 | yes (60.59% / 60.81%; 60.35% / 60.03%; 60.41% / 60.02%) | yes |
-| ε = -1.5 | C | $49 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $129 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $279 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.10% / 61.76%; 60.38% / 60.28%; 60.45% / 60.14%) | yes |
+| ε = -1.5 | C | $49 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $129 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $279 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.10% / 61.76%; 60.39% / 60.28%; 60.45% / 60.14%) | yes |
 | ε = -2 | A | $79 | $449 | $989 | yes (60.59% / 60.81%; 60.35% / 60.03%; 60.41% / 60.02%) | yes |
-| ε = -2 | C | $49 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $129 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $279 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.10% / 61.76%; 60.38% / 60.28%; 60.45% / 60.14%) | yes |
+| ε = -2 | C | $49 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $129 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $279 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (61.10% / 61.76%; 60.39% / 60.28%; 60.45% / 60.14%) | yes |
 
 **What the scenarios agree on, and where they part.** Under A the lowest price that keeps 60% with every #553 figure is Store $79, Studio $449, Scale $989 (today $69, $449, $999): nothing near the band medians is possible without cutting figures. With |ε| at most 1 (−0.5, −1), constant-elasticity demand has no finite best price, and the program goes to the top of the grid: that is the model's shape, not a finding that the market would pay it. With |ε| above 1 (−1.5, −2) the best price is that lowest one. So the scenarios disagree on direction and agree only on the floor.
 
@@ -178,8 +178,8 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Plan | 1× today's price | 1.25× today's price | 1.5× today's price | 2× today's price |
 | --- | --- | --- | --- | --- |
 | Store | $69: 1000 | $79: 213 | $99: 87 | $129: 49 |
-| Studio | $449: 828 | $559: 29 | $669: 15 | $889: 8 |
-| Scale | $999: 203 | $1,239: 13 | $1,489: 7 | $1,989: 4 |
+| Studio | $449: 817 | $559: 29 | $669: 15 | $889: 8 |
+| Scale | $999: 202 | $1,239: 13 | $1,489: 7 | $1,989: 4 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.
 
@@ -246,7 +246,7 @@ Store carries no list email at #553 and lib/plan.ts gates broadcasts to Studio (
 | products | 2,000 products | 150 | Podia Shaker | Stan Creator Pro, Thinkific Start, Thinkific Grow, Podia Earthquaker | **no** |
 | fee | 0% of a sale | 0% | Stan Creator Pro, Beacons Creator Max, Kajabi Basic, ClickFunnels Launch, ClickFunnels Scale, Teachable Builder, Teachable Growth, Systeme.io Unlimited, Podia Shaker, Podia Earthquaker | — | yes |
 
-Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $6,669; storage $1,389; video $489; all of them together **$7,279 a month** (today $449). Where a competitor in the band prints "unlimited" (list-email, storage, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
+Raised to the band's best finite figure, the lowest price that keeps 60%: list-email $6,669; storage $1,379; video $489; all of them together **$7,279 a month** (today $449). Where a competitor in the band prints "unlimited" (list-email, storage, contacts, seats, products), superiority is infeasible at any price under the 60% rule: an unlimited allowance cannot be held to 60% at full use.
 
 **Scale**
 

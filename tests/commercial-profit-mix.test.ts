@@ -55,3 +55,39 @@ test('report data cannot execute getters, and never grants commercial approval',
  assert.equal(commercialProfitMix(actual).basis,'reconciled_actual');assert.equal(commercialProfitMix(actual).interval,'year');
  assert.equal(commercialPlansMayOpen(true),false);
 });
+
+test('an additional source-row category cannot disappear from known company profit',()=>{
+ for(const source of COMMERCIAL_PROFIT_SOURCES){
+  for(const cost of [null,0,100_000]){
+   const input=fixture();
+   Object.assign(input.sources[source]!,{unreviewedSupplierCents:cost});
+   const result=commercialProfitMix(input);
+   assert.equal(result.reason,'unknown',`${source}: extra cost ${cost} requires reconciliation`);
+   assert.equal(result.totalNetProfitCents,null);
+   assert.equal(result.rows.find(row=>row.source===source)!.netProfitCents,null);
+   assert.ok(result.rows.every(row=>row.shareOfNetProfitBps===null));
+  }
+ }
+});
+
+test('source-row shape is exact even when the additional field looks harmless',()=>{
+ for(const extra of ['supplierInvoiceCents','notes','__proto__','constructor','toString']){
+  const input=fixture();
+  Object.defineProperty(input.sources.captions!,extra,{value:0,enumerable:true,configurable:true});
+  const result=commercialProfitMix(input);
+  assert.equal(result.reason,'unknown',extra);
+  assert.equal(result.totalNetProfitCents,null);
+  assert.equal(result.rows.find(row=>row.source==='captions')!.netProfitCents,null);
+ }
+});
+
+test('explicit evidenced zero and null-prototype source rows retain their exact totals',()=>{
+ const input=fixture();
+ for(const source of COMMERCIAL_PROFIT_SOURCES){
+  input.sources[source]=Object.assign(Object.create(null),input.sources[source]);
+  input.sources[source]!.variableCostsCents=0;
+ }
+ const result=commercialProfitMix(input);
+ assert.equal(result.reason,'known');assert.equal(result.totalNetProfitCents,5400);
+ for(const row of result.rows){assert.equal(row.netProfitCents,600);assert.equal(row.shareOfNetProfitBps,1111);}
+});

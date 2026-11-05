@@ -83,7 +83,7 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[h
   }
   return (
     <>
-      {store ? <SkipLink /> : null}
+      {store && !store.suspended ? <SkipLink /> : null}
       {store && isHouseStore(store) ? <DemoStrip /> : null}
       {children}
       <StoreApp />

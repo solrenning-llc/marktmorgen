@@ -35,7 +35,7 @@ import { LINK_PROBLEMS, type LinkProblem } from "@/lib/product-link";
 import { useStudioHref } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { CourseTemplatePicker } from "@/components/course-template-picker";
-import { FIT_WORDS, exampleTitlesLeft, exampleTitlesWords, quizLessonsWaiting, quizWaitingWords, templateFits } from "@/lib/course-templates";
+import { FIT_WORDS, exampleTitlesLeft, exampleTitlesWords, quizLessonsWaiting, quizWaitingWords, templateFits, type CourseTemplate } from "@/lib/course-templates";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { CAPTION_LANGUAGES, type CaptionTrack, MAX_CAPTION_BYTES, MAX_CAPTION_TRACKS } from "@/lib/captions";
@@ -228,6 +228,7 @@ export function CourseEditor({
   captions = {},
   writing = {},
   auto = { can: false, spoken: "en" },
+  initialTemplate = null,
   openFirst = null,
   look = null,
   language = "en",
@@ -239,6 +240,8 @@ export function CourseEditor({
   language?: LanguageCode;
   /** A lesson to show open when the page is drawn: the one "Can everyone follow your lessons?" linked to. */
   openFirst?: string | null;
+  /** A structure previewed in the shared library, selected here but never saved automatically. */
+  initialTemplate?: CourseTemplate["id"] | null;
   initial: Course;
   folder: string;
   /** Where each lesson video kept by the video service stood when the page was drawn. */
@@ -304,6 +307,7 @@ export function CourseEditor({
       {!skipTemplates && templateFits(course).ok && templateFits(initial).ok ? (
         <CourseTemplatePicker
           course={course}
+          initialTemplate={initialTemplate}
           busy={busy}
           save={async (payload) => {
             const answer = await run(payload);

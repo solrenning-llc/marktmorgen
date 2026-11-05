@@ -8,7 +8,7 @@ export function matchingLibrary(cards:readonly LibraryCard[],goal:TemplateGoal,k
 export function libraryDestination(card:LibraryCard,sid:string,product=""){
  const query="store="+encodeURIComponent(sid)+(product?"&product="+encodeURIComponent(product):"");
  if(card.kind==="funnel")return "/studio/funnels?"+query+"&campaignGoal="+card.goal+"#starter="+encodeURIComponent(card.id);
- if(card.kind==="course")return product?"/studio/course/"+encodeURIComponent(product)+"?store="+encodeURIComponent(sid):"/studio?store="+encodeURIComponent(sid)+"#products";
+ if(card.kind==="course")return product?"/studio/course/"+encodeURIComponent(product)+"?store="+encodeURIComponent(sid)+"&template="+encodeURIComponent(card.id):"/studio?store="+encodeURIComponent(sid)+"#products";
  if(card.kind==="page")return "/studio/pages?"+query+"&template="+encodeURIComponent(card.id);
  if(card.kind==="saved")return "/studio/pages?"+query+"&sectionTemplate="+encodeURIComponent(card.id);
  return "/studio/email?"+query+"&"+(card.kind==="email"?"emailTemplate":"sequenceTemplate")+"="+encodeURIComponent(card.id);

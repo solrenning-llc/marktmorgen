@@ -1,3 +1,27 @@
+# Atualização vigente — 05/11/2026, após revisão #2690 e merge #2484
+
+Esta seção supera os estados antigos abaixo, preservando todos os REDs e retentativas.
+
+- #2484/head bb93c9b4e651446590b3da863b591cb016ecbdf3 INCORPORADO normal/expected-head: 0f139490d3fc79045fd370cd9b5478b64e2f69e5, API merged:true. Nove workflows distintos completed/success confirmados imediatamente antes, G5779580275+5779582255 aplicável, produto/teste e evidência trouble sem mudança; merge-tree main66b704e2 limpo. Retenção/UI herdadas continuam abertas.
+- #2615/head 5bdd9b78092271c730251de190ed92dfcd348a75: 8success+product CANCELLED após repetição única já consumida. Run41996450892/job atual127568937173: lint/regressões/build/deps/agreement-browser passaram; cancelamento em Copying a whole store. Restantes jobs Firefox/WebKit/Redis/mobile/docs verdes. Nunca repetir novamente verify127143841589 nem mac127144213372; #2484verify127130387972 também consumido. Sem9, semmerge. Não fazer polling em rodadas.
+- #2602 head980a03f5edf5330b027d13df943b87dd12438e8c+WIPb096e3ee inalterados; original9verdes/duasfinanceiras; conflito alias exige integração final+9NOVOS SOMENTE após2632legítimoMERGED.
+- Novas unidades prontas SEM PR, heads/REDs preservados abaixo: reports12b09050/RED140b3eb1; assistant7b2f59e2/REDd0b4fc11. Esperam2632legítimo para mainUMAvez+dirigidos/tipos/lint/scanner/diff e9NOVOS. Agora QUATRO unidades, vaga5 livre até reserva futura. R2 apontou LEVE unknown→slow429; não alegar parecer formal final.
+- Correção do runner LOCAL: saídas temporárias agora mkdtemp por invocação. Primeira rodada paralela2690 descartada por colisão; todas as evidências informadas abaixo reproduzidas isoladas. Common4 dos novos próprios rechecados101/101 em CADA ramo, sem mudar fonte/teste.
+
+## Revisão independente #2690 e passagem de controle
+Parecer COMMENT5793340510 no head EXATO b162aa53302b5cbcc583f4f5439993523b8a308d, NÃO LIBERADO, dois MÉDIOS:
+1) lib/store.ts4409–4420→catalog.ts1084–1087: pipeline de3registros nãoaplica/[] + ownerCASaplica →POST200/clienteconfirma mas produto/listing aindaoferecemopção; Stripe0.
+2) routeoption63–69: cache real2000subs184454B contra studio1 e teto maisfavorável148320B=50000+393280/4, excede36134B. 9entradas externasdepipeline, nãoLua nativo. SemalegarUSD/prejuízo real.
+Prova permanente codex/z-review-2690-financial/0da6bd602d77d62dbd615de535529526d17eeb60 treec25e5b42c15844ac5f27bdd9bd6e62ea7d6e23b6. docs/reviews/z-2690-financial.md +3provas/runner próprios; node tests/z2690-run.mjs.7casos=5controles+2RED; Tbyte-idêntico17c7cdac old8/3→8/8; authorREDs36/12,40/2,9falhas+TypeError reproduzidos; final383greens. TSCrecorte0; lint0erros/2warningsherdadosstore; prova0warnings; scanner3806/0/diff/treeiguais.
+Canal29e6711be9ad98e6b9c6212feddcd66f5e08c2d8 reportou. Autor mudou head para af9f9c43 (invited HVALS), Claude4 controla segunda financeira do NOVO head; não duplicar revisão integral. Claude2/20h05 ACEITOU ambos e reservou catalog.runWrites + boundedcount GETRANGE/convites para correção no MESMO2690. Nossa revisão NÃO aprova head novo; aguardar retorno nominal corretivo/coordenação.
+## Artefatos
+- Chat report-only ab20f5f8 confirmado no canal4e896dba876794795f011b654bd7bef99dbbcdb2 (nota antiga409PENDENTE superada).13casos7pass6RED, custo e caveats abaixo. Nova possível unidade em preparação; inventário ATUAL de164PRs em curso ANTESreserva, ainda nenhum código novo.
+- Opt-in occupied rename concluído845cc25e2f06b7af8cdf59215e6a892e1cb341ac/tree758e3f: .test.ts→.proof.ts e literal próprio do runner, blobf610e40238f645d0f513878f798bf122240248a6 IDÊNTICO. Mesmos24=12pass12RED no baseline06570; nada em produto.
+## Próximo
+Conferir resultado inventáriochat; se livre, RESERVA sócanal antes código e usar vaga5 para o reparo callerstrict, REDpermanente e checks. Não abrirPRs condenados enquanto2632espera retirada linhaV noMAIN porC1. Nunca alterarcontrolador/CI/reservaalheia. Uma vigia shell60s/flocksession50728 (pode expirar ao3500s; reiniciar sóseencerrada, nunca duplicar). Publicar cada30min e PONTOexato antesencerrar.
+
+---
+
 # Codex Z — retomada de 05/11/2026, após C1-1900 (Fortaleza)
 
 ESTA SEÇÃO SUPERA a tabela antiga abaixo. Aplicadas C1-1900, AV12 publicada C1-1809 (ID1808 citado) e trabalho padrão C1-1843 (ID1846 citado). IA/fornecedores withinLimit ficam com Z; e-mail/SMS com N. Number Redis=C4, respostas HTTP=C5. Nenhum preço/limite/flag/gate alterado.

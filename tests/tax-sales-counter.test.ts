@@ -190,3 +190,61 @@ test("a hidden array slot is not a persistable complete sales ledger", () => {
   assert.deepEqual(countTaxSales(frozen), countTaxSales(ordinary));
   assert.deepEqual(countTaxSales(nullPrototype), countTaxSales(ordinary));
 });
+
+test("an inherited array serialization hook cannot erase known sales in a captured ledger", () => {
+  const value = ledger([entry("above-threshold", { amountMinor: 3_000_001 })]);
+  const before = countTaxSales(value);
+  assert.equal(before.status, "known");
+  let calls = 0;
+  let result: ReturnType<typeof countTaxSales>;
+  let captured: ReturnType<typeof countTaxSales>;
+  Object.defineProperty(Array.prototype, "toJSON", {
+    configurable: true, value() { calls++; return []; },
+  });
+  try {
+    result = countTaxSales(value);
+    assert.equal(calls, 0);
+    captured = countTaxSales(JSON.parse(JSON.stringify(value)));
+  } finally { Reflect.deleteProperty(Array.prototype, "toJSON"); }
+  assert.equal(calls, 1);
+  assert.deepEqual(result, { status: "unknown" });
+  assert.deepEqual(captured, { status: "unknown" });
+  assert.deepEqual(countTaxSales(value), before);
+});
+
+test("inherited object serialization cannot replace ledger, place or supply evidence", () => {
+  for (const boundary of ["ledger", "place", "entry"] as const) {
+    const value = ledger([entry("real", { amountMinor: 3_000_001 })]);
+    const victim = boundary === "ledger" ? value : boundary === "place" ? value.place : value.entries[0];
+    let calls = 0;
+    let result: ReturnType<typeof countTaxSales>;
+    Object.defineProperty(Object.prototype, "toJSON", {
+      configurable: true, value(this: object) {
+        calls++;
+        if (this !== victim) return this;
+        return boundary === "ledger" ? { ...value, entries: [] }
+          : boundary === "place" ? { country: "US", state: null }
+          : { ...value.entries[0], amountMinor: 0 };
+      },
+    });
+    try { result = countTaxSales(value); }
+    finally { Reflect.deleteProperty(Object.prototype, "toJSON"); }
+    assert.equal(calls, 0, boundary);
+    assert.deepEqual(result, { status: "unknown" }, boundary);
+  }
+});
+
+test("inherited serialization accessors are refused without invoking the getter", () => {
+  for (const prototype of [Object.prototype, Array.prototype]) {
+    const value = ledger([entry("real")]);
+    let reads = 0;
+    let result: ReturnType<typeof countTaxSales>;
+    Object.defineProperty(prototype, "toJSON", {
+      configurable: true, get() { reads++; throw new Error("serialization hook"); },
+    });
+    try { result = countTaxSales(value); }
+    finally { Reflect.deleteProperty(prototype, "toJSON"); }
+    assert.equal(reads, 0);
+    assert.deepEqual(result, { status: "unknown" });
+  }
+});

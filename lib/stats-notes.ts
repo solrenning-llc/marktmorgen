@@ -16,6 +16,7 @@
  *   nl:stats:<statsId>:notes   hash: <id> → JSON { day, text }
  */
 import { randomBytes } from "node:crypto";
+import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
 export const MAX_NOTES = 200;
@@ -44,7 +45,7 @@ export function noteDay(raw: unknown, now = Date.now()): string {
 
 /** Snapshot a complete inert Redis array without converting values or executing accessors. */
 function exactArray(raw: unknown, length?: number): unknown[] {
-  if (!Array.isArray(raw) || (length !== undefined && raw.length !== length)) throw new Error("Chart notes could not be read");
+  if (types.isProxy(raw) || !Array.isArray(raw) || (length !== undefined && raw.length !== length)) throw new Error("Chart notes could not be read");
   const out: unknown[] = [];
   for (let i = 0; i < raw.length; i++) {
     const slot = Object.getOwnPropertyDescriptor(raw, String(i));
@@ -70,6 +71,9 @@ function allNotes(raw: unknown): StatsNote[] {
     const { day, text } = value as Record<string, unknown>;
     const date = typeof day === "string" && DAY.test(day) ? Date.parse(`${day}T00:00:00Z`) : NaN;
     if (!Number.isFinite(date) || new Date(date).toISOString().slice(0, 10) !== day || typeof text !== "string" || !text || noteText(text) !== text) throw new Error("Chart notes could not be read");
+    // The sole writer uses this canonical representation. Parsing alone would
+    // silently choose the last of conflicting duplicate day/text members.
+    if (stored !== JSON.stringify({ day, text })) throw new Error("Chart notes could not be read");
     out.push({ id, day: day as string, text });
   }
   return out.sort((a, b) => a.day.localeCompare(b.day) || a.id.localeCompare(b.id));

@@ -17,7 +17,7 @@
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { ENDING_KEY, GIVE_UP_DAYS, SETTLE_SECONDS, finishPlanRefunds, flowKeyOf, refundAndEndPlan } from "@/lib/plan-refund-flow";
+import { ENDING_KEY, GIVE_UP_DAYS, SETTLE_SECONDS, findPlanRefund, finishPlanRefunds, flowKeyOf, partsOutcome, refundAndEndPlan } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
 import { DAY, NOW, n, paidShop, setAssistantPlan, world } from "./plan-refund-stripe-world";
 
@@ -28,6 +28,34 @@ const order = (subId: string) => world.calls.filter((c) => c.includes(subId) || 
 async function main() {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_a_stand_in_key_for_tests_only";
+
+  part("Unreadable refund evidence never means zero or confirmed settlement");
+  const fetchBefore = globalThis.fetch;
+  const sid="synthetic-refund-store";
+  const valid={id:"re_Evidence0001",amount:123,currency:"usd",status:"succeeded",metadata:{plan_refund:sid}};
+  let reply:unknown, reads=0, writes=0;
+  globalThis.fetch=(async (_input,init)=>{if((init?.method??"GET")==="GET")reads++;else writes++;return new Response(JSON.stringify(reply),{status:200,headers:{"content-type":"application/json"}});}) as typeof fetch;
+  try{
+    for(const amount of [null,"", "123",true,-1,0,1.5,9007199254740992]){
+      reply={data:[{...valid,amount}],has_more:false};
+      is("parts amount unknown: "+String(amount),(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"unknown");
+      is("earlier amount unknown: "+String(amount),(await findPlanRefund(sid,NOW-60,NOW)).kind,"unknown");
+    }
+    for(const bad of [{has_more:false},{data:null,has_more:false},{data:[null],has_more:false},{data:[valid],has_more:null},{data:[{...valid,currency:null}],has_more:false}]){
+      reply=bad;
+      is("parts incomplete evidence is unknown",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"unknown");
+      is("earlier incomplete evidence is unknown",(await findPlanRefund(sid,NOW-60,NOW)).kind,"unknown");
+    }
+    reply={data:[valid,{...valid,id:"re_Evidence0002",amount:null}],has_more:false};
+    is("a valid row cannot hide an unreadable refund",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"unknown");
+    reply={data:[valid],has_more:false};
+    is("confirmed part still settles",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"found");
+    is("confirmed earlier refund still found",(await findPlanRefund(sid,NOW-60,NOW)).kind,"found");
+    reply={data:[],has_more:false};
+    is("confirmed empty parts",(await partsOutcome(sid,[{c:"ch_Evidence0001",a:123}])).kind,"none");
+    is("confirmed empty history",(await findPlanRefund(sid,NOW-60,NOW)).kind,"none");
+    is("bounded reads without any provider write",[reads,writes],[31,0]);
+  }finally{globalThis.fetch=fetchBefore;}
 
   part("Refunded and ended, in the safe order");
   const a = await paidShop();

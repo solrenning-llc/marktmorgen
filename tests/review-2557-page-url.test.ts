@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     pixels,
     names: "Meta and Google",
     askFirst: false,
-    event: { type: "purchase", id: adEventId(SESSION), order: SESSION, value: 49, currency: "usd", productId: "club000001", title: "Club" },
+    event: { type: "purchase", id: adEventId(SESSION), value: 49, currency: "usd", productId: "club000001", title: "Club" },
   });
   is("the four platforms' scripts were started", stripe.seen.length, 4);
   is(
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     pixels: { ...NO_PIXELS, meta: "323456789012345" },
     names: "Meta",
     askFirst: false,
-    event: { type: "purchase", id: adEventId(SESSION), order: SESSION, value: 49, currency: "usd", productId: "club000001", title: "Club" },
+    event: { type: "purchase", id: adEventId(SESSION), value: 49, currency: "usd", productId: "club000001", title: "Club" },
   });
   const queued = ((globalThis as unknown as { fbq?: { queue: unknown[][] } }).fbq?.queue ?? []).filter((c) => c[0] === "track" && c[1] === "Purchase");
   is("the purchase already sent is not sent again under a new id (Meta would count it twice)", queued.length, 0);

@@ -425,6 +425,21 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        // lib/affiliates.ts PUT_AFFILIATE: one record written only over the exact field read (or its absence) and,
+        // when fenced, only while the store's commitment version is still the one read; every write moves it.
+        if (key.startsWith("-- marktmorgen:affiliate-put:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, people, version, id, there, expected, fence, value] = args;
+          this.live(people);
+          this.live(version);
+          const held = this.data.get(people);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const current = held instanceof Map ? held.get(id) : undefined;
+          if (there === "1" ? current !== expected : current !== undefined) return 0;
+          if (fence !== "" && String(this.run(["GET", version]) ?? "0") !== fence) return 0;
+          this.hash(people).set(id, value);
+          this.run(["INCR", version]);
+          return 1;
+        }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
         if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];

@@ -46,6 +46,10 @@ const en = {
       title: "This program is full",
       body: "It has as many affiliates as one store can hold. Write to the store if you would like to be considered.",
     },
+    cap: {
+      title: "This invitation no longer fits",
+      body: "The share it offers no longer fits what the store already promises on those products, so nothing was changed. Ask the store to send you a new one.",
+    },
     error: { title: "Something went wrong on our side", body: "Nothing was changed. Try again in a moment." },
     expired: {
       title: "This link has expired",
@@ -390,6 +394,10 @@ const es: AffiliatesWords = {
       title: "Este programa está completo",
       body: "Tiene tantos afiliados como puede tener una tienda. Escribe a la tienda si quieres que te tengan en cuenta.",
     },
+    cap: {
+      title: "Esta invitación ya no cabe",
+      body: "La participación que ofrece ya no cabe en lo que la tienda ya promete sobre esos productos, así que no se cambió nada. Pide a la tienda que te envíe una nueva.",
+    },
     error: { title: "Algo salió mal por nuestra parte", body: "No se cambió nada. Inténtalo de nuevo en un momento." },
     expired: {
       title: "Este enlace ha caducado",
@@ -690,6 +698,10 @@ const fr: AffiliatesWords = {
       title: "Ce programme est complet",
       body: "Il compte autant d'affiliés qu'une boutique peut en avoir. Écrivez à la boutique si vous souhaitez être pris en considération.",
     },
+    cap: {
+      title: "Cette invitation ne tient plus",
+      body: "La part qu'elle propose ne tient plus dans ce que la boutique promet déjà sur ces produits, rien n'a donc été modifié. Demandez à la boutique de vous en envoyer une nouvelle.",
+    },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été modifié. Réessayez dans un instant." },
     expired: {
       title: "Ce lien a expiré",
@@ -989,6 +1001,10 @@ const de: AffiliatesWords = {
     full: {
       title: "Dieses Programm ist voll",
       body: "Es hat so viele Affiliates, wie ein Shop haben kann. Schreiben Sie dem Shop, wenn Sie berücksichtigt werden möchten.",
+    },
+    cap: {
+      title: "Diese Einladung passt nicht mehr",
+      body: "Die angebotene Beteiligung passt nicht mehr zu dem, was der Shop für diese Produkte schon zugesagt hat, deshalb wurde nichts geändert. Bitten Sie den Shop um eine neue Einladung.",
     },
     error: { title: "Bei uns ist etwas schiefgelaufen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
     expired: {
@@ -1298,6 +1314,10 @@ const it: AffiliatesWords = {
       title: "Questo programma è al completo",
       body: "Ha tutti gli affiliati che un negozio può avere. Scrivi al negozio se vuoi essere preso in considerazione.",
     },
+    cap: {
+      title: "Questo invito non rientra più",
+      body: "La quota che offre non rientra più in quanto il negozio promette già su quei prodotti, quindi non è stato cambiato nulla. Chiedi al negozio di inviartene uno nuovo.",
+    },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è stato cambiato nulla. Riprova tra un momento." },
     expired: {
       title: "Questo link è scaduto",
@@ -1599,6 +1619,10 @@ const nl: AffiliatesWords = {
     full: {
       title: "Dit programma is vol",
       body: "Het heeft zoveel affiliates als één winkel kan hebben. Schrijf de winkel als je in aanmerking wilt komen.",
+    },
+    cap: {
+      title: "Deze uitnodiging past niet meer",
+      body: "Het aandeel dat ze aanbiedt past niet meer bij wat de winkel al toezegt op die producten, dus er is niets gewijzigd. Vraag de winkel om een nieuwe uitnodiging.",
     },
     error: { title: "Er ging iets mis aan onze kant", body: "Er is niets gewijzigd. Probeer het zo meteen opnieuw." },
     expired: {
@@ -1906,6 +1930,10 @@ const pt: AffiliatesWords = {
     full: {
       title: "Este programa está completo",
       body: "Tem tantos afiliados quantos uma loja pode ter. Escreva à loja se quiser ser considerado.",
+    },
+    cap: {
+      title: "Este convite já não cabe",
+      body: "A participação que oferece já não cabe no que a loja já promete sobre esses produtos, por isso nada foi alterado. Peça à loja um novo convite.",
     },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi alterado. Tente novamente daqui a pouco." },
     expired: {

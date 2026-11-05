@@ -64,6 +64,7 @@ const MESSAGES: Record<string, string> = {
   busy: "Another change was being saved at the same moment. Reload the page, check what it shows, and try again.",
   invite_email: "Type the email address to send the invitation to.",
   gone: "That offer is no longer there. The store may have withdrawn it.",
+  invite_cap: "That offer no longer fits what the store already promises on those products, so nothing was accepted. Ask them to send a new one.",
   owner: "That is your own address. A partner is somebody else.",
   full: "This program is full. Remove somebody before inviting another partner.",
   promo: "That discount code is no longer on your Stripe account. Reload the page.",

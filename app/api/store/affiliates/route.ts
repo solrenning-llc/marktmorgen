@@ -187,7 +187,10 @@ export async function POST(request: NextRequest) {
       // decided under the partner's lock, so the studio says to ask for a change, which the partner must accept, or
       // to wait for the end date, however close the two requests came.
       const done = await decideWhy(store, text(body.id, 20), action);
-      return done.ok ? Response.json({ ok: true }) : fail(done.reason === "term" ? "share_term_held" : "unknown");
+      if (done.ok) return Response.json({ ok: true });
+      // Letting back in a partner whose share still runs is checked against the cap as it is written (decideWhy).
+      if (done.reason === "busy") return fail("busy", 409);
+      return fail(done.reason === "term" ? "share_term_held" : done.reason === "cap" ? `share_${done.problem}` : "unknown");
     }
     if (action === "payout") {
       // In the store's currency, which is what the payout is written down in.
@@ -227,7 +230,7 @@ export async function POST(request: NextRequest) {
         return fail("gone");
       }
       const made = await acceptPartnership(from, guarded.email, invite.share);
-      if (!made.ok) return fail(made.reason === "full" ? "full" : "unavailable");
+      if (!made.ok) return fail(made.reason === "full" ? "full" : made.reason === "cap" ? "invite_cap" : "unavailable");
       await answerInvite(guarded.email, invite.id);
       return Response.json({ ok: true, accepted: true });
     }
@@ -286,8 +289,10 @@ export async function POST(request: NextRequest) {
       // the partner says yes to a change that waits.
       const problem = await sharePromiseProblem(store, id, share, now);
       if (problem) return fail(`share_${problem}`);
+      // Checked once more as it is written, against every partner as they stand then (lib/affiliates.ts changeAffiliate).
       const saved = await proposePartnerShare(store, id, share, now);
-      return saved.ok ? Response.json({ ok: true, state: saved.state }) : fail("unknown");
+      if (saved.ok) return Response.json({ ok: true, state: saved.state });
+      return fail(saved.reason === "cap" ? `share_${saved.problem}` : "unknown");
     }
     if (action === "code") {
       const promo = text(body.promo, 90);

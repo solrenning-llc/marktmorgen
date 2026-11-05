@@ -40,3 +40,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex M | 310 [AX2], 274 [AX1]: 44px targets for moving and removing collection products | codex/m-collection-targets | `components/collections-editor.tsx`, `tests/e2e/collections-acknowledgment.mjs`, `tests/collections-editor-accessibility.test.ts` | 04/11/2026 |
 | Codex P | 427 [VR1]: malformed certificate status evidence never becomes valid or permanent | codex/p-certificate-record-evidence | `lib/certificate.ts`, `tests/certificate-record-evidence.test.ts` | 04/11/2026 |
 | Codex P | 274 [AX1], 103 [E2-LESSON-MEDIA]: malformed caption blocks never become a silently truncated successful upload | codex/p-caption-whole-file | `lib/captions.ts`, `tests/captions.test.ts` | 04/11/2026 |
+| Codex S | 427 [VR1]: confirm membership pages before counting creator member health | codex/s-member-health-evidence | `lib/member-health.ts`, `tests/member-health-evidence.test.ts` | 05/11/2026 |

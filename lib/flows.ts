@@ -174,16 +174,45 @@ export function leaseScore(now: number): number {
   return now + LEASE_SECONDS + randomInt(1, 2 ** 20) / 2 ** 21;
 }
 /**
- * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
- * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
- * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
+ * Queues a run's next attempt only while this step's lease entry is still there at the score this run's take wrote
+ * (leaseScore), in one command: a stop step of another workflow removes that entry (act, "stop"), and a later run that
+ * took the same entry again wrote its own score, and then nothing of this run is queued again (Codex G2, #2287: an
+ * old run went on with the steps of the run that took over). KEYS: the lease, the queue; ARGV: the lease member, the
+ * queue score, the queue member, the take's score. 1 when queued, 0 when the run was taken out or taken over.
  */
-const QUEUE_IF_LEASED = `-- marktmorgen:flow-queue-if-leased:v1
-if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
+const QUEUE_IF_LEASED = `-- marktmorgen:flow-queue-if-leased:v2
+local held = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if held and tonumber(held) == tonumber(ARGV[4]) then
   redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
   return 1
 end
 return 0`;
+
+/**
+ * Takes this run's own lease entries away: each member of ARGV[2..] only while it is held at the score this run's take
+ * wrote (ARGV[1]), never one a later run took over. KEYS: the lease. The answer: 1 or 0 for each member, in order.
+ */
+const DROP_OWN_LEASES = `-- marktmorgen:flow-lease-drop-own:v1
+local out = {}
+for i = 2, #ARGV do
+  local held = redis.call('ZSCORE', KEYS[1], ARGV[i])
+  if held and tonumber(held) == tonumber(ARGV[1]) then
+    redis.call('ZREM', KEYS[1], ARGV[i])
+    out[#out + 1] = 1
+  else
+    out[#out + 1] = 0
+  end
+end
+return out`;
+
+/** Which of `members` this take held and took away (DROP_OWN_LEASES); none when the answer is not exactly one 0 or 1 each. */
+async function dropOwnLeases(members: string[], score: number): Promise<boolean[]> {
+  if (!members.length) return [];
+  const reply: unknown = await redisPipeline([["EVAL", DROP_OWN_LEASES, 1, LEASE, String(score), ...members]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  if (!Array.isArray(answer) || answer.length !== members.length || answer.some((one) => one !== 0 && one !== 1)) return members.map(() => false);
+  return answer.map((one) => one === 1);
+}
 const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const enrolledKey = (flowId: string, email: string) =>
   `nl:mail:enr:${flowId}:${createHash("sha256").update(`nimbus-flow:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
@@ -1103,9 +1132,10 @@ export async function sendDueSteps(
       // Back in the queue for a later run, but only for whoever still holds this step's lease entry: a stop step of
       // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
       // orphans above, whoever removes the lease entry is the one who puts it back.
+      // Only this take's own entries: one a later run took over is that run's (Codex G2, #2287).
       const putBack = async (at: number) => {
-        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
-        const held = emails.filter((_, i) => Number(back[i]) === 1);
+        const back = await dropOwnLeases(emails.map((email) => `${group}|${email}`), score);
+        const held = emails.filter((_, i) => back[i]);
         if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
       };
       if (Date.now() > deadline) {
@@ -1115,7 +1145,7 @@ export async function sendDueSteps(
       }
       try {
         await sendGroup(group, emails, score);
-        await redisPipeline([["ZREM", LEASE, ...emails.map((email) => `${group}|${email}`)]]);
+        await dropOwnLeases(emails.map((email) => `${group}|${email}`), score);
       } catch (error) {
         // Put back for a later run rather than lost; the send's own key keeps
         // anybody it already reached from getting it twice.
@@ -1137,7 +1167,7 @@ export async function sendDueSteps(
     const queueHeld = async (commands: (string | number)[][], extra: (string | number)[][] = []): Promise<Set<string>> => {
       const out = new Set<string>();
       if (!commands.length && !extra.length) return out;
-      const sent = [...commands.map((c) => ["EVAL", QUEUE_IF_LEASED, 2, LEASE, QUEUE, `${group}|${personIn(c)}`, c[2], String(c[3])]), ...extra];
+      const sent = [...commands.map((c) => ["EVAL", QUEUE_IF_LEASED, 2, LEASE, QUEUE, `${group}|${personIn(c)}`, c[2], String(c[3]), String(score)]), ...extra];
       const reply = await redisPipeline(sent);
       if (!Array.isArray(reply) || reply.length !== sent.length) throw new FlowWriteUnconfirmed();
       commands.forEach((c, i) => {
@@ -1171,7 +1201,8 @@ export async function sendDueSteps(
     // the step's condition says.
     const [rows, ...scores] = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
     const found = Array.isArray(rows) ? rows : [];
-    const held = new Set(emails.filter((_, i) => scores[i] !== null && scores[i] !== undefined));
+    // Held at this take's own score: an entry a later run took over is not this run's (Codex G2, #2287).
+    const held = new Set(emails.filter((_, i) => (typeof scores[i] === "string" || typeof scores[i] === "number") && Number(scores[i]) === score));
     counts.dropped += emails.length - held.size;
     // Who is still on the list, and of them, who has reached the sequence's
     // end and who this step is not for (lib/flow-rules.ts) — read from the

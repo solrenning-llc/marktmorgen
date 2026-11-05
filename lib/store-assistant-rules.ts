@@ -344,16 +344,60 @@ const TERMS_TERMS = [
   "non (?:mi |ti |vi |le |gli )?piac\\p{L}*", "non soddisfatt\\p{L}*", "insoddisfatt\\p{L}*", "(?:bevalt|bevallen) (?:\\p{L}+ ){0,2}niet", "niet (?:tevreden|bevalt|bevallen)", "ontevreden",
 ].filter((term, i, all) => all.indexOf(term) === i);
 const TERMS_WORDS = new RegExp(`${WORD_EDGE_BEFORE}(?:${TERMS_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}`, "u");
-/** Numbers written as words, folded, in the seven store languages, up to ninety; articles ("a", "un", "ein", "een", "um") are left out, so "a week of dinners" is no deadline. */
-const NUMBER_WORDS = [
-  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "fourteen", "fifteen", "twenty", "thirty", "forty", "fifty", "sixty", "ninety", "hundred",
-  "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "doce", "catorce", "quince", "veinte", "treinta", "cuarenta", "sesenta", "noventa",
-  "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "douze", "quatorze", "quinze", "vingt", "trente", "quarante", "soixante", "quatre[- ]vingt[- ]dix",
-  "zwei", "drei", "vier", "funf", "sechs", "sieben", "acht", "neun", "zehn", "zwolf", "vierzehn", "funfzehn", "zwanzig", "drei(?:ss|\u00df)ig", "vierzig", "sechzig", "neunzig",
-  "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "dodici", "quattordici", "quindici", "venti", "trenta", "quaranta", "sessanta", "novanta",
-  "twee", "drie", "vier", "vijf", "zes", "zeven", "acht", "negen", "tien", "twaalf", "veertien", "vijftien", "twintig", "dertig", "veertig", "zestig", "negentig",
-  "dois", "duas", "quatro", "sete", "oito", "nove", "dez", "doze", "catorze", "quatorze", "quinze", "vinte", "trinta", "quarenta", "sessenta", "noventa",
+/**
+ * Numbers written as words, folded, in the seven store languages: every
+ * word from one to nineteen, every ten, a hundred and a thousand, and the
+ * pieces a language glues into one word ("dieci" in "diciassette", "vent" in
+ * "ventotto", "veinti" in "veintidos"). NUMBER_WORD joins them as a language
+ * does ("twenty-one", "treinta y un", "vingt et un", "einundzwanzig",
+ * "eenentwintig", "vinte e um", "duecento"), so no number is left out for
+ * being missing from a list (Codex D2's MEDIUM on #2177: "thirteen days").
+ * The articles ("a", "un", "une", "una", "ein", "eine", "een", "um", "uma")
+ * count only inside such a number, never alone, so "a week of dinners" is no
+ * deadline.
+ */
+const NUMBER_PIECES = [
+  // English
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+  "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fourty", "fifty", "sixty", "seventy", "eighty", "ninety",
+  "hundreds?", "thousands?",
+  // Spanish
+  "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince",
+  "dieci", "veinte", "veinti", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa",
+  "cien", "cientos?", "quinientos", "setecientos", "novecientos", "mil",
+  // French
+  "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze", "treize", "quatorze", "quinze", "seize",
+  "vingts?", "trente", "quarante", "cinquante", "soixante", "septante", "octante", "huitante", "nonante", "cents?", "milles?",
+  // German
+  "eins", "zwei", "zwo", "drei", "vier", "funf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwolf", "sechzehn", "siebzehn",
+  "zwanzig", "drei(?:ss|\u00df)ig", "vierzig", "funfzig", "sechzig", "siebzig", "achtzig", "neunzig", "hundert", "tausend",
+  // Italian
+  "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "undici", "dodici", "tredici", "quattordici", "quindici",
+  "sedici", "diciassette", "diciotto", "diciannove", "venti", "vent", "trenta", "trent", "quaranta", "quarant", "cinquanta", "cinquant",
+  "sessanta", "sessant", "settanta", "settant", "ottanta", "ottant", "novanta", "novant", "cento", "mille", "mila",
+  // Dutch
+  "twee", "drie", "vijf", "zes", "zeven", "negen", "tien", "twaalf", "dertien", "veertien", "vijftien", "zestien", "zeventien",
+  "achttien", "negentien", "twintig", "dertig", "veertig", "vijftig", "zestig", "zeventig", "tachtig", "negentig", "honderd", "duizend",
+  // Portuguese
+  "dois", "duas", "quatro", "sete", "oito", "dez", "onze", "doze", "treze", "catorze", "dezesseis", "dezasseis", "dezessete", "dezassete",
+  "dezoito", "dezenove", "dezanove", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta", "oitenta", "noventa",
+  "cem", "cento", "duzentos", "duzentas", "trezentos", "trezentas", "quinhentos", "quinhentas",
 ].filter((word, i, all) => all.indexOf(word) === i);
+/** The articles that are also the number one: a number only joined to another piece ("treinta y un", "einundzwanzig"). */
+const NUMBER_ARTICLES = ["un", "une", "una", "ein", "eine", "een", "um", "uma"];
+/** The words a language puts between the pieces of one number. */
+const NUMBER_JOINS = ["and", "y", "et", "und", "en", "e"];
+const PIECE = `(?:${NUMBER_PIECES.join("|")})`;
+const ANY_PIECE = `(?:${[...NUMBER_PIECES, ...NUMBER_ARTICLES].join("|")})`;
+/**
+ * Between two pieces of one number: nothing, a join word, or spaces and
+ * hyphens with an optional join word between more of them. A run of spaces
+ * is always followed by a letter, so it is read one way only and a long text
+ * of pieces cannot make the match slow.
+ */
+const JOIN = `(?:${BETWEEN}(?:(?:${NUMBER_JOINS.join("|")})${BETWEEN})?|(?:${NUMBER_JOINS.join("|")}))?`;
+/** A number in words: pieces joined, starting with a piece that is a number alone or with an article joined to one. */
+const NUMBER_WORD = `(?:${PIECE}|(?:${NUMBER_ARTICLES.join("|")})${JOIN}${PIECE})(?:${JOIN}${ANY_PIECE})*`;
 /** Units of time, folded, with their plurals and the German and Dutch compound forms ("30-tagige", "30-daagse"). */
 const TIME_UNITS = [
   "days?", "weeks?", "months?", "years?", "hours?",
@@ -365,7 +409,7 @@ const TIME_UNITS = [
 ];
 /** A period of time: a number in digits or words, then a unit of time, however it is joined ("30 days", "30-day", "30 Tage", "thirty-day", "30days"). */
 const DURATION = new RegExp(
-  `${WORD_EDGE_BEFORE}(?:\\d+(?:[.,]\\d+)?|${NUMBER_WORDS.map(termSource).join("|")})(?:${BETWEEN})?(?:${TIME_UNITS.map(termSource).join("|")})${WORD_EDGE_AFTER}`,
+  `${WORD_EDGE_BEFORE}(?:\\d+(?:[.,]\\d+)?|${NUMBER_WORD})(?:${BETWEEN})?(?:${TIME_UNITS.map(termSource).join("|")})${WORD_EDGE_AFTER}`,
   "u",
 );
 /**

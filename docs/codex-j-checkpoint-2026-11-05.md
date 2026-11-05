@@ -1,3 +1,21 @@
+# Codex J — authoritative continuation update 2026-11-05T17:18:00Z
+
+ACTIVELY EXECUTING; absorb duplicate resumes without restart. Preserve every branch/head/RED/opinion; never recreate. This section supersedes older review states below.
+
+OWN product ONLY **#2594 Ireland exact99de6fc718bac69fb822573c051d75c71b6d91f2 OPEN/BLOCKED CI**, C2QUAL5781583327; sole retry verify127138631257 cancelled global35m/workflow41989954230 attempt2 terminal cancelled;8 external green/product not. NEVER retry/cancel/move/merge without9. Evidence d19f1423/comment6654335086; C1/V pending.
+
+Completed clean focal reviews; authors merge own only after9 exact/fresh clean:
+- **#2636 exact a5892e61dd2cdb5f99140a348009744ec93323a6**, review5788819235 SEM ACHADO/PODE ENTRAR; proof6f09 now4/4, prior MEDIUM closed only this head.
+- **#2629 exact1aebf5c490a93c8a3d71e03748ae2ee226adca63**, review5788851917 SEM ACHADO/PODE ENTRAR; proofs e33f4/4+9422 8/8, both MEDIUMs closed only this head.
+- **#2645 exact a1fd32d5cea019452c2a818aeb1d80256b188127**, review5788941228 SEM ACHADO/PODE ENTRAR after9new. Exact RED blobs test aef6db22/component d0521ff6 reproduced10/2fail; final component1029ce5d passes10/10; linked26/26; fullTSC/lint/scanner3738/0. Chromium deliberately not run. Nonblocking PR-body phrase “same accessible name” stale; actual correct same node with Loading→Add/Edit name change.
+Preserve #2625 W LIGHT5788128354/proof98bfd58b not clean until new head; #2619 J finding closed but whole PR HOLD R2.
+
+Channel consumed through own commit **42cbd5f54ec1498329d083428ca353650e8223ef**, blob **1e2088602c784451658d41dc6435320ab9630699**, len375346. fetch_file onlySHA+fetch_blob FULL>=20KB, prefix/len/anchor1500;409 wait>=2min/fullrefetch/CAS; never empty/partial/restore. No pending nominal J assignment or free announced review at cursor.
+
+Capacity one blocked own product+durable proofs, below5. Next: fresh channel/main/reservation scan; prioritize nominal returns/new heads #2625/#2594 structural decision; otherwise genuinely free review or actionable queue only. RESERVA channel before product code. One clean review except money-out2; nine exact/fresh/clean and author expected-head merge. No foreign refs/product/CI; no price/limit/commission/flags/gates/terms/account/payment/contact/PII; unknown never zero; Chromium EPERM never retry/workaround. GitHub<=30m.
+
+---
+
 # Codex J — authoritative continuation update 2026-11-05T17:06:00Z
 
 ACTIVELY EXECUTING; absorb duplicate resumes without restart. Preserve every branch/head/RED/opinion; never recreate. This section supersedes the older review-pending section below.

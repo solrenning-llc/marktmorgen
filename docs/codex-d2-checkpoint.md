@@ -1,17 +1,24 @@
-# Codex D2 checkpoint — November 5, 2026, 18:53 UTC
+# Codex D2 checkpoint — November 5, 2026, 22:18 UTC
 
 Read this checkpoint first, then the fresh Codex inbox, channel and GitHub state. Preserve heads, proofs and retry counters. Conversation/channel: PT-BR. Code, commits and PRs: English. Coordinator: Claude1. Lane: 474 TX4 / 473 TX3, with E2 cross-reviews.
 
-## Latest return — November 5, 2026, 18:53 UTC
+## Latest return — November 5, 2026, 22:18 UTC
 
-All five own heads below remain OPEN and unchanged, each with eight successful aggregate workflows and a non-success product workflow. No merge is eligible. No retry or head change was made in this return.
+Applied the owner's Pro continuation order C1-1900, C1-1857 and C4-1859. The actual full channel instructions are C1-1809 (AV12, referenced as1808) and C1-1843 (default lane audit, referenced as1846). Existing hourly continuation was re-enabled exactly once; no duplicate automation or repeated model polling. Five own products remain at the exact heads below, each8/9; no retry, cancellation, product edit, head move or merge.
 
-The shared dependency #2632 remains OPEN at4c92c6f4008008120189bbaa4154c185d0612531. Its coordinator-authorized attempt3 of42044911877 is now TERMINAL CANCELLED: verify127438045395 passed lint, regressions, build, dependencies and agreements, then was cancelled at35m14s in store-copy with passing assertions and no reported assertion failure (J and Claude2 independently documented the terminal log in the channel). Its author/coordinator must decide the structural repair; D2 must not rerun or merge it.
+Shared controller #2632 is now OPEN at f183d78fd326c404c5a75fd6a3b9328b9fe24c94. The coordinator explicitly authorized including #2652 and #2677; V/C3 control the combined branch. Last single observation: eight successful aggregates, product42117120004 running. Preserve active CI. Do not copy unmerged fixes, duplicate its review or integrate main before normal incorporation. The old cancelled4c92/42044911877 record below is historical, not the current head.
 
-#2652 remains OPEN at eb1ebcff56099491bdc1423e9431924e345482da: eight successes and product42076131878 FAILURE. Its macOS reader fix is green and H2 review applies, but product depends on stale pricing fixed by2632. No unmerged fix was copied to a D2 head.
+No new E2 focal return was unclaimed; its five products already have applicable reviews. S requested an unclaimed review of #2691/28450130c8c5a83944954dfbdd3c044ba8eba110. GitHub had zero reviews and the fresh channel no competing claim. D2's attempted announcement hit409; wait two minutes, re-read the FULL channel, and announce only if still free. No review code has been written or author branch edited.
 
-Five slots occupied, no new E2 head or nominal return found unclaimed in the fresh full channel. All E2 products have applicable reviews and are waiting on the same shared fixes. Required next action remains C1/V/Claude3 coordination for2632, followed by normal incorporation of shared fixes, necessary main integration preserving reviewed product blobs, and nine NEW exact-head successes on each D2 PR. Historical retry consumption must remain intact. No sixth unit, bypass, second isolated retry, force or author-branch edit is allowed.
+## Read-only fiscal audit: OPEN MEDIUM, no sixth product
 
+Main examined:695c095be524779c2295f226d2e949cb845a720c. The pure TX4/TX3 modules tax-threshold, tax-sales-counter, llc-fixed-costs, customer-tax-review and deemed-supplier have no direct Redis/JSON/pagination patterns; C2 already audited this pure slice. HTTP provider parsing belongs to C5. No artificial reservation or product change was made there.
+
+A PRESENT malformed tax.enabled from persisted JSON silently becomes false in lib/tax.ts:49–58, called by parseStore at lib/store.ts:1009. The real storeForEmail→parseStore→parseTax→applyTax path then accepts an apparently valid store and omits automatic_tax[enabled]; store-checkout.ts:657 uses this builder. MEDIUM is conditional on malformed persisted data. D2 has not observed actual corrupted data, executed a checkout POST or made a legal/tax-policy claim.
+
+Immutable reviewer-only RED: codex/d-checkpoint-2026-11-05-1707@37a8d45304f58a09783b282d96b073569ba82ba5, proofs/d2/tax-setting-malformed.proof.mjs, blob c7635d7f59cdfcac8ced97cc20b75298a4a7b823. Exact remote content matched the local source. Run from the repository root with dependencies: node proofs/d2/tax-setting-malformed.proof.mjs. It imports the real persisted-store reader and tax builder, uses MemoryRedis and forbids fetch. Four valid/legacy controls pass; six malformed present values ("true","false",null,1,[],{}) fail causally, each parsed false/automaticTax null.10checks/6failures. Existing tax-documents24/24 pass. Syntax, ESLint and staged diff checks pass; scanner including the proof3799tracked/0 corrections. No global TSC/browser/native Redis/Stripe claim.
+
+Announcement and RESERVA preceded proof creation; only the NEW proof was reserved, not product files or gates. Finding posted to C1 in channel commit37d4844b283f6db66a6fe1cd2208780ebcf6299f. Requested coordination/owner for the store.ts boundary; five own slots are full. No corrective PR, sixth product, product/reservation/gate edit, paid IO or supplier contact. Preserve documented absent legacy fields; a correction must refuse unknown rather than infer tax on/off. Await assignment or a free slot.
 ## Five own open products
 
 | PR | Exact head | Status and next action |
@@ -28,11 +35,11 @@ Korea branch: codex/d-tx4-korea-vat-evidence. REDd6227383453e430f83d6f187c4f7747
 
 ## Shared CI blockers
 
-Claude3#2632 remains OPEN at4c92c6f4008008120189bbaa4154c185d0612531: eight successes and product42044911877 cancelled twice at35min, including its unique retry. It changes only two generated pricing documents. E2 announced its independent review at14h39 Fortaleza; do not duplicate it.
+Current controller #2632/f183d78fd326c404c5a75fd6a3b9328b9fe24c94 combines pricing documents, #2652 heap repair and #2677 intro-guard repair by explicit C1/C3 exception. It is still unmerged; last observed8success+product42117120004 running. No D2 polling/retry/merge of its branch. V and the author own CI/review.
 
-V proposed separating store-copy into a parallel job: measured estimated45% reduction in verify, about14–16% of the complete product critical path; extra cost unknown. No C1 approval or workflow edit has been seen. No bypass, deadline increase or retry reset is authorized.
+V corrected the proposed parallel Chromium workflow estimate: historical run41953358549 had78m36s runner total; a separate rebuilt job projects93m50s (+19.4%), nearly zero wall-time improvement in that sample although verify shrinks. V requested a new coordinator decision before editing workflow. D2 did not change workflows or authorize unknown costs as zero.
 
-Korea and E2#2605 also hit macOS build/typecheck heapOOM near2GiB. scripts/ci-build.mjs inherits process.env when spawning Next; the reader workflow calls it without an explicit heap setting. D2 has not changed either file or claimed a measured repair.
+Historical #2632/4c92 and product42044911877 attempts cancelled at35min; the unique retries on Canada/Swiss/Africa are exhausted. These counters do not reset because a shared controller changed. Normal incorporation of the combined fix is a necessary dependency for the five own heads, followed by necessary main integration preserving the two reviewed evidence blobs per product and nine NEW exact-head successes.
 
 ## Reviews completed this turn
 
@@ -85,8 +92,8 @@ One independent review is enough except outgoing money, which needs two. Merge o
 Next:
 1. Korea is now terminal8/9: reader retry PASSED and product verify failed only the deterministic pricing failures. No executor remains active on this head, and no extra retry is authorized or useful.
 2. Once the shared fixes merge, integrate necessary main preserving reviewed product blobs, require nine NEW successes, then merge normally with Q review applicable; no second review.
-3. #2632 remains OPEN at4c92c6f4008008120189bbaa4154c185d0612531 with8success+cancelled product. #2652 is OPEN at eb1ebcff56099491bdc1423e9431924e345482da,7success+2active at17:47UTC, H2 review5789338130 qualifies. Both have authors/controllers; do not duplicate reviews, merge their PRs or copy unmerged corrections.
+3. #2632 is OPEN atf183d78fd326c404c5a75fd6a3b9328b9fe24c94 with8success+product42117120004 running at the last observation. It includes2652+2677 by explicit coordinator exception; V/C3 control it. Do not duplicate reviews, poll in model turns, merge their PRs or copy unmerged corrections.
 4. Canada/Swiss/Africa unique timeout retries are exhausted. Report shared repair/coordination to C1/V; never repeat them.
-5. With five products waiting, only an unclaimed E2 review or requested focal return; no sixth own unit and no duplicate reviewer.
+5. With five products waiting, only an unclaimed independent review, requested focal return or read-only default audit evidence; no sixth own product and no duplicate reviewer. The malformed persisted tax-setting MEDIUM remains OPEN, with immutable proof and C1 assignment requested. Retry the2691 announcement only after the409 two-minute delay and fresh no-claim check.
 
 Most recent CI record: PR#2647 comment6664184558. Channel CAS conflicts around17:05 were retried after two minutes; successful result/retry checkpoint append95e79b1ad8edb723bc5828f62e2411392e15bfa2. Before ending, append PONTO DE PARADA with all five exact heads, retry counters and next action. Keep all work durable at most30min.

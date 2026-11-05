@@ -166,6 +166,8 @@ test("every route a buyer acts through takes from the store's month before it wr
     ["app/api/store/course/file/route.ts", /takePublicRequest\(store, found\.lesson\.preview \? "public" : "buyer"\)/],
     ["app/api/store/course/open/route.ts", /takeBuyerRead\(store\)/],
     ["app/api/store/course/link/route.ts", /takeBuyerRead\(store\)/],
+    ["app/api/store/letters/open/route.ts", /takeBuyerRead\(store\)/],
+    ["app/api/store/letters/link/route.ts", /takeBuyerRead\(store\)/],
     ["app/api/store/podcast/open/route.ts", /takeBuyerRead\(store\)/],
     ["app/api/store/podcast/play/[token]/[episode]/route.ts", /takeBuyerRead\(store\)/],
   ];

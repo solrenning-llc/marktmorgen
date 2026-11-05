@@ -18,7 +18,7 @@ import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscriptio
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import type { Broadcast } from "@/lib/broadcasts";
 import { LETTER_ID, MAX_PUBLISHED_LETTERS, PUBLISH_WARNING } from "@/lib/letter-rules";
-import { letterIdFor, letterRoomBytes, listLetters, publishLetter, publishedLetterIds, readLetter, unpublishLetter } from "@/lib/letters";
+import { letterIdFor, letterRoomBytes, listLetters, publishLetter, publishedLetters, readLetter, unpublishLetter } from "@/lib/letters";
 import { FOLLOWERS } from "@/lib/closed-store-data";
 import { RESERVED_SLUGS } from "@/lib/site-page-rules";
 import { dataUsed } from "@/lib/store-data";
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   is("drawn with the links as typed, not tagged", bodyHtml(page!.body).includes('href="https://example.com/workbook"'), true);
   const listed = await measure("open the list of published emails", () => listLetters(store));
   is("listed", listed.map((l) => l.id), [letter.id]);
-  is("the studio knows it is published", (await measure("the studio's read of what is published", () => publishedLetterIds(store))).has(letter.id), true);
+  is("the studio knows it is published", (await measure("the studio's read of what is published", () => publishedLetters(store)))?.has(letter.id), true);
   is("publishing it again writes it again, not a second one", [(await publishLetter(store, sent, now + 1)).ok, (await listLetters(store)).length], [true, 1]);
 
   part("A cap, and taking it off");

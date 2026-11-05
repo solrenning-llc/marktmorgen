@@ -188,12 +188,16 @@ const brokenKey = async (email: string) =>
  * added to them, a second move waits, and a login without a second step is
  * refused (lib/signin-finish.ts and the recovery routes).
  */
-export async function markBrokenMove(from: string, to: string): Promise<void> {
-  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now() });
+export async function markBrokenMove(from: string, to: string): Promise<string> {
+  // A token made here for this move alone: what this move writes into the record later carries it, so nothing it
+  // writes late lands on another move's record, even of the same two addresses (noteMoveCopy; Codex H, #2271).
+  const op = randomToken();
+  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now(), op });
   await redisPipeline([
     ["SET", await brokenKey(from), value],
     ["SET", await brokenKey(to), value],
   ]);
+  return op;
 }
 
 export async function readBrokenMove(email: string): Promise<{ from: string; to: string; copy?: string } | null> {
@@ -212,16 +216,31 @@ export async function readBrokenMove(email: string): Promise<{ from: string; to:
  * Notes, with a running move's record, the fingerprint of the store record it
  * wrote at the new address (lib/store.ts copyPrint), just before the old one is
  * taken away: a repair then deletes a copy left behind while it is still that,
- * however the store changed since (review of #2140). Written only over the
- * record that is there (XX): a move already cleared is never marked again.
+ * however the store changed since (review of #2140). Written, in one script
+ * (NOTE_MOVE_COPY), only over a record that still carries this move's own
+ * token (`op`, from markBrokenMove): a move cleared since, or replaced by
+ * another (of other addresses, or of the same two again), is never written
+ * over (Codex H, #2271: SET XX wrote over whatever record was there).
  */
-export async function noteMoveCopy(from: string, to: string, copy: string): Promise<void> {
-  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now(), copy });
-  await redisPipeline([
-    ["SET", await brokenKey(from), value, "XX"],
-    ["SET", await brokenKey(to), value, "XX"],
-  ]);
+export async function noteMoveCopy(from: string, to: string, copy: string, op: string): Promise<void> {
+  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now(), op, copy });
+  await redisPipeline([["EVAL", NOTE_MOVE_COPY, 2, await brokenKey(from), await brokenKey(to), op, value]]);
 }
+
+/** Writes ARGV[2] over each record whose `op` is ARGV[1], and nothing else. Answers how many. Modelled by lib/redis-memory.ts. */
+export const NOTE_MOVE_COPY = `-- marktmorgen:move-copy-note:v1
+local written = 0
+for i = 1, #KEYS do
+  local held = redis.call('GET', KEYS[i])
+  if held then
+    local ok, record = pcall(cjson.decode, held)
+    if ok and type(record) == 'table' and record.op == ARGV[1] then
+      redis.call('SET', KEYS[i], ARGV[2])
+      written = written + 1
+    end
+  end
+end
+return written`;
 
 export async function clearBrokenMove(from: string, to: string): Promise<void> {
   await redisPipeline([["DEL", await brokenKey(from), await brokenKey(to)]]);

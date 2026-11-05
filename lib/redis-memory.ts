@@ -460,6 +460,24 @@ export class MemoryRedis {
           held.delete(args[2]);
           return value;
         }
+        // lib/auth.ts NOTE_MOVE_COPY: a move's record written over only where it still carries that move's token.
+        if (key.startsWith("-- marktmorgen:move-copy-note:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const [op, value] = args.slice(1 + count);
+          let written = 0;
+          for (const target of keys) {
+            const held = this.run(["GET", target]);
+            if (typeof held !== "string") continue;
+            let record: unknown = null;
+            try { record = JSON.parse(held); } catch { record = null; }
+            if (record && typeof record === "object" && (record as { op?: unknown }).op === op) {
+              this.run(["SET", target, value]);
+              written += 1;
+            }
+          }
+          return written;
+        }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);

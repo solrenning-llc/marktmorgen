@@ -77,10 +77,11 @@ export async function POST(request: NextRequest) {
   // address and its ways in on the other are never left with a login by the emailed link let in, and the
   // next login or move repairs it (lib/move-repair.ts, which waits while this move's mark is there).
   // Not written: nothing moves, and the 5-minute mark lapses on its own.
-  if (!(await markBrokenMove(from, to).then(() => true, () => false))) return away("/signin?status=move-error");
+  const op = await markBrokenMove(from, to).catch(() => null);
+  if (!op) return away("/signin?status=move-error");
   let broken = false;
   try {
-    return await finishMove(from, to, away, () => {
+    return await finishMove(from, to, op, away, () => {
       broken = true;
     });
   } finally {
@@ -110,7 +111,7 @@ async function step(what: string, work: () => Promise<unknown>): Promise<boolean
  * that cannot be done, or where the store is cannot be told, `broke` is
  * called and the move is kept marked until it is repaired.
  */
-async function finishMove(from: string, to: string, away: (path: string) => Response, broke: () => void): Promise<Response> {
+async function finishMove(from: string, to: string, op: string, away: (path: string) => Response, broke: () => void): Promise<Response> {
   let keysMoved = false;
   let appMoved = false;
   // A copy of two-step login that may have been left at `to` when moving it refused (lib/two-step.ts moveTwoStep).
@@ -144,7 +145,7 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
 
   let sessionId: string;
   try {
-    const result = await moveAccount(from, to, (copy) => noteMoveCopy(from, to, copy));
+    const result = await moveAccount(from, to, (copy) => noteMoveCopy(from, to, copy, op));
     if (!result.ok) {
       await undo();
       return away(`/signin?status=move-${result.reason}`);

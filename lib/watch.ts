@@ -155,22 +155,35 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
 
   // Each video's last total, only in its exact shape (audit SG2, CX-123 rule
   // 24). A total read as 0 would count the whole video again, so a reply
-  // that is not a list of fields and whole numbers measures nothing this
+  // that is not a list of text fields and values measures nothing this
   // round: null, read again soon, as when the service could not be read.
   const flat = stringList(repliesFor(await redisPipeline([["HGETALL", lastKey(folder)]]), 1)?.[0]);
   if (flat === null || flat.length % 2 !== 0) return null;
   const last = new Map<string, number>();
+  // A well-formed reply can still hold one entry that is not a whole number
+  // ("12.5", an old format, a deleted video's). It is persisted and never
+  // expires, so refusing the whole store on it would stop the metering for
+  // good (review 1 of SG2 L8). That entry alone is dropped: its previous
+  // total is not known, so nothing is added for it this round (never counted
+  // from 0) and it is rewritten with the current total below, or let go with
+  // the videos that are gone. At most one interval of one video goes uncounted.
+  const resync = new Set<string>();
   for (let i = 0; i < flat.length; i += 2) {
     const seconds = textCountOf(flat[i + 1]);
-    if (typeof seconds !== "number") return null;
-    last.set(flat[i], seconds);
+    if (typeof seconds === "number") last.set(flat[i], seconds);
+    else resync.add(flat[i]);
   }
+  if (resync.size) console.error(`a store's last watch totals held ${resync.size} malformed entr${resync.size === 1 ? "y" : "ies"}; resynced without counting them (watch ${folder})`);
 
   let added = 0;
   const writes: (string | number)[][] = [];
   const there = new Set<string>();
   for (const video of videos) {
     there.add(video.id);
+    if (resync.has(video.id)) {
+      writes.push(["HSET", lastKey(folder), video.id, video.seconds]);
+      continue;
+    }
     const before = last.get(video.id);
     // A video seen for the first time was put there since the reading before
     // (or before any reading was made): all of its watching is new.
@@ -178,7 +191,7 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
     if (before === undefined || video.seconds !== before) writes.push(["HSET", lastKey(folder), video.id, video.seconds]);
   }
   // A video that is gone is forgotten, so this does not grow for ever.
-  const gone = [...last.keys()].filter((id) => !there.has(id));
+  const gone = [...last.keys(), ...resync].filter((id) => !there.has(id));
   if (gone.length) writes.push(["HDEL", lastKey(folder), ...gone]);
 
   if (added > 0) {

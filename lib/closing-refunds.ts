@@ -37,6 +37,8 @@
 import { createHash } from "node:crypto";
 import { onAccount, StripeError } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
+import { signedOf } from "@/lib/redis-count";
+import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { type PaidPeriod, REFUNDS_PER_REQUEST, stillToGive, totalsOf, unusedOf } from "@/lib/closing-buyers-rules";
 import { paidPeriods, savePaidPeriod, takeCalls, workKey } from "@/lib/closing-holds";
@@ -195,16 +197,28 @@ export async function giveBackUnused(
         let left = taken.reduce((sum, [, n]) => sum + n, 0) - used;
         for (const [from, n] of [...taken].reverse()) {
           const back = Math.min(n, left);
-          if (back > 0) await redisPipeline([["HINCRBY", workKey(folder), from, back]]);
+          if (back > 0) {
+            // Once: a total in an unknown shape may or may not have been added, so it is logged, never sent again.
+            const replies = repliesFor(await redisPipeline([["HINCRBY", workKey(folder), from, back]]), 1);
+            if ((replies ? signedOf(replies[0]) : null) === null) console.error(`giving back ${back} of a closing's ${from} calls answered in an unknown shape; not tried again`);
+          }
           left -= back;
         }
         taken.length = 0;
       };
-      const have = options.final
-        ? (await take("rcalls", 3))
-          ? need === 3 || (await take("calls", need - 3)) || (await take("rcalls", need - 3))
-          : await take("calls", need)
-        : await take("calls", need);
+      let have: boolean;
+      try {
+        have = options.final
+          ? (await take("rcalls", 3))
+            ? need === 3 || (await take("calls", need - 3)) || (await take("rcalls", need - 3))
+            : await take("calls", need)
+          : await take("calls", need);
+      } catch (error) {
+        // A take whose reply was unknown (review 1 of SG2 L8): what was taken before it with an exact reply is given
+        // back, never the unknown one, and the run stops as before.
+        await giveCallsBack().catch((failed) => console.error("giving back a closing's calls failed; not tried again", failed));
+        throw error;
+      }
       if (!have) {
         await giveCallsBack();
         // On the closing day it is final, and its member is told honestly that it was not made automatically (not

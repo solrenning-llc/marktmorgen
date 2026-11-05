@@ -9,8 +9,10 @@
  *     and swallowed a Redis error into 0 too. It now throws, and the hourly
  *     job's per-store loop skips that store this round.
  *   - measure (lib/watch.ts) read a video's last total that was not a whole
- *     number as 0, and so counted the whole video again. Now the store is
- *     not metered this round (null, read again soon), never counted from 0.
+ *     number as 0, and so counted the whole video again. Now a reply out of
+ *     shape meters nothing this round (null, read again soon), and one
+ *     malformed entry in a well-formed reply is resynced without counting
+ *     it; never counted from 0.
  *   - measureDue (lib/watch.ts) read an unknown "last opened" as never, and
  *     took the store out of line. Unknown now keeps it in line.
  *   - toldOf (lib/closing-buyers.ts) read garbage on the told list as "told,
@@ -138,8 +140,22 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:stream:col:${folder}`, COLLECTION]]);
   await redis.pipeline([["HSET", `nl:watch:last:${folder}`, VIDEO, "100"]]);
   watchedTotal = 150;
+  // An entry that is text but not a whole number sits in a well-formed reply:
+  // it alone is resynced (tests/sg2-l8-watch-resync.test.ts), never counted
+  // from 0. Any other slot makes the reply itself out of shape.
+  const RESYNCED = BAD_TEXT.filter(([, slot]) => typeof slot === "string");
+  for (const [label, slot] of RESYNCED) {
+    await redis.pipeline([["HSET", `nl:watch:last:${folder}`, VIDEO, "100"]]);
+    rule = { when: first("HGETALL", "nl:watch:last:"), reply: [[VIDEO, slot]] };
+    const from = sent.length;
+    is(`measure, a last total that is ${label}: nothing counted for that video this round`, await measure(folder), 0);
+    is(`measure, a last total that is ${label}: nothing added to the month`, sentSince(from, "INCRBY", "nl:watch:sec:"), false);
+    is(`measure, a last total that is ${label}: resynced to the video's current total`, sent.slice(from).some((commands) => commands.some((c) => c[0] === "HSET" && String(c[1]).startsWith("nl:watch:last:") && c[2] === VIDEO && c[3] === 150)), true);
+  }
+  rule = null;
+  await redis.pipeline([["HSET", `nl:watch:last:${folder}`, VIDEO, "100"]]);
   const BAD_LAST: [string, unknown][] = [
-    ...BAD_TEXT.map(([label, slot]) => [`a last total that is ${label}`, [[VIDEO, slot]]] as [string, unknown]),
+    ...BAD_TEXT.filter(([, slot]) => typeof slot !== "string").map(([label, slot]) => [`a last total that is ${label}`, [[VIDEO, slot]]] as [string, unknown]),
     ["a last total that is null", [[VIDEO, null]]],
     ["a list of odd length (a field with no value)", [[VIDEO]]],
     ["a field that is not text", [[5, "100"]]],

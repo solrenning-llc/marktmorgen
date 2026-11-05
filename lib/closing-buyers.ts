@@ -76,6 +76,21 @@ function markOf(raw: unknown): "absent" | "untold" | number | null {
   return raw === UNTOLD ? "untold" : textCountOf(raw);
 }
 
+/**
+ * takeCredit, and when its reply is unknown (it throws), gives back the
+ * `certain` credit taken before it in the same round, whose emails will not
+ * go now, and throws again (review 1 of SG2 L8). The unknown take itself is
+ * never given back: it is not known whether it ran.
+ */
+async function takeCreditOrGiveBack(folder: string, n: number, certain: number): Promise<boolean> {
+  try {
+    return await takeCredit(folder, n);
+  } catch (error) {
+    await returnCredit(folder, certain).catch((failed) => console.error("giving back a closing's email credit failed; not tried again", failed));
+    throw error;
+  }
+}
+
 function message(store: Store, to: string, letter: BuyerLetter, postal: string): BatchMessage {
   const text = `${letter.text}\n\nMarktmorgen, ${postal}`;
   return { from: NIMBUS_FROM, to, replyTo: store.email, subject: letter.subject, text, html: letterHtml(letter.text, postal), tags: { kind: "closing_notice" } };
@@ -146,7 +161,7 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
     for (let i = 0; i < todo.length; i += 100) {
       const going: string[] = [];
       for (const email of todo.slice(i, i + 100)) {
-        if (await takeCredit(folder, EMAILS_PER_BUYER_PER_ENDING)) going.push(email);
+        if (await takeCreditOrGiveBack(folder, EMAILS_PER_BUYER_PER_ENDING, going.length * EMAILS_PER_BUYER_PER_ENDING)) going.push(email);
         else {
           // Counted once however many times the address turns up (HSETNX).
           const [fresh] = await redisPipeline([["HSETNX", toldKey(folder), email, UNTOLD]]);
@@ -272,10 +287,14 @@ export async function tellRefundShort(store: Store, short: { email: string; amou
   }
   const going: BatchMessage[] = [];
   const addresses: string[] = [];
+  let taken = 0;
   for (const { row, email, told } of rows) {
-    if (!told && !(await takeCredit(folder, 1))) {
-      out.untold += 1;
-      continue;
+    if (!told) {
+      if (!(await takeCreditOrGiveBack(folder, 1, taken))) {
+        out.untold += 1;
+        continue;
+      }
+      taken += 1;
     }
     addresses.push(email);
     const letter = why === "limit" ? refundUnmadeLetter : refundShortLetter;

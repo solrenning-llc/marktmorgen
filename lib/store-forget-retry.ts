@@ -24,7 +24,8 @@
  * forgetStoreWebhooks (two pipelines: 13 + 2 × LOG_SIZE commands, and 3 more
  * for each endpoint it names: the MAX_ENDPOINTS configured and up to
  * MAX_ENDPOINTS told on each of the last three days, lib/webhooks.ts, so
- * 4 × MAX_ENDPOINTS) and revokeAllKeys (2 + MAX_KEYS), plus at most four for
+ * 4 × MAX_ENDPOINTS) and revokeAllKeys (4 + MAX_KEYS: the list read, each key's
+ * lookup, and the list, its holds and its uses deleted), plus at most four for
  * the line itself: FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
  * a deleted store, at most FORGET_PER_RUN stores a day, and only for a delete
  * whose first try failed (held in tests/sg2-unknown-replies.test.ts).
@@ -40,7 +41,7 @@ export const FORGET_TRIES = 8;
 /** Stores tried again in one run of the closing job. */
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
-export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 2 + MAX_KEYS + 4;
+export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + 4;
 /** How long a month's counts are kept: past the next yearly look at them. */
 const MONTH_SECONDS = 400 * 86_400;
 

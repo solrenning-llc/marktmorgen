@@ -480,8 +480,7 @@ export type TurnOn = "ok" | "unknown" | "not_paused" | "not_yours" | "whose" | "
  */
 export async function turnKeyOn(store: Store, email: string, role: Role, id: string, as = ""): Promise<TurnOn> {
   if (!store.sid) return "unknown";
-  // Strict: a list read in another shape throws, so the studio says it could not read the keys (audit SG2, finding 23).
-  const [keys, team] = await Promise.all([keyRecords(store.sid, true), teamNow(store)]);
+  const [keys, team] = await Promise.all([keyRecords(store.sid), teamNow(store)]);
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
   const why = pauseWhy(store.sid, key.maker, key.hold, team.members, key.write, team.rule);
@@ -510,8 +509,7 @@ export type Revoke = "ok" | "unknown" | "owner_only";
 /** Revokes a key; the endpoints it added stop with it (read at every send). A key whose maker left the team is the owner's alone to revoke. */
 export async function revokeChecked(store: Store, role: Role, id: string): Promise<Revoke> {
   if (!store.sid) return "unknown";
-  // Strict: a list read in another shape throws, so the studio says it could not read the keys (audit SG2, finding 23).
-  const [keys, team] = await Promise.all([keyRecords(store.sid, true), teamNow(store)]);
+  const [keys, team] = await Promise.all([keyRecords(store.sid), teamNow(store)]);
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
   if (pauseWhy(store.sid, key.maker, key.hold, team.members, key.write, team.rule) === "left" && role !== "owner") return "owner_only";

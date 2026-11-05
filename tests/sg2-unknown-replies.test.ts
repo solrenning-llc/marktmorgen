@@ -33,7 +33,7 @@ import { LOCKED_UNTIL_STAR_COMMANDS } from "./plan-cost-registry";
 import { alignRecoveryLock } from "@/lib/recovery-address";
 import { PASSKEY_SESSIONS_OPEN, cancelRemoval, listPasskeys, pendingNow, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
 import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
-import { MAX_KEYS, listKeys, makeKey, resolveKey, revokeAllKeys } from "@/lib/api-keys";
+import { MAX_KEYS, keyRecords, listKeys, makeKey, resolveKey, revokeAllKeys } from "@/lib/api-keys";
 import { FORGET_TRIES, FORGET_TRY_COMMANDS, type ForgetWork, queueStoreForget, retryStoreForgets, storeForgetLine, storeForgetMonth } from "@/lib/store-forget-retry";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { ApiKeyEditor, KEYS_UNREAD } from "@/components/api-key-editor";
@@ -388,6 +388,10 @@ async function main(): Promise<void> {
     restore();
     is(`the list read as ${JSON.stringify(bad) ?? "nothing"}: unread, not empty`, answer, "UnknownReplyError");
   }
+  malform(on("HGETALL", "nl:api:keys:"), { 0: "x" });
+  const strictRecords = [await rejects(() => keyRecords(SID, true)), (await keyRecords(SID).catch(() => null))?.length];
+  restore();
+  is("the studio's read of the keys (shownKeys, keyRecords strict) fails; the pause code's read is as before", strictRecords, ["UnknownReplyError", 0]);
   malform(on("HGETALL", "nl:api:keys:"), null);
   const revoked = await rejects(() => revokeAllKeys(SID));
   restore();
@@ -409,8 +413,8 @@ async function main(): Promise<void> {
   const keysRoute = readFileSync("app/api/store/api-keys/route.ts", "utf8");
   is(
     "the studio passes an unread list as such, and the route sends it as null after a change that was made",
-    [studio.includes('listKeys(current.sid).catch(() => "unread" as const)'), studio.includes("listKeys(current.sid).catch(() => [])"), keysRoute.includes("keys: await listAfter(store.sid)"), keysRoute.includes("keys: await listKeys(store.sid)")],
-    [true, false, true, false],
+    [studio.includes('shownKeys(current, email, role).catch(() => "unread" as const)'), studio.includes("shownKeys(current, email, role).catch(() => [])"), keysRoute.includes("shownKeys(store, email, role).catch((error: unknown) => {"), keysRoute.includes("return null;")],
+    [true, false, true, true],
   );
   is("(the words)", KEYS_UNREAD, "We could not read your keys just now, so they are not listed here. Reload the page to try again.");
   is("(read in its shape, the key is listed)", (await listKeys(SID)).map((k) => k.name), ["Zapier"]);

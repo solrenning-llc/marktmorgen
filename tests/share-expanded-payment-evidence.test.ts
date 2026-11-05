@@ -8,7 +8,7 @@ import { paidPeriod } from "./billing-period-fixture";
 
 const fee = { id: "fee_JExpanded0001", account: "acct_JExpanded0001", charge: "ch_JExpanded0001", amount: 625, refunded: 0, currency: "usd" };
 const intentId = "pi_JExpanded0001";
-type Options = { kind?: "intent" | "invoice" | "session"; patch?: Record<string, unknown>; chargePatch?: Record<string, unknown>; storeAccount?: string; diagnostic?: boolean; feeReplyPatch?: Record<string, unknown> };
+type Options = { kind?: "intent" | "invoice" | "session"; patch?: Record<string, unknown>; chargePatch?: Record<string, unknown>; storeAccount?: string; diagnostic?: boolean; feeReplyPatch?: Record<string, unknown>; historical?: boolean };
 async function run(options: Options = {}) {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_j_expanded_only_a_stand_in";
@@ -30,8 +30,10 @@ async function run(options: Options = {}) {
     assert.equal(url.origin, "https://api.stripe.com");
     const body = new URLSearchParams(String(init?.body ?? ""));
     calls.push({ method, path: url.pathname, amount: body.get("amount") });
-    if (url.pathname === "/v1/application_fees") return Response.json({ object: "list", has_more: false, data: [{ object: "application_fee", ...fee, amount_refunded: fee.refunded, ...options.feeReplyPatch }] });
-    if (url.pathname === "/v1/events") return Response.json({ object: "list", has_more: false, data: [] });
+    const feeReply = { object: "application_fee", ...fee, amount_refunded: fee.refunded, ...options.feeReplyPatch };
+    if (url.pathname === "/v1/application_fees") return Response.json({ object: "list", has_more: false, data: options.historical ? [] : [feeReply] });
+    if (url.pathname === "/v1/application_fees/" + fee.id && method === "GET") return Response.json(feeReply);
+    if (url.pathname === "/v1/events") return Response.json({ object: "list", has_more: false, data: options.historical ? [{ id: "evt_JExpanded0001", data: { object: { application_fee: fee.id } } }] : [] });
     if (url.pathname === "/v1/subscriptions/search") return Response.json({ object: "search_result", has_more: false, data: [] });
     if (url.pathname === "/v1/charges/" + fee.charge && method === "GET") return Response.json(charge);
     if (url.pathname === "/v1/checkout/sessions" && method === "GET") {
@@ -122,7 +124,7 @@ for (const kind of ["intent", "invoice", "session"] as const) test("unknown " + 
 });
 
 // I2 self-audit: the application fee itself must confirm its resource identities.
-for (const [label, feeReplyPatch] of [
+for (const historical of [false, true]) for (const [label, feeReplyPatch] of [
  ["missing fee kind", { object: undefined }], ["foreign fee kind", { object: "charge" }],
  ["missing expanded account kind", { account: { id: fee.account } }],
  ["foreign expanded account kind", { account: { object: "customer", id: fee.account } }],
@@ -132,16 +134,17 @@ for (const [label, feeReplyPatch] of [
  ["null charge", { charge: null }], ["array charge", { charge: [] }],
  ["foreign account id kind", { account: { object: "account", id: fee.charge } }],
  ["foreign charge id kind", { charge: { object: "charge", id: fee.account } }],
-] as const) test("unconfirmed application fee resource cannot authorize money: " + label, async () => {
- const r = await run({ diagnostic: true, feeReplyPatch });
+] as const) test("unconfirmed " + (historical ? "historical" : "recent") + " application fee resource cannot authorize money: " + label, async () => {
+ const r = await run({ diagnostic: true, feeReplyPatch, historical });
  assert.equal(r.posts.length, 0);
- assert.ok(r.counts); assert.equal(r.counts.complete, false); assert.equal(r.counts.listUnknown, 1);
+ assert.ok(r.counts); assert.equal(r.counts.complete, false); assert.equal(r.counts.listUnknown, historical ? 0 : 1);
+ if (historical) { assert.equal(r.counts.unknownAmounts, 1); assert.deepEqual(r.counts.unknownAmountFees, [fee.id]); }
  assert.equal(r.counts.gaveBack, 0); assert.equal(r.counts.cents, 0);
 });
-for (const feeReplyPatch of [
+for (const historical of [false, true]) for (const feeReplyPatch of [
  {}, { account: { object: "account", id: fee.account }, charge: { object: "charge", id: fee.charge } },
-]) test("confirmed application fee retains the exact known refund: " + JSON.stringify(feeReplyPatch), async () => {
- const r = await run({ diagnostic: true, feeReplyPatch });
+]) test("confirmed " + (historical ? "historical" : "recent") + " application fee retains the exact known refund: " + JSON.stringify(feeReplyPatch), async () => {
+ const r = await run({ diagnostic: true, feeReplyPatch, historical });
  assert.ok(r.counts);
  assert.deepEqual([r.counts.complete, r.counts.gaveBack, r.counts.cents, r.posts.length], [true, 1, 125, 1]);
 });

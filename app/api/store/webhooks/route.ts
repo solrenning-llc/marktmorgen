@@ -58,6 +58,8 @@ export async function POST(request: NextRequest) {
       if (!result.ok) {
         if (result.reason === "unavailable") return Response.json({ ok: false, error: "unavailable", message: "The test could not be sent just now. Try again in a moment." }, { status: 503 });
         if (result.reason === "used") return Response.json({ ok: false, error: "used", message: result.message }, { status: 429 });
+        // Its API key is paused or revoked (owner C3-100): nothing was counted.
+        if (result.reason === "held") return Response.json({ ok: false, error: "held", message: result.message }, { status: 409 });
         return Response.json({ ok: false, error: result.reason }, { status: result.reason === "limited" ? 429 : 404 });
       }
       return Response.json({
@@ -77,6 +79,7 @@ export async function POST(request: NextRequest) {
         if (result.reason === "unavailable") return Response.json({ ok: false, error: "unavailable", message: "It could not be sent again just now. Try again in a moment." }, { status: 503 });
         if (result.reason === "used") return Response.json({ ok: false, error: "used", message: result.message }, { status: 429 });
         if (result.reason === "paused") return Response.json({ ok: false, error: "paused", message: result.message }, { status: 409 });
+        if (result.reason === "too_large") return Response.json({ ok: false, error: "too_large", message: result.message }, { status: 409 });
         if (result.reason === "limited") return Response.json({ ok: false, error: "limited" }, { status: 429 });
         return Response.json({ ok: false, error: result.reason }, { status: result.reason === "missing" ? 404 : 409 });
       }

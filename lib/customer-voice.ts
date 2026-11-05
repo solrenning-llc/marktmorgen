@@ -26,12 +26,23 @@
  * Nobody is named. The texts go without a name, and any email address, phone
  * number or web address in them is taken out before they are sent.
  *
+ * A person's erasure (lib/person-erasure.ts; rule 28: an erased person's data
+ * never comes back) deletes every summary of the store kept here
+ * (forgetVoicePerson), after their reviews went at their source, so the
+ * summary read again leaves them out. A reading already under way when they
+ * are deleted is not kept: the erasure takes its lock too, and the summary is
+ * written only while the lock is still the reading's own, in one step on the
+ * Redis side (VOICE_KEEP), so the erasure cannot fall between the check and
+ * the write. What members wrote when leaving comes from the creator's Stripe
+ * account with nobody named beside it, so whether its writer was deleted
+ * cannot be checked: it is sorted and counted, never kept as an example.
+ *
  * One of the month's AI jobs (lib/ai.ts, counted), on the smaller model,
  * made only when the creator asks, at most once a calendar month, and only
  * when there are at least MIN_TEXTS texts to sort.
  *
  *   nl:voice:<statsId>:<yyyy-mm>   the month's summary, about two months
- *   nl:voice:lock:<statsId>         one reading at a time, a minute
+ *   nl:voice:lock:<statsId>         one reading at a time, two minutes, holding its own token
  */
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -41,6 +52,7 @@ import { STORE_PAGE, missedQuestions } from "@/lib/answers";
 import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
+import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
 
 export type VoiceSource = "cancel" | "question" | "review" | "search";
@@ -75,6 +87,13 @@ export type VoiceSummary = {
   /** How many texts were read, by where they came from. */
   read: Partial<Record<VoiceSource, number>>;
   themes: VoiceTheme[];
+  /**
+   * The themes reviews are part of, picked before the themes above are cut to
+   * MAX_THEMES (searches, counted as many times as they were made, can take
+   * every place there), with up to three reviews as their examples. The
+   * reviews page reads these. Missing on a summary made before they were kept.
+   */
+  reviewThemes?: VoiceTheme[];
   /** Texts that fit no theme said by two or more. */
   other: number;
 };
@@ -87,11 +106,48 @@ export const MAX_TEXTS = 160;
 const MAX_TEXT = 300;
 export const MAX_THEMES = 6;
 const MAX_TITLE = 60;
-const KEEP_SECONDS = 70 * 86_400;
+export const KEEP_SECONDS = 70 * 86_400;
+/** One reading at a time: long enough for the texts to be gathered and the model's answer (45 seconds at most, lib/ai.ts). */
+export const LOCK_SECONDS = 120;
 
 const monthOf = (ms: number) => new Date(ms).toISOString().slice(0, 7);
 const voiceKey = (statsId: string, month: string) => `nl:voice:${statsId}:${month}`;
 const lockKey = (statsId: string) => `nl:voice:lock:${statsId}`;
+
+/** Where examples may come from: every source whose writer, once deleted, is gone at the source too or was never named. */
+const QUOTED = (source: VoiceSource) => source !== "cancel";
+
+/**
+ * The months a summary kept now may be of, the newest first, at most four. A
+ * summary's month is taken when its reading begins, and it is written up to
+ * LOCK_SECONDS later (perhaps in the next month), then kept KEEP_SECONDS from
+ * that write; a minute more covers the step before the lock and the clocks.
+ * Pure.
+ */
+export function keptMonths(now: number): string[] {
+  const out: string[] = [];
+  const date = new Date(now);
+  for (let back = 0; ; back += 1) {
+    const first = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - back, 1);
+    const end = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - back + 1, 1);
+    if (end <= now - (KEEP_SECONDS + LOCK_SECONDS + 60) * 1000) break;
+    out.push(monthOf(first));
+  }
+  return out;
+}
+
+/**
+ * The summary written only while the reading's lock is still its own, and the
+ * lock let go with it, in one step (a person's erasure deletes the lock):
+ * KEYS[1] the lock, KEYS[2] the summary; ARGV[1] the token, ARGV[2] the
+ * summary, ARGV[3] its seconds. 1 when written, 0 when not. lib/redis-memory.ts
+ * runs it the same way.
+ */
+export const VOICE_KEEP = `-- marktmorgen:voice-keep:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+redis.call("DEL", KEYS[1])
+return 1`;
 
 /** A text as it may be sent: one line, short, with addresses, phone numbers and links taken out. Pure. */
 export function cleanVoice(value: string, max = MAX_TEXT): string {
@@ -161,10 +217,17 @@ export function voicePrompt(items: VoiceItem[]): string {
  * theme, is dropped; a theme left with fewer than two texts, or a name with a
  * figure in it, is dropped too. Counts and examples come from the texts. Pure.
  */
-export function themesFrom(raw: Record<string, unknown> | null, items: VoiceItem[]): { themes: VoiceTheme[]; other: number } {
+export function themesFrom(raw: Record<string, unknown> | null, items: VoiceItem[]): { themes: VoiceTheme[]; reviewThemes: VoiceTheme[]; other: number } {
   const byId = new Map(items.map((i) => [i.id, i]));
   const used = new Set<number>();
   const themes: VoiceTheme[] = [];
+  const reviewThemes: VoiceTheme[] = [];
+  const examplesOf = (list: VoiceItem[]) =>
+    [...list]
+      .sort((a, b) => b.n - a.n || a.id - b.id)
+      .filter((i) => QUOTED(i.source))
+      .slice(0, 3)
+      .map((i) => ({ source: i.source, text: i.text, n: i.n, ...(i.product ? { product: i.product } : {}), ...(i.stars ? { stars: i.stars } : {}) }));
   const listed = Array.isArray(raw?.themes) ? (raw.themes as unknown[]) : [];
   for (const entry of listed) {
     if (!entry || typeof entry !== "object") continue;
@@ -177,21 +240,17 @@ export function themesFrom(raw: Record<string, unknown> | null, items: VoiceItem
     for (const item of mine) used.add(item.id);
     const sources: Partial<Record<VoiceSource, number>> = {};
     for (const item of mine) sources[item.source] = (sources[item.source] ?? 0) + item.n;
-    themes.push({
-      title,
-      count: mine.reduce((sum, item) => sum + item.n, 0),
-      sources,
-      examples: [...mine]
-        .sort((a, b) => b.n - a.n || a.id - b.id)
-        .slice(0, 3)
-        .map((i) => ({ source: i.source, text: i.text, n: i.n, ...(i.product ? { product: i.product } : {}), ...(i.stars ? { stars: i.stars } : {}) })),
-    });
+    const count = mine.reduce((sum, item) => sum + item.n, 0);
+    themes.push({ title, count, sources, examples: examplesOf(mine) });
+    const reviews = mine.filter((item) => item.source === "review");
+    if (reviews.length) reviewThemes.push({ title, count, sources, examples: examplesOf(reviews) });
   }
   themes.sort((a, b) => b.count - a.count);
+  reviewThemes.sort((a, b) => (b.sources.review ?? 0) - (a.sources.review ?? 0) || b.count - a.count);
   const kept = themes.slice(0, MAX_THEMES);
   const inKept = kept.reduce((sum, t) => sum + t.count, 0);
   const all = items.reduce((sum, i) => sum + i.n, 0);
-  return { themes: kept, other: Math.max(0, all - inKept) };
+  return { themes: kept, reviewThemes: reviewThemes.slice(0, MAX_THEMES), other: Math.max(0, all - inKept) };
 }
 
 /** How many texts of each kind were read. Pure. */
@@ -201,14 +260,33 @@ export function readBySource(items: VoiceItem[]): Partial<Record<VoiceSource, nu
   return out;
 }
 
+/** A theme without the examples that may not be shown (a summary kept before they were left out). Pure. */
+const quotedOnly = (theme: VoiceTheme): VoiceTheme => ({ ...theme, examples: (Array.isArray(theme.examples) ? theme.examples : []).filter((e) => QUOTED(e.source)) });
+
 function parseSummary(raw: unknown): VoiceSummary | null {
   if (typeof raw !== "string") return null;
   try {
     const value = JSON.parse(raw) as VoiceSummary;
-    return value && Array.isArray(value.themes) && typeof value.month === "string" ? value : null;
+    if (!value || !Array.isArray(value.themes) || typeof value.month !== "string") return null;
+    return { ...value, themes: value.themes.map(quotedOnly), ...(Array.isArray(value.reviewThemes) ? { reviewThemes: value.reviewThemes.map(quotedOnly) } : {}) };
   } catch {
     return null;
   }
+}
+
+/**
+ * A person's erasure (lib/person-erasure.ts): every summary of the store that
+ * may still be kept, and the lock of a reading under way, so that reading is
+ * not kept (VOICE_KEEP). Run after their reviews went at their source; the
+ * summary read again is made without them. Returns how many summaries went.
+ */
+export async function forgetVoicePerson(statsId: string | null, now = Date.now()): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [, gone] = await redisPipeline([
+    ["DEL", lockKey(statsId)],
+    ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
+  ]);
+  return Number(gone) || 0;
 }
 
 /** This month's summary, or last month's while this month has none yet. */
@@ -225,7 +303,7 @@ export async function readVoice(store: Store, now = Date.now()): Promise<VoiceSu
 
 export type VoiceResult =
   | { ok: true; summary: VoiceSummary; fresh: boolean; left: number | null }
-  | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed"; texts?: number };
+  | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "changed"; texts?: number };
 
 /**
  * This month's summary: the one already made, or, when there is none and
@@ -237,8 +315,11 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
   const [kept] = await redisPipeline([["GET", voiceKey(store.statsId, month)]]);
   const already = parseSummary(kept);
   if (already) return { ok: true, summary: already, fresh: false, left: null };
-  const [claimed] = await redisPipeline([["SET", lockKey(store.statsId), "1", "NX", "EX", 60]]);
-  if (claimed === null) return { ok: false, reason: "busy" };
+  const held = await takeLock(lockKey(store.statsId), LOCK_SECONDS, 0).catch((error: unknown) => {
+    if (error instanceof LockBusyError) return null;
+    throw error;
+  });
+  if (!held) return { ok: false, reason: "busy" };
   try {
     const items = await gatherVoice(store, now);
     if (items.length < MIN_TEXTS) return { ok: false, reason: "few", texts: items.length };
@@ -254,13 +335,19 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
       const json = reply ? jsonIn(reply) : null;
       if (!json) return null;
       const sorted = themesFrom(json, items);
-      const summary: VoiceSummary = { at: Math.floor(now / 1000), month, read: readBySource(items), themes: sorted.themes, other: sorted.other };
+      const summary: VoiceSummary = { at: Math.floor(now / 1000), month, read: readBySource(items), themes: sorted.themes, reviewThemes: sorted.reviewThemes, other: sorted.other };
       return summary;
     });
     if (!done.ok) return { ok: false, reason: done.reason === "notes" ? "failed" : done.reason };
-    await redisPipeline([["SET", voiceKey(store.statsId, month), JSON.stringify(done.value), "EX", KEEP_SECONDS]]);
+    // Kept, and shown, only when nobody was deleted from the store while it was read (forgetVoicePerson took the lock).
+    // The job is counted by now: a write that cannot be made says so with "changed", whose words say it counted.
+    const kept = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS]]).catch((error: unknown) => {
+      console.error("keeping the summary of what customers say failed", error);
+      return null;
+    });
+    if (!Array.isArray(kept) || kept[0] !== 1) return { ok: false, reason: "changed" };
     return { ok: true, summary: done.value, fresh: true, left: done.left };
   } finally {
-    await redisPipeline([["DEL", lockKey(store.statsId)]]).catch(() => {});
+    await releaseLock(held);
   }
 }

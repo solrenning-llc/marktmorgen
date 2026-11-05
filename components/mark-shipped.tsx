@@ -1,14 +1,15 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/components/toast";
 import { NewTab } from "@/components/new-tab";
-import { readShipmentConfirmation, readShippedRecord } from "@/lib/shipment-record";
+import { CURRENT_SHIPMENT_MAIL_LIFECYCLE, readShipmentConfirmation, readShippedRecord, readShipmentMailStatus, type ShipmentMailStatus } from "@/lib/shipment-record";
 
 const MESSAGES: Record<string, string> = {
   tracking: "Paste a tracking link that starts with https://, or leave it empty.",
   unknown: "That order could not be found as a shipped one. Reload the page.",
   stripe: "Your Stripe account did not answer just now. Nothing was sent. Try again in a moment.",
+  mail_unavailable: "The shipment email could not be safely saved. Reload to check the order before trying again.",
   role: "Your role on this store does not include orders.",
   signed_out: "Your session ended. Log in again.",
 };
@@ -38,6 +39,20 @@ export function MarkShipped({
   const [tracking, setTracking] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mail, setMail] = useState<ShipmentMailStatus | null>(null);
+  useEffect(() => {
+    if (CURRENT_SHIPMENT_MAIL_LIFECYCLE === "never_activated" || !done || mail) return;
+    const controller = new AbortController();
+    void fetch(`/api/store/shipped?session=${encodeURIComponent(session)}`, { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        const raw: unknown = await response.json();
+        if (!response.ok || !raw || typeof raw !== "object" || Array.isArray(raw) ||
+            !Object.hasOwn(raw, "ok") || (raw as { ok?: unknown }).ok !== true || Object.hasOwn(raw, "error")) return;
+        const state = readShipmentMailStatus((raw as { mail?: unknown }).mail);
+        if (state) setMail(state);
+      }).catch(() => {});
+    return () => controller.abort();
+  }, [done, mail, session]);
   const id = `ship-${session.slice(-10)}`;
   return (
     <div className="mt-3 rounded-xl bg-white px-4 py-3 text-sm">
@@ -54,6 +69,18 @@ export function MarkShipped({
       {done ? (
         <p className="mt-2 font-semibold text-ink" role="status">
           {`Marked as shipped on ${day(done.at)}.`}
+          {!mail || mail.state === "not_recorded" ? (
+            <span className="mt-1 block font-normal">The email&apos;s acceptance was not recorded. No automatic resend is scheduled.</span>
+          ) : null}
+          {mail && mail.state !== "accepted" && mail.state !== "not_recorded" ? (
+            <span className="mt-1 block font-normal">
+              {mail.state === "acceptance_unknown" ? "The email's acceptance is unknown. It will not be sent again automatically."
+                : mail.state === "refused" ? "The email service refused this message. It has been kept; no new send is confirmed."
+                : mail.state === "on_hold" ? "The email is saved. Automatic sending is on hold while its sending budget is checked."
+                : "The email is saved and waiting. Sending is not confirmed yet."}
+              {mail.delayed ? " It has been waiting for more than 72 hours." : ""}
+            </span>
+          ) : null}
           {done.tracking ? (
             <>
               {" "}
@@ -81,7 +108,8 @@ export function MarkShipped({
               const confirmed = readShipmentConfirmation(data, response.ok);
               if (confirmed) {
                 setDone(confirmed.shipped);
-                toast(confirmed.emailed ? "Marked as shipped. The buyer was emailed." : "Marked as shipped. No new email was confirmed.");
+                setMail(confirmed.mail ?? { state: "not_recorded", delayed: false });
+                toast(confirmed.emailed ? "Marked as shipped. The email was accepted for sending." : confirmed.mail?.state === "queued" ? "Marked as shipped. The email is saved and waiting." : "Marked as shipped. No new email was confirmed.");
                 return;
               }
               const reason = data && typeof data === "object" && Object.hasOwn(data, "ok") && (data as { ok?: unknown }).ok === false && Object.hasOwn(data, "error") ? (data as { error?: unknown }).error : null;

@@ -26,7 +26,8 @@
  * a creator who makes it longer moves the orders still waiting; one who
  * makes it shorter sends those at the old time.
  *
- *   nl:rev:ask:sent:<reference>    that order was asked ("sent"), and reminded ("again"), 120 days
+ *   nl:rev:ask:sent:<reference>    that order was asked ("sent:<seconds>", the time the first went out;
+ *                                  "sent" alone before that time was kept), and reminded ("again"), 120 days
  *   nl:rev:off:<statsId>:<hash>    that address pressed stop, kept for good
  *   nl:rev:stop:<token>            who a stop link belongs to, 400 days
  */
@@ -155,7 +156,29 @@ export type AskCounts = { sent: number; dropped: number; waiting: number };
  */
 export function askStage(mark: unknown, again: number | undefined): "first" | "again" | null {
   if (mark === null || mark === undefined) return "first";
-  return mark === "sent" && again ? "again" : null;
+  return (mark === "sent" || firstSentAt(mark) > 0) && again ? "again" : null;
+}
+
+/**
+ * When the first email of an order went out, from its mark ("sent:<seconds>");
+ * 0 for a mark kept before that time was (plain "sent") or anything else.
+ */
+export function firstSentAt(mark: unknown): number {
+  const found = typeof mark === "string" ? /^sent:(\d{1,12})$/.exec(mark) : null;
+  return found ? Number(found[1]) : 0;
+}
+
+/**
+ * When an order's email is due. The first: its delay after the purchase. The
+ * reminder: its days after the first actually went out, as the first email
+ * promises ("If you have not reviewed it N days from now"), and never before
+ * its days after the first's due day; a first held back (the plan, Stripe,
+ * the allowance or the sender) therefore never brings the reminder closer.
+ */
+export function askDueAt(stage: "first" | "again", mark: unknown, paidAt: number, ask: { days: number; again?: number }): number {
+  if (stage === "first") return dueAt(paidAt, ask.days);
+  const again = ask.again ?? 0;
+  return Math.max(againDueAt(paidAt, ask.days, again), firstSentAt(mark) + again * 86_400);
 }
 
 /**
@@ -166,12 +189,14 @@ export function askStage(mark: unknown, again: number | undefined): "first" | "a
 export function afterSent(
   items: { reference: string; member: string; paidAt: number; stage: "first" | "again" }[],
   ask: { days: number; again?: number },
+  sentAt: number,
 ): (string | number)[][] {
   const again = ask.again ?? 0;
   const firsts = items.filter((item) => item.stage === "first");
+  const mark = `sent:${Math.floor(sentAt)}`;
   return [
-    ...items.map((item) => ["SET", sentKey(item.reference), item.stage === "again" ? "again" : "sent", "EX", SENT_MARK_SECONDS]),
-    ...(again ? firsts.map((item) => ["ZADD", ASK_DUE_KEY, "XX", againDueAt(item.paidAt, ask.days, again), item.member]) : []),
+    ...items.map((item) => ["SET", sentKey(item.reference), item.stage === "again" ? "again" : mark, "EX", SENT_MARK_SECONDS]),
+    ...(again ? firsts.map((item) => ["ZADD", ASK_DUE_KEY, "XX", askDueAt("again", mark, item.paidAt, ask), item.member]) : []),
     ...(!again && firsts.length ? [["ZREM", ASK_DUE_KEY, ...firsts.map((item) => item.member)]] : []),
   ];
 }
@@ -223,7 +248,7 @@ export async function sendReviewRequests(
       await drop(member);
       continue;
     }
-    const due = stage === "first" ? dueAt(entry.paidAt, store.reviewAsk.days) : againDueAt(entry.paidAt, store.reviewAsk.days, store.reviewAsk.again ?? 0);
+    const due = askDueAt(stage, mark, entry.paidAt, store.reviewAsk);
     if (due > nowSeconds) {
       await later(member, due);
       continue;
@@ -334,7 +359,7 @@ export async function sendReviewRequests(
       continue;
     }
     // After the first, the order waits on the list for its one reminder, when the creator chose one.
-    await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk));
+    await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
     counts.sent += ready.length;
   }
   return counts;

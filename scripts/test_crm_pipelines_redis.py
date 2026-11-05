@@ -67,7 +67,8 @@ def main():
         # A store that never saved pipelines: the snapshot is the empty string.
         assert redis.command("EVAL", script, 1, keys[0], "", "pipelines-v1") == 1
         assert redis.command("GET", keys[0]) == "pipelines-v1"
-        assert redis.command("EVAL", script, 1, keys[0], "", "pipelines-again") == -1
+        # A refusal answers -1 and the size of the record kept (crm-pipelines-save:v2), so the data room is sized in one step.
+        assert redis.command("EVAL", script, 1, keys[0], "", "pipelines-again") == [-1, len("pipelines-v1")]
         assert redis.command("GET", keys[0]) == "pipelines-v1"
         print("PASS: the first save needs an absent record, and a second first save is refused")
         redis.command("SET", keys[1], "snapshot")
@@ -79,12 +80,13 @@ def main():
                 client.close()
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
             replies = list(pool.map(save, range(64)))
-        assert replies.count(1) == 1 and replies.count(-1) == 63, replies
+        refused = [r for r in replies if isinstance(r, list) and r[0] == -1 and r[1] == len(redis.command("GET", keys[1]))]
+        assert replies.count(1) == 1 and len(refused) == 63, replies
         winner = redis.command("GET", keys[1])
         assert winner.startswith("writer-")
         print("PASS: 64 concurrent saves over one snapshot: exactly one is written")
         redis.command("SET", keys[2], "edited-by-another-session")
-        assert redis.command("EVAL", script, 1, keys[2], "stale-snapshot", "stale-write") == -1
+        assert redis.command("EVAL", script, 1, keys[2], "stale-snapshot", "stale-write") == [-1, len("edited-by-another-session")]
         assert redis.command("GET", keys[2]) == "edited-by-another-session"
         assert redis.command("EVAL", script, 1, keys[2], "edited-by-another-session", "fresh-write") == 1
         assert redis.command("GET", keys[2]) == "fresh-write"

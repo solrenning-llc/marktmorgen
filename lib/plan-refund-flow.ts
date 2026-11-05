@@ -145,7 +145,7 @@ async function takeBackStop(id: string): Promise<boolean> {
   }
 }
 
-type RefundRow = { id: string; charge: string; amount: number; currency: string; status: string; metadata: { plan_refund?: string } };
+type RefundRow = { id: string; charge: string | null; amount: number; currency: string; status: string; metadata: { plan_refund: string } };
 type Found = { kind: "found"; refund: RefundRow; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
 const ownValue = (row: unknown, key: string): unknown => {
   if (!row || typeof row !== "object" || types.isProxy(row) || Array.isArray(row)) return undefined;
@@ -154,7 +154,7 @@ const ownValue = (row: unknown, key: string): unknown => {
 };
 
 /** Validate the complete observed page before any refund settles a plan or is said to be absent. */
-function refundPage(page: unknown): { data: RefundRow[]; more: boolean } | null {
+function refundPage(page: unknown, sid: string): { data: RefundRow[]; ids: string[]; more: boolean } | null {
   try {
     const data = ownValue(page, "data"), more = ownValue(page, "has_more");
     if (typeof more !== "boolean" || types.isProxy(data) || !Array.isArray(data)) return null;
@@ -165,20 +165,24 @@ function refundPage(page: unknown): { data: RefundRow[]; more: boolean } | null 
       const slot = Object.getOwnPropertyDescriptor(data, String(i));
       if (!slot || !Object.hasOwn(slot, "value")) return null;
       const row: unknown = slot.value;
-      const id = ownValue(row, "id"), charge = ownValue(row, "charge"), amount = ownValue(row, "amount"), currency = ownValue(row, "currency"), status = ownValue(row, "status"), metadata = ownValue(row, "metadata");
-      if (typeof id !== "string" || !REFUND_ID.test(id) || ids.has(id) ||
-          typeof charge !== "string" || !/^ch_[A-Za-z0-9]{6,128}$/.test(charge) ||
-          typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1 ||
-          typeof currency !== "string" || !/^[a-z]{3}$/.test(currency) ||
-          typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status) ||
-          !metadata || typeof metadata !== "object" || types.isProxy(metadata) || Array.isArray(metadata)) return null;
+      const id = ownValue(row, "id"), metadata = ownValue(row, "metadata");
+      if (typeof id !== "string" || !REFUND_ID.test(id) || ids.has(id)) return null;
+      ids.add(id);
+      // Stripe permits null metadata/charge/status on unrelated refunds. Only ours can settle this plan.
+      if (metadata === null) continue;
+      if (!metadata || typeof metadata !== "object" || types.isProxy(metadata) || Array.isArray(metadata)) return null;
       const owner = Object.getOwnPropertyDescriptor(metadata, "plan_refund");
       if ((owner && (!Object.hasOwn(owner, "value") || typeof owner.value !== "string")) || (!owner && "plan_refund" in metadata)) return null;
-      ids.add(id);
+      if (!owner || owner.value !== sid) continue;
+      const charge = ownValue(row, "charge"), amount = ownValue(row, "amount"), currency = ownValue(row, "currency"), status = ownValue(row, "status");
+      if ((charge !== null && (typeof charge !== "string" || !OBJECT_ID.test(charge))) ||
+          typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1 ||
+          typeof currency !== "string" || !/^[a-z]{3}$/.test(currency) ||
+          typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status)) return null;
       // Snapshot only validated data; later projections never observe an unchecked amount.
-      refunds.push({ id, charge, amount, currency, status, metadata: owner ? { plan_refund: owner.value } : {} });
+      refunds.push({ id, charge, amount, currency, status, metadata: { plan_refund: sid } });
     }
-    return { data: refunds, more };
+    return { data: refunds, ids: [...ids], more };
   } catch { return null; }
 }
 
@@ -215,13 +219,14 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
       console.error("reading a plan payment's refunds failed", error);
       return { kind: "unknown" };
     }
-    const page = refundPage(listed);
+    const page = refundPage(listed, sid);
     if (!page || page.more) return { kind: "unknown" };
     // A refund belongs to exactly one charge: contradictory pages cannot repay two debts.
-    for (const r of page.data) {
-      if (r.charge !== part.c || observed.has(r.id)) return { kind: "unknown" };
-      observed.add(r.id);
+    for (const id of page.ids) {
+      if (observed.has(id)) return { kind: "unknown" };
+      observed.add(id);
     }
+    if (page.data.some((r) => r.charge !== part.c)) return { kind: "unknown" };
     const ours = page.data.filter((r) => r.metadata.plan_refund === sid);
     for (const r of ours) {
       currency ??= r.currency;
@@ -248,6 +253,7 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
  */
 export async function findPlanRefund(sid: string, at: number, until: number): Promise<Found> {
   let after = "";
+  const observed = new Set<string>();
   for (let page = 0; page < MAX_REFUND_PAGES; page += 1) {
     let listed: Row;
     try {
@@ -258,16 +264,20 @@ export async function findPlanRefund(sid: string, at: number, until: number): Pr
       console.error("reading the platform's refunds failed", error);
       return { kind: "unknown" };
     }
-    const parsed = refundPage(listed);
+    const parsed = refundPage(listed, sid);
     if (!parsed) return { kind: "unknown" };
+    for (const id of parsed.ids) {
+      if (observed.has(id)) return { kind: "unknown" };
+      observed.add(id);
+    }
     const data = parsed.data;
     const ours = data.find((r) => r.metadata.plan_refund === sid &&
       (r.status === "succeeded" || r.status === "pending" || r.status === "requires_action"));
-    if (ours) return { kind: "found", refund: ours, settled: ours.status === "succeeded" };
+    if (ours) return ours.charge === null ? { kind: "unknown" } : { kind: "found", refund: ours, settled: ours.status === "succeeded" };
     if (!parsed.more) return { kind: "none" };
-    const last = data[data.length - 1];
-    if (!last || typeof last.id !== "string") return { kind: "unknown" };
-    after = last.id;
+    const last = parsed.ids.at(-1);
+    if (!last) return { kind: "unknown" };
+    after = last;
   }
   // More refunds since the note than we read: not decided, never "none".
   return { kind: "unknown" };

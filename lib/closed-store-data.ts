@@ -69,9 +69,11 @@
  *                                 tries:<key> its first step's failures, left:<key> the walks it was left by,
  *                                 partial:<key> a key of it passed over, out:<key> it sits this walk out;
  *                                 unread:<list> -> the walks that could not prune a list of the company's passed over
- *   nl:closed:prune   hash        "<list>|<a store's key>" -> 1: a member a list passed over still owes; and
- *                                 "marks|<a store's key>" -> every id its walk named it by (JSON), once a store,
- *                                 whatever the lists: pruned once a gap until each list reads (SG2 third and fourth reviews)
+ *   nl:closed:prune   hash        "<list>|<a store's key>|<its sid>" -> 1: a member a list passed over still owes;
+ *                                 "marks|<a store's key>|<its sid>" -> every id its walk named it by (JSON), once a
+ *                                 store, whatever the lists: pruned once a gap until each list reads (SG2 reviews 3-5)
+ *   nl:closed:kept    hash        the same, for the lists given up on (UNREAD_TRIES): never read by the gap's pruning,
+ *                                 counted for the owner's report
  *
  * Reading the database is the company's, bounded by its schedule: one walk a
  * day at the most, WALK_COUNT keys a command (docs/funded-exposure-review.md).
@@ -89,7 +91,7 @@ import { readAllListingsExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { readFlowsExact } from "@/lib/flows";
 import { FINAL_INDEX, workKey } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForClosing, storeRef } from "@/lib/store";
+import { type Store, accountStores, closeStoreRecord, imageFolder, saleHandles, storeFolder, storeForClosing, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
@@ -127,6 +129,8 @@ export const DUE_KEY = "nl:closed:due";
 export const BATCH_KEY = "nl:closed:batch";
 /** What the company's lists passed over still owe: their closed stores' members, pruned once each list reads again. */
 export const PRUNE_KEY = "nl:closed:prune";
+/** What the lists given up on still owe: kept apart, so the pruning once a gap never reads it again, and counted. */
+export const PRUNE_KEPT_KEY = "nl:closed:kept";
 export const WALK_KEY = "nl:closed:walk";
 /** Keys one SCAN of the walk asks for. */
 export const WALK_COUNT = 1000;
@@ -217,6 +221,13 @@ export type Batched = {
   handles: string[];
   /** Every id the store's own keys are named by. */
   marks: string[];
+  /**
+   * The ids made from its key alone (its files' and pictures' folders, hashes of
+   * the owner's address): a store its owner opens again under the same key has
+   * the same ones, so what they name is deleted only while no living store holds
+   * the key, as what the key itself names (SG2 fifth review, K).
+   */
+  keyMarks?: string[];
   endedAt: number;
   at: number;
 };
@@ -242,7 +253,7 @@ function filesIn(value: unknown, out: { pathname: string; addedAt: string }[] = 
  * owner sells through the same account. Never its plan's ids on our own
  * Stripe account, which name the company's records about its plan.
  */
-export async function marksOf(store: Store): Promise<{ marks: string[]; files: { pathname: string; addedAt: string }[] }> {
+export async function marksOf(store: Store): Promise<{ marks: string[]; keyMarks: string[]; files: { pathname: string; addedAt: string }[] }> {
   // A read that fails stops here (SG2, finding 3): marks found without it would leave its keys behind for ever.
   // Each read exactly: an answer of another shape is never taken for nothing (SG2 review, B).
   const listings = await readAllListingsExact(store);
@@ -256,7 +267,11 @@ export async function marksOf(store: Store): Promise<{ marks: string[]; files: {
   if (store.stripeAccountId && (await sharedAccount(store))) found.delete(store.stripeAccountId);
   // The owner's address and the store's addresses are not ids: the walk matches them only where a family says so.
   found.delete(store.email);
-  return { marks: [...found].sort(), files: filesIn([listings, courses]) };
+  // Made from its key alone (rule 30: lib/store.ts makes these two, and its catalog's from its key and its day):
+  // kept apart, under the key's guard (SG2 fifth review, K).
+  const keyMarks = [await storeFolder(storeRef(store)), await imageFolder(storeRef(store))];
+  for (const id of keyMarks) found.delete(id);
+  return { marks: [...found].sort(), keyMarks, files: filesIn([listings, courses]) };
 }
 
 /** Whether another store of the same owner sells through the same Stripe account: then its account's records are not this store's to delete. */
@@ -310,11 +325,11 @@ async function del(keys: string[]): Promise<void> {
  */
 export async function prepareStore(store: Store, now = Date.now(), keep?: (entry: Batched) => Promise<void>): Promise<Batched> {
   const ref = storeRef(store);
-  const { marks } = await marksOf(store);
+  const { marks, keyMarks } = await marksOf(store);
   const extra: string[] = [];
   // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
   const team = store.sid ? await readTeam(store.sid) : { members: [] };
-  const own = new Set(marks);
+  const own = new Set([...marks, ...keyMarks]);
   for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
     let cursor = "0";
     let whole = false;
@@ -359,6 +374,7 @@ export async function prepareStore(store: Store, now = Date.now(), keep?: (entry
     handle: store.handle,
     handles: [...saleHandles(store)],
     marks,
+    keyMarks,
     endedAt: Date.parse(store.planEndedAt) || now,
     at: now,
   };
@@ -378,6 +394,8 @@ function ownersOf(batch: Batched[]): Owners {
   const owners: Owners = { byMark: new Map(), byHandle: new Map(), byRef: new Map() };
   for (const entry of batch) {
     for (const mark of entry.marks) owners.byMark.set(mark, entry.ref);
+    // Made from its key alone: matched as its key is, under the same guard.
+    for (const mark of entry.keyMarks ?? []) owners.byRef.set(mark, entry.ref);
     for (const handle of entry.handles) owners.byHandle.set(handle, entry.ref);
     owners.byRef.set(entry.ref, entry.ref);
   }
@@ -789,7 +807,7 @@ function batchedOf(ref: string, raw: string): Batched {
   const value = json(raw);
   const text = (name: string) => typeof value?.[name] === "string";
   const ok = value && value.ref === ref && text("email") && text("sid") && text("name") && text("handle")
-    && (value.statsId === null || text("statsId")) && allStrings(value.handles) && allStrings(value.marks)
+    && (value.statsId === null || text("statsId")) && allStrings(value.handles) && allStrings(value.marks) && (value.keyMarks === undefined || allStrings(value.keyMarks))
     && typeof value.endedAt === "number" && Number.isFinite(value.endedAt) && typeof value.at === "number" && Number.isFinite(value.at);
   return ok ? (value as unknown as Batched) : refuse("a store in the walk's batch");
 }
@@ -911,54 +929,78 @@ function deletedByItsOwner(ref: string, now: number): Batched | null {
 async function prunePending(state: WalkState, refFree: RefFree): Promise<void> {
   const lists = [...state.unread].filter(([, tries]) => tries < UNREAD_TRIES).map(([list]) => list);
   if (!lists.length) return;
-  const { rows, marks } = await owedOf();
+  const { rows, marks } = await owedOf(PRUNE_KEY);
   for (const list of lists) {
     const owing = rows.get(list) ?? [];
     try {
       // Every id of each store, exactly as its walk had them: one missing is unknown, never "only its key".
-      const entries = owing.map((ref) => ({ ref, email: "", sid: "", statsId: null, name: "", handle: "", handles: [], marks: marks.get(ref) ?? refuse("the ids a list owes a store by"), endedAt: 0, at: 0 }));
+      const entries = owing.map((o) => {
+        const ids = marks.get(o.store) ?? refuse("the ids a list owes a store by");
+        return { ref: o.ref, email: "", sid: o.sid, statsId: null, name: "", handle: "", handles: [], marks: ids.marks, keyMarks: ids.keyMarks, endedAt: 0, at: 0 };
+      });
       await pruneIndex(list, ownersOf(entries), refFree);
       rows.delete(list);
+      for (const o of owing) if (![...rows.values()].flat().some((r) => r.store === o.store)) marks.delete(o.store);
       // A store's ids go once no list owes it any more.
-      const stillOwed = new Set([...rows.values()].flat());
-      const done = owing.filter((ref) => !stillOwed.has(ref));
+      const stillOwed = new Set([...rows.values()].flat().map((o) => o.store));
+      const done = [...new Set(owing.map((o) => o.store))].filter((store) => !stillOwed.has(store));
       await redisPipeline([
-        ...(owing.length ? [["HDEL", PRUNE_KEY, ...owing.map((ref) => `${list}|${ref}`), ...done.map((ref) => `marks|${ref}`)]] : []),
+        ...(owing.length ? [["HDEL", PRUNE_KEY, ...owing.map((o) => `${list}|${o.store}`), ...done.map((store) => `marks|${store}`)]] : []),
         ["HDEL", WALK_KEY, `unread:${list}`],
       ]);
       state.unread.delete(list);
     } catch (error) {
-      const [tries] = await redisPipeline([["HINCRBY", WALK_KEY, `unread:${list}`, 1]]);
-      state.unread.set(list, countOf(tries, "a list's tries"));
+      const [raw] = await redisPipeline([["HINCRBY", WALK_KEY, `unread:${list}`, 1]]);
+      const tries = countOf(raw, "a list's tries");
+      state.unread.set(list, tries);
       console.error("closed-data: a list of the company's passed over still cannot be read; what it owes is kept, and it is tried again with the next walk", error);
+      // Given up on (fifth review, 4): what it owes moves to PRUNE_KEPT_KEY, out of what the gap reads, and is counted.
+      if (tries >= UNREAD_TRIES && owing.length) {
+        const stillOwed = new Set([...rows.entries()].filter(([name]) => name !== list).flatMap(([, o]) => o.map((r) => r.store)));
+        const stores = [...new Set(owing.map((o) => o.store))];
+        await redisPipeline([
+          ["HSET", PRUNE_KEPT_KEY, ...owing.flatMap((o) => [`${list}|${o.store}`, 1]), ...stores.flatMap((store) => [`marks|${store}`, JSON.stringify(marks.get(store) ?? { marks: [], keyMarks: [] })])],
+        ]);
+        await redisPipeline([["HDEL", PRUNE_KEY, ...owing.map((o) => `${list}|${o.store}`), ...stores.filter((store) => !stillOwed.has(store)).map((store) => `marks|${store}`)]]);
+        rows.delete(list);
+        for (const store of stores) if (!stillOwed.has(store)) marks.delete(store);
+      }
     }
   }
+  // A store's ids no list owes it by (its rows' write failed after them, and its page was read again): let go. Only
+  // while no walk runs (this is the idle phase), so never the ids a page is writing.
+  const owedStores = new Set([...rows.values()].flat().map((o) => o.store));
+  const orphans = [...marks.keys()].filter((store) => !owedStores.has(store));
+  if (orphans.length) await redisPipeline([["HDEL", PRUNE_KEY, ...orphans.map((store) => `marks|${store}`)]]);
 }
 
+type Owing = { store: string; ref: string; sid: string };
+
 /** What the company's lists passed over owe, read exactly: the stores each list owes, and every id of each store. */
-async function owedOf(): Promise<{ rows: Map<string, string[]>; marks: Map<string, string[]> }> {
-  const [flat] = await redisPipeline([["HGETALL", PRUNE_KEY]]);
+async function owedOf(key: string): Promise<{ rows: Map<string, Owing[]>; marks: Map<string, { marks: string[]; keyMarks: string[] }> }> {
+  const [flat] = await redisPipeline([["HGETALL", key]]);
   if (!allStrings(flat) || flat.length % 2 !== 0) refuse("what the company's lists owe");
   const list = flat as string[];
-  const rows = new Map<string, string[]>();
-  const marks = new Map<string, string[]>();
+  const rows = new Map<string, Owing[]>();
+  const marks = new Map<string, { marks: string[]; keyMarks: string[] }>();
+  /** "<a store's key>|<its sid>" from the end of a field: neither has a "|" in it. */
+  const storeOf = (field: string): Owing & { rest: string } => {
+    const sidCut = field.lastIndexOf("|");
+    const refCut = field.lastIndexOf("|", sidCut - 1);
+    if (refCut < 1) refuse("what a company's list owes");
+    return { store: field.slice(refCut + 1), ref: field.slice(refCut + 1, sidCut), sid: field.slice(sidCut + 1), rest: field.slice(0, refCut) };
+  };
   for (let i = 0; i < list.length; i += 2) {
     const field = list[i];
-    if (field.startsWith("marks|")) {
-      let ids: unknown;
-      try {
-        ids = JSON.parse(list[i + 1]);
-      } catch {
-        ids = null;
-      }
-      if (!allStrings(ids)) refuse("the ids a list owes a store by");
-      marks.set(field.slice("marks|".length), ids as string[]);
+    const at = storeOf(field);
+    if (at.rest === "marks") {
+      const value = json(list[i + 1]);
+      if (!value || !allStrings(value.marks) || !allStrings(value.keyMarks)) refuse("the ids a list owes a store by");
+      marks.set(at.store, { marks: value!.marks as string[], keyMarks: value!.keyMarks as string[] });
       continue;
     }
-    const cut = field.lastIndexOf("|");
-    if (cut < 1 || list[i + 1] !== "1") refuse("what a company's list owes");
-    const name = field.slice(0, cut);
-    rows.set(name, [...(rows.get(name) ?? []), field.slice(cut + 1)]);
+    if (list[i + 1] !== "1") refuse("what a company's list owes");
+    rows.set(at.rest, [...(rows.get(at.rest) ?? []), { store: at.store, ref: at.ref, sid: at.sid }]);
   }
   return { rows, marks };
 }
@@ -1075,6 +1117,8 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   // One guard a run: its reads are at most one for each store of the batch, whatever the pages.
   const refFree = refGuard();
   const walked = [...batch.values()].filter((entry) => !sitting.has(entry.ref));
+  // The stores whose ids were kept for a list passed over in this run: written once a run at the most.
+  const marksKept = new Set<string>();
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
     const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", "nl:*", "COUNT", WALK_COUNT]]);
     // SG2, finding 18: a page in another shape stops the run where it was; it is read again next run, never passed over.
@@ -1106,12 +1150,17 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     // What a list passed over owes the walk's stores, written before the page counts as read: a store is never
     // finished while it is owed and not kept (third review, I). A write that fails throws, and the page is read again.
     if (passed.length) {
-      await redisPipeline([
-        // Every id its walk names it by (fourth review, J): a list may name a store by any of them (its list, its folder...).
-        ["HSET", PRUNE_KEY, ...passed.flatMap((list) => walked.flatMap((entry) => [`${list}|${entry.ref}`, 1])), ...walked.flatMap((entry) => [`marks|${entry.ref}`, JSON.stringify(entry.marks)])],
-        ["HSET", WALK_KEY, ...passed.flatMap((list) => [`unread:${list}`, 0])],
-      ]);
+      // In this order (fifth review, L): the list's mark first, so a row is never written that no pruning will read;
+      // then each store's ids, once a store and never over another's (HSETNX, by its sid: fifth review, 3 and 4);
+      // then the rows. A write that fails throws, and the page is read again.
+      await redisPipeline([["HSET", WALK_KEY, ...passed.flatMap((list) => [`unread:${list}`, 0])]]);
       for (const list of passed) state.unread.set(list, 0);
+      for (const entry of walked) {
+        if (marksKept.has(entry.ref)) continue;
+        await redisPipeline([["HSETNX", PRUNE_KEY, `marks|${entry.ref}|${entry.sid}`, JSON.stringify({ marks: entry.marks, keyMarks: entry.keyMarks ?? [] })]]);
+        marksKept.add(entry.ref);
+      }
+      await redisPipeline([["HSET", PRUNE_KEY, ...passed.flatMap((list) => walked.flatMap((entry) => [`${list}|${entry.ref}|${entry.sid}`, 1]))]]);
     }
     report.deleted += done.deleted;
     report.pruned += done.pruned;
@@ -1174,7 +1223,7 @@ export async function closedDataNow(): Promise<ClosedDataNow | null> {
     const stuck = [...state.left.values()].filter((n) => n >= LEFT_WALKS).length;
     const kept = [...state.unread].filter(([, n]) => n >= UNREAD_TRIES).map(([list]) => list);
     // The members the lists given up on still owe (fourth review, 3): each a closed store's member left in a list.
-    const owedKept = kept.length ? [...(await owedOf()).rows].filter(([list]) => kept.includes(list)).reduce((sum, [, refs]) => sum + refs.length, 0) : 0;
+    const owedKept = kept.length ? [...(await owedOf(PRUNE_KEPT_KEY)).rows.values()].reduce((sum, refs) => sum + refs.length, 0) : 0;
     return { parked: state.parked, stopped: state.stopped, left: state.left.size, stuck, unread: state.unread.size, unreadKept: kept.length, owedKept, scansStuck: state.scansStuck };
   } catch {
     return null;

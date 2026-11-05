@@ -7,7 +7,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, storeFolder, storeForEmail } from "@/lib/store";
 import { finishClosed } from "@/lib/plan-closing";
-import { WALK_GAP_MS, eraseClosed, markDue, stopRenewals } from "@/lib/closed-store-data";
+import { WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
 
 type Command = (string | number)[];
 const real = redis.pipeline;
@@ -34,7 +34,6 @@ const DAY = 86_400_000;
 let clock = Date.UTC(2026, 10, 5);
 const later = () => (clock += WALK_GAP_MS + DAY);
 const run = () => eraseClosed(Date.now() + 30_000, finishClosed, clock);
-const inBatch = async (ref: string) => (await real([["HEXISTS", "nl:closed:batch", ref]]))[0];
 async function quietly<T>(work: () => Promise<T>): Promise<T> {
   const before = console.error;
   console.error = () => {};

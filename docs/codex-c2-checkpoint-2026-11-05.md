@@ -1,3 +1,30 @@
+# Latest C2 continuation — 2026-11-05, default inventory completed
+
+New source order: Claude1 C1-20261105-1843-CX-1 now requires own-lane rule24 inventory before asking for a next item. AV12 C1-20261105-1809-TODOS-1 requires one watcher, shell sleep, at least60seconds between reads, no repeated unchanged suites or polling rounds; explicit latest C1 says KEEP existing hourly ChatGPT task. C4 may decide routine within-lane assignments after30min without C1, not money-out, rule changes or lane changes. User's EXPLICIT C1 requirement for threshold2325 remains.
+
+Fresh mainfca02e475950863ea1891ff695311dfe482943a0 differs fromc88ffeed only in docs/reservations/codex.md: Vscript line moved to end rather than removed. CLAUDE/AGENTS/Codex inbox/queue unchanged. Channel was legitimately rotated: complete fresh119946char blob read, >20KB; never restore372KB older snapshot. Do not infer truncation corruption from this rotation. All latest announcements read.
+
+GitHub metadata:
+2601 still OPEN/a12c62f9d67810d9db42039c0c58da17445e3466, no integration/retry.
+2654 still OPEN/fec0dbd6658af0a7a92e7e52524b96d3cbd9a8a5, no nominal helper candidate; MÉDIO5790749015 open. Do not repeat188proof until changed source.
+2672 still OPEN/4b8882968c72b8df9b02cf1bf540928974a9e94a, S controller/LOWstringList pending.
+2632 now OPEN legitimate head42e50cf6dfd52fd2b09602595dfa5a794a800885; C3 integrated main, J reported8success+product42110660963running18h52. C2 did not poll/rerun/edit sharedCI or integrate before normal merge. Verify exact final9+V only after source actually merged; old8c5d CI failures are historical.
+2677 intro fix belongs Claude2/R1/V, proposal dependency combination only coordinator decides.
+
+Own-lane inventory read-only (NO implementation, reservation, proof or PR):
+- Pure modules receiving-costs, cost-envelope, funded-exposure-rules, llc-fixed-costs, exposure-budget/policy, customer-tax-review, tax-sales-counter, spend-cost-table and backup-cost have no stored Redis JSON/HGETALL/HMGET/MGET/LRANGE/provider pagination in requested scope; numerical pure snapshots are not stored-read defects.
+- company-margin-report.ts:96 parse is detached canonicalFinancialSnapshot, occupied E2/#2646 (REST files confirms3paths); commercial-margin.ts:195 snapshot stays J/CX119 reserved and explicitly prohibited to C2.
+- contract-funding/resource-window/restart-activation/restart-publication have JSON/ACK patterns. Focused inspection found canonical input capture, explicit stored field/value comparisons and null/false on malformed; HMGET inside Lua. No NEW defect demonstrated; NOT exhaustive safety certification or tests.
+- customer-voice outside own lane, excluded.
+
+Useful free review2684 was checked: exactbae47bd57924e48c419ddd2b7552d6f3f629af2d,3paths,no comments initially. BEFORE claim/test, fresh channel revealed CodexJ claim on same exacthead. C2 aborted claim and did NOT publish any2684announcement, fetch patch or run tests. Never duplicate J. Old wrapper scan raised a safety stop and caused no mutation.
+
+Coordinator inventory/capacity note sent via CAS but409 at21:58:30UTC. MUST wait2min then reread FULL fresh blob, append only. Message pending in execution storeinventoryNote and fully represented here. After repeat failure, preserve report here, no snapshot restore. Ask C1/C4 for next FREE own-lane item only because scoped inventory yielded no actionable free defect. One own product, four free slots; threshold still needsEXPLICIT C1. No changes to foreign product/branch/CI/reservation, price/flags/gates, provider/account/contact/PII; no retry/merge/head churn/deploy. No inherited finding self-closed. Next nominal2654 or normal merged2632 first; otherwise routine assignment response/default inventory for a newly freed file.
+
+All previous exact REDs, proofs, opinions and completed merges preserved below; C2 task remains existing/enabled per latest coordinator and user. This is not a replacement task.
+
+---
+
 # Latest C2 status — fresh checks on 2026-11-05
 
 This section supersedes the earlier product-in-progress state. No new nominal corrective head exists.

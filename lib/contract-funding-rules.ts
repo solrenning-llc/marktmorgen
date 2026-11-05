@@ -122,7 +122,12 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  if(!context||typeof context!=='object'||!inertOwnDataGraph({policy,context})||Array.isArray(context))return null;
  const contextKeys=Reflect.ownKeys(context);
  if(contextKeys.length!==2||!contextKeys.includes('termsSnapshot')||!contextKeys.includes('review'))return null;
- const disputes=assessPlanPaymentDisputeCosts(context.review?.planPaymentDisputes);
+ const sourceReviewField=Object.getOwnPropertyDescriptor(context,'review');
+ if(!sourceReviewField||!Object.hasOwn(sourceReviewField,'value')||!sourceReviewField.enumerable||
+  !sourceReviewField.value||typeof sourceReviewField.value!=='object'||Array.isArray(sourceReviewField.value))return null;
+ const sourceDisputesField=Object.getOwnPropertyDescriptor(sourceReviewField.value,'planPaymentDisputes');
+ if(!sourceDisputesField||!Object.hasOwn(sourceDisputesField,'value')||!sourceDisputesField.enumerable)return null;
+ const disputes=assessPlanPaymentDisputeCosts(sourceDisputesField.value);
  if(!disputes)return null;
  const taxState=customerTaxContractContextState(context);
  if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,now))return null;
@@ -135,7 +140,9 @@ export function contractFundingConfiguration(policy:ContractFundingPolicy|null,c
  if(!reviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
  const review=JSON.parse(reviewEncoded) as CommercialMarginReview|null;
  if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
- const boundDisputes=assessPlanPaymentDisputeCosts(review.planPaymentDisputes);
+ const boundDisputesField=Object.getOwnPropertyDescriptor(review,'planPaymentDisputes');
+ if(!boundDisputesField||!Object.hasOwn(boundDisputesField,'value')||!boundDisputesField.enumerable)return null;
+ const boundDisputes=assessPlanPaymentDisputeCosts(boundDisputesField.value);
  if(!boundDisputes||!PLAN_PAYMENT_DISPUTE_KEYS.every(key=>
   boundDisputes[key].principalCents===disputes[key].principalCents&&
   boundDisputes[key].feesCents===disputes[key].feesCents&&

@@ -150,12 +150,15 @@ export async function POST(request: NextRequest) {
         const admitted = await takeAllowance(store, "studio", extra);
         if (!admitted.ok) return notCounted(admitted.message);
       }
-      const { added, already, full, roomFull, notImported } = await importContacts(store.listId as string, emails, store);
+      const { added, already, full, roomFull, notImported, notConfirmed } = await importContacts(store.listId as string, emails, store);
       // A hundred addresses or more, pasted in: of unknown age, so the next
       // emails go out in portions that double (lib/mail-health.ts), also
       // when the store's data room filled up partway and only some went in.
-      await startRamp(healthId(store), added);
-      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, notImported: notImported ?? null, counts: await listCounts(store.listId) });
+      // A lost write receipt may still have imported that whole batch. Apply
+      // the existing protection to its upper bound without claiming it landed.
+      if (notConfirmed) await startRamp(healthId(store), added + notConfirmed.left);
+      else await startRamp(healthId(store), added);
+      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, notImported: notImported ?? null, notConfirmed: notConfirmed ?? null, counts: await listCounts(store.listId) });
     }
 
     if (action === "count") {

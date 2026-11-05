@@ -413,7 +413,7 @@ export async function importContacts(
   listId: string,
   emails: string[],
   data: DataStore,
-): Promise<{ added: number; already: number; full: boolean; roomFull?: { left: number; message: string }; notImported?: { left: number; message: string } }> {
+): Promise<{ added: number; already: number; full: boolean; roomFull?: { left: number; message: string }; notImported?: { left: number; message: string }; notConfirmed?: { left: number; message: string } }> {
   if (!isRedisConfigured() || !listId || !emails.length) return { added: 0, already: emails.length, full: false };
   const key = leadsKey(listId);
   const sizeReply = await redisPipeline([["HLEN", key]]);
@@ -476,7 +476,19 @@ export async function importContacts(
         const left = emails.length - i;
         return { added, already: i - added, full, roomFull: { left, message: error.message } };
       }
-      const result = await writeImportedContacts(listId, writes);
+      let result: number[];
+      try {
+        result = await writeImportedContacts(listId, writes);
+      } catch {
+        // The command may have landed. Keep its reserved room and never replay
+        // or call these addresses absent; earlier confirmed progress is still true.
+        const unattempted = emails.length - i - chunk.length;
+        return {
+          added, already: i - added + chunk.length - writes.length, full,
+          notConfirmed: { left: writes.length, message: "The outcome for these contacts could not be confirmed. Try again." },
+          ...(unattempted > 0 ? { notImported: { left: unattempted, message: "The remaining contacts were not imported. Try again." } } : {}),
+        };
+      }
       const written = result.map((v) => v === 1);
       await settleContacts(data, sizes, written);
       added += written.filter(Boolean).length;

@@ -605,8 +605,9 @@ function ListCard({
             setBusy(false);
             if (a.ok) {
               const remaining = a.notImported && typeof a.notImported === "object" ? Number((a.notImported as { left?: unknown }).left) : 0;
-              const incomplete = Number.isSafeInteger(remaining) && remaining > 0;
-              setDone(`${n(Number(a.added))} added. ${n(Number(a.already))} were already on your list or had left it, and stay as they were.${Number(a.skipped) ? ` ${n(Number(a.skipped))} did not look like email addresses.` : ""}${incomplete ? ` ${n(remaining)} not imported. Try again; the addresses already imported will stay as they are.` : ""}`);
+              const uncertain = a.notConfirmed && typeof a.notConfirmed === "object" ? Number((a.notConfirmed as { left?: unknown }).left) : 0;
+              const incomplete = (Number.isSafeInteger(remaining) && remaining > 0) || (Number.isSafeInteger(uncertain) && uncertain > 0);
+              setDone(`${n(Number(a.added))} added. ${n(Number(a.already))} were already on your list or had left it, and stay as they were.${Number(a.skipped) ? ` ${n(Number(a.skipped))} did not look like email addresses.` : ""}${remaining > 0 ? ` ${n(remaining)} not imported. Try again; the addresses already imported will stay as they are.` : ""}${uncertain > 0 ? ` The outcome for ${n(uncertain)} contacts could not be confirmed. Try again; they may already have been imported.` : ""}`);
               if (!incomplete) {
                 setText("");
                 setConfirm(false);

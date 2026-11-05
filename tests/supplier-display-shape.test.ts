@@ -51,6 +51,10 @@ async function main(): Promise<void> {
   is("clicks that are not a number", throws(() => readRows({ rows: [{ keys: ["a"], clicks: "lots", impressions: 5, position: 1 }] })), "not known");
   is("times shown missing", throws(() => readRows({ rows: [{ keys: ["a"], clicks: 1, position: 1 }] })), "not known");
   is("a place that is not a number", throws(() => readRows({ rows: [{ keys: ["a"], clicks: 1, impressions: 5, position: null }] })), "not known");
+  // Review of Codex J on #2684: a row without its search as text is not "no search".
+  for (const keys of [undefined, null, [], [42]]) {
+    is(`keys ${JSON.stringify(keys) ?? "missing"}`, throws(() => readRows({ rows: [{ ...(keys === undefined ? {} : { keys }), clicks: 1, impressions: 5, position: 1 }] })), "not known");
+  }
 
   part("Discord roles");
   const role = (id: string, position: unknown) => ({ id, name: `Role ${id.slice(0, 3)}`, color: 0, position, managed: false });
@@ -58,6 +62,13 @@ async function main(): Promise<void> {
   const read = await serverRoles(SERVER);
   is("the bot's place is its own role's", read?.botTop, 5);
   is("a role whose place is not a whole number is not offered", read?.roles.map((r) => r.id).sort(), ["333333333333333333", "444444444444444444"]);
+  // Review of Codex J on #2684: whether Discord manages a role (a bot's or an integration's, never given by hand)
+  // is only Discord's own true or false.
+  for (const managed of [undefined, null, "true"]) {
+    roles = [role("333333333333333333", 5), { id: "666666666666666666", name: "Odd", color: 0, position: 2, ...(managed === undefined ? {} : { managed }) }];
+    const odd = await serverRoles(SERVER);
+    is(`managed ${JSON.stringify(managed) ?? "missing"}: not offered`, odd?.roles.some((r) => r.id === "666666666666666666"), false);
+  }
   memberStatus = 500;
   is("the bot's own roles not read: the roles are not known", await serverRoles(SERVER), null);
   done();

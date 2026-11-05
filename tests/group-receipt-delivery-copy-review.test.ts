@@ -13,10 +13,13 @@ const CONDITIONAL: Record<LanguageCode, RegExp> = {
   pt: /\b(se|pode|poderá)\b/i,
 };
 
-part("The group receipt copy does not promise arrival without delivery evidence");
+part("The group page does not promise email arrival without delivery evidence");
 for (const code of LANGUAGE_CODES) {
-  const text = thanksWords(code).groupReceipt(ADDRESS);
-  is(`${code}: keeps the receipt address`, text.includes(ADDRESS), true);
-  is(`${code}: makes receipt arrival conditional`, CONDITIONAL[code].test(text), true);
+  const words = thanksWords(code);
+  const receipt = words.groupReceipt(ADDRESS);
+  is(`${code}: keeps the receipt address`, receipt.includes(ADDRESS), true);
+  is(`${code}: makes receipt arrival conditional`, CONDITIONAL[code].test(receipt), true);
+  is(`${code}: keeps the missing-link explanation`, words.noGroupLink.length > 20, true);
+  is(`${code}: makes missing-link email arrival conditional`, CONDITIONAL[code].test(words.noGroupLink), true);
 }
 done();

@@ -62,6 +62,9 @@ function main() {
   is("a time that cannot be read", vtt("1\n00:00:01 --> 00:00:02\nNo fractions.\n"), "refused: format");
   is("a caption that ends before it starts", vtt("1\n00:00:05,000 --> 00:00:02,000\nBackwards.\n"), "refused: format");
   is("one good caption and one broken: the whole file is refused, not half kept", vtt("1\n00:00:01,000 --> 00:00:02,000\nGood.\n\n2\nxx --> yy\nBad.\n"), "refused: format");
+  for (const broken of ["2\n00:00:03,000 -> 00:00:04,000\nMissing a dash.", "2\n00:00:03,000 00:00:04,000\nNo separator.", "A detached part of the transcript."]) {
+    is(`a broken block without an arrow is refused, never silently lost: ${broken.split("\n")[0]}`, vtt(`1\n00:00:01,000 --> 00:00:02,000\nGood.\n\n${broken}`), "refused: format");
+  }
   is("a file over the size one may be", vtt(`WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n${"a".repeat(MAX_CAPTION_BYTES)}\n`), "refused: too_big");
 
   part("The languages");

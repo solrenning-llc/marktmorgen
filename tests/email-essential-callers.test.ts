@@ -35,6 +35,18 @@ for (const [file, scopes] of expected) {
   }
 }
 
+const honestUnavailable = new Map<string, Array<[string, string]>>([
+  ["lib/erasure-request.ts", [["erase-ip", 'return { status: "error" }'], ["erase-address", 'return { status: "error" }']]],
+  ["lib/takedown.ts", [["report", 'return "error"']]],
+]);
+for (const [file, cases] of honestUnavailable) {
+  const lines = read(file).split("\\n");
+  for (const [scope, refusal] of cases) {
+    const line = lines.find((candidate) => candidate.includes(`withinEssentialLimit("${scope}"`)) ?? "";
+    is(`${file}: ${scope} says unavailable rather than blaming the person`, line.includes(refusal), true);
+  }
+}
+
 const inbox = read("lib/inbox.ts");
 is("chat start stays an ordinary non-delivery guard", /withinLimit\(\s*["']chat-start["']/.test(inbox), true);
 is("chat messages stay ordinary until the separate mail admission", /withinLimit\(\s*["']chat-send["']/.test(inbox), true);

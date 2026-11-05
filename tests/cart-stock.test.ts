@@ -306,8 +306,10 @@ async function main(): Promise<void> {
   const shop = { handle: "prints", name: "Prints", email: "prints@example.com", language: "en", currency: "usd", stripeAccountId: "acct_test_cartstock1", sale: { ...NO_SALE }, cartDeal: { ...NO_DEAL }, recovery: { ...NO_RECOVERY }, hasDiscounts: false, tax: { enabled: false, included: false, ids: false, invoices: false }, affiliates: { enabled: false, percent: 0, days: 30, rates: {}, payday: 0, hold: 0 }, catalog: { id: null, items: [], head: [], inline: null } } as unknown as Store;
   const now = Math.floor(Date.now() / 1000);
   await createCartCheckout(shop, [limited("print6", 3) as Product, plain("guide1") as Product], "https://marktmorgen.com", { digitalConsent: TEST_CONSENT, held: true, remind: true });
+  // Read after the call too: the checkout takes its own clock, which may already be a second later than `now`.
+  const after = Math.floor(Date.now() / 1000);
   const closes = Number(sent.at(-1)!.get("expires_at"));
-  is("a held unit's time, shorter than a reminder's hour", closes > now && closes <= now + 31 * 60, true);
+  is("a held unit's time, shorter than a reminder's hour", closes > now && closes <= after + 31 * 60, true);
 
   part("The open cart, and paying for it");
   const OWNER = "prints@example.com";

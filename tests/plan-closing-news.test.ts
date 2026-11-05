@@ -222,6 +222,52 @@ async function main(): Promise<void> {
     is("a break answered in a shape we do not expect throws too", odd, "threw");
   }
 
+  part("The whole letter in each state of the hold: 'nobody is charged again' only when every one is known to be paused");
+  {
+    // Codex G's review of #2554: holdCharges finishes (done) with members it
+    // could not pause or did not reach, who stay chargeable; the same letter
+    // must not then say none is charged again.
+    const at = Date.UTC(2026, 10, 1, 12);
+    const closes = removalDay(at);
+    const on = new Date(closes).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+    const lines = (hold: Pick<ClosingNews, "notHeld" | "overLimit">) => closingLetter("ended", "Rita Shop", at, closes, at, { buyersBy: null, untold: 0, members: 0, unused: "", ...hold }).text.split("\n");
+    const PROMISE = "Since your plan ended, none of your members is charged again, and they keep their access.";
+    const ACCESS = "Your members keep their access until your store closes.";
+    const paused = lines({ notHeld: 0, overLimit: 0 });
+    is("every one paused: the fourth line says none is charged again, once", [paused[3], paused.filter((l) => l === PROMISE).length], [PROMISE, 1]);
+    is("every one paused: no line about memberships not paused or unchecked", paused.some((l) => /not paused|could not check|refund them from Stripe/.test(l)), false);
+    // Every other state is that same letter, word for word, but for the fourth line and the hold's own lines before "We keep no copy".
+    const sales = paused.indexOf("We keep no copy of your sales: every sale, refund and payout is on your own Stripe");
+    is("the letter has its sales paragraph", sales > 4, true);
+    const expected = (hold: string[]) => [...paused.slice(0, 3), ACCESS, ...paused.slice(4, sales), ...hold, "", ...paused.slice(sales)];
+    is(
+      "some not paused (one could not be paused, one past the limit): the whole letter",
+      lines({ notHeld: 1, overLimit: 1 }),
+      expected([
+        "2 memberships' payments are not paused yet: we try again every day, and some are past this closing's limit.",
+        `Every one of them ends on ${on}. If a member is charged before then, please refund them from Stripe.`,
+        `What these members paid for after ${on} may not be refunded for you: after that day, please check each of them in Stripe and refund that time yourself.`,
+      ]),
+    );
+    is(
+      "one not paused: the whole letter",
+      lines({ notHeld: 1, overLimit: 0 }),
+      expected([
+        "1 membership's payments are not paused yet: we try again every day.",
+        `Every one of them ends on ${on}. If a member is charged before then, please refund them from Stripe.`,
+        `What this member paid for after ${on} may not be refunded for you: after that day, please check their membership in Stripe and refund that time yourself.`,
+      ]),
+    );
+    const unchecked = [
+      "We could not check just now whether every membership's payments are paused.",
+      `Every membership ends on ${on}. If a member is charged before then, please refund them from Stripe.`,
+      `For a member whose payments were not paused, what they paid for after ${on} may not be refunded for you: after that day, please check your members in Stripe and refund that time yourself.`,
+    ];
+    is("the hold could not be read: the whole letter", lines({ notHeld: null, overLimit: null }), expected(unchecked));
+    is("one count read and the other not: the same as unread", lines({ notHeld: 0, overLimit: null }), expected(unchecked));
+    is("no news about the hold at all: no promise either", closingLetter("ended", "Rita Shop", at, closes, at).text.includes(PROMISE), false);
+  }
+
   part("The letter on its own: an unknown is never printed as a number");
   {
     const text = letterOf({ buyersBy: null, untold: 0, members: null, unused: "", notHeld: null, overLimit: null });

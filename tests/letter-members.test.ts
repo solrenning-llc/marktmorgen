@@ -301,7 +301,7 @@ async function main(): Promise<void> {
   part("The link form: its field is named and described, and a notice after it is reached");
   const formHtml = await render(store, letter.id);
   is(
-    "the field is labelled as an email address and described by the line that explains it",
+    "the field is labeled as an email address and described by the line that explains it",
     [/<label[^>]*for="letter-email"[^>]*>Your email address<\/label>/.test(formHtml), /<p[^>]*id="letter-email-explain"[^>]*>Type the address you used/.test(formHtml), /<input[^>]*aria-describedby="letter-email-explain"/.test(formHtml)],
     [true, true, true],
   );
@@ -315,7 +315,7 @@ async function main(): Promise<void> {
   }
   const shared = renderToStaticMarkup(createElement(LinkRequestForm, { action: "/api/store/community/link", hidden: { handle: HANDLE }, id: "community-email", label: "Already a member?", explain: "Type the address you used to buy or sign up.", button: "Send me the link", placeholder: "you@example.com", language: "es" }));
   is(
-    "the community's form, the same component: named, described, labelled in the store's language",
+    "the community's form, the same component: named, described, labeled in the store's language",
     [/aria-labelledby="community-email-title"/.test(shared), /aria-describedby="community-email-explain"/.test(shared), /<label[^>]*for="community-email"[^>]*>Tu dirección de email<\/label>/.test(shared)],
     [true, true, true],
   );

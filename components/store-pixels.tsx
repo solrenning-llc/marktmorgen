@@ -41,10 +41,13 @@ export type PixelEvent =
    * `value` is in the currency's own units (27.5 dollars, 2700 yen); `currency` is its ISO code.
    * `id` is the id the platforms are given, made from the order's on the server
    * (lib/ad-events.ts adEventId), never the order's own; "" sends nothing.
-   * `order` is the Stripe checkout's own id, sent only to this site's own
-   * server, which then sends the same purchase from there; never to a pixel.
+   * `relay` is an opaque handle sealed on the server for this store and this
+   * hour (lib/ad-events.ts adEventRelay), sent only to this site's own server,
+   * which opens it and sends the same purchase from there; never to a pixel.
+   * Never the checkout's own id: that is a key to the order, and every prop
+   * here is written into the page, where the platforms' scripts run.
    */
-  | { type: "purchase"; id: string; order?: string; value: number; currency?: string; productId: string; title: string }
+  | { type: "purchase"; id: string; relay?: string; value: number; currency?: string; productId: string; title: string }
   /** `id`, when the route that took the sign-up sent the same lead from the server (lib/ad-events.ts), so it is counted once. */
   | { type: "lead"; productId: string; id?: string }
   | null;
@@ -458,18 +461,19 @@ export function StorePixels({
     start("reddit", pixels.reddit, (win, id) => startReddit(win, id, restricted, place));
 
     // Before ids were derived, a purchase was marked sent under the order's own
-    // id (the checkout's, or PayPal's from the address): sent then, not again.
-    const marked = event?.type === "purchase" ? [event.order ?? "", ...taken].filter(Boolean).map((v) => `nl_px_sent:${v}`) : [];
+    // id (the checkout's or PayPal's, both from the address, taken out of it
+    // above): sent then, not again.
+    const marked = event?.type === "purchase" ? taken.filter(Boolean).map((v) => `nl_px_sent:${v}`) : [];
     if (event?.type === "purchase" && event.id && !sentBefore(marked) && once(`nl_px_sent:${event.id}`)) {
       track(w, pixels, event, restricted);
       // The same purchase from our server now, where the creator set it up
       // (lib/ad-events.ts), rather than at the server's next pass over the
       // store's checkouts: asked only here, where the pixels were allowed to run.
-      if (event.order) {
+      if (event.relay) {
         fetch("/api/store/ads-event", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ h: handle, s: event.order }),
+          body: JSON.stringify({ h: handle, t: event.relay }),
           keepalive: true,
         }).catch(() => {});
       }

@@ -57,7 +57,7 @@ import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { deriveKey, seal, unseal } from "@/lib/secret-box";
+import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { toMajor } from "@/lib/money";
@@ -239,6 +239,44 @@ const AD_EVENT_LABEL = "marktmorgen/ad-event-id/v1";
 export function adEventId(id: string): string {
   const key = id ? deriveKey(AD_EVENT_LABEL) : null;
   return key ? `ev_${createHmac("sha256", key).update(id).digest("hex").slice(0, 32)}` : "";
+}
+
+const RELAY_CONTEXT = "marktmorgen/ad-event-relay/v1";
+/** How long a relay handle opens after the thanks page made it. */
+export const AD_EVENT_RELAY_SECONDS = 3600;
+/** The longest relay handle the route reads; a checkout's id at its longest seals to about 340 characters. */
+export const AD_EVENT_RELAY_MAX = 420;
+
+/**
+ * What the thanks page hands the pixels so the buyer's browser can ask this
+ * site's server to send the same purchase now (app/api/store/ads-event): an
+ * opaque handle, never the checkout's id. Review of #2557 (Codex O): every
+ * prop of a client component is serialized into the page, where the
+ * platforms' scripts run, and the checkout's id is a key to the order
+ * (adEventId above). This is sealed (lib/secret-box.ts, AES-256-GCM, a fresh
+ * nonce each time) with the store and this one purpose bound in, and it
+ * carries its own hour: it opens only in openAdEventRelay, for the same store,
+ * while fresh, untouched. Nothing else reads it, and every route that takes a
+ * checkout's id holds it to the cs_ shape (lib/store-checkout.ts readOrder),
+ * which this never has. "" when there is nothing to seal with, or the id is
+ * not a checkout's: the browser then asks nothing, and the five-minute pass
+ * sends the purchase instead.
+ */
+export function adEventRelay(sessionId: string, storeHandle: string, now = Date.now()): string {
+  if (!SESSION.test(sessionId) || !storeHandle || !canSeal()) return "";
+  return seal(`${Math.floor(now / 1000) + AD_EVENT_RELAY_SECONDS}|${sessionId}`, `${RELAY_CONTEXT}|${storeHandle}`);
+}
+
+/** The checkout's id inside a relay handle made for this store within its hour, or null. */
+export function openAdEventRelay(token: unknown, storeHandle: string, now = Date.now()): string | null {
+  if (typeof token !== "string" || !token || token.length > AD_EVENT_RELAY_MAX || !storeHandle) return null;
+  const opened = unseal(token, `${RELAY_CONTEXT}|${storeHandle}`);
+  if (!opened.ok) return null;
+  const cut = opened.value.indexOf("|");
+  const until = opened.value.slice(0, cut);
+  const sessionId = opened.value.slice(cut + 1);
+  if (cut < 1 || !/^\d{1,12}$/.test(until) || Number(until) * 1000 < now || !SESSION.test(sessionId)) return null;
+  return sessionId;
 }
 
 export const sha256 = (text: string) => createHash("sha256").update(text.trim().toLowerCase()).digest("hex");

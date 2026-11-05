@@ -221,7 +221,10 @@ function sixPixels(): Pixels {
   };
 }
 
-const purchase = (id: string, order?: string) => ({ type: "purchase" as const, id: adEventId(id), ...(order ? { order } : {}), value: 49, currency: "usd", productId: "club000001", title: "Club" });
+/** The relay handle the thanks page seals for a checkout (lib/ad-events.ts adEventRelay), read through the module as adEventId is. */
+const relayOf = (id: string) =>
+  (((ads as unknown as Record<string, unknown>).adEventRelay as ((id: string, handle: string) => string) | undefined) ?? (() => ""))(id, "harbor");
+const purchase = (id: string, relay?: string) => ({ type: "purchase" as const, id: adEventId(id), ...(relay ? { relay } : {}), value: 49, currency: "usd", productId: "club000001", title: "Club" });
 const props = (pixels: Pixels, event: ReturnType<typeof purchase> | null) => ({ handle: "harbor", storeName: "Harbor Kitchen", pixels, names: "Meta and Google", askFirst: false, event });
 const here = () => (globalThis as unknown as { location: URL }).location;
 
@@ -331,11 +334,11 @@ async function main(): Promise<void> {
     purchases.map((p) => /id: adEventId\((sessionId|order)\),$/.test(p)),
     [true, true, true, true, true, true],
   );
-  is("and the checkout's own id only as the order for this site's own server", (thanks.match(/order: sessionId,/g) ?? []).length, 5);
+  is("and the checkout's own id never, only a relay handle sealed for this site's own server", [(thanks.match(/order: sessionId,/g) ?? []).length, (thanks.match(/relay: adEventRelay\(sessionId, store\.handle\),/g) ?? []).length], [0, 5]);
 
   part("The pixels in a browser: a Stripe thanks page");
   const onStripe = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}&upsell=no#top`);
-  runPixels(props(sixPixels(), purchase(SESSION, SESSION)));
+  runPixels(props(sixPixels(), purchase(SESSION, relayOf(SESSION))));
   const calls = queued();
   is("the six platforms' scripts started", onStripe.seen.length, 6);
   is("none on an address naming the checkout", onStripe.seen.filter((s) => s.page.includes(SESSION)).length, 0);
@@ -346,7 +349,7 @@ async function main(): Promise<void> {
     { meta: true, google: true, tiktok: true, pinterest: true, x: true, reddit: true },
   );
   is("no call to any platform names the checkout", Object.entries(calls).filter(([, list]) => list.some((c) => c.includes(SESSION))).map(([p]) => p), []);
-  is("the checkout's own id goes only to this site's server", onStripe.posted, [{ url: "/api/store/ads-event", body: JSON.stringify({ h: "harbor", s: SESSION }) }]);
+  is("only the relay handle goes, and only to this site's server", onStripe.posted.map((p) => [p.url, Object.keys(JSON.parse(p.body)), p.body.includes(SESSION), ads.openAdEventRelay(JSON.parse(p.body).t, "harbor")]), [["/api/store/ads-event", ["h", "t"], false, SESSION]]);
   is(
     "kept for this tab, under this page: the address it became and the one it was",
     JSON.parse((globalThis as unknown as { sessionStorage: Storage }).sessionStorage.getItem("nl_px_keys:/@harbor/thanks") ?? "null"),
@@ -361,7 +364,7 @@ async function main(): Promise<void> {
 
   part("Before the visitor's choice, and when Next's router listens late");
   const asked = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}&upsell=no`, { routerLate: true });
-  runPixels(props(sixPixels(), purchase(SESSION, SESSION)), "ask");
+  runPixels(props(sixPixels(), purchase(SESSION, relayOf(SESSION))), "ask");
   is("the address is cleared at once, whatever the choice, and no script starts", [here().href, asked.seen.length], ["https://marktmorgen.com/@harbor/thanks?upsell=no", 0]);
   is("keeping Next's own state on the entry while its router does not listen", (globalThis as unknown as { history: { state: unknown } }).history.state, { __NA: true });
   asked.listen();
@@ -409,12 +412,12 @@ async function main(): Promise<void> {
 
   part("When the address cannot be cleared");
   const stuck = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`, { replaceThrows: true });
-  runPixels(props(sixPixels(), purchase(SESSION, SESSION)));
+  runPixels(props(sixPixels(), purchase(SESSION, relayOf(SESSION))));
   is("no script starts and nothing is sent", [stuck.seen.length, stuck.posted.length], [0, 0]);
 
   part("Without this tab's storage");
   const bare = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`, { session: null });
-  runPixels(props(sixPixels(), purchase(SESSION, SESSION)));
+  runPixels(props(sixPixels(), purchase(SESSION, relayOf(SESSION))));
   is("the address is still cleared and the scripts start", [bare.seen.length, bare.seen.filter((s) => s.page.includes(SESSION)).length], [6, 0]);
 
   part("A reload, or a step back, after the address was cleared");
@@ -446,7 +449,7 @@ async function main(): Promise<void> {
   part("A purchase sent before ids were derived");
   const before = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}`);
   before.local.set(`nl_px_sent:${SESSION}`, "1");
-  runPixels(props(sixPixels(), purchase(SESSION, SESSION)));
+  runPixels(props(sixPixels(), purchase(SESSION, relayOf(SESSION))));
   is("a Stripe one is not sent again under the new id", [Object.values(queued()).flat().filter((c) => c.includes(adEventId(SESSION))).length, before.posted.length], [0, 0]);
   const beforePp = browserAt(`https://marktmorgen.com/@harbor/thanks?paypal=${PAYPAL}`);
   beforePp.local.set(`nl_px_sent:${PAYPAL}`, "1");
@@ -454,7 +457,7 @@ async function main(): Promise<void> {
   is("nor a PayPal one", Object.values(queued()).flat().filter((c) => c.includes(adEventId(PAYPAL))).length, 0);
   const twice = browserAt(`https://marktmorgen.com/@harbor/thanks?session_id=${SESSION}x`);
   twice.local.set(`nl_px_sent:${adEventId(SESSION + "x")}`, "1");
-  runPixels(props(sixPixels(), purchase(SESSION + "x", SESSION + "x")));
+  runPixels(props(sixPixels(), purchase(SESSION + "x", relayOf(SESSION + "x"))));
   is("nor one already sent under the new id", Object.values(queued()).flat().filter((c) => c.includes(adEventId(SESSION + "x"))).length, 0);
   done();
 }

@@ -95,11 +95,12 @@ while (long.length < 20000) {
   seed = (seed * 1103515245 + 12345) % 2147483648;
   long += pieces[seed % pieces.length] + (seed % 3 === 0 ? " " : seed % 3 === 1 ? "-" : "");
 }
-for (const text of [long + "x", "tre".repeat(7000) + "!", ("venti e tre " + "e ").repeat(1500) + "zz", ("einund" + "zwanzig").repeat(1500)]) {
+// Revisor 1's runs (06h00): "vingt et un " and "twenty-" repeated took about 2.0 s and 0.7 s before the number was bounded.
+for (const text of [long + "x", "tre".repeat(7000) + "!", ("venti e tre " + "e ").repeat(1500) + "zz", ("einund" + "zwanzig").repeat(1500), "vingt et un ".repeat(2000), "twenty-".repeat(3000), "twenty one ".repeat(2200)]) {
   const started = performance.now();
   speaksOfTerms(text);
   const took = performance.now() - started;
-  is(`a long text of number words (${text.length} signs) is read in under a second`, took < 1000, true);
+  is(`a long text of number words (${text.length} signs) is read in a quarter of a second`, took < 250, true);
 }
 
 done();

@@ -396,8 +396,17 @@ const ANY_PIECE = `(?:${[...NUMBER_PIECES, ...NUMBER_ARTICLES].join("|")})`;
  * of pieces cannot make the match slow.
  */
 const JOIN = `(?:${BETWEEN}(?:(?:${NUMBER_JOINS.join("|")})${BETWEEN})?|(?:${NUMBER_JOINS.join("|")}))?`;
-/** A number in words: pieces joined, starting with a piece that is a number alone or with an article joined to one. */
-const NUMBER_WORD = `(?:${PIECE}|(?:${NUMBER_ARTICLES.join("|")})${JOIN}${PIECE})(?:${JOIN}${ANY_PIECE})*`;
+/**
+ * A number in words: pieces joined, starting with a piece that is a number
+ * alone or with an article joined to one. At most ten pieces in all, more
+ * than any number below a million takes ("quatre cent quatre-vingt-dix-neuf"
+ * is six), so a long run of number words is read in time that grows only
+ * with its length (Revisor 1, 06h00: unbounded, "vingt et un " repeated took
+ * two seconds at 24,000 signs).
+ */
+const NUMBER_WORD = `(?:${PIECE}|(?:${NUMBER_ARTICLES.join("|")})${JOIN}${PIECE})(?:${JOIN}${ANY_PIECE}){0,9}`;
+/** Words that are a period of time by themselves (Revisor 1's note of 05h29: "within a fortnight"). */
+const PERIOD_WORDS = ["fortnights?", "quincenas?", "quinzaines?", "quindicin[ae]", "quinzenas?", "veertiendaags\\p{L}*"];
 /** Units of time, folded, with their plurals and the German and Dutch compound forms ("30-tagige", "30-daagse"). */
 const TIME_UNITS = [
   "days?", "weeks?", "months?", "years?", "hours?",
@@ -409,7 +418,7 @@ const TIME_UNITS = [
 ];
 /** A period of time: a number in digits or words, then a unit of time, however it is joined ("30 days", "30-day", "30 Tage", "thirty-day", "30days"). */
 const DURATION = new RegExp(
-  `${WORD_EDGE_BEFORE}(?:\\d+(?:[.,]\\d+)?|${NUMBER_WORD})(?:${BETWEEN})?(?:${TIME_UNITS.map(termSource).join("|")})${WORD_EDGE_AFTER}`,
+  `${WORD_EDGE_BEFORE}(?:(?:\\d+(?:[.,]\\d+)?|${NUMBER_WORD})(?:${BETWEEN})?(?:${TIME_UNITS.map(termSource).join("|")})|${PERIOD_WORDS.join("|")})${WORD_EDGE_AFTER}`,
   "u",
 );
 /**

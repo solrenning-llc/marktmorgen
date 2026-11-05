@@ -213,3 +213,88 @@ test("parent validation never executes a getter installed by a later scenario Pr
   assert.equal(installed, 1, "the regression must install the late getter");
   assert.equal(reads, 0, "financial validation must not execute an original evidence getter");
 });
+
+test("post-serialization validation rejects a late plain evidence change", () => {
+  const fixture = contractFixture();
+  assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
+
+  let mutations = 0;
+  fixture.review.scenarios = new Proxy(fixture.review.scenarios, {
+    getOwnPropertyDescriptor(target, key) {
+      if (key === "review") {
+        mutations++;
+        fixture.review.companyBase!.fixedCostsEvidence = "CHANGED AFTER SERIALIZATION";
+      }
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+  });
+
+  assert.equal(
+    contractFundingConfiguration(fixture.policy, fixture.context, fixture.now),
+    null,
+    "a second valid snapshot cannot silently differ from the bound review",
+  );
+  assert.ok(mutations > 0, "the regression must change already serialized evidence");
+});
+
+for (const stage of ["review-ownKeys", "context-identity", "late-canonical"] as const) {
+  test(`shallow capture cannot retain a hidden liability inserted at ${stage}`, () => {
+    const fixture = contractFixture();
+    assert.ok(contractFundingConfiguration(fixture.policy, fixture.context, fixture.now));
+    let installs = 0;
+    let reads = 0;
+    const install = () => {
+      if (installs++) return;
+      fixture.review.planPaymentDisputes!.creator_year = new Proxy(
+        {
+          ...fixture.review.planPaymentDisputes!.creator_year!,
+          additionalFeesCents: null,
+        },
+        {
+          ownKeys: (target) =>
+            Reflect.ownKeys(target).filter((key) => key !== "additionalFeesCents"),
+        },
+      );
+    };
+
+    let context: typeof fixture.context = fixture.context;
+    if (stage === "review-ownKeys") {
+      context = {
+        ...fixture.context,
+        review: new Proxy(fixture.review, {
+          ownKeys(target) {
+            install();
+            return Reflect.ownKeys(target);
+          },
+        }),
+      };
+    } else if (stage === "context-identity") {
+      context = new Proxy(fixture.context, {
+        getOwnPropertyDescriptor(target, key) {
+          const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+          if (key === "review" && ++reads === 2) install();
+          return descriptor;
+        },
+      });
+    } else {
+      fixture.review.scenarios = new Proxy(fixture.review.scenarios, {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === "review") install();
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+      });
+    }
+
+    const actual = contractFundingConfiguration(fixture.policy, context, fixture.now);
+    assert.equal(
+      assessPlanPaymentDisputeCosts(fixture.review.planPaymentDisputes),
+      null,
+      "the actual original graph now contains an unknown hidden liability",
+    );
+    assert.equal(
+      actual,
+      null,
+      "captured evidence must remain complete after every executable observation",
+    );
+  });
+}

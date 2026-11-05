@@ -424,6 +424,38 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/calendar-sync.ts, KEEP_COPY: the feed's copy written only while the store's calendar settings exist, and
+        // only when nobody it names was deleted from the store (their prints in KEYS[3]); one was: the copy goes, 2.
+        if (key.startsWith("-- marktmorgen:calendar-copy:v2\n") && args[0] === "3" && args.length >= 6) {
+          const [, settings, copy, erased, value, seconds, ...prints] = args;
+          this.live(settings);
+          this.scriptCalls += 1;
+          if (!this.data.has(settings)) return 0;
+          if (prints.length) {
+            this.scriptCalls += 1;
+            const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+            if (found.some((one) => one !== null)) {
+              this.scriptCalls += 1;
+              this.run(["DEL", copy]);
+              return 2;
+            }
+          }
+          this.scriptCalls += 1;
+          this.run(["SET", copy, value, "EX", seconds]);
+          return 1;
+        }
+        // lib/store-readings.ts, READING_COPY: a reading kept only when nobody it names was deleted from the store;
+        // the places of those who were answered, and the copy gone.
+        if (key.startsWith("-- marktmorgen:reading-copy:v1\n") && args[0] === "2" && args.length >= 6) {
+          const [, copy, erased, value, seconds, ...prints] = args;
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+          const gone = found.flatMap((one, i) => (one !== null ? [i + 1] : []));
+          this.scriptCalls += 1;
+          if (gone.length) this.run(["DEL", copy]);
+          else this.run(["SET", copy, value, "EX", seconds]);
+          return gone;
+        }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
           this.live(target);
@@ -533,6 +565,33 @@ export class MemoryRedis {
           return value;
         }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
+        // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
+        if (key.startsWith("-- marktmorgen:api-key-record-swap:v1\n") && args[0] === "1" && (args.length - 2) % 3 === 0) {
+          const [, list, ...triples] = args;
+          const changed: string[] = [];
+          for (let i = 0; i + 2 < triples.length; i += 3) {
+            if (this.run(["HGET", list, triples[i]]) !== triples[i + 1]) continue;
+            this.run(["HSET", list, triples[i], triples[i + 2]]);
+            changed.push(triples[i]);
+          }
+          return changed;
+        }
+        // lib/api-keys.ts HOLD_SWAP: each field still in the list, whose hold is one of the allowed, takes the new one.
+        if (key.startsWith("-- marktmorgen:api-hold-swap:v1\n") && args[0] === "2" && args.length >= 5) {
+          const [, holds, list, next, rawCount, ...rest] = args;
+          const count = Number(rawCount);
+          const fields = rest.slice(0, count);
+          const allowed = rest.slice(count);
+          const changed: string[] = [];
+          for (const field of fields) {
+            if (Number(this.run(["HEXISTS", list, field])) !== 1) continue;
+            const now = this.run(["HGET", holds, field]);
+            if (!allowed.includes(typeof now === "string" ? now : "")) continue;
+            this.run(next === "" ? ["HDEL", holds, field] : ["HSET", holds, field, next]);
+            changed.push(field);
+          }
+          return changed;
+        }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
           const n = Number(this.data.get(args[1]) ?? "0") || 0;

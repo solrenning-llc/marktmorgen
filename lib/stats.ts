@@ -44,6 +44,7 @@ import { type AttributionTable, attributionTable } from "@/lib/attribution-rules
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { reachRows } from "@/lib/page-read";
 import { PAGE_PARTS } from "@/lib/store-order";
+import { type TaxSummary, taxSummary } from "@/lib/tax-summary";
 import { type CappedCount, cappedCount, cappedCountCommand } from "@/lib/capped-count";
 
 /** Days kept, a little over a year, so a year-on-year look is possible. */
@@ -791,6 +792,12 @@ export type SalesStats = {
   byContentIn?: Record<"d7" | "d30" | "d90", { content: string; source: string; campaign: string; cents: number; sales: number }[]>;
   /** Money by the buyer's country, for each window. */
   byCountryIn?: Record<"d7" | "d30" | "d90", { country: string; cents: number; sales: number }[]>;
+  /**
+   * The tax Stripe added at checkout, by the buyer's region, each currency on
+   * its own (lib/tax-summary.ts; 601 [KB22] U4, added 6 November 2026). From
+   * the sales above, with no read of its own. Absent on a reading from before.
+   */
+  taxIn?: TaxSummary;
   /** Refunds made in each window, by the channel of the sale refunded; "" is direct, UNRECORDED a payment not among the sales read. */
   refundsIn?: Record<"d7" | "d30" | "d90", { source: string; refunds: number; cents: number }[]>;
   /** Refunds by product over the 90 days. */
@@ -1584,6 +1591,8 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   };
   out.byContentIn = { d7: contentIn(cut7), d30: contentIn(cut30), d90: contentIn("") };
   out.byCountryIn = { d7: countryIn(cut7), d30: countryIn(cut30), d90: countryIn("") };
+  // The tax collected at checkout, every currency each on its own, from the same 90 days' sales (lib/tax-summary.ts).
+  out.taxIn = taxSummary(sales, { d7: cut7, d30: cut30, d90: cut90 }, store.currency, readPartial);
   if (refundRows) {
     // A refund is credited to the channel and product of the sale it gave back,
     // found by the payment it names among every sale read, the 180 days.
@@ -2008,6 +2017,8 @@ export type StatsData = {
   ads: Record<"d7" | "d30" | "d90", { content: string; source: string; campaign: string; sales: number; cents: number }[]>;
   /** Money by the buyer's country, for the window, as Stripe has the country. */
   salesCountries: Record<"d7" | "d30" | "d90", { country: string; sales: number; cents: number }[]>;
+  /** The tax collected at checkout (SalesStats.taxIn); null when it could not be read. */
+  taxCollected?: TaxSummary | null;
   /** Refunds made in the window, by the channel of the sale refunded; null when they could not be read. */
   refunds: Record<"d7" | "d30" | "d90", { source: string; refunds: number; cents: number }[]> | null;
   /** Refunds over the last 90 days, by product. */
@@ -2279,6 +2290,7 @@ export function studioStats(
     searchMisses: { d7: w.d7.searchMisses ?? [], d30: w.d30.searchMisses ?? [], d90: w.d90.searchMisses ?? [] },
     ads: sales?.byContentIn ?? { d7: [], d30: [], d90: [] },
     salesCountries: sales?.byCountryIn ?? { d7: [], d30: [], d90: [] },
+    taxCollected: sales?.taxIn ?? null,
     refunds: sales?.refundsIn ?? null,
     refundsByProduct: sales?.refundsByProduct ?? {},
     takenBackElsewhere: sales?.takenBackElsewhere ?? null,
@@ -2340,7 +2352,8 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
     const details = (row.customer_details ?? {}) as { email?: unknown; name?: unknown; address?: { country?: unknown } | null };
     const totals = (row.total_details ?? {}) as { amount_discount?: unknown; amount_tax?: unknown };
     const text = (v: unknown) => (typeof v === "string" ? v : "");
-    const cents = (v: unknown) => (typeof v === "number" ? v : 0);
+    // An amount Stripe's record does not give as whole cents is left blank, never written as 0.00 (601 [KB22] U4).
+    const amount = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? plainAmount(v, sale.currency) : "");
     const product = await find(sale.product);
     const option = product?.options.find((o) => o.id === meta.option)?.label ?? meta.option ?? "";
     const kind = sale.upsell
@@ -2364,8 +2377,9 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
         (await Promise.all(bumpsFromMeta(meta).map((added) => title(added.id, "")))).filter(Boolean).join(" + "),
         kind,
         plainAmount(sale.cents, sale.currency),
-        plainAmount(cents(totals.amount_discount), sale.currency),
-        plainAmount(cents(totals.amount_tax), sale.currency),
+        // A one-click extra is a bare payment: no coupon and no tax calculation (lib/upsell.ts), so both are a known zero.
+        sale.upsell ? plainAmount(0, sale.currency) : amount(totals.amount_discount),
+        sale.upsell ? plainAmount(0, sale.currency) : amount(totals.amount_tax),
         sale.currency.toUpperCase(),
         text(details.email) || text(row.customer_email) || text(row.receipt_email),
         text(details.name),

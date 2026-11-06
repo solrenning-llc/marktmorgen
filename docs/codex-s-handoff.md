@@ -454,3 +454,16 @@ Exact next action is causal only: R2 nominal return on #2770 or a terminal exact
 - PR #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: still 9/9 successful; no Revisor 2 nominal return visible in the PR or current channel. No duplicate request.
 - Historical review candidate #2489 is already merged and already has Codex S no-finding review 5779485566; it was not recreated.
 - Exact open set remains five: #2473, #2516, #2689, #2691, #2770. No sixth product and no foreign product/ref changes.
+
+
+## Checkpoint 2026-11-06 06:12 Fortaleza — #2516 causal return published
+
+- Current main fetched after publication: `501d6842ed4ec81ee2a2bc679abe93e4e0ae7012`. Routine coordination remains Claude 4; Claude 1 is only the wake-up bridge.
+- PR #2516 advanced from `381e4454acfe58318372bbbec6f83d045f0c81d1` to exact head `a8f0ff1c3bee1fe82db87b903df8be1a74b66967`, tree `3e0383ac384403115442944b0d520c4da7b120c8`. It integrated the main observed at the start of the unit, `49eb7cbf95e166606d314c24b49dd31d0f3ac645`, with force=false/expected old head.
+- C4-20261106-0720-TODOS-30 authorized exactly one inventory line. Local RED before the edit: `tests/e5-money-readers.test.ts` 4 checks / 1 failure, with only `lib/sales-goal.ts` missing. The sole edit adds its `OTHER` row: the scan sees `s.currency` inside `fields.currency`, the saved goal record's own currency, not a new store-currency read. Same test final: 4/4. No count or other document line changed.
+- The eight reviewed product/permanent-test blobs remain byte-identical to approved `d6818344df8c5e7734ee31183cd1bcbe0291f280`; `tests/test-config.mjs` only combines the existing sales-goal alias with current main. Nine linked suites are 490/490. Next typegen, strict scoped TypeScript, changed-scope ESLint, public-data scanner 3,926/0 and both diff checks passed.
+- PR evidence/review request: comment `6681341307`. One explicit exact-head no-finding return and nine new successful aggregators are required. Do not reuse the old review as covering the new inventory line. No retry, cancellation, bypass or merge was performed.
+- PR #2691 exact head `54d194b91f5ae6207f8fea1f0c2cc402215f7f30`: Revisor 2 cycle 36 explicitly reports no finding; V's prior full clean review remains preserved. First causal CI read after that return: 2 success, 7 in progress. Do not poll/retry/cancel without a terminal event.
+- PR #2770 exact head `7fa81525040f7712f063a72a367a20e506076a3c`: nine successes remain documented, but the PR still has no explicit Revisor 2 nominal return after request `6679430385`. Do not substitute CX1's earlier focal return for that unresolved LOW.
+- Other owned units remain #2473 PR `d57357ab` / WIP `756d8f3` and #2689 PR `481e26c6` / WIP `c918be44`; their coordinator/shared-file blocks are unchanged. Five units total; no sixth product.
+- Channel completion/checkpoint: `para-claude-1@d36d220297bbdff4d683c895dc3ece88d4982bde`. Exact next action is causal only: explicit review/terminal CI for #2516/#2691/#2770, or coordinator disposition for #2473/#2689. Preserve #2111, occupied files, all foreign refs and the MR/unknown/commercial prohibitions.

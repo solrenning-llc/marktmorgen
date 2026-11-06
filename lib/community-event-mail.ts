@@ -428,14 +428,15 @@ export async function runEventQueue(
         counts.dropped += 1;
       } else if (due.mark === "p") {
         if (Date.now() < event.start) {
-          const going = (await rsvpNumbers(due.community, [event], null)).get(event.id)?.going ?? 0;
+          // A count that could not be read is left out of the push, never said as 0 (sweep app5, finding 2).
+          const going = (await rsvpNumbers(due.community, [event], null)).get(event.id)?.going ?? null;
           const time = new Intl.DateTimeFormat("en-US", { timeZone: event.tz, hour: "numeric", minute: "2-digit" }).format(new Date(event.start));
           const sent = await alertCreator(
             store,
             "live",
             {
               title: "Live in 15 minutes",
-              body: `${event.title} starts at ${time}. ${going} ${going === 1 ? "person has" : "people have"} RSVP'd. Get there a few minutes early.`,
+              body: `${event.title} starts at ${time}. ${going === null ? "" : `${going} ${going === 1 ? "person has" : "people have"} RSVP'd. `}Get there a few minutes early.`,
               url: store.sid ? `/studio/community?store=${store.sid}` : "/studio/community",
             },
             { seed: `event:${event.id}:${event.start}` },

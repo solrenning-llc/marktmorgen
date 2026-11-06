@@ -80,11 +80,13 @@ export default async function CommunityEventPage({ params, searchParams }: Param
     event.where === "meet" ? eventMeetings(store, [event]).catch(() => null) : null,
   ]);
   const meeting = meetings?.get(event.id) ?? null;
-  const going = numbers.get(event.id)?.going ?? 0;
-  const mine = numbers.get(event.id)?.mine ?? false;
+  // Each null when it could not be read (sweep app5, finding 2): said as not checked, never as "0 going" with places
+  // left; a member's own place is read on its own, so the way in follows only a place known to be theirs.
+  const going = numbers.get(event.id)?.going ?? null;
+  const mine = numbers.get(event.id)?.mine ?? null;
   const over = isOver(event, now);
   const door = joinWindow(event, now);
-  const way = wayInFor(event, { owner: viewer.owner, mayAttend: allowed, going: mine }, now, meeting?.link || null);
+  const way = wayInFor(event, { owner: viewer.owner, mayAttend: allowed, going: mine === true }, now, meeting?.link || null);
   const place = event.where === "meet" && event.meet && meeting?.made && !meeting.gone ? event.meet : null;
   const whereWords = place ? MEET_NAMES[place] : event.where === "link" ? w.onlineMeeting : w.privateRoom;
   const openWords = roomKind(way) === "meet" ? w.joinMeet : roomKind(way) === "zoom" ? w.joinZoom : w.openMeeting;
@@ -93,7 +95,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
     viewer.owner && place === "zoom" && meeting && roomKind(way) === "zoom"
       ? `/api/integrations/zoom/host?${new URLSearchParams({ scope: meeting.scope, ...(store.sid ? { store: store.sid } : {}) })}`
       : null;
-  const full = event.cap > 0 && going >= event.cap;
+  const full = event.cap > 0 && going !== null && going >= event.cap;
   const room = way && isVideoRoom(way) ? way : null;
   const doorsOpenAt = clockAt(door.opensAt, event.tz, locale);
   const forProducts = allowed ? [] : (await readListings(store, event.only.filter((p) => viewer.config.access.includes(p)))).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
@@ -117,7 +119,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
                 <span className={`cm-badge ${!event.cancelled && !over && event.start <= now ? "cm-badge-creator ev-live" : event.cancelled ? "cm-badge-warn" : "cm-badge-accent"}`}>
                   {eventWhenIn(store, event, now)}
                 </span>
-                {mine && !over && !event.cancelled ? <span className="cm-badge cm-badge-accent">{w.youAreGoing}</span> : null}
+                {mine === true && !over && !event.cancelled ? <span className="cm-badge cm-badge-accent">{w.youAreGoing}</span> : null}
               </p>
               <h1 id={labelId} className="font-display mt-2 break-words text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{event.title}</h1>
               <p className="mt-2 font-semibold">
@@ -126,7 +128,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
               </p>
               <LocalTime ms={event.start} tz={event.tz} locale={locale} template={w.yourTime("{time}")} />
               <p className="st-muted mt-1 text-sm">
-                {`${whereWords} · ${w.hostedBy(store.name)}${event.cancelled ? "" : over ? ` · ${w.rsvpd(going)}` : ` · ${placesWords(store, event, going)}`}`}
+                {`${whereWords} · ${w.hostedBy(store.name)}${event.cancelled ? "" : over ? ` · ${going === null ? w.countUnchecked : w.rsvpd(going)}` : ` · ${placesWords(store, event, going)}`}`}
               </p>
             </div>
           </div>
@@ -155,8 +157,8 @@ export default async function CommunityEventPage({ params, searchParams }: Param
           ) : !over ? (
             <div className="mt-6 flex flex-wrap items-center gap-3">
               {viewer.owner ? (
-                <span className="cm-pill cm-pill-still">{w.youHost(going)}</span>
-              ) : mine ? (
+                <span className="cm-pill cm-pill-still">{going === null ? w.youHostUnchecked : w.youHost(going)}</span>
+              ) : mine === true ? (
                 <>
                   <span className="cm-pill cm-pill-on" role="status">{w.youAreGoing}</span>
                   <form action="/api/store/community/rsvp" method="post">
@@ -165,8 +167,12 @@ export default async function CommunityEventPage({ params, searchParams }: Param
                     <button type="submit" className="cm-pill">{w.cancelRsvp}</button>
                   </form>
                 </>
+              ) : mine === null ? (
+                <p className="st-muted text-sm" role="status">{w.placeUnchecked}</p>
               ) : full ? (
                 <span className="cm-pill cm-pill-still">{w.everyPlaceTaken}</span>
+              ) : event.cap > 0 && going === null ? (
+                <p className="st-muted text-sm" role="status">{w.placesUnchecked}</p>
               ) : (
                 <form action="/api/store/community/rsvp" method="post">
                   <Carry store={store} action="going" from="feed" />

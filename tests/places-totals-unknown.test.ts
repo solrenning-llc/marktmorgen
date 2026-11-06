@@ -10,7 +10,7 @@
  *    so an unknown count never hides it nor withholds the way in; an unknown place is never "not going"; taking a
  *    place with an unknown answer fails and never leaves somebody over the cap.
  * 3. All your stores (app/studio/totals/page.tsx, lib/account-totals.ts): a store whose members could not be read
- *    is named, and the member figures say they are short (or not known), never a partial sum or $0.00 as the whole.
+ *    is named, and the member figures say they are short (or not known), never a partial sum or $0 as the whole.
  *
  * Healthy controls first in each part.
  */
@@ -193,9 +193,9 @@ async function totalsPart(): Promise<void> {
 
   part("3. All your stores: healthy control");
   const healthy = sumStores([figures("Bread", { state: "ok", data, members: bread }), figures("Pasta", { state: "ok", data, members: pasta })]);
-  is("43 paying, 3 on trial, $387.00 a month, no note", memberLines(healthy), { paying: "43", trialing: "3", mrr: "$387.00", note: null });
+  is("43 paying, 3 on trial, $387 a month, no note", memberLines(healthy), { paying: "43", trialing: "3", mrr: "$387", note: null });
   const none = sumStores([figures("Bread", { state: "ok", data, members: null })]);
-  is("a store with no memberships counts as none, with no note", [memberLines(none), none.members.unread], [{ paying: "0", trialing: "0", mrr: "$0.00", note: null }, []]);
+  is("a store with no memberships counts as none, with no note", [memberLines(none), none.members.unread], [{ paying: "0", trialing: "0", mrr: "$0", note: null }, []]);
 
   part("3. A store's members read fails (Stripe cannot be reached)");
   redis.clear();
@@ -216,14 +216,14 @@ async function totalsPart(): Promise<void> {
   is("the figures say they are at least, and the note names Pasta", memberLines(one), {
     paying: "At least 3",
     trialing: "At least 1",
-    mrr: "At least $27.00",
+    mrr: "At least $27",
     note: "Members could not be read just now for Pasta, so the member numbers below leave it out and may be lower than they are.",
   });
   is("its visits and sales are still added", one.counted, 2);
 
   part("3. Every store's members unread");
   const both = sumStores([figures("Bread", { state: "ok", data, members: "unread" }), figures("Pasta", { state: "ok", data, members: "unread" })]);
-  is("never 0 or $0.00: not known, and the note names both", memberLines(both), {
+  is("never 0 or $0: not known, and the note names both", memberLines(both), {
     paying: "Not known",
     trialing: "Not known",
     mrr: "Not known",

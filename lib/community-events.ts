@@ -653,19 +653,33 @@ export type RsvpResult = "added" | "already" | "full" | "closed";
  */
 export async function rsvp(id: string, event: CommunityEvent, member: string, room: DataStore, now = Date.now()): Promise<RsvpResult> {
   if (event.cancelled || isOver(event, now)) return "closed";
-  const [already] = await redisPipeline([["HEXISTS", rsvpKey(id, event.id), member]]);
-  if (Number(already) === 1) return "already";
+  // Each answer read exactly (sweep app5, finding 2; CX-123 rules 24 and 30): an unknown one fails (the page says the
+  // RSVP did not go through), never "already going", and never leaves somebody over the cap.
+  const already = repliesFor(await redisPipeline([["HEXISTS", rsvpKey(id, event.id), member]]), 1)?.[0];
+  if (already !== 0 && already !== 1) throw new UnknownReplyError("whether a member has a place");
+  if (already === 1) return "already";
   // A place takes room first (DataRoomError when it does not fit), and gives it back when it is not kept.
   await needData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
-  const [added, length] = await redisPipeline([
-    ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
-    ["HLEN", rsvpKey(id, event.id)],
-  ]);
-  if (Number(added) !== 1) {
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
+      ["HLEN", rsvpKey(id, event.id)],
+    ]),
+    2,
+  );
+  const added = replies?.[0];
+  const length = countOf(replies?.[1]);
+  if (added === 0) {
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "already";
   }
-  if (event.cap > 0 && Number(length) > event.cap) {
+  if (added !== 1 || length === null) {
+    // Whether the place was written, or how many now hold one, is unknown: it is given back, never kept over the cap.
+    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
+    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    throw new UnknownReplyError("a place taken at an event");
+  }
+  if (event.cap > 0 && length > event.cap) {
     await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "full";
@@ -680,13 +694,29 @@ export async function cancelRsvp(id: string, event: CommunityEvent, member: stri
   return Number(removed) === 1;
 }
 
-/** How many are coming to each event, and whether this member is. */
-export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, { going: number; mine: boolean }>> {
-  const out = new Map<string, { going: number; mine: boolean }>();
+/**
+ * How many are coming to an event, and whether this member is; null where it could not be read.
+ * Each is read exactly and on its own (sweep app5, finding 2; CX-123 rules 24 and 30): a count in another shape is
+ * unknown, never "nobody is coming" with places left, and the member's own place is read apart from the count, so an
+ * unknown count never hides a place they hold nor withholds the way in, and an unknown place is never "not going".
+ */
+export type RsvpNumbers = { going: number | null; mine: boolean | null };
+
+/** How many are coming to each event, and whether this member is, each null when unknown; an unreachable Redis is all unknown. */
+export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, RsvpNumbers>> {
+  const out = new Map<string, RsvpNumbers>();
   if (!events.length) return out;
-  const rows = await redisPipeline(events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]]));
+  const commands = events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]]);
+  const rows = repliesFor(
+    await redisPipeline(commands).catch((error: unknown) => {
+      console.error("reading an event's places failed", error);
+      return null;
+    }),
+    commands.length,
+  );
   events.forEach((e, i) => {
-    out.set(e.id, { going: Number(rows[i * 2]) || 0, mine: Number(rows[i * 2 + 1]) === 1 });
+    const there = rows?.[i * 2 + 1];
+    out.set(e.id, { going: countOf(rows?.[i * 2]), mine: there === 1 ? true : there === 0 ? false : null });
   });
   return out;
 }

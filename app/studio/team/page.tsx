@@ -48,18 +48,21 @@ export default async function StudioTeamPage({
   // their own session stands, who on the team has no second step yet, and
   // which API keys would pause, for the review before it is saved.
   const owner = view.role === "owner";
+  // A second step that cannot be read is unknown (rule 24), never "none" or "another session": the switch then waits.
   const [ownerStep, ready, preview] = owner
     ? await Promise.all([
-        (async (): Promise<OwnerStep> =>
-          (await liveSecondStep(view.email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) !== null
-            ? "live"
-            : (await hasSecondStep(view.email).catch(() => true))
-              ? "other_session"
-              : "none")(),
-        Promise.all(team.members.map((m) => hasSecondStep(m.email).catch(() => false))),
+        (async (): Promise<OwnerStep | null> => {
+          const live = await liveSecondStep(view.email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => undefined);
+          if (live === undefined) return null;
+          if (live !== null) return "live";
+          const kept = await hasSecondStep(view.email).catch(() => null);
+          return kept === null ? null : kept ? "other_session" : "none";
+        })(),
+        Promise.all(team.members.map((m) => hasSecondStep(m.email).catch(() => null))),
         pausePreview(store).catch(() => null),
       ])
     : (["other_session", [], null] as const);
+  const stepsKnown = ownerStep !== null && ready.every((step) => step !== null);
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -93,7 +96,7 @@ export default async function StudioTeamPage({
                 Two-step login for the team
               </h2>
               <div className="mt-3">
-                {preview ? (
+                {preview && stepsKnown ? (
                   <TeamTwoStepSwitch
                     on={team.requireTwoStep === true}
                     ownerStep={ownerStep}

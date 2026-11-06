@@ -12,6 +12,13 @@ import { Icon } from "@/components/icons";
  *
  * `toast()` works from any client component without a provider: it fires a
  * window event that the one Toaster, mounted in the root layout, listens for.
+ *
+ * It never covers the control that has focus (WCAG 2.4.11 and 2.4.12): before
+ * it is painted, and again whenever focus moves, the person types, the page
+ * scrolls or the window is resized, it takes the first corner that leaves the
+ * focused control and its focus ring fully visible. If no corner is clear
+ * (a full-window editor has focus, say), the box is hidden; the live region
+ * still announces the message.
  */
 
 const EVENT = "nimbus:toast";
@@ -55,10 +62,63 @@ const reducedMotion = () =>
 
 type Current = { id: number; message: string };
 
+/** The corners the toast may sit in, in the order they are tried. */
+export const TOAST_PLACES = ["bottom-end", "top-end", "bottom-start", "top-start"] as const;
+export type ToastPlace = (typeof TOAST_PLACES)[number] | "hidden";
+type Box = { left: number; top: number; right: number; bottom: number };
+
+/** Room around the focused control for its focus ring (outline plus offset), in px. */
+export const FOCUS_ROOM = 8;
+
+/** True when the toast's box would cover any part of the focused control or its ring. */
+export function coversFocus(toast: Box, focus: Box, room = FOCUS_ROOM): boolean {
+  return (
+    toast.left < focus.right + room &&
+    toast.right > focus.left - room &&
+    toast.top < focus.bottom + room &&
+    toast.bottom > focus.top - room
+  );
+}
+
+/**
+ * Where the toast goes so it covers nothing that has focus: the preferred place
+ * when it is clear (so the box does not jump about), else the first clear corner,
+ * else "hidden". `rectAt` gives the toast's box at a place.
+ */
+export function chooseToastPlace(focus: Box | null, rectAt: (place: ToastPlace) => Box, preferred: ToastPlace): ToastPlace {
+  const start: ToastPlace = preferred === "hidden" ? TOAST_PLACES[0] : preferred;
+  if (!focus || focus.right <= focus.left || focus.bottom <= focus.top) return start;
+  const order = [start, ...TOAST_PLACES.filter((place) => place !== start)];
+  return order.find((place) => !coversFocus(rectAt(place), focus)) ?? "hidden";
+}
+
+/**
+ * Moves the toast region (its `data-place`, read by app/globals.css) off the
+ * focused element, measuring the region's real box at each place. Focus inside
+ * the toast leaves it where it is.
+ */
+export function keepToastClear(region: HTMLElement, active: Element | null, preferred?: ToastPlace): ToastPlace {
+  const now = (region.dataset.place as ToastPlace | undefined) ?? TOAST_PLACES[0];
+  if (active && region.contains(active)) return now;
+  const page = active?.ownerDocument;
+  const focus = active && active !== page?.body && active !== page?.documentElement ? active.getBoundingClientRect() : null;
+  const place = chooseToastPlace(
+    focus,
+    (candidate) => {
+      region.dataset.place = candidate;
+      return region.getBoundingClientRect();
+    },
+    preferred ?? now,
+  );
+  region.dataset.place = place;
+  return place;
+}
+
 /** Mounted once, in the root layout. */
 export function Toaster() {
   const [current, setCurrent] = useState<Current | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  const region = useRef<HTMLDivElement>(null);
   const next = useRef(0);
   const timer = useRef<number | undefined>(undefined);
   const remaining = useRef(SHOWN_FOR);
@@ -139,6 +199,8 @@ export function Toaster() {
     hovered.current = false;
     focused.current = false;
     remaining.current = SHOWN_FOR;
+    // Placed before it is painted, so it never covers the focused control even for a frame.
+    if (region.current) keepToastClear(region.current, document.activeElement, "bottom-end");
     box.current?.animate(
       reducedMotion()
         ? [{ opacity: 0 }, { opacity: 1 }]
@@ -152,8 +214,35 @@ export function Toaster() {
     return stopTimer;
   }, [current, startTimer, stopTimer]);
 
+  // While a toast shows, it moves out of the way whenever the focused control
+  // could end up under it: focus moving (also from script), typing that grows a
+  // field, scrolling (any scroller) and resizing.
+  useEffect(() => {
+    if (!current) return;
+    let frame = 0;
+    const now = () => {
+      window.cancelAnimationFrame(frame);
+      frame = 0;
+      if (region.current) keepToastClear(region.current, document.activeElement);
+    };
+    const soon = () => {
+      if (!frame) frame = window.requestAnimationFrame(now);
+    };
+    document.addEventListener("focusin", now);
+    document.addEventListener("input", now, true);
+    window.addEventListener("scroll", soon, { capture: true, passive: true });
+    window.addEventListener("resize", soon);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("focusin", now);
+      document.removeEventListener("input", now, true);
+      window.removeEventListener("scroll", soon, { capture: true });
+      window.removeEventListener("resize", soon);
+    };
+  }, [current]);
+
   return (
-    <div className="nb-toast-region">
+    <div ref={region} className="nb-toast-region">
       {/* Always in the page, empty when idle, so each message is announced. */}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {current ? <span key={current.id}>{current.message}</span> : null}

@@ -1,0 +1,1374 @@
+=== focal ===
+
+quiet-sales.ts: the day's check and the email are ours only on an exact claim
+  ok    the day's check answered queued, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered no reply, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered undefined, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered an extra reply, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered a count, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the email's mark answered queued, not written: no email
+  ok    the email's mark answered no reply, not written: no email
+  ok    the email's mark answered undefined, not written: no email
+  ok    the email's mark answered an extra reply, not written: no email
+  ok    the email's mark answered a count, not written: no email
+  ok    the day's check answered in another shape but written: read back as ours, the email goes once
+  ok    one email
+  ok    and the same day again is seen
+  ok    the email's mark answered in another shape but written: ours, sent
+  ok    one email
+
+store-alerts.ts: the day's look and each alert are ours only on an exact claim
+  ok    the day's look answered queued, not written: nothing read, nothing said
+  ok    the day's look answered no reply, not written: nothing read, nothing said
+  ok    the day's look answered undefined, not written: nothing read, nothing said
+  ok    the day's look answered an extra reply, not written: nothing read, nothing said
+  ok    the day's look answered a count, not written: nothing read, nothing said
+  ok    an alert's mark answered queued, not written: not said
+  ok    an alert's mark answered no reply, not written: not said
+  ok    an alert's mark answered undefined, not written: not said
+  ok    an alert's mark answered an extra reply, not written: not said
+  ok    an alert's mark answered a count, not written: not said
+  ok    an alert's mark answered in another shape but written: ours, said once by email and in the chat
+
+sale-events.ts: a one-click offer's sale is posted to the chat only on an exact claim
+  ok    the sale's mark answered queued, not written: nothing posted
+  ok    the sale's mark answered no reply, not written: nothing posted
+  ok    the sale's mark answered undefined, not written: nothing posted
+  ok    the sale's mark answered an extra reply, not written: nothing posted
+  ok    the sale's mark answered a count, not written: nothing posted
+  ok    answered in another shape but written: ours, posted once
+  ok    and never twice
+
+checkout-trouble.ts: the day's email is ours only on an exact claim, and let go only while it is ours
+  ok    the email's mark answered queued, not written: counted, no email
+  ok    the email's mark answered no reply, not written: counted, no email
+  ok    the email's mark answered undefined, not written: counted, no email
+  ok    the email's mark answered an extra reply, not written: counted, no email
+  ok    the email's mark answered a count, not written: counted, no email
+  ok    a failed send lets go of its own mark only: the other run's mark stays
+  ok    and a failed send with its own mark still held lets it go, so the next refusal can tell
+
+cron/courses: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/reminders: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/discord: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/quiet: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    our own lock is let go when the run ends
+
+G independent: a failed release EVAL cannot fall back to deleting a legitimate successor
+  ok    G courses: actual release EVAL failed once
+  FAIL  G courses: read real token then successor legitimately won NX after actual TTL
+        expected ["string",true,"OK","g-successor-courses"]
+        got      ["object",true,null,null]
+  FAIL  G courses: the successor lock survives old run's release
+        expected "g-successor-courses"
+        got      "1793977171955.457938783"
+  ok    G reminders: actual release EVAL failed once
+  FAIL  G reminders: read real token then successor legitimately won NX after actual TTL
+        expected ["string",true,"OK","g-successor-reminders"]
+        got      ["object",true,null,null]
+  FAIL  G reminders: the successor lock survives old run's release
+        expected "g-successor-reminders"
+        got      "1793977171956.777064682"
+  ok    G discord: actual release EVAL failed once
+  FAIL  G discord: read real token then successor legitimately won NX after actual TTL
+        expected ["string",true,"OK","g-successor-discord"]
+        got      ["object",true,null,null]
+  FAIL  G discord: the successor lock survives old run's release
+        expected "g-successor-discord"
+        got      "1793977171957.118457290"
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    G quiet: actual release EVAL failed once
+  FAIL  G quiet: read real token then successor legitimately won NX after actual TTL
+        expected ["string",true,"OK","g-successor-quiet"]
+        got      ["object",true,null,null]
+  FAIL  G quiet: the successor lock survives old run's release
+        expected "g-successor-quiet"
+        got      "1793977171966.223357785"
+
+93 checks, 8 failing.
+  ok    G courses: release EVAL was attempted once
+  FAIL  G courses: real original claim then legitimate successor NX
+        expected ["g-owner-courses","OK","g-successor-courses"]
+        got      [null,null,null]
+  FAIL  G courses: old release preserves new owner
+        expected "g-successor-courses"
+        got      "g-owner-courses"
+  ok    G reminders: release EVAL was attempted once
+  FAIL  G reminders: real original claim then legitimate successor NX
+        expected ["g-owner-reminders","OK","g-successor-reminders"]
+        got      [null,null,null]
+  FAIL  G reminders: old release preserves new owner
+        expected "g-successor-reminders"
+        got      "g-owner-reminders"
+  ok    G discord: release EVAL was attempted once
+  FAIL  G discord: real original claim then legitimate successor NX
+        expected ["g-owner-discord","OK","g-successor-discord"]
+        got      [null,null,null]
+  FAIL  G discord: old release preserves new owner
+        expected "g-successor-discord"
+        got      "g-owner-discord"
+  ok    G quiet: release EVAL was attempted once
+  FAIL  G quiet: real original claim then legitimate successor NX
+        expected ["g-owner-quiet","OK","g-successor-quiet"]
+        got      [null,null,null]
+  FAIL  G quiet: old release preserves new owner
+        expected "g-successor-quiet"
+        got      "g-owner-quiet"
+  ok    G existing strict release reports unknown on EVAL failure
+  ok    G existing strict release performs no GET/DEL fallback
+  ok    G existing strict release leaves the actual held key intact
+
+15 checks, 8 failing.
+
+quiet-sales.ts: the day's check and the email are ours only on an exact claim
+  ok    the day's check answered queued, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered no reply, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered undefined, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered an extra reply, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered a count, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the email's mark answered queued, not written: no email
+  ok    the email's mark answered no reply, not written: no email
+  ok    the email's mark answered undefined, not written: no email
+  ok    the email's mark answered an extra reply, not written: no email
+  ok    the email's mark answered a count, not written: no email
+  ok    the day's check answered in another shape but written: read back as ours, the email goes once
+  ok    one email
+  ok    and the same day again is seen
+  ok    the email's mark answered in another shape but written: ours, sent
+  ok    one email
+
+store-alerts.ts: the day's look and each alert are ours only on an exact claim
+  ok    the day's look answered queued, not written: nothing read, nothing said
+  ok    the day's look answered no reply, not written: nothing read, nothing said
+  ok    the day's look answered undefined, not written: nothing read, nothing said
+  ok    the day's look answered an extra reply, not written: nothing read, nothing said
+  ok    the day's look answered a count, not written: nothing read, nothing said
+  ok    an alert's mark answered queued, not written: not said
+  ok    an alert's mark answered no reply, not written: not said
+  ok    an alert's mark answered undefined, not written: not said
+  ok    an alert's mark answered an extra reply, not written: not said
+  ok    an alert's mark answered a count, not written: not said
+  ok    an alert's mark answered in another shape but written: ours, said once by email and in the chat
+
+sale-events.ts: a one-click offer's sale is posted to the chat only on an exact claim
+  ok    the sale's mark answered queued, not written: nothing posted
+  ok    the sale's mark answered no reply, not written: nothing posted
+  ok    the sale's mark answered undefined, not written: nothing posted
+  ok    the sale's mark answered an extra reply, not written: nothing posted
+  ok    the sale's mark answered a count, not written: nothing posted
+  ok    answered in another shape but written: ours, posted once
+  ok    and never twice
+
+checkout-trouble.ts: the day's email is ours only on an exact claim, and let go only while it is ours
+  ok    the email's mark answered queued, not written: counted, no email
+  ok    the email's mark answered no reply, not written: counted, no email
+  ok    the email's mark answered undefined, not written: counted, no email
+  ok    the email's mark answered an extra reply, not written: counted, no email
+  ok    the email's mark answered a count, not written: counted, no email
+  ok    a failed send lets go of its own mark only: the other run's mark stays
+  ok    and a failed send with its own mark still held lets it go, so the next refusal can tell
+
+cron/courses: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/reminders: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/discord: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/quiet: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    our own lock is let go when the run ends
+
+G independent: a failed release EVAL cannot fall back to deleting a legitimate successor
+  ok    G courses: actual release EVAL failed once
+  ok    G courses: read real token then successor legitimately won NX after actual TTL
+  ok    G courses: the successor lock survives old run's release
+  ok    G reminders: actual release EVAL failed once
+  ok    G reminders: read real token then successor legitimately won NX after actual TTL
+  ok    G reminders: the successor lock survives old run's release
+  ok    G discord: actual release EVAL failed once
+  ok    G discord: read real token then successor legitimately won NX after actual TTL
+  ok    G discord: the successor lock survives old run's release
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    G quiet: actual release EVAL failed once
+  ok    G quiet: read real token then successor legitimately won NX after actual TTL
+  ok    G quiet: the successor lock survives old run's release
+
+93 checks, all passing.
+
+quiet-sales.ts: the day's check and the email are ours only on an exact claim
+  ok    the day's check answered queued, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered no reply, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered undefined, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered an extra reply, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered a count, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the email's mark answered queued, not written: no email
+  ok    the email's mark answered no reply, not written: no email
+  ok    the email's mark answered undefined, not written: no email
+  ok    the email's mark answered an extra reply, not written: no email
+  ok    the email's mark answered a count, not written: no email
+  ok    the day's check answered in another shape but written: read back as ours, the email goes once
+  ok    one email
+  ok    and the same day again is seen
+  ok    the email's mark answered in another shape but written: ours, sent
+  ok    one email
+
+store-alerts.ts: the day's look and each alert are ours only on an exact claim
+  ok    the day's look answered queued, not written: nothing read, nothing said
+  ok    the day's look answered no reply, not written: nothing read, nothing said
+  ok    the day's look answered undefined, not written: nothing read, nothing said
+  ok    the day's look answered an extra reply, not written: nothing read, nothing said
+  ok    the day's look answered a count, not written: nothing read, nothing said
+  ok    an alert's mark answered queued, not written: not said
+  ok    an alert's mark answered no reply, not written: not said
+  ok    an alert's mark answered undefined, not written: not said
+  ok    an alert's mark answered an extra reply, not written: not said
+  ok    an alert's mark answered a count, not written: not said
+  ok    an alert's mark answered in another shape but written: ours, said once by email and in the chat
+
+sale-events.ts: a one-click offer's sale is posted to the chat only on an exact claim
+  ok    the sale's mark answered queued, not written: nothing posted
+  ok    the sale's mark answered no reply, not written: nothing posted
+  ok    the sale's mark answered undefined, not written: nothing posted
+  ok    the sale's mark answered an extra reply, not written: nothing posted
+  ok    the sale's mark answered a count, not written: nothing posted
+  ok    answered in another shape but written: ours, posted once
+  ok    and never twice
+
+checkout-trouble.ts: the day's email is ours only on an exact claim, and let go only while it is ours
+  ok    the email's mark answered queued, not written: counted, no email
+  ok    the email's mark answered no reply, not written: counted, no email
+  ok    the email's mark answered undefined, not written: counted, no email
+  ok    the email's mark answered an extra reply, not written: counted, no email
+  ok    the email's mark answered a count, not written: counted, no email
+  ok    a failed send lets go of its own mark only: the other run's mark stays
+  ok    and a failed send with its own mark still held lets it go, so the next refusal can tell
+
+cron/courses: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/reminders: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/discord: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/quiet: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    our own lock is let go when the run ends
+
+81 checks, all passing.
+
+Codex G's proof: a script receipt not in its exact shape confirms nothing
+  ok    extra: three script boundaries reached
+  ok    extra: a hold on the successor's lock is not confirmed
+  ok    extra: an unwritten record is not confirmed
+  ok    extra: an unapplied deletion is not confirmed
+  ok    extra: no getter called
+  ok    extra: the successor's lock and the record are unchanged
+  ok    accessor: three script boundaries reached
+  ok    accessor: a hold on the successor's lock is not confirmed
+  ok    accessor: an unwritten record is not confirmed
+  ok    accessor: an unapplied deletion is not confirmed
+  ok    accessor: no getter called
+  ok    accessor: the successor's lock and the record are unchanged
+  ok    inherited: three script boundaries reached
+  ok    inherited: a hold on the successor's lock is not confirmed
+  ok    inherited: an unwritten record is not confirmed
+  ok    inherited: an unapplied deletion is not confirmed
+  ok    inherited: no getter called
+  ok    inherited: the successor's lock and the record are unchanged
+  ok    hole: three script boundaries reached
+  ok    hole: a hold on the successor's lock is not confirmed
+  ok    hole: an unwritten record is not confirmed
+  ok    hole: an unapplied deletion is not confirmed
+  ok    hole: no getter called
+  ok    hole: the successor's lock and the record are unchanged
+
+The acquisition receipt too: only its exact shape takes a lock
+  ok    extra: not taken, said busy
+  ok    extra: no getter called
+  ok    accessor: not taken, said busy
+  ok    accessor: no getter called
+  ok    inherited: not taken, said busy
+  ok    inherited: no getter called
+  ok    hole: not taken, said busy
+  ok    hole: no getter called
+
+Codex G's return (a586f20d): a getter slot stays unknown even when Object.prototype carries a value
+  ok    the reply is unknown
+  ok    no hold, write or delete confirmed
+  ok    no getter called
+  ok    the successor's lock and the record are unchanged
+
+The exact shapes still work
+  ok    a hold on our own lock
+  ok    a fenced write while ours
+  ok    a fenced delete while ours
+
+39 checks, all passing.
+
+Codex G's proof: a release whose script fails never deletes the successor's mark
+  ok    courses: the release's script was tried once
+  ok    courses: no read-then-delete after it
+  ok    courses: the successor's mark is kept
+  ok    reminders: the release's script was tried once
+  ok    reminders: no read-then-delete after it
+  ok    reminders: the successor's mark is kept
+  ok    discord: the release's script was tried once
+  ok    discord: no read-then-delete after it
+  ok    discord: the successor's mark is kept
+  ok    quiet: the release's script was tried once
+  ok    quiet: no read-then-delete after it
+  ok    quiet: the successor's mark is kept
+
+Codex G's exact race: the old fallback read our mark, then the successor took it, then the DEL landed on it
+  ok    courses: after the failed script, no DEL is sent
+  ok    courses: the successor's mark, taken once ours ran out, survives
+  ok    reminders: after the failed script, no DEL is sent
+  ok    reminders: the successor's mark, taken once ours ran out, survives
+  ok    discord: after the failed script, no DEL is sent
+  ok    discord: the successor's mark, taken once ours ran out, survives
+  ok    quiet: after the failed script, no DEL is sent
+  ok    quiet: the successor's mark, taken once ours ran out, survives
+
+A hold whose script fails says the lock is not held, and extends nothing
+  ok    not held, so the caller does not write
+  ok    and no separate GET or EXPIRE was sent
+
+A fenced write whose script fails writes nothing
+  ok    not written
+  ok    and no separate GET, EXISTS or SET was sent
+
+On a healthy Redis each is one script, and does what it says
+  ok    a hold on our own lock: held
+  ok    a fenced write while ours: written
+  ok    a fenced write of something new, already there: not written
+  ok    our release deletes our lock
+  ok    a release never deletes another holder's lock
+  ok    a hold on another's lock: not held
+  ok    a fenced write under another's lock: not written
+
+31 checks, all passing.
+
+=== extra-adversarial ===
+DESCRIPTOR_PROTOTYPE {"parsed":null,"renewed":false,"written":false,"deleted":false,"calls":0,"owner":"next","record":"before"}
+  ok    accessor descriptor cannot inherit data value from Object.prototype
+  ok    unknown polluted receipt does not confirm renew
+  ok    unknown polluted receipt does not confirm write
+  ok    unknown polluted receipt does not confirm delete
+  ok    getter stays uncalled
+  ok    actual successor and record survive
+
+6 checks, all passing.
+G_LOCK_ENVELOPE {"mode":"extra","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    extra: exactly three actual script boundaries reached
+  ok    extra: unknown receipt cannot confirm lease held by successor
+  ok    extra: unknown receipt cannot confirm unwritten record
+  ok    extra: unknown receipt cannot confirm unapplied deletion
+  ok    extra: no getter invoked
+  ok    extra: actual successor and record unchanged
+G_LOCK_ENVELOPE {"mode":"accessor","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    accessor: exactly three actual script boundaries reached
+  ok    accessor: unknown receipt cannot confirm lease held by successor
+  ok    accessor: unknown receipt cannot confirm unwritten record
+  ok    accessor: unknown receipt cannot confirm unapplied deletion
+  ok    accessor: no getter invoked
+  ok    accessor: actual successor and record unchanged
+G_LOCK_ENVELOPE {"mode":"inherited","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    inherited: exactly three actual script boundaries reached
+  ok    inherited: unknown receipt cannot confirm lease held by successor
+  ok    inherited: unknown receipt cannot confirm unwritten record
+  ok    inherited: unknown receipt cannot confirm unapplied deletion
+  ok    inherited: no getter invoked
+  ok    inherited: actual successor and record unchanged
+
+18 checks, all passing.
+
+=== related-valid ===
+
+Taken and let go by the same run
+  ok    taken
+  ok    taken again by another: not ours
+  ok    let go by its own run
+
+A mark that ran out and was taken by another run is not ours to let go
+  ok    the second run takes it
+  ok    the first run failing later leaves the second run's mark alone
+
+5 checks, all passing.
+
+The first email: only an exact reading or claim sends it
+  ok    marks answered with an extra reply: nothing sent
+  ok    a first mark with no answer: nothing sent
+  ok    a claim answered oddly that did not land: nothing sent this run
+  ok    a claim answered oddly that did land with our own value: read back, and the first email goes with the card kept
+  ok    and not twice
+
+A reminder: a count read as text or missing never picks the email
+  ok    a reminder count answered as text: nothing sent
+  ok    a reply missing: nothing sent
+  ok    on a whole reading, the reminder due goes once
+
+No more than a hundred written about per store per run, however many are behind (Claude 3 on #2714)
+  ok    150 behind: a hundred looked after this run
+  ok    the other fifty on the next
+
+10 checks, all passing.
+
+Was the confirmation already sent? Only an exact 0 says no
+  ok    a mark read in an unknown shape (no answer) sends nothing this run, and the run counts it as failed
+  ok    nor one answered as text, counted as failed
+  ok    nor an answer with more replies than were asked, counted as failed
+  ok    an exact answer on the next run sends it, once
+  ok    and never again
+
+A page of checkouts that is not a list is not "no checkouts"
+  ok    it is said to have failed, so the run is not taken as a clean read
+
+6 checks, all passing.
+
+Has the member come back? Only a whole list says no
+  ok    a list read in part, or no list, never counts as "has not come back": nobody is written to
+  ok    the claim taken on an unknown reading was let go: the next whole reading writes to Bob, once
+
+A partial membership row never proves that the member has not come back (Codex N on #2714)
+  ok    an active row with missing metadata is unknown, never 'has not come back'
+  ok    read whole the next time (live, but to another product): Fox is written to, once
+
+Is the mark ours? Only an exact OK says yes
+  ok    a claim answered in an unknown shape that did not land is not taken for ours: Cat is not written to
+  ok    the next run claims it whole and writes to Cat, once
+  ok    a claim answered oddly that did land with our own value is read back as ours: Fay is written to
+  ok    and never twice
+  ok    the once-a-while mark answered oddly but ours: Gus is written to, not held back for months
+
+Every ended membership of the window, past the first page
+  ok    Dan and Eve are both read, though the window's events come one a page
+  ok    and nobody is written to twice
+
+No more than a hundred offers looked at per store per run, however many ended (Claude 3 on #2714)
+  ok    150 ended: a hundred looked at this run
+  ok    the other fifty on the next
+
+13 checks, all passing.
+
+Three daily runs over two days of ended memberships, listed newest first by Stripe
+  ok    all 100 of day 2 looked at
+  ok    all 150 of day 1 looked at before they leave the window
+  ok    no run looked at more than its 100, and nobody twice
+
+3 checks, all passing.
+MEASURE readTrouble: 1 command, 271 bytes
+PASS readTrouble: eight fields, one command and a bounded transfer after 4000 days
+MEASURE readTroubleStrict: 1 command, 271 bytes
+PASS readTroubleStrict: eight fields, one command and a bounded transfer after 4000 days
+PASS strict reader refuses partial envelope []
+PASS strict reader refuses partial envelope [null]
+PASS strict reader refuses partial envelope [[]]
+PASS strict reader refuses partial envelope [[null]]
+PASS strict reader refuses partial envelope [[null,null,null,null,null,null,null,null,null]]
+PASS strict reader refuses partial envelope [[null,null,null,null,null,null,null,null],[]]
+PASS confirmed missing fields are a known quiet week
+PASS unknown counter undefined is not zero
+PASS unknown counter false is not zero
+PASS unknown counter 0 is not zero
+PASS unknown counter -1 is not zero
+PASS unknown counter -1 is not zero
+PASS unknown counter 1.5 is not zero
+PASS unknown counter  is not zero
+PASS unknown counter 01 is not zero
+PASS unknown counter NaN is not zero
+PASS unknown counter 9007199254740992 is not zero
+PASS unknown last reason undefined is unavailable
+PASS unknown last reason false is unavailable
+PASS unknown last reason 0 is unavailable
+PASS unknown last reason invalid is unavailable
+PASS unknown last reason null is unavailable
+PASS unknown last reason [] is unavailable
+PASS unknown last reason {} is unavailable
+PASS unknown last reason {"at":1607860800000,"code":"x"} is unavailable
+PASS unknown last reason {"at":1607860800000,"code":"x","message":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"} is unavailable
+PASS a known sum that would overflow is unavailable
+MEASURE largest writer fields: 1345 bytes
+PASS largest writer fields and wide UTF-8 fit the registered transfer ceiling
+MEASURE JSON escapes: 2770 bytes
+PASS writer-permitted JSON escapes fit the registered transfer ceiling
+31 checks passed
+
+A reader that fails or is slow
+  ok    failed: the fallback
+  ok    slower than its ceiling: the fallback, on time
+  ok    answered: the answer
+  ok    each reader is waited for at most 8 seconds
+
+A healthy store
+  ok    payments, domain, email, checkout and limits fine; disputes not checked
+  ok    the line at the top does not say all is well
+  ok    only reads were asked of Stripe and Vercel
+
+Stripe
+  ok    Stripe failing: not checked, never fine
+  ok    Stripe not answering: not checked, and the page does not wait for it
+  ok    card payments off: a problem
+  ok    not connected: a problem, with nothing asked of Stripe
+
+The domain
+  ok    no longer on the project: a problem, with the way to connect it again
+  ok    a 404 while the project's own name is wrong: not checked, never "gone"
+  ok    an answer without its verdict: not checked, not called wrong
+  ok    off Pro: the domain rests, said without asking Vercel
+  ok    Vercel failing: not checked
+  ok    the records not read: not checked, not called wrong
+  ok    records wrong: a problem
+  ok    no domain of its own: left out
+
+Email and checkout
+  ok    the list paused: a problem
+  ok    checkout refused twice this week: a problem
+  ok    no stats id: refusals were never counted, so not checked
+  ok    Redis failing: email, checkout and limits not checked, never fine
+
+What the plan decides
+  ok    off Pro there is no list email: left out
+  ok    a renewal unpaid: email stopped, a problem leading to billing
+  ok    a plan payment disputed: email stopped, a problem
+  ok    with no Stripe account, checkout is left out: the payments line says no checkout can open
+
+A fix the role cannot open
+  ok    an admin, who has no payments card: asked to tell the owner, no dead link
+  ok    and the billing card likewise, when the role lacks it
+  ok    the owner keeps the link
+
+The plan's limits (unit 3)
+  ok    a figure used up: a problem, in its own words, with when it opens again and a larger plan
+  ok    not used up: fine, with the most used one
+  ok    a count that is not a number: not checked, never nothing used
+  ok    strict reading: unreadable is null, never 0
+  ok    billing not set up here: the plan card is not drawn, so the way is said, not linked
+  ok    no plan on sale: the way to a plan is said, not linked, and the studio's rest names only what works
+  ok    a role without billing: asked to tell the owner
+  ok    a trial's own window: what was taken is what is read
+  ok    a trial with room: fine
+
+Nothing is written
+  ok    the same keys after a checkup
+  ok    lib/checkup.ts sends no write
+
+The page
+  ok    read with the settings permission, the role's own permissions passed on
+  ok    where you are is shown
+  ok    the page changes nothing
+  ok    each part a section named by its heading, in a list
+  ok    each state said in words, beside an icon of its own
+  ok    a fix in the studio is a link for this store
+  ok    a fix outside the person's reach says where, with no link to it
+  ok    when it was read is said
+  ok    the summary first, never all well while something was not checked
+  ok    one press from the studio's home, for whoever may open it
+  ok    the domain card has the anchor its fix points to
+
+52 checks, all passing.
+
+Goal aggregation requires complete purchases and renewals
+  ok    all channels included in a day's money
+  ok    calendar goal uses known current-month money
+  ok    refund coverage does not block gross goal progress
+  ok    complete zero remains an empty known ledger
+  ok    partial purchases is unknown rather than zero
+  ok    partial purchases cannot trigger a goal alert
+  ok    partial purchases cannot claim best paid day/week
+  ok    partial renewals is unknown rather than zero
+  ok    partial renewals cannot trigger a goal alert
+  ok    partial renewals cannot claim best paid day/week
+  ok    failed renewal reading is unknown rather than zero
+  ok    failed renewal reading cannot trigger a goal alert
+  ok    failed renewal reading cannot claim best paid day/week
+  ok    missing ledger is unknown rather than zero
+  ok    missing ledger cannot trigger a goal alert
+  ok    missing ledger cannot claim best paid day/week
+  ok    legacy incomplete is unknown rather than zero
+  ok    legacy incomplete cannot trigger a goal alert
+  ok    legacy incomplete cannot claim best paid day/week
+  ok    failed provider is unknown rather than zero
+  ok    failed provider cannot trigger a goal alert
+  ok    failed provider cannot claim best paid day/week
+  ok    legacy combined confirmation remains usable
+
+Rendered goal retains the target and controls without false progress
+  ok    unavailable reading explained accessibly
+  ok    saved target retained independently
+  ok    change remains available
+  ok    no fake bar, percentage, pace or achievement
+  ok    new goal can still be set
+  ok    complete zero has real 0 percent progress
+  ok    complete zero differs from unavailable
+  ok    complete payments show measured progress
+  ok    complete payments show pace
+  ok    complete attainment remains visible
+
+Alerts and record highlights retain their independent evidence
+  ok    known gross payments can trigger reached alert
+  ok    known zero can trigger a real pace alert
+  ok    unknown goal income preserves traffic alert
+  ok    complete payment record remains useful
+  ok    missing refunds don't suppress complete gross records
+  ok    traffic insight survives missing payment coverage
+  ok    no buyer identities in goal outputs
+
+40 checks, all passing.
+
+A page's token
+  ok    opens its own store's numbers for its own page
+  ok    and no other page
+  ok    not the store page either
+  ok    nor another store's numbers with the same signature
+  ok    nothing opens nothing
+
+The store page, item by item
+  ok    a field is what a page sends, and nothing else
+  ok    each measured visit once
+  ok    in the order of the page, each with how many reached it and clicked it
+
+Measured through the route, one command each
+  ok    a sales page's furthest block, for its own page, never a robot's
+  ok    and none for a page the token is not for
+  ok    the visitors are the blocks added up
+  ok    the store page's, on the day's record
+
+All-time views
+  ok    a view writes no all-time count of its own
+  ok    all-time views are the sources added up
+  ok    a record from before keeps what it counted
+  ok    and goes on counting from there
+
+Each window beside the stretch before it
+  ok    the 7 days before the last 7
+  ok    and the 90 before the last 90
+  ok    money in the stretch before, read from Stripe
+  ok    and the 90 days themselves are as before
+  ok    a stretch the reading did not reach all of is unknown, not zero
+  ok    the studio has both
+  ok    so does the API
+
+Source traffic coverage survives legacy previous-period placeholders
+  ok    confirmed source history available in all windows
+  ok    missing source history is marked unavailable
+  ok    API does not expose legacy placeholders as real zeros
+  ok    current results survive missing previous traffic
+  ok    source windows have independent availability
+  ok    confirmed source zero traffic remains zero
+  ok    legacy stats data without the new flag retains reported history
+  ok    payment failure does not hide complete prior traffic
+  ok    and the weekly email says it in words
+
+The AI assistants, and where Gmail goes
+  ok    each by its name
+  ok    ChatGPT's own tag is the same channel
+
+Notes on the chart
+  ok    a day that is real and not ahead
+  ok    words are not a note's without a day
+  ok    kept as one line
+  ok    and taken away
+
+What was spent on ads
+  ok    only what a line can be
+  ok    spread over the days it ran
+  ok    kept, the words as the numbers count them
+  ok    by channel and by post
+
+Where did you hear about us?
+  ok    an answer that is not one is refused
+  ok    counted for a paid order of this store
+  ok    once
+  ok    never for another store's order
+  ok    nor for one that does not exist
+  ok    the studio shows the answer and the money of its sale
+  ok    a creator who stops asking is not counted for
+  ok    nothing about the buyer is kept
+
+When sales stop
+  ok    six a week, a week without one: quiet
+  ok    six a week, three days without one: not yet
+  ok    ten a day, two days without one: quiet
+  ok    twice a month, three weeks without one: its usual
+  ok    too few sales to know a pace
+  ok    a store with no plan is not written to
+  ok    nor one whose creator stopped the emails
+  ok    written to once its sales have stopped
+  ok    saying so, and what to look at
+  ok    looked at once a day
+  ok    and written to once for the stretch
+
+Who stays
+  ok    a cohort read at the ages its members have reached
+  ok    this month's cohort has no age yet
+  ok    by channel: joined, still members, after three months
+
+64 checks, all passing.
+
+Why members leave
+  ok    the member's own reason and words are read from Stripe, the words on one line
+  ok    a membership with a set number of payments ending is not somebody leaving
+  ok    those who chose to leave in the last year, and those who said why
+  ok    reasons summed, the most first, with what they paid a month
+  ok    a payment that never went through is said apart, not counted as a choice
+  ok    their words, the latest first, with no name or address
+
+The next three months
+  ok    no forecast from fewer than five members paying 90 days ago
+  ok    losing one of eleven in 90 days is about 3% a month
+  ok    gaining one $10 member in 90 days is $3.33 a month
+  ok    each month keeps its share and adds its gain
+  ok    a member who joined and left inside the 90 days gained nothing
+  ok    nor one whose first payment never went through
+  ok    a trial that ended unpaid never paid
+
+A checkout Stripe would not open
+  ok    a refusal is counted and the creator told
+  ok    in Stripe's own words, saying what to look at
+  ok    a second on the same day is counted, not emailed
+  ok    Stripe being down is counted, never emailed
+  ok    nor a refusal of our own making, which is not Stripe's
+  ok    the studio reads the week's count and the last words
+  ok    and nothing a week later
+  ok    the next day's first refusal is emailed again
+
+Spend more, keep or cut
+  ok    below the floor, nothing is said
+  ok    2 back for each 1 is spend more, under 1 is cut, between is keep
+
+When ads paid back
+  ok    counted from the first day of spend, to the day the money covered it
+  ok    not yet, with how much has come back
+  ok    and nothing for a channel nobody spent on
+  ok    a renewal is put on its channel's day, so payback counts it
+
+Buyers for ad audiences
+  ok    only buyers who agreed and are still on the list, one address a line
+  ok    an empty file still has its header
+
+The month's goal
+  ok    a goal is a whole positive amount, or 0 for none
+  ok    kept for the store, with the month it was set in
+  ok    and not read as a goal in another currency
+  ok    every channel's money on a day added up
+  ok    this month only, with what a day must bring for the days left
+  ok    and the day it was reached
+  ok    no goal, nothing to show
+
+Records
+  ok    a new store's first sales are not called records
+  ok    a best day of the last 90, set this week
+  ok    a best day long ago is no news
+
+Said in words
+  ok    a channel's recorded payments less costs, not a budget instruction
+  ok    a channel with spend and no payments discloses the negative result
+  ok    no direction to scale or cut follows from gross attributed sales
+  ok    and the record, said as of the last 90 days
+  ok    the Monday email carries the goal
+  ok    the month just ended is the one before today
+  ok    a goal set on the 1st is not held against the month before it, only against its own and after
+  ok    the month's email: its visitors set beside the month before, its money, its best day and the goal
+  ok    a month with nobody and nothing says nothing
+
+Slack and Discord
+  ok    only a Slack or Discord webhook address is taken
+  ok    anything else is refused before a request is made
+  ok    an address the chat will not post to is not kept
+  ok    one that took a first message is kept
+  ok    sealed, never as given
+  ok    Slack's marks escaped, so a name cannot ping a channel
+  ok    Discord pings nobody and stays under its length
+  ok    the email's lines about stopping it are not posted
+  ok    kept by the store, not by its address, so another store with the same handle never reaches the channel
+  ok    forgotten when emptied
+
+58 checks, all passing.
+
+Actual reminder route skips disabled break work and retains ordinary reminder passes
+  ok    actual cron response
+  ok    no pause effects
+  ok    no pause records read
+  ok    ordinary passes still invoked
+
+4 checks, all passing.
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (51.823609ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (437.187949ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (96.079978ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (6.371147ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.231258ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.183476ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (1.21711ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (291.892073ms)
+✔ every store figure taken in the code is a kind a line prices (85.547168ms)
+✔ every email sent names a meter, and each file only the meters it may use (100.333112ms)
+✔ the units a figure is taken in cost at least what they stand for (10.426414ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.88927ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.200431ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.342405ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.109334ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.134462ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.346341ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.732184ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.095003ms)
+✔ Path push fits its reserved studio requests (0.056886ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.043875ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.092188ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.137427ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (47.305003ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1167.455639
+  ok    confirmed empty history stays empty
+  ok    missing history stays unavailable
+  ok    missing pagination state stays unavailable
+  ok    empty page with more results stays unavailable
+  ok    missing cursor stays unavailable
+  ok    paid checkout without its date stays unavailable
+  ok    capped history stays unavailable
+  ok    history cap remains three calls
+  ok    complete third page is available
+  ok    other stores and unpaid sessions excluded
+  ok    complete quiet history still qualifies
+  ok    partial reading skips notification
+  ok    no email from partial history
+  ok    provider failure skips notification
+  ok    no email from provider failure
+  ok    complete quiet reading sends notification
+  ok    exactly one mocked email
+  ok    daily deduplication retained
+
+18 checks, all passing.
+
+What may be shown
+  ok    a live purchase of a product
+  ok    unknown or future purchase time is never now: undefined
+  ok    unknown or future purchase time is never now: null
+  ok    unknown or future purchase time is never now: 0
+  ok    unknown or future purchase time is never now: -1
+  ok    unknown or future purchase time is never now: NaN
+  ok    unknown or future purchase time is never now: Infinity
+  ok    unknown or future purchase time is never now: 1793980848
+  ok    a test payment, no
+  ok    a free copy, no
+  ok    a membership, no
+  ok    a call or a tip, no
+  ok    a payment Stripe sent whole is read by its id
+
+Off
+  ok    nothing written while it is off
+  ok    and nothing shown
+  ok    a store showing them listens to its sales
+
+On
+  ok    newest first, the removed product and the purchase over a week old left out, up to three
+  ok    nothing about who bought
+
+Asked once in five minutes
+  ok    the second visit asks Stripe nothing
+
+Refunds
+  ok    a new purchase shows at once, and one refunded in part is left out
+reading refunds for recent purchases failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/tmp/codex-g-proof-3LcVS3/proof.cjs:2143:11)
+    at async refundedSince (/tmp/codex-g-proof-3LcVS3/proof.cjs:45054:20)
+    at async recentSales (/tmp/codex-g-proof-3LcVS3/proof.cjs:45085:24)
+    at async main (/tmp/codex-g-proof-3LcVS3/proof.cjs:45285:48) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    Stripe cannot be asked: nothing shown
+  ok    and asked again on the next visit, not left empty
+
+Incomplete refund evidence never certifies public purchases
+  ok    missing envelope: no unchecked purchase shown
+  ok    missing envelope: no successful feed cached
+  ok    missing envelope: only the existing refund read
+  ok    null envelope: no unchecked purchase shown
+  ok    null envelope: no successful feed cached
+  ok    null envelope: only the existing refund read
+  ok    array envelope: no unchecked purchase shown
+  ok    array envelope: no successful feed cached
+  ok    array envelope: only the existing refund read
+  ok    missing list kind: no unchecked purchase shown
+  ok    missing list kind: no successful feed cached
+  ok    missing list kind: only the existing refund read
+  ok    wrong list kind: no unchecked purchase shown
+  ok    wrong list kind: no successful feed cached
+  ok    wrong list kind: only the existing refund read
+  ok    missing rows: no unchecked purchase shown
+  ok    missing rows: no successful feed cached
+  ok    missing rows: only the existing refund read
+  ok    null rows: no unchecked purchase shown
+  ok    null rows: no successful feed cached
+  ok    null rows: only the existing refund read
+  ok    missing completion: no unchecked purchase shown
+  ok    missing completion: no successful feed cached
+  ok    missing completion: only the existing refund read
+  ok    null completion: no unchecked purchase shown
+  ok    null completion: no successful feed cached
+  ok    null completion: only the existing refund read
+  ok    numeric completion: no unchecked purchase shown
+  ok    numeric completion: no successful feed cached
+  ok    numeric completion: only the existing refund read
+  ok    more pages: no unchecked purchase shown
+  ok    more pages: no successful feed cached
+  ok    more pages: only the existing refund read
+  ok    empty partial page: no unchecked purchase shown
+  ok    empty partial page: no successful feed cached
+  ok    empty partial page: only the existing refund read
+  ok    missing row fields: no unchecked purchase shown
+  ok    missing row fields: no successful feed cached
+  ok    missing row fields: only the existing refund read
+  ok    null row: no unchecked purchase shown
+  ok    null row: no successful feed cached
+  ok    null row: only the existing refund read
+  ok    missing payment identity: no unchecked purchase shown
+  ok    missing payment identity: no successful feed cached
+  ok    missing payment identity: only the existing refund read
+  ok    invalid payment identity: no unchecked purchase shown
+  ok    invalid payment identity: no successful feed cached
+  ok    invalid payment identity: only the existing refund read
+  ok    missing refund status: no unchecked purchase shown
+  ok    missing refund status: no successful feed cached
+  ok    missing refund status: only the existing refund read
+  ok    unknown refund status: no unchecked purchase shown
+  ok    unknown refund status: no successful feed cached
+  ok    unknown refund status: only the existing refund read
+  ok    partly valid page: no unchecked purchase shown
+  ok    partly valid page: no successful feed cached
+  ok    partly valid page: only the existing refund read
+  ok    overfull page: no unchecked purchase shown
+  ok    overfull page: no successful feed cached
+  ok    overfull page: only the existing refund read
+  ok    a confirmed retry still excludes the refunded purchase
+  ok    pending: confirmed refund state respected
+  ok    requires_action: confirmed refund state respected
+  ok    succeeded: confirmed refund state respected
+  ok    failed: confirmed refund state respected
+  ok    canceled: confirmed refund state respected
+  ok    an explicitly empty complete page allows real purchases
+  ok    confirmed empty page keeps the existing cache behavior
+
+Unknown or stale cached evidence is not public proof
+  ok    a future cached purchase is hidden
+  ok    a cached hidden product is excluded from the already-loaded catalog
+  ok    hiding it requires no additional provider lookup
+
+On the pages
+  ok    the front page and product pages show them
+  ok    each once a visit, never in a loop
+
+95 checks, all passing.
+
+Chance, as counts have it
+  ok    none when about one is usual is ordinary
+  ok    3 when 30 are usual is not
+  ok    6 refunds when half of one is usual is not
+
+Visits that fell away
+  ok    said, with the numbers
+  ok    not for a store with a handful a day
+  ok    today, still going, does not count
+
+Sales from visits that fell, while visits held
+  ok    said when the last 7 days sold none at a rate of 3 a day
+  ok    with the rate before and after
+  ok    not when sales dipped by chance
+
+Refunds piling up
+  ok    6 in a week, where 2 in a season is usual
+  ok    not 3 where 3 a week is usual
+
+Unavailable payment readings
+  ok    missing sales do not imply a conversion drop
+  ok    traffic remains available without money readings
+  ok    unknown historical refunds do not imply a spike
+  ok    unknown recent refunds do not imply zero
+  ok    confirmed empty readings stay zero
+  ok    capped purchase reading blocks conversion and refunds
+  ok    failed refunds preserve complete purchase figures
+  ok    missing refund records stay unavailable
+  ok    incomplete renewals block refund comparison
+  ok    legacy unconfirmed coverage blocks refunds
+
+The month's goal
+  ok    off pace on the 20th
+  ok    reached
+  ok    nothing before the 10th
+
+Said once, where the creator asked for it
+  ok    the goal reached, said once
+  ok    by email
+  ok    and in the chat
+  ok    once a day
+  ok    and once a month
+  ok    never by email once the numbers emails are stopped
+
+Each sale in the chat
+  ok    the amount, what and from where, never who
+  ok    once
+  ok    not when switched off
+
+33 checks, all passing.
+creator: room 18 MB; outside it 121.4 MB on average, 294.6 MB at once
+pro: room 135 MB; outside it 288.1 MB on average, 804.0 MB at once
+scale: room 250 MB; outside it 704.6 MB on average, 2472.8 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (519.136719ms)
+✔ each family is bounded one way at least, and what it says can be checked (76.994702ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (4.737783ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.498092ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.681354ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (9.967335ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.489586ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 638.987109
+
+The rules
+  ok    roles are ids, once each, three at most
+  ok    only roles the bot can give: below its own, not everyone's, not an app's
+  ok    what to add and what to take
+  ok    the roles of what is held
+
+Discord's page asks each side only for what it needs
+  ok    the creator adds a bot that manages roles, invites and removes people, and nothing else
+  ok    the buyer lets it see who they are and put them in a server
+
+Joining
+  ok    somebody who holds nothing is not let in
+  ok    and Discord is not asked to
+  ok    a member is put in the server with the product's roles
+  ok    and kept, with what was given
+  ok    a second Discord account for the same address takes the roles over
+
+Checking again
+  ok    not due before its time
+  ok    due after it
+  ok    still a member: kept
+  ok    a role the product gives since is added
+checking a Discord member's purchases failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/tmp/codex-g-proof-3LcVS3/proof.cjs:5636:11)
+    at async paidForAny (/tmp/codex-g-proof-3LcVS3/proof.cjs:53435:27)
+    at async ticketFor (/tmp/codex-g-proof-3LcVS3/proof.cjs:53504:120)
+    at async heldProducts (/tmp/codex-g-proof-3LcVS3/proof.cjs:53630:9)
+    at async checkMember (/tmp/codex-g-proof-3LcVS3/proof.cjs:53682:12)
+    at async main (/tmp/codex-g-proof-3LcVS3/proof.cjs:54438:52) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    Stripe cannot be asked: nothing is taken
+  ok    the membership ended: every role given is taken back
+  ok    they stay in the server, and are forgotten
+
+Taken out of the server when the creator asks for it
+  ok    Discord refusing the removal: kept to try again, never forgotten while still in the server
+  ok    and back in line for the next check
+  ok    at the next check: only the removal is tried, then it is forgotten
+  ok    a lasting refusal: 3 tries kept, then forgotten
+
+A funded optional bot-install start refuses before provider consent
+  ok    the owner stays at the studio instead of Discord consent
+  ok    no provider request or extra integration allowance
+
+A previously issued funded install trip is rechecked on return
+  ok    unapproved marked return stays at the studio before token exchange
+  ok    no provider call, server replacement or extra integration allowance
+  ok    the same trip remains single-use
+  ok    declining consent remains available without funding
+  ok    invalid codes keep their existing refusal before financial admission
+  ok    all refused and declined returns retain the original server and make no provider request
+
+Funded new role work refuses while role removal and disconnect remain available
+  ok    new provider role and nonempty assignment fail closed
+  ok    neither new operation asks Discord
+  ok    removing product roles remains available without provider lookup
+  ok    disconnect still reaches the existing provider cleanup
+
+A trip to Discord's page
+  ok    is read once
+
+35 checks, all passing.
+
+=== types ===
+
+=== lint ===
+
+=== parent-a1d-adapted-red ===
+
+quiet-sales.ts: the day's check and the email are ours only on an exact claim
+  ok    the day's check answered queued, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered no reply, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered undefined, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered an extra reply, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the day's check answered a count, not written: nothing read, nothing sent
+  ok    and nothing let go
+  ok    the email's mark answered queued, not written: no email
+  ok    the email's mark answered no reply, not written: no email
+  ok    the email's mark answered undefined, not written: no email
+  ok    the email's mark answered an extra reply, not written: no email
+  ok    the email's mark answered a count, not written: no email
+  ok    the day's check answered in another shape but written: read back as ours, the email goes once
+  ok    one email
+  ok    and the same day again is seen
+  ok    the email's mark answered in another shape but written: ours, sent
+  ok    one email
+
+store-alerts.ts: the day's look and each alert are ours only on an exact claim
+  ok    the day's look answered queued, not written: nothing read, nothing said
+  ok    the day's look answered no reply, not written: nothing read, nothing said
+  ok    the day's look answered undefined, not written: nothing read, nothing said
+  ok    the day's look answered an extra reply, not written: nothing read, nothing said
+  ok    the day's look answered a count, not written: nothing read, nothing said
+  ok    an alert's mark answered queued, not written: not said
+  ok    an alert's mark answered no reply, not written: not said
+  ok    an alert's mark answered undefined, not written: not said
+  ok    an alert's mark answered an extra reply, not written: not said
+  ok    an alert's mark answered a count, not written: not said
+  ok    an alert's mark answered in another shape but written: ours, said once by email and in the chat
+
+sale-events.ts: a one-click offer's sale is posted to the chat only on an exact claim
+  ok    the sale's mark answered queued, not written: nothing posted
+  ok    the sale's mark answered no reply, not written: nothing posted
+  ok    the sale's mark answered undefined, not written: nothing posted
+  ok    the sale's mark answered an extra reply, not written: nothing posted
+  ok    the sale's mark answered a count, not written: nothing posted
+  ok    answered in another shape but written: ours, posted once
+  ok    and never twice
+
+checkout-trouble.ts: the day's email is ours only on an exact claim, and let go only while it is ours
+  ok    the email's mark answered queued, not written: counted, no email
+  ok    the email's mark answered no reply, not written: counted, no email
+  ok    the email's mark answered undefined, not written: counted, no email
+  ok    the email's mark answered an extra reply, not written: counted, no email
+  ok    the email's mark answered a count, not written: counted, no email
+  ok    a failed send lets go of its own mark only: the other run's mark stays
+  ok    and a failed send with its own mark still held lets it go, so the next refusal can tell
+
+cron/courses: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/reminders: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/discord: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+  ok    our own lock is let go when the run ends
+
+cron/quiet: the run's lock is ours only on an exact claim, and let go only while it is ours
+  ok    the lock answered queued, not written: the job does not run
+  ok    the lock answered no reply, not written: the job does not run
+  ok    the lock answered undefined, not written: the job does not run
+  ok    the lock answered an extra reply, not written: the job does not run
+  ok    the lock answered a count, not written: the job does not run
+  ok    held by another run: busy, as before
+  ok    and the other run's lock is left alone
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    our lock ran out and another run took it: ours ending never deletes theirs
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    our own lock is let go when the run ends
+
+G independent: a failed release EVAL cannot fall back to deleting a legitimate successor
+  ok    G courses: actual release EVAL failed once
+  ok    G courses: read real token then successor legitimately won NX after actual TTL
+  FAIL  G courses: the successor lock survives old run's release
+        expected "g-successor-courses"
+        got      null
+  ok    G reminders: actual release EVAL failed once
+  ok    G reminders: read real token then successor legitimately won NX after actual TTL
+  FAIL  G reminders: the successor lock survives old run's release
+        expected "g-successor-reminders"
+        got      null
+  ok    G discord: actual release EVAL failed once
+  ok    G discord: read real token then successor legitimately won NX after actual TTL
+  FAIL  G discord: the successor lock survives old run's release
+        expected "g-successor-discord"
+        got      null
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    G quiet: actual release EVAL failed once
+  ok    G quiet: read real token then successor legitimately won NX after actual TTL
+  FAIL  G quiet: the successor lock survives old run's release
+        expected "g-successor-quiet"
+        got      null
+
+93 checks, 4 failing.

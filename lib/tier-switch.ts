@@ -181,6 +181,26 @@ export function chargedOf(invoice: unknown): { cents: number; currency: string }
   return { cents: paid, currency };
 }
 
+/**
+ * Whether Stripe's invoice preview can be read for the amount a switch
+ * charges now (Codex J on #2764; CX-123 rule 24): its currency, a starting
+ * balance in whole cents or none, and a list of lines, each with its amount
+ * and the start of its period in whole numbers, and its discounts and taxes,
+ * when it has them, each with a whole amount. Anything else is unknown: the
+ * page then says Stripe could not work out the price, never that nothing is
+ * charged today (dueNow in lib/tier-rules.ts reads a missing number as 0).
+ */
+export function previewKnown(invoice: unknown): boolean {
+  const whole = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value);
+  const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+  const amounts = (value: unknown) => value === undefined || value === null || (Array.isArray(value) && value.every((one) => record(one) && whole(one.amount)));
+  if (!record(invoice) || typeof invoice.currency !== "string" || !invoice.currency) return false;
+  if (invoice.starting_balance !== undefined && invoice.starting_balance !== null && !whole(invoice.starting_balance)) return false;
+  const lines = record(invoice.lines) ? invoice.lines.data : undefined;
+  if (!Array.isArray(lines)) return false;
+  return lines.every((line) => record(line) && whole(line.amount) && record(line.period) && whole(line.period.start) && amounts(line.discount_amounts) && amounts(line.taxes) && amounts(line.tax_amounts));
+}
+
 /** The switch itself, at the same second: charged at once, and made only if it is paid. */
 export function switchBody(itemId: string, price: string, at: number): URLSearchParams {
   const body = new URLSearchParams({
@@ -261,6 +281,11 @@ export async function previewSwitch(store: Store, token: string, subscription: s
     const price = await tierPrice(store, found.to);
     const at = Math.floor(Date.now() / 1000);
     const invoice = await onAccount("POST", found.grant.a, "/invoices/create_preview", previewBody(found.grant.c, subscription, found.itemId, price, at));
+    // Read exactly first (previewKnown): an unknown preview is no figure, so no page shows an amount for it.
+    if (!previewKnown(invoice)) {
+      console.error("a tier switch's preview was not one this code knows", subscription);
+      return { ok: false, reason: "error" };
+    }
     // What the switch itself charges, not the whole next invoice (lib/tier-rules.ts).
     const due = dueNow(invoice as Parameters<typeof dueNow>[0], at);
     return {

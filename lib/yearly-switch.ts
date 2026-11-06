@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { chargedOf, previewBody, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
+import { chargedOf, previewBody, previewKnown, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -172,6 +172,11 @@ export async function previewYearly(store: Store, token: string, subscription: s
     const price = await yearlyPrice(store, found.product, found.choice.cents);
     const at = Math.floor(Date.now() / 1000);
     const invoice = await onAccount("POST", found.grant.a, "/invoices/create_preview", previewBody(found.grant.c, subscription, found.itemId, price, at));
+    // Read exactly first, as a switch between tiers reads it (lib/tier-switch.ts, previewKnown; Codex J on #2764).
+    if (!previewKnown(invoice)) {
+      console.error("a move to yearly's preview was not one this code knows", subscription);
+      return { ok: false, reason: "error", emailed };
+    }
     const due = dueNow(invoice as Parameters<typeof dueNow>[0], at);
     return {
       ok: true,

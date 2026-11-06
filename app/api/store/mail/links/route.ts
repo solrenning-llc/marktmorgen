@@ -13,7 +13,9 @@ const NO_STORE = { "Cache-Control": "private, no-store" };
  *
  *   { action: "link-change", id, n, to }
  *
- * answered with every change kept for that email, in order. Changing a link
+ * answered with every change kept for that email, in order; "busy" (409)
+ * when other changes to the same email landed first and this one was not
+ * saved, "unconfirmed" (503) when it may have been. Changing a link
  * back is a change to the address the email was sent with. What reaches the
  * list is for whoever may send ("send", lib/team-roles.ts). Only the store
  * settled by lib/studio-route.ts is ever touched: an email of another store
@@ -31,7 +33,7 @@ export async function POST(request: NextRequest) {
     const email = await readBroadcast(id);
     if (!email) return Response.json({ ok: false, error: "none", message: CHANGE_REFUSALS.none }, { status: 404, headers: NO_STORE });
     const done = await changeLink(store, email, n, to);
-    if (!done.ok) return Response.json({ ok: false, error: done.reason, message: done.message }, { status: done.reason === "none" ? 404 : 400, headers: NO_STORE });
+    if (!done.ok) return Response.json({ ok: false, error: done.reason, message: done.message }, { status: done.reason === "none" ? 404 : done.reason === "busy" ? 409 : 400, headers: NO_STORE });
     return Response.json({ ok: true, changes: done.changes }, { headers: NO_STORE });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full", message: "Your store has no room left for more records. Delete some you no longer need first." }, { status: 409, headers: NO_STORE });

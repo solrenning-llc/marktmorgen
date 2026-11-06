@@ -22,7 +22,10 @@
  *   nl:mail:bc:<id>:go   the changes to one email's links, in order, with
  *                        the list they belong to (JSON); gone
  *                        SENT_LINK_KEEP_DAYS after the first change, and
- *                        with the store (lib/broadcasts.ts, broadcastKeys)
+ *                        with the store (lib/broadcasts.ts, broadcastKeys);
+ *                        written only over exactly the record read before
+ *                        (APPEND_SENT_LINK), so two changes made at the same
+ *                        moment never write over each other
  *
  * Old emails cannot be changed: their links point straight at the address,
  * and the studio says so. Sequence emails are written again for whoever
@@ -32,6 +35,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { broadcastCampaign, variantCampaign } from "@/lib/mail-links";
@@ -155,14 +159,20 @@ function parseKept(raw: unknown): SentLinks {
   return { l: kept.l, exp: kept.exp as number, changes: (kept.changes as LinkChange[]).map((c) => ({ n: c.n, to: c.to, at: c.at })) };
 }
 
+/** The record as read, exactly (lib/redis-reply.ts), with what it says: both null when there is none. */
+async function readKept(id: string): Promise<{ raw: string | null; kept: SentLinks | null }> {
+  if (!isRedisConfigured()) throw new SentLinksUnreadable();
+  const reply = repliesFor(await redisPipeline([["GET", sentLinkKey(id)]]), 1);
+  if (!reply) throw new SentLinksUnreadable();
+  if (reply[0] === null) return { raw: null, kept: null };
+  if (typeof reply[0] !== "string") throw new SentLinksUnreadable();
+  return { raw: reply[0], kept: parseKept(reply[0]) };
+}
+
 /** The changes kept for one email: null when there are none; SentLinksUnreadable when the answer is not one. */
 export async function readSentLinks(id: string): Promise<SentLinks | null> {
   if (!ID.test(id)) return null;
-  if (!isRedisConfigured()) throw new SentLinksUnreadable();
-  const reply = await redisPipeline([["GET", sentLinkKey(id)]]);
-  if (!Array.isArray(reply) || reply.length !== 1) throw new SentLinksUnreadable();
-  if (reply[0] === null) return null;
-  return parseKept(reply[0]);
+  return (await readKept(id)).kept;
 }
 
 /** The changes of several emails at once, for the studio: one command each, in one request. Unread ones are missing. */
@@ -170,8 +180,9 @@ export async function readSentLinksMany(ids: string[]): Promise<Map<string, Sent
   const out = new Map<string, SentLinks | null>();
   const wanted = ids.filter((id) => ID.test(id));
   if (!wanted.length || !isRedisConfigured()) return out;
-  const replies = await redisPipeline(wanted.map((id) => ["GET", sentLinkKey(id)]));
-  if (!Array.isArray(replies) || replies.length !== wanted.length) return out;
+  // Exactly one reply a read, each in its own slot (lib/redis-reply.ts), or none of them is taken as read.
+  const replies = repliesFor(await redisPipeline(wanted.map((id) => ["GET", sentLinkKey(id)])), wanted.length);
+  if (!replies) return out;
   wanted.forEach((id, i) => {
     try {
       out.set(id, replies[i] === null ? null : parseKept(replies[i]));
@@ -187,7 +198,7 @@ export type SentEmail = { id: string; listId: string; handle: string; body: stri
 
 export type ChangeResult =
   | { ok: true; changes: LinkChange[] }
-  | { ok: false; reason: "none" | "old" | "unsent" | "link" | "to" | "full"; message: string };
+  | { ok: false; reason: "none" | "old" | "unsent" | "link" | "to" | "full" | "busy"; message: string };
 
 export const CHANGE_REFUSALS: Record<Exclude<ChangeResult, { ok: true }>["reason"], string> = {
   none: "That email is not one of this store's.",
@@ -196,14 +207,70 @@ export const CHANGE_REFUSALS: Record<Exclude<ChangeResult, { ok: true }>["reason
   link: "That link is not one of this email's.",
   to: "That address cannot be used.",
   full: `This email's links have been changed ${SENT_LINK_CHANGES_MAX} times, the most kept for one email. Each one keeps going where it goes now.`,
+  busy: "This email's links were being changed somewhere else at the same moment, so this change was not saved. Reload the page to see where each link goes now, then try again.",
 };
+
+/** Reads of the history and writes over it, in all, before a change made at the same moment as others says it was not saved. */
+export const SENT_LINK_WRITE_TRIES = 2;
+
+/**
+ * KEYS[1] one email's changes. ARGV[1] the record exactly as read before
+ * ("" when there was none), ARGV[2] the record with the new change, ARGV[3]
+ * its time to live in seconds. Writes it only while the key still holds
+ * exactly what was read, in one step: a change another request saved since
+ * is never written over (Codex P and Codex J on #3034). Answers 1 when
+ * written, 0 when the record changed since (nothing written). The first
+ * line names it for the local stand-in (lib/redis-memory.ts).
+ */
+export const APPEND_SENT_LINK = `-- marktmorgen:sent-link-append:v1
+local current = redis.call("GET", KEYS[1])
+if (current or "") ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+return 1`;
+
+/**
+ * Writes `next` over exactly `raw` (null: only where there is none). "written" or "changed" (another change landed
+ * first, nothing written); an answer of any other shape is read back, and only our own record there is "written":
+ * anything else throws SentLinkWriteUnconfirmed, since the write may have landed.
+ */
+async function writeOver(id: string, raw: string | null, next: string, seconds: number): Promise<"written" | "changed"> {
+  let answer: unknown;
+  try {
+    const replies = repliesFor(await redisPipeline([["EVAL", APPEND_SENT_LINK, 1, sentLinkKey(id), raw ?? "", next, seconds]]), 1);
+    answer = replies ? replies[0] : undefined;
+  } catch {
+    answer = undefined;
+  }
+  if (answer === 1) return "written";
+  if (answer === 0) return "changed";
+  try {
+    const back = repliesFor(await redisPipeline([["GET", sentLinkKey(id)]]), 1);
+    if (back && back[0] === next) return "written";
+  } catch {
+    // Not read: unknown, below.
+  }
+  throw new SentLinkWriteUnconfirmed();
+}
 
 /**
  * Sends link `n` of a sent email somewhere else, under the rules of
  * lib/sent-link-rules.ts, kept after every change before it. Its room in
  * the store's data room is taken first (DataRoomError when it does not
- * fit). Throws SentLinksUnreadable when what is kept cannot be read, and
- * SentLinkWriteUnconfirmed when the write's answer is not Redis's "OK".
+ * fit). The new history is written only over exactly the one read
+ * (APPEND_SENT_LINK): when another change landed in between, the history is
+ * read again and checked again (its list, its most changes, its expiry,
+ * whether the link already goes there), up to SENT_LINK_WRITE_TRIES reads
+ * in all, reusing the room already taken where it covers the record; past
+ * them it answers "busy", never a success, with nothing written. "Saved"
+ * is said only for a change written. Throws SentLinksUnreadable when what
+ * is kept cannot be read, and SentLinkWriteUnconfirmed when the write's
+ * answer is unknown and our record is not read back.
+ *
+ * Room taken for a write that then did not land (another change came first
+ * and the check refused or no longer needed it, or the room had to be taken
+ * again until a later expiry) is not given back: what expires by itself is
+ * never given back early (lib/store-data.ts, giveData), so it errs toward a
+ * fuller room, never toward storage nobody counted.
  */
 export async function changeLink(store: Store, email: SentEmail, n: number, raw: string, now = Date.now()): Promise<ChangeResult> {
   const refuse = (reason: Exclude<ChangeResult, { ok: true }>["reason"], message = CHANGE_REFUSALS[reason]): ChangeResult => ({ ok: false, reason, message });
@@ -216,24 +283,30 @@ export async function changeLink(store: Store, email: SentEmail, n: number, raw:
   const problem = destinationProblem(raw, hrefs[n], store);
   if (problem) return refuse("to", problem);
   const to = raw.trim();
-  const kept = await readSentLinks(email.id);
-  if (kept && kept.l !== store.listId) return refuse("none");
-  const changes = kept?.changes ?? [];
-  if ((currentOf(changes, n) ?? hrefs[n]) === to) return { ok: true, changes };
-  if (changes.length >= SENT_LINK_CHANGES_MAX) return refuse("full");
   const at = Math.floor(now / 1000);
-  const exp = kept?.exp ?? at + SENT_LINK_KEEP_DAYS * 86_400;
-  if (exp <= at) return refuse("full");
-  const entry: LinkChange = { n, to, at };
-  const next: SentLinks = { l: store.listId, exp, changes: [...changes, entry] };
-  // The change's bytes, and the record's own the first time, until the record goes.
-  await needData(store, [{ until: exp * 1000, bytes: dataBytes([kept ? "" : JSON.stringify({ l: next.l, exp, changes: [] }), `${JSON.stringify(entry)},`], kept ? 0 : 1) }], now);
-  let reply: unknown;
-  try {
-    reply = await redisPipeline([["SET", sentLinkKey(email.id), JSON.stringify(next), "EX", Math.max(1, exp - at)]]);
-  } catch {
-    throw new SentLinkWriteUnconfirmed();
+  let held: { bytes: number; until: number } | null = null;
+  for (let tries = 0; tries < SENT_LINK_WRITE_TRIES; tries += 1) {
+    const { raw: before, kept } = await readKept(email.id);
+    if (kept && kept.l !== store.listId) return refuse("none");
+    const changes = kept?.changes ?? [];
+    if ((currentOf(changes, n) ?? hrefs[n]) === to) return { ok: true, changes };
+    if (changes.length >= SENT_LINK_CHANGES_MAX) return refuse("full");
+    const exp = kept?.exp ?? at + SENT_LINK_KEEP_DAYS * 86_400;
+    if (exp <= at) return refuse("full");
+    const entry: LinkChange = { n, to, at };
+    const next: SentLinks = { l: store.listId, exp, changes: [...changes, entry] };
+    // The change's bytes, and the record's own the first time, until the record goes.
+    const bytes = dataBytes([kept ? "" : JSON.stringify({ l: next.l, exp, changes: [] }), `${JSON.stringify(entry)},`], kept ? 0 : 1);
+    const until = exp * 1000;
+    if (!held || until > held.until) {
+      await needData(store, [{ until, bytes }], now);
+      held = { bytes, until };
+    } else if (bytes > held.bytes) {
+      await needData(store, [{ until: held.until, bytes: bytes - held.bytes }], now);
+      held = { bytes, until: held.until };
+    }
+    if ((await writeOver(email.id, before, JSON.stringify(next), Math.max(1, exp - at))) === "written") return { ok: true, changes: next.changes };
+    // Another change landed first: read it, and check this one again against it.
   }
-  if (!Array.isArray(reply) || reply.length !== 1 || reply[0] !== "OK") throw new SentLinkWriteUnconfirmed();
-  return { ok: true, changes: next.changes };
+  return refuse("busy");
 }

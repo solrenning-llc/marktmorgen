@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { type LinkChange, SENT_LINK_CHANGES_MAX, SENT_LINK_MAX_LENGTH, currentOf } from "@/lib/sent-link-rules";
+import { type LinkChange, SENT_LINK_CHANGES_MAX, SENT_LINK_KEEP_DAYS, SENT_LINK_MAX_LENGTH, currentOf } from "@/lib/sent-link-rules";
 
 /** One sent email whose links can be changed, as the page reads it. `changes` null: they could not be read just now. */
 /** `own`: whether each link went to the store, which then can only go to another page of it. */
 export type SentEmailLinks = { id: string; subject: string; sentOn: string; links: string[]; own: boolean[]; changes: LinkChange[] | null };
+
+/** Said when the change may or may not have been saved. */
+const UNKNOWN = "We could not confirm whether the change was saved. Reload the page to see where the link goes now.";
 
 const day = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
@@ -21,6 +24,13 @@ const day = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en
  * button in use is aria-disabled, never disabled, so focus stays on it; one
  * short sentence per step is said in a polite live region, never the whole
  * list; nothing moves or times out; addresses wrap instead of scrolling.
+ *
+ * "Not changed" is said only when the server refused the change in so many
+ * words. When the answer is unknown (the server could not confirm its
+ * write, a reply that is not its own, or no reply), the change may have
+ * been saved, so it says it could not confirm and to reload (Codex J on
+ * #3034). Once an email's changes are all used, no form is shown for its
+ * links: a button that cannot work is not offered.
  */
 /** `home`: the store's own address, for the example a store link is given. */
 export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLinks[]; home: string }) {
@@ -46,7 +56,7 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
     setErrors((all) => ({ ...all, [field]: "" }));
     try {
       const response = await fetch("/api/store/mail/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "link-change", id: email.id, n, to }) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; changes?: LinkChange[]; message?: string };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; changes?: LinkChange[]; message?: string; error?: string };
       if (answer.ok && Array.isArray(answer.changes)) {
         const changes = answer.changes;
         setEmails((all) => all.map((e) => (e.id === email.id ? { ...e, changes } : e)));
@@ -56,11 +66,17 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
         focusAfter.current = `${field}-now`;
         return;
       }
-      setErrors((all) => ({ ...all, [field]: typeof answer.message === "string" && answer.message ? answer.message : "That did not work. Nothing was changed. Try again in a moment." }));
-      setLive(`Link ${n + 1} was not changed.`);
+      const said = typeof answer.message === "string" && answer.message ? answer.message : "";
+      if (answer.ok === false && typeof answer.error === "string" && answer.error !== "unconfirmed") {
+        setErrors((all) => ({ ...all, [field]: said || "That did not work. Nothing was changed. Try again in a moment." }));
+        setLive(`Link ${n + 1} was not changed.`);
+        return;
+      }
+      setErrors((all) => ({ ...all, [field]: said || UNKNOWN }));
+      setLive(`We could not confirm whether link ${n + 1} was changed. Reload the page to see where it goes now.`);
     } catch {
-      setErrors((all) => ({ ...all, [field]: "That did not work. Check your connection and try again. Nothing was changed." }));
-      setLive(`Link ${n + 1} was not changed.`);
+      setErrors((all) => ({ ...all, [field]: `${UNKNOWN} Check your connection first.` }));
+      setLive(`We could not confirm whether link ${n + 1} was changed. Reload the page to see where it goes now.`);
     } finally {
       setBusy(null);
     }
@@ -82,7 +98,13 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
                 </p>
                 {email.changes === null ? (
                   <p className="mt-3 text-ink">Where these links go now could not be read just now. Reload the page to try again. Each one still goes where it went.</p>
-                ) : (
+                ) : null}
+                {email.changes !== null && used >= SENT_LINK_CHANGES_MAX ? (
+                  <p className="mt-3 text-ink">
+                    All {SENT_LINK_CHANGES_MAX} changes for this email are used, so its links cannot be changed or sent back again. Each one keeps going where it goes now until {SENT_LINK_KEEP_DAYS} days after the first change, then where the email first sent it.
+                  </p>
+                ) : null}
+                {email.changes === null ? null : (
                   <ol className="mt-5 space-y-6">
                     {email.links.map((original, n) => {
                       const field = `${email.id}-${n}`;
@@ -105,7 +127,7 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
                               <dd id={`${field}-now`} tabIndex={-1} className="inline break-all font-semibold">{now}</dd>
                             </div>
                           </dl>
-                          <form
+                          {used >= SENT_LINK_CHANGES_MAX ? null : <form
                             className="mt-3"
                             onSubmit={(event) => {
                               event.preventDefault();
@@ -145,7 +167,7 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
                                 </button>
                               ) : null}
                             </div>
-                          </form>
+                          </form>}
                           {history.length ? (
                             <div className="mt-4">
                               <h4 className="font-medium">Changes to link {n + 1}</h4>

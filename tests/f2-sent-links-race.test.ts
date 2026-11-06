@@ -17,12 +17,16 @@
  *   - a change that is not saved says so (a refusal with words), never a
  *     success;
  *   - where each link goes now is the last change kept for it;
- *   - the data room counts at least what the history keeps.
+ *   - the data room counts at least what the history keeps;
+ *   - (added with the fix) two at once are both saved; past the reads
+ *     allowed a change answers "busy" in words; a write whose answer is lost
+ *     is "saved" only when our own record is read back, and otherwise is
+ *     said as unconfirmed, never as saved or as not changed.
  */
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { SITE_URL } from "@/lib/site-url";
 import { currentOf, linksOf } from "@/lib/sent-link-rules";
-import { type SentEmail, changeLink, readSentLinks, sentLinkKey } from "@/lib/sent-links";
+import { type SentEmail, APPEND_SENT_LINK, CHANGE_REFUSALS, SentLinkWriteUnconfirmed, changeLink, readSentLinks, sentLinkKey } from "@/lib/sent-links";
 import { dataUsed } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { store as redis } from "./redis-stub";
@@ -117,6 +121,8 @@ async function main(): Promise<void> {
     const outcomes = await Promise.all([attempt(harbor, e, 1, "https://youtube.com/watch?v=2"), attempt(harbor, e, 2, "https://zoom.us/j/2")]);
     release();
     await check("first record", e, 0, outcomes);
+    // Added with the fix (rule 23: a new assertion, none changed): the one that lost the first write reads again and is saved.
+    is("first record: both are saved", outcomes.map((o) => o.ok), [true, true]);
   }
 
   part("Two changes to one link of an email already changed, read at the same moment");
@@ -127,6 +133,8 @@ async function main(): Promise<void> {
     const outcomes = await Promise.all([attempt(harbor, e, 1, "https://youtube.com/watch?v=6"), attempt(harbor, e, 1, "https://youtube.com/watch?v=7")]);
     release();
     await check("kept record", e, 1, outcomes);
+    // Added with the fix (rule 23: a new assertion, none changed).
+    is("kept record: both are saved, in the order written", [outcomes.map((o) => o.ok), (await readSentLinks(e.id))?.changes.slice(1).length], [[true, true], 2]);
   }
 
   part("Three changes at the same moment");
@@ -141,6 +149,38 @@ async function main(): Promise<void> {
     ]);
     release();
     await check("three at once", e, 1, outcomes);
+    // Added with the fix (rule 23: new assertions, none changed): SENT_LINK_WRITE_TRIES reads, so two are saved and the third says "busy".
+    is("three at once: two saved, one busy", [outcomes.filter((o) => o.ok).length, outcomes.filter((o) => !o.ok).map((o) => (o as { why: string }).why)], [2, ["busy:said"]]);
+    is("busy says nothing was saved and to reload", /not saved/.test(CHANGE_REFUSALS.busy) && /Reload/.test(CHANGE_REFUSALS.busy), true);
+  }
+
+  part("A write whose answer is lost");
+  {
+    const e = email("d".repeat(24));
+    const original = redis.pipeline.bind(redis);
+    const isWrite = (commands: (string | number)[][]) => commands.length === 1 && commands[0][0] === "EVAL" && commands[0][1] === APPEND_SENT_LINK;
+    // Written, then the answer comes back in a shape that is not one: our record is read back, so it is saved.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!isWrite(commands)) return original(commands);
+      await original(commands);
+      return ["?"];
+    }) as typeof redis.pipeline;
+    const landed = await attempt(harbor, e, 1, "https://youtube.com/watch?v=3");
+    redis.pipeline = original as typeof redis.pipeline;
+    is("landed, answer lost: saved, and kept", [landed.ok, (await readSentLinks(e.id))?.changes.map((c) => c.to)], [true, ["https://youtube.com/watch?v=3"]]);
+    // Not written, and the answer lost: neither saved nor "not changed", but unconfirmed.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (isWrite(commands)) throw new Error("connection reset");
+      return original(commands);
+    }) as typeof redis.pipeline;
+    let thrown: unknown = null;
+    try {
+      await changeLink(harbor, e, 1, "https://youtube.com/watch?v=4");
+    } catch (error) {
+      thrown = error;
+    }
+    redis.pipeline = original as typeof redis.pipeline;
+    is("not landed, answer lost: unconfirmed, never saved", [thrown instanceof SentLinkWriteUnconfirmed, (await readSentLinks(e.id))?.changes.length], [true, 1]);
   }
 
   done();

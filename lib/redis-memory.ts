@@ -549,6 +549,18 @@ export class MemoryRedis {
           this.run(["ZADD", queue, score, next]);
           return 1;
         }
+        // lib/sent-links.ts APPEND_SENT_LINK: an email's link changes written only over exactly the record read, with their expiry.
+        if (key.startsWith("-- marktmorgen:sent-link-append:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, target, expected, value, seconds] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          this.scriptCalls += 1;
+          if ((held ?? "") !== expected) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", target, value, "EX", seconds]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
           const target = args[1];
           this.live(target);

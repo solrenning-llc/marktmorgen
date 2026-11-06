@@ -265,6 +265,14 @@ async function main(): Promise<void> {
   is("the route needs the role that sends", /guardStoreWrite\(request, "send"/.test(read("app/api/store/mail/links/route.ts")), true);
   is("the email studio leads to it", read("app/studio/email/page.tsx").includes("studioPath(store, \"\", \"email/links\")"), true);
   is("no open, no click counted, in the route", !/noteClick|SADD|pixel/.test(read("app/go/[handle]/[id]/[link]/route.ts")), true);
+  // Added for Codex J's three LOW findings on #3034 (rule 23: new assertions, none changed).
+  is("no promise to send a link back always, past the most changes", /always send a link back/.test(page + editor), false);
+  is("past the most changes, no form is offered for its links", /used >= SENT_LINK_CHANGES_MAX \? null : <form/.test(editor) && /cannot be changed or sent back again/.test(editor), true);
+  is("an unconfirmed save is never said as not changed", /answer\.error !== "unconfirmed"/.test(editor) && /could not confirm whether link/.test(editor), true);
+  is("a lost connection is never said as nothing changed", /\} catch \{\s*setErrors\(\(all\) => \(\{ \.\.\.all, \[field\]: `\$\{UNKNOWN\}/.test(editor), true);
+  is("busy is its own answer", /done\.reason === "busy" \? 409/.test(read("app/api/store/mail/links/route.ts")), true);
+  const privacy = read("app/privacy/page.tsx");
+  is("the privacy policy says what the redirect counts, not that it writes nothing", !/writes\s+nothing about you or the email/.test(privacy) && /one-way\s+hash of the network address it is opened from/.test(privacy), true);
 
   delivery.restore();
   done();

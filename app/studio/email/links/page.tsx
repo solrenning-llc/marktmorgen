@@ -76,10 +76,10 @@ export default async function StudioSentLinksPage({ searchParams }: Params) {
           <ul className="mt-2 max-w-2xl list-disc space-y-1 pl-6 text-ink-soft">
             <li>Links in one-off emails sent from November 6, 2026. The first {SENT_LINKS_MAX} links of each email.</li>
             <li>A link to your store can go to another page of your store. Any other link can go to another page on the same site, or to a page of your store.</li>
-            <li>Up to {SENT_LINK_CHANGES_MAX} changes for each email. Each change is listed, and you can always send a link back to where it first went.</li>
+            <li>Up to {SENT_LINK_CHANGES_MAX} changes for each email, sending a link back included. Each change is listed. Until they are all used, you can send a link back to where it first went.</li>
             <li>Changes last {SENT_LINK_KEEP_DAYS} days from the first one. After that, the link goes where the email first sent it.</li>
             <li>A mail app that shows only plain text shows the address as written, which goes straight there.</li>
-            <li>Nothing records who opened a link, or when. Each opening counts as one request of your store, like a page view.</li>
+            <li>Nothing about who opened a link, or when, is kept for the email or shown to you. Each opening counts as one request of your store, like a page view.</li>
           </ul>
           {before > 0 ? (
             <p className="mt-6 max-w-2xl">

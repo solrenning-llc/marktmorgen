@@ -41,7 +41,8 @@ export default async function StudioFormsPage({ searchParams }: Params) {
   const { view } = found;
   const { store } = view;
   const reads = can(view.role, "export");
-  const forms = await readForms(store.statsId);
+  const loadedForms = await readForms(store.statsId).catch(() => null);
+  const forms = loadedForms ?? [];
   const canCreateDeals = reads && can(view.role, "orders") && forms.length > 0;
   const emptyReview: OpportunityReviewData = { available: false, stages: [], deals: [], pipelines: [], versions: {} };
   const [reviewData, team] = canCreateDeals
@@ -87,9 +88,9 @@ export default async function StudioFormsPage({ searchParams }: Params) {
             next step.
           </p>
           {canCreateDeals && !reviewData.available && saved.some(item => item.total !== null && item.total > 0) ? <p className="notice notice-warn mt-6" role="status">Opportunities could not be checked. Answers and exports remain available; reload Forms before creating another opportunity. <a className="underline" href={`/studio/deals?store=${encodeURIComponent(sid)}`}>Open Deals</a></p> : null}
-          <div className="mt-8">
+          {loadedForms === null ? <p role="status" className="notice notice-warn mt-6">Forms could not be read right now. Reload before creating or changing a form.</p> : <div className="mt-8">
             <FormsEditor key={sid} existingDealsAvailable={reviewData.available} existingDeals={existingDeals} currency={store.currency} dealAssignees={dealAssignees} sid={sid} dealStages={dealStages} saved={saved} products={products} exportBase={`/api/store/forms/export?${sid ? `store=${sid}&` : ""}id=`} />
-          </div>
+          </div>}
           {!reads && forms.length ? <p className="mt-4 text-sm text-ink-soft">Your role does not see the answers: they can hold people&apos;s addresses and words.</p> : null}
         </main>
       </StudioStorePin>

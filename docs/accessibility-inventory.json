@@ -931,6 +931,12 @@
       "parameters": []
     },
     {
+      "source": "app/status/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/status",
+      "parameters": []
+    },
+    {
       "source": "app/studio/add/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/add",

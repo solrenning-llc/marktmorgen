@@ -196,10 +196,16 @@ export async function pendingInvitesOnOptions(store: Store, productId: string, o
   // (an empty list for invitations that exist, a cut reply, a write between the two reads) is unknown, never a count.
   if (!Array.isArray(reply) || reply.length !== many) return unknown;
   const counts = Object.fromEntries(optionIds.map((id) => [id, 0])) as Record<string, number | null>;
+  // Each record must be a different invitation (Codex T on #2690): its identity is the field it is kept under, so
+  // HLEN records with HLEN different identities are the whole hash. A record seen twice is a reply nobody can trust.
+  const identities = new Set<string>();
   for (let at = 0; at < reply.length; at += 1) {
     const slot = Object.getOwnPropertyDescriptor(reply, String(at));
     const invite = slot && Object.hasOwn(slot, "value") ? parseInvite(slot.value) : null;
     if (!invite) return unknown;
+    const identity = inviteField(invite.e, invite.p);
+    if (identities.has(identity)) return unknown;
+    identities.add(identity);
     if (invite.p !== productId || !Object.hasOwn(counts, invite.o)) continue;
     // One whose state cannot be read: not a guess either way (Claude 4 on #2690).
     if (invite.kept < 0) return unknown;

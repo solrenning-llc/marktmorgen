@@ -58,21 +58,55 @@ export async function feedToken(store: Store, productId: string, email: string):
   // An unknown read of the index is not "no feed yet" (CX-123 rule 24): nothing is written on it.
   const existing = await indexedToken(sid, productId, email);
   if (existing === undefined) return null;
-  if (existing !== null && FEED_TOKEN.test(existing)) return existing;
-  const token = randomBytes(24).toString("hex");
   const grant: FeedGrant = { s: sid, h: store.handle, p: productId, e: normaliseEmail(email) };
+  if (existing !== null && FEED_TOKEN.test(existing)) return withGrant(store, existing, grant);
+  const token = randomBytes(24).toString("hex");
   // A listener's access is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
   // Only "OK" made the index and only null says another token was kept first: any other reply is unknown, and
   // writing a grant then could leave one holding the address that no index leads to, which an erasure never finds.
   const [set] = await orderWrite(store, [["SET", byKey(sid, productId, email), token, "NX"]]);
   if (set === null) {
     const again = await indexedToken(sid, productId, email);
-    return typeof again === "string" && FEED_TOKEN.test(again) ? again : null;
+    return typeof again === "string" && FEED_TOKEN.test(again) ? withGrant(store, again, grant) : null;
   }
   if (set !== "OK") return null;
   // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)]]);
   return made === "OK" ? token : null;
+}
+
+/**
+ * An indexed token, handed out only once its grant is there (finding by Claude 6): an index whose grant write failed
+ * would otherwise give a link that opens no feed, for good. The grant is read exactly; a missing one is written
+ * again (SET NX, so a concurrent write is never overwritten), which keeps the buyer's existing feed address working.
+ * An unknown reply, or a grant for another store, product or address, hands out nothing.
+ */
+async function withGrant(store: Store, token: string, grant: FeedGrant): Promise<string | null> {
+  const held = await grantOf(token);
+  if (held === undefined) return null;
+  if (held !== null) return sameGrant(held, grant) ? token : null;
+  const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"]]);
+  if (made === "OK") return token;
+  if (made !== null) return null;
+  // null: another call wrote it first; hand it out only if it is this address's grant.
+  const again = await grantOf(token);
+  return again && sameGrant(again, grant) ? token : null;
+}
+
+/** A grant's stored text: null where none, undefined where the reply is unknown. */
+async function grantOf(token: string): Promise<string | null | undefined> {
+  const reply = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
+  const value = reply?.[0];
+  return value === null || typeof value === "string" ? value : undefined;
+}
+
+function sameGrant(raw: string, grant: FeedGrant): boolean {
+  try {
+    const g = JSON.parse(raw) as Partial<FeedGrant> | null;
+    return !!g && g.s === grant.s && g.p === grant.p && g.e === grant.e;
+  } catch {
+    return false;
+  }
 }
 
 /** The token one product's index holds for this address: text, null where none, undefined where the reply is unknown. */

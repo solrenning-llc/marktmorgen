@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** All reminder-setting writes are synthetic intercepted replies; no email/provider action. */
 export async function checkRecoveryAcknowledgment({browser,LOCAL,fixture,is}){
  const scenariosFor=asks=>[
@@ -36,6 +38,7 @@ export async function checkRecoveryAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("#checkout-reminders"),form=section.locator("form");await form.waitFor({state:"visible"});
    const toggle=form.getByRole("checkbox",{name:"Send one reminder after an abandoned checkout",exact:true}),address=form.getByLabel("Your postal address",{exact:true});
+   await waitForReactChangeHandler(page,toggle);
    await toggle.setChecked(true);
    for(const scenario of scenarios){
     await address.fill("  123  Example Lane, Test City  ");

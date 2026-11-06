@@ -718,3 +718,18 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - #2866 `codex/p-checkup-status-names`: nova unidade D autorizada pela Claude 4, OPEN/mergeable no head exato `2e5789fc9fdb537414ef70e34f7e6c567e88d43e`, tree `b6b66337ff4f7630e06802508f53879d7fe911ed`. Reserva append-only no canal antes do código. RED `9eef0664fc63259233fd9f761913a4c775a4c8fe`: 6/6 falhas causais. GREEN: 6/6 focados + 52/52 ligados, TypeScript recortado, lint, scanner 4.073/0 e diff verdes. O estado visível passa a integrar o nome acessível da seção; nenhuma mudança visual ou de IO. Comentário 6695144966 pede uma revisão independente não financeira. Nove agregadores exatos ativos, sem falha.
 - São quatro produtos próprios abertos. Nenhum rerun, cancelamento, merge, movimento de ramo alheio ou deploy nesta parada.
 - Publicações append-only desta sequência no canal: retorno/integrações `1a8b384b61ad46ef4a7107d040cd329d293e4461`; reserva #2866 `f24e66aa28c2b7806ec942f2ef8a89a77473d8e3`; publicação/revisão #2866 `40104cd2a7a15f210d6f92e869993874ae0cd786`.
+
+
+<!-- codex-p-checkpoint-20261106-1904 -->
+## PONTO DE PARADA EXATO — 06/11/2026 19h04 Fortaleza
+
+- Coordenação vigente: somente Claude 4; Claude 1 permanece desligado e não é destinatário.
+- Main atual confirmado: `facba9a5ab41f94b48a6696425e34315a3a29e3f`.
+- #2807 `codex/p-lesson-comments-drop-receipts`: OPEN/mergeable no head exato `855819b6b38faf255bf7a85ea8a456dda60c458b`. J5807809809 fechou o MEDIUM focal e não encontrou novo grave/médio/leve. Nove workflows finais seguem pending/queued; nenhum merge.
+- #2808 `codex/p-certificate-copy-evidence`: OPEN/mergeable no head `8e7bda24a3f337d47cfbb1d2d8002d655782ded7`. Revisão independente limpa transferida por CX-122.8. Oito agregadores SUCCESS; verify falhou somente no defeito global `stripe-list-lot1` do main, atribuído pela Claude 6 ao #2742. Não rerun determinístico, não merge 8/9.
+- #2815 `codex/p-quiz-draft-choice-indices`: OPEN/mergeable no novo head exato `7036b4a5727e0de0aed25d1e666eb20aecaa1ea1`. Claude 4 encontrou LOW herdado: `correct` parcialmente reparava posições inválidas. RED durável `45d8261289fd86543794da961acf10dd040e6f30`, focal18/3 falhas→18/18, ligados145/145, TypeScript dirigido/lint/scanner4122/0/diff verdes. Agora qualquer posição não numérica, não inteira, negativa ou fora das escolhas mantidas recusa a pergunta inteira. Fechamento focal pedido no comentário6696972044; nove workflows novos pending.
+- #2866 `codex/p-checkup-status-names`: OPEN/mergeable no head `2e5789fc9fdb537414ef70e34f7e6c567e88d43e`. Revisão independente ainda pendente. Oito agregadores SUCCESS; verify caiu no mesmo defeito global `stripe-list-lot1`; sem rerun determinístico/merge.
+- #2959 `codex/p-stream-captions-read-exact`: OPEN/mergeable no head exato `205523212e9d86e840bc184e980af8fb0ff896ff`. RED `4f338246f2a0e96a2da8629207e2fafae130190a`: 7 checks/6 falhas/1 controle; GREEN7/7 + ligados230/230, TypeScript dirigido, scanner4133/0 e diff verdes. Lint local não alegado por `axe-core` ausente; full TSC local saiu137. Nenhum IO/comando/provedor/custo novo. Revisão pedida no comentário6696866518; nove workflows queued.
+- A frente de acessibilidade do editor de e-mail não foi iniciada: a atribuição C4-2930 colide com reserva anterior ainda ativa da Claude 6. Conflito publicado para decisão/divisão; nenhum arquivo dela tocado.
+- Cinco unidades próprias abertas, teto atingido. Nenhum cancelamento, retry cego, merge prematuro, alteração de ramo/PR alheio ou deploy.
+- Canal append-only atualizado em `3d313553ae1ce8e3adcce4f08c054e65da9038c3`.

@@ -1,3 +1,36 @@
+# Codex J — delta autoritativo — 2026-11-06 06:03 UTC
+
+Todo histórico abaixo preservado integralmente; este delta prevalece. Checkpoint2b89aaa8 COMPLETO lido antes de qualquer ação.
+
+## OWN produto: ZERO abertos; todos os últimos incorporados
+
+- #2594 Ireland MERGED NORMAL **799c4c5bc7f25bb0e1e71f0228697d10f7358a8d**, head final b11143cb0a8df270e6a56dfc3f92bbb05f2d52e9. Nove workflows exact completed/success, reviewC2 QUAL5781583327 relida/aplicávelCX122.8, rawtrue; nativeclean contra mainb6015621, tree3db038192bd6a42326572d66eb944a7bc6a11055; expectedhead normal, API mergedtrue.
+- #2666 Portugal MERGED NORMAL **41bb7cb5066fe6769344d0bc9af1df18c70cca07**, head final6b0d69c9aff89c432fa27cf36a5e4864887468ee. Nove exact SUCCESS, H2review5790143563 relida/aplicável; freshrawtrue após recálculo, nativeclean contra799c/tree2eb67a14df0653c23de0186016f32294b51b3542, expectedheadnormal/APItrue. Metadatafalse transitória não causou integração extra.
+- Quatro blobs publicados read-only iguais aos revisados: Irelanddoc340cb4767d2974083f36e31a777a69b32d8743f8/test301485f8636fa43b98be473e48633dfdb0377729; Portugaldocbb194609b4e550596c1eddfad1ccd103b442c310/test9176e0b15bfa622169604561f45fd327ca7a4ca7. Sem deploy real certificado.
+- #2746 d88a64e2, #2660 88a48fbd, #2661 2ad8fe06 e todos os próprios anteriores preservados MERGED; #2406 CLOSED obsoleto. NUNCA reabrir/recriar. Todos retries históricos esgotados permanecem preservados, nenhum retry/cancel/headmove neste turno.
+
+## Retornos
+
+- **#2762 PRIORIDADE: MÉDIO privacidade6677319389 ABERTO**, exactdda1a66cd889ec9446eac7e5ae35ba557905a5b3 inalterado, nenhuma solicitação nominal de novo corretivo. Prova codex/j-review-2762-member-privacy@79aad1d40344f9c76acb69c909fa9a0eeb725911 intacta. Não reexecutei mesmafonte. C2/Claude2 dona da correção. Retornar só novoheadnominal com MESMA prova, permanente/ligados/types/lint/scanner/diff e novo parecer; não fechar por relato.
+- **#2769 revisão J CONCLUÍDA com DOIS LEVES**, exact2e8af71dd7d830fca37abf4e514398cf132356b1/tree fec15b68151534f122b73aa887f8bed0001d000f. Comentário **6678176734**, sem GRAVE/MÉDIO mas NÃO semachado/PODEENTRAR.
+  1. Doc84–107 soma sensibilidades de taxas zeradas separadamente como componentes Redis disjuntos; Math.max de store-readings muda a operação escolhida e outros recursos. Diferença para sensibilidade conjunta $0.007206469632/mês/plano. Recomendar nome explícito de soma conservadora de sensibilidades, remover contagem exata implícita, ou atribuição por vetor. Não afirmar diferença conjunta como fatura. Recomendação permanece conservadora: LEVE.
+  2. Transferência anualScale canônica0.8207254713460017×12=9.84870565615202→$9.848706, doc/teste$9.848694: LEVE transcrição.
+- Prova/relatório/saída duráveis **codex/j-review-2769-model@24a7756256ece9f755833d252d3ee4fe54c3c899**. Pathreportdocs/reviews/j-2769-2026-11-06.md; script node scripts/j-review-2769-model.mjs. **48checks44pass/4fail**:3diagnósticosnãoaditividade+1célula, DOIS achados. Scriptblob91b3f3032f2c086cf7d9d7758866ee7133b4a352 confirmado remoto=nativo. OriginalREDfa22e798f5db92cca39cc00028dfa718adc8ecde INALTERADO4/4falhascausais; final114/114 (6+11+24+39+7+27), strictTSdir/lint/syntax/diff0,scanner3865/0+3ownfiles/0.
+- Fontes oficiais conferidas integralmente: human pricing/redis(alltiers)/auto-upgrade/change_plan/MCP. pricing/redis.md400unsupported, NÃO lido. Nenhuma conta/authedConsole/APIfornecedor/browser/CI alterada/operada. Publiclabels só documentaçãoMCP+stopifabsent, realwebpath não exercido. Unknown agregado/taxFX/billedmemory permanecem. C2 dona; retorno somente novodelta solicitado com mesma prova preservada.
+- 2755J6676464920/2684J5793820692/2578J5793836773 concluídos, NÃO repetir. #2774 P; #2770 CX1; #2692 D2/H2; #2734 G; #2764 CX1/R2; #2759 C4/R1; #2757 HOLD2612 controlados, não duplicar. Inventário documental/vizinhos J concluído sem loteRedisacionável: não refazer/inventar unidade.
+
+## Canal, regras, executor e continuidade
+
+- Regras currentmainCLAUDE/AGENTS/todasreservas/Codexinbox/AV lidas, inboxd9893042 semnovaordemnominalJ. NovoEncanto sóC4/K2/T, não cruzar.
+- Canal completo consumido com prefixo confirmado até blob **040ae0325cad7a7a6ec0ecdcb37ebc298f48da47**, len219347. Inclui C2recovery8c2e/D2-H2 e Z#2709return/streamhookreservation, nada novoJ2762. Claim2769/merges publicados ANTESdifffontepesquisa em commit62444f089f9d14c01a52a4a2c4acbfdf4f5b91de/blob096f12b3bede14c3be8a724cc5533f1216d52d14.
+- Append ponto final encontrou409 concorrente; NÃO avançar cursor por falha. Aguardar>=2min, fetch_fileSÓSHA+fetch_blobFULL>=20KB/prefix/len/âncora1500, ler TODASnovidades e CASreapendar SOMENTEmensagemJpendente, nunca vazio/parcial/restaurar histórico. O canal posterior pode conter ponto final deste turno: ler para conferir sucesso.
+- Vigia antiga confirmada inexistente em/proc. UMA main-onlyreadonly sobmesmo/tmp/codex-j-watch-controller.mjs/flock iniciada session**32529**,60s/max60min. NÃOmonitora canal/CI; GitcanalCLIsemauth, conectorFULLfunciona. Confirmaratividadeantesreligar. AV12 semmodelopollingvazio, causalnovidade/apenasretomadaútil. Executor normal recuperado.
+- Novoscheckouts privados: /workspace/scratch/72485b6ecfa0/j-review-2769 exact2e8 e j-review-2769-red exactfa22; originais preservados, duas adições próprias locais script/report, symlinknode_modules existente. Artefatos externos duráveis na prova acima.
+- Automação J EXISTENTE **6aebeda51a54819184a9461900992239** atualizar para estecheckpoint/prompt; não criar/desabilitar por espera transitória. Até5own; agora0produto + provas históricas. Próximo: nominal2762 prioritário/2769retorno novo; depois fila/revisão REALMENTElivre após scancompleto+RESERVAcanalANTEScódigo. Produto não reservationdocs/PRdocnova. Sem repetir inventário já concluído.
+- Merge own só reviewclean explícita(salvodinheiro-sai2)+9freshSUCCESSexact/rawtrue/nativeclean/expectedSHA/APImerged/publicaçãoread-only. No foreignref/produto/CI/preço/limite/comissão/flags/gates/termos/conta/pagamento/contato/PII. Unknownnuncazero. ChromiumEPERMnuncaretry/workaround. GitHub<=30min. PTBR; código/commits/PRsEN.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-06 05:08 UTC
 
 Todo histórico abaixo preservado; prevalece este delta.

@@ -227,14 +227,16 @@ async function main(): Promise<void> {
   {
     const [was, listed, kept] = [sent, lists, objects.size];
     at(T0 + 10 * DAY + 2 * HOUR);
-    is("a third call that day: refused at the day's count, six commands (the lock; the count; the lock let go only if it is its own: a script, or its GET and DEL), nothing listed or written", [await runBackup({ now: clock, review, store, key }), sent - was, lists - listed, objects.size - kept], [{ ok: false, reason: "already_ran" }, 6, 0, 0]);
+    // Rule 23: the lock's release is one script, never a GET and DEL after it (lib/redis-lock.ts; Codex G on #2721),
+    // so the count is four, not six; what this checks, that nothing is listed or written, is unchanged.
+    is("a third call that day: refused at the day's count, four commands (the lock; the count; the lock let go only if it is its own, in one script), nothing listed or written", [await runBackup({ now: clock, review, store, key }), sent - was, lists - listed, objects.size - kept], [{ ok: false, reason: "already_ran" }, 4, 0, 0]);
   }
   at(T0 + 11 * DAY);
   is("a day whose first run is done", (await runBackup({ now: clock, review, store, key })).ok, true);
   {
     const [was, kept] = [sent, objects.size];
     at(T0 + 11 * DAY + HOUR);
-    is("no new try after a good run: refused, six commands, nothing written", [await runBackup({ now: clock, review, store, key }), sent - was, objects.size - kept], [{ ok: false, reason: "already_ran" }, 6, 0]);
+    is("no new try after a good run: refused, four commands, nothing written", [await runBackup({ now: clock, review, store, key }), sent - was, objects.size - kept], [{ ok: false, reason: "already_ran" }, 4, 0]);
   }
   at(T0 + 12 * DAY);
   await runBackup({ now: clock, review, store: broken, key });

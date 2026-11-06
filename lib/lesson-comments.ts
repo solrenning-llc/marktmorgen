@@ -530,6 +530,45 @@ export async function dropComments(courseId: string, lessonIds: string[], room: 
   await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: 0, set: true }]);
 }
 
+/**
+ * Removes the bounded lesson indexes that can still be identified after the
+ * course record is already gone. Confirmed course absence must not make its
+ * product impossible to remove, while an incomplete index or comment read is
+ * still unknown and leaves the product for a later try.
+ */
+export async function dropCommentsAfterCourseGone(courseId: string, room: DataStore): Promise<void> {
+  if (!isRedisConfigured()) return;
+  const what = "the missing course's lesson comment index";
+  const [rawIds] = exactReplies(
+    await redisPipeline([["ZREVRANGE", allKey(courseId), 0, RECENT_KEPT - 1]]),
+    1,
+    what,
+  );
+  const ids = plainList(rawIds);
+  if (!ids || ids.some((id) => typeof id !== "string" || !COMMENT_ID_PATTERN.test(id))) {
+    throw new UnknownReply(what);
+  }
+  const commentIds = ids as string[];
+  const lessonIds = new Set<string>();
+  if (commentIds.length) {
+    const [rawRows] = exactReplies(
+      await redisPipeline([["HMGET", commentsKey(courseId), ...commentIds]]),
+      1,
+      what,
+    );
+    const rows = plainList(rawRows);
+    if (!rows || rows.length !== commentIds.length) throw new UnknownReply(what);
+    rows.forEach((raw, index) => {
+      const comment = parseComment(raw);
+      if (!comment || comment.id !== commentIds[index] || !COMMENT_ID_PATTERN.test(comment.lesson)) {
+        throw new UnknownReply(what);
+      }
+      lessonIds.add(comment.lesson);
+    });
+  }
+  await dropComments(courseId, [...lessonIds], room);
+}
+
 /** Takes away every comment under lessons that are gone from the course. */
 export async function dropLessonComments(courseId: string, lessonIds: string[], room: DataStore): Promise<void> {
   if (!isRedisConfigured() || !lessonIds.length) return;

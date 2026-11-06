@@ -29,6 +29,8 @@
  * another page is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
 import { usesCommands } from "@/lib/saved-block-store";
@@ -83,6 +85,47 @@ export async function claimPictures(statsId: string, productId: string, paths: s
   const [owners] = await redisPipeline([["HMGET", picsKey(statsId), ...paths]]);
   const list = Array.isArray(owners) ? owners : [];
   return paths.filter((_, i) => list[i] !== productId);
+}
+
+/**
+ * Says these pictures, new on this page, are this page's, and returns whether
+ * every one of them may be: each has to be let in through the picture door
+ * for this very save (lib/picture-door.ts, taken here) or be written down as
+ * this page's already (a save tried again after a failure).
+ *
+ * The store's pictures share one folder, and this registry lists only the
+ * pages' pictures: a product's, a link's, a buyer's review photo or an
+ * email's picture sit in the same folder unlisted. So a name that is neither
+ * fresh from the door nor this page's is refused, never claimed; otherwise
+ * taking it off this page later would delete a file another record shows.
+ * Another page's picture is refused as before. A picture from before the door
+ * existed stays on the page that shows it: it is never new there.
+ *
+ * Those taken from the door are claimed even when another is refused, so the
+ * creator's save tried again still finds them; nothing is deleted here.
+ * A take from the door that cannot be confirmed throws (takePictureDoor), so
+ * the page is refused with server_error before it is written.
+ */
+export async function claimNewPictures(statsId: string, pageId: string, paths: string[]): Promise<boolean> {
+  const unique = [...new Set(paths)];
+  if (unique.length === 0) return true;
+  // Not known is ours to say, never "add the picture again" (Claude 4 on #2156): it throws, and the route answers
+  // server_error before anything is written.
+  if (!isRedisConfigured()) throw new UnknownReplyError("page pictures: no database");
+  const [owners] = await redisPipeline([["HMGET", picsKey(statsId), ...unique]]);
+  if (!Array.isArray(owners) || owners.length !== unique.length) throw new UnknownReplyError("page pictures: HMGET");
+  const list = owners;
+  if (unique.some((_, i) => typeof list[i] === "string" && list[i] !== "" && list[i] !== pageId)) return false;
+  const unclaimed = unique.filter((_, i) => list[i] !== pageId);
+  const taken = await takePictureDoor(unclaimed);
+  const fresh = unclaimed.filter((path) => taken.has(path));
+  if (fresh.length) {
+    await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
+    const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
+    const now = Array.isArray(after) ? after : [];
+    if (fresh.some((_, i) => now[i] !== pageId)) return false;
+  }
+  return fresh.length === unclaimed.length;
 }
 
 /**
@@ -178,6 +221,74 @@ function sectionsOfRecord(raw: unknown): string[] {
 export type PageVersion = { at: number; page: SalesPage };
 
 /** The page as it was before each of its last saves, newest first. */
+/**
+ * How many versions of a page are kept, read exactly (LLEN) and at most the
+ * MAX_VERSIONS readVersions reads, so a reading of them is paid for before it
+ * is made (lib/mcp-tools.ts); null when Redis answered in another shape.
+ */
+export async function countVersions(statsId: string | null, productId: string): Promise<number | null> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const replies: unknown = await redisPipeline([["LLEN", versionsKey(statsId, productId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const n = replies[0];
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? Math.min(n, MAX_VERSIONS) : null;
+}
+
+/**
+ * A product's page exactly as kept, for a reader that must never take an
+ * answer it does not know for an empty page (the MCP tools): null when no
+ * page is kept; throws when Redis's answer is not exactly one text or null,
+ * or when the kept record is not a page.
+ */
+export async function readPageExact(statsId: string, productId: string): Promise<{ page: SalesPage | null; bytes: number }> {
+  if (!isRedisConfigured()) throw new Error("the page could not be read");
+  const reply: unknown = await redisPipeline([["GET", pageKey(statsId, productId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new Error("the page could not be read");
+  const raw = reply[0];
+  if (raw === null) return { page: null, bytes: 0 };
+  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) throw new Error("the page could not be read");
+  return { page: pageRecordExact(raw, "the page could not be read"), bytes: Buffer.byteLength(raw, "utf8") };
+}
+
+/** A kept page record decoded: an object with its list of blocks, before the forgiving normalization; anything else throws (Codex J on #1821: JSON null or [] is not an empty page). */
+function pageRecordExact(json: string, what: string): SalesPage {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(json);
+  } catch {
+    throw new Error(what);
+  }
+  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded) || !Array.isArray((decoded as { blocks?: unknown }).blocks)) throw new Error(what);
+  try {
+    return parsePage(decoded);
+  } catch {
+    throw new Error(what);
+  }
+}
+
+/**
+ * A page's kept versions exactly as kept, newest first, for a reader that must
+ * never take an answer it does not know for "no versions" (the MCP tools):
+ * throws when Redis's answer is not exactly one list of texts, or when a kept
+ * version is not one, so nothing is left out unsaid.
+ */
+export async function readVersionsExact(statsId: string, productId: string): Promise<{ versions: PageVersion[]; bytes: number }> {
+  if (!isRedisConfigured()) throw new Error("the page's versions could not be read");
+  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
+  const versions: PageVersion[] = [];
+  let bytes = 0;
+  for (const entry of reply[0] as unknown[]) {
+    if (typeof entry !== "string") throw new Error("the page's versions could not be read");
+    bytes += Buffer.byteLength(entry, "utf8");
+    const cut = entry.indexOf("\n");
+    const at = Number(entry.slice(0, cut));
+    if (cut < 1 || !Number.isFinite(at)) throw new Error("the page's versions could not be read");
+    versions.push({ at, page: pageRecordExact(entry.slice(cut + 1), "the page's versions could not be read") });
+  }
+  return { versions, bytes };
+}
+
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const [list] = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);

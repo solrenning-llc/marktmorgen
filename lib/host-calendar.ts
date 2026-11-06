@@ -42,6 +42,7 @@ import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/l
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { NotConnected, accessFor, disconnect, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
 import { type GoogleCalendar, MAX_READ_CALENDARS, ProviderError, googleCalendars, googleFreeBusy, grantedParts, hostSyncOn } from "@/lib/meet-providers";
+import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 import { hostId } from "@/lib/host-claims";
 import type { Store } from "@/lib/store";
 
@@ -52,9 +53,9 @@ import type { Store } from "@/lib/store";
  * host's calendar filled in the meantime is still never booked twice through
  * us, because every hold is claimed on each host's own list (lib/host-claims.ts).
  */
-export const SYNC_SECONDS = 900;
+export const SYNC_SECONDS = HOST_SYNC_MINUTES * 60;
 /** How old the last good reading may be before the host is blocked: three readings missed. */
-export const STALE_SECONDS = 45 * 60;
+export const STALE_SECONDS = HOST_STALE_MINUTES * 60;
 /** How far ahead busy times are read: past the longest booking horizon. */
 export const HOST_LOOKAHEAD_DAYS = 92;
 /** How long the last reading and the last failure are kept, for the studio. */

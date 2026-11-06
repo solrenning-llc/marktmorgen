@@ -280,10 +280,23 @@ export async function dataUsed(store: DataStore, now = Date.now()): Promise<{ us
   const key = dataKey(store);
   if (!key || !isRedisConfigured()) return null;
   try {
-    const [reply] = await redisPipeline([["HMGET", key, "#", "o"]]);
-    const [used, orders] = Array.isArray(reply) ? reply.map((v) => Number(v ?? 0)) : [NaN, NaN];
-    if (!Number.isFinite(used) || !Number.isFinite(orders)) return null;
-    return { used: Math.max(0, used), orders: Math.max(0, orders), room: dataRoomFor(store, now / 1000) };
+    const replies = await redisPipeline([["HMGET", key, "#", "o"]]);
+    if (replies.length !== 1) return null;
+    const reply = replies[0];
+    if (!Array.isArray(reply) || reply.length !== 2) return null;
+    // HMGET returns a decimal string for a kept hash field and null for one
+    // that is absent. Coercing another value would turn an unknown count into
+    // zero (or a fraction) before callers set aside the work it pays for.
+    const count = (value: unknown): number | null => {
+      if (value === null) return 0;
+      if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
+      const parsed = Number(value);
+      return Number.isSafeInteger(parsed) ? parsed : null;
+    };
+    const used = count(reply[0]);
+    const orders = count(reply[1]);
+    if (used === null || orders === null) return null;
+    return { used, orders, room: dataRoomFor(store, now / 1000) };
   } catch {
     return null;
   }

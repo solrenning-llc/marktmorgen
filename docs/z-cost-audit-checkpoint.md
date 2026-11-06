@@ -1,3 +1,5 @@
+Vigia: a sessão25117 não pôde ser confirmada (resumption devolveu network approval cancelled); novo lançamento no MESMOflock retornou91766, confirmada ainda rodando após espera5s. Esta nota supera a sessão da seção abaixo; uma vigia60s, semCIpolling. Sem escalada depermissão ououtroprocesso de agente confirmado.
+
 # PONTO VIGENTE — 05/11/2026 21h46 Fortaleza: retorno2709 e revisão2724
 
 Checkpoint completo lido ANTESdeagir. CINCO próprias continuam intactas:2602/980a03f5edf5330b027d13df943b87dd12438e8c(+WIPb096e3ee7991b4c56f0bd9c10f7478f4e81ee09d),2615/5bdd9b78092271c730251de190ed92dfcd348a75; SEMPRreports12b09050dde6c858d37f00630c3874d930139e67,assistant7b2f59e2597fb6b1640ac3eb37735872e9a58017,chat1ad267f106319c48c974522b4e32747d397669b8. REDs/WIPs e3retentativasCONSUMIDAS abaixo preservados. Nenhuma sextaunidade, código produtivo, integração main, retry ou sondagemCI própria nesta retomada.

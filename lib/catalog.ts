@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -711,6 +712,23 @@ export async function readCourseListing(store: Store | null, id: string | null |
   return found?.course ? found : null;
 }
 
+/**
+ * A product's heavy rest as GET answered it: null only for an explicit nil, the key productWrites deletes when a
+ * product asks no questions and has no funnel. Anything but the object it writes (every question reading back, and
+ * a funnel that reads or null) throws UnknownReplyError (CX-123 rule 24), never "asks nothing": a checkout would
+ * open without a required question, and an edit would write the product back without its questions and funnel.
+ */
+function extrasRead(raw: unknown): Record<string, unknown> | null {
+  if (raw === null) return null;
+  const value = parseJson(raw);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const { fields, funnel } = value as { fields?: unknown; funnel?: unknown };
+    const whole = Array.isArray(fields) && parseFields(fields).length === fields.length;
+    if (whole && (funnel === null || parseFunnel(funnel))) return value as Record<string, unknown>;
+  }
+  throw new UnknownReplyError("a product's checkout questions and funnel");
+}
+
 /** Products in full, in the order asked (all of them when no ids are given). */
 export async function readProducts(store: Store, ids?: Iterable<string>): Promise<Product[]> {
   const asked = wanted(store, ids);
@@ -725,8 +743,8 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
   asked.forEach((id, i) => {
     const listing = parseJson(raws[i * 2]);
     if (!listing || typeof listing !== "object") return;
-    const extras = parseJson(raws[i * 2 + 1]);
-    const product = parseProduct({ ...(listing as object), ...(extras && typeof extras === "object" ? extras : {}) });
+    const extras = extrasRead(raws[i * 2 + 1]);
+    const product = parseProduct({ ...(listing as object), ...(extras ?? {}) });
     if (product && product.id === id) out.push(product);
   });
   return out;

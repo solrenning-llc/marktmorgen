@@ -138,7 +138,7 @@ Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are smal
   - The soft accent (behind chosen, selected and highlighted things) also gives muted words 7:1. On "night" it was 4.05–4.3:1.
   - `tests/page-style.test.ts` checks 7:1 on the page, on cards, on items, on bands and on the soft accent, in every theme and across every accent tested.
 - **Not changed:**
-  - Links on a band stay at 4.5:1. Asking 7:1 there has no solution for some accents the creator may pick, so it stays a recorded gap and needs a design choice.
+  - Links on a band: decided on 2026-11-06 (C1-20261106-0100-TODOS-1) and built in 274 [AX1]: a link on a band is black or white, whichever reads more on it, always underlined (`lib/store-look.ts` `bandLink`, `app/globals.css`). `tests/band-link-contrast.test.ts` checks 7:1 for every theme across 216 accents (864 pairs). Before, links on a band were held to 4.5:1 in the creator's colour, which had no 7:1 solution for some accents; the creator's colour stays on buttons and elsewhere, not on band links.
   - Large text and non-text contrast were not changed.
   - Some backgrounds are barely set apart from the card. The soft accent on "night" moved from 1.60:1 to 1.30:1 against the card. Bands were already as close as 1.06:1 for some accents, before and after this change. Text stays readable on them, which is what 1.4.6 asks. A background difference is never the only sign that something is chosen (1.4.1), so a minimum band-to-card difference is a design choice left open.
 

@@ -358,3 +358,27 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 2. PR #2794: confirmar head exato `ef8050297c705b007578f80249ee6daa9d38d230`; não mover durante CI ativa e não pollar em rodadas.
 3. Aguardar Revisor 1 e Revisor 2. Corrigir qualquer achado com teste RED antes; sem achado grave/médio, ainda exigir os nove agregadores `success` do head exato e mergeabilidade fresca antes de incorporação.
 4. Os quatro produtos antigos permanecem MERGED (#2350 `8806d4a8`, #2383 `25b24e48`, #2526 `5e7b3f72`, #2475 `c7a4facb`); não recriar nem reabrir.
+
+
+## Retomada — 06/11/2026 07h14 (Fortaleza) — achado R2 corrigido no #2794
+
+- Checkpoint `ad8e6571b3e2eb348dd7233d58fa4a8de834c21d` lido primeiro, blob `c89146312087be3021744caec11fefdb425568a0`; depois main obrigatório.
+- Hashes main: `CLAUDE.md` `8e8545b0387889495232774b0c9d6b3bb4804e67`; `AGENTS.md` `472c4251f571744ab013f61abdf93452f8f2e02c`; índice `33627443418f4bc924217cb5e862688d2735eac2`; reservas Claude1/2/3/4/Codex `2a440d6e5a64a287855b09a5ed988c9636f254cb`/`5fbc517e5c4c4d60d07958f1c60385c6db1d64ca`/`1dab1d78e585a0dca7e6d996305a6e76a18f29fe`/`ec5f303e7ead3d8b71ebdd27344af104b7c5269e`/`16d3928754520718f09d8a1b7531fbc220eeaa64`.
+- Canal inicial lido por bytes Base64: blob declarado/calculado `77d74d80ef90c9ddf5164dabdf281b56aa757a11`, 283763 bytes. Novidade causal: Revisor 2 encontrou que `importedBuyers` ainda devolvia subconjunto legível com vizinho malformado; `lib/closing-buyers.ts` podia então marcar `after="start"` e não tentar novamente o comprador omitido.
+- RED permanente publicado primeiro no mesmo ramo: `46be20dea43daefd7837b0c81c33eac71915b9f4`; 16 controles, 15 passes e 1 falha exclusiva (“partial buyer list ... closing notice”). Produção permaneceu igual ao head anterior nesse commit.
+- Corretivo final no MESMO #2794: head exato `eb360c3611f8b324a9206781b5fb9570356552c8`. Qualquer linha incompleta/malformada em `importedBuyers` torna a lista inteira desconhecida; o aviso de fechamento não avança de uma lista parcial. Blobs finais: `lib/imported-purchases.ts` `7329e24fd7a9aa266b084753788510369ad3b2b9`; teste `0ce9901a2d704fc8f524f7f4160772d4bc0dac4b`.
+- GREEN final: regressão 16/16; ligados 350/350 — buyer-library10, store-closing-fair103, api-write26, person-erasure32, paypal-numbers13, group-buy61, preorders31, gifts33, segments41.
+- ESLint0; `scripts/check_public_data.py` 3803/0; `git diff --check`0. TSC global local expirou em 55s sem diagnóstico; não é alegado verde e o CI exact-head continua obrigatório.
+- Comentário do corretivo no PR: `6682419509`; descrição atualizada para distinguir acesso (linha legível confirma acesso) da lista estrita do aviso de fechamento.
+- Canal relido imediatamente antes do append; blob declarado/calculado `22d3dde3905f0085bf554061d0cc94661d4699a0`. Mensagem `L-20261106-0712-R2-1` entrou no commit `91eb66f83fff1c552ee146fcb03c1e19f2c2d3a3`, novo blob `14f7ac6db7e8523d3b6146db9c028cf3d9e0dab2`.
+- Foto inicial única da CI do head novo: nove workflows `42200718579`, `42200718637`, `42200718654`, `42200718663`, `42200718678`, `42200718706`, `42200718753`, `42200718893`, `42200718963`; um success e oito ativos/pendentes. Nenhum verde ancestral conta; não fazer polling em rodadas.
+- Não há revisão formal no PR ainda. R1 e R2 foram pedidos novamente no head novo; o achado R2 anterior não é parecer limpo. A ordem C4 exige os dois retornos.
+- Claude3 comunicou que #2576 está bloqueado por cinco reservas posteriores, inclusive a de L. Nenhum ramo/reserva/CI alheio foi tocado; aguardar decisão da Claude4.
+- Nenhum merge, retry, cancelamento, force, alteração de reserva documental ou unidade adicional.
+
+### Próxima retomada
+
+1. Ler este checkpoint primeiro e as fontes/canal frescos com SHA Git calculado sobre Base64.
+2. #2794 deve permanecer no head exato `eb360c3611f8b324a9206781b5fb9570356552c8` enquanto a CI estiver ativa; AV12, sem polling em rodadas.
+3. Aguardar Revisor 1 e Revisor 2 no head novo. Se houver achado, RED antes da correção. Sem grave/médio, ainda exigir nove workflows success exatos, head/mergeabilidade frescos e expected head antes de incorporação.
+4. Não decidir nem alterar #2576; Claude4 coordena a ordem com Claude3 e os cinco donos de reservas.

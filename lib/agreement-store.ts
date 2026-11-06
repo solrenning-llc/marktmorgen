@@ -26,7 +26,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, releaseMark } from "@/lib/claim-mark";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
@@ -195,11 +195,17 @@ export async function createAgreement(store: Store, draft: AgreementDraft, now =
   }
 }
 
-/** One agreement by its id, or null. */
+/**
+ * One agreement by its id, or null. Read exactly (CX-123 rule 24): null only when the record is confirmed absent
+ * (GET null) or its text does not read; any other reply throws UnknownReplyError, so a withdraw or a delete is never
+ * told "gone" while the record may still be there.
+ */
 export async function readAgreement(id: string): Promise<Agreement | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(id)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("reading an agreement");
+  const raw = reply[0];
+  if (raw === null) return null;
   try {
     return parseAgreement(JSON.parse(raw));
   } catch {
@@ -533,12 +539,15 @@ async function forget(a: Agreement): Promise<void> {
 export async function forgetAgreementsPerson(sid: string, email: string): Promise<number> {
   if (!isRedisConfigured() || !sid) return 0;
   const person = personSet(sid, email);
-  const [members] = await redisPipeline([["SMEMBERS", person]]);
-  const ids = (Array.isArray(members) ? members.map(String) : []).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
-  if (!ids.length) {
-    await redisPipeline([["DEL", person]]);
-    return 0;
-  }
-  await redisPipeline([...ids.flatMap((id) => [["DEL", ...agreementKeys(id)], ["ZREM", storeKey(sid), id]]), ["DEL", person]]);
+  // Read exactly (CX-123 rule 24): only a confirmed empty set is "none". An unknown list throws before anything is
+  // deleted, so the person's index, the only way to find their agreements, is never removed on a guess.
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
+  const members = listed ? stringList(listed[0]) : null;
+  if (!members) throw new UnknownReplyError("listing a person's agreements");
+  const ids = members.filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
+  const commands: (string | number)[][] = [...ids.flatMap((id) => [["DEL", ...agreementKeys(id)], ["ZREM", storeKey(sid), id]]), ["DEL", person]];
+  // Counted as deleted only when every command answered with a count.
+  const deleted = repliesFor(await redisPipeline(commands), commands.length);
+  if (!deleted || !deleted.every((value) => countOf(value) !== null)) throw new UnknownReplyError("deleting a person's agreements");
   return ids.length;
 }

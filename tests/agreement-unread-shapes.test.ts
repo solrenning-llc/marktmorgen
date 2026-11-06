@@ -18,8 +18,8 @@ import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { type AgreementDraft, readDraft, statusOf } from "@/lib/agreement-rules";
-import { createAgreement, deleteAgreement, forgetAgreementsPerson, readAgreement, withdrawAgreement } from "@/lib/agreement-store";
-import { sendAgain, sendAgreementEmail } from "@/lib/agreements";
+import { createAgreement, deleteAgreement, forgetAgreementsPerson, readAgreement, signAgreement, withdrawAgreement } from "@/lib/agreement-store";
+import { resendSignedCopy, sendAgain, sendAgreementEmail } from "@/lib/agreements";
 import { POST as studioRoute } from "@/app/api/store/agreements/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -137,6 +137,15 @@ async function main(): Promise<void> {
     await withdrawAgreement(store, made.agreement.id);
     await deleteAgreement(store, made.agreement.id);
   }
+  const signedOne = await make("signer-copy@example.com");
+  const signed = await signAgreement(store, signedOne.agreement.id, { n: 1, sha256: signedOne.version.sha256, name: "Synthetic Signer", email: "signer-copy@example.com", consent: true, ip: "203.0.113.9" }, "Synthetic Signer");
+  is("signed, healthy", signed.ok, true);
+  const later = Date.now() + 25 * 3_600_000;
+  // The first GET is the read that decides the copy; the second, under the lock, writes down that it went.
+  let gets = 0;
+  const copyBefore = mails.length;
+  const copy = await under((cmd) => cmd[0] === "GET" && cmd[1] === `nl:agree:r:${signedOne.agreement.id}` && ++gets === 2, [1], () => resendSignedCopy(store, signedOne.agreement.id, later));
+  is("the signed copy again, its writing down unknown: reported as sent, once, nothing thrown", [copy.threw, copy.value, mails.length - copyBefore], [false, { ok: true, sent: true }, 1]);
   // Through the studio: an unknown read while writing down the send is not "could not be done", which would invite
   // a second agreement, and a second email, for the same person.
   const records = () => [...redis.keys()].filter((k) => k.startsWith("nl:agree:r:")).length;

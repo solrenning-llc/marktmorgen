@@ -139,7 +139,8 @@ export const es: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog de ${store}`,
-  blogEmpty: "Todavía no hay nada aquí.",
+  blogPastEnd: "No hay entradas en esta página",
+  blogPastEndBody: "Esta página está después de la última entrada.",
   blogMinutes: (n) => `${n} min de lectura`,
   blogNewer: "Entradas más recientes",
   blogOlder: "Entradas anteriores",
@@ -152,6 +153,7 @@ export const es: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `ahorras un ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Elige una opción de ${title}`,
+  chooseOne: "Elige una",
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Cómo pagar ${title}`,

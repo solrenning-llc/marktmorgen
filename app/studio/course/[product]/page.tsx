@@ -79,8 +79,9 @@ export default async function StudioCoursePage({
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for.
   const writing = await autoWriting(videoPaths).catch(() => ({}));
-  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
-  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
+  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card. A read that
+  // failed is null and is said on the page, never shown as no refund owed (CX-123 rule 30).
+  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> | null = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => null) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
   const { students, total } = await studentsOf(course, 500);
@@ -167,7 +168,16 @@ export default async function StudioCoursePage({
           </span>
         </div>
 
-        {owedRows.length ? (
+        {owedRows === null ? (
+          <section aria-labelledby="captions-refunds-unread" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds-unread>
+            <h2 id="captions-refunds-unread" className="text-base font-bold text-ink">
+              Refunds for AI captions could not be checked
+            </h2>
+            <p className="mt-2 text-sm text-ink">
+              We could not read whether a refund for AI captions is still waiting for Stripe. Reload this page to try again. If this keeps happening, write to {SUPPORT_EMAIL}.
+            </p>
+          </section>
+        ) : owedRows.length ? (
           <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
             <h2 id="captions-refunds" className="text-base font-bold text-ink">
               Refunds for AI captions not confirmed yet

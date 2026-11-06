@@ -20,6 +20,7 @@
  * once ask for the same one and money is never returned twice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { askStream, noteCaptionLanguages, streamCaptions, streamConfig, streamRecord } from "@/lib/stream";
 import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
 import { captionLabel } from "@/lib/captions";
@@ -353,15 +354,23 @@ export async function autoWriting(pathnames: string[]): Promise<Record<string, s
   return out;
 }
 
-/** Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and whether automatic looks have stopped. */
+/**
+ * Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and
+ * whether automatic looks have stopped. A reply in an unknown shape throws UnknownReplyError, never "none owed"
+ * (CX-123 rules 24 and 30): money owed is never hidden by a read that failed. A record gone (expired) is not owed.
+ */
 export async function autoRefundsOwed(folder: string): Promise<{ id: string; cents: number; stuck: boolean }[]> {
   if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return [];
-  const [members] = await redisPipeline([["SMEMBERS", owedKey(folder)]]);
-  const ids = (Array.isArray(members) ? members : []).filter((m): m is string => typeof m === "string" && STREAM_ID_PATTERN.test(m)).sort().slice(0, 100);
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1)?.[0]);
+  if (!members || !members.every((m) => STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the caption refunds owed to a store");
+  const ids = members.sort().slice(0, 100);
   if (!ids.length) return [];
-  const rows = await redisPipeline(ids.map((id) => ["GET", pendingKey(id)]));
+  const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
+  if (!rows) throw new UnknownReplyError("the caption refunds owed to a store");
   return ids.flatMap((id, i) => {
+    if (rows[i] === null) return [];
     const pending = parsePending(rows[i]);
+    if (!pending) throw new UnknownReplyError("a caption refund owed to a store");
     return pending?.owed && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
   });
 }

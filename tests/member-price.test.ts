@@ -59,6 +59,7 @@ import { mintPass, passCookieName } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 
+process.env.STRIPE_SECRET_KEY = "sk_test_member_price_only";
 const OWNER = "owner@example.com";
 const MEMBER = "member@example.com";
 const HANDLE = "harbor";
@@ -285,8 +286,9 @@ async function main(): Promise<void> {
   sessionsByEmail = { [MEMBER]: "garbage" };
   is("Stripe answering in another shape: unknown", await check(), { state: "unknown" });
   sessionsByEmail = {};
-  const guideNow = (await readProduct(store, guide.product.id))!;
-  is("a product no rule covers: nothing asked", [await memberPriceFor(await current(), guideNow, proved), sessionReads], [{ state: "none" }, 0]);
+  sessionReads = 0;
+  const clubNow = (await readProduct(store, club.product.id))!;
+  is("a product no rule can cover (a membership): nothing asked", [await memberPriceFor(await current(), clubNow, proved), sessionReads], [{ state: "none" }, 0]);
 
   const noRoom = { ...(await current()), period: null } as unknown as Awaited<ReturnType<typeof current>>;
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active")] };

@@ -28,6 +28,7 @@ import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { AB_COOKIE, abMeta, count as countTest, expectedShareB, readBucket, readCounts, versionFor, winner } from "@/lib/headline-test";
 import { readPage } from "@/lib/sales-page-store";
 import { readCountry } from "@/lib/fair-price";
+import { memberClaim, readMemberClaim } from "@/lib/member-price";
 import { pageShown, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
 import { markFromReferer } from "@/lib/page-funnel";
@@ -97,6 +98,9 @@ export async function POST(request: NextRequest) {
   // version of the sentence this code shows. Checked again where the charge
   // is built, so nothing digital is opened without it.
   let digitalConsent: DigitalConsent | null = null;
+  // The member price the page showed (lib/member-price.ts), as a percentage;
+  // 0 for none. Never trusted: proved again below for this browser's address.
+  let memberAsked = 0;
   // The page the form was on, when it is not the product's own (renew, course): only those two words count.
   let from: "renew" | "course" | "" = "";
   try {
@@ -136,6 +140,7 @@ export async function POST(request: NextRequest) {
     remind = form.get("remind") === "yes";
     remindEmail = remind ? normaliseEmail(read("remind_email", MAX_EMAIL_LENGTH + 1)) : "";
     remindVersion = remind ? read("remind_v", 40) : "";
+    memberAsked = readMemberClaim(form.get("member"));
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -260,6 +265,16 @@ export async function POST(request: NextRequest) {
       }
     }
     const ads = await adsCheckout(request, store);
+    // A member price the page showed: charged only when it is exactly what
+    // this address is proved to get now; otherwise back to the page, with
+    // nothing charged, rather than a price it did not show. Not on a payment
+    // plan, which is never lowered.
+    let member: number | undefined;
+    if (memberAsked && !inPlan) {
+      const claim = await memberClaim(store, product, memberAsked, request.cookies);
+      if (!claim.ok) return away(`/@${store.handle}/p/${product.id}?member=changed#buy`);
+      member = claim.member;
+    }
     // Only where the box was offered, for a purchase of the buyer's own, with an address that is one.
     const reminding = remind && !gift && !group && !preorder && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderOffered(store, product);
     const held = await withStockHold(store, product, (holding) =>
@@ -297,6 +312,7 @@ export async function POST(request: NextRequest) {
         // Where the buyer's connection is, for a fair price for that country
         // (lib/fair-price.ts), the same header the page read to show it.
         country: readCountry(request.headers.get("x-vercel-ip-country")),
+        member,
         // A funnel of pages this product is a step of, read off the page the
         // button was pressed on like the tags above (lib/page-funnel.ts).
         funnel: funnel ?? undefined,

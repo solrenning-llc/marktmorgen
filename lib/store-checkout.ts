@@ -15,9 +15,10 @@ import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
 import { currentMeta } from "@/lib/tier-rules";
-import { saleOff } from "@/lib/store-sale";
+import { saleOff, saleable } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
-import { fairCoupon } from "@/lib/fair-coupon";
+import { fairCoupon, memberCoupon } from "@/lib/fair-coupon";
+import { isMemberPercent } from "@/lib/member-price-rules";
 import { introCoupon } from "@/lib/intro-coupon";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
@@ -221,6 +222,13 @@ export async function createCheckout(
      * the route from the request; "" when it is not known.
      */
     country?: string;
+    /**
+     * A member price (lib/member-price.ts, 620 [SZ4]): the percentage the page
+     * showed, proved again by the route for this browser's address
+     * (memberClaim) before it is passed here. Taken off like a fair price,
+     * when it takes off the most.
+     */
+    member?: number;
     /** No free trial: somebody coming back has had theirs. */
     noTrial?: boolean;
     /**
@@ -480,6 +488,10 @@ export async function createCheckout(
   // the page used to show the price, and taken off the same way as a sale,
   // when it takes off more than the sale does. Never both.
   const fairOffNow = !extras.coupon && !plan && !membership ? fairOff(store.fair, product, extras.country ?? "") : 0;
+  // A member price (lib/member-price.ts), already proved by the route: on
+  // what a sale covers, the same way, when it takes off more than a sale or
+  // a fair price does. Never two.
+  const memberOffNow = !extras.coupon && !plan && !membership && saleable(product) && isMemberPercent(extras.member) ? extras.member : 0;
   // A membership's introductory price (lib/intro-price.ts), unless a
   // come-back offer replaces it: one discount at a time, as everywhere here.
   const intro = membership && !extras.coupon ? activeIntro(product, store.tiers) : null;
@@ -504,6 +516,10 @@ export async function createCheckout(
     body.set("metadata[intro_cents]", String(intro.cents));
     body.set("metadata[regular_cents]", String(product.priceCents));
     body.set("subscription_data[metadata][intro]", String(intro.count));
+  } else if (memberOffNow > saleOffNow && memberOffNow > fairOffNow) {
+    body.set("discounts[0][coupon]", await memberCoupon(store.stripeAccountId, memberOffNow));
+    body.set("metadata[member]", String(memberOffNow));
+    mayComeOff.push({ kind: "percent", percent: memberOffNow });
   } else if (fairOffNow > saleOffNow) {
     body.set("discounts[0][coupon]", await fairCoupon(store.stripeAccountId, fairOffNow));
     body.set("metadata[fair]", `${extras.country}:${fairOffNow}`);

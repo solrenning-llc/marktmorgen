@@ -179,7 +179,7 @@ async function main() {
     reply = { status: 200, body: { data: [], has_more: false } };
     const empty = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB }, take);
     is("a complete, empty page: none yet, in plain text", [html(empty).includes("no invoices"), html(empty).includes("<a ")], [true, false]);
-    reply = { status: 200, body: { data: Array.from({ length: PLAN_INVOICES_SHOWN }, (_, n) => invoice({ id: `in_Many${String(n).padStart(8, "0")}` })), has_more: true };
+    reply = { status: 200, body: { data: Array.from({ length: PLAN_INVOICES_SHOWN }, (_, n) => invoice({ id: `in_Many${String(n).padStart(8, "0")}` })), has_more: true } };
     const many = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB }, take);
     is("more than a page: says only the latest are shown", html(many).includes(`your ${PLAN_INVOICES_SHOWN} most recent invoices`), true);
     is("a malformed id is never sent to Stripe", [await planInvoicesOf({ stripeCustomerId: "cus_x/../charges", subscriptionId: SUB }, take), asked.some((a) => a.path.includes("charges"))], [{ state: "none" }, false]);

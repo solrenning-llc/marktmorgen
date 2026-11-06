@@ -12,6 +12,14 @@
  * what it did, refuses what is not owed, and never writes for a person whose
  * marks could not be read; a retired benefit stays owed for what was owed
  * before it was retired; a deleted person's marks go with them.
+ *
+ * Review of #3014 (Claude 6): a membership whose first charge after a free
+ * trial failed goes from trialing to past_due, then unpaid, without anyone
+ * paying; it is owed nothing until a paid invoice after the trial is read
+ * from Stripe, and a proof that cannot be read is unknown, never owed. A
+ * person's place in the list of people with marks is counted in the data
+ * room once, and given back with them; a deleted store's DEL answers are
+ * checked.
  */
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -23,7 +31,9 @@ import {
   monthWindow,
   owedNow,
 } from "@/lib/tier-benefit-rules";
-import { addBenefit, benefitsDue, forgetBenefitPerson, giveBenefit, readBenefits, retireBenefit, undoGiven } from "@/lib/tier-benefits";
+import { addBenefit, benefitsDue, forgetBenefitPerson, forgetStoreBenefits, giveBenefit, readBenefits, retireBenefit, undoGiven } from "@/lib/tier-benefits";
+import { dataKey } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
 import { personKey } from "@/lib/person-key";
 import { ERASERS } from "@/lib/person-erasure";
 import { PERSON_DATA } from "@/lib/person-data";
@@ -41,6 +51,25 @@ const ANCHOR = Date.UTC(2027, 0, 31, 9) / 1000;
 let products = { basic: "", pro: "", book: "" };
 let mode: "ok" | "error" | "garbled" | "endless" = "ok";
 let stripeCalls = 0;
+let invoiceCalls = 0;
+
+/** One invoice of a membership; amount_paid 0 for a free trial's, which is "paid" with no charge. */
+const invoice = (subId: string, created: number, status = "paid", amountPaid = 1000) => ({
+  id: `in_${subId.slice(4)}${created}`,
+  object: "invoice",
+  status,
+  created,
+  amount_paid: status === "paid" ? amountPaid : 0,
+  parent: { type: "subscription_details", subscription_details: { subscription: subId } },
+});
+/** The newest paid invoices of each membership, as Stripe lists them (newest first); "garbled" answers in another shape. */
+let paidOf: Record<string, unknown[] | "garbled"> = {
+  // Paid before: a renewal being retried, and a member who chose a pause (its invoices voided meanwhile).
+  sub_pastdue0001: [invoice("sub_pastdue0001", ANCHOR)],
+  sub_paused00001: [invoice("sub_paused00001", ANCHOR)],
+};
+/** Memberships added to the list for one part only. */
+let extra: Record<string, unknown>[] = [];
 
 const sub = (id: string, email: string, product: string, extra: Record<string, unknown> = {}) => ({
   id,
@@ -49,6 +78,8 @@ const sub = (id: string, email: string, product: string, extra: Record<string, u
   billing_cycle_anchor: ANCHOR,
   metadata: { store: "benefitstore", product },
   customer: { id: `cus_${id.slice(4)}`, email },
+  trial_end: null,
+  latest_invoice: invoice(id, ANCHOR),
   items: { data: [{ price: { unit_amount: 1000, currency: "usd", metadata: {}, recurring: { interval: "month", interval_count: 1 } }, current_period_end: NOW + 10 * DAY }] },
   ...extra,
 });
@@ -56,12 +87,13 @@ const sub = (id: string, email: string, product: string, extra: Record<string, u
 const subs = () => [
   sub("sub_active00001", "Ann@Example.com", products.basic),
   sub("sub_trial000001", "bea@example.com", products.basic, { status: "trialing", billing_cycle_anchor: NOW + 5 * DAY }),
-  sub("sub_pastdue0001", "cal@example.com", products.basic, { status: "past_due" }),
-  sub("sub_paused00001", "dee@example.com", products.basic, { pause_collection: { behavior: "void", resumes_at: NOW + 20 * DAY }, metadata: { store: "benefitstore", product: products.basic, pause_from: String(NOW - DAY) } }),
+  sub("sub_pastdue0001", "cal@example.com", products.basic, { status: "past_due", latest_invoice: invoice("sub_pastdue0001", NOW - 2 * DAY, "open") }),
+  sub("sub_paused00001", "dee@example.com", products.basic, { pause_collection: { behavior: "void", resumes_at: NOW + 20 * DAY }, metadata: { store: "benefitstore", product: products.basic, pause_from: String(NOW - DAY) }, latest_invoice: invoice("sub_paused00001", NOW - DAY, "void") }),
   sub("sub_otherst0001", "eve@example.com", products.basic, { metadata: { store: "another", product: products.basic } }),
   sub("sub_planpay0001", "fay@example.com", products.basic, { metadata: { store: "benefitstore", product: products.basic, kind: "plan" } }),
   sub("sub_proplan0001", "gus@example.com", products.pro),
   sub("sub_ended000001", "hal@example.com", products.basic, { status: "canceled" }),
+  ...extra,
 ];
 
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -79,6 +111,13 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     }
     return answer({ object: "list", data: subs(), has_more: false });
   }
+  if (path === "/invoices") {
+    invoiceCalls += 1;
+    const held = paidOf[url.searchParams.get("subscription") ?? ""] ?? [];
+    if (held === "garbled" || url.searchParams.get("status") !== "paid") return answer({ object: "list", data: "nothing", has_more: false });
+    const limit = Number(url.searchParams.get("limit") ?? "10");
+    return answer({ object: "list", data: held.slice(0, limit), has_more: held.length > limit });
+  }
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
@@ -91,11 +130,15 @@ async function main(): Promise<void> {
   is("before the anchor there is no month yet", monthWindow(NOW + DAY, NOW), null);
   const once = { id: "b000000000001", product: "p1", text: "A signed print", cadence: "once" as const, since: ANCHOR - DAY, retired: 0 };
   const monthly = { ...once, id: "b000000000002", text: "A monthly call", cadence: "monthly" as const };
-  const member = { sub: "sub_x", status: "active", product: "p1", anchor: ANCHOR, start: ANCHOR, paused: false };
+  const member = { sub: "sub_x", status: "active", product: "p1", anchor: ANCHOR, start: ANCHOR, paused: false, paidNow: true, paidEver: true as boolean | null };
   is("once, paid: owed, with no date promised", owedNow(once, member, NOW), { owed: true, period: "once", from: ANCHOR, until: null });
   is("monthly, paid: owed for this month, until it ends", owedNow(monthly, member, NOW), { owed: true, period: `m${win?.from}`, from: win?.from, until: win?.until });
   is("in a free trial: not owed yet", [owedNow(once, { ...member, status: "trialing" }, NOW), owedNow(monthly, { ...member, status: "trialing" }, NOW)], [{ owed: false, why: "trial" }, { owed: false, why: "trial" }]);
   is("a payment being retried: the one-time benefit was paid for, this month is not yet", [owedNow(once, { ...member, status: "past_due" }, NOW).owed, owedNow(monthly, { ...member, status: "past_due" }, NOW)], [true, { owed: false, why: "unpaid" }]);
+  const never = { ...member, paidNow: false, paidEver: false };
+  is("the first charge after a free trial failed (past_due, then unpaid): never paid, so not owed even once", [owedNow(once, { ...never, status: "past_due" }, NOW), owedNow(once, { ...never, status: "unpaid" }, NOW), owedNow(monthly, { ...never, status: "past_due" }, NOW)], [{ owed: false, why: "unpaid" }, { owed: false, why: "unpaid" }, { owed: false, why: "unpaid" }]);
+  is("a payment that could not be read either way: unknown, never owed", owedNow(once, { ...member, status: "past_due", paidNow: false, paidEver: null }, NOW), { owed: false, why: "unknown" });
+  is("running, but the invoice of the period running now is not paid yet (the hour after a free trial ends): owed nothing yet", [owedNow(once, never, NOW), owedNow(monthly, never, NOW)], [{ owed: false, why: "unpaid" }, { owed: false, why: "unpaid" }]);
   is("paused: no monthly benefit while paused", owedNow(monthly, { ...member, paused: true }, NOW), { owed: false, why: "paused" });
   is("another membership's benefit is not this member's", owedNow(once, { ...member, product: "p2" }, NOW), { owed: false, why: "none" });
   is("retired before the member joined: not owed", owedNow({ ...once, retired: ANCHOR - 1 }, member, NOW), { owed: false, why: "retired" });
@@ -192,6 +235,38 @@ async function main(): Promise<void> {
   is("a benefit that cannot be read: the list is unknown", [await readBenefits(store), (await benefitsDue(store, NOW * 1000)).state], [null, "unknown"]);
   await redis.pipeline([["HDEL", `nl:tben:${store.statsId}`, "b123456789abc"]]);
 
+  part("A first payment that never went through is never owed");
+  const failedAt = NOW - 3 * DAY;
+  extra = [
+    // Trial over three days ago, its first charge failed: past_due.
+    sub("sub_trialfail01", "ivy@example.com", products.basic, { status: "past_due", start_date: NOW - 17 * DAY, billing_cycle_anchor: failedAt, trial_end: failedAt, latest_invoice: invoice("sub_trialfail01", failedAt, "open") }),
+    // Trial over 26 days ago, never paid, retries over: unpaid, its period moved on all the same.
+    sub("sub_trialunpd01", "jo@example.com", products.basic, { status: "unpaid", start_date: NOW - 40 * DAY, billing_cycle_anchor: NOW - 26 * DAY, trial_end: NOW - 26 * DAY, latest_invoice: invoice("sub_trialunpd01", NOW - DAY, "draft") }),
+    // Trial over an hour ago, its first invoice not charged yet: active, nothing paid.
+    sub("sub_trialhour01", "kit@example.com", products.basic, { status: "active", start_date: NOW - 14 * DAY, billing_cycle_anchor: NOW - 3600, trial_end: NOW - 3600, latest_invoice: invoice("sub_trialhour01", NOW - 3600, "draft") }),
+    // A renewal being retried whose paid invoices come back in another shape.
+    sub("sub_garbled0001", "lee@example.com", products.basic, { status: "past_due", latest_invoice: invoice("sub_garbled0001", NOW - 2 * DAY, "open") }),
+  ];
+  paidOf = {
+    ...paidOf,
+    sub_trialfail01: [invoice("sub_trialfail01", NOW - 17 * DAY, "paid", 0)],
+    sub_trialunpd01: [],
+    sub_trialhour01: [invoice("sub_trialhour01", NOW - 14 * DAY, "paid", 0)],
+    sub_garbled0001: "garbled",
+  };
+  const fresh = ["sub_trialfail01", "sub_trialunpd01", "sub_trialhour01", "sub_garbled0001"];
+  const unpaidView = await benefitsDue(store, NOW * 1000);
+  if (unpaidView.state !== "ok") throw new Error(`not read: ${unpaidView.state}`);
+  is("never owed the signed print nor the monthly call", unpaidView.rows.filter((r) => fresh.includes(r.sub)).map((r) => [r.sub, r.benefit]), []);
+  is("the three who never paid wait as unpaid; the one that cannot be read is said as unreadable, not as waiting", [unpaidView.waiting[print.benefit.id].unpaid, unpaidView.unreadable], [3, 1]);
+  is("the members paid before are still owed it", unpaidView.rows.filter((r) => r.benefit === print.benefit.id).map((r) => r.sub).sort(), ["sub_active00001", "sub_pastdue0001", "sub_paused00001"]);
+  is(
+    "and marking them gives nothing: three not owed, one unknown",
+    await giveBenefit(store, by, print.benefit.id, fresh.map((s) => ({ sub: s, period: "once" })), NOW * 1000),
+    { ok: true, given: 0, already: 0, notOwed: 3, unknown: 1 },
+  );
+  extra = [];
+
   part("Retiring a benefit keeps what was owed before");
   is("retired", await retireBenefit(store, call.benefit.id, NOW * 1000), { ok: true });
   const retired = await benefitsDue(store, NOW * 1000);
@@ -207,6 +282,28 @@ async function main(): Promise<void> {
   is("no mark left", gone.state === "ok" ? gone.rows.find((r) => r.benefit === print.benefit.id && r.sub === "sub_active00001")?.given : "x", null);
   is("the erasure runs it", ERASERS.some((e) => e.module === "lib/tier-benefits.ts"), true);
   is("and the creator is told", PERSON_DATA.some((p) => p.file === "lib/tier-benefits.ts" && p.how === "erased"), true);
+
+  part("A person's place in the list is counted once, and given back with them");
+  const room = async () => Number((await redis.pipeline([["HGET", dataKey(store)!, "tb"]]))[0] ?? 0);
+  const before = await room();
+  await giveBenefit(store, by, print.benefit.id, [{ sub: "sub_active00001", period: "once" }], NOW * 1000);
+  const onePrint = await room();
+  is("the first mark: the mark and the person's place", onePrint - before, dataBytes([`${print.benefit.id}:sub_active00001:once`, JSON.stringify({ at: NOW, by })], 1) + dataBytes([annKey], 1));
+  await giveBenefit(store, by, call.benefit.id, [{ sub: "sub_active00001", period: `m${win?.from}` }], NOW * 1000);
+  is("a second mark for the same person: only the mark, their place already counted", (await room()) - onePrint, dataBytes([`${call.benefit.id}:sub_active00001:m${win?.from}`, JSON.stringify({ at: NOW, by })], 1));
+  await forgetBenefitPerson(store, annKey);
+  is("forgotten: every byte given back, their place included", await room(), before);
+
+  part("A deleted store's benefits: an answer that cannot be read is not done");
+  const realPipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await realPipeline(commands);
+    return commands.map((c, i) => (c[0] === "DEL" ? "OK?" : replies[i]));
+  }) as typeof redis.pipeline;
+  const blindDelete = await forgetStoreBenefits(store.statsId).then(() => "done", (error: unknown) => (error instanceof Error ? error.name : "thrown"));
+  redis.pipeline = realPipeline;
+  is("a DEL answered in another shape throws, never said as done", blindDelete, "UnknownReplyError");
+  is("read answers: done, and nothing kept", [await forgetStoreBenefits(store.statsId).then(() => "done"), await readBenefits(store)], ["done", []]);
 
   part("The studio and its door");
   const route = readFileSync("app/api/store/tier-benefits/route.ts", "utf8");

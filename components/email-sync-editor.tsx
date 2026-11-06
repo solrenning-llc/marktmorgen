@@ -80,6 +80,9 @@ function outcome(job: JobView, local: boolean): { text: string; tone: "ok" | "wa
   return { text: `Failed after ${job.attempts} ${job.attempts === 1 ? "try" : "tries"}`, tone: "bad" };
 }
 
+/** Said when the account's lists were not read: never drawn as an account with none, or as still reading. */
+const LISTS_UNREAD = "Your account's lists could not be read just now. Press Refresh list to try again.";
+
 /**
  * The creator's own email platform: connect it with an API key, pick where
  * people go, choose who is sent and with which tags, test it, and see the
@@ -151,10 +154,12 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
       .then((response) => response.json() as Promise<{ ok?: boolean; targets?: Target[]; message?: string }>)
       .then((data) => {
         if (cancelled) return;
-        if (data.ok && data.targets) setTargets(data.targets);
-        else if (data.message) setError(data.message);
+        if (data.ok && Array.isArray(data.targets)) setTargets(data.targets);
+        else setError(data.message ?? LISTS_UNREAD);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setError(LISTS_UNREAD);
+      });
     return () => {
       cancelled = true;
     };
@@ -166,7 +171,11 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
     if (!data?.view?.connected) return;
     setKey("");
     setReplacing(false);
-    setTargets(data.targets ?? []);
+    if (Array.isArray(data.targets)) setTargets(data.targets);
+    else {
+      setTargets(null);
+      setError(LISTS_UNREAD);
+    }
     setTarget(data.view.connected.target?.id ?? "");
     toast(`${byKey(data.view.connected.provider).name} connected.`);
   }
@@ -283,7 +292,7 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
                   className="field min-w-0 flex-1"
                 >
                   <option value="" disabled>
-                    {targets === null && !connected.target ? "Reading your account…" : `Choose ${info.target === "audience" ? "an" : "a"} ${info.target}`}
+                    {targets === null && !connected.target && error !== LISTS_UNREAD ? "Reading your account…" : `Choose ${info.target === "audience" ? "an" : "a"} ${info.target}`}
                   </option>
                   {options.map((t) => (
                     <option key={t.id} value={t.id}>

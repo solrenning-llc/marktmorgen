@@ -29,4 +29,6 @@ export function StudioHeader() { return null; }
 export function StoreTracking() { return null; }
 export function StudioStorePin({ children }: { children: ReactNode }) { return <>{children}</>; }
 export function AiOn({ children }: { children: ReactNode }) { return <>{children}</>; }
-export function BlogEditor() { return <div data-synthetic-editor="true" />; }
+export function BlogEditor({ post }: { post: { id: string | null; title: string; body: string } }) {
+  return <div data-synthetic-editor="true" data-post-id={post.id ?? "new"} data-post-title={post.title} data-post-body={post.body} />;
+}

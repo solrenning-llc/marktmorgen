@@ -72,3 +72,27 @@ test("healthy studio editing still opens the actual editor slot", async () => {
   const html = renderToStaticMarkup(await StudioBlogPage({ searchParams: Promise.resolve({ edit: value.id }) }));
   assert.match(html, /data-synthetic-editor="true"/);
 });
+
+test("an unread list still offers a new post without claiming the list is empty", async () => {
+  configure(await fixture, value, "list");
+  const html = renderToStaticMarkup(await StudioBlogPage({ searchParams: Promise.resolve({}) }));
+  assert.match(html, /Posts couldn&#x27;t be loaded\. Reload to try again\./);
+  assert.doesNotMatch(html, /Posts \(0\)|No posts yet/);
+  assert.match(html, /href="\/studio\/blog\?edit=new"/);
+});
+
+test("a new editor does not depend on reading every previous post", async () => {
+  configure(await fixture, value, "list");
+  const html = renderToStaticMarkup(await StudioBlogPage({ searchParams: Promise.resolve({ edit: "new" }) }));
+  assert.match(html, /Posts couldn&#x27;t be loaded\. Reload to try again\./);
+  assert.doesNotMatch(html, /Posts \(0\)|No posts yet/);
+  assert.match(html, /data-synthetic-editor="true" data-post-id="new" data-post-title="" data-post-body=""/);
+});
+
+test("an independently readable post keeps its complete editor when the list is unread", async () => {
+  configure(await fixture, value, "list");
+  const html = renderToStaticMarkup(await StudioBlogPage({ searchParams: Promise.resolve({ edit: value.id }) }));
+  assert.match(html, /Posts couldn&#x27;t be loaded\. Reload to try again\./);
+  assert.doesNotMatch(html, /Posts \(0\)|No posts yet/);
+  assert.match(html, /data-synthetic-editor="true" data-post-id="0000000001" data-post-title="Fictional bread guide" data-post-body="Complete fictional words\."/);
+});

@@ -35,11 +35,11 @@ const LANDING_SLOT = (productId: string) => `al:${productId}`;
 /** Set in the same step as the landings are dropped with their page: while it is there, no save writes them again. */
 const goneKey = (statsId: string, productId: string) => `${landingKey(statsId, productId)}:gone`;
 /**
- * The ids a landing record may be kept under: a product's (lib/sales-page.ts) or a site page's (site-<id>). Anything
- * else, such as "<product>:gone", would name another key of this family (Codex G, #1947: the deletion fence), so it
- * is never read, written or deleted here.
+ * The ids a landing record may be kept under: a product's (lib/sales-page.ts) or a site page's (site-<id>), letters,
+ * digits and hyphens. Anything else, such as "<product>:gone" (the key separator), would name another key of this
+ * family (Codex G, #1947: the deletion fence), so it is never deleted here.
  */
-const LANDING_ID = /^(?:site-)?[a-z0-9]{6,40}$/;
+const LANDING_ID = /^[a-z0-9-]{1,48}$/;
 
 /**
  * How long a dropped product's landings stay closed to saves, in seconds: far longer than any request runs, so a save

@@ -33,7 +33,7 @@
  * from 2025 on, which is why the version is pinned here.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark } from "@/lib/claim-mark";
 import { isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type Store, storeForEmail, storeForId } from "@/lib/store";
@@ -112,23 +112,27 @@ export function paidOn(invoice: Invoice, refunded: number): number {
  * Puts credits already written, and still owed, back on the lists they are paid from: their inviter's credits and
  * the owed set. Both are sets, so a credit listed already is unchanged. The invited store's own bonus is relisted
  * with them, since it was listed by the same write. One read and one write for all of them (Claude 4 on #2722).
- * Never throws.
+ * Throws UnknownReplyError when it cannot be sure (Codex N on #2722): the read not answered exactly, a credit
+ * written before that does not read back whole (only the bonus may be absent: it is written only with a paid
+ * first invoice), or the write not answered exactly. The run then counts the store as failed and not complete,
+ * and pays nothing on what it could not read; the next run tries again.
  */
 async function relist(ids: string[], sid: string): Promise<void> {
   if (!ids.length) return;
-  try {
-    const keys = [...ids, `bonus_${sid}`].map((id) => creditKey(id));
-    const read = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
-    if (!read) return;
-    const writes: (string | number)[][] = [];
-    for (const raw of read) {
-      const credit = parseCredit(raw);
-      if (credit?.state === "owed" && credit.cents > 0) writes.push(["ZADD", mineKey(credit.to), credit.at, credit.id], ["SADD", OWED_KEY, credit.id]);
-    }
-    if (writes.length) await redisPipeline(writes);
-  } catch (error) {
-    console.error("relisting owed invite credits failed", sid, error);
-  }
+  const keys = [...ids, `bonus_${sid}`].map((id) => creditKey(id));
+  const read = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  if (!read) throw new UnknownReplyError("relisting invite credits: the read");
+  const writes: (string | number)[][] = [];
+  read.forEach((raw, i) => {
+    const bonus = i === ids.length;
+    if (bonus && raw === null) return;
+    const credit = parseCredit(raw);
+    if (!credit) throw new UnknownReplyError(`relisting invite credits: ${bonus ? "the bonus" : ids[i]} does not read back`);
+    if (credit.state === "owed" && credit.cents > 0) writes.push(["ZADD", mineKey(credit.to), credit.at, credit.id], ["SADD", OWED_KEY, credit.id]);
+  });
+  if (!writes.length) return;
+  const wrote = repliesFor(await redisPipeline(writes), writes.length);
+  if (!wrote || wrote.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("relisting invite credits: the write");
 }
 
 /** Step 1 for one invited store. Returns how many credits it wrote. */
@@ -309,7 +313,8 @@ export async function settleInvites(deadline: number, now = Date.now()): Promise
       console.error("putting an invite credit on a plan failed", error);
     }
   }
-  counts.complete = walkedAll && pushedAll;
+  // A store or credit that could not be read for sure is not a complete pass (Codex N on #2722).
+  counts.complete = walkedAll && pushedAll && counts.failed === 0;
   return counts;
 }
 

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { NextRequest } from "next/server";
-import { makeKey, resolveKey, revokeKey } from "@/lib/api-keys";
+import { MAX_KEYS, makeKey, resolveKey, revokeKey } from "@/lib/api-keys";
 import { apiStore, apiWriter } from "@/lib/api-guard";
 import { POST } from "@/app/api/store/api-keys/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -137,4 +137,69 @@ test("unknown revocation remains retryable in the actual studio endpoint", async
   assert.equal(retried.status, 200);
   assert.equal((await retried.json()).ok, true);
   assert.equal(await resolveKey(made.key), null);
+});
+
+for (const outcome of ["healthy", "unapplied", "applied", "thrown"] as const) {
+  test(`a creation race reports the actual rollback evidence: ${outcome}`, async () => {
+    redis.clear();
+    for (let i = 0; i < MAX_KEYS - 1; i += 1) assert.equal((await makeKey(sid, `Synthetic seed ${i}`)).ok, true);
+    let raced = false;
+    let rollbacks = 0;
+    const wrapped: typeof redis.pipeline = async (commands) => {
+      if (!raced && commands.length === 1 && commands[0]?.[0] === "HLEN" && commands[0]?.[1] === `nl:api:keys:${sid}`) {
+        const read = await original(commands);
+        raced = true;
+        // A real second writer fills the last place after the first read.
+        redis.pipeline = original;
+        try { assert.equal((await makeKey(sid, "Synthetic concurrent key")).ok, true); }
+        finally { redis.pipeline = wrapped; }
+        return read;
+      }
+      if (commands.length === 2 && commands[0]?.[0] === "DEL" && commands[1]?.[0] === "HDEL") {
+        rollbacks += 1;
+        if (outcome === "unapplied") return [];
+        if (outcome === "thrown") throw new Error("Synthetic rollback transport failure");
+        const reply = await original(commands);
+        return outcome === "applied" ? [] : reply;
+      }
+      return original(commands);
+    };
+    redis.pipeline = wrapped;
+    let result: Awaited<ReturnType<typeof makeKey>>;
+    try { result = await makeKey(sid, "Synthetic racing key"); }
+    finally { redis.pipeline = original; }
+    assert.equal(raced, true);
+    assert.equal(rollbacks, 1, "an unknown acknowledgement never triggers automatic replay");
+    assert.deepEqual(result, { ok: false, reason: outcome === "healthy" ? "full" : "make_unconfirmed" });
+    const [count] = await original([["HLEN", `nl:api:keys:${sid}`]]);
+    assert.equal(count, outcome === "unapplied" || outcome === "thrown" ? MAX_KEYS + 1 : MAX_KEYS);
+  });
+}
+
+test("the creation endpoint never says nothing changed after an unknown rollback", async () => {
+  redis.clear();
+  const owner = "api-rollback@example.test";
+  await claimHandle(owner, "qrollback", "Synthetic rollback", "");
+  await ensureStoreId(owner);
+  await ensureStatsId(owner);
+  await setSubscription(owner, { customerId: "cus_QRollback", subscriptionId: "sub_QRollback", active: true, tier: "creator", period: paidPeriod() });
+  const store = (await storeForEmail(owner))!;
+  const session = await openSession(owner);
+  let rollbacks = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.length === 2 && commands[0]?.[0] === "DEL" && commands[1]?.[0] === "HDEL") { rollbacks += 1; return []; }
+    const reply = await original(commands);
+    return commands.length === 3 && commands[0]?.[0] === "SET" && commands[1]?.[0] === "HSET" && commands[2]?.[0] === "HLEN" ? [reply[0], reply[1], undefined] : reply;
+  };
+  let response: Response;
+  try {
+    response = await POST(new NextRequest(`${origin}/api/store/api-keys?store=${store.sid}`, {
+      method: "POST", headers: { "content-type": "application/json", origin, host: "marktmorgen.com", cookie: `${SESSION_COOKIE}=${session}` },
+      body: JSON.stringify({ action: "make", name: "Synthetic uncertain creation" }),
+    }));
+  } finally { redis.pipeline = original; }
+  assert.equal(rollbacks, 1);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { ok: false, error: "make_unconfirmed" });
+  assert.equal((await original([["HLEN", `nl:api:keys:${store.sid}`]]))[0], 1, "the record remains, so a no-change claim would be false");
 });

@@ -5,6 +5,7 @@ import {
   SPEED_KEY,
   clockOf,
   keptSpeed,
+  placeToRemove,
   positionKey,
   readPlace,
   readSpeed,
@@ -76,8 +77,15 @@ export function LessonPlayer({
       try {
         raw = store.getItem(key);
       } catch {}
+      const now = Date.now();
+      // Past KEEP_DAYS, or not one we wrote: removed as it is read, never offered.
+      if (placeToRemove(raw, now)) {
+        try {
+          store.removeItem(key);
+        } catch {}
+      }
       const duration = Number.isFinite(el.duration) ? el.duration : null;
-      const from = resumeFrom(readPlace(raw, Date.now()), duration);
+      const from = resumeFrom(readPlace(raw, now), duration);
       // Offered only before the student starts playing; once they play, it is theirs.
       setOffer(el.currentTime === 0 && el.paused ? from : null);
     };

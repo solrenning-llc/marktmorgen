@@ -69,6 +69,11 @@ export function readPlace(raw: string | null, nowMs: number): Place | null {
   return { seconds: s, at: t };
 }
 
+/** Whether a stored place is to be removed when it is read: there, but too old or not one we wrote (Claude 4 on #2728). */
+export function placeToRemove(raw: string | null, nowMs: number): boolean {
+  return raw !== null && readPlace(raw, nowMs) === null;
+}
+
 /** What is written for a place. */
 export function writePlace(seconds: number, nowMs: number): string {
   return JSON.stringify({ s: Math.max(0, Math.floor(seconds)), t: Math.floor(nowMs) });

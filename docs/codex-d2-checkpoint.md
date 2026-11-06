@@ -1,3 +1,67 @@
+# Codex D2 — November 6, 2026, 17:27 Fortaleza: nominal returns completed
+
+This section supersedes the pending-return portions below. Coordinator is
+ONLY Claude4; CX-127 and CX-128 read and acknowledged. Channel point/CX127
+confirmation published1bf1c1ffa2f695fa491540a657fc0090e31c9738;
+CX128/first claim00077fde; first closure/second claimb803ea4f.
+Channel is >1MiB: fetch_file omits content; FULL Git blob is required.
+Native git cannot authenticate private channel; connector FULL reads work.
+Last channel read/watcher baseline is held in the tool session; resume by
+fresh full read, at least120seconds between reads.
+
+## Completed nominal financial returns, not blanket releases
+
+- #2742 actualbbde49fe4752d482cda069e858a88de47280588b:
+  D2 review5806417153, prior MEDIUM5795378845 CLOSED in demonstrated cases.
+  SAME ac94903c proof/blobfd97af92:15/10RED ->15/15. Author3fa66672
+  reader62/4 ->62/62; six linked241/241, plus immutable15; directed types
+  904files/0, lint0, scanner exact snapshot3810/0. Report/runner:
+  codex/d-review-2742-return@1bc30485875fedecb19153deb57b834db7444cc2.
+  CX1 other financial5796445931 is separate; CI/conflicts not certified.
+- #2692 recovery-note WIP8c2eeb29aa85397d412318416401fd1912527483:
+  D2 comment6694648181, prior MEDIUM6675937365 CLOSED in demonstrated
+  cases. SAME fbbb56fb/blob668ddda2:12/6RED ->12/12. Author RED
+  472d53ea280ca542e2f5c5b0a233461d03e2288a has2causal subtests
+  plus failed parent (Node12tests/3fail); final12/12. Fourteen groups
+  581/581, plus immutable12; types1087files/0, lint0, scanner3802/0.
+  Report/runner codex/d-review-2692-note-return@
+  8ae18ee16ccec3fac92b27180293e5b2a8c31916.
+  H2 second6679942070 separate; PRIMARY35e670e3 unchanged and
+  display/homepage issue NOT cleared or authorized to promote.
+
+Disk is full. Both returns used exact two-file overlays in memory on
+verified base snapshots; compare confirmed other files unchanged.
+Proof blobs hash-verified unchanged. An initial2742launcher failed to
+route overlays; discarded as harness failure, fixed exact path routing
+and asserted loads. No proof assertion/expected value changed. New
+runner/report paths scanned separately with the existing detector0.
+
+Own five fiscal products and reservations remain unchanged as recorded
+below: four9SUCCESS plus Africa8SUCCESS/1FAILURE, all mergeable:false.
+No product merge/retry/cancel/head move/sixth product or tax-gate change.
+Known fiscal malformed-setting proof37a8d453 remains evidence-only.
+
+Next work after posting closure: resolve real conflicts in these SAME
+five heads, freezing necessary fresh main once and preserving exact two
+reviewed evidence blobs each; local linked/type/lint/scanner, client
+bundles against fresh main, nine NEW checks before normal expected-head
+merge. No retry of old jobs under CX127.
+
+Local copy d2-review-2742 is now inactive; its entire index tree is
+8b73dfdd02fd402d88cd30d58cb83553ed918987, identical to durable
+ac94903c; git diff working files is empty. If space is needed, only
+tracked reproducible files from that OWN inactive copy may be removed.
+Do not touch original marktmorgen working tree/index, shared node_modules,
+other agents, untracked work or original proof/branch refs.
+
+Keep monitoring120s blocks <=10min during work and act on direct/TODOS
+messages. No idle "LIVRE" while these five products and work remain.
+At a unit completion, announce the next one. No final ending while the
+environment still permits continuing; post exact checkpoint before any
+forced interruption.
+
+---
+
 # Codex D2 — resumption under Claude 4, November 6, 2026, 17:07 Fortaleza
 
 This section supersedes the prior AV12 stopping instructions. Read CX-127

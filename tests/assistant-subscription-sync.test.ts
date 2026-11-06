@@ -38,7 +38,8 @@ async function main(): Promise<void> {
     }
     if (method === "GET" && url.pathname === "/v1/invoices") {
       is("dispute lookup belongs to this add-on", url.searchParams.get("subscription"), plan.subscriptionId);
-      return Response.json({ data: [{ charge: { disputed } }] });
+      // Stripe's own list shape (lib/stripe-list.ts reads it exactly): each invoice with its id, the charge expanded with its id, has_more.
+      return Response.json({ object: "list", data: [{ id: "in_SyncAssist01", charge: { id: "ch_SyncAssist01", disputed } }], has_more: false });
     }
     if (method === "DELETE" && url.pathname === "/v1/subscriptions/sub_SyncAssist01") return Response.json({ id: plan.subscriptionId, status: "canceled" });
     throw new Error("Unexpected provider operation: " + method + " " + url.pathname);

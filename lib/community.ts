@@ -83,6 +83,7 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { type AboutSetting, NO_ABOUT_PAGE, parseAboutSetting } from "@/lib/community-about-setting";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
 export const CREATOR = "creator";
@@ -129,6 +130,8 @@ export type CommunityConfig = {
   questions: string[];
   /** Sent privately to a member the first time they come in, from the creator, when messages are on. */
   welcome: string;
+  /** The public About page, and whether it shows its counts (lib/community-about-setting.ts). Off until the creator turns it on. */
+  page: AboutSetting;
 };
 
 export type Member = {
@@ -265,6 +268,8 @@ export function freshConfig(storeName: string): CommunityConfig {
     chat: { ...NO_CHAT },
     questions: [],
     welcome: "",
+    // Nothing of the community is shown to people who are not in it until the creator says so.
+    page: { ...NO_ABOUT_PAGE },
   };
 }
 
@@ -310,6 +315,8 @@ function parseConfig(raw: unknown): CommunityConfig | null {
         .filter(Boolean)
         .slice(0, MAX_QUESTIONS),
       welcome: typeof value.welcome === "string" ? value.welcome.slice(0, MAX_WELCOME) : "",
+      // And before there was an About page: off.
+      page: parseAboutSetting(value.page),
     };
   } catch {
     return null;

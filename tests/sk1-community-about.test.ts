@@ -40,6 +40,8 @@ import {
   aboutWords,
 } from "@/lib/community-about";
 import { LANGUAGE_CODES } from "@/lib/store-language";
+import { takePublicRequest } from "@/lib/traffic";
+import { requestLimitFor } from "@/lib/traffic-rules";
 import { TAKE_COMMANDS, request, walkRead } from "./plan-cost-registry";
 import { laterPageCost } from "./traffic-cost";
 import { store as redis } from "./redis-stub";
@@ -72,7 +74,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "sk1about", "Bread Club", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, "acct_sk1about000", true);
-  await setSubscription(OWNER, { customerId: "cus_sk1", subscriptionId: "sub_sk1", active: true, tier: "creator", period: paidPeriod() } as never);
+  await setSubscription(OWNER, { customerId: "cus_sk1aboutshop", subscriptionId: "sub_sk1aboutshop", active: true, tier: "creator", period: paidPeriod() } as never);
   const paid = await addProduct(OWNER, "Bread Club Membership", "", "20", { interval: "month", trialDays: 0, payments: 0 });
   const draft = await addProduct(OWNER, "Secret Draft Tier", "", "90", null, null, true);
   if (!paid.ok || !draft.ok) throw new Error("no products");
@@ -102,11 +104,11 @@ async function main(): Promise<void> {
   if (plain.state !== "shown") throw new Error("not shown");
   is("the creator's name and words", [plain.page.name, plain.page.about], ["Bread Club Community", "Weekly bakes and answers from me."]);
   is("only the product on sale now (no draft)", plain.page.ways.map((w) => w.title), ["Bread Club Membership"]);
-  is("its published price, as the community's door says it", plain.page.ways[0].kind, "Membership · $20");
+  is("its published price, as the community's door says it", plain.page.ways[0].kind, "Membership · $20 a month");
   is("it goes to the product's own page, the checkout's door", plain.page.ways[0].href.startsWith(`/@sk1about/p/`), true);
   is("it opens the one space not kept for another product, of two", [plain.page.ways[0].spaces, plain.page.spaces], [1, 2]);
   is("no counts", plain.page.counts, null);
-  is("no member, feed or post read", names().filter((n) => /:m$|:feed$|^MGET|:p:/.test(n)), []);
+  is("no member, feed or post read", names().filter((n) => /:m$|:feed$|^MGET nl:cm:|:p:/.test(n)), []);
   store = (await setCommunity(OWNER, false))!;
   is("the community switched off: not found", (await aboutPage(store)).state, "none");
   store = (await setCommunity(OWNER, true))!;
@@ -135,7 +137,7 @@ async function main(): Promise<void> {
   is("no member's name or address, no post's words", ["Jane Hidden-Name", "jane@example.com", "bob@example.com", "spreadsheet", "Sourdough", "Secret Draft"].filter((s) => drawn.includes(s)), []);
   sent = [];
   const again = await aboutPage(store);
-  is("kept: read back with no member or feed read", [again.state === "shown" && again.page.counts?.joined, names().filter((n) => /^HLEN|^ZREVRANGE|^MGET/.test(n))], [2, []]);
+  is("kept: read back with no member or feed read", [again.state === "shown" && again.page.counts?.joined, names().filter((n) => /^HLEN|^ZREVRANGE|^MGET nl:cm:/.test(n))], [2, []]);
 
   part("3. Many posts: shown as at least what was read");
   for (let i = 0; i < ABOUT_POSTS_READ; i += 1) await write(`Thread ${i}`);
@@ -155,13 +157,16 @@ async function main(): Promise<void> {
   spoil = "none";
   is("posts left out, joined real", [noPosts?.posts ?? "omitted", noPosts?.joined], ["omitted", 2]);
   sent = [];
-  const refused = await aboutCounts(store, id, (await readConfig(id))!, Date.now(), async () => false);
-  is("refused by the store's requests: no counts, nothing read", [refused, names().filter((n) => /^HLEN|^ZREVRANGE|^MGET/.test(n))], [null, []]);
+  await takePublicRequest(store, "buyer", Date.now(), requestLimitFor(store));
+  is("(the store's requests used up)", await takePublicRequest(store, "public", Date.now(), 1), false);
+  sent = [];
+  const refused = await aboutCounts(store, id, (await readConfig(id))!);
+  is("refused by the store's requests: no counts, nothing read", [refused, names().filter((n) => /^HLEN|^ZREVRANGE|^MGET nl:cm:/.test(n))], [null, []]);
   is("the words never print a missing count as 0", aboutWords("en").joined(0), "Nobody has joined yet");
 
   part("5. Cost");
   const refresh = request("heavy", ABOUT_REFRESH_COMMANDS + TAKE_COMMANDS, ABOUT_REFRESH_BYTES) + walkRead(0, ABOUT_REFRESH_BYTES);
-  is("the refresh's requests cover what it reads", ABOUT_REFRESH_UNITS * laterPageCost() >= refresh, true);
+  is("the refresh's requests cover what it reads, and one fewer would not", [ABOUT_REFRESH_UNITS * laterPageCost() >= refresh, (ABOUT_REFRESH_UNITS - 1) * laterPageCost() < refresh], [true, true]);
   console.log(`About page counts refreshed: $${refresh.toFixed(6)} at most, counted as ${ABOUT_REFRESH_UNITS} requests at $${laterPageCost().toFixed(6)}, at most every few hours`);
   const lib = readFileSync("lib/community-about.ts", "utf8");
   is("counted before the products are read", lib.indexOf("isResting(store") > 0 && lib.indexOf("isResting(store") < lib.indexOf("readListings("), true);

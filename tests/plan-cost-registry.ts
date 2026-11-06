@@ -1131,6 +1131,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-book-snapshot.ts", names: ["BOOK_FRESH_SECONDS", "BOOK_KEEP_SECONDS", "BOOK_SNAPSHOT_MAX_BYTES", "BOOK_LOCK_SECONDS", "BOOK_READ_SECONDS", "AFFILIATE_PAGE_MAX_SECONDS"] },
       { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
       { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
+      // A community's public About page (233 [SK1], 6 November 2026): counted as a page, its products paid before they are read, and its
+      // counts worked out at most every ABOUT_FRESH_SECONDS for ABOUT_REFRESH_UNITS, held against their cost in tests/sk1-community-about.test.ts.
+      { file: "lib/community-about.ts", names: ["isResting(store, now)", "takePublicRequest(store, \"public\", now, listingUnits(config.access.length))", "takePublicRequest(store, \"public\", now, ABOUT_REFRESH_UNITS)", "ABOUT_FRESH_SECONDS", "ABOUT_POSTS_READ"] },
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },

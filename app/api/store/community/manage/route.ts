@@ -25,6 +25,7 @@ import {
 } from "@/lib/community";
 import { parseDmSetting } from "@/lib/community-dm";
 import { parseChatSetting } from "@/lib/community-chat";
+import { parseAboutSetting } from "@/lib/community-about-setting";
 import { forgetTicket } from "@/lib/community-access";
 import { dropCommunityImage } from "@/lib/community-files";
 import {
@@ -45,6 +46,7 @@ const ACTIONS = new Set([
   "settings",
   "messages",
   "room",
+  "about-page",
   "access",
   "space-add",
   "space-edit",
@@ -65,7 +67,9 @@ const MODERATION = new Set(["member", "dismiss", "report-hide", "report-delete"]
  * Everything the studio changes about the creator's community.
  *
  * `{ action: "enable", on }` switches it on or off (made the first time);
- * `{ action: "settings", name, about }`; `{ action: "access", products }`
+ * `{ action: "settings", name, about }`; `{ action: "about-page", on, counts }`
+ * shows or takes away the public About page (lib/community-about.ts) and its
+ * counts; `{ action: "access", products }`
  * chooses whose purchases let people in; `space-add`, `space-edit`,
  * `space-move` and `space-remove` look after the spaces; `{ action:
  * "member", key, muted?, removed? }` mutes, takes out or lets back a member;
@@ -157,6 +161,12 @@ export async function POST(request: NextRequest) {
           creatorOnly: body.creatorOnly === true,
         }),
       });
+    }
+
+    // The public About page, and whether it shows its counts. Off is off: the
+    // page answers not found, rather than merely being left unlinked.
+    if (action === "about-page") {
+      return save({ ...config, page: parseAboutSetting({ on: body.on === true, counts: body.counts === true }) });
     }
 
     if (action === "access") {

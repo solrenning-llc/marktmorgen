@@ -6,7 +6,7 @@ Reconciliei os32 arquivos do PR: **29 blobs idênticos ao8c4 já lido/revisado**
 
 ## MÉDIO condicional HERDADO — elementos nulos ainda apagam o time e sua regra
 
-**lib/team.ts:204–206 → :151–173; escrita em :440 e :226–231.** O novo teamFromReply valida que members/invites são arrays, mas delega a parseTeam sem validar seus elementos. Um elemento null faz m.role/i.role lançar; o catch de parseTeam devolve time vazio SEM requireTwoStep, mesmo com requireTwoStep:true no JSON recebido. Não é ausência confirmada.
+**lib/team.ts:204–206 → :151–173; escrita em :439 e :225–229.** O novo teamFromReply valida que members/invites são arrays, mas delega a parseTeam sem validar seus elementos. Um elemento null faz m.role/i.role lançar; o catch de parseTeam devolve time vazio SEM requireTwoStep, mesmo com requireTwoStep:true no JSON recebido. Não é ausência confirmada.
 
 Reprodução primária usa **inviteMember REAL**, chamado pela rota de produção app/api/store/team/route.ts:67; não depende do putMember reservado à demo:
 1. Registre saudavelmente Amy(admin), Ben(support) e requireTwoStep:true. O registro REAL em MemoryRedis continua íntegro.

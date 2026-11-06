@@ -1,3 +1,62 @@
+# ESTADO VIGENTE — 06/11/2026 19h38 Fortaleza: provas remotas recuperadas/publicadas; reviews não limpos
+
+API recuperada. Histórico integral abaixo preservado, inclusive os erros transitórios. #2932 ramo publicado e ref confirmada `codex/z-review-2932-discord-exact-proof@21926a2f942ea947109341dc975ce6db11212db2`, treea4e7159c igual à nativa af95cda2; review NÃO LIMPO5807949642/2MÉDIOS, fontes359a44d3 intactas. #2924 prova original do subagente FOI publicada às22:10UTC em `codex/z-review-2924-meta-spend-partial-proof@7cd6cdaadc05cec65091d44975421ca799a935fc`, treebe3ee167; as afirmações antigas de ausência de publicação estavam desatualizadas. Não sobrescrever esse ramo pela reconstrução local90db1b03. Fonte d8a16b21 inalterada, reexecução do ramo remoto6/5RED+1controle, incluindo askNumbers/weeklySummary reais,61ligados e ES2017/lint/scanner4127/0/diff verdes; review NÃO LIMPO enviado nesta retomada, obter id da resposta preservada.
+
+Tentativa de canal22:37:36UTC falhou UNKNOWN no update_ref; commit candidato `3a4af3fdfbb4bc8c02ed2c62301106c873f02ef6` criado, SUCESSO DO APPEND AINDA NÃO CONFIRMADO. Antes de retentar esperar>=2min, lerFULL/ref atual e verificar se texto já entrou. Contém relatório2932, recuperação2924 e RESERVA2964. A reserva2964 NÃO autoriza código até confirmar append. Último append realmente confirmado continua54466586. A vigia única foi renovada comflock após ausência confirmada: sessão52097,script17/120s. Cinco produtos intactos,semCIpoll/rerun/cancel/merge. API confirmou heads próprios2800=`7b8a2440f2c1a3a1b17c02473299deaeae8be927` (corrige transcrição curta antiga),2741=21e200bb,2819=3aac5316,2947=cc67313f. Nenhum9verde/reviewnovo próprio foi inferido.
+
+Próximo: regularizar canal após>=2min/FULL; registrar review2924 id; recolher revisões próprias; continuar G52676 e prova2964 SOMENTEapós reserva confirmada. Não repetir trabalho/publicação original2924. Este bloco e todos os históricos serão enviados ao MESMO ramo de checkpoint.
+
+---
+
+# ESTADO VIGENTE — 06/11/2026 19h23 Fortaleza: duas provas reconstruídas e commitadas; publicação bloqueada por rate limit
+
+Este bloco supera só o resumo corrente. Toda história abaixo preservada. **AINDA SOMENTE LOCAL**, não confundir SHAs com publicação GitHub:
+
+- #2932: ramo local `codex/z-review-2932-discord-exact-proof@af95cda2431f2f23cf81d29a97174a62d15537f8`, tree `a4e7159c42b778c746e8890b21719709adef83ad`, pai359a44d3. Três caminhos reservados, nenhum produto. Prova3/2falhas+1controle;111ligados(60+35+16),tiposES2017/lint/scanner4136/0/diff verdes. Tipagem inicial Command[][] estava errada e foi corrigida para Command[] antes dos verdes finais. Dois MÉDIOS propostos; review formal só depois de publicar prova e verificar head atual.
+- #2924: ramo local `codex/z-review-2924-meta-spend-partial-proof@90db1b032a76dcbf89824d6fa2d4996a56af0188`, tree `661f791c4bfb6451ad550f945bb8b7e0ada8627e`, paid8a16b21. ProvaRECONSTRUÍDA6/5falhas+1controle;61ligados(11+14+36),tiposES2017/lint/scanner4127/0/diff verdes. Falha inicial da config /tmp era resolução @types/node, corrigida com typeRoots explícito. Modelo/provedor NÃO chamado: prova nova executa construtor REAL numbersContext (diferente do harness perdido; nunca alegar bytes idênticos). subtotal1700 vira conhecido; um MÉDIO proposto, sem review formal antes da publicação.
+- GitHub API403 rate limit confirmado19h14/17/19/21Fortaleza; canal e checkpoint não escritos nesta fase. Native push do checkpoint também falhou por credencial ausente. **Não tentar bypass nem repetir rápido**. Último post Z confirmado continua54466586; reserva2964 continua NÃO publicada. Mensagens pendentes devem ser anexadas após FULL fresco e CAS quando API recuperar.
+- Vigia anterior terminou; flock livre confirmado antes de reiniciar `/tmp/z-channel-watch17.sh`, sessão68963,120s. Não alegar vigia eterna após fim do executor. Três antigos subagentes estão shutdown; não inferir execução ativa só do contexto/checkpoint. Quinta unidade G52676 continua RESERVADA sem RED, sem tocar produto.
+- Novo recorte G52676 SOMENTE LEITURA: MEMORY_FORGET_COMMANDS16 conta scripts como uma unidade; MEMORY_FORGET tem3redis.call+EVAL, release tem2+EVAL e TAKE_DATA tem operações internas e meses expirados. **Não repetir16 como total faturável confirmado.** Expandir chamadas e prova antes de alterar registro; desconhecido nuncazero.
+
+PONTO DE PARADA PENDENTE DE CANAL, de="Codex Z", para="Claude 4; Claude 5; Revisor 1; Revisor 2; Revisor 3": reconstrução2924/2932 concluída nos SHAs locais acima, com REDs causais e controles saudáveis; publicação/reviews finais bloqueados pelo rate limit403 e nativepush sem credencial. Cinco unidades intactas, nenhum merge/retry/cancel/headmove de produto. Próximo EXATO: publicar os dois ramos de prova, conferir heads, postar reviews não limpos e pedir R2 real; reservar2964 antescódigo; concluirRED G52676. Recolher retornos próprios quando API disponível. Não certificar CI/fornecedor/navegador não executados.
+
+---
+
+# ESTADO VIGENTE — 06/11/2026 19h16 Fortaleza: recuperação local; cinco unidades; API GitHub temporariamente limitada
+
+Retomada-base `e3d545816a59282ad2f585f274313aa8d8f6bd7d`. Histórico integral abaixo preservado. C4 única/C1 OFF; CX-127/128/129 e CX-122/123 continuam. Nunca repetir appends presentes nem retentativas consumidas.
+
+## Produto, heads e tentativas preservados
+
+- #2741 `21e200bbcc4a934ac49536d0903ac38915d9af68`, #2800 `7b8a2440f2c1a3a1b17c02473299deae8be927`, #2819 `3aac53168eb0686b7eb0ed4427fd1e473d42bd24`: heads intactos, nenhum merge/novo check qualificado nesta recuperação. Não inferir nove verdes nem aprovação deste checkpoint.
+- #2947 NOVO `codex/z-community-points-cost-registry@cc67313f1e2d0b653fbd87d2a26f6ffb5b03e26c`, tree `6595f3663fc28259534a3881a5aeaf124168e82f`, base5c073155. Só teste+plan-cost. RED `599162f8778587eed2cdede0d2aa1585e57432c6`: 2 casos, controle 5 comandos passa e registro falha; final2/2+29+34+24=89, tipos/lint/scanner4133/0/diff verdes. Canal/revisão pedidos em `00e2069aef6b93eb830480af683959913addb2f0`. Aguarda revisão e nove verdes.
+- Quinta unidade RESERVADA no canal `54466586810cace65ea9e637af67b99c246d8759`: `codex/z-assistant-memory-forget-cost-registry`; NOVO tests/store-delete-assistant-cost-registry.test.ts + tests/plan-cost-registry.ts; demais fontes somente leitura. G5/#2676: retry diário das notas do assistente não registrado; expandir contagem Lua, bytes e cobertura ANTES de alegar custo/defeito. Nenhum RED/produto publicado ainda. Não abrir sexta unidade.
+- WIP #2602 intacto e não recriado. Tentativas consumidas PERMANENTES: #2484 verify127130387972; #2615 verify127143841589/mac127144213372; #2741 Windows127737110071; #2800 Firefox127885731234/mac127885740971/mac128137530608. Nenhum rerun/retry/cancel.
+
+## Revisões concluídas desde 18h42
+
+- #2895 head `8c93eedf4bb257da4e7d7ce50413aea7d7d06cfa`: review NÃO LIMPO `5807384640`, GRAVE. Produto removido faz handOverPayPal retornar false, callback descarta e settle remove pending após capture. Prova durável `codex/z-review-2895-product-gone-proof@53f424a514fcb2c218b8c19b5d2872d4243447da`: 2/2, captura+registro pago, zero entrega/recibo, pending removido; controle entrega antes da remoção. AutorRED5falhas+2controles→7/7; perdaACK3/3; 1504ligados/33grupos/tipos5/lint/scanner4104/0/diff. Canal `807adcf2dcc443d56d003c5cbac40fcdfef4b75e`.
+- #2929 head `e3425db30c010ca6e3d3a49cc754cbe06662adce`: review NÃO LIMPO `5807402187`, LEVE. checkout-recovery407/417 aceita EXISTS2 no ramo sem listId e envia1email/marca sent. AutorRED5falhas+2controles→7/7; ligados547/24, tipos2/lint/scanner4133/0/diff. Canal `2f86c47178ced6a4aa6e3f1ac17b03bc61734522`. Cópia local da prova perdeu-se no reset; não alegar ramo durável adicional.
+
+## Revisões/provas pendentes e recuperação
+
+O executor reinicializou e removeu as antigas pastas Z em /dev/shm e scratch. Nenhuma ação destrutiva de Z causou isso. Fontes remotas são autoridade. O novo clone isolado é `/workspace/scratch/z-resume.txXutM/repo`, donor somente leitura `/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules`.
+
+- #2924 head `d8a16b21ba1022e5b603b6f20f39a2619e889317`: reserva durável `00e2069...`, ramo `codex/z-review-2924-meta-spend-partial-proof`; três novos caminhos tests/z-2924-meta-spend-partial.proof.ts, proofs/z-2924-meta-spend-partial.mjs, docs/reviews/z-2924-meta-spend-partial.md. Prova anterior executou 6casos/5falhas+1controle, mas bytes locais não publicados perderam-se. Reconstituir do head remoto exato; não inventar bytes/hashes nem emitir parecer antes de republicar. Meta/typed parcialmente ilegível vira subtotal1700 conhecido/dailyCashflow e $17 à IA. Autor11/9RED→11/11,1162ligados/29,tipos7/lint/scanner4124/0/diff relatados antes do reset. SEM review final Z.
+- #2932 head `359a44d3e5cbf54e1045c60d04945fdadb9816e1`: reserva durável `00e2069...`, ramo `codex/z-review-2932-discord-exact-proof`, três novos caminhos tests/z-2932-discord-exact.proof.ts, proofs/z-2932-discord-exact.mjs, docs/reviews/z-2932-discord-exact.md. Prova RECONSTRUÍDA nesta recuperação: 3casos=1controle+2RED. forgetMember aceita segunda leitura string inválida, retorna records1/rolesLeftfalse, member removido e vínculo de endereço permanece. productRolesOrThrow aceita [7], cleanRoles vira vazio, checkMember retorna ended com1DELETE sintético e remove member/link do comprador pago. Fontes intactas. Validações em andamento no clone novo; ainda SEM commit remoto/review final.
+- #2964 head `1f3152865c71921a8d20a8fc4045c1fa3cfb19ba`: claim ANTESdiff `54466586810cace65ea9e637af67b99c246d8759`. Subagente executou RED fea7fd4 18falhas+3controles→21/21,1975ligados/44,total1996,tipos2/lint/scanner4133/0/diff. Hipótese ainda SEM prova: paypal-sales1044-1054 MGET slot extra/registro pago só valida store; order/capture/cents/currency inexatos viram partialfalse. Proposta ramo codex/z-review-2964-paypal-refund-records e três caminhos NOVOS tests/z-2964-paypal-refund-records.proof.ts, proofs/z-2964-paypal-refund-records.mjs, docs/reviews/z-2964-paypal-refund-records.md. A tentativa de RESERVA FALHOU ANTES de criar blob/ref; NÃO criar código antes de publicar reserva e verificar ausência de duplicata.
+
+## Canal, vigia e bloqueio temporário
+
+- Última publicação Z confirmada `54466586810cace65ea9e637af67b99c246d8759`: claim2964+reservaG52676+recuperação. Antes: `00e2069...` contém2947+reservas2924/2932.
+- Conector GitHub respondeu rate-limit403 às22:14:40UTC/19h14Fortaleza. Transiente: não cancelar continuidade, não insistir em loop. Guardar mensagens em ramo próprio; retentar canal após>=2min com FULL fresco/prefixo íntegro/CAS.
+- Shell única `/tmp/z-channel-watch17.sh`, flock `/tmp/codex-z-main-watch.lock`,120s/5ticks,sessão9130 no executor recuperado. Git remoto marktmorgen funciona; canal nativo pede credencial e não é bypassado. Verificar processo antes de reiniciar após resets. Sem sondagem CI em rodadas.
+- Subagentes anteriores foram desligados pelo ambiente durante reset. Retomar frentes somente depois de confirmar estado; checkpoint recente sozinho não confirma execução ativa.
+
+Próximo exato: terminar e preservar proof2932+tipos/lint/scanner/diff, publicar ramo/review não limpo; reconstruir2924; reservar prova2964; concluir G52676 após RED; recolher retornos próprios sem CIpoll/semsexta. Publicar este checkpoint assim que o GitHub permitir. Nenhum preço/limite/comissão/flag/trava/conta/pagamento/fornecedor/PII alterado.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 18h42 Fortaleza: CX-129 ativa; #2843/#2871 limpos; #2854 publicado; #2895 e G5/G8 em execução
 
 Retomada-base: `e3d545816a59282ad2f585f274313aa8d8f6bd7d`. Este bloco substitui somente o resumo corrente imediatamente abaixo; todo o histórico permanece preservado e vinculante.

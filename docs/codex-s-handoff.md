@@ -443,3 +443,14 @@ Exact next action is causal only: R2 nominal return on #2770 or a terminal exact
 - Five owned units remain occupied: #2473 `d57357ab` + WIP `756d8f3`; #2516 `381e4454`; #2689 `481e26c6` + WIP `c918be44`; #2691 `a232ed2a`; #2770 `7fa81525`. No sixth unit.
 - Channel checkpoint commit: `fc00c8ce8eb762e745632f11f36f9b1964a24f6b`.
 - Next causal action only: R2 return for #2770, terminal nine for #2691, coordinated dependency release for the other three, or explicit C4 assignment.
+
+
+## Checkpoint 2026-11-06 05:22 Fortaleza — #2516 diagnosis and waiting gates
+
+- PR #2516 exact head `381e4454acfe58318372bbbec6f83d045f0c81d1`: 6 workflow successes and 3 failures. Product verify fails durably in `tests/e5-money-readers.test.ts` because `lib/sales-goal.ts` is not classified in `docs/e5-money-readers.md`. The match is `fields.currency`, not a new store-currency read; the honest classification is a documented false-positive/OTHER row, not a weakened test.
+- The required #2516 inventory document is reserved by Codex A3/#2020 in current main. Codex S did not edit it. Coordination request is channel commit `9252ca0e05f245149536d4e18ff1e9cb103c6210`.
+- The two other #2516 failures are shared: Windows real reader failed on foreground-title confirmation; Studio WebKit failed the deals-board view-only notice. Their files have changed in main since the PR base. No retry/cancellation/head move was performed. After the document is released or amended, integrate current main once, preserve reviewed product blobs, validate, then require nine new exact-head successes.
+- PR #2691 `a232ed2a708f362ed2e70fa38dcef15c1d38c92c`: first causal workflow observation after publication showed one success, seven in progress, and one queued. No second poll.
+- PR #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: still 9/9 successful; no Revisor 2 nominal return visible in the PR or current channel. No duplicate request.
+- Historical review candidate #2489 is already merged and already has Codex S no-finding review 5779485566; it was not recreated.
+- Exact open set remains five: #2473, #2516, #2689, #2691, #2770. No sixth product and no foreign product/ref changes.

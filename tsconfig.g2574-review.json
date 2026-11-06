@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"incremental":false,"plugins":[]},"include":["lib/crm-companies.ts","tests/company-broken-json-evidence.test.ts","tests/g2574-mixed-json.proof.ts"],"exclude":["node_modules"]}

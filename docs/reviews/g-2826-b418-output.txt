@@ -1,0 +1,493 @@
+# Codex G review #2826 b418 — final executed evidence
+
+## /tmp/g2826-canonical-b418.log
+✔ one next bundle overlaps the running test; every process stays serial and every failure counts (3.694876ms)
+✔ a rejected next build is observed immediately but propagates only after the current process closes (0.859071ms)
+✔ a process launch failure drains its in-flight build before cleanup and preserves the original error (1.40345ms)
+✔ empty inventory does no work (0.197958ms)
+✔ real isolated child processes inherit the supplied environment, flush before advancing and keep nonzero exits (286.559444ms)
+✔ a test process that never ends is killed at its time limit and counted as a failure that names the file (506.463256ms)
+✔ a test process that ends in time is not touched by the limit (195.955434ms)
+✔ every file in tests/run.mjs runs under the limit, generous over the slowest file measured in CI and well under the job (1.071721ms)
+✖ a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread's wchan and the next compilation (511.155431ms)
+✔ a next compilation that never settles fails naming the file at the limit, and the runner does not hang on it (651.551738ms)
+✔ a run is told whether the next file's compilation has settled, and that there is none after the last (1.340405ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 10
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2171.892378
+
+✖ failing tests:
+
+test at ../g2826-canonical-FI2UO9/test.cjs:323:30
+✖ a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread's wchan and the next compilation (511.155431ms)
+  AssertionError [ERR_ASSERTION]: State from /proc/<pid>/status
+      at TestContext.<anonymous> (/tmp/g2826-canonical-FI2UO9/test.cjs:345:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'TIMEOUT: never.test.ts did not finish in 0.5 s; exit not seen; proc=unreadable; next compile resolved; killed and counted as a failure.',
+    expected: /state=[A-Z]/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+
+## /tmp/g2826-canonical-red1bf.log
+✔ one next bundle overlaps the running test; every process stays serial and every failure counts (4.171546ms)
+✔ a rejected next build is observed immediately but propagates only after the current process closes (1.20905ms)
+✔ a process launch failure drains its in-flight build before cleanup and preserves the original error (3.762751ms)
+✔ empty inventory does no work (0.197797ms)
+✔ real isolated child processes inherit the supplied environment, flush before advancing and keep nonzero exits (351.64655ms)
+✔ a test process that never ends is killed at its time limit and counted as a failure that names the file (550.942944ms)
+✔ a test process that ends in time is not touched by the limit (267.238717ms)
+✖ every file in tests/run.mjs runs under the limit, generous over the slowest file measured in CI and well under the job (1.572786ms)
+✖ a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread's wchan and the next compilation (508.739826ms)
+✖ a next compilation that never settles fails naming the file at the limit, and the runner does not hang on it (5002.370801ms)
+✖ a run is told whether the next file's compilation has settled, and that there is none after the last (0.955377ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 7
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6705.285882
+
+✖ failing tests:
+
+test at ../g2826-canonical-TsUYlf/test.cjs:269:30
+✖ every file in tests/run.mjs runs under the limit, generous over the slowest file measured in CI and well under the job (1.572786ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /compileTimeoutMs: TEST_FILE_TIMEOUT_MS/. Input:
+  
+  '/**\n' +
+    ' * Runs every *.test.ts in this folder.\n' +
+    ' *\n' +
+    ' * esbuild does the TypeScript, which is why it is a devDependency: these run\n' +
+    ' * with `npm test` and nothing else installed. "@/lib/redis" is swapped for an\n' +
+    ' * in-memory one, so a test exercises the real code against a store that\n' +
+    ' * behaves like the one it was written for, without reaching anything real.\n' +
+    ' */\n' +
+    'import { readdirSync, mkdtempSync, rmSync } from "node:fs";\n' +
+    'import { tmpdir } from "node:os";\n' +
+    'import { join, dirname, resolve } from "node:path";\n' +
+    'import { fileURLToPath } from "node:url";\n' +
+    'import { build } from "esbuild";\n' +
+    'import { checkClientBundles } from "./client-bundles.mjs";\n' +
+    'import {testAliases,testEnvironment} from "./test-config.mjs";\n' +
+    'import {runTestFiles,runBundle,TEST_FILE_TIMEOUT_MS} from "./test-runner.mjs";\n' +
+    '\n' +
+    'const here = dirname(fileURLToPath(import.meta.url));\n' +
+    'const root = resolve(here, "..");\n' +
+    'const out = mkdtempSync(join(tmpdir(), "nimbus-tests-"));\n' +
+    'let failed = 0;\n' +
+    '\n' +
+    'try {\n' +
+    '  const files = readdirSync(here).filter((f) => f.endsWith(".test.ts")).sort();\n' +
+    '  if (!files.length) {\n' +
+    '    console.log("No tests found.");\n' +
+    '    process.exit(0);\n' +
+    '  }\n' +
+    '  failed = await runTestFiles({files, compile: async file => {\n' +
+    '    const bundle = join(out, `${file}.cjs`);\n' +
+    '    await build({\n' +
+    '      entryPoints: [join(here, file)],\n' +
+    '      bundle: true,\n' +
+    '      platform: "node",\n' +
+    '      format: "cjs",\n' +
+    '      outfile: bundle,\n' +
+    '      logLevel: "error",\n' +
+    '      alias: testAliases(file,root,here),\n' +
+    '    });\n' +
+    '    return bundle;\n' +
+    '  }, run: async (file, bundle) => {\n' +
+    '    console.log(`\\n=== ${file} ===`);\n' +
+    '    return runBundle(bundle, testEnvironment(process.env), process.execPath, {timeoutMs: TEST_FILE_TIMEOUT_MS, label: file});\n' +
+    '  }});\n' +
+    '} finally {\n' +
+    '  rmSync(out, { recursive: true, force: true });\n' +
+    '}\n' +
+    '\n' +
+    'const clientBundles = await checkClientBundles(root);\n' +
+    'console.log(`\\nBrowser bundles: ${clientBundles.total - clientBundles.failed}/${clientBundles.total} passed.`);\n' +
+    'for (const failure of clientBundles.failures) console.error(failure);\n' +
+    'failed += clientBundles.failed;\n' +
+    '\n' +
+    'if (failed) {\n' +
+    '  console.log(`\\n${failed} test file(s) failed.`);\n' +
+    '  process.exit(1);\n' +
+    '}\n' +
+    'console.log("\\nEverything passing.");\n'
+  
+      at TestContext.<anonymous> (/tmp/g2826-canonical-TsUYlf/test.cjs:275:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '/**\n * Runs every *.test.ts in this folder.\n *\n * esbuild does the TypeScript, which is why it is a devDependency: these run\n * with `npm test` and nothing else installed. "@/lib/redis" is swapped for an\n * in-memory one, so a test exercises the real code against a store that\n * behaves like the one it was written for, without reaching anything real.\n */\nimport { readdirSync, mkdtempSync, rmSync } from "node:fs";\nimport { tmpdir } from "node:os";\n...',
+    expected: /compileTimeoutMs: TEST_FILE_TIMEOUT_MS/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at ../g2826-canonical-TsUYlf/test.cjs:278:30
+✖ a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread's wchan and the next compilation (508.739826ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /exit not seen/. Input:
+  
+  'TIMEOUT: never.test.ts did not finish in 0.5 s; killed and counted as a failure.'
+  
+      at TestContext.<anonymous> (/tmp/g2826-canonical-TsUYlf/test.cjs:298:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'TIMEOUT: never.test.ts did not finish in 0.5 s; killed and counted as a failure.',
+    expected: /exit not seen/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at ../g2826-canonical-TsUYlf/test.cjs:314:30
+✖ a next compilation that never settles fails naming the file at the limit, and the runner does not hang on it (5002.370801ms)
+  AssertionError [ERR_ASSERTION]: names the file whose compilation did not finish
+      at TestContext.<anonymous> (/tmp/g2826-canonical-TsUYlf/test.cjs:335:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'hung',
+    expected: /b\.test\.ts/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at ../g2826-canonical-TsUYlf/test.cjs:338:30
+✖ a run is told whether the next file's compilation has settled, and that there is none after the last (0.955377ms)
+  TypeError: next is not a function
+      at run (/tmp/g2826-canonical-TsUYlf/test.cjs:345:30)
+      at async runTestFiles (/tmp/g2826-canonical-TsUYlf/test.cjs:54:11)
+      at async TestContext.<anonymous> (/tmp/g2826-canonical-TsUYlf/test.cjs:340:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+
+## /tmp/g2826-descendant-b418-final.log
+TIMEOUT: single-stuck.test.ts did not finish in 1.2 s; exit not seen; proc=unreadable; killed and counted as a failure.
+PASS single stuck child returns failure
+PASS single stuck child is no longer running
+G_FIXTURE_DESCENDANT_READY
+TIMEOUT: descendant-stuck.test.ts did not finish in 1.2 s; exit not seen; proc=unreadable; killed and counted as a failure.
+G_DESCENDANT_STATE {"status":1,"parent":"proc=unreadable","descendant":"proc=unreadable"}
+PASS timeout remains a failure if optional diagnose throws
+PASS the direct worker is no longer running
+FAIL no worker descendant survives the timed-out test {"got":true,"want":false}
+PASS a later healthy test still succeeds
+G_OWN_FIXTURE_CLEANUP [{"pid":14,"running":false,"state":"proc=unreadable"},{"pid":22,"running":false,"state":"proc=unreadable"},{"pid":30,"running":false,"state":"proc=unreadable"}]
+6 checks, 1 failures
+
+
+## /tmp/g2826-descendant-red1bf-final.log
+TIMEOUT: single-stuck.test.ts did not finish in 1.2 s; killed and counted as a failure.
+PASS single stuck child returns failure
+PASS single stuck child is no longer running
+G_FIXTURE_DESCENDANT_READY
+TIMEOUT: descendant-stuck.test.ts did not finish in 1.2 s; killed and counted as a failure.
+G_DESCENDANT_STATE {"status":1,"parent":"proc=unreadable","descendant":"proc=unreadable"}
+PASS timeout remains a failure if optional diagnose throws
+PASS the direct worker is no longer running
+FAIL no worker descendant survives the timed-out test {"got":true,"want":false}
+PASS a later healthy test still succeeds
+G_OWN_FIXTURE_CLEANUP [{"pid":13,"running":false,"state":"proc=unreadable"},{"pid":21,"running":false,"state":"proc=unreadable"},{"pid":29,"running":false,"state":"proc=unreadable"}]
+6 checks, 1 failures
+
+
+## /tmp/g2826-inherited-output-b418.log
+PASS outer executor itself finished normally after counting timeout
+G_OUTPUT_BEFORE_CLEANUP {"exit":{"code":0,"signal":null},"descendantAlive":true,"closed":false,"output":"DESCENDANT_READY\nTIMEOUT: worker.test.ts did not finish in 1.2 s; exit not seen; proc=unreadable; killed and counted as a failure.\nDRIVER_FINISHED 1\n"}
+FAIL no descendant survives when the executor has finished {"got":true,"want":false}
+FAIL the finished executor releases its inherited stdout/stderr {"got":false,"want":true}
+PASS killing the recorded synthetic descendant releases close
+4 checks, 2 failures
+
+
+## /tmp/g2826-inherited-output-red1bf.log
+PASS outer executor itself finished normally after counting timeout
+G_OUTPUT_BEFORE_CLEANUP {"exit":{"code":0,"signal":null},"descendantAlive":true,"closed":false,"output":"DESCENDANT_READY\nTIMEOUT: worker.test.ts did not finish in 1.2 s; killed and counted as a failure.\nDRIVER_FINISHED 1\n"}
+FAIL no descendant survives when the executor has finished {"got":true,"want":false}
+FAIL the finished executor releases its inherited stdout/stderr {"got":false,"want":true}
+PASS killing the recorded synthetic descendant releases close
+4 checks, 2 failures
+
+
+## /tmp/g2826-linked-final.log
+
+Off three ways today, and nothing is sent while off
+  ok    no reviewed cost ceiling exists yet
+  ok    no review: off, nothing sent
+  ok    no store: off, nothing sent
+  ok    no key: off, nothing sent
+  ok    the key: none without the setting
+  ok    the key: not 32 bytes, none
+  ok    the key: 32 bytes from base64
+  ok    the default run, with a key but no review or bucket, is off and sends nothing
+  ok    the default store: none without the bucket settings
+
+A review counts only with its date, its source, a retention and a storage ceiling the copies cannot pass
+  ok    the synthetic review is whole
+  ok    a cap behind a getter: refused, off, nothing sent, the getter never run
+  ok    a review inherited from another object: refused, nothing sent
+  ok    a field added to Object.prototype is never read into the copy
+  ok    a retention of 3 days is admitted
+  ok    a revoked proxy: refused as a result, never an exception
+  ok    no date: refused, off, nothing sent
+  ok    a date that is not one: refused, off, nothing sent
+  ok    no source: refused, off, nothing sent
+  ok    no retention: refused, off, nothing sent
+  ok    a retention of 1 day: refused, off, nothing sent
+  ok    a retention of 2 days: refused, off, nothing sent
+  ok    a storage ceiling the kept copies could pass: refused, off, nothing sent
+  ok    a storage ceiling one byte short of retention + 2 sets: refused, off, nothing sent
+  ok    no room for the run's own commands: refused, off, nothing sent
+  ok    a cap that is not a count: refused, off, nothing sent
+  ok    more parts than a set may have: refused, off, nothing sent
+  ok    parts whose stored weight the ceiling cannot hold: refused, off, nothing sent
+
+With all three, a copy is made, written once and read back the same
+  ok    done, with the keys copied (its own day count and lock among them), one part and its manifest
+  ok    a second run the same day is refused before anything is written
+  ok    the good copy's time and its manifest are kept, and survive that refusal
+  ok    the last good copy's mark is kept for good: it names the copy never deleted to make room
+
+Failures say which step, and keep the last good copy's time
+  ok    a copy that does not read back the same is a failure
+  ok    its reason is kept, with its time
+  ok    a failure's note expires by itself
+  ok    one failed day after a good one: a good copy is still under 48 hours old
+  ok    a cap reached is a failure that says which
+  ok    the reason kept is the latest
+  ok    no good copy for over 48 hours: seen
+  ok    the database failing during the export: a result, not an exception
+  ok    and its reason is kept
+  ok    a refused day mark: the run stops before copying, as a result
+  ok    a good copy whose outcome could not be written is still reported done
+  ok    with nothing ever kept, the report says there is no good copy
+
+At most one run a day and one new try after a failure, counted before any cost (inbox C4-49)
+  ok    the day's first run fails
+  ok    one new try the same day runs, and is done
+  ok    a third call that day: refused at the day's count, four commands (the lock; the count; the lock let go only if it is its own, in one script), nothing listed or written
+  ok    a day whose first run is done
+  ok    no new try after a good run: refused, four commands, nothing written
+  ok    two failures in a day: the second was the new try
+  ok    and nothing more that day
+  ok    the count of the day expires by itself
+
+A walk past its pages is a failure that says so, never a partial copy (inbox C4-46)
+  ok    refused at the walk's page cap, nothing written
+  ok    and the owner's report says so
+
+Write first, then delete past the retention; under the ceiling a failed delete never costs the day's copy (inbox C4-53)
+  ok    the normal case: written, then the copy older than 30 days deleted, the one of exactly 30 days and the younger kept
+  ok    a delete that fails under the ceiling: the day's copy is still written, done
+  ok    and the owner's report says the deletion failed
+  ok    the good copy's time is the new one
+  ok    the next run deletes what was left past the retention
+
+At the ceiling, the oldest go first, never the last verified copy; a failed delete there writes nothing (inbox C4-53)
+  ok    at the ceiling, a delete that fails: nothing written, said so
+  ok    the day's new try makes room from the oldest, keeps the last verified copy, and writes
+  ok    and the bucket stays within the review's ceiling
+
+The last verified copy is known for sure before any copy is deleted to make room (Codex G on e95705e66)
+  ok    an empty answer from the database: no copy deleted to make room, nothing written, said so
+  ok    two answers for one command: no copy deleted to make room, nothing written, said so
+  ok    a value that is not text: no copy deleted to make room, nothing written, said so
+  ok    a value that is not the kept shape: no copy deleted to make room, nothing written, said so
+  ok    an old mark with a time and no manifest: no copy deleted to make room, nothing written, said so
+  ok    no mark at all, with copies in the bucket: no copy deleted to make room, nothing written, said so
+
+The bucket's rule outlives the retention, and a last good copy lost to it never stops the backup (Reviewer 1 on e81007570)
+  ok    the bucket's lifecycle rule to set: 60 days, longer than the 30-day retention
+  ok    30 days more than the retention
+  ok    the last good copy was taken by the bucket's rule
+  ok    the first good run after it writes again
+  ok    and the report says the last good copy was lost
+  ok    the run's own note: last good copy lost
+  ok    only objects with no valid manifest were deleted to make room
+
+A failed day deletes nothing after it: the last good copy stays past the retention while new ones fail (Codex G on e95705e66)
+  ok    day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole
+  ok    the next good copy is written, and only then is the old one, past the retention, deleted
+
+When even deleting every other copy leaves no room, nothing is written
+  ok    the others deleted, the last verified copy kept, and still no room: room_error, nothing written
+
+A listing longer than the ceiling allows: nothing written, said so
+  ok    more than its 1 page: refused as room_pages after one page, nothing written or deleted
+
+Two calls at once: one runs, the other is refused before anything costly (inbox C4-53)
+  ok    one is done, the other refused as busy; one set written
+  ok    the busy call left the day's new try untouched
+
+The lock: only its own run lets it go, it outlives the run's cutoff, and a busy call is reported
+  ok    the lock lives longer than the cutoff and the admission's two requests, with a minute to spare
+  ok    held, while writing, for at least the cutoff
+  ok    a lock taken by another run since is never let go by this one
+  ok    a call that finds the lock: busy, and the owner's report says so
+
+What the code proves: never past the review's ceiling in objects, and the last verified copy always kept
+  ok    never more than the review's 36199424 bytes (seen 21664)
+  ok    objects are what limits here: 64 reached, never passed, one listing page of 1
+  ok    the last verified copy is never deleted
+  ok    after each run whose deletion finished, none of its own copies older than 30 days
+  ok    the ceiling in sets: retention + 2 = 32
+
+The same 90 days with copies that weigh more than half a set each: bytes are what limits
+  ok    never more than the review's 36199424 bytes as listed (seen 35633871)
+  ok    and fewer objects than the 64 the count allows (seen 63)
+  ok    the last verified copy is never deleted
+
+A run that passes its cutoff stops before its manifest (independent review of #2175)
+  ok    the run's cutoff: 800 s, under a day (the retention's proof needs it)
+  ok    past the cutoff: refused as such, its part left unreferenced, no manifest written
+
+With the shortest retention, the report says no good copy before the last one can be deleted
+  ok    two failed days: the good copy is still there, and the report already says no good copy for 48 hours
+
+Nothing schedules it
+  ok    vercel.json names no backup route
+
+96 checks, all passing.
+
+Off until the owner's own settings exist, and never on the sold files' bucket or keys
+  ok    no settings: off
+  ok    the sold files' bucket: off
+  ok    the sold files' key: off
+  ok    a malformed account: off
+  ok    its own bucket and key: on
+  ok    a bucket in the EU jurisdiction: its own address
+  ok    an unknown jurisdiction: off
+
+Written once, read back whole, through the read-back the backup needs
+  ok    one object, under backups/, named by its id
+  ok    create-only, and signed with it
+  ok    every request signed, the body's hash the body's
+  ok    the round trip never deletes
+
+It lists its own objects and deletes one by its id (inbox C4-49: the run's retention)
+  ok    one page under backups/, signed, at most 1,000 names
+  ok    only its own objects, each with the time the bucket wrote it and its size; another name is never offered for deletion
+  ok    a long listing goes on from where it stopped
+  ok    not a listing: refused, never read as an empty bucket
+  ok    a truncated listing with nowhere to go on: refused, never read as an empty bucket
+  ok    a time that is not one: refused, never read as an empty bucket
+  ok    no size: refused, never read as an empty bucket
+  ok    a count that does not match: refused, never read as an empty bucket
+  ok    a delete: of that object only, signed
+  ok    an id that is not one: refused before any request
+  ok    a delete answered 403: refused, never taken as done
+
+What is never taken as a backup
+  ok    an id that is not one: refused before any request
+  ok    a second write under the same id: refused (412), the first kept
+  ok    a read past its cap: refused
+  ok    and so when the store states no length, counted as it streams
+  ok    a cap that is not a count of bytes: refused
+  ok    an answer of 303: refused, never taken as written or read
+  ok    an answer of 409: refused, never taken as written or read
+  ok    an answer of 503: refused, never taken as written or read
+  ok    a missing object: refused
+  ok    an unreachable store: refused
+
+32 checks, all passing.
+
+
+## /tmp/g2826-types.log
+
+
+## /tmp/g2826-lint.log
+
+
+## /tmp/g2826-scanner.log
+Public data check: 4068 tracked files; 0 file(s) require correction.
+
+
+## Measurement excerpts fetched from exact GitHub jobs
+Job127943351314
+2026-11-06T14:24:45.8749549Z === contract-admission-ack.test.ts ===
+2026-11-06T14:26:26.6596369Z ℹ tests 4
+2026-11-06T14:26:26.6597321Z ℹ pass 4
+2026-11-06T14:26:26.6597771Z ℹ fail 0
+2026-11-06T14:26:26.6599857Z ℹ duration_ms 100676.451934
+Job127891038519
+2026-11-06T12:28:11.3700199Z === contract-admission-ack.test.ts ===
+2026-11-06T12:29:05.2029771Z ℹ tests 4
+2026-11-06T12:29:05.2030334Z ℹ pass 4
+2026-11-06T12:29:05.2030541Z ℹ fail 0
+2026-11-06T12:29:05.2031291Z ℹ duration_ms 53766.602105
+Header-to-next-header measured top windows
+{
+  "job127943351314": [
+    {
+      "file": "contract-admission-ack.test.ts",
+      "seconds": 100.818
+    },
+    {
+      "file": "contract-funding.test.ts",
+      "seconds": 96.049
+    },
+    {
+      "file": "contract-resource-window.test.ts",
+      "seconds": 85.476
+    },
+    {
+      "file": "broadcast-completion-order.test.ts",
+      "seconds": 21.212
+    },
+    {
+      "file": "person-tasks.test.ts",
+      "seconds": 19.969
+    }
+  ],
+  "job127891038519": [
+    {
+      "file": "contract-admission-ack.test.ts",
+      "seconds": 53.859
+    },
+    {
+      "file": "contract-funding.test.ts",
+      "seconds": 52.455
+    },
+    {
+      "file": "contract-resource-window.test.ts",
+      "seconds": 45.348
+    },
+    {
+      "file": "broadcast-completion-order.test.ts",
+      "seconds": 21.144
+    },
+    {
+      "file": "person-tasks.test.ts",
+      "seconds": 19.968
+    }
+  ],
+  "sha256": {
+    "tests/g2826-descendant-cleanup.proof.mjs": "a09a97f5ff501d63ba1b538f744470d470057ded769edf2940bc5d08e2624de5",
+    "tests/g2826-inherited-output.proof.mjs": "0a12a598f59fb206aff313c9b75590c2ed3d7e8254f646e22421ace1b9609488",
+    "tests/g2826-run.mjs": "78faee516657861a956f74f2053e37cdf2bcc78272ae80e5bf880b33eeb8fae3",
+    "tsconfig.g2826.json": "d978fef680f6ceee7aa41f907caeccc1ec57bca9af57c000bb6a5e1c165dba6b"
+  },
+  "status": "?? scripts/__pycache__/check_public_data.cpython-312.pyc\n?? tests/g2826-descendant-cleanup.proof.mjs\n?? tests/g2826-inherited-output.proof.mjs\n?? tests/g2826-run.mjs\n?? tsconfig.g2826.json\n"
+}

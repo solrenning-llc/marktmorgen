@@ -4,14 +4,14 @@ import { giveBackUnused, unusedRows } from "@/lib/closing-refunds";
 import { paidKey, workKey } from "@/lib/closing-holds";
 import { claimHandle, storeFolder, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
-import { done, is, part } from "./check";
+import { done, is } from "./check";
 
 const DAY = Date.UTC(2026, 10, 6);
 const DAY_SECONDS = DAY / 1000;
 const SUB = "sub_g2699refund";
 const INTENT = "pi_g2699refund";
 let response: Record<string, unknown> = {};
-let listRows: Record<string, unknown>[] = [];
+const listRows: Record<string, unknown>[] = [];
 let listEnvelope:Record<string,unknown>|null=null;
 let posts = 0;
 let refunded = 0;

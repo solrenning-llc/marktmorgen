@@ -258,6 +258,12 @@ async function main(): Promise<void> {
     is(`${mode}: the products and the preview stay`, [(await readLetter(store, letter.id))?.products, (await readLetter(store, letter.id))?.preview], [[club], 2]);
     is(`${mode}: a visitor never sees the private recipe`, (await render(store, letter.id)).includes(SECRET), false);
   }
+  part("J: missing copy with a surviving members-only score");
+  await publishLetter(store, kept, now + 30, [club], false, 2);
+  await redis.pipeline([["DEL", `nl:letters:i:${letter.id}`]]);
+  const missing = await publishLetter(store, kept, now + 31);
+  is("a missing member copy refuses republication", missing.ok, false);
+  is("a visitor never reads the private recipe after missing-copy republication", (await render(store, letter.id)).includes(SECRET), false);
   done();
 }
 

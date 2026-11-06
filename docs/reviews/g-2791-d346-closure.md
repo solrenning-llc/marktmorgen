@@ -1,0 +1,19 @@
+# Codex G — #2791 retorno final focal de finitude
+
+Head EXATO d346da2b10358a6c25a0236b5f7675290570463f. Anúncio canal ed014cc0cc8dc88a141b395dad0370d243d8a8da, após retentativa legítima >2min do409 não aplicado. Pedido nominalC4 de10h52; R1semachado10h53 creditado, sem segundo parecer limpo encontrado antes do anúncio. Todo delta8ec9eb79b8744d47ed26a465cffe77ab06038342..d346 lido:2paths331adições/3remoções. Produto só troca formato do score por segundos inteiros que o próprio writer grava; permanente328linhas é a prova69663ffc com UMAcreditline e modo padrãooverflow em vez deempty. Todas as63chamadasis() inteiras por AST preservadas. Nenhuma edição de produto G.
+
+**Sem achado no retorno nominal de finitude. MÉDIO overflow FECHADO. M1 concorrente permanece ABERTO/ADIADO por decisão C4-1310; não é parecer de segurança global do acesso.** M2 serial e os fechamentos anteriores de recibos permanecem preservados.
+
+Mesma prova congelada **tests/g2791-refund-score-overflow.proof.ts@69663ffc698c988e7c81f9a340f169e5dec25777**, bytes/expectativas inalterados, modoexplicitamenteoverflow: pai8ec9 **63/4 falhas** (saída b00e8dab), atuald346 **63/63**. ZSCOREatingido1emambos, compra paga e vigília agora preservadas; leitura saudável posterior mantém o acesso. Outrosmodos empty,spaces,hex,extra,newline:63/63cada; nulllegítimo62/62. Permanente com padrãooverflow:63/63. Não somo execuções da mesma fixture como independência.
+
+**Controle adicional de score legítimo produzido pelo próprio código**, não resposta fabricada de ZSCORE: **tests/g2791-real-refund-score.proof.ts@92b2f251b60c3bccf2fb2c6c354408366826bfb7**. Duas compras reais no stand-in, capture nova observada REFUNDED, SREM do job divergente explicitamente não aplicado com ACKnull conserva membro+vigília. O writer real grava marca de reembolso String(now). Depois, outro reembolso usa essa marca não nula pelo ZSCORE real: scoreReads1, ambas capturesREFUNDED, grant[]. **60/60**. Relógio fixado apenas durante a observação da marca e restaurado emfinally; comparação usa o instante fixo, evitando dependência da virada do segundo. Primeira execução desse controle já passou60/60; a última prova durável foi repetida com relógio fixo e também60/60. Prova a saída integral, sem pressupor confirmação do SREM desconhecido.
+
+Serialrefund-order própria:60/60nestehead.14entradas relacionadas PayPal, drops, other-order-id, paid-schema-batch, ownership-pair, final-reassign/revoke, gifts,preorders: **618verificaçõesregistradas, todas aprovadas**, processos exit0. Númerosbrutos:67,12,13,49,43,45,14,61,62,62,62,62,34,32. As diferenças de contagem de fixtures em outrosheads não são expectativas removidas pelo G.
+
+- Tipagem recortada tsconfig.g2791-d346.json@649918c6271b0787ad2eb7fde728eefc9ab1f581:exit0; repetida após endurecer o relógio do controle próprio, sem diagnóstico.
+- ESLint lib/paypal-sales.ts tests/g2791-refund-score-overflow.test.ts:exit0, ZEROerros/SEISavisosunusedda fixture. Sem alegação de lint sem avisos.
+- gitdiff--check8ec9..HEAD:exit0.
+
+M1 da compra concorrente foi repetido por G no8ec9 com63/2; não o repeti neste delta só de formato e teste, nem o chamo corrigido. O recorte de adiamento explícito C4 continua aceito sem agravar o cenário demonstrado; próxima unidade mantém a prova bf4842ee como RED. Condição #2781antes/junto#2791 preservada. O LEVE do leitor de relatório readPayPalRefundsWithCoverage foi registrado pela coordenação como fora do PR; não o fecho nem o reclassifico sem prova própria. Não certifico retenção/relatórios gerais.
+
+Saídas completas docs/reviews/g-2791-d346-output.txt@bddc794e15474b9c9f0981b4b5c7c3af878790fc; log final adicional de tipos é armazenado separadamente no mesmo ramo. **codex/g-review-2791-paid-ownership-return**. SemRedisnativo, provedorreal, conta, pagamento, browser, CIglobal/build ou certificação global de margem. Sem produto/reserva/ref/base/CIalheio/merge. C4 única coordenadora,C1desligado.

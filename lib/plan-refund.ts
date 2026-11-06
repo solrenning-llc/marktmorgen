@@ -106,7 +106,17 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     if (calls > MAX_CALLS || Date.now() > deadline) throw new Spent();
     return onPlatformAt(AT, "GET", path);
   };
-  const list = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).map(obj).filter((r): r is Row => r !== null) : []);
+  const list = (page: Row, maximum: number): Row[] | null => {
+    if (page.object !== "list" || typeof page.has_more !== "boolean" || !Array.isArray(page.data) || page.data.length > maximum) return null;
+    const rows = page.data.map(obj);
+    return rows.every((row): row is Row => row !== null) ? rows : null;
+  };
+  const embedded = (value: unknown): Row[] | null => {
+    const data = obj(value)?.data;
+    if (!Array.isArray(data)) return null;
+    const rows = data.map(obj);
+    return rows.every((row): row is Row => row !== null) ? rows : null;
+  };
 
   try {
     const sub = await get(`/subscriptions/${encodeURIComponent(subscriptionId)}?expand[]=customer`);
@@ -122,7 +132,11 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
 
     const paidPage = await get(`/invoices?${new URLSearchParams({ subscription: subscriptionId, status: "paid", limit: "100" })}`);
     // A trial's invoice is paid with no charge: not a payment.
-    const paid = list(paidPage).filter((r) => idOf(r.subscription) === subscriptionId && idOf(r.charge) !== "");
+    const paidRows = list(paidPage, 100);
+    if (!paidRows || paidRows.some((r) => !INVOICE_ID.test(idOf(r.id)) || idOf(r.subscription) !== subscriptionId || r.status !== "paid" || (r.charge !== null && !CHARGE_ID.test(idOf(r.charge))))) {
+      return { refund: { kind: "unknown", reason: "unreadable" } };
+    }
+    const paid = paidRows.filter((r) => idOf(r.charge) !== "");
     if (!paid.length) return { refund: { kind: "none", reason: "no_plan_payment" } };
 
     /** Reads an invoice's charge and judges it by the rules. */
@@ -135,13 +149,15 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       let disputeStatus: string | null = null;
       let disputedCents: number | null = null;
       if (charge.disputed === true) {
-        const disputes = list(await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`));
+        const disputes = list(await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`), 10);
+        if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
         disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
         disputedCents = num(disputes[0].amount);
       }
-      const lines = list(obj(invoice.lines) ?? {});
+      const lines = embedded(invoice.lines);
+      if (!lines) return { refund: { kind: "unknown", reason: "unreadable" } };
       const line = lines.find((l) => l.type === "subscription");
       const price = obj(line?.price);
       const interval = obj(price?.recurring)?.interval;
@@ -179,14 +195,16 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
 
     // The customer's first succeeded charge, if the list shows them all.
     const chargesPage = await get(`/charges?${new URLSearchParams({ customer: customer.id, limit: "100" })}`);
-    const succeeded = list(chargesPage).filter((c) => c.status === "succeeded" && c.paid === true && Number.isFinite(num(c.created)));
+    const chargeRows = list(chargesPage, 100);
+    if (!chargeRows) return { refund: { kind: "unknown", reason: "unreadable" } };
+    const succeeded = chargeRows.filter((c) => c.status === "succeeded" && c.paid === true && Number.isFinite(num(c.created)));
     const windowStart = nowSeconds - REFUND_DAYS * DAY_SECONDS;
     const oldestListed = succeeded.reduce<Row | null>((a, c) => (!a || num(c.created) < num(a.created) ? c : a), null);
     let first: Row | null = null;
     if (chargesPage.has_more === true) {
       // Over a page: every charge not listed is older than the oldest listed, of any status (a page of declined charges
       // holds no succeeded one, and the first payment may be on the next page). Inside the window if that one is.
-      const listedTimes = list(chargesPage).map((c) => num(c.created));
+      const listedTimes = chargeRows.map((c) => num(c.created));
       if (!listedTimes.length || listedTimes.some((t) => !Number.isFinite(t)) || Math.min(...listedTimes) >= windowStart) {
         return { refund: { kind: "unknown", reason: "too_many" } };
       }
@@ -208,20 +226,26 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       for (const email of emails) {
         const found = await get(`/customers/search?${new URLSearchParams({ query: `email:"${email.replace(/["\\]/g, "")}"`, limit: "100" })}`);
         if (found.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
-        for (const c of list(found)) if (typeof c.email === "string" && normaliseEmail(c.email) === email && idOf(c.id) !== customer.id) others.add(idOf(c.id));
+        const foundRows = list(found, 100);
+        if (!foundRows) return { refund: { kind: "unknown", reason: "unreadable" } };
+        for (const c of foundRows) if (typeof c.email === "string" && normaliseEmail(c.email) === email && idOf(c.id) !== customer.id) others.add(idOf(c.id));
       }
       if (others.size > MAX_OTHER_CUSTOMERS) return { refund: { kind: "unknown", reason: "too_many" } };
       for (const other of others) {
         if (!CUSTOMER_PATTERN.test(other)) return { refund: { kind: "unknown", reason: "unreadable" } };
         const page = await get(`/charges?${new URLSearchParams({ customer: other, "created[lt]": String(before), limit: "100" })}`);
-        if (list(page).some((c) => c.status === "succeeded" && c.paid === true)) personPaidBefore = true;
+        const rows = list(page, 100);
+        if (!rows) return { refund: { kind: "unknown", reason: "unreadable" } };
+        if (rows.some((c) => c.status === "succeeded" && c.paid === true)) personPaidBefore = true;
         else if (page.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
       }
       // …or the same card.
       const fingerprint = obj(obj(first.payment_method_details)?.card)?.fingerprint;
       if (!personPaidBefore && typeof fingerprint === "string" && /^[A-Za-z0-9]{4,64}$/.test(fingerprint)) {
         const found = await get(`/charges/search?${new URLSearchParams({ query: `payment_method_details.card.fingerprint:"${fingerprint}" AND status:"succeeded" AND created<${before}`, limit: "10" })}`);
-        if (list(found).some((c) => idOf(c.id) !== idOf(first!.id) && num(c.created) < before)) personPaidBefore = true;
+        const foundRows = list(found, 10);
+        if (!foundRows) return { refund: { kind: "unknown", reason: "unreadable" } };
+        if (foundRows.some((c) => idOf(c.id) !== idOf(first!.id) && num(c.created) < before)) personPaidBefore = true;
       }
       if (!personPaidBefore) {
         const invoiceId = idOf(first.invoice);

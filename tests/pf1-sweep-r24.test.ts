@@ -25,6 +25,8 @@ import { test } from "node:test";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { forgetRecoveryPerson, readStopToken, remindAbandoned, stopReminders } from "@/lib/checkout-recovery";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { NextRequest } from "next/server";
+import { POST as unsubscribePost } from "@/app/api/mail/unsubscribe/route";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -256,6 +258,29 @@ test("F3: pressing stop with a reply of another shape is unknown, never 'Unsubsc
     const token = await stopToken(`stopper-set-${label.length}@example.com`);
     await t.test(label, () => assert.rejects(intercept(isStopWrite, answer, () => stopReminders(token)), UnknownReplyError, `stop: ${label}`));
   }
+});
+
+test("F3 at the door: an unknown stop write never says 'Unsubscribed.' nor 'Not found.', and the page offers the button again", async () => {
+  await shop();
+  const press = async (token: string, fromPage: boolean) => {
+    const body = new URLSearchParams(fromPage ? { from: "page" } : {});
+    return intercept(isStopWrite, async () => [null], () =>
+      unsubscribePost(new NextRequest(`https://marktmorgen.test/api/mail/unsubscribe?r=${token}`, {
+        method: "POST",
+        headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      })));
+  };
+  const oneClick = await press(await stopToken("door-oneclick@example.com"), false);
+  assert.equal(oneClick.status, 503, "a one-click stop whose write is unknown answers try again");
+  const said = await oneClick.text();
+  assert.ok(!/Unsubscribed|Not found/.test(said), `never a false answer: ${said}`);
+  assert.match(said, /try again/i);
+  const token = await stopToken("door-page@example.com");
+  const fromPage = await press(token, true);
+  assert.equal(fromPage.status, 303);
+  assert.match(fromPage.headers.get("location") ?? "", /done=0/);
+  assert.equal((await readStopToken(token))?.stopped, false, "not stopped, so the page shows the button again");
 });
 
 test("F5: forgetting the once-a-week marks with a reply of another shape is unknown, never 'nothing here'", async (t) => {

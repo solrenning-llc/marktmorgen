@@ -33,7 +33,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_notify_prefs_stand_in";
-process.env.RESEND_API_KEY = "re_test_notify_prefs_stand_in";
+process.env.RESEND_API_KEY = "re_test_store_alerts_stand_in";
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 
 const OWNER = "notify-owner@example.com";
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
   is("saved, read back, in the catalog's order", saved === "invalid" || saved === "unknown" ? saved : [...saved], ["traffic", "quiet-sales"]);
   is("read", [...((await readNotifyOff(STATS)) ?? [])], ["traffic", "quiet-sales"]);
   is("one key, a short list", redis.run(["GET", `nl:notify:off:${STATS}`]), JSON.stringify(["traffic", "quiet-sales"]));
-  is("an always-on event cannot be switched off", await saveNotifyOff(STATS, ["account"]), "invalid");
+  is("an always-on event cannot be switched off, and says so", await saveNotifyOff(STATS, ["account"]), "always_on");
   is("an unknown event is refused", await saveNotifyOff(STATS, ["traffic", "news"]), "invalid");
   is("a repeat is refused", await saveNotifyOff(STATS, ["traffic", "traffic"]), "invalid");
   is("not a list is refused", await saveNotifyOff(STATS, "traffic"), "invalid");
@@ -221,10 +221,11 @@ async function main(): Promise<void> {
   const quietStore = { ...store, handle: "notifyharbor" };
   const quiet = Array.from({ length: 30 }, (_, i) => ({ id: `cs_nq${i}`, created: (quietNow - (20 + i) * DAY) / 1000, status: "complete", payment_status: "paid", metadata: { store: "notifyharbor" } }));
   sessions = quiet;
+  const stretch = `nl:quiet:sent:notifyharbor:${quietNow - 20 * DAY}`;
   await saveNotifyOff(store.statsId!, ["quiet-sales"]);
   emails.length = 0;
   is("switched off: no email", [await checkQuiet(quietStore, quietNow), emails.length], ["skipped", 0]);
-  is("its stretch is not used up", redis.run(["KEYS", "nl:quiet:sent:notifyharbor:*"]), []);
+  is("its stretch is not used up", redis.run(["EXISTS", stretch]), 0);
   await saveNotifyOff(store.statsId!, []);
   await redis.pipeline([["DEL", `nl:quiet:seen:${day(quietNow)}:notifyharbor`]]);
   const garbledQuiet = garbleChoice([7]);
@@ -234,9 +235,9 @@ async function main(): Promise<void> {
   } finally {
     garbledQuiet.heal();
   }
-  is("an unknown choice: no email, nothing used up", [quietUnknown, emails.length, redis.run(["KEYS", "nl:quiet:sent:notifyharbor:*"])], ["skipped", 0, []]);
+  is("an unknown choice: no email, nothing used up", [quietUnknown, emails.length, redis.run(["EXISTS", stretch])], ["skipped", 0, 0]);
   is("and the day's look let go", redis.run(["EXISTS", `nl:quiet:seen:${day(quietNow)}:notifyharbor`]), 0);
-  is("the next run sends it once", [await checkQuiet(quietStore, quietNow + 3_600_000), emails.length], ["sent", 1]);
+  is("the next run sends it once", [await checkQuiet(quietStore, quietNow + 3_600_000), emails.length, redis.run(["EXISTS", stretch])], ["sent", 1, 1]);
   is("with where to choose", emails[0]?.text.includes(`/studio/notifications?store=${store.sid}`), true);
 
   part("The route: owner or Admin, optional events only, confirmed or said so");

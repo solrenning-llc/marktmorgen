@@ -1403,6 +1403,10 @@ export default async function StudioPage({
                   : []),
                 // Everyone on the store, for their own devices (lib/phone-alerts.ts).
                 { href: studioPath(store, "", "phone"), title: "Phone notifications", text: "A buzz for sales, bookings, community reports, affiliate applications and live events, on your own devices.", icon: "phone" as const },
+                // A setting, so for the owner and an Admin (lib/notify-prefs.ts, queue item 601 [KB22] U6).
+                ...(may("settings")
+                  ? [{ href: studioPath(store, "", "notifications"), title: "Alert emails", text: "Choose which emails about your store's numbers you get. Account, payment and legal emails always come.", icon: "mail" as const }]
+                  : []),
                 // Everyone on the store, for their own calendar as a team host (lib/host-calendar.ts).
                 ...(callProducts.length > 0
                   ? [{ href: studioPath(store, "", "calendar"), title: "Your calendar", text: "Your own busy times, kept out of the team calls you host.", icon: "calendar" as const }]

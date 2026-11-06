@@ -850,11 +850,19 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }
+    // Each write confirmed before the order leaves the watch (Codex G on #2791): a reply in another shape keeps the
+    // order watched, looked at again in an hour, and the same write is made again then (both are harmless twice).
+    const leaveWatch = async (write: (string | number)[]): Promise<boolean> => {
+      const wrote = repliesFor(await redisPipeline([write]), 1);
+      if (!wrote || (wrote[0] !== 0 && wrote[0] !== 1)) {
+        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+        return false;
+      }
+      await redisPipeline([["ZREM", watchKey(statsId), order]]);
+      return true;
+    };
     if (kept) {
-      await redisPipeline([
-        ["HSET", importedKey(statsId, paid.email), paid.product, JSON.stringify({ at: kept.at, job: `paypal:${kept.order}`, items: items.length ? items : null })],
-        ["ZREM", watchKey(statsId), order],
-      ]);
+      await leaveWatch(["HSET", importedKey(statsId, paid.email), paid.product, JSON.stringify({ at: kept.at, job: `paypal:${kept.order}`, items: items.length ? items : null })]);
       continue;
     }
     // The course first, then the purchase and the watch (Codex G on #2781; rule 30): a course removal that fails keeps
@@ -866,11 +874,7 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
       continue;
     }
-    await redisPipeline([
-      ["HDEL", importedKey(statsId, paid.email), paid.product],
-      ["ZREM", watchKey(statsId), order],
-    ]);
-    revoked += 1;
+    if (await leaveWatch(["HDEL", importedKey(statsId, paid.email), paid.product])) revoked += 1;
   }
   result.revoked = revoked;
   return result;

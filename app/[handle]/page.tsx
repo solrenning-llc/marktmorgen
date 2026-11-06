@@ -41,6 +41,7 @@ import { forVisitor } from "@/lib/visitor";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
 import { saleClock, saleRunning } from "@/lib/store-sale";
 import { endsLine, speech } from "@/lib/buyer-words";
+import { EmptyState } from "@/components/empty-state";
 import { preorderDay, soonState } from "@/lib/preorders";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -366,12 +367,8 @@ export default async function StorePage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
-          {total === 0 && links.length === 0 ? (
-            <div className="st-note text-center">
-              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.nothingYet}</p>
-              <p className="mt-2 text-sm">{w.nothingYetBody(store.name)}</p>
-            </div>
-          ) : null}
+          {/* Nothing listed yet: a heading and a sentence for the buyer, and no button (656 [WG16], components/empty-state.tsx). */}
+          {total === 0 && links.length === 0 ? <EmptyState title={w.nothingYet} body={w.nothingYetBody(store.name)} /> : null}
 
           {/*
             The parts of the page, in the order the creator chose (lib/store-order.ts).

@@ -55,6 +55,8 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type DataStore, DataRoomError } from "@/lib/store-data";
 import { onAccount } from "@/lib/stripe-account";
+// The one Stripe version these lists are read at, so their shape is the one checked here (Revisor 1 on #2464).
+import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
@@ -84,6 +86,8 @@ const IP_LIMIT = 10;
 const ADDRESS_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
+/** The customers whose one-click additions are read for one answer. */
+const CUSTOMERS_READ = 10;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const okKey = (id: string, email: string) => `nl:cm:${id}:ok:${emailKey(email)}`;
@@ -96,11 +100,42 @@ export async function accessProducts(store: Store, config: CommunityConfig): Pro
 }
 
 type Row = Record<string, unknown>;
-type Listed = { data?: unknown };
 
-function rows(listed: Listed): Row[] {
-  return Array.isArray(listed.data) ? (listed.data as Row[]) : [];
+/** A list from Stripe that is not one, or that has more than was read: whether the address holds anything is not known. */
+export class UnreadPurchasesError extends Error {
+  constructor(what: string) {
+    super(`the purchases could not be read in full: ${what}`);
+    this.name = "UnreadPurchasesError";
+  }
 }
+
+/**
+ * The rows of a Stripe list, read exactly (CX-123 rule 24): `data` an array
+ * and `has_more` a boolean, or the reply is not a list and throws. `complete`
+ * is false when Stripe has more than this page: a "no" read from it is not a
+ * "no" (Codex G on #2464), so a caller that finds nothing in it throws.
+ */
+function listOf(listed: unknown, readable: (row: Row) => boolean): { rows: Row[]; complete: boolean } {
+  const list = listed && typeof listed === "object" ? (listed as { data?: unknown; has_more?: unknown }) : null;
+  if (!list || !Array.isArray(list.data) || typeof list.has_more !== "boolean") throw new UnreadPurchasesError("a reply that is not a list");
+  const rows = list.data.filter((row): row is Row => isRecord(row) && readable(row));
+  // An entry that is not the kind asked for (no id, an unknown state, a list in its place) proves nothing, and is not
+  // a "no" either: the readable ones may still prove a purchase, but the list is not complete (Revisor 1 on #2464).
+  return { rows, complete: !list.has_more && rows.length === list.data.length };
+}
+
+const isRecord = (value: unknown): value is Row => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const SESSION_STATES = new Set(["open", "complete", "expired"]);
+const SESSION_PAYMENTS = new Set(["paid", "unpaid", "no_payment_required"]);
+const INTENT_STATES = new Set(["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled", "succeeded"]);
+/** A field Stripe always fills, read only when it is one of Stripe's own values: absent is not known (Codex G on #2464). */
+const oneOf = (value: unknown, known: Set<string>) => typeof value === "string" && known.has(value);
+const hasId = (row: Row) => typeof row.id === "string" && row.id.length > 0;
+const hasMeta = (row: Row) => row.metadata === undefined || row.metadata === null || isRecord(row.metadata);
+/** A Checkout Session as Stripe lists it: an id, and its state and payment state among Stripe's own. */
+const isSessionRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.status, SESSION_STATES) && oneOf(row.payment_status, SESSION_PAYMENTS);
+/** A PaymentIntent as Stripe lists it: an id and a state among Stripe's own. */
+const isIntentRow = (row: Row) => hasId(row) && hasMeta(row) && oneOf(row.status, INTENT_STATES);
 
 /** The rule every door uses for a refund (lib/refunds.ts). */
 const refunded = refundedInFull;
@@ -114,14 +149,17 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   if (!account || ids.size === 0) return false;
   const handles = saleHandles(store);
   const customers = new Set<string>();
+  // Whether every list read here was read to its end: a "no" is only a "no" when it was.
+  let complete = true;
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
     query.append("expand[]", "data.payment_intent.latest_charge");
-    const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
-    for (const session of rows(listed)) {
+    const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_VERSION), isSessionRow);
+    if (!listed.complete) complete = false;
+    for (const session of listed.rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
       const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
       if (!handles.has(meta.store ?? "")) continue;
@@ -144,11 +182,14 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
     }
   }
   // What was added in one click after paying is its own payment.
-  for (const customer of [...customers].slice(0, 10)) {
+  // At most ten customers are asked (the reads stay bounded); more than that leaves the answer unread, not "no".
+  if (customers.size > CUSTOMERS_READ) complete = false;
+  for (const customer of [...customers].slice(0, CUSTOMERS_READ)) {
     const query = new URLSearchParams({ customer, limit: "50" });
     query.append("expand[]", "data.latest_charge");
-    const listed = (await onAccount("GET", account, `/payment_intents?${query}`)) as Listed;
-    for (const intent of rows(listed)) {
+    const listed = listOf(await onAccount("GET", account, `/payment_intents?${query}`, undefined, STRIPE_VERSION), isIntentRow);
+    if (!listed.complete) complete = false;
+    for (const intent of listed.rows) {
       const meta = (intent.metadata ?? {}) as Record<string, string>;
       if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
       if (intent.status !== "succeeded" || refunded(intent)) continue;
@@ -159,6 +200,9 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
       return true;
     }
   }
+  // Nothing found, but not everything was read: unknown, never "holds none of them". A door that does not need to
+  // know (not strict) lets nobody in on it and keeps no answer; a strict door says it could not be asked.
+  if (!complete) throw new UnreadPurchasesError("more than one page");
   return false;
 }
 

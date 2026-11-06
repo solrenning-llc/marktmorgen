@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Every sign-up-setting POST is intercepted; no message or store write occurs. */
 export async function checkJoinAcknowledgment({browser,LOCAL,fixture,axeSource,is}){
  const scenarios=[
@@ -35,6 +37,7 @@ export async function checkJoinAcknowledgment({browser,LOCAL,fixture,axeSource,i
    const form=page.locator("form#signup");await form.waitFor({state:"visible"});await page.addScriptTag({content:axeSource});
    const toggle=form.getByRole("checkbox",{name:"Show the sign-up box on my store page",exact:true});
    const heading=form.getByLabel("Heading (optional)",{exact:true});const line=form.getByLabel("One line under it (optional)",{exact:true});
+   await waitForReactChangeHandler(page,toggle);
    const original=await toggle.isChecked();await toggle.setChecked(!original);
    for(const scenario of scenarios){
     await heading.fill("  Questions   about dinner  ");await line.fill("Écrivez   votre question.");

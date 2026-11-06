@@ -33,8 +33,8 @@ import { dropPage } from "@/lib/sales-page-store";
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { dropCourse, filesInCourse, lessonsInOrder, readCourse } from "@/lib/course";
-import { dropComments } from "@/lib/lesson-comments";
+import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
+import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
@@ -281,14 +281,17 @@ export async function POST(request: NextRequest) {
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
       // options holds one file per option as well as its own.
-      let course: Awaited<ReturnType<typeof readCourse>> = null;
+      let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       const removed = await removeProduct(ref, id, async (going, store) => {
         if (!going.course) return true;
-        const found = await readCourse(going.course.id).catch(() => null);
-        if (!found) return false;
-        course = found;
         try {
-          await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
+          const found = await readCourseExact(going.course.id);
+          if (found) {
+            course = found;
+            await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
+          } else {
+            await dropCommentsAfterCourseGone(going.course.id, store);
+          }
           return true;
         } catch {
           return false;

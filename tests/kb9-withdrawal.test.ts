@@ -263,3 +263,14 @@ test("a creator's notice refused by the inbox is owned up to, offered again, and
   assert.equal(await notices(c), 0);
   assert.ok(!(await render({ token, ref: c })).includes("Confirm withdrawal"));
 });
+
+test("a shipped order stays offered past 14 days from payment: its receipt is not known", async () => {
+  // Revisor 1 on #2827: the rules keep a shipped item open, so the list must say which orders ship (metadata ship=yes).
+  const { store, product, token } = await shop();
+  sessions = [paid("shipped", product, NOW - 40 * DAY, { ship: "yes" }), paid("notship", product, NOW - 40 * DAY)];
+  const purchases = await purchasesFor(store, BUYER, new OrdersMeter(store));
+  const open = Object.fromEntries(purchases.map((p) => [p.reference.slice(8, 15), windowOf(p).open]));
+  assert.deepEqual(open, { shipped: true, notship: false });
+  const html = await render({ token });
+  assert.ok(html.includes(`ref=${sessions[0].id}`) && !html.includes(`ref=${sessions[1].id}`), "the shipped one is offered, the other is not");
+});

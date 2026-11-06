@@ -2821,6 +2821,38 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
     padding: 2.25rem;
   }
 }
+/* A divider and a space (lib/sales-page.ts, 375 [TB1]): only arrangement,
+   never on a card or a band. The line is drawn in the store's muted text
+   colour, which lib/store-look.ts holds at 7:1 or more on the page, so it
+   passes the 3:1 a graphic needs in every store; it keeps the room a section
+   is set off by above it. Nothing here moves or animates. In forced colours
+   the line takes the system's text colour, so it stays visible. */
+.sp-divider {
+  margin: 3.5rem 0 0;
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--st-muted);
+}
+.sp-style-bands .sp-divider {
+  margin-top: 2.75rem;
+}
+.sp-style-cards .sp-divider {
+  margin-top: 1.5rem;
+}
+.sp-space-small {
+  height: 1rem;
+}
+.sp-space-medium {
+  height: 2.5rem;
+}
+.sp-space-large {
+  height: 5rem;
+}
+@media (forced-colors: active) {
+  .sp-divider {
+    border-top-color: CanvasText;
+  }
+}
 @media (min-width: 1100px) {
   .sp-wide.sp-style-bands .sp-band-computer > .sp-section {
     margin-inline: -3rem;

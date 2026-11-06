@@ -89,7 +89,7 @@ async function owner(): Promise<void> {
   is("a save is one of the store's buyer actions", /takeBuyerAction\(store\)/.test(route), true);
   is("a download is one of the store's buyer reads", /takeBuyerRead\(store\)/.test(route), true);
   is("one student's saves are held to an hourly limit", /withinLimit\("lesson-note", who, NOTE_SAVES_PER_HOUR, 3_600\)/.test(route), true);
-  is("the answers are never cached", (route.match(/no-store/g) ?? []).length >= 2, true);
+  is("the answers are never cached", route.includes('NO_STORE = { "Cache-Control": "no-store" }') && (route.match(/NO_STORE/g) ?? []).length >= 4, true);
   const page = read("app/[handle]/course/[product]/[lesson]/page.tsx");
   is("the lesson page reads a note only for a student, never the creator or a visitor", /student && open \? readNote\(/.test(page) || /student && open\s*\?\s*await readNote\(/.test(page), true);
   is("studio pages never read notes", read("app/studio/course/[product]/page.tsx").includes("lesson-notes"), false);
@@ -163,7 +163,7 @@ async function unknown(): Promise<void> {
 
   const w = lessonNotesWords("en");
   const unread = renderToStaticMarkup(createElement(LessonNotes, { initial: { state: "unknown" }, where: { handle: "bakery", product: "p1", lesson: L1 }, language: "en" }));
-  is("the page says it could not be loaded", unread.includes(w.unloaded), true);
+  is("the page says it could not be loaded", unread.includes(w.unloaded.replace(/'/g, "&#x27;")), true);
   is("and gives no box to type over it", unread.includes("<textarea"), false);
   is("and no save button", unread.includes(w.save), false);
 }
@@ -183,7 +183,7 @@ async function page(): Promise<void> {
   is("the download is a plain link that says what it gives", html.includes(w.download) && html.includes('href="/api/store/course/note?h=bakery&amp;p=p1"'), true);
   for (const language of ["en", "es", "fr", "de", "it", "nl", "pt"] as const) {
     const words = lessonNotesWords(language);
-    is(`${language}: every sentence is said`, Object.values(words).every((v) => (typeof v === "function" ? String(v(1, 2)).length > 0 : String(v).length > 0)), true);
+    is(`${language}: every sentence is said`, Object.values(words).every((v) => (typeof v === "function" ? String((v as (a: never, b: never) => string)(1 as never, 2 as never)).length > 0 : String(v).length > 0)), true);
   }
 }
 
@@ -238,11 +238,13 @@ async function erasure(): Promise<void> {
   is("the privacy policy says what is kept and who sees it", privacy.includes('id="lesson-notes"'), true);
 }
 
-await owner();
-await caps();
-await room();
-await unknown();
-await page();
-await exportText();
-await erasure();
-done();
+void (async () => {
+  await owner();
+  await caps();
+  await room();
+  await unknown();
+  await page();
+  await exportText();
+  await erasure();
+  done();
+})();

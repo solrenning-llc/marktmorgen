@@ -1,0 +1,185 @@
+/**
+ * The words of a student's private notes on a lesson (lib/lesson-notes.ts,
+ * components/lesson-notes.tsx, app/api/store/course/note), in the store's
+ * language (lib/store-language.ts). Every language says all English says,
+ * nothing added and nothing softened.
+ */
+import { type LanguageCode, parseLanguage } from "@/lib/store-language";
+
+const n = (locale: string, value: number) => new Intl.NumberFormat(locale).format(value);
+
+const en = {
+  heading: "Your notes",
+  privateLine: "Only you can see these notes. The creator and other students never see them.",
+  label: "Notes on this lesson",
+  count: (used: number, max: number) => `${n("en-US", used)} of ${n("en-US", max)} characters`,
+  save: "Save notes",
+  saving: "Saving…",
+  saved: "Your notes are saved.",
+  cleared: "Your note on this lesson is deleted.",
+  tooLong: (max: number) => `Notes can be at most ${n("en-US", max)} characters. Shorten them, then save.`,
+  tooMany: (max: number) => `You already have notes on ${n("en-US", max)} lessons in this store, the most one student can keep. To add one here, empty a note on another lesson and save it.`,
+  changed: "These notes were changed in another tab or window. Reload the page to see them, then make your change again.",
+  full: "This store has no room for notes right now, so they were not saved. Try again later.",
+  failed: "Your notes could not be saved. Try again in a minute.",
+  slow: "You saved many times in the last hour. Wait a little, then save again.",
+  unloaded: "Your notes on this lesson could not be loaded, so they can't be changed right now. Reload the page to try again.",
+  download: "Download all my notes for this course (text file)",
+  fileTitle: (course: string) => `My notes: ${course}`,
+  downloaded: (day: string) => `Downloaded ${day}`,
+  goneLesson: "A lesson no longer in the course",
+  none: "You have no notes in this course yet.",
+  readFailed: "Your notes could not be read right now. Try again in a minute.",
+};
+
+export type LessonNotesWords = typeof en;
+
+const es: LessonNotesWords = {
+  heading: "Tus notas",
+  privateLine: "Solo tú puedes ver estas notas. El creador y los demás estudiantes nunca las ven.",
+  label: "Notas sobre esta lección",
+  count: (used, max) => `${n("es-ES", used)} de ${n("es-ES", max)} caracteres`,
+  save: "Guardar notas",
+  saving: "Guardando…",
+  saved: "Tus notas están guardadas.",
+  cleared: "Tu nota sobre esta lección está eliminada.",
+  tooLong: (max) => `Las notas pueden tener como máximo ${n("es-ES", max)} caracteres. Acórtalas y vuelve a guardar.`,
+  tooMany: (max) => `Ya tienes notas en ${n("es-ES", max)} lecciones de esta tienda, el máximo que puede guardar un estudiante. Para añadir una aquí, vacía la nota de otra lección y guárdala.`,
+  changed: "Estas notas se cambiaron en otra pestaña o ventana. Recarga la página para verlas y vuelve a hacer tu cambio.",
+  full: "Esta tienda no tiene espacio para notas en este momento, así que no se guardaron. Inténtalo más tarde.",
+  failed: "No se pudieron guardar tus notas. Inténtalo de nuevo en un minuto.",
+  slow: "Guardaste muchas veces en la última hora. Espera un poco y vuelve a guardar.",
+  unloaded: "No se pudieron cargar tus notas sobre esta lección, así que no se pueden cambiar ahora. Recarga la página para intentarlo de nuevo.",
+  download: "Descargar todas mis notas de este curso (archivo de texto)",
+  fileTitle: (course) => `Mis notas: ${course}`,
+  downloaded: (day) => `Descargado el ${day}`,
+  goneLesson: "Una lección que ya no está en el curso",
+  none: "Todavía no tienes notas en este curso.",
+  readFailed: "No se pudieron leer tus notas en este momento. Inténtalo de nuevo en un minuto.",
+};
+
+const fr: LessonNotesWords = {
+  heading: "Vos notes",
+  privateLine: "Vous seul pouvez voir ces notes. Le créateur et les autres élèves ne les voient jamais.",
+  label: "Notes sur cette leçon",
+  count: (used, max) => `${n("fr-FR", used)} sur ${n("fr-FR", max)} caractères`,
+  save: "Enregistrer les notes",
+  saving: "Enregistrement…",
+  saved: "Vos notes sont enregistrées.",
+  cleared: "Votre note sur cette leçon est supprimée.",
+  tooLong: (max) => `Les notes peuvent compter au plus ${n("fr-FR", max)} caractères. Raccourcissez-les, puis enregistrez.`,
+  tooMany: (max) => `Vous avez déjà des notes sur ${n("fr-FR", max)} leçons dans cette boutique, le maximum qu’un élève peut garder. Pour en ajouter une ici, videz la note d’une autre leçon et enregistrez-la.`,
+  changed: "Ces notes ont été modifiées dans un autre onglet ou une autre fenêtre. Rechargez la page pour les voir, puis refaites votre modification.",
+  full: "Cette boutique n’a pas de place pour des notes en ce moment, elles n’ont donc pas été enregistrées. Réessayez plus tard.",
+  failed: "Vos notes n’ont pas pu être enregistrées. Réessayez dans une minute.",
+  slow: "Vous avez enregistré de nombreuses fois au cours de la dernière heure. Attendez un peu, puis enregistrez à nouveau.",
+  unloaded: "Vos notes sur cette leçon n’ont pas pu être chargées, elles ne peuvent donc pas être modifiées pour le moment. Rechargez la page pour réessayer.",
+  download: "Télécharger toutes mes notes de ce cours (fichier texte)",
+  fileTitle: (course) => `Mes notes : ${course}`,
+  downloaded: (day) => `Téléchargé le ${day}`,
+  goneLesson: "Une leçon qui n’est plus dans le cours",
+  none: "Vous n’avez encore aucune note dans ce cours.",
+  readFailed: "Vos notes n’ont pas pu être lues pour le moment. Réessayez dans une minute.",
+};
+
+const de: LessonNotesWords = {
+  heading: "Deine Notizen",
+  privateLine: "Nur du kannst diese Notizen sehen. Der Ersteller und andere Teilnehmende sehen sie nie.",
+  label: "Notizen zu dieser Lektion",
+  count: (used, max) => `${n("de-DE", used)} von ${n("de-DE", max)} Zeichen`,
+  save: "Notizen speichern",
+  saving: "Wird gespeichert…",
+  saved: "Deine Notizen sind gespeichert.",
+  cleared: "Deine Notiz zu dieser Lektion ist gelöscht.",
+  tooLong: (max) => `Notizen dürfen höchstens ${n("de-DE", max)} Zeichen haben. Kürze sie und speichere dann.`,
+  tooMany: (max) => `Du hast in diesem Shop bereits Notizen zu ${n("de-DE", max)} Lektionen, mehr kann eine Person nicht behalten. Um hier eine hinzuzufügen, leere die Notiz einer anderen Lektion und speichere sie.`,
+  changed: "Diese Notizen wurden in einem anderen Tab oder Fenster geändert. Lade die Seite neu, um sie zu sehen, und nimm deine Änderung dann erneut vor.",
+  full: "Dieser Shop hat gerade keinen Platz für Notizen, deshalb wurden sie nicht gespeichert. Versuche es später erneut.",
+  failed: "Deine Notizen konnten nicht gespeichert werden. Versuche es in einer Minute erneut.",
+  slow: "Du hast in der letzten Stunde sehr oft gespeichert. Warte kurz und speichere dann erneut.",
+  unloaded: "Deine Notizen zu dieser Lektion konnten nicht geladen werden, deshalb können sie gerade nicht geändert werden. Lade die Seite neu, um es erneut zu versuchen.",
+  download: "Alle meine Notizen zu diesem Kurs herunterladen (Textdatei)",
+  fileTitle: (course) => `Meine Notizen: ${course}`,
+  downloaded: (day) => `Heruntergeladen am ${day}`,
+  goneLesson: "Eine Lektion, die nicht mehr im Kurs ist",
+  none: "Du hast in diesem Kurs noch keine Notizen.",
+  readFailed: "Deine Notizen konnten gerade nicht gelesen werden. Versuche es in einer Minute erneut.",
+};
+
+const it: LessonNotesWords = {
+  heading: "Le tue note",
+  privateLine: "Solo tu puoi vedere queste note. Il creatore e gli altri studenti non le vedono mai.",
+  label: "Note su questa lezione",
+  count: (used, max) => `${n("it-IT", used)} di ${n("it-IT", max)} caratteri`,
+  save: "Salva le note",
+  saving: "Salvataggio…",
+  saved: "Le tue note sono salvate.",
+  cleared: "La tua nota su questa lezione è eliminata.",
+  tooLong: (max) => `Le note possono avere al massimo ${n("it-IT", max)} caratteri. Accorciale, poi salva.`,
+  tooMany: (max) => `Hai già note su ${n("it-IT", max)} lezioni in questo negozio, il massimo che uno studente può tenere. Per aggiungerne una qui, svuota la nota di un'altra lezione e salvala.`,
+  changed: "Queste note sono state cambiate in un'altra scheda o finestra. Ricarica la pagina per vederle, poi rifai la tua modifica.",
+  full: "Questo negozio non ha spazio per le note in questo momento, quindi non sono state salvate. Riprova più tardi.",
+  failed: "Non è stato possibile salvare le tue note. Riprova tra un minuto.",
+  slow: "Hai salvato molte volte nell'ultima ora. Aspetta un po', poi salva di nuovo.",
+  unloaded: "Non è stato possibile caricare le tue note su questa lezione, quindi ora non si possono cambiare. Ricarica la pagina per riprovare.",
+  download: "Scarica tutte le mie note di questo corso (file di testo)",
+  fileTitle: (course) => `Le mie note: ${course}`,
+  downloaded: (day) => `Scaricato il ${day}`,
+  goneLesson: "Una lezione che non è più nel corso",
+  none: "Non hai ancora note in questo corso.",
+  readFailed: "Non è stato possibile leggere le tue note in questo momento. Riprova tra un minuto.",
+};
+
+const nl: LessonNotesWords = {
+  heading: "Je notities",
+  privateLine: "Alleen jij kunt deze notities zien. De maker en andere cursisten zien ze nooit.",
+  label: "Notities bij deze les",
+  count: (used, max) => `${n("nl-NL", used)} van ${n("nl-NL", max)} tekens`,
+  save: "Notities opslaan",
+  saving: "Bezig met opslaan…",
+  saved: "Je notities zijn opgeslagen.",
+  cleared: "Je notitie bij deze les is verwijderd.",
+  tooLong: (max) => `Notities mogen hoogstens ${n("nl-NL", max)} tekens hebben. Maak ze korter en sla ze dan op.`,
+  tooMany: (max) => `Je hebt in deze winkel al notities bij ${n("nl-NL", max)} lessen, het meeste dat één cursist kan bewaren. Om er hier een toe te voegen, maak je de notitie bij een andere les leeg en sla je die op.`,
+  changed: "Deze notities zijn in een ander tabblad of venster gewijzigd. Laad de pagina opnieuw om ze te zien en breng je wijziging dan opnieuw aan.",
+  full: "Deze winkel heeft nu geen ruimte voor notities, dus ze zijn niet opgeslagen. Probeer het later opnieuw.",
+  failed: "Je notities konden niet worden opgeslagen. Probeer het over een minuut opnieuw.",
+  slow: "Je hebt het afgelopen uur heel vaak opgeslagen. Wacht even en sla dan opnieuw op.",
+  unloaded: "Je notities bij deze les konden niet worden geladen, dus je kunt ze nu niet wijzigen. Laad de pagina opnieuw om het nog eens te proberen.",
+  download: "Al mijn notities bij deze cursus downloaden (tekstbestand)",
+  fileTitle: (course) => `Mijn notities: ${course}`,
+  downloaded: (day) => `Gedownload op ${day}`,
+  goneLesson: "Een les die niet meer in de cursus staat",
+  none: "Je hebt nog geen notities in deze cursus.",
+  readFailed: "Je notities konden nu niet worden gelezen. Probeer het over een minuut opnieuw.",
+};
+
+const pt: LessonNotesWords = {
+  heading: "Suas anotações",
+  privateLine: "Só você pode ver estas anotações. O criador e os outros alunos nunca as veem.",
+  label: "Anotações sobre esta aula",
+  count: (used, max) => `${n("pt-BR", used)} de ${n("pt-BR", max)} caracteres`,
+  save: "Salvar anotações",
+  saving: "Salvando…",
+  saved: "Suas anotações estão salvas.",
+  cleared: "Sua anotação sobre esta aula foi excluída.",
+  tooLong: (max) => `As anotações podem ter no máximo ${n("pt-BR", max)} caracteres. Encurte-as e salve de novo.`,
+  tooMany: (max) => `Você já tem anotações em ${n("pt-BR", max)} aulas desta loja, o máximo que um aluno pode guardar. Para acrescentar uma aqui, esvazie a anotação de outra aula e salve.`,
+  changed: "Estas anotações foram alteradas em outra aba ou janela. Recarregue a página para vê-las e depois faça sua alteração de novo.",
+  full: "Esta loja não tem espaço para anotações agora, então elas não foram salvas. Tente de novo mais tarde.",
+  failed: "Não foi possível salvar suas anotações. Tente de novo em um minuto.",
+  slow: "Você salvou muitas vezes na última hora. Espere um pouco e salve de novo.",
+  unloaded: "Não foi possível carregar suas anotações sobre esta aula, então elas não podem ser alteradas agora. Recarregue a página para tentar de novo.",
+  download: "Baixar todas as minhas anotações deste curso (arquivo de texto)",
+  fileTitle: (course) => `Minhas anotações: ${course}`,
+  downloaded: (day) => `Baixado em ${day}`,
+  goneLesson: "Uma aula que não está mais no curso",
+  none: "Você ainda não tem anotações neste curso.",
+  readFailed: "Não foi possível ler suas anotações agora. Tente de novo em um minuto.",
+};
+
+export const LESSON_NOTES_WORDS: Record<LanguageCode, LessonNotesWords> = { en, es, fr, de, it, nl, pt };
+
+export function lessonNotesWords(language: unknown): LessonNotesWords {
+  return LESSON_NOTES_WORDS[parseLanguage(language)];
+}

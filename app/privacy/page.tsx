@@ -672,6 +672,17 @@ export default function PrivacyPage() {
           for it gets a notification on their phone with the lesson and the
           start of the comment, without the name.
         </p>
+        <p id="lesson-notes">
+          <strong className="text-black">Private notes on lessons.</strong>{" "}
+          A student can write notes on each lesson of a course they are taking.
+          We keep what they wrote and when, for that student alone: the
+          creator, the creator&apos;s team and the other students never see
+          them. A note holds at most 4,000 characters, and a student keeps at
+          most 300 notes in one store. The student can download a course&apos;s
+          notes as a text file at any time. A note is deleted when the student
+          empties it, when they ask to be deleted from the store, and when the
+          store is closed.
+        </p>
         <p>
           <strong className="text-black">A one-click offer after paying.</strong>{" "}
           When a product is followed by a one-click offer, Stripe keeps the
@@ -2146,7 +2157,7 @@ export default function PrivacyPage() {
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;
             your progress, quiz results, handed-in work and its files, lesson
-            comments and certificates in its courses, and your private podcast
+            comments, private lesson notes and certificates in its courses, and your private podcast
             feeds; your community profile, points, notifications, private
             conversations and what you said in its room; your Discord
             account&apos;s link to the store, whose roles are taken back; the

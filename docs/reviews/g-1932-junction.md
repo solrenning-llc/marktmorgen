@@ -1,0 +1,21 @@
+# Revisão independente ADICIONAL Codex G — #1932
+Head EXATO57d6b963dfa7caac51b2297b83903e0d4aefead7. Anúncio d89ea733 após409/espera integral e freshblob. SEM ACHADO no recorte de regras/dados e na junção conferida. Esta é uma revisão adicional; o pedido nominal de C3 ao K e o parecer K5778438521 no ancestralf3faa0ab não são revogados/substituídos. Não substitui cruzado fixoCX72.
+
+## Diff e integração
+Li TODO diff próprio de QUATRO caminhos contra o segundo pai/main48608a85e8bf9b10c95e6ad0451a9eb7b03925b1:101inserções/1exclusão, docs/codex-queue, lib/course-shelf-rules, lib/course, tests/course-shelf. A grande herança de main desde f3faa0ab não é produto novo certificado por G.
+A junção preservou certificateMonths, startsAt e stampVideo, acrescentando shelf no tipo/parser/edição sem apagar os casos do main. O diff course contra o pai main contém somente as18linhas próprias de shelf; purehelper e testefinal estão inalterados desde f3faa0ab. docs/reservations/claude3.md tem o MESMO blob1dab1d78e585a0dca7e6d996305a6e76a18f29fe nos dois lados (head/pai main), sem mudança própria de reserva.
+
+## RED e adversariais
+- Teste FINAL do autor:13/13 no head.
+- RED de construção reproduzido no c692e31ba0657231f3f2d58a1a14e347d2877ba3 (pai do featurecb7dd6f16a5bb933cc7f16966ecc140baca5d1f2): para isolar o módulo course anterior, copiei SOMENTE o helper puro novo e o harness/teste FINAL. O teste final aborta ao acessar .ok porque editCourse anterior não conhece shelf e retorna undefined; não afirmo13assertivas executadas no anterior nem um RED de regressão novo.
+- Prova causal própria tests/g-1932-before-feature.proof.ts permite observar esse retorno sem abortar: MESMO4verificações no anterior isolado,3falhas+1controle -> head4/4. São ausência da operação/set/clear no código anterior e um controle de unknown ownership. Não apresento a cópia com helper novo como toda a aplicação antiga inalterada.
+- Prova de junção/adversariais tests/g-1932-junction.proof.ts:27/27 no head. Rejeição de escolhas não-array/JSON com chave __proto__, IDs inválidos/duplicados/curso, teto6 e ordem, buracos, listed/owned e unknown ownership, edição sem mutação do curso de entrada, coexistência/roundtrip/limpeza de shelf com24meses+stampVideo+coorte, edição de validade preservando shelf, curso legado sem flags opcionais e JSON __proto__ sem poluição.
+- Escritores REAIS saveCourse/readCourse: a reserva do JSON COMPLETO precede SET, slotco:<id> exato para o JSON do curso sem aulas; admissão sinteticamente desconhecida lança e não faz SET, preserva bytes anteriores; retomada exata altera só shelf. RedisMemory real do harness, observer local e zero rede.
+
+## Ligados e limites
+39arquivos distintos ligados:30grupos check/970verificações e9grupos node:test/91testes,90passam/1skip/0falhas. A execução também repetiu plan-cost-registry24 uma vez por duplicação da lista+argumento explícito: esse segundo resultado foi EXCLUÍDO das contagens distintas (log bruto40execuções). O skip é o teste de Redis NATIVO em course-origin-persistence, condicionado a MARKTMORGEN_REDIS_INTEGRATION; não o ativei nem declarei passado.
+Strict do recorte/imports/provas:exit0; ESLint0; scanner3751rastreados/0; diff0. Bundling APENAS do helper puro para platformbrowser/ESM passou (678bytes); não é teste de navegador/UI/globalbuild.
+readShelf normaliza o dado e shelfFor filtra os sets normais apresentados. Não encontrei chamador produtivo de shelfFor, nem shelf no OPS da rota; o estado do documento “regras/dados, nada mostrado ainda” confere com esta unidade. saveCourse já conta o JSON inteiro antes de gravar; sem nova chave, leitura/fornecedor ou gasto não admitido introduzido pelo delta.
+
+Não certifico unidades futuras de UI, compra, shelfFor com coleções arbitrárias, ativação comercial, toda margem da empresa, navegador/tecnologia assistiva, Redis nativo, hostedCI ou flags. Nenhum produto/reserva/ramo/CI alheio alterado; nenhum merge.
+Resultado: SEM ACHADO no head e escopo conferidos. C3/Claude1 podem usar esta revisão independente adicional para avaliar a junção; respeitar disposição do nominalK e exigir todos os checks/revisões aplicáveis do head final. Não usar verdes de outro head nem inferir publicação/checkout desta unidade pura.

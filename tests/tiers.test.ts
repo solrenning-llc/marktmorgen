@@ -1,3 +1,6 @@
+import {renderToStaticMarkup} from "react-dom/server";
+import SwitchPage from "@/app/[handle]/manage/switch/page";
+let jPreviewUnknown = false;
 /**
  * Membership tiers: a member switching up or down, on their own.
  *
@@ -63,6 +66,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Tier00000001" });
   if (method === "POST" && path === "/invoices/create_preview") {
+    if (jPreviewUnknown) return json({});
     // Stripe's next invoice: the switch's prorations, and the renewal at the period's end.
     const at = Number(body.get("subscription_details[proration_date]"));
     return json({
@@ -233,6 +237,16 @@ async function main(): Promise<void> {
   is("a receipt to the member, a note to the creator", emails.map((e) => e.subject), ["You switched to Pro", "A member switched to Pro"]);
   is("the receipt says what was charged", emails[0].text.includes("Charged today: $12.40"), true);
 
+  part("J: an unreadable invoice preview is not a known zero charge");
+  jPreviewUnknown = true;
+  const unknownPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+  const unknownHtml = renderToStaticMarkup(await SwitchPage({params:Promise.resolve({handle:"@harbor"}),searchParams:Promise.resolve({token,sub:"sub_Member0001",to:b.product.id})}));
+  is("unknown preview never tells the buyer nothing is charged today", unknownHtml.includes(membershipWords("en").nothingToday), false);
+  const priorCharges = calls.filter(c=>c.method==="POST" && c.body.has("items[0][price]")).length;
+  const chargedAfterUnknown = await switchTier(store, token, "sub_Member0001", b.product.id, unknownPreview.ok ? unknownPreview.preview.at : Math.floor(Date.now()/1000), TEST_CONSENT);
+  is("valid consent control still reaches exactly one charging update", [chargedAfterUnknown.ok,calls.filter(c=>c.method==="POST" && c.body.has("items[0][price]")).length-priorCharges], [true,1]);
+  jPreviewUnknown = false;
+  is("an unreadable preview refuses to certify the amount shown to the member", unknownPreview.ok, false);
   part("Afterward");
   priceMeta = { product: b.product.id };
   const after = (await membershipsFor(store, token))!;

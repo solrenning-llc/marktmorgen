@@ -1,3 +1,7 @@
+import {renderToReadableStream} from "react-dom/server";
+import SwitchPage from "@/app/[handle]/manage/switch/page";
+import {membershipWords} from "@/lib/buyer-words/membership";
+let jPreviewUnknown=false;
 /**
  * A monthly member moving to the same membership's yearly price, and the one
  * email that offers it (lib/yearly-switch-rules.ts, lib/yearly-switch.ts,
@@ -80,6 +84,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Yearly000001" });
   if (method === "POST" && path === "/invoices/create_preview") {
+    if(jPreviewUnknown)return json({});
     const at = Number(body.get("subscription_details[proration_date]"));
     // The month's unused part back, and the year from now.
     return json({
@@ -226,6 +231,16 @@ async function main(): Promise<void> {
   is("not another", await grantFor(store, offer, "sub_Other0000001"), null);
   is("and not the member's page", await membershipsFor(store, offer), null);
 
+  part("J: unreadable yearly preview is not zero");
+  jPreviewUnknown=true;
+  const unknownPreview=await previewYearly(store,offer,"sub_Dana00000001");
+  const unknownHtml=await new Response(await renderToReadableStream(await SwitchPage({params:Promise.resolve({handle:"@harbor"}),searchParams:Promise.resolve({token:offer,sub:"sub_Dana00000001",to:YEARLY_TARGET,from:"offer"})}))).text();
+  is("unknown yearly preview refuses to certify a zero amount",unknownPreview.ok,false);
+  is("unknown yearly preview never says nothing is charged today",unknownHtml.includes(membershipWords("en").nothingToday),false);
+  const priorCharges=calls.filter(c=>c.method==="POST"&&c.body.has("items[0][price]")).length;
+  const chargedAfterUnknown=await switchYearly(store,offer,"sub_Dana00000001",unknownPreview.ok?unknownPreview.preview.at:Math.floor(Date.now()/1000),TEST_CONSENT);
+  is("yearly valid-consent control reaches one charging update",[chargedAfterUnknown.ok,calls.filter(c=>c.method==="POST"&&c.body.has("items[0][price]")).length-priorCharges],[true,1]);
+  jPreviewUnknown=false;
   part("The email");
   is("refused without an address", (await setYearlyAsk(OWNER, { on: true, address: "" })).ok, false);
   is("saved with one", (await setYearlyAsk(OWNER, { on: true, address: "1 Main St, Portland, OR 97201" })).ok, true);

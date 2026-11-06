@@ -56,12 +56,15 @@ function walk(html: string): Walk {
     const frame: Frame = { tag, color: prop(style, "color"), bg: prop(style, "background(?:-color)?") };
     if (tag === "a") {
       if (frame.bg) out.edges.push({ fill: frame.bg, on: last("bg") });
-      else out.links.push(style);
+      else out.links.push(m[3]);
     }
     stack.push(frame);
   }
   return out;
 }
+
+/** The links in the creator's words (the foot's own links are its small, muted words). */
+const bodyLinks = (html: string) => walk(html).links.filter((attrs) => attrs.includes("example.com"));
 
 const BODY =
   "# Fresh this week\n\nA new sourdough guide is out. Read it at https://example.com/guide today.\n\n- Rye\n- Spelt\n\n[Read the guide](https://example.com/guide)\n\n---\n\nSee you soon.";
@@ -119,7 +122,7 @@ for (const theme of THEMES.map((t) => t.id as ThemeId)) {
 }
 {
   const { html } = render(storeWith({ accent: "#15112e" }), "New loaf", BODY, "tok");
-  is("a store color that already reads at 7:1 is used on links as it is", walk(html).links.every((s) => /color:#15112e/i.test(s)), true);
+  is("a store color that already reads at 7:1 is used on links as it is", bodyLinks(html).length > 0 && bodyLinks(html).every((s) => /color:#15112e/i.test(s)), true);
 }
 {
   const theme = emailTheme(storeWith({ font: "editorial" }).look, { name: "Oven Notes", photoId: null });
@@ -176,7 +179,7 @@ part("The studio is told which color was adjusted for emails");
   is("a pale yellow is adjusted on links in the email", Boolean(links && links.picked === "#ffdd00" && links.sent !== "#ffdd00"), true);
   is("the adjusted link color reads at 7:1 on the email's card", links ? ratio(links.sent, lookColours(yellow).card) >= 7 : false, true);
   const { html } = render(storeWith(yellow), "New loaf", BODY, "tok");
-  is("the email uses exactly the color the studio names", links ? walk(html).links.every((s) => s.toLowerCase().includes(`color:${links.sent}`)) : false, true);
+  is("the email uses exactly the color the studio names", links ? bodyLinks(html).length > 0 && bodyLinks(html).every((s) => s.toLowerCase().includes(`color:${links.sent}`)) : false, true);
   const notice = emailColourNotice(yellow) ?? "";
   is("the notice names the color picked and the one emails use", notice.includes("#ffdd00") && links !== undefined && notice.includes(links.sent), true);
   is("the notice says it is only in emails and the store page keeps the color", /email/i.test(notice) && /store page/i.test(notice), true);

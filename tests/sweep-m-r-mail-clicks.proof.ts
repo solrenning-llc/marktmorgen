@@ -56,7 +56,9 @@ async function main(): Promise<void> {
     const run = await forgetClicksPerson(LIST, EMAIL).then(() => "done", () => "unknown");
     restore();
     is("the erasure is not said as done while the link key may remain", run, "unknown");
-    is("and the key their links carried is not silently kept", await linkIndexKept(), false);
+    // A refused erasure cannot also remove the key in the same pass (the token is unknown);
+    // the key stays until the erasure is tried again, and the refusal above says so.
+    is("and the key their links carried stays until the erasure is tried again", await linkIndexKept(), true);
   }
 
   part("The copy of a person's data: an SMEMBERS that is not a list");

@@ -144,7 +144,8 @@ async function readRecord(statsId: string, productId: string): Promise<{ raw: st
 
 /** A product's landings, or none when it has none (or they cannot be read). */
 export async function readLandings(statsId: string | null, productId: string): Promise<CampaignLanding[]> {
-  if (!statsId || !isRedisConfigured()) return [];
+  // An id no write accepts (changeLandings) holds nothing, and never names another key of the family.
+  if (!statsId || !isRedisConfigured() || !LANDING_ID.test(productId)) return [];
   const [raw] = await redisPipeline([["GET", landingKey(statsId, productId)]]);
   return landingsOf(raw);
 }
@@ -228,7 +229,18 @@ function landingsReceipt(reply: unknown): { state: 0 | 1 | 3 | 4; total: number 
  * written, full (DataRoomError, nothing written), changed, or dropped with the page (LandingsGone, nothing written,
  * however many reads ago the save began); anything else is LandingsWriteUnconfirmed, and no room is given back for it.
  */
+/** A landing id that is not one (see LANDING_ID): nothing is ever written under it, so nothing can be kept to delete. */
+export class LandingIdInvalid extends Error {
+  constructor() {
+    super("That is not a product's or a page's id, so no landing is kept under it.");
+    this.name = "LandingIdInvalid";
+  }
+}
+
 async function changeLandings(statsId: string, productId: string, room: DataStore, change: (landings: CampaignLanding[]) => CampaignLanding[] | "full" | "same"): Promise<"saved" | "full" | "same"> {
+  // The one gate for writes (Revisor 2, #1947): an id the deletions would not touch is never written either, so a
+  // read or a deletion of one answers truthfully that nothing is kept under it.
+  if (!LANDING_ID.test(productId)) throw new LandingIdInvalid();
   const key = dataKey(room);
   if (!key || !isRedisConfigured()) throw new LandingsUnreadable();
   for (let tries = 0; tries < WRITE_TRIES; tries += 1) {

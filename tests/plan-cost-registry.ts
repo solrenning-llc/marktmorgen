@@ -1677,7 +1677,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/email.ts": ["company", "order", "monthly", "store"],
   // The acknowledgement of a buyer's withdrawal (EU art. 11a, 588 [KB9]): the store's transactional email, tried at most WITHDRAWAL_ACK_SENDS (3) times per order.
   "lib/withdrawal.ts": ["store"],
-  // The receipt of a creator's withdrawal from their plan (EU art. 11a, 588 [KB9] unit 3), tried at most PLAN_WITHDRAW_ACK_SENDS (3) times, and at most one note to support: the company's.
+  // The receipt of a creator's withdrawal from their plan (EU art. 11a, 588 [KB9] unit 3), tried at most PLAN_WITHDRAW_ACK_SENDS (3) times, and a note to support tried at most PLAN_WITHDRAW_SUPPORT_TRIES (3) times, each counted before it is made: the company's.
   "lib/plan-withdrawal.ts": COMPANY,
   "app/api/cron/mail-check/route.ts": COMPANY, "app/api/cron/monthly/route.ts": COMPANY, "app/api/cron/stripe-check/route.ts": COMPANY,
   "app/api/cron/usage/route.ts": COMPANY, "app/api/cron/weekly/route.ts": COMPANY, "lib/account-notice.ts": COMPANY, "lib/auth.ts": COMPANY,

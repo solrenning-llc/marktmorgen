@@ -30,7 +30,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { POST } from "@/app/api/billing/withdraw/route";
 import StudioRefundPage from "@/app/studio/refund/page";
-import { PLAN_WITHDRAW_ACK_SENDS, planWithdrawKey, planWithdrawal, withdrawFromPlan } from "@/lib/plan-withdrawal";
+import { PLAN_WITHDRAW_ACK_SENDS, PLAN_WITHDRAW_SUPPORT_TRIES, planWithdrawKey, planWithdrawal, withdrawFromPlan } from "@/lib/plan-withdrawal";
 import { redisPipeline } from "@/lib/redis";
 import { who } from "./plan-refund-route-world";
 import { paidShop, world } from "./plan-refund-stripe-world";
@@ -202,6 +202,72 @@ async function main() {
   redis.pipeline = pipeline;
   is("reading whether it was withdrawn: unknown throws, never 'not withdrawn'", unread, "threw");
   is("and a statement whose subscription is not the store's is refused", await withdrawFromPlan(shopH, { name: NAME, reference: "sub_someoneelse01", email: ADDRESS }), "error");
+
+  part("A note to support that did not go stays owed: tried again on the next statement, at most 3 times, never a second refund");
+  // Codex N's finding on #2849 (67c62cbc): a refused note to support was said "handled" and never tried again.
+  const k = await paidShop({ at: REAL - DAY });
+  who.store = await k.store();
+  const healthy = globalThis.fetch;
+  let stripeUp = false;
+  let supportUp = false;
+  let supportTries = 0;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!stripeUp && url.includes("api.stripe.com/v1/charges")) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
+    if (url.includes("api.resend.com") && [(JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[] }).to].flat().includes(SUPPORT)) {
+      supportTries += 1;
+      if (!supportUp) return new Response(JSON.stringify({ message: "unavailable" }), { status: 503 });
+    }
+    return healthy(input, init);
+  }) as typeof fetch;
+  world.emails = [];
+  const refundCalls = () => world.calls.filter((call) => call.startsWith("POST /refunds")).length;
+  const refundCallsBefore = refundCalls();
+  try {
+    const firstTry = await post({ name: NAME, email: ADDRESS });
+    const owed = await planWithdrawal(who.store);
+    is("not said to be handled: pending, the reason kept, one try counted, not told", [firstTry.state, owed.support?.includes("unknown"), owed.supportTries, owed.told, owed.refund], ["pending", true, 1, false, true]);
+    const owedPage = await page({ withdraw: "pending" });
+    is("the page says support has not got it and offers the form again", [owedPage.includes('data-withdraw-support="retry"'), owedPage.includes("Confirm withdrawal"), owedPage.includes('data-withdraw-done="pending"')], [true, true, true]);
+    is("the ceiling is 3 tries", PLAN_WITHDRAW_SUPPORT_TRIES, 3);
+    const later = [(await post({ name: NAME, email: ADDRESS })).state, (await post({ name: NAME, email: ADDRESS })).state, (await post({ name: NAME, email: ADDRESS })).state];
+    is("tried again on each statement until the third, then no more", [later, supportTries, (await planWithdrawal(who.store)).supportTries], [["pending", "unreached", "unreached"], 3, 3]);
+    stripeUp = true;
+    supportUp = true;
+    is("past the ceiling, healthy again: still not sent", [(await post({ name: NAME, email: ADDRESS })).state, supportTries, world.emails.filter((m) => m.to === SUPPORT).length], ["unreached", 3, 0]);
+    const givenUp = await page({ withdraw: "unreached" });
+    is("the page says to email support with the subscription, and no form", [givenUp.includes('data-withdraw-support="unreached"'), givenUp.includes(k.subId), givenUp.includes("Confirm withdrawal")], [true, true, false]);
+    is("no refund was ever asked for: the money is support's to handle", [k.refunds().length, refundCalls() - refundCallsBefore], [0, 0]);
+    is("the receipt went once", receipts().filter((m) => m.to === ADDRESS).length, 1);
+
+    const m = await paidShop({ at: REAL - DAY });
+    who.store = await m.store();
+    stripeUp = false;
+    supportUp = false;
+    supportTries = 0;
+    world.emails = [];
+    is("a second store: refused once", (await post({ name: NAME, email: ADDRESS })).state, "pending");
+    stripeUp = true;
+    supportUp = true;
+    const recovered = await post({ name: NAME, email: ADDRESS });
+    const notes = world.emails.filter((mail) => mail.to === SUPPORT);
+    is("healthy again: support told once, with the first reason and the subscription; still no refund", [recovered.state, notes.length, notes[0]?.text.includes("the refund reading is unknown"), notes[0]?.text.includes(m.subId), m.refunds().length], ["handled", 1, true, true, 0]);
+    is("then nothing more", [(await post({ name: NAME, email: ADDRESS })).state, world.emails.filter((mail) => mail.to === SUPPORT).length, (await planWithdrawal(who.store)).told], ["already", 1, true]);
+
+    const n = await paidShop({ at: REAL - DAY });
+    const shopN = await n.store();
+    stripeUp = false;
+    supportUp = true;
+    supportTries = 0;
+    const plain = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.some((cmd) => cmd[0] === "HINCRBY" && cmd[2] === "ht") ? commands.map(() => ["not", "a", "reply"]) : plain(commands)) as typeof redis.pipeline;
+    const uncounted = await withdrawFromPlan(shopN, { name: NAME, reference: n.subId, email: ADDRESS }).catch(() => "threw");
+    redis.pipeline = plain;
+    is("a try that cannot be counted is not made, and is not said to be handled", [["error", "threw"].includes(uncounted), supportTries, n.refunds().length], [true, 0, 0]);
+  } finally {
+    globalThis.fetch = healthy;
+  }
   done();
 }
 

@@ -14,7 +14,7 @@ import { issueReview } from "@/lib/plan-refund-flow";
 import { refundUnderway } from "@/lib/plan-refund-underway";
 import { REFUND_DONE, SUPPORT_ADDRESS, moneyOf, refundEffects, refusalWords } from "@/lib/plan-refund-words";
 import { PLAN_NAMES } from "@/lib/plan";
-import { PLAN_WITHDRAW_ACK_SENDS, planWithdrawWindow, planWithdrawal } from "@/lib/plan-withdrawal";
+import { PLAN_WITHDRAW_ACK_SENDS, PLAN_WITHDRAW_SUPPORT_TRIES, planWithdrawWindow, planWithdrawal } from "@/lib/plan-withdrawal";
 import { PLAN_WITHDRAW_WORDS as W } from "@/lib/plan-withdrawal-words";
 
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
@@ -92,6 +92,9 @@ export default async function StudioRefundPage({ searchParams }: Params) {
   const withdrawWindow = offer && subscription ? planWithdrawWindow(shown ? reading : null) : null;
   const withdrawOpen = withdrawWindow?.open === true ? withdrawWindow : null;
   const resend = withdrawn !== null && !withdrawn.sent && withdrawn.tries < PLAN_WITHDRAW_ACK_SENDS;
+  // A refund support has not been told about yet: said, and the form offered again while a try is left.
+  const supportOwed = withdrawn !== null && withdrawn.refund && withdrawn.support !== null && !withdrawn.told;
+  const supportRetry = supportOwed && withdrawn.supportTries < PLAN_WITHDRAW_SUPPORT_TRIES;
   const planName = `${PLAN_NAMES[store.tier] ?? "Marktmorgen"} for ${name}`;
   const ownerEmail = view.email || store.email;
   const withdrawForm = (
@@ -187,7 +190,8 @@ export default async function StudioRefundPage({ searchParams }: Params) {
                   <>
                     <p className="mt-4 text-ink" data-withdrawn={withdrawn.at}>{W.withdrawn(momentOf(withdrawn.at))}</p>
                     <p className="mt-2 text-ink-soft">{withdrawn.sent ? W.receiptSent : resend ? W.receiptUnsent : W.receiptGiveUp}</p>
-                    {resend ? withdrawForm : null}
+                    {supportOwed ? <p className="mt-2 text-ink" data-withdraw-support={supportRetry ? "retry" : "unreached"}>{supportRetry ? W.supportUnsent : W.supportGiveUp(subscription)}</p> : null}
+                    {resend || supportRetry ? withdrawForm : null}
                   </>
                 ) : withdrawOpen ? (
                   <>

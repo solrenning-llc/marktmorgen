@@ -19,7 +19,7 @@ const events: { id: string; created: number; data: unknown }[] = [];
 const customers = new Map<string, string>();
 const looked: string[] = [];
 
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }));
   const path = url.pathname.replace(/^\/v1/, "");

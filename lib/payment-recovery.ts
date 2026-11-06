@@ -43,7 +43,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { formatMoney } from "@/lib/money";
@@ -262,7 +262,11 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
     // Claimed before anything is done, so a second run does not write twice: ours on OK or, answered in another
     // shape, when the key holds this claim's own value read back (Claude 4 on #2714). The value starts with the time,
     // which is what a later run reads the first email's day from. Somebody else's or unknown: nothing is done.
-    if ((await claimMark(key, SENT_SECONDS)) !== "ours") continue;
+    // Accepted (Claude 4 LEVE A on #2714): a claim answered oddly whose read-back also fails stays as it may be ours,
+    // so a later run can take it as the first email sent and send the reminder that follows; that is the cost of
+    // never writing twice, and the member still gets the pay link in the reminder.
+    const value = claimValue();
+    if ((await claimMark(key, SENT_SECONDS, value)) !== "ours") continue;
     written += 1;
 
     try {
@@ -310,10 +314,10 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
         sent += 1;
         await countSent(store.statsId, "failed");
       }
-      else await redisPipeline([["DEL", key]]);
+      else await releaseMark(key, value);
     } catch (error) {
-      // Let go, so the next run tries this one again rather than never.
-      await redisPipeline([["DEL", key]]).catch(() => {});
+      // Let go, so the next run tries this one again rather than never: only our own claim (Revisor 1 on #2719).
+      await releaseMark(key, value);
       console.error("writing about a failed renewal failed", store.handle, error);
     }
   }
@@ -438,7 +442,8 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
       if (finished === "updated" || finished === "paid" || finished === "declined") continue;
     }
     const key = cardKey(account, subId, card.id);
-    if ((await claimMark(key, CARD_SENT_SECONDS)) !== "ours") continue;
+    const value = claimValue();
+    if ((await claimMark(key, CARD_SENT_SECONDS, value)) !== "ours") continue;
     try {
       const token = await cardLink(account, customer, subId);
       const mail = cardNoticeEmail({
@@ -463,9 +468,9 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
         sent += 1;
         await countSent(store.statsId, "cards");
       }
-      else await redisPipeline([["DEL", key]]);
+      else await releaseMark(key, value);
     } catch (error) {
-      await redisPipeline([["DEL", key]]).catch(() => {});
+      await releaseMark(key, value);
       console.error("writing about a card that stops working failed", store.handle, error);
     }
   }

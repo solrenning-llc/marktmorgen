@@ -14,6 +14,7 @@
 import { randomInt } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
+import { releaseLock } from "@/lib/redis-lock";
 
 export type Claimed = "ours" | "taken" | "unknown";
 
@@ -41,4 +42,13 @@ export async function claimMark(key: string, seconds: number, value = claimValue
   } catch {
     return "unknown";
   }
+}
+
+/**
+ * Lets go of a claim only while it still holds this claim's own value (Revisor 1 on #2719): a run whose mark ran out
+ * and was taken by another run never deletes the other run's mark. The compare and delete is one script, read and
+ * deleted in two steps where scripts are not run (lib/redis-lock.ts, releaseLock). Never throws.
+ */
+export async function releaseMark(key: string, value: string): Promise<void> {
+  await releaseLock({ key, token: value, ttlSeconds: 1 });
 }

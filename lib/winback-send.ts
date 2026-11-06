@@ -24,7 +24,7 @@ import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
@@ -160,7 +160,9 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
   let sent = 0;
   let lookedAt = 0;
 
-  for (const event of events) {
+  // Oldest first (Claude 4 on #2714): Stripe lists events newest first, and the window is two days wide with one run
+  // a day, so the offers a run can look at go to the ended memberships about to leave the window, not the newest.
+  for (const event of [...events].reverse()) {
     if (Date.now() >= deadline || lookedAt >= OFFERS_PER_RUN) break;
     const sub = event.data?.object ?? {};
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
@@ -182,7 +184,8 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 
     // Ours only when Redis says OK or, answered in another shape, the key holds this claim's own value read back
     // (CX-123 rule 24, L6; Claude 4 on #2714). Somebody else's mark, or unknown: nothing is sent and nothing let go.
-    if ((await claimMark(sentKey(account, subId), 90 * 86_400)) !== "ours") continue;
+    const claim = claimValue();
+    if ((await claimMark(sentKey(account, subId), 90 * 86_400, claim)) !== "ours") continue;
     lookedAt += 1;
     try {
       const found = await onAccount("GET", account, `/customers/${customer}`);
@@ -191,7 +194,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const back = await cameBack(account, customer, product.id);
       if (back === null) {
         // Not known whether they came back: nothing is sent, and the mark (ours) is let go for a whole reading next run.
-        await redisPipeline([["DEL", sentKey(account, subId)]]);
+        await releaseMark(sentKey(account, subId), claim);
         continue;
       }
       if (back) continue;
@@ -202,11 +205,12 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const tokens = await tokensFor(store.listId, [email], store.handle);
       const unsub = tokens.get(email);
       if (!unsub) continue;
-      const once = await claimMark(onceKey(statsId, email, product.id), ONCE_PER_DAYS * 86_400);
+      const onceValue = claimValue();
+      const once = await claimMark(onceKey(statsId, email, product.id), ONCE_PER_DAYS * 86_400, onceValue);
       if (once !== "ours") {
         // Heard one lately, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the next
         // run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
-        if (once === "unknown") await redisPipeline([["DEL", sentKey(account, subId)]]);
+        if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
         continue;
       }
 
@@ -241,7 +245,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         await redisPipeline([["INCR", countKey(statsId)]]);
       } else {
         // Not sent: tried again on the next run, inside the same window.
-        await redisPipeline([["DEL", sentKey(account, subId), onceKey(statsId, email, product.id), linkKey(token)]]);
+        // Only our own claims are let go (Revisor 1 on #2719); the offer's link is this run's alone.
+        await releaseMark(sentKey(account, subId), claim);
+        await releaseMark(onceKey(statsId, email, product.id), onceValue);
+        await redisPipeline([["DEL", linkKey(token)]]);
       }
     } catch (error) {
       console.error("sending a come-back offer failed", store.handle, error);

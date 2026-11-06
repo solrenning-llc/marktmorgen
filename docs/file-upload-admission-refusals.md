@@ -33,7 +33,7 @@ The canonical RED reports five tests: three controls pass and two fail because `
 
 Eight selected files passed, totaling 220 reported checks/subtests. The seven route importers/source consumers and the sibling download refusal test were selected from the actual affected paths. Next route type generation, strict scoped TypeScript for the route/new test/world and their real transitive imports, directed ESLint and diff checks passed. The public-data scanner checked 4,153 tracked files with zero files requiring correction. This is not the full repository suite or global TypeScript.
 
-The five regression scenarios check one `products` admission call each, zero Redis commands, zero storage/provider/token events and zero external fetch attempts. Their ceilings are 2,000 synthetic commands per case, at most 16,000 total, 120 seconds per test process and 256 KiB combined output. RED, GREEN and linked logs together occupied 16,699 bytes.
+The five regression scenarios check one `products` admission call each, zero Redis commands, zero storage/provider/token events and zero external fetch attempts. These zero counts describe the canonical stand-ins; real admission may read records and count requests before refusing. Their ceilings are 2,000 synthetic commands per case, at most 16,000 total, 120 seconds per test process and 256 KiB combined output. RED, GREEN and linked logs together occupied 16,699 bytes.
 
 ## Costs, accessibility and limits
 
@@ -41,4 +41,4 @@ No new Redis/provider operation, key, retention, price, visible limit, flag, fun
 
 No interface control, task step, confirmation decision, focus behavior or layout changes (0 added steps or decisions). The corrected HTTP error codes are verified; client presentation, keyboard behavior, assistive technology and accessibility conformity were not tested or certified.
 
-Real studio authentication/authorization and the real Blob SDK are outside this fixture's scope. Positive legacy Blob issuance is unreachable through the unchanged backend/production gates, so no successful upload is claimed. No native Redis, external provider, production request, real person data, hosted CI or deployment was exercised. This branch requires independent review and the normal final checks before merge; it is not evidence of deployment or customer availability.
+Real studio authentication/authorization and the real Blob SDK are outside this fixture's scope. The five tested refusals stop before token issuance. The existing production gate is unchanged; successful uploads were not exercised. No native Redis, external provider, production request, real person data, hosted CI or deployment was exercised. This branch requires independent review and the normal final checks before merge; it is not evidence of deployment or customer availability.

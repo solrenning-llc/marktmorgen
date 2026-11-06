@@ -14,12 +14,30 @@
  * a browser there is no Redis reply to read, and no Proxy check is needed there.
  */
 type ProxyCheck = (value: unknown) => boolean;
-const isProxy: ProxyCheck = (() => {
-  const host = typeof process === "undefined" ? undefined : (process as { getBuiltinModule?: (id: string) => unknown });
+/**
+ * The Proxy check for where this runs: Node's own when it can be read; in a browser (no Redis reply ever reaches
+ * there) none is needed; on a server without it (a Node older than 20.16/22.3), every reply counts as a Proxy, so
+ * each read fails closed as unknown and says so once, never quietly accepting a reply whose traps would run
+ * (Revisor 1 on #2822).
+ */
+export function proxyCheckFor(host: { getBuiltinModule?: (id: string) => unknown } | undefined, browser: boolean): ProxyCheck {
   const util = host?.getBuiltinModule?.("node:util") as { types?: { isProxy?: unknown } } | undefined;
   const check = util?.types?.isProxy;
-  return typeof check === "function" ? (check as ProxyCheck) : () => false;
-})();
+  if (typeof check === "function") return check as ProxyCheck;
+  if (browser) return () => false;
+  let told = false;
+  return () => {
+    if (!told) {
+      told = true;
+      console.error("node:util isProxy is not available on this server; every Redis reply is read as unknown (Node 20.16+/22.3+ needed)");
+    }
+    return true;
+  };
+}
+const isProxy: ProxyCheck = proxyCheckFor(
+  typeof process === "undefined" ? undefined : (process as { getBuiltinModule?: (id: string) => unknown }),
+  typeof window !== "undefined",
+);
 
 /**
  * A list's own data slots, as a fresh plain list, with no code of the reply

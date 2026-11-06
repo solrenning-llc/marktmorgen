@@ -1,0 +1,102 @@
+
+LOG g2721-canonical-red.log SHA256 a6bd7ded001dfde66d41464149b27a78aa90cd46ca8e48e34bafb8871e539e48
+81 checks, 55 failing.
+
+LOG g2721-canonical-green.log SHA256 c700eaba64b84adfdc62b1d70f735636cd2fe46506f2583f1701516394a381b7
+81 checks, all passing.
+
+LOG g2721-fallback-head.log SHA256 e179d46184623fc313e7b8b3bda29fa6ea5b422b91afba53af6e1ccde6166388
+93 checks, 4 failing.
+G independent: a failed release EVAL cannot fall back to deleting a legitimate successor
+  ok    G courses: actual release EVAL failed once
+  ok    G courses: read real token then successor legitimately won NX after actual TTL
+  FAIL  G courses: the successor lock survives old run's release
+        expected "g-successor-courses"
+        got      null
+  ok    G reminders: actual release EVAL failed once
+  ok    G reminders: read real token then successor legitimately won NX after actual TTL
+  FAIL  G reminders: the successor lock survives old run's release
+        expected "g-successor-reminders"
+        got      null
+  ok    G discord: actual release EVAL failed once
+  ok    G discord: read real token then successor legitimately won NX after actual TTL
+  FAIL  G discord: the successor lock survives old run's release
+        expected "g-successor-discord"
+        got      null
+quiet: {"sent":0,"fine":0,"skipped":0,"seen":0,"failed":0,"alerts":0}
+  ok    G quiet: actual release EVAL failed once
+  ok    G quiet: read real token then successor legitimately won NX after actual TTL
+  FAIL  G quiet: the successor lock survives old run's release
+        expected "g-successor-quiet"
+        got      null
+
+93 checks, 4 failing.
+
+
+LOG g2721-shared-head.log SHA256 7350bec2522b0e7caea4554eef2afc6a6b09dfa60180b7361733480aacd35604
+15 checks, 4 failing.
+  ok    G courses: release EVAL was attempted once
+  ok    G courses: real original claim then legitimate successor NX
+  FAIL  G courses: old release preserves new owner
+        expected "g-successor-courses"
+        got      null
+  ok    G reminders: release EVAL was attempted once
+  ok    G reminders: real original claim then legitimate successor NX
+  FAIL  G reminders: old release preserves new owner
+        expected "g-successor-reminders"
+        got      null
+  ok    G discord: release EVAL was attempted once
+  ok    G discord: real original claim then legitimate successor NX
+  FAIL  G discord: old release preserves new owner
+        expected "g-successor-discord"
+        got      null
+  ok    G quiet: release EVAL was attempted once
+  ok    G quiet: real original claim then legitimate successor NX
+  FAIL  G quiet: old release preserves new owner
+        expected "g-successor-quiet"
+        got      null
+  ok    G existing strict release reports unknown on EVAL failure
+  ok    G existing strict release performs no GET/DEL fallback
+  ok    G existing strict release leaves the actual held key intact
+
+15 checks, 4 failing.
+
+
+LOG g2721-shared-aff.log SHA256 7350bec2522b0e7caea4554eef2afc6a6b09dfa60180b7361733480aacd35604
+15 checks, 4 failing.
+
+LOG g2721-linked.log SHA256 1b488eb6d9109b6c26f0681f30e7edfc2640f55592a1376067ca2e37d2e17499
+5 checks, all passing.
+6 checks, all passing.
+10 checks, all passing.
+13 checks, all passing.
+3 checks, all passing.
+31 checks passed
+52 checks, all passing.
+40 checks, all passing.
+64 checks, all passing.
+58 checks, all passing.
+4 checks, all passing.
+ℹ tests 24
+ℹ pass 24
+ℹ fail 0
+ℹ skipped 0
+18 checks, all passing.
+95 checks, all passing.
+33 checks, all passing.
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ skipped 0
+35 checks, all passing.
+
+LOG g2721-types.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2721-lint.log SHA256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+EMPTY: True
+
+LOG g2721-scan.log SHA256 90ad198bd3cb73c02d1f51ecb616574a451b24e858b80f3653b7f5a1fa65366b
+Public data check: 3810 tracked files; 0 file(s) require correction.

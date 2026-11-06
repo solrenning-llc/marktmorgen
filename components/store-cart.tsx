@@ -159,6 +159,11 @@ export function CartButton({
   // Which product's button the focus moves to once one is removed: the next one, or the panel when none is left (2.4.3).
   const refocus = useRef<number | null>(null);
   const wanted = ids.join(",");
+  // Each read of the cart, so a failed one is said for that read only, and "Try again" makes a new one (3.3.1, 4.1.3).
+  const [tries, setTries] = useState(0);
+  const reading = `${wanted}#${tries}`;
+  // The read that could not be loaded (no network, a reply that is not JSON, or ok: false), or null.
+  const [unread, setUnread] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !wanted) return;
@@ -166,7 +171,12 @@ export function CartButton({
     fetch(`/api/store/cart?${new URLSearchParams({ handle, ids: wanted })}`)
       .then((r) => r.json())
       .then((data: { ok?: boolean; items?: Line[]; total?: string; deal?: { percent: number; saved: string } | null; next?: { more: number; percent: number } | null; suggest?: Suggestion[]; bundle?: BundleSwap | null; shipping?: ShippingRow | null; apart?: Apart | null; digital?: boolean }) => {
-        if (!live || !data.ok) return;
+        if (!live) return;
+        if (!data.ok) {
+          setUnread(reading);
+          return;
+        }
+        setUnread(null);
         setLines(data.items ?? []);
         setTotal(data.total ?? "");
         setDeal(data.deal ?? null);
@@ -178,11 +188,13 @@ export function CartButton({
         // Unknown is asked: a cart that does not say is treated as holding something digital.
         setDigital(data.digital !== false);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (live) setUnread(reading);
+      });
     return () => {
       live = false;
     };
-  }, [open, wanted, handle]);
+  }, [open, wanted, handle, reading]);
 
   useEffect(() => {
     if (open) panel.current?.focus();
@@ -262,6 +274,21 @@ export function CartButton({
           ) : null}
           {ids.length === 0 ? (
             <p className="st-muted mt-3 text-sm">{c.empty}</p>
+          ) : unread === reading ? (
+            <>
+              <p className="st-note mt-3 text-sm" role="alert" data-cart-unread="">{c.unread}</p>
+              <button
+                type="button"
+                data-cart-retry=""
+                className="btn st-btn mt-3 inline-flex min-h-11 min-w-11 items-center justify-center"
+                onClick={() => {
+                  setTries((now) => now + 1);
+                  panel.current?.focus();
+                }}
+              >
+                {c.retry}
+              </button>
+            </>
           ) : lines === null ? (
             <p className="st-muted mt-3 text-sm" role="status">{c.loading}</p>
           ) : (

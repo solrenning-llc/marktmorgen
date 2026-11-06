@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { NextRequest } from 'next/server';
 import Page from '@/app/studio/forms/page';
+import EmailPage from '@/app/studio/email/page';
 import { GET as csv } from '@/app/api/store/forms/export/route';
 import { GET as pdf } from '@/app/api/store/forms/response-pdf/route';
 import { POST as opportunity } from '@/app/api/store/form-opportunity/route';
@@ -66,4 +67,50 @@ test('CRUD permission refusal stays before any form mutation',async()=>{
  state.denied=true;state.writes=0;
  try{assert.equal((await saveForm(request())).status,403);assert.equal(state.writes,0);}
  finally{state.denied=false;}
+});
+
+
+type EmailPageProps={flowsReadFailed:boolean;initialSequence?:unknown;automation:{forms:{id:string}[]}};
+async function emailPage(forms:'known'|'unknown'|'empty',allowance=1,sequenceTemplate?:string){
+ state.emailForms=forms;state.emailAllowance=allowance;state.formReads=0;state.emailProps=null;
+ try{
+  const html=renderToStaticMarkup(await EmailPage({searchParams:Promise.resolve(sequenceTemplate?{sequenceTemplate}:{})}));
+  return {html,props:state.emailProps as EmailPageProps|null,reads:state.formReads};
+ }finally{state.emailForms='known';state.emailAllowance=1;}
+}
+test('email page reports unavailable form choices and blocks sequence mutation',async()=>{
+ const result=await emailPage('unknown');
+ assert.match(result.html,/Forms could not be checked/);
+ assert.match(result.html,/role="status"/);
+ assert.ok(result.props);
+ assert.equal(result.props.flowsReadFailed,true);
+ assert.equal(result.reads,1);
+});
+test('email page does not promise an opened sequence when its forms are unknown',async()=>{
+ const result=await emailPage('unknown',1,'welcome');
+ assert.ok(result.props);
+ assert.equal(result.props.initialSequence,undefined);
+ assert.doesNotMatch(result.html,/Library sequence opened as an unsaved paused draft/);
+ assert.equal(result.reads,1);
+});
+test('email page preserves confirmed form choices',async()=>{
+ const result=await emailPage('known');
+ assert.ok(result.props);
+ assert.equal(result.props.flowsReadFailed,false);
+ assert.ok(result.props.automation.forms.some(item=>item.id===form.id));
+ assert.doesNotMatch(result.html,/Forms could not be checked/);
+ assert.equal(result.reads,1);
+});
+test('email page preserves a confirmed empty form inventory',async()=>{
+ const result=await emailPage('empty');
+ assert.ok(result.props);
+ assert.equal(result.props.flowsReadFailed,false);
+ assert.deepEqual(result.props.automation.forms,[]);
+ assert.doesNotMatch(result.html,/Forms could not be checked/);
+ assert.equal(result.reads,1);
+});
+test('email page still skips the form read when its editor is not shown',async()=>{
+ const result=await emailPage('unknown',0);
+ assert.equal(result.props,null);
+ assert.equal(result.reads,0);
 });

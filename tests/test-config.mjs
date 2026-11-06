@@ -186,8 +186,10 @@ export function testAliases(file,root,here){
  if(file==='form-response-unavailable.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'form-response-unavailable-world.tsx');
   for(const name of ['store','studio-route','store-request','form-store','catalog','crm','team','pipeline-access','form-opportunity','form-response-pdf'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');
-  for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['payment-requests','purchase-email','checkout-recovery','mail-starters','contacts','broadcasts','letters','mail-revenue','flow-stats','flow-list','mail','mail-health','mail-drafts','ai','segments','flow-runs','billing'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['studio-header','studio-store-pin','email-studio'])aliases['@/components/'+name]=join(here,'form-response-unavailable-world.tsx');
  }
+ if(file==='k-form-submit-unknown.test.ts')for(const name of ['metered-limits','request-origin','request-guard','store','flows','store-join','affiliate-leads','page-funnel-store','visit'])aliases['@/lib/'+name]=join(here,'k-form-submit-world.ts');
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

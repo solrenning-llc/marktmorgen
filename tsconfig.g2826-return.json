@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "tests/test-runner.test.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

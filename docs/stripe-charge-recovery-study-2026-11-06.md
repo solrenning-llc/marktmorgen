@@ -90,6 +90,7 @@ Not proposed: a line for automatic card updates or Adaptive Acceptance. Neither 
 
 - Read: one `GET /v1/subscriptions?status=past_due&limit=100&expand[]=data.latest_invoice` on the creator's account, filtered to this store's subscriptions (`metadata.store`, as lib/payment-recovery.ts does).
 - State shown: "N memberships with a failed payment; Stripe will try again for X of them; for Y no further try is scheduled." Y counts open, `charge_automatically` invoices whose `next_payment_attempt` is null.
+- Whole page or no total (Codex CX1 on #2747): the list holds at most 100 a page and says `has_more` (https://docs.stripe.com/api/subscriptions/list, https://docs.stripe.com/api/pagination), and other stores' subscriptions share the creator's account. N, X and Y are shown as totals only when the page came back whole (`has_more: false`) with every row readable (lib/stripe-list.ts, `readStripePage`). With `has_more: true` the line says "at least N" for what was found, never 0 for this store, since its rows may sit on a later page; a page in another shape or an unreadable row gives no number at all and only the guidance sentence. Still one read: no paging, so the cost below does not change.
 - What it must not say: that retries are "off". A null `next_payment_attempt` also means the tries are used up, and under automations may mean something else (Gaps, item 4). The line says what Stripe will do, and links the guidance sentence above.
 - Not a repeat of lib/payment-recovery.ts: that job reads the same list once a day to send emails and keeps nothing to show.
 
@@ -135,4 +136,4 @@ Still open (not guessed):
 
 - No price, limit, commission, flag or gate changes.
 - No account, terms, contract or contact: nothing was created, accepted, signed or sent, and no one at Stripe or elsewhere was contacted.
-- Nothing is built from this study until the open gaps that touch what would be built (items 4 and 6 for the optional read) are closed.
+- Nothing is built from this study until the open gaps that touch what would be built (items 4 and 6 for the optional read) are closed, and the optional read, if built, counts only a whole page with every row readable ("at least N" with more pages, no number on a page it cannot read), as the proposal above says.

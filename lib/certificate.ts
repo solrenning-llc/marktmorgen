@@ -409,8 +409,8 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
   const what = "a person's certificate copy";
   const idsOf = (raw: unknown): string[] => {
     const list = plainList(raw);
-    if (!list || !list.every((id) => typeof id === "string")) throw new UnknownReply(what);
-    return (list as string[]).filter((id) => CERT_ID_PATTERN.test(id));
+    if (!list || !list.every((id) => typeof id === "string" && CERT_ID_PATTERN.test(id))) throw new UnknownReply(what);
+    return list as string[];
   };
   const countOf = (raw: unknown): number => {
     const count = replyCount(raw, what);
@@ -423,14 +423,14 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
       3,
       what,
     );
-    if (current !== null && typeof current !== "string") throw new UnknownReply(what);
+    if (current !== null && (typeof current !== "string" || !CERT_ID_PATTERN.test(current))) throw new UnknownReply(what);
     const count = countOf(size);
     const [all] = count > 0 && count <= LEGACY_SCAN
       ? exactReplies(await redisPipeline([["SMEMBERS", allKey(courseId)]]), 1, what)
       : [[]];
     const ids = new Set<string>([
       ...idsOf(mine),
-      ...(typeof current === "string" && CERT_ID_PATTERN.test(current) ? [current] : []),
+      ...(typeof current === "string" ? [current] : []),
     ]);
     const candidates = [...new Set([...ids, ...idsOf(all)])];
     for (let i = 0; i < candidates.length; i += 500) {

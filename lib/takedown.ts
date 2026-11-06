@@ -177,11 +177,22 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
       "",
       what,
       "",
+      "Where: everywhere. It is down for every visitor, in every country.",
+      "How long: we set no end date. We change it only if we decide to, for example after your answer below.",
+      "",
       report.kind === "copyright" ? `The notice was sent by ${report.name}, who says it uses: ${report.work.slice(0, 600)}` : `The notice says: ${report.work.slice(0, 600)}`,
+      "",
+      `What we relied on: that notice, sent through our form at ${origin}/report as ${report.kind === "copyright" ? "a copyright notice under the US Digital Millennium Copyright Act (17 U.S.C. § 512(c)(3))" : "a notice of illegal content under Article 16 of the EU Digital Services Act"}.`,
+      "We used no automated means to find this content or to decide: a person at Marktmorgen read the notice and made this decision.",
+      report.kind === "copyright"
+        ? "Legal ground: copyright law. The notice says the content infringes the copyright in the work it names, and we took it down for that reason."
+        : "Legal ground: the law the notice says the content breaks, for the reason it gives above. We took it down for that reason.",
+      `Our Terms do not allow content that is unlawful or that infringes someone else's rights: section 3, "Selling through a Marktmorgen store" (${origin}/terms#selling-through-a-marktmorgen-store), and section 4, "Acceptable use" (${origin}/terms#acceptable-use).`,
       "",
       report.kind === "copyright"
         ? "If you believe it was taken down by mistake, or that you have the right to use it, you can send a counter-notice by replying to this email with: your name and signature; what was taken down and where it was; a statement, under penalty of perjury, that you believe in good faith it was taken down by mistake or misidentification; your address and telephone number; and a statement that you consent to the jurisdiction of the federal court for your district (or, outside the US, any judicial district where Marktmorgen may be found) and will accept service from the person who sent the notice. We pass it to them, and put the content back in 10 to 14 business days unless they tell us they have gone to court."
         : "If you believe this was a mistake, reply to this email and say why; we look at it again and tell you what we decided.",
+      `You can also take our decision to a court. Section 16 of our Terms, "Governing law", says which law and courts apply (${origin}/terms#governing-law).`,
       "",
       `Our policy: ${origin}/copyright. Stores that are the subject of repeated valid notices are switched off.`,
     ].join("\n"),

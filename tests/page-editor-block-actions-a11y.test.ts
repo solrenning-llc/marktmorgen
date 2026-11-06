@@ -25,7 +25,10 @@
  * - the choice that is on, in Build or Preview, the page's style and a
  *   block's "Shows on", was told apart by color and shadow only, which
  *   forced colors take away (WCAG 1.4.1, 1.4.11); the editor's other
- *   switches already show a check beside the one that is on.
+ *   switches already show a check beside the one that is on;
+ * - a save refused because the session ended said only "Log in again.":
+ *   signing in in the same tab loses the page being edited, which this tab
+ *   still holds (WCAG 2.2.5).
  *
  * What is checked here, against the real code: the sizes in the classes,
  * the buttons kept focusable at an edge, the words said after a move and a
@@ -40,6 +43,7 @@
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 import * as insert from "@/lib/block-insert";
+import { MESSAGES } from "@/components/page-editor";
 
 // Read by name, so a helper still missing fails its own lines rather than the whole file.
 const helper = (name: string) => (insert as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>)[name] ?? (() => undefined);
@@ -74,21 +78,23 @@ is("the name keeps at least 9rem", /min-w-\[9rem\]/.test(header), true);
 is("the buttons stay together, at the end", /<div className="ml-auto flex shrink-0 items-center">/.test(editor), true);
 
 part("Save keeps the focus (WCAG 2.4.3)");
-const save = editor.slice(editor.indexOf('onClick={() => send(pageToSend(), "Page saved.")}') - 40, editor.indexOf('{busy ? "Saving…" : "Save the page"}'));
-is("Save is never turned off under the focus", /\bdisabled=\{/.test(save), false);
+const saveLabel = editor.indexOf('{busy ? "Saving…" : "Save the page"}');
+const save = editor.slice(editor.lastIndexOf("<button", saveLabel), saveLabel);
+is("Save is never turned off under the focus", /(?<![-\w])disabled=\{/.test(save), false);
 is("it says it cannot save now, and stays focusable", /aria-disabled=\{busy \|\| !dirty \|\| undefined\}/.test(save), true);
 is("a press while it cannot save does nothing", /function saveNow\(\) \{\s*if \(busy \|\| !dirty\) return;/.test(editor), true);
 const swaps = editor.slice(editor.indexOf("onClick={() => swap(i, -1)}") - 40, editor.indexOf("aria-label={`Remove picture ${i + 1}`}"));
-is("a picture's Earlier and Later are never turned off under the focus", /\bdisabled=\{/.test(swaps), false);
+is("a picture's Earlier and Later are never turned off under the focus", /(?<![-\w])disabled=\{/.test(swaps), false);
 
 part("The wide layout is drawn from the first paint (no layout shift)");
-const grid = editor.slice(editor.indexOf("on a narrow screen the gallery opens where a place is pressed."), editor.indexOf("{drafts.length === 0 ? ("));
+const gridAt = editor.indexOf("on a narrow screen the gallery opens where a place is pressed.");
+const grid = editor.slice(gridAt, editor.indexOf("{drafts.length === 0 ? (", gridAt));
 is("the two columns come from the style sheet at 1280 pixels, not from the script", grid.includes('<div className="min-[1280px]:grid min-[1280px]:grid-cols-[minmax(0,1fr)_25.5rem] min-[1280px]:items-start min-[1280px]:gap-5">'), true);
 is("saved sections under the blocks are hidden by the style sheet at 1280 pixels until the script moves them beside", editor.includes('{sideBySide ? null : <div className="min-[1280px]:hidden">{savedSections}</div>}'), true);
 
 part("A move keeps the focus and says where the block went (WCAG 2.4.3, 4.1.3)");
 const moveButtons = row.slice(0, row.indexOf("canDuplicate(block) ?"));
-is("Move up and Move down are never turned off under the focus", /\bdisabled=\{/.test(moveButtons), false);
+is("Move up and Move down are never turned off under the focus", /(?<![-\w])disabled=\{/.test(moveButtons), false);
 is("they say when they cannot move, and stay focusable", (moveButtons.match(/aria-disabled=\{/g) ?? []).length, 2);
 is("what a move says", movedSaying("Text", 3, 9), "Moved Text to position 4 of 9.");
 is("the editor says it after a move", /function move\(index: number, by: -1 \| 1\) \{[\s\S]*?setSaid\(movedSaying\(/.test(editor), true);
@@ -108,5 +114,9 @@ is("Build or Preview: a check beside the one on", buildPreview.includes('<Icon n
 const shows = editor.slice(editor.indexOf("BLOCK_SHOWS.map((option) =>"), editor.indexOf("A shorter list for phones"));
 is("Shows on: a check beside the one on", shows.includes('<Icon name="check"'), true);
 is("Page style: a check beside the one on", picker.includes('<Icon name="check"'), true);
+
+part("A session that ended: sign in again without losing the page (WCAG 2.2.5)");
+is("the refusal says the changes are still here and how to keep them", MESSAGES.signed_out, "Your session ended. Your changes are still here, not saved yet: sign in again in a new tab, then come back to this tab and press Save the page.");
+is("with a link that opens the sign-in in a new tab, so this tab keeps the page", /error === MESSAGES\.signed_out \? \([\s\S]{0,200}href="\/signin" target="_blank"/.test(editor), true);
 
 done();

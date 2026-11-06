@@ -1,0 +1,1511 @@
+=== original ===
+
+=== j-2764-preview.proof.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+a tier switch's preview was not one this code knows sub_Member0001
+/tmp/j2764-zrFR79/j-2764-preview.proof.ts.cjs:89639
+  if (!preview.ok) throw new Error(`no preview: ${preview.reason}`);
+                         ^
+
+Error: no preview: error
+    at main (/tmp/j2764-zrFR79/j-2764-preview.proof.ts.cjs:89639:26)
+
+Node.js v24.22.1
+
+=== j-2764-yearly-preview.proof.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+a move to yearly's preview was not one this code knows sub_Dana00000001
+Error: no preview: error
+    at main (/tmp/j2764-zrFR79/j-2764-yearly-preview.proof.ts.cjs:92303:26)
+
+=== j-2764-tier-page.proof.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+a tier switch's preview was not one this code knows sub_Member0001
+/tmp/j2764-zrFR79/j-2764-tier-page.proof.ts.cjs:89637
+  if (!preview.ok) throw new Error(`no preview: ${preview.reason}`);
+                         ^
+
+Error: no preview: error
+    at main (/tmp/j2764-zrFR79/j-2764-tier-page.proof.ts.cjs:89637:26)
+
+Node.js v24.22.1
+
+=== j-2764-yearly-page.proof.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+a move to yearly's preview was not one this code knows sub_Dana00000001
+Error: no preview: error
+    at main (/tmp/j2764-zrFR79/j-2764-yearly-page.proof.ts.cjs:92300:26)
+
+
+=== partial-original ===
+
+=== j-2764-partial-preview.proof.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+a tier switch's preview was not one this code knows sub_Member0001
+/tmp/j2764-partial-rqthDS/j-2764-partial-preview.proof.ts.cjs:89639
+  if (!preview.ok) throw new Error(`no preview: ${preview.reason}`);
+                         ^
+
+Error: no preview: error
+    at main (/tmp/j2764-partial-rqthDS/j-2764-partial-preview.proof.ts.cjs:89639:26)
+
+Node.js v24.22.1
+
+=== j-2764-partial-yearly-preview.proof.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+a move to yearly's preview was not one this code knows sub_Dana00000001
+Error: no preview: error
+    at main (/tmp/j2764-partial-rqthDS/j-2764-partial-yearly-preview.proof.ts.cjs:92303:26)
+
+=== j-2764-known-preview.proof.ts ===
+  ok    known complete preview retains 0 cents
+  ok    known complete preview retains -500 cents
+  ok    known complete preview retains 1240 cents
+  ok    unsafe cents remain unknown
+
+4 checks, all passing.
+
+
+=== adapted ===
+
+=== j-2764-complete-preview.proof.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+  ok    Stripe's own figure
+  ok    worked out to the second, onto the new tier's price
+  ok    that price names the product it hands over
+  ok    and is made once
+  ok    nobody else's membership
+  ok    not to the tier it is on
+  ok    not without a live link
+
+A membership paid in another currency than the store's now
+  ok    no tier offered to it
+  ok    a link to a switch says why and changes nothing
+  ok    no price made, no preview asked, no subscription touched
+  ok    the member is told so in every language
+
+The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the tier is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    a yes to older words: refused the same
+
+The switch
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and the invoice is voided, so nothing is owed
+  ok    and nobody is told it happened
+a tier switch's reply was not one this code knows sub_Member0001
+  ok    an answer that cannot be read: not confirmed, and nobody is told it happened
+  ok    said in every language without claiming nothing changed
+  ok    switched
+  ok    the yes is kept on the subscription with the charge itself
+  ok    charged at once, only if paid
+  ok    the subscription's record follows
+  ok    a receipt to the member, a note to the creator
+  ok    the receipt says what was charged
+
+J: an unreadable invoice preview is not a known zero charge
+a tier switch's preview was not one this code knows sub_Member0001
+a tier switch's preview was not one this code knows sub_Member0001
+  ok    unknown preview never tells the buyer nothing is charged today
+  ok    valid consent control still reaches exactly one charging update
+  ok    an unreadable preview refuses to certify the amount shown to the member
+
+Afterward
+  ok    the member's page shows the new tier
+  ok    and offers the way back down
+  ok    switching off offers nothing
+
+54 checks, all passing.
+
+=== j-2764-complete-yearly-preview.proof.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+  ok    the year, less what is left of the month
+  ok    on a yearly price for the same product
+  ok    the price body, pure
+  ok    previewed as the move itself will be made
+  ok    somebody else's membership is not on this link
+
+The box is asked again before a move to yearly charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the membership is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    the button without the box: back to the same move, the box saying what is missing
+  ok    and nothing sent to Stripe
+
+The move
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and leaves nothing owed
+  ok    made
+  ok    the yes is kept on the subscription with the charge itself
+  ok    at the preview's second, charged at once
+  ok    recorded as a membership bought yearly says it
+  ok    the member's receipt
+  ok    the creator's note
+
+The emailed link opens this one move and nothing else
+  ok    this membership
+  ok    not another
+  ok    and not the member's page
+
+J: unreadable yearly preview is not zero
+a move to yearly's preview was not one this code knows sub_Dana00000001
+a move to yearly's preview was not one this code knows sub_Dana00000001
+  ok    unknown yearly preview refuses to certify a zero amount
+  ok    unknown yearly preview never says nothing is charged today
+  ok    yearly valid-consent control reaches one charging update
+
+The email
+  ok    refused without an address
+  ok    saved with one
+  ok    sent to the one it fits
+  ok    what they pay, what a year costs and saves, the link to this one move, the list's footer
+  ok    once per membership
+  ok    in the store's language
+
+43 checks, all passing.
+
+=== j-2764-complete-tier-page.proof.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+  ok    Stripe's own figure
+  ok    worked out to the second, onto the new tier's price
+  ok    that price names the product it hands over
+  ok    and is made once
+  ok    nobody else's membership
+  ok    not to the tier it is on
+  ok    not without a live link
+
+A membership paid in another currency than the store's now
+  ok    no tier offered to it
+  ok    a link to a switch says why and changes nothing
+  ok    no price made, no preview asked, no subscription touched
+  ok    the member is told so in every language
+
+The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the tier is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    a yes to older words: refused the same
+
+The switch
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and the invoice is voided, so nothing is owed
+  ok    and nobody is told it happened
+a tier switch's reply was not one this code knows sub_Member0001
+  ok    an answer that cannot be read: not confirmed, and nobody is told it happened
+  ok    said in every language without claiming nothing changed
+  ok    switched
+  ok    the yes is kept on the subscription with the charge itself
+  ok    charged at once, only if paid
+  ok    the subscription's record follows
+  ok    a receipt to the member, a note to the creator
+  ok    the receipt says what was charged
+
+J: actual switch page asks an unchecked, required membership box
+  ok    actual switch page renders a required checkbox, never checked
+  ok    actual switch page preserves current words and missing-state semantics
+
+Afterward
+  ok    the member's page shows the new tier
+  ok    and offers the way back down
+  ok    switching off offers nothing
+
+53 checks, all passing.
+
+=== j-2764-complete-yearly-page.proof.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+  ok    the year, less what is left of the month
+  ok    on a yearly price for the same product
+  ok    the price body, pure
+  ok    previewed as the move itself will be made
+  ok    somebody else's membership is not on this link
+
+The box is asked again before a move to yearly charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the membership is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    the button without the box: back to the same move, the box saying what is missing
+  ok    and nothing sent to Stripe
+
+The move
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and leaves nothing owed
+  ok    made
+  ok    the yes is kept on the subscription with the charge itself
+  ok    at the preview's second, charged at once
+  ok    recorded as a membership bought yearly says it
+  ok    the member's receipt
+  ok    the creator's note
+
+The emailed link opens this one move and nothing else
+  ok    this membership
+  ok    not another
+  ok    and not the member's page
+
+J: actual yearly page carries a required membership box and offer origin
+  ok    actual yearly page renders a required checkbox, never checked
+  ok    actual yearly page keeps version, error and offer context
+
+The email
+  ok    refused without an address
+  ok    saved with one
+  ok    sent to the one it fits
+  ok    what they pay, what a year costs and saves, the link to this one move, the list's footer
+  ok    once per membership
+  ok    in the store's language
+
+42 checks, all passing.
+
+
+=== partial-adapted ===
+
+=== j-2764-complete-partial-preview.proof.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+  ok    Stripe's own figure
+  ok    worked out to the second, onto the new tier's price
+  ok    that price names the product it hands over
+  ok    and is made once
+  ok    nobody else's membership
+  ok    not to the tier it is on
+  ok    not without a live link
+
+A membership paid in another currency than the store's now
+  ok    no tier offered to it
+  ok    a link to a switch says why and changes nothing
+  ok    no price made, no preview asked, no subscription touched
+  ok    the member is told so in every language
+
+The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the tier is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    a yes to older words: refused the same
+
+The switch
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and the invoice is voided, so nothing is owed
+  ok    and nobody is told it happened
+a tier switch's reply was not one this code knows sub_Member0001
+  ok    an answer that cannot be read: not confirmed, and nobody is told it happened
+  ok    said in every language without claiming nothing changed
+  ok    switched
+  ok    the yes is kept on the subscription with the charge itself
+  ok    charged at once, only if paid
+  ok    the subscription's record follows
+  ok    a receipt to the member, a note to the creator
+  ok    the receipt says what was charged
+
+J: an incomplete invoice preview is not a known zero charge
+a tier switch's preview was not one this code knows sub_Member0001
+a tier switch's preview was not one this code knows sub_Member0001
+  ok    unknown preview never tells the buyer nothing is charged today
+  ok    valid consent control still reaches exactly one charging update
+  ok    an unreadable preview refuses to certify the amount shown to the member
+
+Afterward
+  ok    the member's page shows the new tier
+  ok    and offers the way back down
+  ok    switching off offers nothing
+
+54 checks, all passing.
+
+=== j-2764-complete-partial-yearly-preview.proof.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+  ok    the year, less what is left of the month
+  ok    on a yearly price for the same product
+  ok    the price body, pure
+  ok    previewed as the move itself will be made
+  ok    somebody else's membership is not on this link
+
+The box is asked again before a move to yearly charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the membership is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    the button without the box: back to the same move, the box saying what is missing
+  ok    and nothing sent to Stripe
+
+The move
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and leaves nothing owed
+  ok    made
+  ok    the yes is kept on the subscription with the charge itself
+  ok    at the preview's second, charged at once
+  ok    recorded as a membership bought yearly says it
+  ok    the member's receipt
+  ok    the creator's note
+
+The emailed link opens this one move and nothing else
+  ok    this membership
+  ok    not another
+  ok    and not the member's page
+
+J: incomplete yearly preview is not zero
+a move to yearly's preview was not one this code knows sub_Dana00000001
+a move to yearly's preview was not one this code knows sub_Dana00000001
+  ok    unknown yearly preview refuses to certify a zero amount
+  ok    unknown yearly preview never says nothing is charged today
+  ok    yearly valid-consent control reaches one charging update
+
+The email
+  ok    refused without an address
+  ok    saved with one
+  ok    sent to the one it fits
+  ok    what they pay, what a year costs and saves, the link to this one move, the list's footer
+  ok    once per membership
+  ok    in the store's language
+
+43 checks, all passing.
+
+=== j-2764-known-preview.proof.ts ===
+  ok    known complete preview retains 0 cents
+  ok    known complete preview retains -500 cents
+  ok    known complete preview retains 1240 cents
+  ok    unsafe cents remain unknown
+
+4 checks, all passing.
+
+
+=== partial-prior ===
+
+=== j-2764-complete-partial-preview.proof.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+  ok    Stripe's own figure
+  ok    worked out to the second, onto the new tier's price
+  ok    that price names the product it hands over
+  ok    and is made once
+  ok    nobody else's membership
+  ok    not to the tier it is on
+  ok    not without a live link
+
+A membership paid in another currency than the store's now
+  ok    no tier offered to it
+  ok    a link to a switch says why and changes nothing
+  ok    no price made, no preview asked, no subscription touched
+  ok    the member is told so in every language
+
+The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the tier is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    a yes to older words: refused the same
+
+The switch
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and the invoice is voided, so nothing is owed
+  ok    and nobody is told it happened
+a tier switch's reply was not one this code knows sub_Member0001
+  ok    an answer that cannot be read: not confirmed, and nobody is told it happened
+  ok    said in every language without claiming nothing changed
+  ok    switched
+  ok    the yes is kept on the subscription with the charge itself
+  ok    charged at once, only if paid
+  ok    the subscription's record follows
+  ok    a receipt to the member, a note to the creator
+  ok    the receipt says what was charged
+
+J: an incomplete invoice preview is not a known zero charge
+  FAIL  unknown preview never tells the buyer nothing is charged today
+        expected false
+        got      true
+  ok    valid consent control still reaches exactly one charging update
+  FAIL  an unreadable preview refuses to certify the amount shown to the member
+        expected false
+        got      true
+
+Afterward
+  ok    the member's page shows the new tier
+  ok    and offers the way back down
+  ok    switching off offers nothing
+
+54 checks, 2 failing.
+
+=== j-2764-complete-partial-yearly-preview.proof.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+  ok    the year, less what is left of the month
+  ok    on a yearly price for the same product
+  ok    the price body, pure
+  ok    previewed as the move itself will be made
+  ok    somebody else's membership is not on this link
+
+The box is asked again before a move to yearly charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the membership is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    the button without the box: back to the same move, the box saying what is missing
+  ok    and nothing sent to Stripe
+
+The move
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and leaves nothing owed
+  ok    made
+  ok    the yes is kept on the subscription with the charge itself
+  ok    at the preview's second, charged at once
+  ok    recorded as a membership bought yearly says it
+  ok    the member's receipt
+  ok    the creator's note
+
+The emailed link opens this one move and nothing else
+  ok    this membership
+  ok    not another
+  ok    and not the member's page
+
+J: incomplete yearly preview is not zero
+  FAIL  unknown yearly preview refuses to certify a zero amount
+        expected false
+        got      true
+  FAIL  unknown yearly preview never says nothing is charged today
+        expected false
+        got      true
+  ok    yearly valid-consent control reaches one charging update
+
+The email
+  ok    refused without an address
+  ok    saved with one
+  ok    sent to the one it fits
+  ok    what they pay, what a year costs and saves, the link to this one move, the list's footer
+  ok    once per membership
+  ok    in the store's language
+
+43 checks, 2 failing.
+
+=== j-2764-known-preview.proof.ts ===
+  ok    known complete preview retains 0 cents
+  ok    known complete preview retains -500 cents
+  ok    known complete preview retains 1240 cents
+  ok    unsafe cents remain unknown
+
+4 checks, all passing.
+
+
+=== red ===
+
+=== tiers.test.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+  ok    Stripe's own figure
+  ok    worked out to the second, onto the new tier's price
+  ok    that price names the product it hands over
+  ok    and is made once
+  ok    nobody else's membership
+  ok    not to the tier it is on
+  ok    not without a live link
+
+A membership paid in another currency than the store's now
+  ok    no tier offered to it
+  ok    a link to a switch says why and changes nothing
+  ok    no price made, no preview asked, no subscription touched
+  ok    the member is told so in every language
+
+The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the tier is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    a yes to older words: refused the same
+
+The switch
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and the invoice is voided, so nothing is owed
+  ok    and nobody is told it happened
+a tier switch's reply was not one this code knows sub_Member0001
+  ok    an answer that cannot be read: not confirmed, and nobody is told it happened
+  ok    said in every language without claiming nothing changed
+  ok    switched
+  ok    the yes is kept on the subscription with the charge itself
+  ok    charged at once, only if paid
+  ok    the subscription's record follows
+  ok    a receipt to the member, a note to the creator
+  ok    the receipt says what was charged
+
+J: an unreadable invoice preview is not a known zero charge
+a tier switch's preview was not one this code knows sub_Member0001
+a tier switch's preview was not one this code knows sub_Member0001
+  ok    unknown preview never tells the buyer nothing is charged today
+  ok    valid consent control still reaches exactly one charging update
+  ok    an unreadable preview refuses to certify the amount shown to the member
+
+J: a preview whose lines are not all there is not a known zero charge
+  FAIL  lines said to go on (has_more) never tell the buyer nothing is charged today
+        expected [false,false]
+        got      [true,true]
+  FAIL  lines are whole only when they say so (has_more false)
+        expected [true,false,false]
+        got      [true,true,true]
+
+Afterward
+  ok    the member's page shows the new tier
+  ok    and offers the way back down
+  ok    switching off offers nothing
+
+56 checks, 2 failing.
+
+=== yearly-switch.test.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+  ok    the year, less what is left of the month
+  ok    on a yearly price for the same product
+  ok    the price body, pure
+  ok    previewed as the move itself will be made
+  ok    somebody else's membership is not on this link
+
+The box is asked again before a move to yearly charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the membership is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    the button without the box: back to the same move, the box saying what is missing
+  ok    and nothing sent to Stripe
+
+The move
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and leaves nothing owed
+  ok    made
+  ok    the yes is kept on the subscription with the charge itself
+  ok    at the preview's second, charged at once
+  ok    recorded as a membership bought yearly says it
+  ok    the member's receipt
+  ok    the creator's note
+
+The emailed link opens this one move and nothing else
+  ok    this membership
+  ok    not another
+  ok    and not the member's page
+
+J: unreadable yearly preview is not zero
+a move to yearly's preview was not one this code knows sub_Dana00000001
+a move to yearly's preview was not one this code knows sub_Dana00000001
+  ok    unknown yearly preview refuses to certify a zero amount
+  ok    unknown yearly preview never says nothing is charged today
+  ok    yearly valid-consent control reaches one charging update
+  FAIL  yearly lines said to go on (has_more) never say nothing is charged today
+        expected [false,false]
+        got      [true,true]
+
+The email
+  ok    refused without an address
+  ok    saved with one
+  ok    sent to the one it fits
+  ok    what they pay, what a year costs and saves, the link to this one move, the list's footer
+  ok    once per membership
+  ok    in the store's language
+
+44 checks, 1 failing.
+
+=== j-2764-known-preview.test.ts ===
+  ok    known complete preview retains 0 cents
+  ok    known complete preview retains -500 cents
+  ok    known complete preview retains 1240 cents
+  ok    unsafe cents remain unknown
+
+4 checks, all passing.
+
+
+=== linked-fixed ===
+
+=== tiers.test.ts ===
+
+What a tier is
+  ok    2 to 6 ids, or none
+  ok    a membership that runs until canceled, at one price
+  ok    up or down on the same schedule, neither across schedules
+
+What a switch charges, read from Stripe's preview
+  ok    only the switch, not the renewal after it
+  ok    a credit the member holds comes off it
+  ok    down is a credit
+  ok    monthly to yearly: the new year is charged now, less the credit
+
+The tier a subscription is on now
+  ok    its price first, then its record, then the checkout
+  ok    a switched membership hands over its tier now
+  ok    never switched, as it was
+  ok    a payment plan is never read as a tier
+  ok    nor a one-off payment
+
+The member's page
+  ok    kept with the store
+  ok    both on sale
+  ok    the link is emailed
+  ok    which says switching is there
+  ok    the membership, on the tier it is on
+  ok    offered the other tier, as an upgrade
+  ok    nothing offered once canceled
+  ok    nor while a payment is failing
+  ok    nor on one sold as a set number of payments
+
+What it costs, before anything happens
+  ok    Stripe's own figure
+  ok    worked out to the second, onto the new tier's price
+  ok    that price names the product it hands over
+  ok    and is made once
+  ok    nobody else's membership
+  ok    not to the tier it is on
+  ok    not without a live link
+
+A membership paid in another currency than the store's now
+  ok    no tier offered to it
+  ok    a link to a switch says why and changes nothing
+  ok    no price made, no preview asked, no subscription touched
+  ok    the member is told so in every language
+
+The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the tier is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    a yes to older words: refused the same
+
+The switch
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and the invoice is voided, so nothing is owed
+  ok    and nobody is told it happened
+a tier switch's reply was not one this code knows sub_Member0001
+  ok    an answer that cannot be read: not confirmed, and nobody is told it happened
+  ok    said in every language without claiming nothing changed
+  ok    switched
+  ok    the yes is kept on the subscription with the charge itself
+  ok    charged at once, only if paid
+  ok    the subscription's record follows
+  ok    a receipt to the member, a note to the creator
+  ok    the receipt says what was charged
+
+J: an unreadable invoice preview is not a known zero charge
+a tier switch's preview was not one this code knows sub_Member0001
+a tier switch's preview was not one this code knows sub_Member0001
+  ok    unknown preview never tells the buyer nothing is charged today
+  ok    valid consent control still reaches exactly one charging update
+  ok    an unreadable preview refuses to certify the amount shown to the member
+
+J: a preview whose lines are not all there is not a known zero charge
+a tier switch's preview was not one this code knows sub_Member0001
+a tier switch's preview was not one this code knows sub_Member0001
+  ok    lines said to go on (has_more) never tell the buyer nothing is charged today
+  ok    lines are whole only when they say so (has_more false)
+
+Afterward
+  ok    the member's page shows the new tier
+  ok    and offers the way back down
+  ok    switching off offers nothing
+
+56 checks, all passing.
+
+=== yearly-switch.test.ts ===
+
+Where it is offered
+  ok    a monthly member: the year, and what it saves against their own payments
+  ok    a member on an older, lower price, for whom a year saves nothing: not offered
+  ok    in a trial, yes
+  ok    not paid up, set to end, paused, two seats, another currency, already yearly
+  ok    never with a discount: a few months off would come off a whole year
+  ok    an affiliate's share for 3 months still running: not offered; once it ran out, or for as long as they pay: offered
+  ok    the share's months counted from the sale
+  ok    a product that no longer offers a yearly price, or one in the plans members switch between
+
+When the email fits
+  ok    paying, from the third monthly payment on; not in a trial, not before
+  ok    on only with a postal address
+
+The member's page
+  ok    the link is emailed
+  ok    the membership offers paying yearly, with what it saves
+
+What moving costs, from Stripe's preview
+  ok    the year, less what is left of the month
+  ok    on a yearly price for the same product
+  ok    the price body, pure
+  ok    previewed as the move itself will be made
+  ok    somebody else's membership is not on this link
+
+The box is asked again before a move to yearly charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)
+  ok    the preview says the membership is delivered at once, so the page shows the box
+  ok    without the box checked: refused, and nothing sent to Stripe
+  ok    the button without the box: back to the same move, the box saying what is missing
+  ok    and nothing sent to Stripe
+
+The move
+  ok    a figure more than 15 minutes old is not used
+  ok    another change to the membership holding the lock: busy, never an error, and nothing sent
+  ok    a declined card changes nothing
+  ok    and leaves nothing owed
+  ok    made
+  ok    the yes is kept on the subscription with the charge itself
+  ok    at the preview's second, charged at once
+  ok    recorded as a membership bought yearly says it
+  ok    the member's receipt
+  ok    the creator's note
+
+The emailed link opens this one move and nothing else
+  ok    this membership
+  ok    not another
+  ok    and not the member's page
+
+J: unreadable yearly preview is not zero
+a move to yearly's preview was not one this code knows sub_Dana00000001
+a move to yearly's preview was not one this code knows sub_Dana00000001
+  ok    unknown yearly preview refuses to certify a zero amount
+  ok    unknown yearly preview never says nothing is charged today
+  ok    yearly valid-consent control reaches one charging update
+a move to yearly's preview was not one this code knows sub_Dana00000001
+a move to yearly's preview was not one this code knows sub_Dana00000001
+  ok    yearly lines said to go on (has_more) never say nothing is charged today
+
+The email
+  ok    refused without an address
+  ok    saved with one
+  ok    sent to the one it fits
+  ok    what they pay, what a year costs and saves, the link to this one move, the list's footer
+  ok    once per membership
+  ok    in the store's language
+
+44 checks, all passing.
+
+=== j-2764-known-preview.test.ts ===
+  ok    known complete preview retains 0 cents
+  ok    known complete preview retains -500 cents
+  ok    known complete preview retains 1240 cents
+  ok    unsafe cents remain unknown
+
+4 checks, all passing.
+
+=== cx1-review-2764-charge-reply.test.ts ===
+a tier switch's reply was not one this code knows sub_CX1Member0001
+  ok    tier: empty reply; unknown cannot become success, follow-up metadata or receipt
+a tier switch's reply was not one this code knows sub_CX1Member0001
+  ok    tier: wrong subscription reply; unknown cannot become success, follow-up metadata or receipt
+a tier switch's reply was not one this code knows sub_CX1Member0001
+  ok    tier: false pending reply; unknown cannot become success, follow-up metadata or receipt
+  ok    tier: exact reply; unknown cannot become success, follow-up metadata or receipt
+  ok    tier: declined reply; unknown cannot become success, follow-up metadata or receipt
+a move to yearly's reply was not one this code knows sub_CX1Member0001
+  ok    yearly: empty reply; unknown cannot become success, follow-up metadata or receipt
+a move to yearly's reply was not one this code knows sub_CX1Member0001
+  ok    yearly: wrong subscription reply; unknown cannot become success, follow-up metadata or receipt
+a move to yearly's reply was not one this code knows sub_CX1Member0001
+  ok    yearly: false pending reply; unknown cannot become success, follow-up metadata or receipt
+  ok    yearly: exact reply; unknown cannot become success, follow-up metadata or receipt
+  ok    yearly: declined reply; unknown cannot become success, follow-up metadata or receipt
+
+10 checks, all passing.
+
+=== cx1-review-2764-invoice.test.ts ===
+tier/missing invoice: returned ok=true, receipt=true, real charge=1000 cents
+  ok    tier: unreadable missing invoice never claims nothing was charged
+tier/partial invoice: returned ok=true, receipt=true, real charge=1000 cents
+  ok    tier: unreadable partial invoice never claims nothing was charged
+tier/text amount: returned ok=true, receipt=true, real charge=1000 cents
+  ok    tier: unreadable text amount never claims nothing was charged
+  ok    tier: exact invoice control charges and sends the correct paid amount
+yearly/missing invoice: returned ok=true, receipt=true, real charge=1000 cents
+  ok    yearly: unreadable missing invoice never claims nothing was charged
+yearly/partial invoice: returned ok=true, receipt=true, real charge=1000 cents
+  ok    yearly: unreadable partial invoice never claims nothing was charged
+yearly/text amount: returned ok=true, receipt=true, real charge=1000 cents
+  ok    yearly: unreadable text amount never claims nothing was charged
+  ok    yearly: exact invoice control charges and sends the correct paid amount
+
+8 checks, all passing.
+
+=== cx1-review-2764-stripe-version.test.ts ===
+  ok    tier: metadata with pending_if_incomplete pins an API version that supports it
+  ok    tier: explicit supported version survives the real transport
+  ok    yearly: metadata with pending_if_incomplete pins an API version that supports it
+  ok    yearly: explicit supported version survives the real transport
+
+4 checks, all passing.
+
+=== cx1-review-2764-transport.test.ts ===
+a tier switch's charging update had no answer that can be read TypeError: Synthetic connection lost after applied update
+    at globalThis.fetch (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:61249:41)
+    at /tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:5472:29
+    at timed (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:3887:19)
+    at onAccount (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:5471:43)
+    at /tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:60887:25
+    at async withLock (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:4048:12)
+    at async switchTier (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:60875:12)
+    at async main (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:61288:40)
+  ok    tier: lost response; an applied update with lost response must not claim nothing changed
+  ok    tier: exact; an applied update with lost response must not claim nothing changed
+  ok    tier: known rejection; an applied update with lost response must not claim nothing changed
+a move to yearly's charging update had no answer that can be read TypeError: Synthetic connection lost after applied update
+    at globalThis.fetch (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:61249:41)
+    at /tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:5472:29
+    at timed (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:3887:19)
+    at onAccount (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:5471:43)
+    at /tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:61078:25
+    at async withLock (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:4048:12)
+    at async switchYearly (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:61066:12)
+    at async main (/tmp/j-renewal-ugvzjz/cx1-review-2764-transport.test.ts.cjs:61288:116)
+  ok    yearly: lost response; an applied update with lost response must not claim nothing changed
+  ok    yearly: exact; an applied update with lost response must not claim nothing changed
+  ok    yearly: known rejection; an applied update with lost response must not claim nothing changed
+
+6 checks, all passing.
+
+=== digital-consent.test.ts ===
+
+The words: what the law asks for, by kind, and a version tied to them
+  ok    every language a store speaks
+  ok    the words have not changed without a new version (bump EU_WITHDRAWAL_CONSENT_VERSION and CONSENT_WORDS_FINGERPRINT together)
+  ok    digital: consent to start before the period ends, and the acknowledgement that the right is lost
+  ok    membership: the request to start before the period ends, and what a cancellation in it costs; never that the right is lost
+  ok    German speaks as Sie, never du
+  ok    German follows § 356(6) BGB: express consent, and knowledge confirmed
+  ok    the English is plain: it says who has the right, and that paying needs the box
+  ok    never told it is fully compliant
+  ok    the kind follows the product: a membership's, or digital content sold once
+
+The box
+  ok    a real checkbox with its name and value, required
+  ok    never checked for the buyer
+  ok    its visible label holds the sentence
+  ok    a membership's box says the membership's sentence
+  ok    a target at least 44 px high
+  ok    the note is tied to it
+  ok    the version the page shows travels with it
+  ok    no error, no alert and an empty live region when nothing was refused
+  ok    refused: said in text beside it and tied to it, the box marked, and no alert present from the start (it is announced once the page runs)
+  ok    in the store's language
+  ok    checking it clears the mark and the reason (components/digital-consent-box.tsx)
+
+Only the checked box with today's version is a yes
+  ok    nothing sent: no yes
+  ok    the version without the box: no yes
+  ok    the box without the version (a forged form): no yes
+  ok    a page from before the words changed: no yes
+  ok    a value other than yes: no yes
+  ok    checked, today's version: a yes with the time
+  ok    kept as yes, version, kind and time, read back the same
+  ok    a value this code did not write is no yes
+  ok    within Stripe's 500 characters
+
+What is handed over digitally
+  ok    a file, a link, a course, a podcast, a bundle, a membership
+  ok    a product shipped with nothing digital is not, whichever option
+  ok    shipping set on something holding a file is not shipped (lib/shipping.ts), so it is digital on every option
+  ok    a booked call (a service) is not
+
+The checkout refuses before Stripe is reached, without the yes
+  ok    a physical product is set up
+  ok    one product, no yes: refused
+  ok    a yes of another version: refused
+  ok    a yes with no real time: refused
+  ok    a gift, no yes: refused
+  ok    a cart, no yes: refused
+  ok    none of those reached Stripe
+
+With the yes: kept on the order and on the payment
+  ok    on the order and on its payment, as yes, version and time
+  ok    a cart keeps it the same way
+
+Stripe's 50 metadata fields: the yes is never the one dropped
+  ok    at the most that fits, it opens with the yes kept and room left for a choose-your-price mark
+  ok    one more and the checkout is refused, never opened without the yes
+  ok    a cart the same: refused past the room, never without the yes
+
+A product shipped with nothing digital is not asked
+  ok    it opens without the box
+  ok    and keeps no yes it was not given
+
+The confirmation email, the durable medium
+  ok    quotes the sentence, its version, and that the right ended when access was given
+  ok    and the day it was given
+  ok    never says it was paid (a trial or a moved member pays nothing at checkout)
+  ok    an order with no yes says nothing of one
+  ok    a pre-order: access starts on the release day, the right lasts until then, and nothing is said to have ended
+  ok    a membership: its own sentence, the right kept, and a proportional price for a cancellation in the 14 days
+  ok    with a shipped item: the digital part ended, the shipped item keeps its own right from delivery
+  ok    the line in the store's language
+  ok    the German line speaks as Sie
+  ok    lib/purchase-email.ts carries the line in its receipt
+  ok    lib/purchase-email.ts carries the line in its receipt
+  ok    lib/gifts.ts carries the line in its receipt
+  ok    lib/group-buy.ts carries the line in its receipt
+  ok    lib/preorders.ts carries the line in its receipt
+  ok    lib/paypal-sales.ts carries the line in its receipt
+
+The routes send the buyer back to the box, nothing charged
+  ok    no box: back to the product's buy box with the reason
+  ok    a forged form with the box and no version: the same
+  ok    a gift: back to the gift's box, nothing written down
+  ok    from the course or renew page: back to that page, said there; any other word is ignored
+  ok    none of them reached Stripe
+  ok    the box checked: on to Stripe, with the yes kept
+  ok    a cart without the box: back to the cart, said there, nothing charged
+  ok    with it: on to Stripe
+
+Every page that pays for something digital draws the box
+  ok    components/store-product.tsx draws it
+  ok    components/pick-bundle-form.tsx draws it
+  ok    components/store-cart.tsx draws it
+  ok    app/[handle]/renew/[product]/page.tsx draws it
+  ok    app/[handle]/course/[product]/page.tsx draws it
+  ok    app/[handle]/free/page.tsx draws it
+  ok    app/[handle]/move/[product]/page.tsx draws it
+  ok    app/[handle]/thanks/page.tsx draws it
+  ok    the buy box, the gift, the group, the pre-order and PayPal on its own each have one
+  ok    PayPal beside the card checkout sends the same form, so the same box
+  ok    a sales page's button for something digital leads to the buy box
+  ok    each offer after paying asks on its own button, and No thanks never needs it
+  ok    the offer's route reads the box only with a yes
+  ok    app/api/store/welcome/open/route.ts reads the box and passes it on
+  ok    app/api/store/come-back/open/route.ts reads the box and passes it on
+  ok    app/api/store/move/open/route.ts reads the box and passes it on
+  ok    app/api/store/paypal/checkout/route.ts reads the box and passes it on
+
+The policies, the help and the record of what is kept say so
+  ok    Terms: both rules, the pre-order, the shipped item and the member's refund
+  ok    Refund policy: digital, pre-order, shipped and membership each said as they are
+  ok    Privacy: where it is kept and for how long, PayPal's 400 days included
+  ok    Help
+  ok    What is kept about a person: on Stripe, and with the PayPal order
+  ok    no page claims full compliance
+
+93 checks, all passing.
+
+=== leave-flow.test.ts ===
+
+The setting
+  ok    off for a store that never chose, every reason offered
+  ok    “Another reason” is always offered
+  ok    own reasons need an id and words, three at most
+
+What each answer is met with
+  ok    it costs too much: a cheaper plan and a pause
+  ok    not used enough: a pause
+  ok    something missing, and the creator's own: a way to write
+  ok    moved to something else: only the way out
+  ok    only an offered answer counts
+
+Saved by the creator
+  ok    off until turned on
+  ok    a reason of the creator's own is given an id
+  ok    and keeps it
+  ok    four of their own are refused
+
+Canceling after saying why
+  ok    Stripe's page opens
+  ok    the reason is written on the membership
+  ok    and Stripe's page does not ask again
+  ok    without an answer, nothing is written, and Stripe's page asks as before
+  ok    an answer the store does not offer is not written
+
+Why members leave
+  ok    the store's own answer, and Stripe's when the store's is old
+  ok    the creator's own reason in their words
+
+This month
+  ok    said why, paused, switched, and went on to cancel
+
+20 checks, all passing.
+
+=== yearly-offer.test.ts ===
+
+What counts as a sale
+  ok    a paid product is
+  ok    a tip is not
+  ok    nothing charged is not
+
+What the email says
+  ok    the subject
+  ok    it says the saving at the published prices
+  ok    it says it is the only time
+  ok    it names nothing that ends
+  ok    in the trial, nothing is charged now
+
+A store on a monthly plan, at its first sale
+  ok    it is noted as the first sale
+  ok    with its own date
+  ok    one email, to the creator
+  ok    a later sale is not a first sale
+  ok    still one email
+  ok    the date stays the first one
+
+While no plan is on sale, no switch is offered
+  ok    the first sale is noted, and no email offers a yearly switch the studio would refuse
+
+A store that sold before this was built
+  ok    is not told it made its first sale
+  ok    its earlier sale is noted instead
+  ok    and nothing is sent
+
+Only a monthly plan that is staying, once
+  ok    a yearly plan is not written to
+  ok    but its first sale is noted
+  ok    a plan set to stop is not written to
+  ok    a store with no plan is not written to
+
+When Stripe cannot be asked
+asking a store's Stripe account about earlier sales failed outagestore StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/tmp/j-renewal-ugvzjz/yearly-offer.test.ts.cjs:5068:11)
+    at async soldBefore (/tmp/j-renewal-ugvzjz/yearly-offer.test.ts.cjs:11577:20)
+    at async noteFirstSale (/tmp/j-renewal-ugvzjz/yearly-offer.test.ts.cjs:11567:20)
+    at async main (/tmp/j-renewal-ugvzjz/yearly-offer.test.ts.cjs:11756:18) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+  ok    nothing is noted
+  ok    the next pass notes it and writes
+
+24 checks, all passing.
+
+=== platform-us-english.test.ts ===
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+
+
+=== types ===
+
+
+=== lint ===
+
+
+=== scanner ===
+Public data check: 3857 tracked files; 0 file(s) require correction.
+
+
+=== diff ===

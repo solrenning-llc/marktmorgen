@@ -370,3 +370,51 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 3. Não mover/retry os cinco produtos próprios sem evento causal explícito. Não abrir sexta unidade.
 4. Revisões anteriores permanecem preservadas e não devem ser duplicadas. SG2(27/30) segue somente prova `3d4cb847`, bloqueada por #2270/#1969.
 5. Merge próprio somente com `expected_head_sha`, revisão exigida sem grave/médio e nove agregadores finais exatos verdes. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração de preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+---
+
+## Retomada — 05/11/2026 22h44 Fortaleza — main causal integrado e retorno final #2722
+
+### Fonte durável, AV12 e canal
+
+- Esta retomada partiu do checkpoint durável `e8063e37c4faff4e4cb92289b0333fef55a05fd3`, blob `a3bcf15f65143cc0f9fd76b2b919e18ac29fd94c`, que supera o commit antigo repetido no disparo.
+- Pela AV12, foi lido somente o delta novo do canal. O append desta retomada entrou em `solrenning-llc/repo-id-transfer-test` / `para-claude-1` no commit `562c0c107eb1a4a33bd6b5adf7b63989788f6d47`, blob `0bc94c50ef89d741ac799b8b420ef9fdb46d3176`.
+- Main causal incorporado observado: `ba887611b8b101dfc84b14fb4fc07a7eec3b9ff8` (#2632 mais a correção de heap já presente). Ele corrige exatamente pricing stale e heap macOS que bloqueavam heads próprios. Nenhum job antigo foi repetido.
+- Cinco produtos próprios continuam ocupando todos os slots; nenhuma sexta unidade/reserva foi aberta.
+
+### Produtos próprios — heads exatos e bloqueios
+
+1. **#2451** — head `bf6840e04371e0c8bcaa27674989532ff5b0ec96`. L aplicável; 8/9. Retry único verify `127163240735` esgotado em cinco testes-base alheios; nunca repetir. Aguarda evento causal/CI normal.
+2. **#2544** — head `447e97287e9bec0062e7878186495cb92cbdc277`. G sem achado. NÃO editar/retry até liberação explícita A3 para o teste causal cancel_paid25→27.
+3. **#2608** — main `ba887611` integrado UMA vez; novo head EXATO `cefbf115d08efc6c77d3ed322ef73f8490fa9f96`, tree `d8abffcd38abc00c76e00db8f177e75de6c4a2a3`, mergeable. Os 11 blobs próprios/testes são byte-idênticos ao head `8ac8975` revisado por R2. Validação: SG2 23/23 + 11 grupos ligados 227/227 = 250/250; typegen/TSC recorte; ESLint focal limpo; scanner 3807/0; diff limpo. Comentário PR `6674456620`. A mensagem R2 de 22h43 registra que `cefbf115d` é somente merge de main e que o conteúdo próprio já foi revisado. Exige NOVE agregadores NOVOS exatos; não consultar em rodada, não reutilizar nem repetir o verify antigo `127378763596` CANCELLED no teto.
+4. **#2674** — head `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`. Continua bloqueado pelo triestado reservado em request-guard. REDs `f8911772`, `e8dfabf5`; teste `2421674d` inválido; RED legal válido `73a1745db1b7d57c14844cccd91d2f5a2111feda` / blob `60aa1ba0`; prova produto/API `17f4f4c47031f41dfed95b887deda34ccfc34191` / blob `255aae86`. Não tocar `lib/request-guard.ts` nem `tests/request-guard-shape.test.ts` sem liberação explícita.
+5. **#2700** — main causal integrado UMA vez; novo head EXATO `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`, mergeable. Blobs próprios byte-idênticos ao parecer P `5793243766`: `lib/mail-clicks.ts` `061902fec8420e9950fb8dafe94ee556e8368ad3`, teste `2b45f6e21a6fd1850d9cbe69394cb8b79e3d35f1`. Validação: focal 7/7, flow 32/32, pricing 7/7, margin 8/8, heap args 3/3, lint focal, scanner 3807/0 e diff limpos. Comentário `6674370076`. A mensagem R2 de 22h43 também registra merge-only e conteúdo próprio igual ao revisado. Exige NOVE agregadores NOVOS; não sondar em rodada e não repetir jobs antigos.
+
+### Revisões concluídas nesta retomada
+
+#### #2722 — dinheiro, retorno final sem achado
+
+- Head final revisado: `54fd1988db9b9d1a8f097ef64ddaaf03c26596de`, base empilhada #2714.
+- Parecer N `5794655544`: **SEM GRAVE/MÉDIO; residual EXISTS fechado**.
+- RED durável N foi incorporado sem mudança: `codex/n-review-2722-exists-evidence@743f6b8d5d8a3851a23011474745809a8e2e8196`, blob `51eeb9f51a1631574e895d70d0ca76099c88c07e`. Qualquer slot EXISTS fora de 0/1 exato lança antes de relistar/gravar; `settleInvites` conta failed, mantém complete=false e não faz POST. Caminhos exatos 0 e 1 permanecem, sem readback/segundo incremento.
+- Validação exata: l9 invite 6/6; creator-invites 52/52; plan-closing 90/90; plan-dispute 66/66; ligados review exact 2/2, reminder 56/56, elsewhere 39/39, erasure evidence 19/19, welcome 19/19, yearly 27/27, lesson comments 31/31 e claim-mark 5/5. ESLint focal limpo, scanner 3811/0 e diff limpo.
+- Revisor 1 também publicou parecer sem achado no mesmo head. Dinheiro: só pode entrar depois dos dois pareceres aplicáveis exigidos, NOVE agregadores finais exatos e #2714 na pilha. N não mexeu em produto/ramo/CI do autor.
+
+#### #2722 — retorno intermediário preservado
+
+- No head `50b963aebec854798d5df5e5dc10a58f3c66fee8`, parecer N `5794513138`: primeiro MÉDIO fechado, mas residual EXISTS desconhecido ainda reconhecia a rodada como completa.
+- A prova acima, no ramo `codex/n-review-2722-exists-evidence`, produzia esperado `[1,false,[]]` e real `[0,true,[]]`. Este achado foi corrigido pelo head final `54fd1988`; não repetir revisão integral.
+
+#### #2499 — retorno sem achado
+
+- Head exato `bd0e5997e3abc1ec07a9ca6ff2d7e3984722d8b5`, parecer N `5794536429`: **SEM GRAVE/MÉDIO**. O médio anterior de owner/person vazio foi fechado; AutoDM 263/263, prova G2 12/12, lint sem erro (um warning herdado), scanner 3752/0 e diff limpo. Pode entrar apenas após nove agregadores exatos do autor. Não tocar ramo/CI alheio.
+
+### Próximo exato
+
+1. AV12: acordar apenas com novidade real. Não sondar CI em rodadas.
+2. #2608 e #2700: aguardar NOVE agregadores NOVOS terminais nos heads exatos; não repetir jobs antigos. Com os nove verdes e revisão aplicável/identidade qualificada, merge próprio somente por `expected_head_sha`.
+3. #2451/#2544/#2674 mantêm exatamente seus bloqueios; nenhum retry ou edição sem causa/liberação explícita.
+4. #2722 é revisão alheia: nenhum merge por N. Retorno final concluído; não duplicar.
+5. SG2(27/30) continua somente prova `3d4cb847`, bloqueada por #2270/#1969. Cinco produtos; não abrir sexta.
+6. Só sintético; UNKNOWN nunca0; teto antes do gasto. Nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

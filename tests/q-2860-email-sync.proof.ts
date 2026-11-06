@@ -21,7 +21,7 @@ globalThis.fetch=(async(input:string|URL|Request)=>{
 }) as typeof fetch;
 const real=redis.pipeline.bind(redis);
 let budget=0,holdLease=true,lookups=0;
-const count=(n=1)=>{budget+=n;if(budget>5000)throw Error('Q proof command ceiling exceeded');};
+const count=(n=1)=>{budget+=n;if(budget>2000)throw Error('Q proof command ceiling exceeded');};
 const run=(command:(string|number)[])=>{count();return redis.run(command);};
 redis.pipeline=(async(commands:(string|number)[][])=>{
  count(commands.length);

@@ -254,6 +254,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/tax": row("settings", draft),
   "POST store/team": row("access", never(ACCESS)),
   "POST store/thanks-note": row("products", draft),
+  "POST store/tier-benefits": row("buyers", draft, "Marking a benefit given is the creator's own record of what they handed over: proposed, then confirmed by the creator (422 [PT2])."),
   "POST store/tiers": row("products", draft),
   "POST store/tips": row("pages", draft),
   "POST store/vault": row("files", draft),

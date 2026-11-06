@@ -426,3 +426,32 @@ Local fifth worktree: /dev/shm/codex-q-person-copy-checkout-evidence. Isolated r
 - Prova durável própria, produto intacto: ramo `codex/q-review-2724-empty-payment-proof`, commit remoto `554fc38573913df927a3f54f6939a59de9ab9444`, árvore `89a0aa3e13d8bd507fe3ce4498947233bd959d3a`. Teste real TB14: 77 checks, 75 controles passam e 2 falham causalmente: lista completa indevida e âncora pre-order null→timestamp.
 - Parecer GitHub COMMENT bloqueante `5794829222`, ancorado no head exato. Pedido: exigir id de pagamento não vazio/válido tanto na forma string quanto objeto; preservar null explícito como caso conhecido; retornar a MESMA prova 77/77. Q não alterou ramo/CI/produto C6. Z mantém ACK/registro separado.
 - Próxima ação Q nessa revisão somente após head corretivo nominal. Nenhuma revisão limpa/merge alegada.
+
+
+## Retomada — 05/11/2026 23h49 Fortaleza
+
+### #2724 — retorno nominal Q concluído no head atual
+
+- Head remoto exato `c5b302f8a95260b1451cb9b8488cb4275b6dbcfb`, OPEN. Q revisou o delta corretivo `2832cd1e..58aa1d79`: `closingKnown()` agora só aceita pagamento expandido quando ele é objeto não-array e possui `id` string não vazio; `null` continua a ausência explicitamente conhecida.
+- O delta posterior `58aa1d79..c5b302f8` não altera `lib/refunds.ts`; ele só amplia os casos de contagem de escrita do escopo Z no teste focal.
+- No head atual, `tests/tb14-lost-disputes.test.ts` passou 93/93 pelo runner esbuild/aliases do repositório. A prova Q durável `codex/q-review-2724-empty-payment-proof@554fc38573913df927a3f54f6939a59de9ab9444` permanece o RED causal 75/77 no `2832cd1e` e está GREEN dentro dos 93/93 atuais.
+- Parecer Q COMMENT `5795076516`, sem achado no escopo Q e fechando o MÉDIO `5794829222`. Ele não substitui a segunda revisão independente exigida pela retirada de acesso nem o retorno Z. Canal commit `d42c401778f8c48ae9e6a4cb4f7d29317462f44e`. Nenhum ramo/CI/produto Claude6 alterado.
+
+### #2731 — retornos limpos, nove ainda incompletos
+
+- Revisor2 confirmou no canal o fechamento no head exato `4d700566abcbf09b2ed585b76a6a8d220378e1e1`; K2 concluiu retorno nominal sem novo achado, comentário `6675105022`, prova original byte-idêntica 9/9, RED autor 32/14 falhas → GREEN 32/32, ligados 233, tipos/lint/scanner/diff verdes; durável `cb80d3c4cee49a60472c36181a20bab4b1b783bd`.
+- Uma leitura causada por essa novidade encontrou 4 workflows SUCCESS e 5 ainda queued/in_progress no head exato. O PR está OPEN e o conector reporta mergeable=false. Portanto não foi incorporado, nenhum job foi repetido/cancelado e o head não foi movido. Próxima leitura só por evento terminal novo.
+
+### Retorno focal #2669 — concluído sem achado
+
+- Pedido nominal P sem controlador anterior: Q anunciou no canal commit `a9e8905cfa2ce28c45c411cdee9c5769e103f0bb` e revisou somente `e426623d83effaa806834dbc5a2c4804ea81fd28..deae53915cb6c8f54c0af628d990b0f63fcaee56`.
+- RED durável `codex/p-quiz-attempt-person-copy-red@094d366994e2eb49eeac86c06fec311bde75bc5d` reproduz exit1/`QuizAttemptReadError` no caminho real `copyPerson`: a shared fixture ainda guardava o formato legado `{score,of}`.
+- O final altera apenas `tests/erasure-world.ts` para uma tentativa concluída no formato real atual e acrescenta a regressão real; `lib/quiz.ts` e o leitor estrito permanecem byte-idênticos.
+- GREEN exato: 14 arquivos focais/ligados, 326 checks reportados; Next typegen; ESLint dos alterados; scanner 3808/0 e diff-check verdes. Full TSC local com heap4GiB foi tentado mas o runner restrito matou exit137 após o typegen; Q não certifica essa execução local e preserva separada a evidência full-TSC do autor.
+- Parecer Q `5795109253`, sem achado no delta test-only; canal conclusão `92865e9615be84f682755b8cacb2c696082cec71`. Ainda exige nove agregadores exatos; nenhum ramo/CI/produto P alterado.
+
+### Produtos Q e próximo evento
+
+- Cinco produtos continuam ocupados; nenhuma sexta unidade: #2438 `6da1a24763a718e88e157703542c24957bfc6123`; #2535 `079b2e510b1869ef2dd45652b90f64b49fd01069`; #2709 `3452609da586d0a60128a7f3b27c647e1361e96a`; #2729 `13fe497840020d2c356baa3763b99b5ef1174e95`; #2731 `4d700566abcbf09b2ed585b76a6a8d220378e1e1`.
+- #2535 aguarda Revisor2 formal/aplicabilidade e nove; #2709 aplicabilidade Z e nove; #2729 aplicabilidade S e nove; estados não foram repolled sem novidade. #2438 continua dirty/coordenado e intocado.
+- Nenhum produto Q foi incorporado nesta retomada. Próxima ação apenas por novidade causal: achado/parecer exato, conclusão terminal dos nove ou coordenação explícita. Sem force, head-churn, retry/cancelamento ou polling vazio.

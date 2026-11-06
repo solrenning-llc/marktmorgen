@@ -20,6 +20,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { signedOf } from "@/lib/redis-count";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
@@ -223,7 +224,8 @@ export async function undoTakeRoom(room: string, bytes: number, path: string): P
   const replies = repliesFor(await redisPipeline([["DEL", takenKey(path)]]), 1);
   if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("whether a handed-in file took its room");
   if (replies[0] !== 1) return false;
-  await releaseBytes(room, bytes);
+  // The mark is gone: an unknown give-back is said as unknown to the caller, which handles it, never as given back.
+  if (!(await releaseBytes(room, bytes))) throw new UnknownReplyError("whether a handed-in file's room was given back");
   return true;
 }
 
@@ -257,11 +259,22 @@ export async function hasRoom(room: string, bytes: number, limit: number = MAX_S
   return used + bytes <= limit;
 }
 
-/** Gives back room taken for files that are no longer kept. */
-export async function releaseBytes(room: string, bytes: number): Promise<void> {
-  if (!isRedisConfigured() || !(bytes > 0)) return;
-  const [left] = await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]);
-  if (typeof left === "number" && Number.isSafeInteger(left) && left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
+/**
+ * Gives back room taken for files that are no longer kept. True when the DECRBY answered the counter's new total, a
+ * whole number (below zero it comes back to zero); nothing to give back is true too. Any other reply is unknown
+ * (CX-123 rule 24): it is not known whether the bytes came back, so it answers false and says so in the log, never
+ * "given back". It does not throw: the callers that delete records call it after the deletion, which must not be
+ * undone or hidden by it (applyTaskDrop, forgetTasksPerson); undoTakeRoom throws on false itself.
+ */
+export async function releaseBytes(room: string, bytes: number): Promise<boolean> {
+  if (!isRedisConfigured() || !(bytes > 0)) return true;
+  const left = signedOf(repliesFor(await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]), 1)?.[0]);
+  if (left === null) {
+    console.error(`giving back ${Math.ceil(bytes)} bytes of a store's task room: unknown reply, not counted as given back`);
+    return false;
+  }
+  if (left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
+  return true;
 }
 
 /** What handing in did: where the work stands, and the earlier file it replaced, with its size, to delete. */

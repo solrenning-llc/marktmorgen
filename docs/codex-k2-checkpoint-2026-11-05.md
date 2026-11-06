@@ -782,3 +782,74 @@ Nextimplementautonomously WITHOUTpermission:
 3.CSV/PDFlocalunknowncatch503plainunavailable; auth/permission/validknowncontrols. person-copyandstore-exportalreadyhaveOUTERpartialhandling; proveitactuallymarksunknown, changesonlyifneeded. No extraIO/provider/ceiling.
 4.Otherform-storehelpersrule30candidatesonlyuntilcausalproof; readForms/readForm/responseCounts/addResponse/dropFormnotedited. flowsC3.
 5.CompleteALLconsumers+linkedtypeslintscan/diff, causalmainintegrationonlybeforequalifiedreview, onefullPR/R2nominal/nineexactsuccess/NORMALexpectedSHA. OneownWIPunit, zeroproductPRopen; alloldmerged2811ffb/2796etcstable. No coordinationblockremains; continuefrombe5WIP, neverrecreateRED21ab.
+
+
+## COMPLETE CHECKPOINT — 2026-11-06 13:35 Fortaleza — complete #2821; #2790 focal return clean
+Supersedes prior WIP/consumerpending states. C4 SOLE coordinator/C1 OFF/V reservationbatching. One own product OPEN2821; reviews do notcount. All K/K2 oldheads/REDs/evidence retained, old2340/2354/2345/2472/...2796+2811 MERGED neverrecreate. No subagents/newworker/automation changes/foreign refs/source/CI actions or prohibitedcommercial/gate/account/payment/provider/contact/PIIactions.
+
+### #2821 complete correction, exact final head, pending R2 and nine final gates
+PR https://github.com/solrenning-llc/marktmorgen/pull/2821
+branch **codex/k-form-response-unavailable**
+EXACTHEAD **5f2cd6dab85de3296fcfd11c90822ec66304274c**
+tree **a79a5f003d2ebc2025cd867459bf2d8c1918e0e5** native=GitData
+DRAFT/OPEN; fresh RAW headexact/mergeable=true/blocked, no conflict inferred.
+12paths226insertions14deletionsversusmainced82292 (finalreportappendsadditionaldocumentation; initialstat226/14precededthatdocappend, do not call finalcount226). No reservationdocdelta.
+
+C4-1910/C4-1925 completeunit honored. GradeMEDIUMprivacy(copy/export) /LOWstudio accepted. Existingfullreservation **36e2370e** retained. Additional **f78079275cffadca4b9b6bb3a5c995df147fb89b** reserves app/api/store/form-opportunity/route.ts ONLYresponse-readunavailable503, expresslyC4-1925. C3/#1969 follows K2, not a blocker; no otherauthorref/PR changed. Mainfetched andmandatoryinstructionscomparedffb->ced: ONLYdocs/reservations/codex.md changed; delta read, A3ownperson-copyrows respected because NOedit tothatmodule. Currentreservedtargetschecked, no new sourceownershipcollision except explicit1969release.
+
+#### Product and exact causal chain
+Original RED **21ab57f4ea9dee51a5ac215ca1d5d43375112df3**32/14, readerWIP **be5fb70ad126e0cf5a122eeb674442ceb02aa028**32/32 preserved. ExistingUnknownReply class, exactReplies2/plainList, nativeintegerLLEN>=0/allrowsparseable; notcustomUnknownReplyErrorname.
+
+New REALconsumerRED **dbf0a6f1b9aca268b10d190cc34ddc2aaf7b0623**, parentbe5; onecanonical *.test.ts +explicitworldfixture+onlyownaliases. SIXtests/FOURcausalfailures/TWOknowncontrols beforeconsumerrepair:
+- actualStudioFormspage/actualFormsEditorrejectwholepage
+- actualCSVhandlerreject
+- actualPDFhandlerreject
+- actualform-opportunityreturns502instead503.
+KnownCSV/PDFattachmentand403controls pass. Auth/studio/dataread/PDFencodingboundaries explicitlysynthetic; no browser/realproviderclaim. Same testassertions now6/6. Storefixturetypeassertion clarified asunknownasStore afteractualTSdiagnostic; NO runtime/expected/assertionchange.
+
+ActualpagecatchlocalizedPERFORM; resultnull representedSavedFormtotalnull/latestnotavailable, never0. Actualeditorrendersstatusnotice **Answers could not be read right now. Reload this page to try again. You can still edit this form.**; Edit/Remove remain, unknownanswercounts/answeractions suppressed; healthycards still4answerskept. No newfocus/hook/fetch/provider. ExistingSSR formediting preserved; no globalAX/browserclaim. CSV/PDF503plainunavailable/noattachment; conversionreadfailure503JSONunavailable beforewrite; role/auth stillbeforedata. Catchscope ONLYreadResponses, notbroadwholeauth/writeflow. No changescopy/streamexportsources because inheritedhandling alreadydoesrightthing.
+
+Additional copycorroboration **f4873ba558fc63154f23a099ac40d66b0a5712c3**, parentoriginalRED21ab, ownnewtest. REAL COPIERSform-store/REALstoreExport/readForms/readResponses/MemoryRedis andactualsavedform/answer. UnknownLRANGEonly:
+oldreader composite copyUnknown/formsOmitted/unread=false/false/false → repairedtrue/true/true. Knowncopy+knownstreamcontrols pass; no providerIO. This corroborationwasADDEDAFTERreaderrepair, notclaimedpredatingit; original21abdidprecederepair. Realpersoncopierthrows(no silentlycompletecopy); realstorestreammarks unreadPart4/omitsformsratherthanconfirmsnoanswers. Allotherreadersremainreal; syntheticbudget300readcommandsbeforepipeline, noactualproviderfetchallowed. Source lib/person-copy.ts/store-export.ts unchanged. ProofdoesNOTexecutefullHTTPdatacopyroute/browser.
+Localnegativeprobe /tmp/k2-form-copy-before.mjs usedsamecanonicaltest+exactoldform-store.ts from21ab; permanentf487reproducesoldtreewithoutneedingthatdriver.
+
+Completeconsumergreen **5a017bb43d9b6252036176a4d0cca3df69b84c5d**, parentdbf+additionalf487, tree **dedb823a96e779bb3a1efe719b0f541bafe4f34f**.
+Frozenmain **ced82292df092a39408b884fa62f569a4a3655ff** integrated **347f6941c2e8a5c83dcf3bf41e4906ca2b93a1c8**, tree **d966b332ab8c122056e04bc677d25ca7d8165f56**.
+Onlyconflict tests/test-config.mjs insertionpoint: retainedBOTHourform-responseblockANDmainblog-read-unavailableblock; noforeignaliasdiscard. Nativeconflictedtree4ab1559c resolvedinto native d966, GitDataexactmatch. Actualblogpagetest10/10 run. Mandatorydocs/reservationsdeltaONLY; no productconflicts. No routineheadchase.
+Final **5f2cd6da**, parent347, docONLY historicalproofclarification/currentgrade/completevalidation; nativea79a=GitData. Expectedrefbe5→5f, forceFALSE; allprecedingREDs/greens remainancestors. No intentionallyREDPR/CI. Historicoriginalreport21abkeptverbatim+explicitcurrentstatus so doNOTrepeatitsoriginalLOW/sourceunchangedstatementasfinaltruth.
+
+#### Executed final verification and environmental failure precisely
+24actualcanonicalfiles: **308customchecks +59Node tests**, allpass aftertargetedexecutorfilerecheck.
+Files: k-form-response-read-evidence,form-response-unavailable,form-response-copy-evidence,forms,form-response-filter,form-response-pdf,form-opportunity,form-opportunity-links,person-copy,person-copy-kept,store-export-unknown-size,form-keep,form-sensitive,form-person-room,form-answers-render,form-response-deal-render,form-scoring,form-schedule,form-capacity,form-starters,form-branching,form-deal,blog-read-unavailable-page,test-runner.
+Actualscopedtsconfig/REALimports9roots: **0diagnostics**, directedESLint10paths0errors, scanner **4061tracked/0corrections**, diff0. No finaldocsourcechangeaffectsthosecompiledroots; finaldocscanner rerun0.
+Initial24batchendedNONZERO ONLYtest-runner.test.tsactualchildtemporaryeventlogENOSPC(4/5); all23otherfilespassed. Helpercleanupreleasedtemporarybundles; ONLYfailingexecutorfile rerun **5/5** unchangedsource/assertions. No claiminitialbatchwasallgreen. RemovedONLYtwohistoricalREPRODUCIBLENextbuilddirectories **k2-encanto-cta/.next**, **k2-encanto-hero-replay/.next**; nosource/log/screenshots/Gitobjects/worktreeheadsremoved. Firstattempttoremove.next/cachefoundnone; notclaimedspacefreedbythat. dfstillshowed100%/reservedblocks, butrecheckpassed; doNOTkeepblindlyrerunningheavysuites. Preservefocallogs.
+OneorchestrationJSONparseerroredwhilescannerexecyieldedrunning; noGitDatamutationperformedbythatfailedparse. ReportalreadyappendedONCE; re-readfile/nativewrite-treeandthenpersistedexactblob, no duplicateappend. Thisisnotatestfailure/productfinding.
+
+Localpreserved:
+- k2-form-evidence HEADffb/stagedreader+consumerwork/treeinitialded; oldsource/red/greenallinGitHub.
+- k2-form-final HEADced/stagedFINALa79a, node_moduleslink, noreset/discard.
+Logs /tmp/k2-form-consumer-{red,green}.log; /tmp/k2-form-copy-{before,green}.log; /tmp/k2-form-final-copy.log; /tmp/k2-form-integrated-{linked,types,lint,scan,scan-final}.log; /tmp/k2-form-runner-recheck.log. /tmp/k2-focused.mjs andscopeddriveruseactualaliases/config; canonicaltests/source durable, logsnotsoleevidence.
+
+Reactreviewapplied: no newhooks/globalrequeststate/clientnetwork/bundleddependency; existingPromise.allpreservedwithper-itemrecovery; serializableunknownstate; nativeexistingcontrols/statusnotice; noinlinecomponent/hydrationtrick/newCSSlib. No localbrowser/nativeRedis/provider/endtoend/production/globalAAA/zero-dollarclaim. No productiveIO/key/retention/retry/costparameterchanged; no registryneededfornewIObecauseNONEintroduced.
+
+#### Review and initialCI
+NominalR2requested channel **f3c2eaea4d1d2c7804c45774fe41fe84ec0ca76b**, PRcomment **6689896689**. No independentcleanfinalreviewyet; R2cycle95onbe5onlyqualifiedreader/inheritedprivacyhandling, NOTnewconsumerdelta.
+SingleinitialexactheadCIlookup: **1SUCCESS,7IN_PROGRESS,1QUEUED**,9distinctworkflows:
+42252945440,42252945786,42252945467,42252945007,42252945351,42252944890,42252945329,42252944945,42252945203.
+PV8source **7ec58572ed5654b38824b18f2c44c414dfa0981e** is syntheticmerge; wrapperquerywas5f2cd6da. Don'tcallallgreenorusebe5/oldheads. No furtherCIpoll/retry/cancel/headmove/merge. Onnominalreturn/terminalevent:causalREDfixorR2qualifiedclean+9distinctcompletedSUCCESS+freshRAW/nativeclean→ready/NORMALexpectedheadmerge/GET. NomainchasejustforCI.
+
+### C5 nominal #2790 observer return COMPLETE while ownCIwaits
+C5requested13:27 exact **368d4fa2141302881e268977735e6b5da7a240ad**, previous **68285760c4b4b219b19f1f651247404522f8cf07**.
+K2claimedBEFOREdiff **3eedf9ac344924100e12c23a6dc2d97a6cc3a106**.
+Entireonefilediff read, tests/e2e/shrink-tone.mjs onlymatcher+comment. ALLfourcases/sixassertionsBYTE-IDfromtryblockonward. Productblob3b9bd63a38d0714a94a8e2258cd1f7675691c830BYTE-IDbothheads. RAWPRhead368/openverified; noauthorCIcheck/retry/cancel/source/refmutation.
+OriginalWebKitjob **127901687708** decodedlogindependentlyread: merge68285760,EncodingError atcheckShrinkTone:24. Installedprimaryplaywright-corewkPage.js949-955 skipsdata/aboutbutNOTblobinterception. NewpredicateinterceptsONLYhttp/https(aborted/counted); oldglobinterceptedblobandabortedlocaldecode.
+CanonicalfinalhelperBYTE-IDcopiedtoownreviewworktreeuntrackedreviewpath, executednativeChromiumagainstbyte-IDproduct682: **6/6**, actualdecodedonepixel/65536stripe/opaqueJPEG,0requests.
+Actualcapturedcanonicalmatchers +actualPlaywrighturlMatches **10/10** protocols: HTTP/HTTPSbothtrue;bloboldtrue/newfalse;dataoldtrue/newfalse;aboutbothfalse. Initialscratchprobeincorrectlyexpectedoldabouttrue; correctedthatprobeassumption, notauthorassertion/product. NoWebKitbinarylocal; NOTclaimWebKitGREEN, newCIrequired.
+Qualifiedreview **5803506092** onexact368: SEMACHADO/PODEENTRARafterSTACKdeps+9exactchecks/freshgates. Previousfunctional/canonicalcoverageclosures remaincredited. No duplicateproductreview.
+Durable SAMEownbranch **codex/k-review-2790-tone@20dcec9fc7b006c7033544a55c38962ffd820fee**, parentpreviousownref323b+additional368; SAMEreportdocs/reviews/k2-2790.mdappendonly+new **proofs/k2/review-2790-protocol.mjs**, original2proofblobsunchanged. Newdurableprobeexecuted10/10 aftersave; Git-sourcedold/newcanonicalhelpers/tempfolderunderroot/findsactualinstalledPlaywright, cleanupfinally. Thisproofisreview-onlynotproductheadmodification. Logs/tmp/k2-shrink-368.log,/tmp/k2-shrink-route-return.log; originalhelpercopiesuntrackedin k2-review-2790-canvas/proofs/k2/shrink-tone-{682,368}-review.mjs. Actualdriver/tmp/k2-shrink-368-return.mjs, durableprotocolprobealsoexecutedfrom/tmp/k2-2790-protocol-durable.mjs.
+NotifyC5completionandreport20d beforeend; don'twaitforduplicateR2orclaimstackmerged. C4-2200 assignedJjuridical2785, C5handlesstack2785→2786→2790; K2doesNOTtouchthosegates/refs/merge.
+
+### Exact next and remaining scopes
+OneownOPEN2821/5f2 +onecompletednominalforeignreview2790/368. ApplynewR2consumerfindingswithRED; orqualifiedclean+9exact+freshcleanmergeown. Don'trepeat368reviewonunchangedsource or old2811mergedwork.
+Rule30samefile readForms/readForm/responseCounts/addResponse/dropForm stillSTATICCANDIDATESnotnewlyprovedandNOTedited; don'tclaimfullform-storeaudit. flowsC3. FutureC6nominalreviewonlyifasked. #2801/#2803owner-costHOLDunchanged.
+BeforeendingFULLfreshchannelappend2790completion+exact2821pending+thischeckpointSHA. AV12 noemptyCIloop; pendingreview/CItransient, continuityunchanged, noautomationcreated/updated/disabled. Currentactualclocklast16:34:46UTC=13:34:46Fortaleza; olderestimatedtimelabelcorrectionsretained.

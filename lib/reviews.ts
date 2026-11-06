@@ -53,6 +53,7 @@ import {
   EMPTY_SUMMARY,
   MAX_REPLY_TEXT,
   MAX_REVIEW_NAME,
+  MAX_REVIEW_PHOTOS,
   MAX_REVIEW_TEXT,
   MAX_REVIEWS_PER_PRODUCT,
   REVIEWS_ON_PAGE,
@@ -168,11 +169,19 @@ export function parseReview(raw: unknown): Review | null {
       refunded: value.refunded === true,
       reply: reply && reply.text ? reply : null,
       photo: parseReviewPhoto(value.photo),
+      // Absent on a review written before it was kept: none granted. Anything else that is not a whole number
+      // from 0 is an unknown count, taken as the ceiling, never as room (unknown never zero).
+      ...(value.photoPuts === undefined ? {} : { photoPuts: readPhotoPuts(value.photoPuts) }),
       ...(Number.isSafeInteger(value.paidAt) && (value.paidAt as number) > 0 ? { paidAt: value.paidAt as number } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/** A review's count of photos granted as kept: a whole number from 0 up to the ceiling; anything else is the ceiling. */
+function readPhotoPuts(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? Math.min(value, MAX_REVIEW_PHOTOS) : MAX_REVIEW_PHOTOS;
 }
 
 function parseSummary(raw: unknown): Summary {
@@ -313,9 +322,18 @@ export type SaveInput = {
   name: string;
   /** When the order was paid, in seconds, from the order's proof (606 [WP5]); 0 when not known. */
   paidAt?: number;
+  /**
+   * The buyer sent a new photo, already checked (lib/review-photo.ts, checkReviewPhoto): the write asks for one of
+   * the review's MAX_REVIEW_PHOTOS slots, before any put is made.
+   */
+  photo?: boolean;
 };
 
-export type SaveResult = { state: "created" | "updated"; review: Review } | { state: "full" | "noroom" | "busy" | "invalid" };
+/**
+ * `photoGranted`: a slot for the new photo was counted on the review by this very write, so the caller may now put
+ * it, once; false when none was asked for or the review has had MAX_REVIEW_PHOTOS. Nothing else allows a put.
+ */
+export type SaveResult = { state: "created" | "updated"; review: Review; photoGranted: boolean } | { state: "full" | "noroom" | "busy" | "invalid" };
 
 /**
  * Where a product's reviews are counted in the store's data room
@@ -368,6 +386,12 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
       // A photo stays through an edit; it is added or taken off by setReviewPhoto.
       photo: before?.photo ?? null,
     };
+    // A new photo's slot is granted here, in the write the words already make, under the product's lock: the count
+    // read above and the count written below are of the same moment, so two sends at once cannot both take the last
+    // slot. Kept whatever happens to the put afterwards (a failed put still used it: the cost side fails closed).
+    const used = before?.photoPuts ?? 0;
+    const photoGranted = input.photo === true && used < MAX_REVIEW_PHOTOS;
+    if (used > 0 || photoGranted) review.photoPuts = used + (photoGranted ? 1 : 0);
     // When the order was paid: kept from the first writing of the same order, else as the order's proof says.
     const paidAt = before && before.reference === input.reference && before.paidAt ? before.paidAt : input.paidAt;
     if (Number.isSafeInteger(paidAt) && (paidAt as number) > 0) review.paidAt = paidAt;
@@ -384,7 +408,7 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     // store's room at what it really adds (lib/order-data.ts).
     if (review.pi) await orderWrite(room, [["HSET", payKey(statsId), review.pi, await payEntry(statsId, review.pi, `${review.productId}|${id}`)]]);
     await recount(statsId, input.productId);
-    return { state: before ? "updated" : "created", review };
+    return { state: before ? "updated" : "created", review, photoGranted };
   });
   return result === "busy" ? { state: "busy" } : result;
 }

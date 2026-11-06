@@ -426,6 +426,8 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
 /** How many certificates each course keeps: what deleting a person may read (lib/person-erasure.ts). */
 export async function certificateCount(courseIds: string[]): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
-  const counts = await redisPipeline(courseIds.map((c) => ["SCARD", allKey(c)]));
-  return counts.reduce<number>((sum, n) => sum + Math.min(Number(n) || 0, LEGACY_SCAN), 0);
+  // Each SCARD's own count only, as the rest of this file reads (CX-123 rule 24): an erasure is never sized as 0 on an unknown answer.
+  const what = "the certificates' count";
+  const counts = exactReplies(await redisPipeline(courseIds.map((c) => ["SCARD", allKey(c)])), courseIds.length, what);
+  return counts.reduce<number>((sum, n) => sum + Math.min(replyCount(n, what), LEGACY_SCAN), 0);
 }

@@ -39,7 +39,7 @@ export type MemberSub = {
   discounted: boolean;
 };
 
-type Raw = Record<string, unknown>;
+export type Raw = Record<string, unknown>;
 const list = (value: unknown): Raw[] => (value && typeof value === "object" && Array.isArray((value as Raw).data) ? ((value as Raw).data as Raw[]) : []);
 
 /** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
@@ -71,18 +71,28 @@ export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null 
 
 /** Every running membership of this store held under an address, newest customer first; null when Stripe could not be read. */
 export async function memberSubs(store: Store, email: string): Promise<MemberSub[] | null> {
+  const rows = await memberSubRows(store, email);
+  return rows === null ? null : rows.map((r) => r.row);
+}
+
+/**
+ * The same memberships with what Stripe answered for each, for a reader that
+ * needs more of a subscription than the studio row (lib/member-free-days.ts:
+ * its next charge). Same reads, same filter; null when Stripe could not be read.
+ */
+export async function memberSubRows(store: Store, email: string): Promise<{ row: MemberSub; raw: Raw }[] | null> {
   const account = store.stripeAccountId;
   if (!account) return null;
   const handles = saleHandles(store);
   try {
     const customers = list(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION));
-    const out: MemberSub[] = [];
+    const out: { row: MemberSub; raw: Raw }[] = [];
     for (const customer of customers) {
       if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) continue;
       const subs = list(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`, undefined, API_VERSION));
       for (const sub of subs) {
         const row = readMemberSub(sub, handles);
-        if (row) out.push(row);
+        if (row) out.push({ row, raw: sub });
       }
     }
     return out;

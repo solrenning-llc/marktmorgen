@@ -69,7 +69,7 @@ for (const file of [...walk("app"), ...walk("components")]) {
   }
 }
 // 308 [TC1], unit 3, moved 10 of the audit's 25 inputs to EmailField (4) and EmailInput (6), and EmailInput has one of its own.
-is("the email fields the audit counted: 16 inputs (two with a type chosen in code), 21 EmailFields and 7 EmailInputs (the seventh: a member's address for a discount, 616 [WP15](8))", [inputs, components, controlled], [16, 21, 7]);
+is("the email fields the audit counted: 16 inputs (two with a type chosen in code), 21 EmailFields and 8 EmailInputs (the seventh: a member's address for a discount, 616 [WP15](8); the eighth: a member's address for free days, 641 [WG1])", [inputs, components, controlled], [16, 21, 8]);
 is("every one says whose address it is (autocomplete)", missing, []);
 is("someone else's address is not offered the creator's own", ["components/form-response-deal.tsx", "components/deals-board.tsx", "components/workflow-tools.tsx"].every((f) => /type="email" autoComplete="off"/.test(readFileSync(f, "utf8"))), true);
 is("nor is the address a store moves to (\"Move to\")", /type="email"\s+name="email"\s+autoComplete="off"/.test(readFileSync("app/studio/page.tsx", "utf8")), true);

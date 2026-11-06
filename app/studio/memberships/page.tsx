@@ -7,6 +7,7 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { MemberDiscount } from "@/components/member-discount";
+import { MemberFreeDays } from "@/components/member-free-days";
 import { LEAVE_NAMES, STAY_AGES, isLeaveReason, membershipNumbers } from "@/lib/membership-numbers";
 import { channelName } from "@/lib/channel-names";
 import { readListings } from "@/lib/catalog";
@@ -530,6 +531,16 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                   <h2 id="member-discount-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Give one member a discount</h2>
                   <div className="mt-3">
                     <MemberDiscount titles={Object.fromEntries(titles)} />
+                  </div>
+                </section>
+              ) : null}
+
+              {/* Free days for one member (641 [WG1]): it puts off what the member pays, so only for a role that may touch payments. */}
+              {can(access.role, "payments") ? (
+                <section aria-labelledby="member-free-days-title" className="card mt-8 p-6 sm:p-8">
+                  <h2 id="member-free-days-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Give one member free days</h2>
+                  <div className="mt-3">
+                    <MemberFreeDays titles={Object.fromEntries(titles)} />
                   </div>
                 </section>
               ) : null}

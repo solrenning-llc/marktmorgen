@@ -341,6 +341,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:orders:addr:@lib/buyer-orders.ts": short("Purchase links per address, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:rl:orders:ip:@lib/buyer-orders.ts": short("Purchase links per connection, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:person:@lib/buyer-profile.ts": { what: "Notes about people", room: ["lib/buyer-profile.ts"] },
+  "nl:free-days:@lib/member-free-days.ts": short("One press giving a member free days on a membership and the date it was shown, a day at most", "studio", 1, MARK),
   "nl:person:find:@lib/buyer-profile.ts": short("A buyer's page found from a search, an hour", "studio", 1, 512),
 
   // ---------------------------------------------------------------- lib/ c

@@ -26,6 +26,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { claimMark, releaseMark } from "@/lib/claim-mark";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
@@ -238,7 +239,9 @@ export async function readVersion(a: Pick<Agreement, "id" | "versions">, n: numb
 
 /** Writes the record back as it now is, for the rest of the days it is kept. Versions are never written here. */
 export async function saveAgreement(a: Agreement, now = Date.now()): Promise<void> {
-  await redisPipeline([["SET", recordKey(a.id), JSON.stringify(a), "EX", keepSeconds(a, now)]]);
+  // Read exactly (CX-123 rule 24, Claude 3 on #2723): a save not answered with OK is not a save.
+  const saved = repliesFor(await redisPipeline([["SET", recordKey(a.id), JSON.stringify(a), "EX", keepSeconds(a, now)]]), 1);
+  if (!saved || saved[0] !== "OK") throw new UnknownReplyError("saving an agreement");
 }
 
 /** The agreement's lock, taken at once or not at all: null when somebody else holds it. */
@@ -304,7 +307,14 @@ export async function reviseAgreement(store: Store, id: string, draft: Agreement
       payRequest: draft.payRequest,
       failed: "",
     };
-    await saveAgreement(next, now);
+    try {
+      await saveAgreement(next, now);
+    } catch (error) {
+      // The record does not name this text: it is let go (only while it is this text), so the next try writes
+      // version n instead of finding it taken (Claude 3 on #2723).
+      await releaseMark(versionKey(a.id, n), text);
+      throw error;
+    }
     return { ok: true, agreement: next, version };
   } catch (error) {
     console.error("a new version of an agreement failed", error);

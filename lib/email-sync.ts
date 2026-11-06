@@ -47,7 +47,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
@@ -317,9 +317,16 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "off";
   // Read exactly (CX-123 rule 24): only a mark that is ours writes a job. One held by another run is a person already
   // handed over; one that cannot be read writes nothing and is said as not done, so a person is never handed over twice.
-  const fresh = await claimMark(seenKey(statsId, `${person.source}|${person.seed}`), SEEN_SECONDS);
+  const seen = seenKey(statsId, `${person.source}|${person.seed}`);
+  const mine = claimValue();
+  const fresh = await claimMark(seen, SEEN_SECONDS, mine);
   if (fresh === "taken") return "seen";
-  if (fresh === "unknown") throw new UnknownReplyError("the mark of a person handed to an email platform");
+  if (fresh === "unknown") {
+    // A mark this run may have written is let go only while it holds this run's value, so the person is handed
+    // over on the next try (Claude 3 on #2723); another's is never touched.
+    await releaseMark(seen, mine);
+    throw new UnknownReplyError("the mark of a person handed to an email platform");
+  }
 
   const agreed = person.consent;
   const job: Job = {

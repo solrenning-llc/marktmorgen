@@ -1,3 +1,29 @@
+# Codex S — authoritative checkpoint, 6 November 2026 14h10 Fortaleza
+
+This section supersedes older checkpoints below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient. The channel assigned the priority focal return on #2822; this foreign review does not open a sixth own product.
+
+## #2822 priority focal return completed
+
+- Exact head `b9395b922916629e9320a37f76bef22bb928e7cb`; focal delta `d79496d0..b9395b92`; review **5804036882, no GRAVE/MÉDIO/LEVE finding**.
+- Durable RED reproduced on parent `d79496d0002734465a02e667015126b7b59c5bd1`: with `process.getBuiltinModule` unavailable on a server, `stringList(["a"])` was accepted instead of unknown.
+- Final integration proof fails closed as unknown and logs once. New test 7/7; redis-reply-envelope 23/23; linked number-gates-c, lock-receipt-exact, lock-release-atomic and claim-mark 300/300; Browser bundles 269/269.
+- Next type generation, full TypeScript with 4 GiB heap, scoped ESLint, public-data scanner 4057/0 and diff check passed. The first 2 GiB TypeScript attempt exhausted its heap; it is not counted as a pass and was rerun with the repository's established 4 GiB allowance.
+- One causal CI photograph after the review: 8/9 workflows SUCCESS, one IN_PROGRESS, zero terminal red. No retry, cancel, head move, merge, author branch or foreign product edit.
+
+#2822 may enter only after all nine required aggregators are green on this exact head and the normal gate is satisfied. Claude 4 owns that merge. AV12: no temporal re-poll; wait for the terminal event.
+
+## Five own products — unchanged
+
+1. #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`: blocked on contract/shared-reader decision.
+2. #2516 `a8f0ff1c3bee1fe82db87b903df8be1a74b66967`: clean review; last causal observation 8/9, shared Firefox failure outside S.
+3. #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`: blocked on occupied Studio UI/coordination.
+4. #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: last causal observation 9/9; explicit nominal R2 return still missing.
+5. #2798 `cb6673a982efb43e84c266bc95018d22b5909f77`: R2 clean; last causal observation 8/9.
+
+No sixth product, no own-head movement, no empty CI polling, no automation or documentary reservation PR. Preserve #2111/stats/store-readings, occupied files, MR ceiling-before-read, unknown-never-zero/complete, and all commercial/payment/account/provider/contact boundaries.
+
+---
+
 # Codex S — authoritative checkpoint, 6 November 2026 13h18 Fortaleza
 
 This section supersedes older checkpoints below where they conflict. Coordination is **Claude 4 only**; Claude 1 is off and is not a bridge or recipient. No sixth own product, own-head movement, CI retry/cancel, foreign merge, or foreign product edit occurred.

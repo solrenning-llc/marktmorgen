@@ -82,6 +82,20 @@ async function main(){
   is(mode+": the history says undone exactly when the text was put back",[value==="Original "+id,undone],mode==="throw-before"?[false,false]:[true,true]);
   is(mode+": answered as the store holds it",(u.value as {ok:boolean}|null)?.ok===true,mode!=="throw-before");
  }
+ part("A lost restore read back in an unknown shape is never taken for a value");
+ for(const shape of [[],[17],[{}]] as unknown[][]){
+  const f=await fixture(),p=f.proposals[0],id=f.ids[0];await confirmFor(f.store,f.owner,[p],f.owner);let wrote=0,read=0;
+  const about=`nl:product:about:${f.statsId}:${id}`;
+  redis.pipeline=(async commands=>{
+   const c=commands[0];
+   if(wrote===0&&commands.length===1&&c[0]==="EVAL"&&String(c[1]).startsWith("-- marktmorgen:about-write-if:")){wrote++;throw Error("refused before");}
+   if(wrote===1&&read===0&&commands.length===1&&c[0]==="GET"&&c[1]===about){read++;return shape;}
+   return base(commands);
+  }) as typeof redis.pipeline;
+  let u:Awaited<ReturnType<typeof outcome>>;
+  try{u=await outcome(()=>undoFor(f.store,f.owner,p,f.owner));}finally{redis.pipeline=base;}
+  is(`read back as ${JSON.stringify(shape)}: never answered done; the mark kept, said as not confirmed; the text unchanged`,[read,u.error,(u.value as {ok:boolean}|null)?.ok===true,Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone),await readAbout(f.statsId,id)],[1,"BookWriteUnconfirmed",false,true,"Agent "+id]);
+ }
  part("A restore whose outcome stays unknown keeps the mark and is said as not confirmed");
  {
   const f=await fixture(),p=f.proposals[0];await confirmFor(f.store,f.owner,[p],f.owner);

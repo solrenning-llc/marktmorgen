@@ -9,7 +9,7 @@
  * batch is fine), with undo.
  */
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
-import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, writeAboutIf } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, readAboutExact, writeAboutIf } from "@/lib/product-about";
 import { setProductAbout, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
@@ -18,6 +18,13 @@ import { productPromptsLeft } from "@/lib/product-outline";
 export type AgentKind = ProposalKind & {
   /** What the store holds now for this target, as the proposal's "before" is compared with. */
   current: (store: Store, target: string) => Promise<Json>;
+  /**
+   * The same, read only in exact shapes: throws when anything it reads was
+   * answered in another shape. What decides whether a write whose answer was
+   * lost was made (lib/agent-confirm.ts undoFor); a kind without it is never
+   * reconciled, its outcome stays unknown.
+   */
+  currentExact?: (store: Store, target: string) => Promise<Json>;
   /**
    * Writes `value` in, only while the store still holds `expected` (what the
    * proposal or the undo was decided on), checked in the same step as the
@@ -65,6 +72,11 @@ export const PRODUCT_DESCRIPTION: AgentKind = {
     const listing = await readListing(store, target);
     if (!listing || !store.statsId) return null;
     return listing.about ? await readAbout(store.statsId, target) : "";
+  },
+  async currentExact(store, target) {
+    const listing = await readListing(store, target);
+    if (!listing || !store.statsId) return null;
+    return listing.about ? await readAboutExact(store.statsId, target) : "";
   },
   refusal: descriptionRefusal,
   async write(store, ref, target, value, expected) {

@@ -57,7 +57,8 @@ export async function undoFor(store: Store & { statsId: string }, ref: string, i
       } catch (error) {
         // The write's answer was lost (Codex G on #1856): what the store holds now says whether it was made.
         console.error("putting back an agent's change could not be confirmed", error);
-        const now = await kind?.current(store, d.target).catch(() => undefined);
+        // Read only in exact shapes: a reply that says nothing is unknown, never taken for a value (Codex G on #1856).
+        const now = kind?.currentExact ? await kind.currentExact(store, d.target).catch(() => undefined) : undefined;
         if (now !== undefined && sameValue(now, value)) return true;
         if (now !== undefined && sameValue(now, d.after)) return false;
         return "unknown";

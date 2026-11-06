@@ -258,7 +258,11 @@ export async function POST(request: NextRequest) {
           if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
           await save(result.course);
           // The work handed in for it goes with it, files and all.
-          const files = await dropTask(course.id, lessonId, storeKey(store), store);
+          // A record that did not read keeps its list of files and deletes nothing (lib/assignment.ts, dropTask).
+          const files = await dropTask(course.id, lessonId, storeKey(store), store).catch((error: unknown) => {
+            console.error("could not read the work handed in for a removed assignment; kept as it was", error);
+            return [] as string[];
+          });
           if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
           return Response.json({ ok: true, course: result.course });
         }
@@ -479,7 +483,10 @@ export async function POST(request: NextRequest) {
         // An assignment goes with its lesson, and the work handed in for it.
         for (const { lesson } of goneLessons) {
           if (!lesson.task) continue;
-          const files = await dropTask(course.id, lesson.id, storeKey(store), store).catch(() => [] as string[]);
+          const files = await dropTask(course.id, lesson.id, storeKey(store), store).catch((error: unknown) => {
+            console.error("could not read the work handed in for a removed lesson's assignment; kept as it was", error);
+            return [] as string[];
+          });
           if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
         }
       }

@@ -26,7 +26,8 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { cartPriceFor } from "@/lib/cart-checkout";
 import { CART_MEMBER_SECONDS, cartMemberCookie, cartMemberValue, readCartMember } from "@/lib/cart-member";
-import { MEMBER_PRICE_STRIPE_CALLS } from "@/lib/member-price";
+import { MEMBER_PRICE_STRIPE_CALLS, memberOffProved, memberProofFor } from "@/lib/member-price";
+import { readListing, readListings } from "@/lib/catalog";
 import { NO_SALE } from "@/lib/store-sale";
 import { DEFAULT_FAIR } from "@/lib/fair-price";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
@@ -74,6 +75,11 @@ const joined = (product: string, status: string) => ({
   payment_intent: null,
   subscription: { id: "sub_Member000001", object: "subscription", status, metadata: { store: HANDLE, product }, items: { data: [] } },
 });
+
+const jar = (cookie: string) => {
+  const cookies = new Map(cookie.split("; ").map((pair) => [pair.slice(0, pair.indexOf("=")), pair.slice(pair.indexOf("=") + 1)] as const));
+  return { get: (name: string) => (cookies.has(name) ? { value: cookies.get(name)! } : undefined) };
+};
 
 type CartAnswer = { ok: boolean; items: { id: string; cents: number; price: string; ok: boolean }[]; total: string };
 
@@ -199,6 +205,59 @@ async function main(): Promise<void> {
   paid = await pay(ids, shown);
   is("charged as shown, with the deal taken off each line", [0, 1, 2].map((i) => paid.sent?.get(`line_items[${i}][price_data][unit_amount]`)), ["1944", "864", "900"]);
   await setCartDeal(OWNER, { on: false, min: 2, percent: 10 });
+
+  part("A qualifying listing that cannot be read (rule 24, review L1 on #2999), in the cart");
+  // A larger rule rests on the workbook; the member holds only the club. While the workbook's listing cannot be
+  // read, that larger rule may hold, so the planner's member price is unknown: the normal price, shown and charged.
+  const workbook = await addProduct(OWNER, "Workbook", "", "15", null);
+  if (!workbook.ok) throw new Error("no workbook");
+  await setProductLink(OWNER, workbook.product.id, "https://example.com/workbook");
+  await setMemberPrices(OWNER, {
+    on: true,
+    rules: [
+      { id: "club", percent: 20, by: [club.product.id], all: false, products: [p.Planner, p.Guide] },
+      { id: "workbook", percent: 30, by: [workbook.product.id], all: false, products: [p.Planner] },
+    ],
+  });
+  sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active")] };
+  const readable = (await storeForEmail(OWNER))!;
+  const wb = workbook.product.id;
+  const plannerListing = (await readListing(readable, p.Planner))!;
+  const readableProof = await memberProofFor(readable, [plannerListing], jar(pass));
+  is("control: the workbook readable, not held: the club's 20% on the planner", readableProof ? memberOffProved(readable.memberPrices, plannerListing, readableProof) : "no proof", 20);
+  // The store record keeps the workbook out of its head, and the workbook's own record answers garbage.
+  const realPipeline = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    const replies = await realPipeline(commands);
+    return replies.map((reply, i) => {
+      const command = commands[i];
+      if (command?.[0] !== "GET" || typeof reply !== "string") return reply;
+      if (String(command[1]).endsWith(`:l:${wb}`)) return "{not json";
+      if (!reply.includes('"catalog"')) return reply;
+      try {
+        const record = JSON.parse(reply) as { catalog?: { head?: { id: string }[] } };
+        if (!Array.isArray(record.catalog?.head)) return reply;
+        record.catalog.head = record.catalog.head.filter((listing) => listing.id !== wb);
+        return JSON.stringify(record);
+      } catch {
+        return reply;
+      }
+    });
+  };
+  try {
+    const unread = (await storeForEmail(OWNER))!;
+    is("the stand-in: the workbook is left out of the listings read", (await readListings(unread, [wb, p.Planner])).map((l) => l.id), [p.Planner]);
+    const proof = await memberProofFor(unread, [plannerListing], jar(pass));
+    is("memberProofFor and memberOffProved: unknown, so 0 off (the normal price), never the club's 20%", proof ? memberOffProved(unread.memberPrices, plannerListing, proof) : 0, 0);
+    seen = await open([p.Planner, p.Notes]);
+    is("the open cart shows the normal price and keeps no member price", [seen.cart.items.map((item) => item.cents), seen.setCookie.includes(`${claimName}=${p.Planner}:`)], [[2700, 1000], false]);
+    paid = await pay([p.Planner, p.Notes], `${pass}; ${claimName}=${p.Planner}:20`);
+    is("a member price the cart showed before: back to the cart, nothing opened, never charged", [paid.to, paid.sent], ["?cart=changed#cart", undefined]);
+    paid = await pay([p.Planner, p.Notes], pass);
+    is("nothing shown: the normal price is charged, no member price written, no address fixed", [paid.to, paid.sent?.get("line_items[0][price_data][unit_amount]"), paid.sent?.get("metadata[member]") ?? null, paid.sent?.get("customer_email") ?? null], ["stripe", "2700", null, null]);
+  } finally {
+    redis.pipeline = realPipeline;
+  }
 
   part("What it reads");
   const route = readFileSync(join(process.cwd(), "app/api/store/cart/route.ts"), "utf8");

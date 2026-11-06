@@ -5,7 +5,8 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dropTask } from "@/lib/assignment";
+import { readFileSync } from "node:fs";
+import { applyTaskDrop, dropTask, readTaskDrop } from "@/lib/assignment";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
@@ -33,7 +34,24 @@ test("a healthy read returns every file and forgets the list", async () => {
   await seed();
   const result = await dropWith((_batch, answers) => answers);
   assert.deepEqual("files" in result ? [...result.files].sort() : result, ["a.pdf", "b.pdf"]);
-  assert.equal(redis.run(["EXISTS", filesKey]), 0);
+  assert.equal(redis.run(["HLEN", filesKey]), 0);
+});
+
+test("a file handed in after the reading stays listed, never lost (Revisor 1 on #2810)", async () => {
+  await seed();
+  const drop = await readTaskDrop(COURSE, LESSON);
+  redis.run(["HSET", filesKey, "late.pdf", "10"]);
+  const files = await applyTaskDrop(drop, null, ROOM);
+  assert.deepEqual([...files].sort(), ["a.pdf", "b.pdf"]);
+  assert.deepEqual(redis.run(["HGETALL", filesKey]), ["late.pdf", "10"]);
+});
+
+test("the course route reads the work before it saves the course without the assignment", () => {
+  const route = readFileSync("app/api/store/course/route.ts", "utf8");
+  for (const [read, save] of [[route.indexOf("const drop = await readTaskDrop("), route.indexOf("await save(result.course);\n          const files = await applyTaskDrop(")], [route.indexOf("taskDrops.push(drop)"), route.indexOf("await save(result.course);\n      const lessons")]]) {
+    assert.ok(read > 0 && save > read, "read first, then save");
+  }
+  assert.equal((route.match(/error: "unavailable" \}, \{ status: 503 \}/g) ?? []).length >= 2, true, "an unread assignment answers 503 and keeps the course as it was");
 });
 
 const SHAPES: [string, (batch: (string | number)[][], answers: unknown[]) => unknown[]][] = [

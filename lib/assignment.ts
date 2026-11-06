@@ -89,14 +89,16 @@ export async function saveTask(courseId: string, lessonId: string, task: Task, d
 /** A handed-in file's size as handIn writes it in the files' hash: a whole number of bytes, as text. */
 const FILE_BYTES_TEXT = /^(0|[1-9]\d{0,15})$/;
 
+/** What removing an assignment will forget, read in full before anything is deleted (readTaskDrop). */
+export type TaskDrop = { courseId: string; lessonId: string; files: string[]; bytes: number; gone: string[]; freed: number };
+
 /**
- * Forgets an assignment and all the work handed in for it. Returns the files to delete. Every reply is read in its
- * exact shape before anything is deleted (CX-123 rules 24 and 30; Claude 4 after Codex P on #2655): a files' hash,
- * a list of work or a record that does not read throws UnknownReplyError and deletes nothing, so the list of files is
- * never lost while the files stay kept in storage nobody could find again.
+ * Reads what removing an assignment will forget: its handed-in files and their sizes, the work handed in, and what
+ * the records weigh. Every reply in its exact shape (CX-123 rules 24 and 30; Claude 4 after Codex P on #2655): a
+ * files' hash, a list of work or a record that does not read throws UnknownReplyError. A caller reads this before it
+ * takes the assignment out of the course (Revisor 1 on #2810), so a read that fails leaves everything findable.
  */
-export async function dropTask(courseId: string, lessonId: string, room: string | null, data: DataStore): Promise<string[]> {
-  if (!isRedisConfigured()) return [];
+export async function readTaskDrop(courseId: string, lessonId: string): Promise<TaskDrop> {
   const flat = repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0];
   const pairs: unknown[] | null = Array.isArray(flat)
     ? flat
@@ -123,14 +125,30 @@ export async function dropTask(courseId: string, lessonId: string, room: string 
   );
   if (!held || !held.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("an assignment's records");
   const freed = held.reduce((sum: number, raw, i) => sum + recordBytes(raw, i === 0 ? 1 : 3), 0) + files.length * ENTRY_BYTES;
+  return { courseId, lessonId, files, bytes, gone, freed };
+}
+
+/**
+ * Forgets what readTaskDrop read, and only that: the files read leave the files' hash one by one (HDEL), so a file
+ * handed in after the reading stays listed, never lost; the work read leaves the lists. Returns the files to delete.
+ */
+export async function applyTaskDrop(drop: TaskDrop, room: string | null, data: DataStore): Promise<string[]> {
+  const { courseId, lessonId, files, bytes, gone, freed } = drop;
   await redisPipeline([
-    ["DEL", taskKey(courseId, lessonId), filesKey(courseId, lessonId)],
+    ["DEL", taskKey(courseId, lessonId)],
+    ...(files.length ? [["HDEL", filesKey(courseId, lessonId), ...files]] : []),
     ...gone.map((member) => ["DEL", subKey(courseId, lessonId, member.slice(lessonId.length + 1))]),
     ...(gone.length ? [["ZREM", waitingKey(courseId), ...gone], ["ZREM", allKey(courseId), ...gone]] : []),
   ]);
   if (room && bytes) await releaseBytes(room, bytes);
   if (freed) await giveData(data, [{ slot: TASKS_SLOT(courseId), bytes: freed }]);
   return files;
+}
+
+/** Forgets an assignment and all the work handed in for it, read first (readTaskDrop). Returns the files to delete. */
+export async function dropTask(courseId: string, lessonId: string, room: string | null, data: DataStore): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
+  return applyTaskDrop(await readTaskDrop(courseId, lessonId), room, data);
 }
 
 /** One student's work on one assignment, or null when they have handed nothing in. */

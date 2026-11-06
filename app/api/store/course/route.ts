@@ -31,7 +31,7 @@ import {
   saveCourse,
 } from "@/lib/course";
 import { emailKey, registerDrip, setBlocked, storeKey, studentEmail } from "@/lib/learn";
-import { dropTask, readTaskFor, review, saveTask } from "@/lib/assignment";
+import { type TaskDrop, applyTaskDrop, readTaskDrop, readTaskFor, review, saveTask } from "@/lib/assignment";
 import { readTask } from "@/lib/assignment-rules";
 import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
@@ -256,13 +256,12 @@ export async function POST(request: NextRequest) {
         if (body.task === null) {
           const result = editCourse(course, { op: "task", lessonId, task: null });
           if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+          // The work handed in for it goes with it, files and all: read before the assignment leaves the course, so a
+          // read that fails keeps the assignment and everything handed in, findable for the next try (Revisor 1 on #2810).
+          const drop = await readTaskDrop(course.id, lessonId).catch((error: unknown) => (console.error("could not read the work handed in for an assignment", error), null));
+          if (!drop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
           await save(result.course);
-          // The work handed in for it goes with it, files and all.
-          // A record that did not read keeps its list of files and deletes nothing (lib/assignment.ts, dropTask).
-          const files = await dropTask(course.id, lessonId, storeKey(store), store).catch((error: unknown) => {
-            console.error("could not read the work handed in for a removed assignment; kept as it was", error);
-            return [] as string[];
-          });
+          const files = await applyTaskDrop(drop, storeKey(store), store);
           if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
           return Response.json({ ok: true, course: result.course });
         }
@@ -468,6 +467,18 @@ export async function POST(request: NextRequest) {
       if (!result.ok) {
         return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
       }
+      // An assignment that goes with its lesson is read before the course is saved without it (Revisor 1 on #2810): a
+      // read that fails keeps the lesson, its assignment and the work handed in, for the next try.
+      const taskDrops: TaskDrop[] = [];
+      if (edit.op === "lesson-remove" || edit.op === "module-remove") {
+        const keptNow = new Set(lessonsInOrder(result.course).map(({ lesson }) => lesson.id));
+        for (const { lesson } of lessonsInOrder(course)) {
+          if (keptNow.has(lesson.id) || !lesson.task) continue;
+          const drop = await readTaskDrop(course.id, lesson.id).catch((error: unknown) => (console.error("could not read the work handed in for a lesson's assignment", error), null));
+          if (!drop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+          taskDrops.push(drop);
+        }
+      }
       await save(result.course);
       const lessons = lessonCount(result.course);
       if (lessons !== courseInfo.lessons) await setCourseLessons(ref, id, lessons);
@@ -480,13 +491,9 @@ export async function POST(request: NextRequest) {
         const goneLessons = lessonsInOrder(course).filter(({ lesson }) => !kept.has(lesson.id));
         const gone = goneLessons.map(({ lesson }) => lesson.id);
         await dropLessonComments(course.id, gone, store).catch((error) => console.error("could not delete a lesson's comments", error));
-        // An assignment goes with its lesson, and the work handed in for it.
-        for (const { lesson } of goneLessons) {
-          if (!lesson.task) continue;
-          const files = await dropTask(course.id, lesson.id, storeKey(store), store).catch((error: unknown) => {
-            console.error("could not read the work handed in for a removed lesson's assignment; kept as it was", error);
-            return [] as string[];
-          });
+        // An assignment goes with its lesson, and the work handed in for it, as read before the save.
+        for (const drop of taskDrops) {
+          const files = await applyTaskDrop(drop, storeKey(store), store);
           if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
         }
       }

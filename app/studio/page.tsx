@@ -72,7 +72,7 @@ import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
 import { weeklyTeam } from "@/lib/stats-report";
-import { NO_SETUP, SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
+import { SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
 import { claimPathsRead, laterWords, pathsStale, readPaths } from "@/lib/next-bought";
 import { BuyerPaths } from "@/components/buyer-paths";
 import { canBeBumped, isOneOff } from "@/lib/product-extras";
@@ -1910,24 +1910,34 @@ export default async function StudioPage({
                 })()}
 
                 <PixelEditor pixels={store.pixels} canViewAttribution={may("stats")} />
-                {hasPixels(store.pixels) ? (
-                  <ServerEventsEditor
-                    setup={await (async () => {
-                      const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                {hasPixels(store.pixels)
+                  ? await (async () => {
+                      // Not read: said so, never shown as an empty setup nor written on the store as none.
+                      const setup = await serverSetup(store.statsId).catch(() => null);
+                      if (!setup) {
+                        return (
+                          <p className="text-ink-soft">
+                            Server-sent conversions could not be read just now. Nothing was changed; reload the page in a moment.
+                          </p>
+                        );
+                      }
                       // A token saved before the store kept its own list of platforms is written there now, once.
                       const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
                       if (on.join() !== store.adsServer.join()) await setAdsServer(storeRef(store), on).catch(() => null);
-                      return setup;
-                    })()}
-                    pixels={{
-                      meta: Boolean(store.pixels.meta),
-                      tiktok: Boolean(store.pixels.tiktok),
-                      google: Boolean(store.pixels.google),
-                      pinterest: Boolean(store.pixels.pinterest),
-                    }}
-                    googleId={store.pixels.google ?? ""}
-                  />
-                ) : null}
+                      return (
+                        <ServerEventsEditor
+                          setup={setup}
+                          pixels={{
+                            meta: Boolean(store.pixels.meta),
+                            tiktok: Boolean(store.pixels.tiktok),
+                            google: Boolean(store.pixels.google),
+                            pinterest: Boolean(store.pixels.pinterest),
+                          }}
+                          googleId={store.pixels.google ?? ""}
+                        />
+                      );
+                    })()
+                  : null}
 
                 {await (async () => {
                   // The free, published products, by name: what can be offered to a leaving visitor.

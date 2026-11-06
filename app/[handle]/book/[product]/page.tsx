@@ -31,6 +31,7 @@ import { speech } from "@/lib/buyer-words";
 import { type BookingWords, bookingNotice, bookingWords } from "@/lib/buyer-words/booking";
 import { NewTab } from "@/components/new-tab";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -265,7 +266,8 @@ export default async function BookPage({ params, searchParams }: Params) {
         </div>
 
         <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(true, false), store.name)}</p>
-        <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
+        {/* Only while the calendar is open: a closed one sells nothing here (WhoAnswers also leaves out test mode and the demo store). */}
+        {open ? <WhoAnswers store={store} /> : null}
     </Shell>
   );
 }

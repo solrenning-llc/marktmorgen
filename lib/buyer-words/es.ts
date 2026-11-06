@@ -191,7 +191,7 @@ export const es: BuyerWords = {
   paidBy: (takers, store) =>
     `El pago lo cobra ${takers} en la propia cuenta de ${store}. Marktmorgen nunca retiene el dinero ni se queda con nada.`,
   whoAnswers: (store) =>
-    `${store} es quien vende y responde de lo que compras, de los reembolsos y de cualquier derecho de desistimiento que tengas. Marktmorgen aloja la tienda y su página de pago, y no es parte de la venta.`,
+    `${store} es quien vende y responde de lo que compras, de los reembolsos y de cualquier derecho de desistimiento que tengas. Marktmorgen aloja las páginas de la tienda y no es parte en la venta.`,
   noPaymentsTitle: "Esta tienda todavía no puede aceptar pagos.",
   noPaymentsBody: (store) => `Los precios de arriba son reales, pero aquí nada puede cobrar una tarjeta. Para comprar, escribe directamente a ${store}.`,
   noPaymentsBodyOne: (store) => `El precio de arriba es real, pero aquí nada puede cobrar una tarjeta. Para comprar, escribe directamente a ${store}.`,

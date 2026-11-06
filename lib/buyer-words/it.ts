@@ -186,7 +186,7 @@ export const it: BuyerWords = {
   paidBy: (takers, store) =>
     `Il pagamento viene incassato da ${takers} sul conto di ${store}. Marktmorgen non trattiene mai il denaro e non ne prende nulla.`,
   whoAnswers: (store) =>
-    `${store} è il venditore e risponde di ciò che compri, dei rimborsi e di ogni diritto di recesso che hai. Marktmorgen ospita il negozio e la pagina di pagamento e non è parte della vendita.`,
+    `${store} è il venditore e risponde di ciò che compri, dei rimborsi e dell'eventuale diritto di recesso. Marktmorgen ospita le pagine del negozio e non è parte del contratto di vendita.`,
   noPaymentsTitle: "Questo negozio non può ancora accettare pagamenti.",
   noPaymentsBody: (store) => `I prezzi qui sopra sono reali, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
   noPaymentsBodyOne: (store) => `Il prezzo qui sopra è reale, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,

@@ -188,7 +188,7 @@ export const de: BuyerWords = {
   paidBy: (takers, store) =>
     `Die Zahlung wird von ${takers} auf dem eigenen Konto von ${store} eingezogen. Marktmorgen hält das Geld nie und behält nichts davon.`,
   whoAnswers: (store) =>
-    `${store} ist der Verkäufer und verantwortlich für das, was Sie kaufen, für Erstattungen und für ein etwaiges Widerrufsrecht. Marktmorgen stellt den Shop und den Bezahlvorgang bereit und ist nicht Partei des Kaufvertrags.`,
+    `${store} ist der Verkäufer und verantwortlich für das, was Sie kaufen, für Erstattungen und für ein etwaiges Widerrufsrecht. Marktmorgen stellt die Seiten des Shops bereit und ist nicht Partei des Kaufvertrags.`,
   noPaymentsTitle: "Dieser Shop kann noch keine Zahlungen annehmen.",
   noPaymentsBody: (store) => `Die Preise oben sind echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
   noPaymentsBodyOne: (store) => `Der Preis oben ist echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,

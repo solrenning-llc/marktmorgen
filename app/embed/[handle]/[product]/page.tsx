@@ -30,6 +30,7 @@ import { bookingWords } from "@/lib/buyer-words/booking";
 import { chargeNow } from "@/lib/call-deposit";
 import { slotWords } from "@/lib/slot-words";
 import { placeLine } from "@/lib/call-place";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -290,6 +291,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
             />
             </>
           )}
+          {/* Before the buyer picks a time and pays (components/who-answers.tsx). */}
+          {chooses || read === null ? null : <WhoAnswers store={store} className="st-muted mt-3 text-sm" />}
           <p className="mt-4 text-center text-sm">
             <a href={here({}, ["view", "length"], "calendar-button")} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{b.backToCard(product.title)}</a>
           </p>
@@ -405,11 +408,13 @@ export default async function EmbedCard({ params, searchParams }: Params) {
 
   if (open?.mode === "page") {
     return (
-      <div lang={lang.locale} className={`st-page st-theme-${store.look.theme} flex min-h-screen items-center justify-center px-4 py-10`} style={lookStyle(store.look) as React.CSSProperties}>
+      <div lang={lang.locale} className={`st-page st-theme-${store.look.theme} flex min-h-screen flex-col items-center justify-center px-4 py-10`} style={lookStyle(store.look) as React.CSSProperties}>
         <style>{ON_A_PAGE}</style>
         <main id="content" className="w-full max-w-[400px]" style={{ height }}>
           {card}
         </main>
+        {/* Under the card, which keeps its height, wherever the card can take a payment (components/who-answers.tsx). */}
+        {action.kind === "checkout" ? <WhoAnswers store={store} className="st-muted mt-4 w-full max-w-[400px] text-center text-sm" /> : null}
       </div>
     );
   }

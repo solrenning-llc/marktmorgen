@@ -837,10 +837,16 @@ export default async function StudioPage({
   // and the way to it is said at the top of the studio.
   const arrivedZoom = cameForZoom(cookieStore) && isConfigured("zoom");
   // Passkeys whose wait has run out are removed first (lib/passkeys.ts pendingRemoval, a write under the account's
-  // lock), so the list of the person's passkeys read afterwards is what is left, as before this unit
-  // (tests/studio-today-removal-order.test.ts).
+  // lock, which also logs out what they opened). The two second-step checks apply the same removal themselves before
+  // they read (lib/second-step-gate.ts), so they start at once. The rest of what is read of the person waits for the
+  // page's own removal; the list of passkeys waits for all three, as before this unit, so that when the page's own
+  // removal read fails and one of the checks applies it, the list is what is left (tests/studio-today-removal-order
+  // .test.ts; Codex M, review 5806799980).
   const removing = email ? early(pendingRemoval(email).catch(() => null)) : null;
+  const mayAdd = email ? early(mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : null;
+  const liveStep = email ? early(liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : null;
   const afterRemoval = <T,>(read: () => Promise<T>): Promise<T> => early((removing ?? Promise.resolve(null)).then(read));
+  const passkeysLeft = early(Promise.all([removing, mayAdd, liveStep]).then(() => (email ? listPasskeys(email).catch(() => []) : [])));
   const firstReads = {
     folder: early(store ? storeFolder(ref) : Promise.resolve("")),
     pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
@@ -852,12 +858,11 @@ export default async function StudioPage({
     meet: store && meetOn && (may("products") || may("orders")) ? early(meetView(store.statsId, store, arrivedZoom).catch(() => null)) : null,
     shelf: store ? early(studioShelf(store, params)) : null,
     removing,
-    // These two apply the same removal themselves, under the account's lock, before they read (lib/second-step-gate.ts).
-    mayAdd: email ? early(mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : null,
-    liveStep: email ? early(liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : null,
+    mayAdd,
+    liveStep,
     person: afterRemoval(() =>
       Promise.all([
-        email ? listPasskeys(email).catch(() => []) : Promise.resolve([]),
+        passkeysLeft,
         store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
         isFreshSession(cookieStore.get(SESSION_COOKIE)?.value).catch(() => false),
         // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).

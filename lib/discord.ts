@@ -184,8 +184,10 @@ export type RoleChange = "ok" | "gone" | "failed";
 
 function changed(answer: Answer | null): RoleChange {
   if (answer && answer.status >= 200 && answer.status < 300) return "ok";
-  // 10007: the person is not in the server any more; 10011: the role is gone.
-  const code = Number((answer?.data as { code?: unknown } | null)?.code);
+  // 10007: the person is not in the server any more; 10011: the role is gone; 10004: the server is.
+  // Only Discord's own whole number says so: a code of another shape ("10007", [10007]) is not known, never "gone",
+  // which would forget somebody still in the server with their role (CX-123 rule 24).
+  const code = (answer?.data as { code?: unknown } | null)?.code;
   if (answer?.status === 404 && (code === 10007 || code === 10011 || code === 10004)) return "gone";
   return "failed";
 }

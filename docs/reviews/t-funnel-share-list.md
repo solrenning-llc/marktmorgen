@@ -12,7 +12,7 @@ Only new files: this report, `tests/t-funnel-share-list.proof.ts`, and `scripts/
 
 The result is more than an empty list. A subsequent **healthy** `openShare` reads the intact snapshot, then finds the deleted index field through `HEXISTS` and returns null (`lib/funnel-share-store.ts:148–162`). The existing share link therefore stops opening without an explicit revoke, expiry or actual snapshot loss. No snapshot deletion, private-data disclosure, privacy bypass, or continued public access is alleged. The intact snapshot remains subject to the original expiry; the sender's missing index is the demonstrated cause of failed access.
 
-The route calls `listShares` while handling its list action (`app/api/store/funnel-share/route.ts:148`), and uses `openShare` for a supplied share code (`:68`). This proof executes the actual store functions, not the authenticated HTTP route or a browser.
+The route calls `listShares` before creating a new link in its share action (`app/api/store/funnel-share/route.ts:148`), and uses `openShare` for a supplied share code (`:68`). This proof executes the actual store functions, not the authenticated HTTP route or a browser.
 
 The production transport returns unvalidated `item.result` slots (`lib/redis.ts:22–50`), so a response item without a result can produce `undefined` without an outer-length mismatch. The proof injects unknown values at that boundary; it does not claim that a real provider has emitted them. NaN is an additional direct-boundary robustness case, not JSON transport evidence.
 

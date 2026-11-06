@@ -217,6 +217,24 @@ export async function dropNote(statsId: string, id: string, room: DataStore): Pr
   });
 }
 
+/** Tries at the lock while waiting `waitMs` (lib/redis-lock.ts takeLock: one SET each, waits of 20 ms doubling up to 250 ms). */
+function lockTries(waitMs: number): number {
+  let tries = 1;
+  for (let wait = 20, waited = 0; waited + wait <= waitMs; wait = Math.min(wait * 2, 250)) {
+    waited += wait;
+    tries += 1;
+  }
+  return tries;
+}
+
+/**
+ * The most Redis commands forgetMemory sends: every try at the lock while it
+ * waits, the deletion, the room given back, and the lock let go (its script,
+ * or GET and DEL when the script cannot run). Counted in a deleted store's
+ * forget line (lib/store-forget-retry.ts FORGET_TRY_COMMANDS).
+ */
+export const MEMORY_FORGET_COMMANDS = lockTries(MEMORY_LOCK_WAIT_MS) + 1 + 1 + 3;
+
 /**
  * Forgets every note at once, and gives back their room. It waits for a
  * change being made to finish, so that change cannot write the notes back

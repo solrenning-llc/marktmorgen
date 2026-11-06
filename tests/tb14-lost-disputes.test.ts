@@ -331,29 +331,34 @@ async function main(): Promise<void> {
   is("gone", await holds("friend4@tb14.example"), false);
 
   part("A write left unknown marks nothing read and keeps the anchor; the next run finishes it (Codex Z, write acknowledgements)");
-  // The command matched is not run and is answered in a shape no command gives; the rest run as they are.
-  const unknownWrite = (when: (command: (string | number)[]) => boolean) => {
+  // The command matched is not run and is answered with `reply`: a shape no command gives, or a count a write of
+  // one item can never return (Codex Z: HDEL, HSET, SADD and EXPIRE of one item answer 0 or 1); the rest run as they are.
+  const unknownWrite = (when: (command: (string | number)[]) => boolean, reply: unknown = "QUEUED") => {
     redis.pipeline = (async (commands: (string | number)[][]) => {
       const ran = await realPipeline(commands.filter((command) => !when(command)));
       let at = 0;
-      return commands.map((command) => (when(command) ? "QUEUED" : ran[at++]));
+      return commands.map((command) => (when(command) ? reply : ran[at++]));
     }) as typeof redis.pipeline;
   };
   const read = async (key: string, id: string) => (await realPipeline([["SISMEMBER", key, id]]))[0];
   const preSeen = `nl:pre:${store.statsId}:seen`;
   const giftSeen = `nl:gift:${store.statsId}:seen`;
-  const writes: [string, number, string, (command: (string | number)[]) => boolean][] = [
+  const writes: [string, number, string, (command: (string | number)[]) => boolean, unknown?][] = [
     ["the purchase's removal", 6, "fay@tb14.example", (c) => c[0] === "HDEL" && String(c[1]).startsWith("nl:imp:buy:")],
     ["the pre-order's taken-back mark", 7, "gus@tb14.example", (c) => c[0] === "HSET" && c[1] === `nl:pre:${store.statsId}:${product.id}`],
     ["the row's read mark", 8, "hal@tb14.example", (c) => c[0] === "SADD" && c[1] === preSeen],
+    ["the purchase's removal answered 2", 9, "ida@tb14.example", (c) => c[0] === "HDEL" && String(c[1]).startsWith("nl:imp:buy:"), 2],
+    ["the pre-order's taken-back mark answered 2", 10, "jo@tb14.example", (c) => c[0] === "HSET" && c[1] === `nl:pre:${store.statsId}:${product.id}`, 2],
+    ["the pre-order's keep answered 2", 11, "kit@tb14.example", (c) => c[0] === "EXPIRE" && c[1] === `nl:pre:${store.statsId}:${product.id}`, 2],
+    ["the row's read mark answered 2", 12, "lu@tb14.example", (c) => c[0] === "SADD" && c[1] === preSeen, 2],
   ];
-  for (const [label, n, email, when] of writes) {
+  for (const [label, n, email, when, reply] of writes) {
     is(`pre-order ${n} handed over`, await confirmPreorder(store, session(n, email) as never, product, deps), "given");
     const event = closing(100 + n, "lost", session(n, "").payment_intent);
     closings = [event];
     refunds = [];
     const anchorThen = (await realPipeline([["GET", preorderAnchor]]))[0];
-    unknownWrite(when);
+    unknownWrite(when, reply);
     try {
       await revokeRefundedPreorders(store, Date.now() + 10_000, drop);
     } finally {
@@ -364,11 +369,13 @@ async function main(): Promise<void> {
     is(`pre-orders, ${label}: the next run finishes it and marks it read`, [await has(email), Boolean((await readPreorder(store, product.id, session(n, "").id))?.revoked), await read(preSeen, String(event.id))], [false, true, 1]);
   }
   let g = 4;
-  for (const [label, when] of [
+  for (const [label, when, reply] of [
     ["the purchase's removal", (c: (string | number)[]) => c[0] === "HDEL" && String(c[1]).startsWith("nl:imp:buy:")],
     ["the gift's taken-back mark", (c: (string | number)[]) => c[0] === "SET" && String(c[1]).startsWith("nl:gift:g")],
     ["the row's read mark", (c: (string | number)[]) => c[0] === "SADD" && c[1] === giftSeen],
-  ] as [string, (command: (string | number)[]) => boolean][]) {
+    ["the purchase's removal answered 2", (c: (string | number)[]) => c[0] === "HDEL" && String(c[1]).startsWith("nl:imp:buy:"), 2],
+    ["the row's read mark answered 2", (c: (string | number)[]) => c[0] === "SADD" && c[1] === giftSeen, 2],
+  ] as [string, (command: (string | number)[]) => boolean, unknown?][]) {
     g += 1;
     const to = `friend${g}@tb14.example`;
     const started = await startGift(store, product as Listing, { to, from: "Ana", message: "" });
@@ -387,7 +394,7 @@ async function main(): Promise<void> {
     closings = [event];
     refunds = [];
     const anchorThen = (await realPipeline([["GET", giftAnchor]]))[0];
-    unknownWrite(when);
+    unknownWrite(when, reply);
     try {
       await revokeRefundedGifts(store, Date.now() + 10_000, drop);
     } finally {

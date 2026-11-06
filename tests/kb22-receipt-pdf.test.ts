@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, decodePDFRawStream } from "pdf-lib";
 import {
+  RECEIPT_MAX_DESCRIPTION,
   RECEIPT_MAX_LINES,
   RECEIPT_PDF_MAX_BYTES,
   RECEIPT_PDF_UNITS,
@@ -88,7 +89,7 @@ async function structure(bytes: Uint8Array) {
   const root = doc.catalog.lookup(PDFName.of("StructTreeRoot"), PDFDict);
   const document = root.lookup(PDFName.of("K"), PDFDict);
   const kids = document.lookup(PDFName.of("K"), PDFArray).asArray().map((ref) => doc.context.lookup(ref as PDFRef, PDFDict));
-  const metadata = doc.catalog.lookup(PDFName.of("Metadata"), PDFRawStream);
+  const metadata = doc.context.lookup(doc.catalog.get(PDFName.of("Metadata")) as PDFRef) as PDFRawStream;
   const xmp = new TextDecoder().decode(decodePDFRawStream(metadata).decode());
   const marked = doc.catalog.lookup(PDFName.of("MarkInfo"), PDFDict).get(PDFName.of("Marked"))?.toString();
   const display = doc.catalog.lookup(PDFName.of("ViewerPreferences"), PDFDict).get(PDFName.of("DisplayDocTitle"))?.toString();
@@ -151,7 +152,7 @@ async function main(): Promise<void> {
   const untaxed = receiptFrom(seller, REF, paidSession({ amount_total: 4900, total_details: { amount_discount: 500, amount_shipping: 0, amount_tax: 0 } }, { amount: 4900 }), linesPage());
   is("no tax charged: Stripe's zero is shown as Stripe's", untaxed.ok && receiptTexts(untaxed.receipt).find((t) => t.text.startsWith("Tax"))?.text, "Tax: $0");
   const yen = receiptFrom(seller, REF, paidSession({ currency: "jpy", amount_subtotal: 2700, amount_total: 2700, total_details: { amount_discount: 0, amount_shipping: 0, amount_tax: 0 } }, { amount: 2700, currency: "jpy" }), linesPage([{ id: "li_1TestLineYen01", description: "Kit", quantity: 1, amount_subtotal: 2700, amount_total: 2700, currency: "jpy" }]));
-  is("a currency without cents is written whole", yen.ok && receiptTexts(yen.receipt).find((t) => t.text.startsWith("Total"))?.text, "Total paid: ¥2,700");
+  is("a currency without cents is written whole", yen.ok && receiptTexts(yen.receipt).find((t) => t.text.startsWith("Total paid"))?.text, "Total paid: ¥2,700");
   is("the payment's currency must be the sale's", receiptFrom(seller, REF, paidSession({}, { currency: "eur" }), linesPage()), { ok: false, why: "unreadable" });
 
   part("Refunds");
@@ -178,6 +179,9 @@ async function main(): Promise<void> {
   is("lines that do not add up to the subtotal", receiptFrom(seller, REF, paidSession(), linesPage([{ id: "li_1TestLine0001", description: "Sourdough Course", quantity: 1, amount_subtotal: 4900, amount_total: 4767, currency: "usd" }])), { ok: false, why: "unreadable" });
   is("a line Stripe gave in another shape", receiptFrom(seller, REF, paidSession(), linesPage([{ id: "li_1TestLine0001", description: "Sourdough Course", quantity: 1, amount_subtotal: 5400, currency: "usd" }, { id: "li_1TestLine0002", description: null, quantity: 1, amount_subtotal: 0, currency: "usd" }])), { ok: false, why: "unreadable" });
   is("a list that goes on past one page", receiptFrom(seller, REF, paidSession(), linesPage(undefined, true)), { ok: false, why: "too_many_lines" });
+  const tooMany = Array.from({ length: RECEIPT_MAX_LINES + 1 }, (_, i) => ({ id: `li_1TestMany${String(i).padStart(4, "0")}`, description: "Kit", quantity: 1, amount_subtotal: i === 0 ? 5400 : 0, currency: "usd" }));
+  is(`more than ${RECEIPT_MAX_LINES} lines: refused, never cut short`, receiptFrom(seller, REF, paidSession(), linesPage(tooMany)), { ok: false, why: "too_many_lines" });
+  is("a line name longer than any checkout here gives", receiptFrom(seller, REF, paidSession(), linesPage([{ id: "li_1TestLine0001", description: "x".repeat(RECEIPT_MAX_DESCRIPTION + 1), quantity: 1, amount_subtotal: 5400, currency: "usd" }])), { ok: false, why: "unreadable" });
   is("a list in another shape", receiptFrom(seller, REF, paidSession(), { data: "nope" }), { ok: false, why: "unreadable" });
   is("a charge for another amount", receiptFrom(seller, REF, paidSession({}, { amount: 5000 }), linesPage()), { ok: false, why: "unreadable" });
   is("the payment not expanded", receiptFrom(seller, REF, paidSession({ payment_intent: "pi_1TestReceipt0001" }), linesPage()), { ok: false, why: "unreadable" });
@@ -189,9 +193,11 @@ async function main(): Promise<void> {
   is("the roles are the texts' roles, in reading order", one.roles, receiptTexts(r).map((t) => `/${t.role}`));
   is("its title shown instead of the file name, and its language", [one.doc.getTitle(), one.doc.catalog.get(PDFName.of("Lang"))?.toString(), one.display], ["Receipt from Harbor Kitchen — September 21, 2026", "(en-US)", "true"]);
   is("marked, with the PDF/UA part in its XMP", [one.marked, one.xmp.includes("<pdfuaid:part>1</pdfuaid:part>"), one.xmp.includes("<dc:language><rdf:Bag><rdf:li>en-US</rdf:li>")], ["true", true, true]);
-  const lines = Array.from({ length: RECEIPT_MAX_LINES }, (_, i) => ({ description: `A long product name for line ${i + 1}, the most a receipt may hold, ${"word ".repeat(12)}`, quantity: 99, amount: 999_999 }));
+  const lines = Array.from({ length: RECEIPT_MAX_LINES }, (_, i) => ({ description: `Line ${i + 1}: ${"A long product name with many words in it ".repeat(12)}`.slice(0, RECEIPT_MAX_DESCRIPTION), quantity: 99, amount: 999_999 }));
+  const drawStart = performance.now();
   const longest = await receiptPdf({ ...r, lines, subtotal: 99_999_900, total: 99_999_900, discount: 0, tax: 0, sellerAddress: "x".repeat(200) });
   const many = await structure(longest);
+  console.log(`  (the heaviest drawn in ${Math.round(performance.now() - drawStart)} ms, ${longest.byteLength} bytes, ${many.pages} pages)`);
   is("the most lines run over pages and stay in order", [many.pages > 1, many.roles.filter((role) => role === "/H2").length], [true, 4]);
   is(`the heaviest file stays under ${RECEIPT_PDF_MAX_BYTES} bytes (${longest.byteLength})`, longest.byteLength <= RECEIPT_PDF_MAX_BYTES, true);
 

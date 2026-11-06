@@ -1127,6 +1127,8 @@ export type Sale = {
   stillDownloadable: boolean;
   /** A booked call delivers a time, not a download. */
   isCall: boolean;
+  /** A one-time payment (Stripe's mode "payment"), which has a receipt (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */
+  oneTime?: boolean;
   /** What the buyer answered at checkout, question by question. */
   answers: Answer[];
   /** A membership that began with a free trial, so nothing was charged yet. */
@@ -1150,6 +1152,7 @@ type SessionRecord = {
   id?: unknown;
   status?: unknown;
   payment_status?: unknown;
+  mode?: unknown;
   created?: unknown;
   amount_total?: unknown;
   currency?: unknown;
@@ -1221,6 +1224,7 @@ export async function listSales(store: Store): Promise<SaleList> {
         paidAt,
         stillDownloadable: now - paidAt <= DOWNLOAD_WINDOW_SECONDS,
         isCall: row.metadata?.kind === "call",
+        oneTime: row.mode === "payment",
         answers: readAnswers(row),
         trial: Number(row.metadata?.trial_days) > 0,
         isTip: row.metadata?.kind === "tip",

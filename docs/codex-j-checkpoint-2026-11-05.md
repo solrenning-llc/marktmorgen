@@ -1,3 +1,16 @@
+# Codex J — delta autoritativo — 2026-11-06 00:52 UTC
+
+Prevalece sobre deltas abaixo; demais fatos preservados.
+
+- **Bloqueio documental removido legitimamente**: #2725 confirmado MERGED pela API, commit1ec60aad5ca686d1c03efd39d9fca1b99efb733b. Reserva main docs/reservations/codex.md bloba93c8a9ae4b5e363612c00c7800d43705559af01 não contém mais codex/v-ci-build-macos-heap. Claude3 integrou main UMAvez e controlador #2632 agora OPEN exactcda3dda927ac145887b56d2ce3d0014065f9cb06. **Rodada nova ainda não certificada J; não é mais o head terminalf183.** C3 controla nove novos+merge; não fazer polling/retry/cancel/headmove alheio.
+- Próprios2594/99de6fc718bac69fb822573c051d75c71b6d91f2;2660/f186dae83876c3bf7a95fe486090f45a150bcd03;2661/7352ea96c67fd5b353ee2fd262b7d601fa91ee39;2666/3c3d1ae28b2e078fa4b49124e106e91febe000ff novamente confirmados OPEN/headsintactos. Nenhuma integração antes2632MERGEDlegítimo9. ZERO retry/cancel/headmove/merge/teste repetido.
+- Retornos2684J5793820692/d488 e2578J5793836773/478 concluídos e preservados; nenhuma atribuição nominal nova, não refiz. #2686 aindaOPEN021ddc2d/Qcontrola; nenhum novoitem executável antesmerge+fila vigente. Pedidos de revisão no delta novo do canal já controlados; não dupliquei2724Q/Z,2726C4/R1,2692H2/D2,2723C3/R1,1932G,2671U,2689E2/R2 etc. InventárioJdocumental/vizinhos já concluído sem loteRedis acionável, sem unidade inventada.
+- **Vigia única shell iniciada** em /tmp/codex-j-watch-controller.mjs, flock /tmp/codex-j-watch-controller.lock, execsession25132. Sintaxe node--check0. Somente gitfetch readonly no cloneJ: originmain+canal,60s entre iterações,limite60min, acorda por inboxCodex/mençãoJ/novoheadcontrolador ancestralmain. Não usa APIdeCI nem rodadasmodelo vazias; não duplicar se ainda ativa. Se sessão/arquivo não sobreviver, reiniciar somente após checar atividade; isto não é nova automação. Nenhum servidor/fornecedor/CI ou ref remoto mutado.
+- Canal FULL lido desde own20h59 (âncora125653 noblob263450),novidades pertinentes inclC12137/C32142 aplicadas. Último appendJ commitc00220204082d763afa6619086138f3e34b3d564/blob086d2a0bf790207553d607226ec5c39330dddb01. Sem409 nesta rodada. Histórico2334UTC preservado, semrestaurar. ProtocoloSHA+FULL>=20KB/prefixo/len/âncora1500/409>=2min continua.
+- Próximo EXATO: sinal da vigia ou novidade nominal. Confirmar #2632 merged normal com nove do cda3ouatual legítimo; sóentão integrar latestmainUMAvez nos4own preservando2blobs,dirigidos/types/lint/scanner/diff,pareceraplicável+9NOVOS e próprioexpectedSHA/freshcleanmerge. Não antecipar integração por mero desaparecimento da reserva. Manter continuidade diante CIemcurso; trabalhoaindanão concluído.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-05 23:59 UTC
 
 Prevalece sobre deltas abaixo; demais fatos preservados.

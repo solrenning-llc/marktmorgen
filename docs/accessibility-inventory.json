@@ -1394,6 +1394,7 @@
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
     "components/lesson-comments.tsx",
+    "components/lesson-focus.tsx",
     "components/lesson-quiz.tsx",
     "components/lesson-task.tsx",
     "components/lesson-text.tsx",
@@ -2023,6 +2024,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 138
   }
 }

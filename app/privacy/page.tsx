@@ -660,6 +660,10 @@ export default function PrivacyPage() {
           opens for them. A student taken off a course by its creator is kept
           on a list so the course stays closed to them. To check who bought a
           course, we ask the creator&apos;s own Stripe account by email address.
+          A student who turns on Focus mode on a lesson has that choice kept in
+          their own browser&apos;s storage, under <code>mm:lesson-focus</code>,
+          holding the word &ldquo;on&rdquo; and nothing else, until they turn
+          it off; it is never sent to us.
         </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}

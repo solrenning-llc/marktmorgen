@@ -61,9 +61,9 @@ is("on: one column, at a width that reads", [on.includes("lg:grid-cols-[minmax(0
 is("on: the note says what happened and how to leave, as a status", on.includes(`role="status"`) && on.includes(en.onNote), true);
 is("off: the status is there, empty, so a change is read out", off.includes(`role="status"`), true);
 is("the button is a real button, at least 44 pixels each way", [/<button type="button"/.test(off), off.includes("min-h-11"), off.includes("min-w-11")], [true, true, true]);
-is("the button names what it hides", off.includes(`aria-controls="lesson-focus-around"`), true);
+is("the button names the parts it hides", off.includes(`aria-controls="lesson-focus-path lesson-focus-list lesson-focus-comments"`), true);
 const noBelow = renderToStaticMarkup(createElement(FocusLayout, { on: true, message: "", words: en, onToggle: () => undefined, ...parts, below: null }));
-is("with no comments, only two parts are hidden", count(noBelow, " hidden=\"\""), 2);
+is("with no comments, only two parts are hidden, and named", [count(noBelow, " hidden=\"\""), noBelow.includes(`aria-controls="lesson-focus-path lesson-focus-list"`)], [2, true]);
 
 part("No movement");
 const source = readFileSync("components/lesson-focus.tsx", "utf8");

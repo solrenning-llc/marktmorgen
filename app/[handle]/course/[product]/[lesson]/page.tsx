@@ -31,6 +31,7 @@ import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { videoStampText } from "@/lib/video-stamp";
+import { LessonFocus, focusWordsOf } from "@/components/lesson-focus";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -166,12 +167,17 @@ export default async function LessonPage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
-        <p className="text-sm">
-          <Link href={base} className="st-footer-link font-semibold">{product.title}</Link>
-          <span className="st-muted">{w.crumb(moduleNumber, unit.title)}</span>
-        </p>
-
-        <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        {/* Focus mode (295 [SQ6]): one button hides the path, the course's
+            lessons and the comments, so only the lesson shows. */}
+        <LessonFocus
+          words={focusWordsOf(w)}
+          crumb={
+            <p className="text-sm">
+              <Link href={base} className="st-footer-link font-semibold">{product.title}</Link>
+              <span className="st-muted">{w.crumb(moduleNumber, unit.title)}</span>
+            </p>
+          }
+          article={
           <article className="st-card min-w-0 p-5 sm:p-8">
             <h1 className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{lesson.title}</h1>
             {!open ? (
@@ -374,8 +380,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
               ) : null}
             </div>
           </article>
-
-          <aside className="st-card h-fit p-5 sm:p-6 lg:row-span-2">
+          }
+          side={
+          <aside className="st-card h-fit p-5 sm:p-6">
             <p className="st-label">{w.inThisCourse}</p>
             <div className="mt-3">
               <CourseOutline course={course} base={base} start={start} done={done} current={lesson.id} held={held} language={store.language} />
@@ -384,9 +391,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
               <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>
             ) : null}
           </aside>
-
-          {reader && talking ? (
-            <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+          }
+          below={
+          reader && talking ? (
               <LessonComments
                 threads={threads}
                 reader={reader}
@@ -398,9 +405,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 language={store.language}
                 namePlaceholder={said.w.namePlaceholder}
               />
-            </div>
-          ) : null}
-        </div>
+          ) : null
+          }
+        />
       </main>
     </div>
   );

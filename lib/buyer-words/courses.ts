@@ -167,6 +167,11 @@ const en = {
   previousLesson: "Previous lesson",
   inThisCourse: "In this course",
   getWhole: "Get the whole course",
+  // Focus mode on a lesson (components/lesson-focus.tsx): the button, and the note read out when it changes.
+  focusMode: "Focus mode",
+  exitFocusMode: "Exit focus mode",
+  focusOnNote: "Focus mode is on. Only the lesson shows. Press Esc or Exit focus mode to see the rest of the page again.",
+  focusOffNote: "Focus mode is off. The rest of the page shows again.",
   /** A lesson's download, asked for when the lesson is not open. */
   notOpenForYou: "This lesson is not open for you. Open the course page to get in.",
   opensOnPassFile: "This lesson opens when you pass the quiz before it.",
@@ -477,6 +482,10 @@ const es: CoursesWords = {
   previousLesson: "Lección anterior",
   inThisCourse: "En este curso",
   getWhole: "Obtener el curso completo",
+  focusMode: "Modo concentración",
+  exitFocusMode: "Salir del modo concentración",
+  focusOnNote: "El modo concentración está activado. Solo se ve la lección. Pulsa Esc o Salir del modo concentración para volver a ver el resto de la página.",
+  focusOffNote: "El modo concentración está desactivado. El resto de la página se ve de nuevo.",
   notOpenForYou: "Esta lección no está abierta para ti. Abre la página del curso para entrar.",
   opensOnPassFile: "Esta lección se abre cuando apruebes el cuestionario anterior.",
 
@@ -773,6 +782,10 @@ const fr: CoursesWords = {
   previousLesson: "Leçon précédente",
   inThisCourse: "Dans cette formation",
   getWhole: "Obtenir toute la formation",
+  focusMode: "Mode concentration",
+  exitFocusMode: "Quitter le mode concentration",
+  focusOnNote: "Le mode concentration est activé. Seule la leçon est affichée. Appuyez sur Échap ou sur Quitter le mode concentration pour revoir le reste de la page.",
+  focusOffNote: "Le mode concentration est désactivé. Le reste de la page est de nouveau affiché.",
   notOpenForYou: "Cette leçon ne vous est pas ouverte. Ouvrez la page de la formation pour y accéder.",
   opensOnPassFile: "Cette leçon s'ouvre quand vous réussissez le quiz qui la précède.",
 
@@ -1063,6 +1076,10 @@ const de: CoursesWords = {
   previousLesson: "Vorherige Lektion",
   inThisCourse: "In diesem Kurs",
   getWhole: "Den ganzen Kurs erhalten",
+  focusMode: "Fokusmodus",
+  exitFocusMode: "Fokusmodus beenden",
+  focusOnNote: "Der Fokusmodus ist an. Nur die Lektion wird angezeigt. Drücken Sie Esc oder Fokusmodus beenden, um den Rest der Seite wieder zu sehen.",
+  focusOffNote: "Der Fokusmodus ist aus. Der Rest der Seite wird wieder angezeigt.",
   notOpenForYou: "Diese Lektion ist für Sie nicht freigeschaltet. Öffnen Sie die Kursseite, um hineinzukommen.",
   opensOnPassFile: "Diese Lektion wird freigeschaltet, wenn Sie das Quiz davor bestehen.",
 
@@ -1355,6 +1372,10 @@ const it: CoursesWords = {
   previousLesson: "Lezione precedente",
   inThisCourse: "In questo corso",
   getWhole: "Ottieni il corso completo",
+  focusMode: "Modalità concentrazione",
+  exitFocusMode: "Esci dalla modalità concentrazione",
+  focusOnNote: "La modalità concentrazione è attiva. Si vede solo la lezione. Premi Esc o Esci dalla modalità concentrazione per rivedere il resto della pagina.",
+  focusOffNote: "La modalità concentrazione è disattivata. Il resto della pagina è di nuovo visibile.",
   notOpenForYou: "Questa lezione non è aperta per te. Apri la pagina del corso per entrare.",
   opensOnPassFile: "Questa lezione si apre quando superi il quiz che la precede.",
 
@@ -1648,6 +1669,10 @@ const nl: CoursesWords = {
   previousLesson: "Vorige les",
   inThisCourse: "In deze cursus",
   getWhole: "Krijg de hele cursus",
+  focusMode: "Focusmodus",
+  exitFocusMode: "Focusmodus sluiten",
+  focusOnNote: "Focusmodus staat aan. Alleen de les is te zien. Druk op Esc of op Focusmodus sluiten om de rest van de pagina weer te zien.",
+  focusOffNote: "Focusmodus staat uit. De rest van de pagina is weer te zien.",
   notOpenForYou: "Deze les is niet open voor jou. Open de cursuspagina om binnen te komen.",
   opensOnPassFile: "Deze les gaat open als je de quiz ervoor haalt.",
 
@@ -1941,6 +1966,10 @@ const pt: CoursesWords = {
   previousLesson: "Aula anterior",
   inThisCourse: "Neste curso",
   getWhole: "Obter o curso completo",
+  focusMode: "Modo foco",
+  exitFocusMode: "Sair do modo foco",
+  focusOnNote: "O modo foco está ativado. Só a aula aparece. Pressione Esc ou Sair do modo foco para ver o resto da página de novo.",
+  focusOffNote: "O modo foco está desativado. O resto da página aparece de novo.",
   notOpenForYou: "Esta aula não está aberta para si. Abra a página do curso para entrar.",
   opensOnPassFile: "Esta aula abre quando passar no questionário anterior.",
 

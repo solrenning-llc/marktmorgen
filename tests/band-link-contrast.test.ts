@@ -1,7 +1,7 @@
 /**
- * 274 [AX1], links on the coloured bands of a sales page (the owner's coordinator's decision C1-20261106-0100-TODOS-1):
+ * 274 [AX1], links on the colored bands of a sales page (the owner's coordinator's decision C1-20261106-0100-TODOS-1):
  * a link on a band is black or white, whichever reaches 7:1 on that band (WCAG 1.4.6 at AAA), and always underlined
- * (1.4.1: never told apart by colour alone). Checked over every theme and a grid of accent colours a creator may pick:
+ * (1.4.1: never told apart by color alone). Checked over every theme and a grid of accent colors a creator may pick:
  * if any band had no black or white at 7:1, the studio would have to warn; the test proves it never happens, because
  * every band already keeps the page's text, which is near black or near white, at 7:1.
  */
@@ -28,9 +28,9 @@ for (const theme of THEMES) {
 is(`every one of ${THEMES.length * accents.length} pairs reaches 7:1 with black or white`, failing.slice(0, 5), []);
 
 part("The page carries it, and the band sections use it, underlined");
-is("the page's style names the band link colour", Object.keys(lookStyle({ theme: "light", accent: "#7c3aed" })).includes("--st-band-link"), true);
+is("the page's style names the band link color", Object.keys(lookStyle({ theme: "light", accent: "#7c3aed" })).includes("--st-band-link"), true);
 const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
 const rules = [...css.matchAll(/\.sp-style-bands \.sp-band-(phone|computer) > \.sp-section a:not\(\.btn\)[^{]*\{([^}]*)\}/g)];
 is("both band layouts (phone and computer) paint their links", rules.map((m) => m[1]).sort(), ["computer", "phone"]);
-is("in the band link colour, always underlined", rules.every((m) => /color:\s*var\(--st-band-link\)/.test(m[2]) && /text-decoration-line:\s*underline/.test(m[2])), true);
+is("in the band link color, always underlined", rules.every((m) => /color:\s*var\(--st-band-link\)/.test(m[2]) && /text-decoration-line:\s*underline/.test(m[2])), true);
 done();

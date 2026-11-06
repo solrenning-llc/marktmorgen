@@ -1,3 +1,38 @@
+# PONTO VIGENTE — 05/11/2026 22h53 Fortaleza: cinco heads publicados; dois novos pareceres; retorno2724
+
+Esta seção SUPERA as próximas ações antigas, mantendo integralmente histórico, REDs, heads, WIP e retentativas. Checkpoint anterior d05a58e184e5a9100047d2acab71ade804e1fc36. Nenhuma execução duplicada descartada por checkpoint recente; trabalho desta execução confirmado pelos commits/reviews abaixo.
+
+## Cinco unidades próprias — NÃO abrir sexta
+
+| PR | Head remoto exato | Parecer aplicável / próximo gate |
+|---|---|---|
+|2602|75617eb5757d950feaddfb9b1386abca82ca94b3|E2+C2 duas financeiras, blobs próprios iguais; aguarda9NOVOS finais|
+|2615|fc5d371c5375e0ee2f06a26e81b3871cbec2ba2e|Q semachado aplicável; aguarda9NOVOS finais|
+|2739|14ce1adb045772eec896494d5c9ce623e34773df|S independente SEM ACHADO no headEXATO, COMMENT PRR_kwDOT49V_M8AAAABWWPoaw, 2026-11-06T01:47:43Z; aguarda9NOVOS|
+|2740|410e68747b30edea76d02f184874189f954ef085|S independente SEM ACHADO no headEXATO, COMMENT PRR_kwDOT49V_M8AAAABWWRB_A, 2026-11-06T01:51:18Z; aguarda9NOVOS|
+|2741|806c11f8211e636c1b5fcca79f85573a91adc7f9|Ainda sem parecer final qualificado nesta leitura; pedidoG2/R2/peer livre já publicado, não duplicar review anunciado|
+
+Congelado mainba887611 (#2632 legitimamenteMERGED) já integrado UMAvez emCADA unidade, zero conflitos; NÃO mainchase. Produto/testes BYTE-IDÊNTICOS anteriores, aliases próprios conciliados. WIPb096 preservado ancestral2602. Árvores e45workflowIDs abaixo permanecem válidos. Validação local concluída:38grupos/1149checks;scopedtypes0/lint0/scanner3808/0/diff/tree0cada. Canal corrigiu editorial27→38 no d63909712ab3d4c74dc989baa0d0c19f5d9e3a77, sem repetir suites.
+Recebidos dois eventos NOMINAIS de revisão concluída: S2739 e S2740. Li formalmente CADA parecer e conferi nove workflows UMAvez por evento: ambos ainda9QUEUED, semconclusão. Isso não é9verdes e nãoautoriza merge. Não houve novas rodadas de CI nos2602/2615/2741 nem rerun/cancel/headmove. Não converterreviewS em aprovação financeira nem fechar oLEVE R2unknown→slow429 por conta própria. TodoschecksNOVOSprecisam exacthead success, merge-treeclean e mergeNORMALexpected_head_sha antes qualquermerge próprio.
+RETENTATIVAS únicas2484verify127130387972,2615verify127143841589/mac127144213372 CONTINUAM CONSUMIDAS PARA SEMPRE. Nenhuma usada nesta execução.
+
+## Retorno focal #2724 concluído com MÉDIO residual — não repetir mesmo head
+
+PedidoC6 corretivocff798b3f1279cd35ea5423c7652d0fe8925342c, atual então39a8e4f92f2859122998013ac0184df940ea93f2main-only. Anunciado d6390971 antes execução; reserva SOMENTE evidência própria no canal2d1432753f311197040b520fb5c680cb179798bc. Nenhum produto/ramo/CI C6 editado.
+Prova ORIGINAL INALTERADA40/40 FECHA lookupunknown de Z. Delta inteiro correto lido; osseis blobs próprios corretivocff são byte-idênticos no39a8. Nova tentativa focal da MESMA fronteira de completar só após confirmação: HDEL semACK confirmado depois marca revoked/seen e avançaâncora. Lib/gifts.ts311–318 e lib/preorders.ts481–490. SóHDEL deacessoalvo não executa e respondeundefined, demais comandos reaisfixtureexecutam. EmAMBAS jornadas sweepdizrevoked1/acessopersiste/seen1/âncoraavança; transportesaudável restaurado próximo sweeprevoked0 eacessopersiste. 53checks/8falhascausais/45controles, ambos caminhosdeinjeçãoexplicitamentealcançados. Não fornecedor/pagamentoreal.
+Parecer COMMENT **5794703899**, head39a8EXATO, **NÃO LIBERADO**. Prova/relatório duráveis em **codex/z-review-2724-paid-access@f8706e3343c46e2700a8bae2524bba49c71c9169**, tree7bcc1b8411ebd30795851f236b8a3886c38febca: tests/z2724-write-ack.proof.ts + docs/reviews/z-2724-paid-access.md. Prova/runnerlookupanterioresintactos. Autor42+gift33+pre31+callcancel22+callreminder17+team100+cost24+data7=276ligadosPASS, tiposrecorteincluidoprovas0/lint0/scanner3807/0/diff0/API=nativatree. ProofwriteACKintencionalREDnãoéverde.
+Nota estruturalregistry: SISMEMBERacrescentadoporlinha, LOST_DISPUTE_PAGESaindadescreveSADD+GET. PedidoreconciliarIOefetivojuntocorretivo; não foi alegadomargemUSDcertificada nemsegundoachadofinanceiro.
+CanalconclusãoCONFIRMADO **4f4fd6ef5597f79c9375e7b4eab5d6e94744963c**. Qretémprimeira e seuMEDcamposStripe5794657228. C6anunciou115f71d3 paraESSEvetorQ, e disseque olharáwriteACK+registrydeZ eavisaráANTESdepúblicar. **Não reler115fQcomo retornoZ nemduplicarQ; esperarcorretivoNOMINALwriteACK para repetirAMESMAprova.** #2714 continua prerequisitoatéMERGEDlegítimo, nãotratarcomojáimplementado.
+Localnovo detached worktree z-return-2724@39a8, apenaslnnode_modules; fonteintacta. Ownreviewlocalcommit539296e7559f51d9fd0c3013e9685994c1b35807 difereassinaturaremota, árvoreigual; parentlocal9073998e árvoreigualremote638de1d3, verificado antesGitData. Nãoempurrarlocalporengano; canônicoremotof870. Logs/tmp/z2724-return-{independent,write-ack,linked,types,product-lint,proof-lint,scanner}.log; config/tmp/z2724-return-types.json. Runnersempremkdtempisolado. SemnativeRedis/browser/globalbuild/CIalheia.
+
+## Vigia, triagem e próxima ação exata
+
+VigiaANTIGA64742finalizoucomnovidademerge2632,játratada; NOVAvigiaÚNICA sessão60748 /tmp/z-main-watch.sh, MESMOflock/tmp/codex-z-main-watch.lock, fetch60s, sóCodexinbox/main, prazo3500s. NãoexistevigiaCIautenticadaviaCLI; nãoalegar45jobsmonitorados. Nuncaabertosegundoprocessoagentecombasecheckpointrecente. Não criar automação duplicada; espera deCI/review não conclui auditoria.
+Triagemsomenteleitura: primeiro rg noROOTantigo695cnãofoiusadoparaqualquerconclusão; leituras corretas por gitshow ba887611de requestguard/meteredlimits/ask/guide. Quatrohipótesesanteriores ainda semnovaprova,jornadadepoisdoauth/providernecessária; nenhumgraunovocertificado, semcódigo/reservanovo/sextaunidade.
+Próximo permitido: retorno próprio causal ou parecer2741/novidade terminaldos9NOVOS → conferirhead/review/checks, tiposdechecks e merge-tree, incorporarNORMALcomexpectedheadsomentecomtodosgates. Ou corretivoNOMINALwriteACK2724 →MESMAprova, controledoisatores/partialwrite/IO; não mexer emQ ou autor. Semnovidade, nada desondagemCIemrodadas, suitesiguais,retriesconsumidos,correçãocompartilhadaduplicada ou sextaunidade. Estado dosconcluídos2484/2606/2614/2690/2709abaixopreservado. PublicarGitHub≤30min e pontoexatonocanalantesencerrar.
+
+---
+
 # ESTADO VIGENTE — 05/11/2026 após2632MERGED e publicação dos5heads
 
 #2632CONFIRMADOMERGED NORMALba887611b8b101dfc84b14fb4fc07a7eec3b9ff8, headcda3, C3/V/9greens reportadoscanal. Congelado snapshotmainba887611 apósUMfetchcausal. IntegreiUMAvez CADAuma das5unidades;0conflitos. NÃO integrar main de novo sóporqueoutrosPRsentraram. Não usarchecksancestrais.

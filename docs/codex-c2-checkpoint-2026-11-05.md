@@ -1,3 +1,41 @@
+# Ponto C2 — 06/11/2026 — C4-2630: prova de rotas publicada; CX-127 vigente
+
+Este topo prevalece sobre todo histórico conflitante. Preserva integralmente cada head, RED, parecer e ramo abaixo.
+
+## Correção factual da leitura do canal
+
+- As leituras anteriores que retornaram conteúdo vazio NÃO provam truncamento real. O canal ultrapassou1MiB e a Contents API omitiu content. A API Git data de blobs recuperou o texto integral (mais de1,35milhão de caracteres).
+- C2 retirou explicitamente a conclusão de truncamento no anúncio/reserva de canal `991e87ca0f0f3b73edd7e7fbfd17349983b253ba`. Não houve restauração de snapshot nem apagamento de mensagens.
+- Procedimento vigente: fetch_file para obter SHA; se content vier vazio/incompleto, GitHub fetch em /git/blobs/<SHA> e usar o conteúdo integral devolvido. Nunca escrever abaixo de20KB. Append-only com CAS; erro/409 exige2min e nova leitura integral.
+- C4-2630/2620/2640/2650/2700 lidas. CX-127 lida e confirmada no canal: prevalece sobre a interpretação antiga da AV12; vigia lê canal a cada2min, blocos de até10min, PRs próprios no máximo a cada5min. Sem rerun/retry/IO pago na vigia. Não anunciar que existe processo de vigia quando não existir.
+- Coordenação SOMENTE Claude4; Claude1 desligado/não destinatário.
+
+## Prova C4-2630 — duas classes, três rotas, nenhuma implementação
+
+- Reserva ANTES do código em `991e87ca`, após auditoria de140PRs abertos e seus arquivos, reservas e canal integral.
+- Ramo: `codex/c-api-read-decision-proof`, head remoto EXATO `2f6723510f6bea94d0b9288480db91de18dc3f01`.
+- Base main `849cef1d131c8fc70e2061e8865b80a1571437ec`; tree `43d2aa25f3e0114fc02499ffadda49efbe1874c3`, idêntica à árvore nativa indexada.
+- SOMENTE três arquivos novos: `tests/c2-api-read-decision.proof.ts` blob14916163; `proofs/c2/api-read-decision.mjs` blobd330cab9; `docs/reviews/c2-api-read-decision.md` blob4b2979ad.
+- Executar: `TMPDIR=/dev/shm node proofs/c2/api-read-decision.mjs`. RED deliberado **19checks/11falhas causais+8controles**. Não são11defeitos.
+- CasoA: cart/route.ts:282 e checkout/route.ts:163. Produto marcado coming-soon por setSoonREAL; leituraREAL com exceção/null/envelopecurto vira falso/vazio. Cada um dos6vetores abre1checkout comum no StripeSINTÉTICO,303/semmetadata preorder. Confirmação saudável de coming-soon abre0; ausência confirmada abre1. Leitores preorders64–74 também permissivos.
+- CasoB: course/task/route.ts:81–83. takeTaskUploadREAL remove a porta antes do HEAD; falha de provedor vira400missing com arquivo presente; próxima tentativa saudável do MESMO arquivo vira400invalid/sem submissão; fixtureseparada prova staleTaskUploadsREALnão encontra o arquivo após24h. Uma cadeia com5assertivas falhas; controles de entrega e sweep saudáveis passam.
+- Inicial Request sem cookies Next e fixture curso com link foram corrigidos antes da prova válida. Não representam RED de produto.
+- Ligados: **264/264** (cart19+physical28+digital-consent93+preorders31+waitlist32+assignments51+task-room-unknown10). Rodar o mesmo launcher com `--linked`.
+- Tipos estritos dirigidos da prova/imports0, lint/syntax/diff0, scanner4074/0. Produto/config/reservas/CI intocados; semRedisnativo/browser/produção/provedor/cobrança real.
+- Relatório completo: docs/reviews/c2-api-read-decision.md. PayPalcheckout:50 e demais candidatos estão explicitamente estáticos/sem grau. Não afirmar varredura exaustiva nem transformar um padrão grep em achado.
+- Cart ocupado1730/1928/1969; checkout2832(recortepágina); task2608. Nenhum produto/ramo/ref alheio editado. C4 classifica/distribui; R2 foi solicitado a reproduzir.
+- Publicação no canal `c3049f9a1e02cdb393a6686526470ffdb31bc1a7`. Git push local sem credencial falhou; publicação Git data/branch pelo conector SUCEDEU com a mesma árvore. Commit local8af268 é histórico; autoridade é2f672.
+- Cópia local temporária: /dev/shm/c2-api-proof.nlcsSg, dependências existentes por symlink, sem apagar trabalho alheio. Discooverlay cheio; fontes GitHub preservadas.
+
+## Restante preservado e próximo passo
+
+- #2654 head76ff7ec com parecerC2 5803848872/188proof fechado continua com Claude4; não repeti nem consulteiCI.
+- Quatro próprias: #2601 702cf9a8/N6654503257; #2695 33bbd1fd/retriesconsumidos; #2692 PRIMARY35e670e3/recovery8c2eeb29 aindaD2+displayA3/#2020; #2742 bbde49fe/CX1 aindaD2+9exatos. Nenhum head foi movido.
+- Próximo: retorno nominal C4/R2 da prova2f672 e atribuição coordenada, sem implementar por silêncio. Commercial-marginJ/threshold2325 sematribuição explícita intocados.
+- Antigos produtos merged/READY não reabrir/redeploy. Preservar a única automação C2; nenhum novo agendamento.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 15h54 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer, ramo e limite anterior continua preservado.

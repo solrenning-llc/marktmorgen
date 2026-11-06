@@ -161,7 +161,7 @@ export default async function StoreOwnPage({ params, searchParams }: Params) {
 /** The forms a page's blocks ask, read once each. */
 async function formsOf(store: Store, blocks: SalesPage["blocks"]): Promise<Record<string, FormDef>> {
   const ids = [...new Set(blocks.flatMap((block) => (block.kind === "form" && block.form ? [block.form] : [])))];
-  const found = await Promise.all(ids.map((id) => readForm(store.statsId, id).catch(() => null)));
+  const found = await Promise.all(ids.map((id) => readForm(store.statsId, id)));
   return Object.fromEntries(found.filter((f): f is FormDef => f !== null).map((f) => [f.id, f]));
 }
 

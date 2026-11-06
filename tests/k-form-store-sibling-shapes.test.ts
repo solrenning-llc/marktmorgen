@@ -6,6 +6,7 @@ import { ROOM } from './data-room';
 import { form, responses } from './form-response-fixture';
 import { done, is } from './check';
 import { receiverOf } from '@/lib/funnel-bundle-store';
+import { previewCopy } from '@/lib/store-copy';
 import { MAX_FORMS } from '@/lib/forms';
 import { COPIERS } from '@/lib/person-copy';
 import { erasureScope } from '@/lib/person-erasure';
@@ -63,6 +64,9 @@ async function main() {
       const known = JSON.parse(await new Response(storeExport(shop)).text());
       is('healthy store export keeps the saved form', known.forms[0].form.id, form.id);
       is('healthy funnel receiver counts its saved form', (await receiverOf(shop)).room.formsLeft, MAX_FORMS - 1);
+      const now = Math.floor(Date.now() / 1000);
+      const fundedTarget = { ...shop, ...ROOM, sid: shop.sid, period: { start: now - 86_400, end: now + 86_400, renews: true }, cycle: 'month' as const };
+      is('healthy store-copy preview includes its source form', (await previewCopy(shop, fundedTarget, false)).needs.forms, 1);
       unknown = true;
       let copyUnknown = false;
       try { await COPIERS['lib/form-store.ts'](scope); } catch (error) { copyUnknown = error instanceof UnknownReply; }
@@ -73,7 +77,10 @@ async function main() {
       let receiverUnknown = false;
       try { await receiverOf(shop); } catch (error) { receiverUnknown = error instanceof UnknownReply; }
       is('funnel receiver refuses unknown capacity instead of inventing free slots', receiverUnknown, true);
-      is('all three actual consumers encountered the selected unknown reply', injections, 3);
+      let previewUnknown = false;
+      try { await previewCopy(shop, fundedTarget, false); } catch (error) { previewUnknown = error instanceof UnknownReply; }
+      is('store-copy preview refuses an unknown source inventory rather than planning zero forms', previewUnknown, true);
+      is('all four actual consumers encountered the selected unknown reply', injections, 4);
       console.log('FORM_SIBLING_CONSUMER_COMMANDS', commands);
     } finally { globalThis.fetch = fetchBefore; }
   } finally { redis.pipeline = pipeline; }

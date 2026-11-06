@@ -153,6 +153,29 @@ export async function readPreorder(store: Store, productId: string, sessionId: s
   return parsePreorder(raw);
 }
 
+/**
+ * Whether a pre-order is given, read exactly, for a run that found another
+ * run's mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the entry as
+ * text, JSON with its buyer's address, and `given` a positive whole number of
+ * seconds (true) or absent (false). Anything else is unknown and throws.
+ */
+async function givenExactly(sid: string, productId: string, sessionId: string): Promise<boolean> {
+  const raw = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), sessionId]]), 1)?.[0];
+  let entry: unknown = null;
+  try {
+    entry = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    entry = null;
+  }
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof (entry as { to?: unknown }).to !== "string" || !(entry as { to: string }).to) {
+    throw new UnknownReplyError("a pre-order's entry");
+  }
+  const given = (entry as { given?: unknown }).given;
+  if (given === undefined) return false;
+  if (typeof given === "number" && Number.isSafeInteger(given) && given > 0) return true;
+  throw new UnknownReplyError("a pre-order's entry");
+}
+
 /** A person's pre-orders of these products and what became of them, for the copy of their data (619 [SZ3]). Only reads. */
 export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
@@ -233,7 +256,7 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
   if (claimed === "taken") {
     // Another run holds the mark: "already" only once the pre-order is given, as for a gift (lib/gifts.ts):
     // confirmPreorder answers "given" for it, so said while the other run may still fail, nothing would hand it over.
-    if ((await readPreorder(store, product.id, sessionId))?.given) return "already";
+    if (await givenExactly(sid, product.id, sessionId)) return "already";
     throw new Error("another run is handing this pre-order over right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a pre-order's giving mark");

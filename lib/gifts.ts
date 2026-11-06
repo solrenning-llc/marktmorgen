@@ -87,6 +87,28 @@ function parseKeptGift(raw: string, id: string): Gift | null {
   }
 }
 
+/**
+ * Whether a gift is given, read exactly, for a run that found another run's
+ * giving mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the record as
+ * text, JSON of this gift, and `given` a positive whole number of seconds
+ * (true) or absent (false). Anything else is unknown and throws, so nothing
+ * is said as given that is not.
+ */
+async function givenExactly(id: string): Promise<boolean> {
+  const raw = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
+  let record: unknown = null;
+  try {
+    record = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    record = null;
+  }
+  if (!record || typeof record !== "object" || Array.isArray(record) || (record as { id?: unknown }).id !== id) throw new UnknownReplyError("a gift's record");
+  const given = (record as { given?: unknown }).given;
+  if (given === undefined) return false;
+  if (typeof given === "number" && Number.isSafeInteger(given) && given > 0) return true;
+  throw new UnknownReplyError("a gift's record");
+}
+
 /** Writes a gift down; true only when Redis answered the write in its exact shape ("OK"). */
 async function saveGift(gift: Gift, seconds: number): Promise<boolean> {
   return repliesFor(await redisPipeline([["SET", giftKey(gift.id), JSON.stringify(gift), "EX", seconds]]), 1)?.[0] === "OK";
@@ -168,7 +190,7 @@ export async function deliverGift(input: {
     // Another run holds the mark. "already" only once the gift is given (Claude 4 on #2726): confirmGift
     // (lib/purchase-email.ts) keeps its "sent" mark on "already", so said while the other run may still fail, the
     // paid gift would never be given. Thrown, no "sent" mark is kept and the next run tries again.
-    if ((await readGift(id))?.given) return "already";
+    if (await givenExactly(id)) return "already";
     throw new Error("another run is giving this gift right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");

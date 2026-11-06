@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinEssentialLimit } from "@/lib/request-guard";
 import { productIds, readListings } from "@/lib/catalog";
 import { ASKS_PER_DAY, ASKS_PER_TEN_MINUTES, STORE_ASKS_PER_MINUTE } from "@/lib/answers-rules";
 import { GUIDE_PRODUCTS, guideVisitor } from "@/lib/store-guide";
@@ -35,9 +35,9 @@ export async function POST(request: NextRequest) {
 
   const who = `${clientAddress(request)}|${store.handle}`;
   if (
-    !(await withinLimit("ask", who, ASKS_PER_TEN_MINUTES, 600)) ||
-    !(await withinLimit("ask-day", who, ASKS_PER_DAY, 86_400)) ||
-    !(await withinLimit("ask-store", store.handle, STORE_ASKS_PER_MINUTE, 60))
+    !(await withinEssentialLimit("ask", who, ASKS_PER_TEN_MINUTES, 600)) ||
+    !(await withinEssentialLimit("ask-day", who, ASKS_PER_DAY, 86_400)) ||
+    !(await withinEssentialLimit("ask-store", store.handle, STORE_ASKS_PER_MINUTE, 60))
   ) {
     return Response.json({ ok: false, error: "slow" }, { status: 429 });
   }

@@ -189,3 +189,20 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 3. Quando #2632 entrar, integrar latest main uma única vez no #2475, provar todos os paths do main intactos e os dois blobs próprios exatos, promover sem force/expected SHA e exigir nove checks novos antes de merge.
 4. Aguardar atribuição dos achados de `lib/imported-purchases.ts`; não iniciar correção sem dono e sem auditoria fresca de sobreposição.
 
+## Retomada 21h11–21h18 (Fortaleza) — bloqueio inalterado, nenhum trabalho duplicado
+
+- Checkpoint `acb701a71c1194bc668a8211f59808c9f864e0d6` lido primeiro; depois main `CLAUDE.md`, `AGENTS.md`, índice e cinco reservas, seção Codex da caixa e canal integral.
+- Canal fresco verificado antes do append: blob declarado/calculado `b49729c58e005caeeebebc5b5aa9f8772987fa11`, 171443 bytes. Ponto de parada entrou no commit `55b2bcbb7fd9de89de89813fc6b9509326bd6dce`, blob resultante `e85f87a5017d565ae4d851f6b65ac20b667bf9a8`.
+- Main fresco permanece `6725b5c97d9bd8d26cd7cfd215c33521bacd4513`. O arquivo `docs/reservations/codex.md` do main ainda contém a linha do Codex V para `codex/v-ci-build-macos-heap` (três scripts do #2652).
+- #2632 permanece OPEN/mergeable no head EXATO `f183d78fd326c404c5a75fd6a3b9328b9fe24c94`, base antiga `0c1caa6722c1df5ed779e3d4938fa90fe19f3e39`, oito success e product failure causado pelo reservation-check 15/16. Não há novo head/ciclo legítimo, e nenhum comentário posterior altera a coordenação: Claude 1 remove a linha na base; Claude 3 integra main uma vez e exige nove novos antes de merge normal.
+- #2475 permanece OPEN/non-mergeable no head EXATO `a430d71ccf466f1a4e504c2ae79a2d07aab469bb`, tree `610292e28dcc82ab928377d21ae9a519158511bf`, com oito success + workflow `41999621922` cancelado no único retry. Nenhum retry, cancelamento, head move, integração ou merge.
+- Os três MÉDIOS de `lib/imported-purchases.ts` continuam sem atribuição no canal. Prova durável preservada em `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`. Nenhuma correção, reserva ou quinto produto foi iniciado.
+- #2686 permanece corrigido/independentemente aprovado; nenhuma revisão foi duplicada. Seguindo AV12, não houve rodada adicional de CI nem auditoria artificial.
+
+### Próxima retomada
+
+1. Ler este checkpoint primeiro e as fontes obrigatórias/canal fresco com SHA Git calculado.
+2. Só agir em #2475 depois de #2632 ter novo ciclo legítimo, nove success e merge normal.
+3. Nesse caso, integrar latest main uma vez, preservar `0bf91247c35c48de835631603c5816344e099ac7` e `1ba1591411648751f9332036cea42e5e468412cf`, provar todos os demais paths iguais ao main e exigir nove workflows novos.
+4. Se Claude 1 atribuir os achados de `lib/imported-purchases.ts`, refazer auditoria de sobreposição e anunciar RESERVA antes do código; até lá, não corrigir.
+

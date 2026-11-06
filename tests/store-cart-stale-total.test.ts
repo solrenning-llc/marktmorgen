@@ -100,10 +100,11 @@ const hang = (deaf = false): Answer => (init) =>
     if (!deaf) init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
   });
 /** A read that answers only when the check says so. */
-function later(): { read: Answer; give: (body: object) => void } {
+function later(): { read: Answer; give: (body: object) => void; drop: () => void } {
   let give: (r: Response) => void = () => {};
-  const promise = new Promise<Response>((resolve) => (give = resolve));
-  return { read: () => promise, give: (body) => give(new Response(JSON.stringify(body), { status: 200 })) };
+  let drop: (e: Error) => void = () => {};
+  const promise = new Promise<Response>((resolve, reject) => ((give = resolve), (drop = reject)));
+  return { read: () => promise, give: (body) => give(new Response(JSON.stringify(body), { status: 200 })), drop: () => drop(new TypeError("Failed to fetch")) };
 }
 
 // Words this review adds, read without assuming they exist yet (so a missing word is a failing check, not a crash).
@@ -130,6 +131,7 @@ function view(tree: Tree) {
     alerts: alertsOf(tree).map((n) => texts(n.props?.children).join("")),
     posted: forms.length === 0 ? null : find(forms, (n) => n.type === "input" && n.props?.name === "id").map((n) => n.props?.value),
     retry: find(tree, (n) => n.type === "button" && texts(n.props?.children).join("") === retryWord()),
+    statuses: find(tree, (n) => n.props?.role === "status").map((n) => texts(n.props?.children).join("")),
   };
 }
 
@@ -167,6 +169,20 @@ async function openCart(start: string[], answers: Answer[]) {
     },
     settle: () => cart.settle(),
     unmount: () => cart.unmount(),
+    /** Gives the panel a stand-in element and counts how often the cart puts the focus on it. */
+    watchFocus: () => {
+      const region = find(cart.tree(), (n) => n.props?.role === "region")[0];
+      const ref = region?.props?.ref as { current: unknown } | undefined;
+      const seen = { focus: 0 };
+      if (ref) ref.current = { focus: () => (seen.focus += 1), contains: () => false };
+      return seen;
+    },
+    /** Changes the cart from elsewhere on the page, as AddToCart does. */
+    change: async (ids: string[]) => {
+      stored.set("mm-cart:sweepshop", JSON.stringify(ids));
+      win.dispatchEvent(new Event("mm-cart-changed"));
+      await cart.settle();
+    },
   };
 }
 const bounded = () => timers.some((t) => t.live && t.ms >= 1000 && t.ms <= 15_000);
@@ -316,6 +332,113 @@ async function main() {
     is("after the wait, no longer \"Checking the prices…\"", v.text.includes(c.loading), false);
     is("the alert says 2 products could not be checked", v.alerts, [uncheckedSome(2)]);
     is("a \"Try again\" button is offered", v.retry.length, 1);
+    cart.unmount();
+  }
+
+  // ---- Claude 5's focal return on #2978 (comment 6697801851), N1–N3, and Claude 4's re-review ----
+  for (const how of ["hangs", "answers slowly"] as const) {
+    part(`N1: after a removal, the re-read ${how}: the old total goes at once`);
+    const slow = later();
+    const cart = await openCart(["a", "b"], [answer(both), how === "hangs" ? hang() : slow.read]);
+    is("first panel shows $27.00", cart.view().button, [c.checkout("$27.00")]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === c.remove("Product b"));
+    const v = cart.view();
+    is("before any wait runs out, no old $27.00 anywhere", v.text.includes("$27.00"), false);
+    is("no old \"10% off\" row for one product", v.text.includes(c.dealRow(10)), false);
+    is("no old \"−$3.00\" saving", v.text.includes("$3.00"), false);
+    is("the button says only \"Check out\"", v.button, [c.checkoutUnpriced]);
+    is("the panel says the prices are being checked", v.statuses.includes(c.loading), true);
+    is("no alert while the read is still running", v.alerts, []);
+    if (how === "answers slowly") {
+      slow.give(onlyA);
+      await cart.settle();
+      is("once it answers, the button says $10.00", cart.view().button, [c.checkout("$10.00")]);
+      is("and the checking line is gone", cart.view().statuses.includes(c.loading), false);
+    } else {
+      await cart.waitOut();
+      is("once the wait runs out, the alert says the prices could not be checked", cart.view().alerts, [c.unchecked]);
+    }
+    cart.unmount();
+  }
+
+  part("N2: \"Try again\" says it is checking, keeps its button, and a new failure is said again");
+  {
+    const again = later();
+    const cart = await openCart(["a"], [failures[2][1], again.read, answer(onlyA)]);
+    is("the first failure is said", cart.view().alerts, [uncheckedSome(1)]);
+    is("Try again was pressed", await cart.retry(), true);
+    const v = cart.view();
+    is("while it runs, the panel says the prices are being checked", v.statuses.includes(c.loading), true);
+    is("the old alert is not left up as if nothing happened", v.alerts, []);
+    is("the button is still there, so the focus is not lost", v.retry.length, 1);
+    is("and it says it is busy", [v.retry[0]?.props?.["aria-disabled"], v.retry[0]?.props?.["aria-busy"]], [true, true]);
+    is("one read so far for the retry", cart.reads(), 2);
+    await cart.retry();
+    is("pressing it again while busy starts no second read", cart.reads(), 2);
+    again.drop();
+    await cart.settle();
+    const w = cart.view();
+    is("when the retry fails too, the alert is said again", w.alerts, [uncheckedSome(1)]);
+    is("the checking line is gone", w.statuses.includes(c.loading), false);
+    is("the button can be pressed again", [w.retry.length, w.retry[0]?.props?.["aria-disabled"] ?? false], [1, false]);
+    await cart.retry();
+    is("and the next retry answers", cart.view().button, [c.checkout("$10.00")]);
+    cart.unmount();
+  }
+
+  part("N2: \"Try again\" under the checkout form says it is checking");
+  {
+    const again = later();
+    const cart = await openCart(["a", "b"], [answer(both), hang(), again.read]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === c.remove("Product b"));
+    await cart.waitOut();
+    is("the alert says the prices could not be checked", cart.view().alerts, [c.unchecked]);
+    await cart.retry();
+    const v = cart.view();
+    is("while it runs, the panel says the prices are being checked", v.statuses.includes(c.loading), true);
+    is("the button is still there and busy", [v.retry.length, v.retry[0]?.props?.["aria-disabled"]], [1, true]);
+    is("no amount on the checkout button", v.button, [c.checkoutUnpriced]);
+    again.give(onlyA);
+    await cart.settle();
+    is("once it answers, the button says $10.00", cart.view().button, [c.checkout("$10.00")]);
+    cart.unmount();
+  }
+
+  part("N3: a retry that fails does not move the focus later");
+  {
+    const cart = await openCart(["a"], [failures[2][1], failures[2][1], answer(aAndC)]);
+    const seen = cart.watchFocus();
+    await cart.retry();
+    is("the retry failed", cart.view().alerts, [uncheckedSome(1)]);
+    await cart.change(["a", "c"]);
+    is("the cart read again after the change", cart.reads(), 3);
+    is("that read answered", cart.view().posted, ["a", "c"]);
+    is("the focus did not jump into the panel", seen.focus, 0);
+    cart.unmount();
+  }
+  part("N3 control: a retry that answers puts the focus on the panel once");
+  {
+    const cart = await openCart(["a"], [failures[2][1], answer(onlyA)]);
+    const seen = cart.watchFocus();
+    await cart.retry();
+    is("the retry answered", cart.view().button, [c.checkout("$10.00")]);
+    is("the focus went to the panel once", seen.focus, 1);
+    cart.unmount();
+  }
+
+  part("Claude 4: after a failed add, another change shows \"Checking the prices…\", not the old failure");
+  {
+    const slow = later();
+    const cart = await openCart(["a"], [answer(onlyAWithC), failures[2][1], slow.read]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === `${c.add}: Product c`);
+    is("the failed add is said", cart.view().alerts, [uncheckedSome(1)]);
+    await cart.change(["a", "c", "d"]);
+    const v = cart.view();
+    is("while the new read runs, no alert from the old failure", v.alerts, []);
+    is("and the panel says the prices are being checked", v.statuses.includes(c.loading), true);
+    slow.give({ ...aAndC, items: [...aAndC.items, line("d", "$1.00")], total: "$16.00" });
+    await cart.settle();
+    is("once it answers, the form posts all three", cart.view().posted, ["a", "c", "d"]);
     cart.unmount();
   }
 

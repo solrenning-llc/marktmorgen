@@ -532,7 +532,13 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       for (const row of rows) {
         if (Date.now() >= deadline) break;
         if (row.status !== "expired" || row.consent?.promotions !== "opt_in") continue;
-        const outcome = await remindAbandoned(store, row);
+        // One checkout whose reminder cannot be decided (an unknown reply,
+        // CX-123 rule 24) is that checkout's failure only: the next buyer's
+        // reminder, the workflows and the later pages still go (CX-116).
+        const outcome = await remindAbandoned(store, row).catch((error) => {
+          console.error("a checkout reminder could not be decided", store.handle, error);
+          return "failed" as const;
+        });
         if (outcome === "sent") counts.reminded += 1;
         if (outcome === "failed") counts.failed += 1;
       }

@@ -71,7 +71,7 @@ import { chargeNow } from "@/lib/call-deposit";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
-import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { suppressedCommand } from "@/lib/suppression";
 import { assistRemindKey } from "@/lib/assistant-reminder-rules";
 
 /** A checkout that closed longer ago than this is left alone. */
@@ -189,8 +189,9 @@ export type RemindOutcome = "sent" | "skip" | "failed";
  * shape (CX-123 rule 24): the integer 1 or 0. Anything else (no reply, text,
  * another number) is unknown, never "not there", and throws
  * UnknownReplyError, so no reminder goes on it. Each caller already reports
- * a throw as not sent: the checkout sweep logs it and a later pass reads
- * the checkout again (nothing was marked as sent); the asked-for and the
+ * a throw as not sent: the checkout sweep counts that one checkout as failed
+ * and goes on to the next, and a later pass reads it again (nothing was
+ * marked as sent); the asked-for and the
  * Store assistant reminders count it as skipped, as any failure there.
  */
 function markThere(reply: unknown, what: string): boolean {
@@ -417,9 +418,12 @@ async function deliver(
   if (store.listId ? contact !== null && typeof contact !== "string" : countOf(contact) === null) {
     throw new UnknownReplyError("the list contact for the checkout reminder");
   }
+  // Somebody deleted from this store is never written to again
+  // (lib/suppression.ts): HEXISTS answers exactly 1 or 0, and a lost reply
+  // is unknown, never "not erased" (CX-116 on #2929).
+  const erased = markThere(deleted, "the checkout reminder's erasure check");
   if (wasSent || stopped || heardThisWeek) return "skip";
-  // Somebody deleted from this store is never written to again (lib/suppression.ts).
-  if (wasSuppressed(deleted)) return "skip";
+  if (erased) return "skip";
   // Someone who left the creator's list has said no to their email, and a
   // reminder is their email.
   if (store.listId && parseContact(contact)?.unsub) return "skip";

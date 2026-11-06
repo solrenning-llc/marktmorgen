@@ -84,7 +84,11 @@ const GREEK_LOOKALIKES = /[ΑΒΕΖΗΙΚΜΝΟΡΤΥΧαβγεηικνορτυ�
 function mixedScriptWord(text: string): string | null {
   // Read as typed, as folded (some look-alikes, the lunate sigma "ϲ", fold into other letters) and as the check reads
   // the line, without its marks: "L\u200Dаst" is split by the joiner as typed but read as one word (Codex G on #2581).
-  for (const [word] of `${text} ${text.normalize("NFKC")} ${adPlain(text)}`.matchAll(/\p{L}+/gu)) {
+  // Read once more without the marks that join letters (variation selectors U+FE00–FE0F and U+E0100–E01EF, combining
+  // marks): "L\uFE0Fа\uFE0Fst" is one word too (Codex G on #2581, second return). Only this scan drops them, so an
+  // emoji's own selector ("❤️") stays in the line.
+  const joined = adPlain(text).replace(/\p{Mn}/gu, "");
+  for (const [word] of `${text} ${text.normalize("NFKC")} ${adPlain(text)} ${joined}`.matchAll(/\p{L}+/gu)) {
     if (!/\p{Script=Latin}/u.test(word)) continue;
     if (/\p{Script=Cyrillic}/u.test(word) || GREEK_LOOKALIKES.test(word)) return word;
   }

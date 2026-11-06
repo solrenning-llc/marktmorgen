@@ -1,0 +1,1502 @@
+Final evidence only; the original16 intentionally misses four moved SET boundaries, not four product failures. Exploratory lost-EVAL results excluded; final lost-restore targets actual fallback SET.
+
+=== /tmp/g1929-harmonized-core.log ===
+=== g1929-title-summary-history-original.proof.ts ===
+{
+  field: 'title',
+  phase: 'normal',
+  hit: 0,
+  value: 'Suggested title',
+  history: [ { id: '8108832d1ea7beaf', undone: undefined } ]
+}
+  ok    title/normal: boundary
+  ok    title: normal writer actually changed the field
+  ok    title/normal: real effect has matching durable history
+{
+  field: 'title',
+  phase: 'confirm-unknown',
+  hit: 0,
+  value: 'Suggested title',
+  history: [ { id: '8eba044e1703d1d1', undone: undefined } ]
+}
+  FAIL  title/confirm-unknown: boundary
+        expected 1
+        got      0
+  ok    title/confirm-unknown: real effect has matching durable history
+  ok    title: initial confirmation actually applied
+{
+  field: 'title',
+  phase: 'undo-unknown',
+  hit: 0,
+  value: 'Original title',
+  history: [ { id: '8c8c370f0b9ac388', undone: [Object] } ]
+}
+  FAIL  title/undo-unknown: boundary
+        expected 1
+        got      0
+  ok    title/undo-unknown: real effect has matching durable history
+{
+  field: 'summary',
+  phase: 'normal',
+  hit: 0,
+  value: 'Suggested summary',
+  history: [ { id: '4813aa3b8e326580', undone: undefined } ]
+}
+  ok    summary/normal: boundary
+  ok    summary: normal writer actually changed the field
+  ok    summary/normal: real effect has matching durable history
+{
+  field: 'summary',
+  phase: 'confirm-unknown',
+  hit: 0,
+  value: 'Suggested summary',
+  history: [ { id: '0188351c12ac1435', undone: undefined } ]
+}
+  FAIL  summary/confirm-unknown: boundary
+        expected 1
+        got      0
+  ok    summary/confirm-unknown: real effect has matching durable history
+  ok    summary: initial confirmation actually applied
+{
+  field: 'summary',
+  phase: 'undo-unknown',
+  hit: 0,
+  value: 'Original summary',
+  history: [ { id: '6be44397e87297d7', undone: [Object] } ]
+}
+  FAIL  summary/undo-unknown: boundary
+        expected 1
+        got      0
+  ok    summary/undo-unknown: real effect has matching durable history
+
+16 checks, 4 failing.
+
+=== g1929-title-summary-history-eval.proof.ts ===
+{
+  field: 'title',
+  phase: 'normal',
+  hit: 0,
+  value: 'Suggested title',
+  history: [ { id: '6231b2e4bb998646', undone: undefined } ]
+}
+  ok    title/normal: boundary
+  ok    title: normal writer actually changed the field
+  ok    title/normal: real effect has matching durable history
+{
+  field: 'title',
+  phase: 'confirm-unknown',
+  hit: 1,
+  value: 'Suggested title',
+  history: [ { id: '87df23f7aac638a4', undone: undefined } ]
+}
+  ok    title/confirm-unknown: boundary
+  ok    title/confirm-unknown: real effect has matching durable history
+  ok    title: initial confirmation actually applied
+{
+  field: 'title',
+  phase: 'undo-unknown',
+  hit: 1,
+  value: 'Suggested title',
+  history: [ { id: 'f8975a1d4613c125', undone: undefined } ]
+}
+  ok    title/undo-unknown: boundary
+  ok    title/undo-unknown: real effect has matching durable history
+{
+  field: 'summary',
+  phase: 'normal',
+  hit: 0,
+  value: 'Suggested summary',
+  history: [ { id: '8de6ed637f09f72e', undone: undefined } ]
+}
+  ok    summary/normal: boundary
+  ok    summary: normal writer actually changed the field
+  ok    summary/normal: real effect has matching durable history
+{
+  field: 'summary',
+  phase: 'confirm-unknown',
+  hit: 1,
+  value: 'Suggested summary',
+  history: [ { id: '7e3fc18b099d026f', undone: undefined } ]
+}
+  ok    summary/confirm-unknown: boundary
+  ok    summary/confirm-unknown: real effect has matching durable history
+  ok    summary: initial confirmation actually applied
+{
+  field: 'summary',
+  phase: 'undo-unknown',
+  hit: 1,
+  value: 'Suggested summary',
+  history: [ { id: 'eadc336e86202d66', undone: undefined } ]
+}
+  ok    summary/undo-unknown: boundary
+  ok    summary/undo-unknown: real effect has matching durable history
+
+16 checks, all passing.
+
+=== g-1856-book-effects-eval.proof.ts ===
+
+Normal product confirmation and undo keep their durable history
+  ok    normal confirmation effect and history agree
+  ok    normal undo effect and history agree
+
+Confirmation's product effect must have a durable history: throw-before
+G confirmation boundary throw-before  { value: 'Agent 48476447c5', waiting: 0, history: 1 }
+  ok    throw-before: final book boundary actually reached
+  ok    throw-before: effect is absent or durably recorded
+
+Confirmation's product effect must have a durable history: empty-before
+G confirmation boundary empty-before  { value: 'Agent 00a216f605', waiting: 0, history: 1 }
+  ok    empty-before: final book boundary actually reached
+  ok    empty-before: effect is absent or durably recorded
+
+Confirmation's product effect must have a durable history: empty-after
+G confirmation boundary empty-after  { value: 'Agent e323e95e6a', waiting: 0, history: 1 }
+  ok    empty-after: final book boundary actually reached
+  ok    empty-after: effect is absent or durably recorded
+
+An undo whose final history write fails cannot leave an unrecorded undo
+  ok    undo failure was reached
+  ok    restored text is durably marked undone
+
+A slow real confirmation cannot erase a successor's real history after the lease expires
+  ok    successor really confirmed the other product
+G expired lease {
+  waiting: [],
+  history: [ 'ba9069343677fb09', 'c94f64328042fb04' ],
+  successor: 'ba9069343677fb09'
+}
+  ok    both actual product changes landed
+  ok    successor history remains after late writer
+  ok    a confirmed successor never returns to waiting
+
+Unknown SET NX is never ownership of somebody else's book lock
+  ok    native-busy: control or one unknown reply
+  ok    native-busy: another holder remains owner
+  ok    native-busy: product never changes without confirmed ownership
+  ok    empty-reply: control or one unknown reply
+  ok    empty-reply: another holder remains owner
+  ok    empty-reply: product never changes without confirmed ownership
+
+20 checks, all passing.
+
+=== g-1856-undo-lost-ack.proof.ts ===
+
+Normal product confirmation and undo keep their durable history
+  ok    normal confirmation effect and history agree
+  ok    normal undo effect and history agree
+
+Confirmation's product effect must have a durable history: throw-before
+G confirmation boundary throw-before  { value: 'Agent f513ed4fae', waiting: 0, history: 1 }
+  ok    throw-before: final book boundary actually reached
+  ok    throw-before: effect is absent or durably recorded
+
+Confirmation's product effect must have a durable history: empty-before
+G confirmation boundary empty-before  { value: 'Agent 525e873006', waiting: 0, history: 1 }
+  ok    empty-before: final book boundary actually reached
+  ok    empty-before: effect is absent or durably recorded
+
+Confirmation's product effect must have a durable history: empty-after
+G confirmation boundary empty-after  { value: 'Agent 10872b70b6', waiting: 0, history: 1 }
+  ok    empty-after: final book boundary actually reached
+  ok    empty-after: effect is absent or durably recorded
+
+An undo whose final history write fails cannot leave an unrecorded undo
+  ok    undo failure was reached
+  ok    restored text is durably marked undone
+
+Return: description restoration applied but reply lost
+G restore reply throw-before {
+  value: 'Agent ad2b8fcd8c',
+  undone: false,
+  answer: { ok: false, error: 'failed' },
+  error: '',
+  injected: 1
+}
+  ok    throw-before: restore boundary reached
+  ok    throw-before: actual effect control
+  ok    throw-before: restore never loses durable undo mark
+G restore reply empty-after {
+  value: 'Original 172f692ca5',
+  undone: true,
+  answer: { ok: true },
+  error: '',
+  injected: 1
+}
+  ok    empty-after: restore boundary reached
+  ok    empty-after: actual effect control
+  ok    empty-after: restore never loses durable undo mark
+G restore reply throw-after {
+  value: 'Original 44dc9021e6',
+  undone: true,
+  answer: { ok: true },
+  error: '',
+  injected: 1
+}
+  ok    throw-after: restore boundary reached
+  ok    throw-after: actual effect control
+  ok    throw-after: restore never loses durable undo mark
+
+A slow real confirmation cannot erase a successor's real history after the lease expires
+  ok    successor really confirmed the other product
+G expired lease {
+  waiting: [],
+  history: [ '65f30d11c8c8d3e6', '93481bd46c5ff0ba' ],
+  successor: '65f30d11c8c8d3e6'
+}
+  ok    both actual product changes landed
+  ok    successor history remains after late writer
+  ok    a confirmed successor never returns to waiting
+
+Unknown SET NX is never ownership of somebody else's book lock
+  ok    native-busy: control or one unknown reply
+  ok    native-busy: another holder remains owner
+  ok    native-busy: product never changes without confirmed ownership
+  ok    empty-reply: control or one unknown reply
+  ok    empty-reply: another holder remains owner
+  ok    empty-reply: product never changes without confirmed ownership
+
+29 checks, all passing.
+putting back an agent's change could not be confirmed Error: G restore refused before application
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/3.cjs:9152:44)
+    at redisPipeline (/tmp/g-2681-proof-BRUtaw/3.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/3.cjs:8241:23)
+    at async Object.write (/tmp/g-2681-proof-BRUtaw/3.cjs:8880:21)
+    at async /tmp/g-2681-proof-BRUtaw/3.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/3.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/3.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/3.cjs:9161:17)
+putting back an agent's change could not be confirmed Error: a description's write could not be confirmed
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/3.cjs:8250:9)
+    at async Object.write (/tmp/g-2681-proof-BRUtaw/3.cjs:8880:21)
+    at async /tmp/g-2681-proof-BRUtaw/3.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/3.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/3.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/3.cjs:9161:17)
+putting back an agent's change could not be confirmed Error: G restore reply lost after application
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/3.cjs:9154:43)
+    at async writeAboutIf (/tmp/g-2681-proof-BRUtaw/3.cjs:8241:17)
+    at async Object.write (/tmp/g-2681-proof-BRUtaw/3.cjs:8880:21)
+    at async /tmp/g-2681-proof-BRUtaw/3.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/3.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/3.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/3.cjs:9161:17)
+
+=== g-1856-empty-readback.proof.ts ===
+
+Normal product confirmation and undo keep their durable history
+  ok    normal confirmation effect and history agree
+  ok    normal undo effect and history agree
+
+Confirmation's product effect must have a durable history: throw-before
+G confirmation boundary throw-before  { value: 'Agent e9903494b4', waiting: 0, history: 1 }
+  ok    throw-before: final book boundary actually reached
+  ok    throw-before: effect is absent or durably recorded
+
+Confirmation's product effect must have a durable history: empty-before
+G confirmation boundary empty-before  { value: 'Agent c5b12fefe6', waiting: 0, history: 1 }
+  ok    empty-before: final book boundary actually reached
+  ok    empty-before: effect is absent or durably recorded
+
+Confirmation's product effect must have a durable history: empty-after
+G confirmation boundary empty-after  { value: 'Agent 10c768c907', waiting: 0, history: 1 }
+  ok    empty-after: final book boundary actually reached
+  ok    empty-after: effect is absent or durably recorded
+
+An undo whose final history write fails cannot leave an unrecorded undo
+  ok    undo failure was reached
+  ok    restored text is durably marked undone
+
+Return: description restoration applied but reply lost
+G restore reply throw-before {
+  value: 'Agent 0167530070',
+  undone: false,
+  answer: { ok: false, error: 'failed' },
+  error: '',
+  injected: 1
+}
+  ok    throw-before: restore boundary reached
+  ok    throw-before: actual effect control
+  ok    throw-before: restore never loses durable undo mark
+G restore reply empty-after {
+  value: 'Original b665d346b7',
+  undone: true,
+  answer: { ok: true },
+  error: '',
+  injected: 1
+}
+  ok    empty-after: restore boundary reached
+  ok    empty-after: actual effect control
+  ok    empty-after: restore never loses durable undo mark
+G restore reply throw-after {
+  value: 'Original e6a7205324',
+  undone: true,
+  answer: { ok: true },
+  error: '',
+  injected: 1
+}
+  ok    throw-after: restore boundary reached
+  ok    throw-after: actual effect control
+  ok    throw-after: restore never loses durable undo mark
+
+Return: unknown readback cannot certify an empty restoration
+G empty readback missing-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 4b6b01efc5',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    missing-slot: both real boundaries reached
+  ok    missing-slot: actual write control
+  ok    missing-slot: success only for a verified actual restoration
+G empty readback number-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 21f87d55f4',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    number-slot: both real boundaries reached
+  ok    number-slot: actual write control
+  ok    number-slot: success only for a verified actual restoration
+G empty readback object-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 9c32fa3139',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    object-slot: both real boundaries reached
+  ok    object-slot: actual write control
+  ok    object-slot: success only for a verified actual restoration
+G empty readback throw-read {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 9fd26f46b1',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    throw-read: both real boundaries reached
+  ok    throw-read: actual write control
+  ok    throw-read: success only for a verified actual restoration
+G empty readback exact-after {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 68b90c28a9',
+  answer: { ok: false, error: 'failed' },
+  error: '',
+  undone: false
+}
+  ok    exact-after: both real boundaries reached
+  ok    exact-after: actual write control
+  ok    exact-after: success only for a verified actual restoration
+G empty readback applied-absent {
+  writes: 1,
+  reads: 1,
+  value: '',
+  answer: { ok: true },
+  error: '',
+  undone: true
+}
+  ok    applied-absent: both real boundaries reached
+  ok    applied-absent: actual write control
+  ok    applied-absent: success only for a verified actual restoration
+
+A slow real confirmation cannot erase a successor's real history after the lease expires
+  ok    successor really confirmed the other product
+G expired lease {
+  waiting: [],
+  history: [ 'da2a885b45d6432b', 'ea9e3787b4ac555d' ],
+  successor: 'da2a885b45d6432b'
+}
+  ok    both actual product changes landed
+  ok    successor history remains after late writer
+  ok    a confirmed successor never returns to waiting
+
+Unknown SET NX is never ownership of somebody else's book lock
+  ok    native-busy: control or one unknown reply
+  ok    native-busy: another holder remains owner
+  ok    native-busy: product never changes without confirmed ownership
+  ok    empty-reply: control or one unknown reply
+  ok    empty-reply: another holder remains owner
+  ok    empty-reply: product never changes without confirmed ownership
+
+47 checks, all passing.
+putting back an agent's change could not be confirmed Error: G restore refused before application
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:9152:44)
+    at redisPipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8241:23)
+    at async Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:21)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9161:17)
+putting back an agent's change could not be confirmed Error: a description's write could not be confirmed
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8250:9)
+    at async Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:21)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9161:17)
+putting back an agent's change could not be confirmed Error: G restore reply lost after application
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:9154:43)
+    at async writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8241:17)
+    at async Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:21)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9161:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:27)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9195:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:27)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9195:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:27)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9195:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:27)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9195:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:27)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9195:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-BRUtaw/4.cjs:9182:15)
+    at async writeAboutIf (/tmp/g-2681-proof-BRUtaw/4.cjs:8241:17)
+    at async Object.write (/tmp/g-2681-proof-BRUtaw/4.cjs:8880:21)
+    at async /tmp/g-2681-proof-BRUtaw/4.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-BRUtaw/4.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-BRUtaw/4.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-BRUtaw/4.cjs:9195:17)
+
+=== review-i2-agent-confirmation.test.ts ===
+{"case":"partial-read","reply":[],"second":{"content":[{"type":"text","text":"{\n  \"error\": \"The proposal could not be kept just now. Try again in a moment.\"\n}"}],"isError":true}}
+✔ partial book read cannot erase a different waiting proposal: 0 (38.058376ms)
+{"case":"partial-read","reply":[null],"second":{"content":[{"type":"text","text":"{\n  \"error\": \"The proposal could not be kept just now. Try again in a moment.\"\n}"}],"isError":true}}
+✔ partial book read cannot erase a different waiting proposal: 1 (14.720861ms)
+✔ a book write without acknowledgement cannot be reported as a kept proposal (7.234609ms)
+{"case":"concurrent-edit","edited":true,"result":{"done":[],"refused":[{"id":"5af3ec0616735ea2","why":"changed_since"}]}}
+✔ a real product edit between snapshot and book lock is not overwritten by confirmation (8.565541ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 76.059
+proposing a summary failed Error: the agent book could not be read
+    at readBook (/tmp/g-2681-proof-BRUtaw/5.cjs:8362:111)
+    at async changeBook (/tmp/g-2681-proof-BRUtaw/5.cjs:8398:18)
+    at async keep (/tmp/g-2681-proof-BRUtaw/5.cjs:8887:18)
+    at async TestContext.<anonymous> (/tmp/g-2681-proof-BRUtaw/5.cjs:8973:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+proposing a summary failed Error: the agent book could not be read
+    at readBook (/tmp/g-2681-proof-BRUtaw/5.cjs:8362:111)
+    at async changeBook (/tmp/g-2681-proof-BRUtaw/5.cjs:8398:18)
+    at async keep (/tmp/g-2681-proof-BRUtaw/5.cjs:8887:18)
+    at async TestContext.<anonymous> (/tmp/g-2681-proof-BRUtaw/5.cjs:8973:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+proposing a title failed BookWriteUnconfirmed: the agent book's write could not be confirmed
+    at changeBook (/tmp/g-2681-proof-BRUtaw/5.cjs:8400:79)
+    at async keep (/tmp/g-2681-proof-BRUtaw/5.cjs:8887:18)
+    at async TestContext.<anonymous> (/tmp/g-2681-proof-BRUtaw/5.cjs:8988:14)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+
+=== /tmp/g1929-harmonized-red.log ===
+=== g1929-title-summary-history-eval.proof.ts ===
+{
+  field: 'title',
+  phase: 'normal',
+  hit: 0,
+  value: 'Suggested title',
+  history: [ { id: '8031cc5ad4468d1e', undone: undefined } ]
+}
+  ok    title/normal: boundary
+  ok    title: normal writer actually changed the field
+  ok    title/normal: real effect has matching durable history
+{
+  field: 'title',
+  phase: 'confirm-unknown',
+  hit: 1,
+  value: 'Suggested title',
+  history: []
+}
+  ok    title/confirm-unknown: boundary
+  FAIL  title/confirm-unknown: real effect has matching durable history
+        expected true
+        got      false
+  ok    title: initial confirmation actually applied
+{
+  field: 'title',
+  phase: 'undo-unknown',
+  hit: 1,
+  value: 'Original title',
+  history: [ { id: '3e84cf5e0f8082f2', undone: undefined } ]
+}
+  ok    title/undo-unknown: boundary
+  FAIL  title/undo-unknown: real effect has matching durable history
+        expected true
+        got      false
+{
+  field: 'summary',
+  phase: 'normal',
+  hit: 0,
+  value: 'Suggested summary',
+  history: [ { id: 'a8559827dd506f68', undone: undefined } ]
+}
+  ok    summary/normal: boundary
+  ok    summary: normal writer actually changed the field
+  ok    summary/normal: real effect has matching durable history
+{
+  field: 'summary',
+  phase: 'confirm-unknown',
+  hit: 1,
+  value: 'Suggested summary',
+  history: []
+}
+  ok    summary/confirm-unknown: boundary
+  FAIL  summary/confirm-unknown: real effect has matching durable history
+        expected true
+        got      false
+  ok    summary: initial confirmation actually applied
+{
+  field: 'summary',
+  phase: 'undo-unknown',
+  hit: 1,
+  value: 'Original summary',
+  history: [ { id: 'a4683403e119849d', undone: undefined } ]
+}
+  ok    summary/undo-unknown: boundary
+  FAIL  summary/undo-unknown: real effect has matching durable history
+        expected true
+        got      false
+
+16 checks, 4 failing.
+
+
+=== /tmp/g1929-harmonized-lost-final.log ===
+=== g1929-lost-title-summary.proof.ts ===
+  ok    title/normal: initial confirmation real
+  ok    title/normal: no tolerant reconciliation hook
+{
+  field: 'title',
+  mode: 'normal',
+  hit: 0,
+  answer: { ok: true },
+  value: 'Original title',
+  marked: true
+}
+  ok    title/normal: boundary
+  ok    title/normal: success only with confirmation
+  ok    title/normal: actual persisted value
+  ok    title/normal: uncertain restore never loses durable mark
+  ok    title/before-product-batch: initial confirmation real
+  ok    title/before-product-batch: no tolerant reconciliation hook
+{
+  field: 'title',
+  mode: 'before-product-batch',
+  hit: 1,
+  answer: 'BookWriteUnconfirmed',
+  value: 'Suggested title',
+  marked: true
+}
+  ok    title/before-product-batch: boundary
+  ok    title/before-product-batch: success only with confirmation
+  ok    title/before-product-batch: actual persisted value
+  ok    title/before-product-batch: uncertain restore never loses durable mark
+  ok    title/applied-owner-acklost: initial confirmation real
+  ok    title/applied-owner-acklost: no tolerant reconciliation hook
+{
+  field: 'title',
+  mode: 'applied-owner-acklost',
+  hit: 1,
+  answer: 'BookWriteUnconfirmed',
+  value: 'Original title',
+  marked: true
+}
+  ok    title/applied-owner-acklost: boundary
+  ok    title/applied-owner-acklost: success only with confirmation
+  ok    title/applied-owner-acklost: actual persisted value
+  ok    title/applied-owner-acklost: uncertain restore never loses durable mark
+  ok    summary/normal: initial confirmation real
+  ok    summary/normal: no tolerant reconciliation hook
+{
+  field: 'summary',
+  mode: 'normal',
+  hit: 0,
+  answer: { ok: true },
+  value: 'Original summary',
+  marked: true
+}
+  ok    summary/normal: boundary
+  ok    summary/normal: success only with confirmation
+  ok    summary/normal: actual persisted value
+  ok    summary/normal: uncertain restore never loses durable mark
+  ok    summary/before-product-batch: initial confirmation real
+  ok    summary/before-product-batch: no tolerant reconciliation hook
+{
+  field: 'summary',
+  mode: 'before-product-batch',
+  hit: 1,
+  answer: 'BookWriteUnconfirmed',
+  value: 'Suggested summary',
+  marked: true
+}
+  ok    summary/before-product-batch: boundary
+  ok    summary/before-product-batch: success only with confirmation
+  ok    summary/before-product-batch: actual persisted value
+  ok    summary/before-product-batch: uncertain restore never loses durable mark
+  ok    summary/applied-owner-acklost: initial confirmation real
+  ok    summary/applied-owner-acklost: no tolerant reconciliation hook
+{
+  field: 'summary',
+  mode: 'applied-owner-acklost',
+  hit: 1,
+  answer: 'BookWriteUnconfirmed',
+  value: 'Original summary',
+  marked: true
+}
+  ok    summary/applied-owner-acklost: boundary
+  ok    summary/applied-owner-acklost: success only with confirmation
+  ok    summary/applied-owner-acklost: actual persisted value
+  ok    summary/applied-owner-acklost: uncertain restore never loses durable mark
+
+36 checks, all passing.
+putting back an agent's change could not be confirmed Error: G before restore product batch
+    at store.pipeline (/tmp/g-2681-proof-wQh9L9/0.cjs:9078:15)
+    at redisPipeline (/tmp/g-2681-proof-wQh9L9/0.cjs:2892:41)
+    at runWrites (/tmp/g-2681-proof-wQh9L9/0.cjs:7020:11)
+    at commit (/tmp/g-2681-proof-wQh9L9/0.cjs:7950:9)
+    at async save (/tmp/g-2681-proof-wQh9L9/0.cjs:7974:17)
+    at async /tmp/g-2681-proof-wQh9L9/0.cjs:8088:19
+    at async withStore (/tmp/g-2681-proof-wQh9L9/0.cjs:7977:12)
+    at async onProduct (/tmp/g-2681-proof-wQh9L9/0.cjs:8083:18)
+    at async setProductTitle (/tmp/g-2681-proof-wQh9L9/0.cjs:8182:18)
+    at async Object.write (/tmp/g-2681-proof-wQh9L9/0.cjs:8898:21)
+putting back an agent's change could not be confirmed StoreBusyError: store_busy
+    at commit (/tmp/g-2681-proof-wQh9L9/0.cjs:7951:50)
+    at async save (/tmp/g-2681-proof-wQh9L9/0.cjs:7974:17)
+    at async /tmp/g-2681-proof-wQh9L9/0.cjs:8088:19
+    at async withStore (/tmp/g-2681-proof-wQh9L9/0.cjs:7977:12)
+    at async onProduct (/tmp/g-2681-proof-wQh9L9/0.cjs:8083:18)
+    at async setProductTitle (/tmp/g-2681-proof-wQh9L9/0.cjs:8182:18)
+    at async Object.write (/tmp/g-2681-proof-wQh9L9/0.cjs:8898:21)
+    at async /tmp/g-2681-proof-wQh9L9/0.cjs:9000:25
+    at async undoDone (/tmp/g-2681-proof-wQh9L9/0.cjs:8494:24)
+    at async main (/tmp/g-2681-proof-wQh9L9/0.cjs:9088:17)
+putting back an agent's change could not be confirmed Error: G before restore product batch
+    at store.pipeline (/tmp/g-2681-proof-wQh9L9/0.cjs:9078:15)
+    at redisPipeline (/tmp/g-2681-proof-wQh9L9/0.cjs:2892:41)
+    at runWrites (/tmp/g-2681-proof-wQh9L9/0.cjs:7020:11)
+    at commit (/tmp/g-2681-proof-wQh9L9/0.cjs:7950:9)
+    at async save (/tmp/g-2681-proof-wQh9L9/0.cjs:7974:17)
+    at async /tmp/g-2681-proof-wQh9L9/0.cjs:8088:19
+    at async withStore (/tmp/g-2681-proof-wQh9L9/0.cjs:7977:12)
+    at async onProduct (/tmp/g-2681-proof-wQh9L9/0.cjs:8083:18)
+    at async setProductSummary (/tmp/g-2681-proof-wQh9L9/0.cjs:8191:18)
+    at async Object.write (/tmp/g-2681-proof-wQh9L9/0.cjs:8916:21)
+putting back an agent's change could not be confirmed StoreBusyError: store_busy
+    at commit (/tmp/g-2681-proof-wQh9L9/0.cjs:7951:50)
+    at async save (/tmp/g-2681-proof-wQh9L9/0.cjs:7974:17)
+    at async /tmp/g-2681-proof-wQh9L9/0.cjs:8088:19
+    at async withStore (/tmp/g-2681-proof-wQh9L9/0.cjs:7977:12)
+    at async onProduct (/tmp/g-2681-proof-wQh9L9/0.cjs:8083:18)
+    at async setProductSummary (/tmp/g-2681-proof-wQh9L9/0.cjs:8191:18)
+    at async Object.write (/tmp/g-2681-proof-wQh9L9/0.cjs:8916:21)
+    at async /tmp/g-2681-proof-wQh9L9/0.cjs:9000:25
+    at async undoDone (/tmp/g-2681-proof-wQh9L9/0.cjs:8494:24)
+    at async main (/tmp/g-2681-proof-wQh9L9/0.cjs:9088:17)
+
+
+=== /tmp/g1929-harmonized-exact65.log ===
+=== g-1856-exact-readback-transport.proof.ts ===
+
+Normal product confirmation and undo keep their durable history
+  ok    normal confirmation effect and history agree
+  ok    normal undo effect and history agree
+
+Confirmation's product effect must have a durable history: throw-before
+G confirmation boundary throw-before  { value: 'Agent 763d8bc951', waiting: 0, history: 1 }
+  ok    throw-before: final book boundary actually reached
+  ok    throw-before: effect is absent or durably recorded
+
+Confirmation's product effect must have a durable history: empty-before
+G confirmation boundary empty-before  { value: 'Agent bbf305d6af', waiting: 0, history: 1 }
+  ok    empty-before: final book boundary actually reached
+  ok    empty-before: effect is absent or durably recorded
+
+Confirmation's product effect must have a durable history: empty-after
+G confirmation boundary empty-after  { value: 'Agent c00f161c1c', waiting: 0, history: 1 }
+  ok    empty-after: final book boundary actually reached
+  ok    empty-after: effect is absent or durably recorded
+
+An undo whose final history write fails cannot leave an unrecorded undo
+  ok    undo failure was reached
+  ok    restored text is durably marked undone
+
+Return: description restoration applied but reply lost
+G restore reply throw-before {
+  value: 'Agent 21565d9969',
+  undone: false,
+  answer: { ok: false, error: 'failed' },
+  error: '',
+  injected: 1
+}
+  ok    throw-before: restore boundary reached
+  ok    throw-before: actual effect control
+  ok    throw-before: restore never loses durable undo mark
+G restore reply empty-after {
+  value: 'Original f87e51bccc',
+  undone: true,
+  answer: { ok: true },
+  error: '',
+  injected: 1
+}
+  ok    empty-after: restore boundary reached
+  ok    empty-after: actual effect control
+  ok    empty-after: restore never loses durable undo mark
+G restore reply throw-after {
+  value: 'Original f6b1fb4591',
+  undone: true,
+  answer: { ok: true },
+  error: '',
+  injected: 1
+}
+  ok    throw-after: restore boundary reached
+  ok    throw-after: actual effect control
+  ok    throw-after: restore never loses durable undo mark
+
+Return: unknown readback cannot certify an empty restoration
+G empty readback missing-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent bf678076af',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    missing-slot: both real boundaries reached
+  ok    missing-slot: actual write control
+  ok    missing-slot: success only for a verified actual restoration
+G empty readback number-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 43a9a4c9aa',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    number-slot: both real boundaries reached
+  ok    number-slot: actual write control
+  ok    number-slot: success only for a verified actual restoration
+G empty readback object-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent a774de52bb',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    object-slot: both real boundaries reached
+  ok    object-slot: actual write control
+  ok    object-slot: success only for a verified actual restoration
+G empty readback throw-read {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 07f9eea0c8',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    throw-read: both real boundaries reached
+  ok    throw-read: actual write control
+  ok    throw-read: success only for a verified actual restoration
+G empty readback exact-after {
+  writes: 1,
+  reads: 1,
+  value: 'Agent f068a92a3e',
+  answer: { ok: false, error: 'failed' },
+  error: '',
+  undone: false
+}
+  ok    exact-after: both real boundaries reached
+  ok    exact-after: actual write control
+  ok    exact-after: success only for a verified actual restoration
+G empty readback applied-absent {
+  writes: 1,
+  reads: 1,
+  value: '',
+  answer: { ok: true },
+  error: '',
+  undone: true
+}
+  ok    applied-absent: both real boundaries reached
+  ok    applied-absent: actual write control
+  ok    applied-absent: success only for a verified actual restoration
+G empty readback extra-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent fa09eb7323',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    extra-slot: both real boundaries reached
+  ok    extra-slot: actual write control
+  ok    extra-slot: success only for a verified actual restoration
+G empty readback hole {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 056fc4ff78',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    hole: both real boundaries reached
+  ok    hole: actual write control
+  ok    hole: success only for a verified actual restoration
+G empty readback bool-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 3d08eff332',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    bool-slot: both real boundaries reached
+  ok    bool-slot: actual write control
+  ok    bool-slot: success only for a verified actual restoration
+G empty readback nested-slot {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 65446150dd',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    nested-slot: both real boundaries reached
+  ok    nested-slot: actual write control
+  ok    nested-slot: success only for a verified actual restoration
+G empty readback not-array {
+  writes: 1,
+  reads: 1,
+  value: 'Agent df3054985c',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    not-array: both real boundaries reached
+  ok    not-array: actual write control
+  ok    not-array: success only for a verified actual restoration
+G empty readback null-envelope {
+  writes: 1,
+  reads: 1,
+  value: 'Agent 41b689b320',
+  answer: null,
+  error: 'BookWriteUnconfirmed',
+  undone: true
+}
+  ok    null-envelope: both real boundaries reached
+  ok    null-envelope: actual write control
+  ok    null-envelope: success only for a verified actual restoration
+
+A slow real confirmation cannot erase a successor's real history after the lease expires
+  ok    successor really confirmed the other product
+G expired lease {
+  waiting: [],
+  history: [ 'ac47f3a77d502263', '7e6d67b780965508' ],
+  successor: 'ac47f3a77d502263'
+}
+  ok    both actual product changes landed
+  ok    successor history remains after late writer
+  ok    a confirmed successor never returns to waiting
+
+Unknown SET NX is never ownership of somebody else's book lock
+  ok    native-busy: control or one unknown reply
+  ok    native-busy: another holder remains owner
+  ok    native-busy: product never changes without confirmed ownership
+  ok    empty-reply: control or one unknown reply
+  ok    empty-reply: another holder remains owner
+  ok    empty-reply: product never changes without confirmed ownership
+
+65 checks, all passing.
+putting back an agent's change could not be confirmed Error: G restore refused before application
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9152:44)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at async Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:21)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9161:17)
+putting back an agent's change could not be confirmed Error: a description's write could not be confirmed
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8250:9)
+    at async Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:21)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9161:17)
+putting back an agent's change could not be confirmed Error: G restore reply lost after application
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9154:43)
+    at async writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:17)
+    at async Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:21)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9161:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at async writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:17)
+    at async Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:21)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+putting back an agent's change could not be confirmed Error: G restore acknowledgement unavailable
+    at store.pipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:9182:15)
+    at redisPipeline (/tmp/g-2681-proof-tuxF9b/0.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-tuxF9b/0.cjs:8241:23)
+    at Object.write (/tmp/g-2681-proof-tuxF9b/0.cjs:8880:27)
+    at async /tmp/g-2681-proof-tuxF9b/0.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-tuxF9b/0.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-tuxF9b/0.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-tuxF9b/0.cjs:9201:17)
+
+
+=== /tmp/g1929-harmonized-types-final.log ===
+
+=== /tmp/g1929-harmonized-lint.log ===
+
+=== /tmp/g1929-harmonized-scanner.log ===
+Public data check: 3278 tracked files; 0 file(s) require correction.
+
+=== linked groups (exploratory own proof excluded) ===
+=== agent-book-durable.test.ts ===
+
+Normal product confirmation and undo keep their history
+  ok    confirmation: effect and history agree
+  ok    undo: effect and history agree
+
+A confirmation whose book write is not confirmed is recorded again: throw-before
+  ok    throw-before: the book write was reached once
+  ok    throw-before: the change is applied and in the history, once, and no longer waiting
+
+A confirmation whose book write is not confirmed is recorded again: empty-before
+  ok    empty-before: the book write was reached once
+  ok    empty-before: the change is applied and in the history, once, and no longer waiting
+
+A confirmation whose book write is not confirmed is recorded again: empty-after
+  ok    empty-after: the book write was reached once
+  ok    empty-after: the change is applied and in the history, once, and no longer waiting
+
+A confirmation whose book write is not confirmed is recorded again: zero-before
+  ok    zero-before: the book write was reached once
+  ok    zero-before: the change is applied and in the history, once, and no longer waiting
+
+An undo is marked in the history before anything is put back: a mark that cannot be written puts nothing back
+  ok    throw: the mark's write was reached once, and nothing written after it
+  ok    throw: nothing put back and the history does not say undone
+  ok    throw: tried again, it is put back and marked undone
+  ok    zero: the mark's write was reached once, and nothing written after it
+  ok    zero: nothing put back and the history does not say undone
+  ok    zero: tried again, it is put back and marked undone
+  ok    empty: the mark's write was reached once, and nothing written after it
+  ok    empty: nothing put back and the history does not say undone
+  ok    empty: tried again, it is put back and marked undone
+
+A restore whose answer is lost: what the store holds decides, and a made restore keeps its mark
+  ok    empty-after: the restore's write was reached once
+  ok    empty-after: the history says undone exactly when the text was put back
+  ok    empty-after: answered as the store holds it
+  ok    throw-after: the restore's write was reached once
+  ok    throw-after: the history says undone exactly when the text was put back
+  ok    throw-after: answered as the store holds it
+  ok    throw-before: the restore's write was reached once
+  ok    throw-before: the history says undone exactly when the text was put back
+  ok    throw-before: answered as the store holds it
+
+A lost restore read back in an unknown shape is never taken for a value
+  ok    read back as []: never answered done; the mark kept, said as not confirmed; the text unchanged
+  ok    read back as [17]: never answered done; the mark kept, said as not confirmed; the text unchanged
+  ok    read back as [{}]: never answered done; the mark kept, said as not confirmed; the text unchanged
+
+A restore whose outcome stays unknown keeps the mark and is said as not confirmed
+  ok    not confirmed, and the mark kept
+
+Every write of the book failing: an undo never leaves the text put back without the history saying so
+  ok    the write was tried
+  ok    not done, the text as the history says
+
+Every write of the book failing after a confirmation carried out: confirmed again, it is recorded once, never carried out twice
+  ok    carried out, said as not confirmed, still waiting in the book
+  ok    confirmed again: recorded as done, once, not waiting, and not carried out a second time
+
+A slow confirmation whose lock ran out never writes over a successor's book
+  ok    the successor confirmed the other product
+  ok    the first confirmation still answers done
+  ok    both product changes landed
+  ok    both are in the history, once each, and neither is waiting
+
+An unknown answer to SET NX is never the store's lock
+  ok    native-busy: control or one unknown reply
+  ok    native-busy: the other holder still owns the lock, and the product is unchanged
+  ok    native-busy: answered busy
+  ok    empty-reply: control or one unknown reply
+  ok    empty-reply: the other holder still owns the lock, and the product is unchanged
+  ok    empty-reply: answered busy
+  ok    null-in-list: control or one unknown reply
+  ok    null-in-list: the other holder still owns the lock, and the product is unchanged
+  ok    null-in-list: answered busy
+
+49 checks, all passing.
+putting back an agent's change could not be confirmed Error: a description's write could not be confirmed
+    at writeAboutIf (/tmp/g-2681-proof-lAeEJj/1.cjs:8250:9)
+    at async Object.write (/tmp/g-2681-proof-lAeEJj/1.cjs:8880:21)
+    at async /tmp/g-2681-proof-lAeEJj/1.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-lAeEJj/1.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-lAeEJj/1.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-lAeEJj/1.cjs:9165:11)
+putting back an agent's change could not be confirmed Error: lost after
+    at store.pipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:9158:43)
+    at async writeAboutIf (/tmp/g-2681-proof-lAeEJj/1.cjs:8241:17)
+    at async Object.write (/tmp/g-2681-proof-lAeEJj/1.cjs:8880:21)
+    at async /tmp/g-2681-proof-lAeEJj/1.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-lAeEJj/1.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-lAeEJj/1.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-lAeEJj/1.cjs:9165:11)
+putting back an agent's change could not be confirmed Error: lost before
+    at store.pipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:9156:44)
+    at redisPipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-lAeEJj/1.cjs:8241:23)
+    at async Object.write (/tmp/g-2681-proof-lAeEJj/1.cjs:8880:21)
+    at async /tmp/g-2681-proof-lAeEJj/1.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-lAeEJj/1.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-lAeEJj/1.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-lAeEJj/1.cjs:9165:11)
+putting back an agent's change could not be confirmed Error: refused before
+    at store.pipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:9184:15)
+    at redisPipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-lAeEJj/1.cjs:8241:23)
+    at async Object.write (/tmp/g-2681-proof-lAeEJj/1.cjs:8880:21)
+    at async /tmp/g-2681-proof-lAeEJj/1.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-lAeEJj/1.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-lAeEJj/1.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-lAeEJj/1.cjs:9194:11)
+putting back an agent's change could not be confirmed Error: refused before
+    at store.pipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:9184:15)
+    at redisPipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-lAeEJj/1.cjs:8241:23)
+    at async Object.write (/tmp/g-2681-proof-lAeEJj/1.cjs:8880:21)
+    at async /tmp/g-2681-proof-lAeEJj/1.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-lAeEJj/1.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-lAeEJj/1.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-lAeEJj/1.cjs:9194:11)
+putting back an agent's change could not be confirmed Error: refused before
+    at store.pipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:9184:15)
+    at redisPipeline (/tmp/g-2681-proof-lAeEJj/1.cjs:2892:41)
+    at writeAboutIf (/tmp/g-2681-proof-lAeEJj/1.cjs:8241:23)
+    at async Object.write (/tmp/g-2681-proof-lAeEJj/1.cjs:8880:21)
+    at async /tmp/g-2681-proof-lAeEJj/1.cjs:8999:25
+    at async undoDone (/tmp/g-2681-proof-lAeEJj/1.cjs:8500:24)
+    at async outcome (/tmp/g-2681-proof-lAeEJj/1.cjs:9085:21)
+    at async main (/tmp/g-2681-proof-lAeEJj/1.cjs:9194:11)
+
+=== agent-book-envelope-evidence.test.ts ===
+  ok    a first proposal is kept
+
+An unknown read of the book is not an empty book
+  ok    GET answering []: the book is unreadable, and nothing is written over it
+  ok    GET answering [undefined]: the book is unreadable, and nothing is written over it
+  ok    GET answering [true]: the book is unreadable, and nothing is written over it
+  ok    GET answering two answers: the book is unreadable, and nothing is written over it
+
+A write of the book that is not confirmed is not a proposal kept
+  ok    SET answering [] (not applied): never answered as kept
+  ok    SET answering [null] (not applied): never answered as kept
+  ok    SET answering [0] (not applied): never answered as kept
+  ok    and a confirmed write still keeps it
+
+9 checks, all passing.
+
+=== agent-confirm-cas-evidence.test.ts ===
+
+A creator's edit made between the read and the lock is never overwritten
+  ok    the edit landed between the read and the lock
+  ok    the confirmation is refused as changed since, and nothing is done
+  ok    the creator's edit stays
+  ok    and the room is what the edit holds
+
+An undo over an edit made after the read is refused too
+  ok    a confirmation with nothing in between goes through
+  ok    the undo is refused as changed since
+  ok    and the creator's newer edit stays
+
+The summary: a creator's edit between the read and the lock stays
+  ok    refused as changed since, the creator's summary kept
+
+8 checks, all passing.
+
+=== agent-propose-title.test.ts ===
+
+Only a key allowed to prepare changes
+  ok    a reading key is refused
+
+Refused before anything is kept
+  ok    an empty title
+  ok    a title too long
+  ok    a promise of fast or easy money on a product on the store
+  ok    the same title is no change
+  ok    nothing kept
+
+Kept, then confirmed, then undone
+  ok    before and after, spaces tidied
+  ok    nothing changed yet
+  ok    confirmed
+  ok    the title changed, and nothing else
+  ok    undone
+  ok    the title is as it was
+
+The summary, the same way
+  ok    a promise of fast or easy money is refused
+  ok    a summary too long is refused
+  ok    kept beside the summary now
+  ok    confirmed: the summary changed, the title and price did not
+  ok    an empty summary takes it off, once confirmed
+
+17 checks, all passing.
+
+=== agent-book.test.ts ===
+
+Kept and read back
+  ok    an empty book to start
+  ok    a proposal is kept
+  ok    no change is refused by the rules
+
+Confirmed: carried out once, kept in the history
+  ok    carried out
+  ok    in the history, nothing waiting
+  ok    confirmed again: unknown, never carried out twice
+
+A failure stays waiting; a decline takes it off
+  ok    could not be carried out: failed, still waiting
+  ok    declined
+
+Undo, through the caller, once
+  ok    the before is put back
+  ok    a second undo is refused
+
+Never an empty book by mistake; one change at a time
+  ok    a book that does not read is not taken for an empty one
+  ok    reading a broken book is an error
+  ok    a second change while one is under way is refused
+
+13 checks, all passing.
+
+=== agent-confirm.test.ts ===
+
+Only the creator, signed in
+  ok    signed out: refused
+  ok    an agent's key is not a session
+  ok    the coverage table says no agent reaches it
+  ok    nothing changed yet
+
+Confirm carries it out, into the history
+  ok    carried out
+  ok    the store's description is the proposed one
+  ok    off the waiting list, into the history with who confirmed it
+
+Decline changes nothing
+  ok    declined
+  ok    the other product is unchanged and nothing waits
+  ok    declining again: not waiting any more
+
+Undo puts it back
+  ok    put back
+  ok    the description is as it was
+  ok    undoing twice is said
+
+Words a product on the store may not hold are never carried out
+  ok    hidden while it is a draft
+  ok    a draft may be proposed such words
+  ok    published again
+  ok    confirming it is refused for its words, and it stays waiting to be declined
+  ok    the product's description is unchanged
+  ok    the studio says why
+  ok    declined
+
+Bad requests
+  ok    nothing chosen
+  ok    unknown action
+
+The page
+  ok    a role that may change settings
+  ok    one heading, the before beside the after, confirm, decline, undo
+
+24 checks, all passing.
+
+=== agent-propose.test.ts ===
+
+Only a key allowed to prepare changes
+  ok    a reading key is refused, with why
+
+Kept as a proposal; nothing changes
+  ok    a proposal is kept for the creator
+  ok    with what is there now and what it would become, and who asked
+  ok    the store's description is unchanged
+  ok    the same text as now is no change
+  ok    an unknown product is said
+  ok    still one proposal waiting
+
+The words the studio refuses are refused here too
+  ok    a promise of fast or easy money on a product on the store
+  ok    a prompt of the ready outline left in
+  ok    neither was kept
+
+10 checks, all passing.
+
+=== agent-proposal-rules.test.ts ===
+
+Equal values read the same whatever the key order
+  ok    canonical sorts keys
+  ok    same value, other order
+  ok    different values differ
+
+Proposing changes nothing in the store
+  ok    the store still holds the old value
+  ok    one proposal waits
+  ok    a change to nothing is refused
+  ok    a change past its kind's size is refused
+  ok    a kind above the ceiling is refused
+  ok    a newer proposal for the same thing replaces the waiting one
+
+Confirmation carries out only what is waiting and still matches
+  ok    an unknown id is refused
+  ok    the replaced proposal cannot be confirmed
+  ok    confirmed: the store holds the new value
+  ok    it left the waiting list
+  ok    the history says who asked, who confirmed and when
+  ok    confirming twice does nothing
+  ok    a preview the store no longer matches is refused
+  ok    and the creator's own change stays
+
+Waiting proposals expire
+  ok    still waiting just before WAITING_DAYS
+  ok    gone at WAITING_DAYS
+
+Batches: drafts together, execute one at a time
+  ok    drafts in a batch are carried out
+  ok    an execute change in a batch is refused
+  ok    alone, the execute change goes
+  ok    a batch past BATCH_MAX is refused whole
+  ok    an unknown kind is never carried out
+
+At most WAITING_MAX waiting
+  ok    one more is refused
+  ok    replacing a waiting one still works
+  ok    declined, there is room again
+  ok    declining an unknown id says so
+
+Undo puts back exactly what was there, once
+  ok    the store holds the old value again
+  ok    the history shows the undo
+  ok    it cannot be undone twice
+  ok    undo never erases a later change
+  ok    past UNDO_DAYS it cannot be undone
+  ok    a kind without undo says so
+  ok    an unknown entry says so
+
+The history is bounded
+  ok    at most HISTORY_MAX entries, newest first
+  ok    entries past HISTORY_DAYS go
+
+37 checks, all passing.
+
+=== agent-coverage.test.ts ===
+
+Every studio action is in the table, and nothing else
+  ok    the scan finds the studio's routes (not an empty or broken scan)
+  ok    studio actions with no row (add one to lib/agent-coverage.ts)
+  ok    rows for actions that are gone
+
+Each row is complete
+  ok    every row has a known area
+  ok    every refusal says why
+  ok    every note says something
+
+Tools named here are served by the MCP server
+  ok    at least one tool is named
+  ok    tools that the MCP server does not serve (lib/mcp-catalog.ts)
+
+Money is never moved by the agent (631 (c))
+  ok    money routes are found
+  ok    money routes that are not "never"
+  ok    money routes are filed under money
+
+The measure
+  ok    counts add up to the table
+  ok    the scanner reads both declaration styles
+  178 studio actions: 10 tool, 10 read, 98 draft, 15 execute, 45 never
+
+13 checks, all passing.
+
+=== g-1856-about-reconcile-race.proof.ts ===
+G actual about room {
+  injected: 1,
+  kept: 4128,
+  expected: 4128,
+  length: 3999,
+  done: [],
+  refused: [ { id: '38d103ff4cedc377', why: 'changed_since' } ]
+}
+  ok    another real studio write occurred in the admission/write gap
+  ok    creator's newer text is preserved by the CAS
+  ok    second real writer ran after CAS before slot reconciliation
+  ok    current text keeps its exact allocated room after rollback
+
+4 checks, all passing.
+
+=== g-1856-about-room.proof.ts ===
+G actual about room {
+  injected: 1,
+  kept: 816,
+  expected: 816,
+  length: 674,
+  done: [],
+  refused: [ { id: '42e1bdabe912ac14', why: 'changed_since' } ]
+}
+  ok    another real studio write occurred in the admission/write gap
+  ok    creator's newer text is preserved by the CAS
+  ok    current text keeps its exact allocated room after rollback
+
+3 checks, all passing.
+

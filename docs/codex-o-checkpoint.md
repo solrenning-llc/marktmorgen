@@ -121,3 +121,11 @@ Branch `codex/o-community-notice-read-evidence`; durable RED `9071b30c1fb21a1536
 - A first buyer-actions attempt used the full path instead of basename in testAliases, so its Blob fixture was not selected and the local no-credential call was refused; corrected runner selected the fixture and passed 9/9. No provider write or external contact occurred.
 - Channel durable status commit: `4b810a93946fa293842b7ab58fc15f3f237f8d14`.
 - Five own slots remain occupied: the three PRs above plus blocked notice RED and blocked device-memory work. Do not open a sixth. Next exact action: inspect new exact-head workflows only after a state change; correct real own failures/findings first; merge each PR only with its qualifying independent review and exactly nine successful aggregators. Never reuse old checks or move heads during active executors.
+
+
+### Exact-head workflow start — 05/11/2026 23h27 Fortaleza
+
+- #2627: all nine fresh runs queued — 42149126769, 42149126809, 42149126596, 42149126595, 42149126830, 42149126737, 42149126690, 42149126727, 42149126707. Revisor 2 focal return still pending.
+- #2629: all nine fresh runs queued — 42149439969, 42149439886, 42149439916, 42149440026, 42149439915, 42149439925, 42149439963, 42149439989, 42149439926. J review applicable; never repeat the consumed macOS retry.
+- #2640: all nine fresh runs queued — 42149667966, 42149667932, 42149667887, 42149667847, 42149667866, 42149667849, 42149667922, 42149667797, 42149667926. P closure applicable.
+- Exact channel stop commit: `f92e1ee03f4271c1ed0072a0d493eb1b93ee533f`. Preserve all three heads while executors are active. AV12: resume only on a state change.

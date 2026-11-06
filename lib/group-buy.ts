@@ -313,11 +313,22 @@ function parseMember(raw: unknown): Member | null {
   }
 }
 
-/** Reads a hash as Redis returns it, a flat list or an object. */
-function values(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) return raw.filter((_, i) => i % 2 === 1);
-  if (raw && typeof raw === "object") return Object.values(raw as Record<string, unknown>);
-  return [];
+/**
+ * A hash's values, read exactly as Redis returns HGETALL (Codex G on #2781; CX-123 rule 30): a flat list of an even
+ * length with every field and value text, or an object whose every value is text. HGETALL answers an empty list,
+ * never null, for a hash with nothing in it, so null, a list of odd length or anything not text is unknown (null),
+ * never "nobody".
+ */
+function hashValues(raw: unknown): string[] | null {
+  if (Array.isArray(raw)) {
+    if (raw.length % 2 !== 0 || !raw.every((item) => typeof item === "string")) return null;
+    return raw.filter((_, i) => i % 2 === 1) as string[];
+  }
+  if (raw && typeof raw === "object") {
+    const all = Object.values(raw as Record<string, unknown>);
+    return all.every((item) => typeof item === "string") ? (all as string[]) : null;
+  }
+  return null;
 }
 
 export type Asked = "sent" | "email" | "gone" | "full" | "slow" | "unavailable" | "resting";
@@ -576,11 +587,13 @@ export async function revokeRefundedGroups(
           if (closed?.[0] !== "OK") return false;
         }
         // Closed already (a run that stopped halfway): the places still held are taken back now.
-        const listed = repliesFor(await redisPipeline([["HGETALL", membersKey(group.id)]]), 1);
-        const members = listed?.[0];
-        if (!listed || (members !== null && typeof members !== "object")) return false;
-        for (const member of values(members).map(parseMember)) {
-          if (!member) continue;
+        // Every place taken, read exactly: a list in another shape, or one place that does not read, is unknown, and
+        // the refund is not marked handled (it waits to be tried again), never "nobody to take back".
+        const members = hashValues(repliesFor(await redisPipeline([["HGETALL", membersKey(group.id)]]), 1)?.[0]);
+        if (!members) return false;
+        const places = members.map(parseMember);
+        if (places.some((member) => !member)) return false;
+        for (const member of places as Member[]) {
           // Only what this purchase gave: an address that also has the product
           // another way keeps that.
           const given = repliesFor(await redisPipeline([["HGET", importedKey(sid, member.e), group.p]]), 1);

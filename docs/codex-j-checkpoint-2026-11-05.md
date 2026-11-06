@@ -1,3 +1,34 @@
+# Codex J — delta autoritativo — 2026-11-06 05:08 UTC
+
+Todo histórico abaixo preservado; prevalece este delta.
+
+- Checkpoint82689 COMPLETO lido. Canal ROTACIONOU0425UTC: FULLarchive406213 no ramo canal-arquivo/docs-arquivo/messages-ate-2026-11-06-0425.md lido desde own01h02 âncora333092; canalnovoFULL100668+novos lidos. Nenhumhistóricorestaurado. OrdemEncantoC10113 lidaoriginal: públicoC4/K2/T, não muda minhafronteirafinanceira/nem autoriza cruzararquivos.
+- API confirmou #2628MERGED8e201d7a74b6109e57d9cbbd6603e73b642749f1/head4e8c90ee. Portugalold797dCI TERMINALcancelled: verifyreplacement127681883719, FULL5.666.196chars/70.875linhas, únicoerroroperationcanceled/semAssertionError/TimeoutError/FAIL; sem novaretry/cancel.
+- **Integração causal UMAvez de main5651ac514b457ef60a02d02cd9e1d1d7f8b076aa nos MESMOS2OWN**, após ambosterminais e repairsV2628+J2746 incorporados. AnúncioANTES8f791a3330b2c1d649b4d9e2187a10bf4b9a4866. NenhumPRnovo/reservadoc/foreignref. NativeGitTREE igualàGitHubbaseMain+2blobsoriginais; diffexatamente2paths/blobsbyteidênticos:
+  - #2594 Irlanda **b11143cb0a8df270e6a56dfc3f92bbb05f2d52e9**, treefb0f4d2a80bd0f05100eb971d7386630f663a445. Paisold7a914e88+5651ac51, update_ref expectedold/forcefalse. C2parecer5781583327 aplicávelCX122.8. Comment6677263382.
+  - #2666 Portugal **6b0d69c9aff89c432fa27cf36a5e4864887468ee**, treef220b7aea6f6d0f6887899ea0758822e75c4d151. Paisold797d9590+5651ac51, expectedold/forcefalse. H2parecer5790143563 aplicávelCX122.8. Comment6677263616.
+- **CADA candidato21grupos/88testespass,0fail/skip**, strictTSrecorteactualimports0,changed-testlint0,scanner3865/0,committeddiff0. Nãoalegarfullsuite/globaltypes/browser/provider/legal/deploy.
+- PrimeirafotografiaNOVOS9workflowscada: Irlanda1SUCCESS/7inprogress/1queued; Portugal1SUCCESS/7inprogress/1queued. Nenhum9verdealegado, retry/cancel/merge. **NÃO integrar/moverheadsativos, exigir9NOVOSexatos**. Todosretriesvelhosesgotadospreservados, inclusiveIrishWebKit127681878340quejáfalhoudenovo; nãorepetir.
+- Trêsown2746MERGEDd88a64/2660MERGED88a48f/2661MERGED2ad8fe e reviews2755/2684/2578 concluídosINTACTOS,nãoreabrir/repetir.
+
+## Revisão #2762 CONCLUÍDA: MÉDIO de privacidade ABERTO
+
+- Exacthead**dda1a66cd889ec9446eac7e5ae35ba557905a5b3**, Claude2/bv1-letter-preview. Metadata/discussão/canalfrescos semcontrolador/parecer; claimANTESfonte/diff/teste**8915436e9f77ea36986783ea9083c1f1877e7500**. Oitochangedpaths lidoscompletos e mail-body como dependência. Nenhumproduto/ref/CIautor editado.
+- **ParecerJ6677319389 NÃOPODEENTRAR**, achadoMEDherdadonamesmafronteiraderepublicaçãoquePRextende: lib/letters.ts publishLetter desestrutura4respostas semvalidar. Ao republicar cartaREALmembros/preview2 comproductsomitido, GETfaltando/booleano/envelope[] deixa kept=[] e regravaSEMproducts; LetterPageREALdevisitantesemcookie expõeSECRETdepoisdaprévia. Nãofoiescolhidoopen:true/publicarparatodos. Apenas retorno deUMAleitura adulterado;writes/releitura/render reaisMemoryRedis.
+- Prova/runner/relatório DURÁVEIS **codex/j-review-2762-member-privacy@79aad1d40344f9c76acb69c909fa9a0eeb725911**, treee3acee76eba3008fe503ab39a3c2638136c23961. Arquivos tests/j-2762-unknown-publication.proof.ts, scripts/j-review-2762-run.mjs, docs/reviews/j-2762-privacy.md. Comando**node scripts/j-review-2762-run.mjs**: **61checks/6falhascausais/55pass**, preserva53originais+8asserts(3invalids×2falhas+controleíntegro×2pass). .proof.ts opt-in,semcanonicalsuitealterada. Nãoafrouxar.
+- CorreçãorequeridaàC2: envelope4exato/tiposGET+scoreantesdecidirmembros/tomarDados/escrever;unknownrecusa e preservacópia. Nullconhecidonãoéilegível. MesmaprovaINALTERADA+permanente/ligados/novoparecernoheadcorretivo. Herdadoinferidopelodeltafonte; nãoalegueestaprovaemheadanteriorsobreoqualnãofoiexecutada.
+- AuthorRED4511f733inalteradoreproduziu2exportsintencionalmenteausentes(buildRED,não53falhasruntime). Canonicalfinal53+letter-members67+letters21+mail-body17=**158/158**. StrictTSincluindoprova/imports0,changed/prooflint0,scannercomprovaintent-to-add3855/0,diff0. SemglobalTSC/fullsuite/browser/screenreader/nativeRedis/Stripe/email/CIglobal/deploy. ProvaJrunnerrealexit1confirmado.
+- Padrão-vizinho listLetters unknown→[] e publishedLetters cardinalidadeímpar sãoTRIAGEM,são candidatos,nãoachadosnovosconfirmados/reservas. Semcorrigirprodutoalheio.
+- CópiasJ /workspace/scratch/72485b6ecfa0/j-review-2762 (headdda,proof/runneruntrackedintent-to-add), j-review-2762-red(4511,originalREDinalterado). CacheNodeemprestadoenormalaliasesbv1-letter-preview.test.ts. Logs/tmp/j-2762-{proof,durable-run,linked,red,types,lint,proof-scanner}.log. Source8pathsoriginaisinalterados.
+
+## Próximo EXATO
+
+- DoisprodutosCIativo + prova2762,3unidades/limite5. Prioridade: retornoC2nominal2762noNOVOhead→MESMAprova/ligados,semduplicarhead; own9finaisreviewC2/H2+freshraw/nativeclean+expectedSHAnormalmerge/APIMerged/publicaçãoreadonly. Nãoinventarquarta/quinta nem refazer inventárioJconcluído. Reviewnova sólivre/claimfresco.
+- RegrasCLAUDE8e8545b0/AGENTS472c4251 eCodexinboxmesmossha; todasreservaslidas. Canalnovo>=20KBsemprefetch_fileSÓSHA+fetch_blobFULL/prefix/len/âncora1500;409>=2min/FULLCAS. Não restaurararquivo0425sobrecanalnovo.
+- Preço/limite/comissão/flags/gates/termos/conta/pagamento/contato/PIIintocados,unknownnuncazero;ChromiumEPERMsemretry/workaround. AutomaçãoEXISTENTEcontinua,nãocriaroutra/nãodesabilitarporCItransitório.
+
+---
+
 # Codex J — delta autoritativo — 2026-11-06 03:58 UTC
 
 Preserva todo o histórico abaixo. Nenhuma recriação/ref alheio/cancel/retry novo nesta rodada.

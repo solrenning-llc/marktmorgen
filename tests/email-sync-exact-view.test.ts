@@ -70,7 +70,7 @@ async function main(): Promise<void> {
 
   part("The three-part view envelope must be exact and own");
   is("a short envelope is unknown, never disconnected or empty", await view([config]), "unknown");
-  is("a sparse envelope is unknown", await view(sparse(3, [[0, config], [2, []]])), "unknown");
+  is("a sparse envelope is unknown", await view(sparse<unknown>(3, [[0, config], [2, []]])), "unknown");
   const inherited = sparse<unknown>(3, [[0, config], [2, []]]);
   const inheritedPrototype = Object.create(Array.prototype) as Record<number, unknown>;
   inheritedPrototype[1] = null;

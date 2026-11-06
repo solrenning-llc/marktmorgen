@@ -83,3 +83,21 @@ The old 61-check test remains untouched. A later authorized repair needs three s
 PENDING: fresh execution of these recovered blobs, scoped TypeScript, lint, public-data scan and final whitespace checks. These were not completed before the environment disappeared. No publication, full journey, accessibility conformance or final green CI claim is made.
 
 The recovery only creates six GitHub blobs. The parent will assemble the RED branch from the preserved identity base, restore a checkout, rerun the exact evidence, and obtain the required independent review before authorizing a product repair. Product remains on HOLD; no head movement or CI reset is part of this recovery.
+
+## Recovered checkout verification
+
+The parent restored codex/k-form-submit-feedback-red at ebccb867c225239ce537794ac3604232f109924d, with exact parent 4f32949ea06fb041ccea57ad264e8da7d9e1acf9, in /workspace/scratch/k2-recovery-20261106-2157/feedback-red. Its initial clean checkout contained exactly the six reserved paths relative to that parent. All six recovered file blobs matched the recovery manifest. All six product source hashes in the table above matched the actual 85e32750 Git objects; no product changed.
+
+The recovered runner was executed before any local repair and again after the narrowly scoped fixture typing repairs below. Both runs produced 71 POST checks / 14 failures and 166 SSR checks / 76 failures, with the same application-command, injection, response and effect counts above. Both exited 1 as required for RED. The complete two post-recovery stdout/stderr logs were byte-identical, SHA-256 f645272506546f06da2fd83d313678947c022c612d35cde8317006fb163f396b. This confirms fresh reproducibility of the recovered tests; it does not retroactively certify vanished pre-loss file hashes.
+
+Scoped TypeScript initially found three test-harness errors: the real Store.suspended field is a string rather than a boolean, and Array.isArray did not narrow the readonly status-array control to Query's mutable array type. Only fixture construction was corrected: empty-string/"Synthetic suspension" represent the same unsuspended/suspended control, and typeof status === 'string' selects the same string versus copied-array query values. No assertion, scenario, expected result, production file, request ceiling or deadline changed. The render-test blob is now 5354abc52744bd6dbdd976cc0b6a0b99e45b06ee and the world blob ab52a09407cfd6c26ff64543fecaa0defefc6731; the original recovered versions remain in ebccb867's ancestry.
+
+Completed local checks after those fixture repairs:
+
+- TypeScript createProgram with the repository's actual tsconfig, the three new test/world roots, their real imports, noEmit and incremental=false: zero diagnostics. Runtime test aliases were not used to hide production type imports.
+- ESLint on both new tests, the new world, standalone runner and test-config.mjs: exit 0.
+- Full scripts/check_public_data.py on the recovered Git worktree: 4,139 tracked files, zero files requiring correction.
+- git diff --check on the recovered six-path commit: exit 0. Final local report/fixture changes are checked again before handoff.
+- Actual package-lock.json blob: 4e0ca0fae6880008b6180e52c22829d519b43738, using Node v24.22.1 and the parent's isolated recovered dependency installation.
+
+The earlier PENDING paragraph describes the pre-loss checkpoint; these local checks now supersede that checkpoint. This remains RED evidence, not a green product validation. No inherited identity RED suite, old 61-check test, whole test suite, provider, browser journey or CI was executed in this phase. The parent retains all GitHub/ref/commit operations and the production repair gate.

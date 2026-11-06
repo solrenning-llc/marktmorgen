@@ -62,7 +62,7 @@ async function main() {
   is('confirmed missing: definition read is retained', state.definitionReads, 1);
   is('confirmed missing: no navigation lookup', state.funnelReads, 0);
 
-  resetFeedback(); shop.suspended = true; drawn = await draw({ status: 'unavailable' });
+  resetFeedback(); shop.suspended = 'Synthetic suspension'; drawn = await draw({ status: 'unavailable' });
   is('suspended: feedback cannot bypass notFound', drawn.error instanceof KnownNotFound, true);
   is('suspended: definition is not read', state.definitionReads, 0);
   is('suspended: product is not read', state.listingReads, 0);
@@ -74,7 +74,7 @@ async function main() {
 
   for (const status of ['other-status', ['unavailable']] as const) {
     resetFeedback(); state.mode = 'healthy';
-    drawn = await draw({ status: Array.isArray(status) ? [...status] : status, r: 'ready0', j: '1' });
+    drawn = await draw({ status: typeof status === 'string' ? status : [...status], r: 'ready0', j: '1' });
     is(`strict status ${JSON.stringify(status)}: normal page remains`, drawn.error, null);
     is(`strict status ${JSON.stringify(status)}: result is not converted to feedback`, drawn.html.includes(escaped(formWords('en').result)), true);
     is(`strict status ${JSON.stringify(status)}: normal joined message is preserved`, drawn.html.includes(escaped(formWords('en').confirmSent)), true);

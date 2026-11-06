@@ -8,14 +8,14 @@ import { form } from './form-response-fixture';
 export const state = { mode: 'unavailable' as 'unavailable' | 'healthy' | 'missing', storeMissing: false, storeReads: 0, definitionReads: 0, listingReads: 0, funnelReads: 0, notFound: 0 };
 export const shop = {
   sid: 'feedback-render-store', statsId: 'feedback-render-stats', handle: 'feedbackshop', name: 'Synthetic feedback shop',
-  suspended: false, currency: 'USD', language: 'en', look: DEFAULT_LOOK,
+  suspended: '', currency: 'USD', language: 'en', look: DEFAULT_LOOK,
   sitePages: [{ id: 'page000001', slug: 'apply', title: 'Apply', target: '' }],
 } as unknown as Store;
 export class KnownNotFound extends Error {}
 export function resetFeedback() {
   state.mode = 'unavailable'; state.storeMissing = false; state.storeReads = 0; state.definitionReads = 0;
   state.listingReads = 0; state.funnelReads = 0; state.notFound = 0;
-  shop.suspended = false; shop.language = 'en';
+  shop.suspended = ''; shop.language = 'en';
 }
 export function normaliseHandle(value: string) { return value.replace(/^@/, '').toLowerCase(); }
 export async function storeForPage(handle: string) { state.storeReads++; return !state.storeMissing && handle === shop.handle ? shop : null; }

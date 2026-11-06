@@ -167,6 +167,7 @@ export const en = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent: number) => `save ${percent}%`,
   chooseOptionFor: (title: string) => `Choose an option for ${title}`,
+  chooseOne: "Choose one",
   recommended: "Recommended",
   recommendedAfter: " (recommended)",
   howToPayFor: (title: string) => `How to pay for ${title}`,

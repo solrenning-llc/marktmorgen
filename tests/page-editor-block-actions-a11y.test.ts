@@ -39,11 +39,22 @@
  * pixels and what was under it moved down (a layout shift of 0.0895 on a
  * slow network). What is drawn and where the focus lands in a browser is
  * checked by the scratch audit named in the pull request, not here.
+ *
+ * Found in review (6 November 2026): an arrow that cannot move looked like
+ * one that works (--ink-mute beside --ink-soft, 1.07:1, and ButtonText in
+ * forced colors); the same words said twice were not said again; the
+ * refusal said "sign in" where the site says "Log in"; and a Clear refused
+ * because the session ended said to press Save the page, which is off then.
+ * The refusal is drawn here from the real component, by react-dom/server.
  */
 import { readFileSync } from "node:fs";
+import { createElement, type FunctionComponent } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { done, is, part } from "./check";
 import * as insert from "@/lib/block-insert";
-import { MESSAGES } from "@/components/page-editor";
+import * as pageEditor from "@/components/page-editor";
+
+const { MESSAGES } = pageEditor;
 
 // Read by name, so a helper still missing fails its own lines rather than the whole file.
 const helper = (name: string) => (insert as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>)[name] ?? (() => undefined);
@@ -52,6 +63,7 @@ const removedSaying = helper("removedSaying");
 const focusAfterRemoval = helper("focusAfterRemoval");
 
 const editor = readFileSync("components/page-editor.tsx", "utf8");
+const styles = readFileSync("app/globals.css", "utf8");
 const picker = readFileSync("components/page-style-picker.tsx", "utf8");
 
 /** The block row's four buttons, from the first Move to the end of Remove. */
@@ -115,8 +127,51 @@ const shows = editor.slice(editor.indexOf("BLOCK_SHOWS.map((option) =>"), editor
 is("Shows on: a check beside the one on", shows.includes('<Icon name="check"'), true);
 is("Page style: a check beside the one on", picker.includes('<Icon name="check"'), true);
 
-part("A session that ended: sign in again without losing the page (WCAG 2.2.5)");
-is("the refusal says the changes are still here and how to keep them", MESSAGES.signed_out, "Your session ended. Your changes are still here, not saved yet: sign in again in a new tab, then come back to this tab and press Save the page.");
-is("with a link that opens the sign-in in a new tab, so this tab keeps the page", /error === MESSAGES\.signed_out \? \([\s\S]{0,200}href="\/signin" target="_blank"/.test(editor), true);
+part("An arrow that cannot move looks off, as an off button does (WCAG 1.4.1, 1.4.11, forced colors)");
+// Words in --ink-mute beside --ink-soft are 1.07:1 apart, so an off arrow looked like one that works, and forced
+// colors drew both in ButtonText. The arrows take the signs of .btn[aria-disabled]: the sand surface and the
+// dashed --line-off edge, and GrayText in forced colors.
+const offArrows = [...moveButtons.matchAll(/aria-disabled=\{[^}]*\}\s*className="([^"]*)"/g), ...row.matchAll(/onClick=\{\(\) => duplicate\(index\)\}\s*aria-disabled=\{[^}]*\}\s*className="([^"]*)"/g), ...swaps.matchAll(/aria-disabled=\{[^}]*\}\s*className="([^"]*)"/g)].map((m) => m[1]);
+is("Move up, Move down, Duplicate, and a picture's Earlier and Later, found", offArrows.length, 5);
+is("each carries the off signs of an off button (icon-btn)", offArrows.every((c) => /(^| )icon-btn( |$)/.test(c)), true);
+is("none is told off by a near-identical gray alone", editor.includes("aria-disabled:text-ink-mute"), false);
+/** The declarations of the first rule whose selector list names `selector`, after `from`. */
+const ruleFor = (selector: string, from = 0) => {
+  const at = styles.indexOf(selector, from);
+  if (at < 0) return { list: "", body: "" };
+  const open = styles.indexOf("{", at);
+  const start = styles.lastIndexOf("}", at) + 1;
+  return { list: styles.slice(start, open), body: styles.slice(open + 1, styles.indexOf("}", open)) };
+};
+const light = ruleFor('.btn[aria-disabled="true"],');
+is("the off button's rule names the round buttons too", light.list.includes('.icon-btn[aria-disabled="true"]') && light.list.includes('.icon-btn[aria-disabled="true"]:hover'), true);
+is("which draw the sand surface and the dashed edge", /background-color: var\(--sand\)/.test(light.body) && /border: 1px dashed var\(--line-off\)/.test(light.body), true);
+const forced = ruleFor('.btn[aria-disabled="true"],', styles.indexOf("@media (forced-colors: active)", styles.indexOf('.btn[aria-disabled="true"],')));
+is("in forced colors, the round buttons are GrayText with a dashed edge", forced.list.includes('.icon-btn[aria-disabled="true"]') && /color: GrayText/.test(forced.body) && /border-style: dashed/.test(forced.body), true);
+
+part("The same words said twice are said again (WCAG 4.1.3)");
+const editorBody = editor.slice(editor.indexOf("export function PageEditor("), editor.indexOf("function RowEditor("));
+is("the editor's status words alternate a no-break space, as RowEditor's do", /const \[said, setSaidNow\] = useState\(""\);\s*const again = useRef\(false\);\s*const setSaid = \(text: string\) => \{\s*again\.current = !again\.current;\s*setSaidNow\(text \? `\$\{text\}\$\{again\.current \? "\\u00a0" : ""\}` : ""\);/.test(editorBody), true);
+
+part("A session that ended: log in again without losing the page (WCAG 2.2.5, 3.3.1)");
+is("the refusal of a save says the changes are still here and how to keep them, in the site's words (Log in)", MESSAGES.signed_out, "Your session ended. Your changes are still here, not saved yet: log in again in a new tab, then come back to this tab and press Save the page.");
+// Read by name, so what is still missing fails its own lines rather than the whole file.
+const named = pageEditor as unknown as Record<string, unknown>;
+const refusalWords = (typeof named.refusalWords === "function" ? named.refusalWords : () => undefined) as (error: string | undefined, clearing: boolean) => string | undefined;
+const ErrorNotice = (typeof named.ErrorNotice === "function" ? named.ErrorNotice : () => null) as FunctionComponent<{ error: string }>;
+is("a refused save says to press Save the page", refusalWords("signed_out", false), MESSAGES.signed_out);
+const clearing = refusalWords("signed_out", true) ?? "";
+// Clear is offered only with nothing unsaved, and "Save the page" is off then: the refusal says to press its own Yes again.
+is("a refused Clear says the page was not cleared and to press Yes, clear it again", clearing, "Your session ended, so the page was not cleared. Log in again in a new tab, then come back to this tab and press Yes, clear it again.");
+is("other refusals keep their own words", [refusalWords("store_full", true), refusalWords("no such error", false)], [MESSAGES.store_full, MESSAGES.server_error]);
+const notice = (error: string) => renderToStaticMarkup(createElement(ErrorNotice, { error }));
+for (const [what, error] of [["a save", MESSAGES.signed_out], ["a Clear", clearing]] as const) {
+  const html = notice(error);
+  is(`after ${what}, the alert says it`, html.startsWith('<p class="notice notice-error mt-4" role="alert">') && html.includes(error), true);
+  is(`after ${what}, a link opens the log-in page in a new tab, so this tab keeps the page`, /<a href="\/signin" target="_blank" rel="noopener noreferrer"[^>]*>Log in again in a new tab<span class="new-tab-note sr-only">/.test(html), true);
+}
+is("another refusal has no log-in link", notice(MESSAGES.store_full).includes("/signin"), false);
+is("the editor draws its refusals with ErrorNotice", /\{error \? <ErrorNotice error=\{error\} \/> : null\}/.test(editor), true);
+is("and words them with refusalWords", editor.includes("refusalWords(data.error, page === null)"), true);
 
 done();

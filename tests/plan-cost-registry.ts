@@ -387,7 +387,7 @@ export function pictureCheckBlob(bytes: number): number {
  *     smaller copy at MAX_IMAGE_BYTES, the thumbnail at MAX_THUMB_BYTES). A product's own picture sent again is checked
  *     again, so this needs no door of its own;
  *   - a page saved (product page, store page): it checks only the pictures it takes from the door, each once
- *     (lib/picture-check.ts keptPictures), up to MAX_PAGE_PICTURES a save; so, past what was let in before, 24 doors
+ *     (lib/picture-check.ts checkedPictures), up to MAX_PAGE_PICTURES a save; so, past what was let in before, 24 doors
  *     and one save are 25 requests for 24 doors and 24 checks.
  * A door note lives a day (PICTURE_DOOR_SECONDS), so a month may also check up to a whole figure of pictures let in on
  * the last day of the month before: counted on top, at a full picture's check each.
@@ -910,11 +910,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/product-image.ts", names: ["MAX_IMAGE_BYTES", "MAX_THUMB_BYTES"] },
       { file: "lib/uploaded-image.ts", names: ["firstBytes", "reader.cancel()"] },
       { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
-      { file: "lib/picture-check.ts", names: ["keptPictures", "isStoredPicture"] },
+      { file: "lib/picture-check.ts", names: ["checkedPictures", "isStoredPicture"] },
       { file: "lib/sales-page.ts", names: ["MAX_PAGE_PICTURES"] },
       { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS"] },
     ],
-    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (the two lines before counted the whole figure twice). Each request is counted at the dearest kind it may be (studioBlobPerRequest): a door (its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try); a product's picture attached, its three copies checked (a head with every try, a plain read, the bytes read counted whole: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206); or a page saved, which checks each picture it takes from the door once (keptPictures). A month may also check a whole figure of pictures let in on the last day before, the door note's day: counted on top. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), and the storage of images/ (item 3).",
+    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (the two lines before counted the whole figure twice). Each request is counted at the dearest kind it may be (studioBlobPerRequest): a door (its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try); a product's picture attached, its three copies checked (a head with every try, a plain read, the bytes read counted whole: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206); or a page saved, which checks each picture it takes from the door once, before it is the page's (checkedPictures). A month may also check a whole figure of pictures let in on the last day before, the door note's day: counted on top. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), and the storage of images/ (item 3).",
   },
   {
     id: "blob-list",

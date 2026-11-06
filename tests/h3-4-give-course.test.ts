@@ -83,9 +83,9 @@ async function main(): Promise<void> {
   is("each choice is said in plain words", Object.values(SEEN_WORDS).every((words) => /^(Here|Not here) /.test(words)), true);
   is("a course that can be given: not a membership, not a call, and a course", [givable({ course: { id: "c", lessons: 1 }, recurring: null, call: null }), givable({ course: { id: "c", lessons: 1 }, recurring: { interval: "month" }, call: null }), givable({ course: null, recurring: null, call: null })], [true, false, false]);
   is(
-    "studio requests: the reads taken before reading, the writes before writing",
-    [giveReadUnits(1), giveReadUnits(20), giveReadUnits(21), giveReadUnits(500), giveWriteUnits(1), giveWriteUnits(10), giveWriteUnits(11), giveWriteUnits(500)],
-    [1, 1, 2, 25, 1, 1, 2, 50],
+    "studio requests, at the most each step can take: every read before reading, every write and read back before writing",
+    [giveReadUnits(1), giveReadUnits(18), giveReadUnits(19), giveReadUnits(500), giveWriteUnits(1, "give"), giveWriteUnits(10, "give"), giveWriteUnits(11, "give"), giveWriteUnits(500, "give"), giveWriteUnits(1, "takeback"), giveWriteUnits(500, "takeback")],
+    [1, 1, 2, 26, 2, 2, 3, 51, 1, 75],
   );
   is(
     "who is asked, read safely: each address once, in lower case, and the course to give",
@@ -227,7 +227,7 @@ async function main(): Promise<void> {
   const paidUnits: number[] = [];
   let calls = 0;
   const refusedWrite = await applyGive(store, target, { change: "give", to, emails: ["ana@example.com", "zed@example.com"], expect: 2 }, async (n) => (paidUnits.push(n), (calls += 1) === 1 ? { ok: true } : { ok: false, reason: "used", message: "Used." }));
-  is("studio requests refused before writing: nothing given", [refusedWrite.kind, paidUnits, await given("ana@example.com")], ["refused", [giveReadUnits(2), giveWriteUnits(2)], []]);
+  is("studio requests refused before writing: nothing given", [refusedWrite.kind, paidUnits, await given("ana@example.com")], ["refused", [giveReadUnits(2), giveWriteUnits(2, "give")], []]);
   const reviewUnits: number[] = [];
   const reviewed = await reviewGive(store, target, { change: "give", to, emails: ["ana@example.com"], expect: null }, async (n) => (reviewUnits.push(n), { ok: true }));
   is("a review takes its reads first", [reviewed.kind, reviewUnits], ["review", [giveReadUnits(1)]]);
@@ -240,7 +240,12 @@ async function main(): Promise<void> {
   const html = renderToStaticMarkup(
     createElement(StudentsBulk, { productId: bread.product.id, courseTitle: "Bread Course", lessons: 1, lines: studentLines, canTag: true, canExport: true, others: [{ id: to, title: "Cake Course" }] }),
   );
-  is("giving another course is one of the actions, with the course chosen by name", [html.includes("Give another course"), html.includes("Course to give"), html.includes(">Cake Course</option>")], [true, true, true]);
+  const component = readFileSync("components/students-bulk.tsx", "utf8");
+  is(
+    "giving another course is one of the actions; once chosen, the course is picked by its name from a labelled list",
+    [html.includes("Give another course"), component.includes('htmlFor="students-give"'), component.includes("Course to give"), component.includes("others.map((course)")],
+    [true, true, true, true],
+  );
   is("said plainly: no payment, no email", html.includes("with no payment") && html.includes("No email is sent"), true);
   const none = renderToStaticMarkup(createElement(StudentsBulk, { productId: bread.product.id, courseTitle: "Bread Course", lessons: 1, lines: studentLines, canTag: true, canExport: true, others: [] }));
   is("with no other course, the action is not offered", none.includes("Give another course"), false);

@@ -37,6 +37,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 
 /** One product one address was given. */
@@ -70,6 +71,64 @@ export const importedKey = (statsId: string, email: string) => `nl:imp:buy:${sta
 export const importedWhoKey = (statsId: string) => `nl:imp:who:${statsId}`;
 /** An import's own job id (lib/imports.ts): only those are brought over; a gift, a place or a PayPal sale is not. */
 const IMPORT_JOB = /^[0-9a-f]{24}$/;
+
+/**
+ * The mark of a course the creator gave from the studio's list of students
+ * (279 [H3-4], unit 2): the studio's own kind of grant, taken back only from
+ * there (takeGivenMany with STUDIO_GIVE_PREFIX), never by the API.
+ */
+export const STUDIO_GIVE_PREFIX = "studio:";
+export const STUDIO_GIVE_JOB = `${STUDIO_GIVE_PREFIX}students`;
+
+/** Given by the creator, from the API ("api:") or from the studio ("studio:"): shown to the buyer as given by the store, never as a sale. */
+export function isGivenByStore(job: string): boolean {
+  return job.startsWith("api:") || job.startsWith(STUDIO_GIVE_PREFIX);
+}
+
+/** Addresses whose record of one product is read in one round trip. */
+const GIVEN_READ_BATCH = 100;
+
+/**
+ * What each address was given of one product, read exactly, one HGET each,
+ * GIVEN_READ_BATCH to a round trip: the grant; null when it was given nothing
+ * of it; "unknown" when the record, or the whole answer, is not in its exact
+ * shape, never read as "nothing given".
+ */
+export async function givenMany(statsId: string, emails: readonly string[], productId: string): Promise<Map<string, ImportedPurchase | null | "unknown">> {
+  const out = new Map<string, ImportedPurchase | null | "unknown">();
+  for (let from = 0; from < emails.length; from += GIVEN_READ_BATCH) {
+    const batch = emails.slice(from, from + GIVEN_READ_BATCH);
+    let rows: unknown[] | null = null;
+    try {
+      rows = repliesFor(await redisPipeline(batch.map((email) => ["HGET", importedKey(statsId, email), productId])), batch.length);
+    } catch (error) {
+      console.error("reading what was given failed", error);
+    }
+    batch.forEach((email, i) => {
+      const raw = rows ? rows[i] : undefined;
+      if (raw === null) out.set(email, null);
+      else out.set(email, (typeof raw === "string" && parse(productId, raw)) || "unknown");
+    });
+  }
+  return out;
+}
+
+/**
+ * Takes one product back from many addresses, only from those whose grant of
+ * it is `prefix`'s kind (read just before): never an import, a gift, a place,
+ * a PayPal purchase or another tool's. Says nothing of the result: the caller
+ * reads it back (givenMany) and says only what reads back as taken.
+ */
+export async function takeGivenMany(statsId: string, emails: readonly string[], productId: string, prefix: string): Promise<void> {
+  const now = await givenMany(statsId, emails, productId);
+  const ours = emails.filter((email) => {
+    const grant = now.get(email);
+    return grant && grant !== "unknown" && grant.job.startsWith(prefix);
+  });
+  for (let from = 0; from < ours.length; from += GIVEN_READ_BATCH) {
+    await redisPipeline(ours.slice(from, from + GIVEN_READ_BATCH).map((email) => ["HDEL", importedKey(statsId, email), productId]));
+  }
+}
 
 /** The addresses an import brought over, with when each was first brought (seconds). */
 export async function importedBuyers(statsId: string | null): Promise<Map<string, number>> {

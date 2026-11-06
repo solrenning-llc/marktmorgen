@@ -8,31 +8,41 @@ import {
   type AccessChange,
   type AccessDone,
   type AccessReview,
+  GIVE_REFUSALS,
+  type GiveChange,
+  type GiveDone,
+  type GiveReview,
   MAX_STUDENT_ACTION,
   PROGRESS_WORDS,
   type StudentLine,
   accessReviewLines,
   accessSummary,
+  giveReviewLines,
+  giveSummary,
   oppositeAccess,
   progressOf,
   studentsCsv,
 } from "@/lib/student-bulk-rules";
 
-type Action = "revoke" | "grant" | "label-add" | "label-remove";
+type Action = "revoke" | "grant" | "give" | "label-add" | "label-remove";
+type Course = { id: string; title: string };
 type Taken = Removed & { email: string; forms?: number; cleaned?: true };
 type Review =
   | { kind: "access"; change: AccessChange; emails: string[]; review: AccessReview; moved: boolean }
+  | { kind: "give"; change: GiveChange; course: Course; emails: string[]; review: GiveReview; moved: boolean }
   | { kind: "label"; change: BulkChange; emails: string[]; label: string; review: BulkReview };
 type Result =
   | { kind: "access"; change: AccessChange; done: AccessDone; words: string }
+  | { kind: "give"; change: GiveChange; course: Course; done: GiveDone; words: string }
   | { kind: "label"; change: BulkChange; label: string; changed: string[]; taken: Taken[]; words: string };
 type Place = "form" | "apply" | "undo" | "file";
 type Focus = "review" | "result" | "title";
 
-const ACTION_WORDS: Record<Action, string> = { revoke: "Remove access", grant: "Give access back", "label-add": "Add a label", "label-remove": "Take a label off" };
+const ACTION_WORDS: Record<Action, string> = { revoke: "Remove access", grant: "Give access back", give: "Give another course", "label-add": "Add a label", "label-remove": "Take a label off" };
 const ACTION_HINTS: Record<Action, string> = {
   revoke: "They can no longer open this course. Nothing is refunded.",
   grant: "Only for students whose access you removed. It does not give the course to someone who didn't get it.",
+  give: "They can open another of your courses with no payment. No email is sent.",
   "label-add": "Adds a label to their contact on your list. It doesn't start the label's automations.",
   "label-remove": "Takes the label off their contact on your list.",
 };
@@ -55,11 +65,29 @@ const day = (seconds: number) => (seconds > 0 ? new Date(seconds * 1000).toLocal
  * came in its place; a refusal is shown next to the step it answers; every
  * target is at least 44 by 44 pixels; nothing changes until a button is pressed.
  */
-export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, canExport }: { productId: string; courseTitle: string; lessons: number; lines: StudentLine[]; canTag: boolean; canExport: boolean }) {
+export function StudentsBulk({
+  productId,
+  courseTitle,
+  lessons,
+  lines,
+  canTag,
+  canExport,
+  others = [],
+}: {
+  productId: string;
+  courseTitle: string;
+  lessons: number;
+  lines: StudentLine[];
+  canTag: boolean;
+  canExport: boolean;
+  /** The store's other courses that can be given (givable): unit 2. None: the action is not offered. */
+  others?: Course[];
+}) {
   const [rows, setRows] = useState(lines);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [action, setAction] = useState<Action>("revoke");
   const [label, setLabel] = useState("");
+  const [giveId, setGiveId] = useState(others[0]?.id ?? "");
   const [review, setReview] = useState<Review | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [note, setNote] = useState("");
@@ -83,7 +111,12 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
     ({ review: reviewTitle, result: resultLine, title: formTitle })[next].current?.focus();
   });
 
-  const actions: Action[] = canTag ? ["revoke", "grant", "label-add", "label-remove"] : ["revoke", "grant"];
+  const actions: Action[] = [
+    "revoke",
+    "grant",
+    ...(others.length ? (["give"] as const) : []),
+    ...(canTag ? (["label-add", "label-remove"] as const) : []),
+  ];
   const chosen = rows.filter((row) => selected.has(row.email)).map((row) => row.email);
 
   // Any change of what is selected or asked makes a review stale: it is asked again before confirming.
@@ -143,6 +176,18 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
       const asked = sent.answer.review as AccessReview;
       setReview({ kind: "access", change: action, emails: chosen, review: asked, moved: false });
       setLive(`Review ready: ${count(asked.changes, "student", "students")} would change. Nothing is changed yet.`);
+    } else if (action === "give") {
+      const course = others.find((c) => c.id === giveId);
+      if (!course) {
+        setErrorAt("form");
+        setError(GIVE_REFUSALS.to);
+        return;
+      }
+      const sent = await send("/api/store/students", { action: "review", change: "give", to: course.id, emails: chosen }, "form");
+      if (!sent) return;
+      const asked = sent.answer.review as GiveReview;
+      setReview({ kind: "give", change: "give", course, emails: chosen, review: asked, moved: false });
+      setLive(`Review ready: ${count(asked.changes, "person", "people")} would get ${course.title}. Nothing is changed yet.`);
     } else {
       const change: BulkChange = action === "label-add" ? "add" : "remove";
       const sent = await send("/api/store/contact-labels", { action: "review", label, change, emails: chosen }, "form");
@@ -192,6 +237,44 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
     }
   }
 
+  // A gift of another course, or its taking back, confirmed at the count shown; when the count moved, the new review is shown.
+  async function changeGift(change: GiveChange, course: Course, emails: string[], expect: number, place: Place, undoing: boolean) {
+    const sent = await send("/api/store/students", { action: "apply", change, to: course.id, emails, expect }, place);
+    if (!sent) return;
+    if (sent.status === 409) {
+      setResult(null);
+      setReview({ kind: "give", change, course, emails, review: sent.answer.review as GiveReview, moved: true });
+      setLive("Something changed since your review. Nothing was changed. Check the new count.");
+      focusNext.current = "review";
+      return;
+    }
+    const a = sent.answer;
+    const done: GiveDone = {
+      asked: counted(a.asked),
+      changed: list(a.changed),
+      already: list(a.already),
+      student: list(a.student),
+      removed: list(a.removed),
+      otherWay: list(a.otherWay),
+      unread: list(a.unread),
+      unknown: list(a.unknown),
+      failed: list(a.failed),
+    };
+    const summary = giveSummary(done, change, course.title);
+    setReview(null);
+    if (undoing) {
+      setResult(null);
+      setNote(`Undo: ${summary.words}`);
+      setLive(`Undo: ${summary.short}`);
+      focusNext.current = "title";
+    } else {
+      setResult({ kind: "give", change, course, done, words: summary.words });
+      setNote("");
+      setLive(summary.short);
+      focusNext.current = "result";
+    }
+  }
+
   async function applyLabel(r: Extract<Review, { kind: "label" }>) {
     const sent = await send("/api/store/contact-labels", { action: "apply", label: r.label, change: r.change, emails: r.emails }, "apply");
     if (!sent || sent.status === 409) return;
@@ -225,6 +308,10 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
     if (busy || !result) return;
     if (result.kind === "access") {
       await changeAccess(oppositeAccess(result.change), result.done.changed, result.done.changed.length, "undo", true);
+      return;
+    }
+    if (result.kind === "give") {
+      await changeGift(result.change === "give" ? "takeback" : "give", result.course, result.done.changed, result.done.changed.length, "undo", true);
       return;
     }
     const undoing = opposite(result.change);
@@ -265,6 +352,12 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
       ? r.review.changes === 0
         ? "Nothing to change"
         : `${r.change === "revoke" ? "Remove access for" : "Give access back to"} ${count(r.review.changes, "student", "students")}`
+      : r.kind === "give"
+        ? r.review.changes === 0
+          ? "Nothing to change"
+          : r.change === "give"
+            ? `Give ${r.course.title} to ${count(r.review.changes, "person", "people")}`
+            : `Take ${r.course.title} back from ${count(r.review.changes, "person", "people")}`
       : r.review.changes === 0
         ? "Nothing to change"
         : `${r.change === "add" ? "Add it to" : "Take it off"} ${count(r.review.changes, "contact", "contacts")}`;
@@ -277,8 +370,19 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
         ["Changed but not confirmed", result.done.unknown],
         ["Did not change", result.done.failed],
       ] as const).filter(([, emails]) => emails.length > 0)
-    : [];
-  const undoable = result ? (result.kind === "access" ? result.done.changed.length > 0 : result.changed.length > 0) : false;
+    : result?.kind === "give"
+      ? ([
+          ["Changed", result.done.changed],
+          [result.change === "give" ? "Already given it" : "Not given it here", result.done.already],
+          ["Already studies it", result.done.student],
+          ["Taken off that course", result.done.removed],
+          ["Has it another way", result.done.otherWay],
+          ["Record could not be read, not changed", result.done.unread],
+          ["Changed but not confirmed", result.done.unknown],
+          ["Did not change", result.done.failed],
+        ] as const).filter(([, emails]) => emails.length > 0)
+      : [];
+  const undoable = result ? (result.kind === "label" ? result.changed.length > 0 : result.done.changed.length > 0) : false;
 
   return (
     <div>
@@ -350,6 +454,32 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
             ))}
           </div>
         </fieldset>
+        {action === "give" ? (
+          <div className="mt-4 text-sm">
+            <label htmlFor="students-give" className="field-label block">
+              Course to give
+            </label>
+            <select
+              id="students-give"
+              className="field mt-1 min-h-11"
+              value={giveId}
+              aria-describedby="students-give-hint"
+              onChange={(event) => {
+                setGiveId(event.target.value);
+                stale();
+              }}
+            >
+              {others.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.title}
+                </option>
+              ))}
+            </select>
+            <span id="students-give-hint" className="mt-1 block text-xs text-ink-soft">
+              {`Given with no payment, as a gift from you. They see it the next time they sign in with their address. Memberships and calls can't be given here.`}
+            </span>
+          </div>
+        ) : null}
         {action === "label-add" || action === "label-remove" ? (
           <div className="mt-4 text-sm">
             <label htmlFor="students-label" className="field-label block">
@@ -400,11 +530,13 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
             <h3 id="students-review-title" ref={reviewTitle} tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">
               Before you confirm
             </h3>
-            {review.kind === "access" && review.moved ? <p className="mt-2 text-sm text-ink">Something changed since your review. Nothing was changed. This is what it would do now.</p> : null}
+            {review.kind !== "label" && review.moved ? <p className="mt-2 text-sm text-ink">Something changed since your review. Nothing was changed. This is what it would do now.</p> : null}
             <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink">
               {review.kind === "access"
                 ? accessReviewLines(review.review, review.change).map((words) => <li key={words}>{words}</li>)
-                : [
+                : review.kind === "give"
+                  ? giveReviewLines(review.review, review.change, review.course.title).map((words) => <li key={words}>{words}</li>)
+                  : [
                     `${count(review.review.changes, "contact", "contacts")} will ${review.change === "add" ? "get" : "lose"} the label “${review.label}”.`,
                     review.review.already ? `${count(review.review.already, "contact", "contacts")} ${review.change === "add" ? "already have it" : "don't have it"}: left as they are.` : "",
                     review.review.full ? `${count(review.review.full, "contact has", "contacts have")} ${MAX_CONTACT_TAGS} labels already: left as they are.` : "",
@@ -421,6 +553,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
               onClick={() => {
                 if (busy || review.review.changes === 0) return;
                 if (review.kind === "access") void changeAccess(review.change, review.emails, review.review.changes, "apply", false);
+                else if (review.kind === "give") void changeGift(review.change, review.course, review.emails, review.review.changes, "apply", false);
                 else void applyLabel(review);
               }}
             >

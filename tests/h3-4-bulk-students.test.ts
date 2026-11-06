@@ -68,8 +68,8 @@ const line = (email: string, done: number, removed: boolean, labels: string[] | 
 async function main(): Promise<void> {
   part("The rules");
   is("progress: not started, started, finished", [progressOf(0, 5), progressOf(2, 5), progressOf(5, 5), progressOf(7, 5), progressOf(0, 0), progressOf(1, 0)], ["none", "started", "finished", "finished", "none", "started"]);
-  is("filters read from the address, the label as it will be kept", readFilters({ progress: "finished", access: "removed", label: "  Workshop   May " }), { progress: "finished", access: "removed", label: "Workshop May" });
-  is("anything else is no filter", readFilters({ progress: ["finished", "none"], access: "nobody", label: 5 as unknown as string }), { progress: "any", access: "any", label: "" });
+  is("filters read from the address, the label as it will be kept", readFilters({ progress: "finished", access: "removed", label: "  Workshop   May " }), { progress: "finished", access: "removed", label: "Workshop May", seen: "any" });
+  is("anything else is no filter", readFilters({ progress: ["finished", "none"], access: "nobody", label: 5 as unknown as string }), { progress: "any", access: "any", label: "", seen: "any" });
   const lines = [line("ana@example.com", 5, false, ["VIP"]), line("ben@example.com", 2, false, ["vip", "b"]), line("cy@example.com", 0, true, []), line("dee@example.com", 0, false, null)];
   is("by progress", filterStudents(lines, 5, { progress: "none", access: "any", label: "" }).shown.map((l) => l.email), ["cy@example.com", "dee@example.com"]);
   is("by access", filterStudents(lines, 5, { progress: "any", access: "removed", label: "" }).shown.map((l) => l.email), ["cy@example.com"]);

@@ -13,11 +13,15 @@
  * back as asked is said as done. No email is sent and nothing is refunded.
  */
 import { readAddresses, leadsKey, parseContact } from "@/lib/contacts";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
+import { STUDIO_GIVE_JOB, STUDIO_GIVE_PREFIX, grantImported, givenMany, takeGivenMany } from "@/lib/imported-purchases";
+import { integrationPauseWord } from "@/lib/integration-pause";
+import { DataRoomError } from "@/lib/store-data";
+import { type Store, ensureStatsId, setPastBuyers, storeRef } from "@/lib/store";
 import { type Course } from "@/lib/course";
 import { emailKey, setBlocked, studentPage } from "@/lib/learn";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
-import type { Store } from "@/lib/store";
 import {
   ACCESS_READ_BATCH,
   ACCESS_WRITES_AT_ONCE,
@@ -25,10 +29,16 @@ import {
   type AccessDone,
   type AccessRefusal,
   type AccessReview,
+  type GiveChange,
+  type GiveDone,
+  type GiveRefusal,
+  type GiveReview,
   MAX_STUDENT_ACTION,
   STUDENTS_PER_PAGE,
   type StudentLine,
   accessUnits,
+  giveReadUnits,
+  giveWriteUnits,
   labelUnits,
   listUnits,
 } from "@/lib/student-bulk-rules";
@@ -135,10 +145,8 @@ export async function accessStates(courseId: string, emails: readonly string[]):
 /** A change asked for: `expect`, the count of people the creator confirmed, or null on a review. */
 export type AccessAsk = { change: AccessChange; emails: string[]; expect: number | null };
 
-/** What the studio sent, made safe, or what is wrong with it. Each address once, in lower case; more than MAX_STUDENT_ACTION refused, never cut. */
-export function readAccessAsk(raw: Record<string, unknown>): { ok: true; ask: AccessAsk } | { ok: false; error: AccessRefusal } {
-  const change = raw.change === "revoke" || raw.change === "grant" ? raw.change : null;
-  if (!change) return { ok: false, error: "change" };
+/** The people a change names, made safe: each address once, in lower case; more than MAX_STUDENT_ACTION refused, never cut. */
+function readPeople(raw: Record<string, unknown>): { ok: true; emails: string[]; expect: number | null } | { ok: false; error: "none" | "many" } {
   if (!Array.isArray(raw.emails)) return { ok: false, error: "none" };
   if (raw.emails.length > MAX_STUDENT_ACTION * 2) return { ok: false, error: "many" };
   const typed = raw.emails.filter((e): e is string => typeof e === "string" && !/[\s,;"'<>()]/.test(e.trim()));
@@ -146,7 +154,16 @@ export function readAccessAsk(raw: Record<string, unknown>): { ok: true; ask: Ac
   if (emails.length > MAX_STUDENT_ACTION) return { ok: false, error: "many" };
   if (!emails.length) return { ok: false, error: "none" };
   const expect = typeof raw.expect === "number" && Number.isSafeInteger(raw.expect) && raw.expect >= 0 ? raw.expect : null;
-  return { ok: true, ask: { change, emails, expect } };
+  return { ok: true, emails, expect };
+}
+
+/** What the studio sent, made safe, or what is wrong with it. */
+export function readAccessAsk(raw: Record<string, unknown>): { ok: true; ask: AccessAsk } | { ok: false; error: AccessRefusal } {
+  const change = raw.change === "revoke" || raw.change === "grant" ? raw.change : null;
+  if (!change) return { ok: false, error: "change" };
+  const people = readPeople(raw);
+  if (!people.ok) return people;
+  return { ok: true, ask: { change, emails: people.emails, expect: people.expect } };
 }
 
 /** Who a change would act on, and why the rest would be left, read now. */
@@ -209,6 +226,141 @@ export async function applyAccess(
     const state = after.get(email) ?? "unknown";
     if (state === asked) result.changed.push(email);
     else if (state === "unknown") result.unknown.push(email);
+    else result.failed.push(email);
+  }
+  return { kind: "done", done: result };
+}
+
+/* ------------------------------------------------------------------------
+ * Unit 2: another of the store's courses given to many people at once, with
+ * no payment, and taken back (the undo).
+ *
+ * A gift is the record an import or the API writes (lib/imported-purchases.ts,
+ * grantImported), marked STUDIO_GIVE_JOB: the course opens for that address
+ * as one brought over does (lib/learn.ts reads it, unchanged), and the buyer
+ * sees it as given by the store, never as a sale. Taking back takes only the
+ * studio's own gift, never an import, a gift paid by someone, a sale or the
+ * API's. No email is sent. Every step takes its studio requests before it
+ * reads and again before it writes, at the most the step can take
+ * (giveReadUnits, giveWriteUnits); nothing is given while the plan's renewal
+ * is unpaid or a payment for it is disputed, and in a paid window only when
+ * the window is reserved (as the API's gift).
+ * --------------------------------------------------------------------- */
+
+/** A gift asked for: the course to give (`to`, a product id), and, on a confirmation, the count confirmed. */
+export type GiveAsk = { change: GiveChange; to: string; emails: string[]; expect: number | null };
+
+export function readGiveAsk(raw: Record<string, unknown>): { ok: true; ask: GiveAsk } | { ok: false; error: GiveRefusal } {
+  const change = raw.change === "give" || raw.change === "takeback" ? raw.change : null;
+  if (!change) return { ok: false, error: "change" };
+  const to = typeof raw.to === "string" ? raw.to.trim().slice(0, 40) : "";
+  if (!to) return { ok: false, error: "to" };
+  const people = readPeople(raw);
+  if (!people.ok) return people;
+  return { ok: true, ask: { change, to, emails: people.emails, expect: people.expect } };
+}
+
+/** The course given: its product (what the record names) and its course (whose students and removals are read). */
+export type GiveTarget = { productId: string; courseId: string };
+type Pay = (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }>;
+/** One person's gift as read: absent from the answer is unknown, never "nothing given". */
+const grantOf = <T>(map: Map<string, T>, email: string): T | "unknown" => (map.has(email) ? (map.get(email) as T) : "unknown");
+type Sorted = { targets: string[]; already: string[]; student: string[]; removed: string[]; otherWay: string[]; unread: string[] };
+
+/** Who it would act on now, and why the rest would be left, read exactly; nothing read but the course's own records and each person's gift of it. */
+async function sortGive(store: Store, target: GiveTarget, ask: GiveAsk): Promise<Sorted> {
+  const sorted: Sorted = { targets: [], already: [], student: [], removed: [], otherWay: [], unread: [] };
+  if (ask.change === "takeback") {
+    if (!store.statsId) return { ...sorted, already: [...ask.emails] };
+    const now = await givenMany(store.statsId, ask.emails, target.productId);
+    for (const email of ask.emails) {
+      const grant = grantOf(now, email);
+      if (grant === "unknown") sorted.unread.push(email);
+      else if (grant === null) sorted.already.push(email);
+      else if (grant.job.startsWith(STUDIO_GIVE_PREFIX)) sorted.targets.push(email);
+      else sorted.otherWay.push(email);
+    }
+    return sorted;
+  }
+  const states = await accessStates(target.courseId, ask.emails);
+  const open = ask.emails.filter((email) => states.get(email) === "none");
+  const grants = store.statsId && open.length ? await givenMany(store.statsId, open, target.productId) : new Map<string, null>();
+  for (const email of ask.emails) {
+    const state = states.get(email) ?? "unknown";
+    if (state === "unknown") sorted.unread.push(email);
+    else if (state === "active") sorted.student.push(email);
+    else if (state === "removed") sorted.removed.push(email);
+    else {
+      const grant = store.statsId ? grantOf(grants, email) : null;
+      if (grant === "unknown") sorted.unread.push(email);
+      else if (grant === null) sorted.targets.push(email);
+      else sorted.already.push(email);
+    }
+  }
+  return sorted;
+}
+
+const giveReviewOf = (s: Sorted): GiveReview => ({ changes: s.targets.length, already: s.already.length, student: s.student.length, removed: s.removed.length, otherWay: s.otherWay.length, unread: s.unread.length });
+
+type Refused = { kind: "refused"; reason: string; message: string };
+
+/** What it would do, with nothing written; its reads taken first. */
+export async function reviewGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: Pay): Promise<{ kind: "review"; review: GiveReview } | Refused> {
+  const paid = await pay(giveReadUnits(ask.emails.length));
+  if (!paid.ok) return { kind: "refused", reason: paid.reason, message: paid.message };
+  return { kind: "review", review: giveReviewOf(await sortGive(store, target, ask)) };
+}
+
+export type GiveApplied = { kind: "done"; done: GiveDone } | { kind: "stale"; review: GiveReview } | Refused;
+
+const refusedAs = (reason: GiveRefusal): Refused => ({ kind: "refused", reason, message: "" });
+
+/**
+ * The gift, or its taking back, for those it applies to now: the reads paid
+ * for, then read; the count confirmed checked (otherwise nothing written);
+ * the writes and their read back paid for; written; each read back, and only
+ * those read back as asked said as `changed`.
+ */
+export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: Pay): Promise<GiveApplied> {
+  const giving = ask.change === "give";
+  const paused = giving ? integrationPauseWord(store) : null;
+  if (paused) return refusedAs(paused);
+  const readPaid = await pay(giveReadUnits(ask.emails.length));
+  if (!readPaid.ok) return { kind: "refused", reason: readPaid.reason, message: readPaid.message };
+  const sorted = await sortGive(store, target, ask);
+  if (ask.expect !== sorted.targets.length) return { kind: "stale", review: giveReviewOf(sorted) };
+  const result: GiveDone = { asked: ask.emails.length, changed: [], already: sorted.already, student: sorted.student, removed: sorted.removed, otherWay: sorted.otherWay, unread: sorted.unread, unknown: [], failed: [] };
+  if (!sorted.targets.length) return { kind: "done", done: result };
+  const writePaid = await pay(giveWriteUnits(sorted.targets.length, ask.change));
+  if (!writePaid.ok) return { kind: "refused", reason: writePaid.reason, message: writePaid.message };
+
+  let statsId = store.statsId;
+  if (giving) {
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return refusedAs("unavailable");
+    statsId = statsId ?? (await ensureStatsId(storeRef(store)))?.statsId;
+    if (!statsId || !store.sid) return refusedAs("unavailable");
+    // Marked first, so what is given is read as soon as it is written (lib/learn.ts reads gifts only of a store so marked).
+    if (!store.pastBuyers && !(await setPastBuyers(storeRef(store)))?.pastBuyers) return refusedAs("unavailable");
+    try {
+      await grantImported(statsId, STUDIO_GIVE_JOB, sorted.targets.map((email) => ({ email, productId: target.productId, items: null })), undefined, store.sid, store);
+    } catch (error) {
+      if (error instanceof DataRoomError) return refusedAs("store_full");
+      // The writes may or may not have landed: what reads back decides, person by person.
+      console.error("giving a course in bulk failed", error);
+    }
+  } else if (statsId) {
+    try {
+      await takeGivenMany(statsId, sorted.targets, target.productId, STUDIO_GIVE_PREFIX);
+    } catch (error) {
+      console.error("taking a course back in bulk failed", error);
+    }
+  }
+  const after = statsId ? await givenMany(statsId, sorted.targets, target.productId) : new Map<string, "unknown">();
+  for (const email of sorted.targets) {
+    const grant = grantOf(after, email);
+    if (grant === "unknown") result.unknown.push(email);
+    else if (giving ? grant !== null && grant.job === STUDIO_GIVE_JOB : grant === null) result.changed.push(email);
+    else if (giving && grant !== null) result.already.push(email);
     else result.failed.push(email);
   }
   return { kind: "done", done: result };

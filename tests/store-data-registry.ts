@@ -622,7 +622,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hostcal:good:@lib/host-calendar.ts": { what: "A host's last reading", parts: [capped((MAX_TEAM + 1) * READING_BYTES, "One per host, seven days: at most 2,000 busy times.", src("lib/team.ts", "MAX_TEAM"), src("lib/ics-parse.ts", "maxIntervals ?? 2000"))] },
   "nl:hostcal:lock:@lib/host-calendar.ts": short("One reading at a time", "request", 1, 128, REQ("page")),
   "nl:host:claims:@lib/host-claims.ts": short("A host's claimed times: a booking's claim on each host, until the call is over", "call", 430, 512),
-  "nl:imp:buy:@lib/imported-purchases.ts": { what: "What an import or the API gave an address, and what an order gave", room: ["lib/imported-purchases.ts"], parts: [kept(512, "A gift's, a place's, a pre-order's or a PayPal purchase's grant.")] },
+  "nl:imp:buy:@lib/imported-purchases.ts": { what: "What an import, the API or the studio gave an address, and what an order gave", room: ["lib/imported-purchases.ts"], parts: [kept(512, "A gift's, a place's, a pre-order's or a PayPal purchase's grant.")] },
   "nl:imp:who:@lib/imported-purchases.ts": { what: "The buyers an import brought over", room: ["lib/imported-purchases.ts"] },
   "nl:import:@lib/imports.ts": { what: "An import job: its rows until they are brought in, what it saw, its errors, its emails", parts: [per("row", 3, IMPORT_ROW_BYTES + 128, "A row as it came in, kept at most RAW_DAYS (an upload counts a row for every IMPORT_ROW_BYTES it carries)."), per("row", 14, 560, "Its mark among the rows seen, and its line in the report.")] },
   "nl:imports:active@lib/imports.ts": company("Imports under way", "One set, members gone when done."),

@@ -3,9 +3,11 @@
  * unit 1), shared by the studio's screen and the server
  * (lib/student-bulk.ts, app/api/store/students/route.ts). Browser-safe.
  *
- * What it does: filters one page of a course's students by progress, access
- * and label; takes access away from those selected or gives it back to those
- * who were taken off; and says, person by person, what happened. Labels on
+ * What it does: filters one page of a course's students by progress, access,
+ * label and when they were last here; takes access away from those selected
+ * or gives it back to those who were taken off; gives them another of the
+ * store's courses with no payment, or takes back one the studio gave (unit
+ * 2); and says, person by person, what happened. Labels on
  * the selection go through the labels route that already exists
  * (lib/bulk-labels.ts), and the file of the selection is made in the browser
  * from what the page already shows. Refunds are never in bulk: they stay one
@@ -60,7 +62,18 @@ export function progressOf(done: number, lessons: number): Progress {
 export const PROGRESS_WORDS: Record<Progress, string> = { none: "Not started", started: "Started, not finished", finished: "Finished" };
 
 export type AccessFilter = "any" | "active" | "removed";
-export type StudentFilters = { progress: Progress | "any"; access: AccessFilter; label: string };
+/** When they were last here: in the last 30 days, or not for 30 or 90 days (never counts as not here). */
+export type SeenFilter = "any" | "recent" | "away30" | "away90";
+/** `seen` absent: any. */
+export type StudentFilters = { progress: Progress | "any"; access: AccessFilter; label: string; seen?: SeenFilter };
+
+export const SEEN_WORDS: Record<Exclude<SeenFilter, "any">, string> = {
+  recent: "Here in the last 30 days",
+  away30: "Not here for 30 days or more",
+  away90: "Not here for 90 days or more",
+};
+const DAY_SECONDS = 86_400;
+const SEEN_DAYS: Record<Exclude<SeenFilter, "any">, number> = { recent: 30, away30: 30, away90: 90 };
 
 const one = (value: unknown) => (typeof value === "string" ? value : "");
 
@@ -68,10 +81,12 @@ const one = (value: unknown) => (typeof value === "string" ? value : "");
 export function readFilters(query: Record<string, unknown>): StudentFilters {
   const progress = one(query.progress);
   const access = one(query.access);
+  const seen = one(query.seen);
   return {
     progress: progress === "none" || progress === "started" || progress === "finished" ? progress : "any",
     access: access === "active" || access === "removed" ? access : "any",
     label: one(query.label).replace(/\s+/gu, " ").trim().slice(0, 80),
+    seen: seen === "recent" || seen === "away30" || seen === "away90" ? seen : "any",
   };
 }
 
@@ -83,11 +98,16 @@ export type StudentLine = { email: string; since: number; lastSeen: number; done
  * whose labels could not be read is left out and counted (`labelsUnknown`),
  * so the screen says so: never guessed as having it or not.
  */
-export function filterStudents(lines: readonly StudentLine[], lessons: number, filters: StudentFilters): { shown: StudentLine[]; labelsUnknown: number } {
+export function filterStudents(lines: readonly StudentLine[], lessons: number, filters: StudentFilters, now = Math.floor(Date.now() / 1000)): { shown: StudentLine[]; labelsUnknown: number } {
   const wanted = filters.label ? labelKey(filters.label) : "";
+  const seen = filters.seen ?? "any";
+  const since = seen === "any" ? 0 : now - SEEN_DAYS[seen] * DAY_SECONDS;
   let labelsUnknown = 0;
   const shown = lines.filter((line) => {
     if (filters.progress !== "any" && progressOf(line.done, lessons) !== filters.progress) return false;
+    const here = Number.isFinite(line.lastSeen) && line.lastSeen > 0 && line.lastSeen >= since;
+    if (seen === "recent" && !here) return false;
+    if ((seen === "away30" || seen === "away90") && here) return false;
     if (filters.access === "active" && line.removed) return false;
     if (filters.access === "removed" && !line.removed) return false;
     if (!wanted) return true;
@@ -153,6 +173,107 @@ export function accessSummary(result: AccessDone, change: AccessChange): { short
       ? `${count(result.unknown.length, "student's access was", "students' access was")} changed but could not be confirmed, so it may or may not be ${change === "revoke" ? "removed" : "back"}. Review again to see`
       : "",
     result.failed.length ? `${count(result.failed.length, "student's access", "students' access")} did not change, because something went wrong; try again` : "",
+  ].filter(Boolean);
+  const out = `${left.toLocaleString("en-US")} ${left === 1 ? "was" : "were"} left out`;
+  return { short: `${head} ${out}.`, words: `${head} ${out}: ${why.join("; ")}.` };
+}
+
+/**
+ * A course that can be given from the list of students: a course, and
+ * neither a membership (its access is its subscription) nor a call. The same
+ * as an import or the API can give (lib/api-write.ts, giveAccess).
+ */
+export function givable(product: { course?: { id: string } | null; recurring?: unknown; call?: unknown }): boolean {
+  return Boolean(product.course) && !product.recurring && !product.call;
+}
+
+/** give: another course, with no payment; takeback: a course the studio gave, taken back (the undo). */
+export type GiveChange = "give" | "takeback";
+
+/**
+ * Studio requests taken before anything is read, on a review and on a
+ * confirmation alike, at the most the reading can take: one HGET a person
+ * (what the store gave them of that course) and, for every hundred people,
+ * the two commands that read whether they study it or were taken off it.
+ * Twenty commands to a studio request (tests/plan-cost-registry.ts,
+ * UNIT_COST.studio); at least one.
+ */
+export function giveReadUnits(people: number): number {
+  const m = Math.max(0, Math.floor(people));
+  return Math.max(1, Math.ceil((m + 2 * Math.ceil(m / 100)) / 20));
+}
+/** The commands a gift adds once, whatever the count: the store marked as one that gives courses, its data room taken, its paid window reserved. */
+export const GIVE_FIXED_COMMANDS = 20;
+/**
+ * Studio requests taken before anything is written, at the most the writing
+ * can take: to give, one HSETNX and one HGET read back a person, and
+ * GIVE_FIXED_COMMANDS; to take back, the record read again just before, one
+ * HDEL and one HGET read back a person. At least one.
+ */
+export function giveWriteUnits(people: number, change: GiveChange): number {
+  const n = Math.max(0, Math.floor(people));
+  return Math.max(1, Math.ceil((change === "give" ? 2 * n + GIVE_FIXED_COMMANDS : 3 * n) / 20));
+}
+
+export type GiveRefusal = "change" | "to" | "none" | "many" | "product" | "expect" | "paused_unpaid" | "paused_disputed" | "store_full" | "unavailable";
+
+export const GIVE_REFUSALS: Record<GiveRefusal, string> = {
+  change: "Choose whether to give the course or take it back.",
+  to: "Choose the course to give.",
+  none: ACCESS_REFUSALS.none,
+  many: ACCESS_REFUSALS.many,
+  product: "Choose one of your courses that can be given: not a membership or a call.",
+  expect: ACCESS_REFUSALS.expect,
+  paused_unpaid: "Nothing was given: your plan's renewal payment did not go through, so new gifts wait until it is paid. Check the notice at the top of your studio. You can still take back a course you gave.",
+  paused_disputed: "Nothing was given: a payment for your plan is disputed with your bank, so new gifts wait until it is settled. Check the notice at the top of your studio. You can still take back a course you gave.",
+  store_full: "Nothing was given: your store's data room is full. Delete something you no longer need, such as old posts, drafts or contacts, then try again.",
+  unavailable: "Nothing was given just now. Try again in a minute.",
+};
+
+/**
+ * What giving or taking back would do, read now, with nothing written.
+ *   changes   would get it (give), or would have it taken back (takeback)
+ *   already   has it given here already (give); was not given it here (takeback)
+ *   student   already studies it (give)
+ *   removed   was taken off that course (give): giving it would not open it
+ *   otherWay  has it from a sale, an import or a gift, not the studio's to take back (takeback)
+ *   unread    their record could not be read: left as they are
+ */
+export type GiveReview = { changes: number; already: number; student: number; removed: number; otherWay: number; unread: number };
+
+/** What it did, person by person: as the review, and `unknown` (written, not read back) and `failed` (read back as before). */
+export type GiveDone = { asked: number; changed: string[]; already: string[]; student: string[]; removed: string[]; otherWay: string[]; unread: string[]; unknown: string[]; failed: string[] };
+
+/** The lines a review shows before the creator confirms. */
+export function giveReviewLines(review: GiveReview, change: GiveChange, title: string): string[] {
+  const giving = change === "give";
+  return [
+    giving ? `${count(review.changes, "person", "people")} will get ${title}, with no payment.` : `${count(review.changes, "person", "people")} will no longer have ${title}.`,
+    review.already ? (giving ? `${count(review.already, "person already has", "people already have")} it given: left as they are.` : `${count(review.already, "person was", "people were")} not given it here: left as they are.`) : "",
+    review.student ? `${count(review.student, "person already studies", "people already study")} it: left as they are.` : "",
+    review.removed ? `${count(review.removed, "person was", "people were")} taken off it: left as they are. Give their access back from that course's students.` : "",
+    review.otherWay ? `${count(review.otherWay, "person has", "people have")} it another way (a sale, an import or a gift): not taken back here.` : "",
+    review.unread ? `${count(review.unread, "person's record", "people's records")} could not be read just now: left as they are.` : "",
+    giving ? "No email is sent. They see it the next time they sign in with this address. You can undo this right after." : "No email is sent and nothing is refunded. You can give it again right after.",
+  ].filter(Boolean);
+}
+
+/** What giving or taking back did, in one short sentence and in full, with why each person left out was left out. */
+export function giveSummary(result: GiveDone, change: GiveChange, title: string): { short: string; words: string } {
+  const giving = change === "give";
+  const changed = result.changed.length;
+  const head = changed === 0 ? "Nothing was changed." : giving ? `${title} given to ${count(changed, "person", "people")}.` : `${title} taken back from ${count(changed, "person", "people")}.`;
+  const left = result.already.length + result.student.length + result.removed.length + result.otherWay.length + result.unread.length + result.unknown.length + result.failed.length;
+  if (left === 0) return { short: head, words: head };
+  const n = (list: string[]) => list.length;
+  const why = [
+    n(result.already) ? (giving ? `${count(n(result.already), "person already had", "people already had")} it given` : `${count(n(result.already), "person was", "people were")} not given it here`) : "",
+    n(result.student) ? `${count(n(result.student), "person already studies", "people already study")} it` : "",
+    n(result.removed) ? `${count(n(result.removed), "person was", "people were")} taken off it; give their access back from that course's students` : "",
+    n(result.otherWay) ? `${count(n(result.otherWay), "person has", "people have")} it another way (a sale, an import or a gift), which is not taken back here` : "",
+    n(result.unread) ? `${count(n(result.unread), "person's record", "people's records")} could not be read, so nothing was changed for them` : "",
+    n(result.unknown) ? `${count(n(result.unknown), "person's change", "people's changes")} could not be confirmed, so ${n(result.unknown) === 1 ? "it" : "they"} may or may not be done. Review again to see` : "",
+    n(result.failed) ? `${count(n(result.failed), "person's change", "people's changes")} did not land, because something went wrong; try again` : "",
   ].filter(Boolean);
   const out = `${left.toLocaleString("en-US")} ${left === 1 ? "was" : "were"} left out`;
   return { short: `${head} ${out}.`, words: `${head} ${out}: ${why.join("; ")}.` };

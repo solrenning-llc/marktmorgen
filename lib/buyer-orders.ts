@@ -45,7 +45,7 @@ import { paidCalls } from "@/lib/calls";
 import { roomsFor } from "@/lib/call-rooms";
 import type { CallSetup } from "@/lib/call-setup";
 import { type BumpKey, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
-import { IMPORTED_REFERENCE, type ImportedPurchase, importedFor, importedFrom, importedKey, importedReference } from "@/lib/imported-purchases";
+import { IMPORTED_REFERENCE, type ImportedPurchase, importedFor, importedFrom, importedKey, importedReference, isGivenByStore } from "@/lib/imported-purchases";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { takePublicRequest } from "@/lib/traffic";
 import {
@@ -804,7 +804,7 @@ async function purchaseFromImported(store: Store, statsId: string, email: string
     giftFrom: await giftFrom(given.job),
     ...(isGroupJob(given.job) ? { place: true } : {}),
     ...(given.job.startsWith("paypal:") ? { paidWith: "paypal" as const } : {}),
-    ...(given.job.startsWith("api:") ? { givenByStore: true } : {}),
+    ...(isGivenByStore(given.job) ? { givenByStore: true } : {}),
     ...(given.job.startsWith("pre:") ? { preorder: { day: null, given: true } } : {}),
     podcastProduct,
     title: product.title,

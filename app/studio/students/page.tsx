@@ -10,7 +10,7 @@ import { readKind } from "@/lib/catalog";
 import { lessonCount, readCourse } from "@/lib/course";
 import { can } from "@/lib/team-roles";
 import { studentList } from "@/lib/student-bulk";
-import { MAX_STUDENT_ACTION, PROGRESS_WORDS, STUDENTS_PER_PAGE, filterStudents, readFilters } from "@/lib/student-bulk-rules";
+import { MAX_STUDENT_ACTION, PROGRESS_WORDS, SEEN_WORDS, STUDENTS_PER_PAGE, filterStudents, givable, readFilters } from "@/lib/student-bulk-rules";
 import { count } from "@/lib/bulk-label-rules";
 
 export const metadata: Metadata = {
@@ -22,9 +22,10 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
 
 /**
  * A course's students, one page of STUDENTS_PER_PAGE at a time, filtered by
- * progress, access and label, many selected at once and changed together:
- * access removed or given back, a label on or off, or downloaded as a file
- * (279 [H3-4], unit 1). For whoever may change the store's courses
+ * progress, access, label and when they were last here, many selected at
+ * once and changed together: access removed or given back, another course
+ * given with no payment, a label on or off, or downloaded as a file (279
+ * [H3-4], units 1 and 2). For whoever may change the store's courses
  * ("products"), as taking one student off a course; labels for whoever may
  * change the list ("send"); the file for whoever may download addresses
  * ("export"). The page's rows and labels are paid for in studio requests
@@ -43,6 +44,8 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
   const canExport = can(view.role, "export");
   const courses = (await readKind(store, "course")).filter((p) => p.course);
   const product = courses.find((p) => p.id === query.product) ?? courses[0] ?? null;
+  // The other courses that can be given from here: never a membership or a call (givable), never this one.
+  const others = courses.filter((p) => p.id !== product?.id && givable(p)).map((p) => ({ id: p.id, title: p.title }));
   const course = product?.course ? await readCourse(product.course.id) : null;
   const typed = readFilters(query);
   const filters = canTag ? typed : { ...typed, label: "" };
@@ -73,6 +76,7 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
         filters.progress !== "any" ? `progress=${filters.progress}` : "",
         filters.access !== "any" ? `access=${filters.access}` : "",
         filters.label ? `label=${encodeURIComponent(filters.label)}` : "",
+        filters.seen && filters.seen !== "any" ? `seen=${filters.seen}` : "",
         after !== "0" ? `after=${after}` : "",
       ]
         .filter(Boolean)
@@ -102,7 +106,7 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
           </nav>
           <h1 className="t-h2 mt-3">Students</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            {`Select students to remove their access, give it back, label them or download them as a file. You see exactly how many will change before anything is saved, and you can undo it right after. Up to ${MAX_STUDENT_ACTION.toLocaleString("en-US")} students at a time.`}
+            {`Select students to remove their access, give it back, give them another course, label them or download them as a file. You see exactly how many will change before anything is saved, and you can undo it right after. Up to ${MAX_STUDENT_ACTION.toLocaleString("en-US")} students at a time.`}
           </p>
 
           {!product || !course ? (
@@ -137,6 +141,15 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
                     <option value="removed">Access removed</option>
                   </select>
                 </div>
+                <div className="text-sm">
+                  <label htmlFor="students-seen" className="field-label block">Last here</label>
+                  <select id="students-seen" name="seen" className="field mt-1 min-h-11" defaultValue={filters.seen ?? "any"}>
+                    <option value="any">Any time</option>
+                    {(["recent", "away30", "away90"] as const).map((value) => (
+                      <option key={value} value={value}>{SEEN_WORDS[value]}</option>
+                    ))}
+                  </select>
+                </div>
                 {canTag ? (
                   <div className="text-sm">
                     <label htmlFor="students-label-filter" className="field-label block">Label on their contact</label>
@@ -164,7 +177,7 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
                       <p className="mt-2 text-sm text-ink">{`${count(filtered.labelsUnknown, "student's labels", "students' labels")} couldn't be read, so ${filtered.labelsUnknown === 1 ? "that student is" : "those students are"} not shown for this label.`}</p>
                     ) : null}
                     {filtered.shown.length ? (
-                      <StudentsBulk key={`${product.id}:${cursor}:${filters.progress}:${filters.access}:${filters.label}`} productId={product.id} courseTitle={product.title} lessons={lessons} lines={filtered.shown} canTag={canTag} canExport={canExport} />
+                      <StudentsBulk key={`${product.id}:${cursor}:${filters.progress}:${filters.access}:${filters.label}:${filters.seen ?? "any"}`} productId={product.id} courseTitle={product.title} lessons={lessons} lines={filtered.shown} canTag={canTag} canExport={canExport} others={others} />
                     ) : (
                       <p className="mt-4 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">No student on this page matches. Change your choices above, or go to the next page.</p>
                     )}

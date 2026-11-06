@@ -12,10 +12,9 @@
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { readListing } from "@/lib/catalog";
+import { readListing, readProduct } from "@/lib/catalog";
 import { readGroup, revokeRefundedGroups, settleGroup, startGroup } from "@/lib/group-buy";
 import { createCheckout } from "@/lib/store-checkout";
-import { readProduct } from "@/lib/catalog";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";

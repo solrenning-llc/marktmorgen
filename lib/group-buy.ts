@@ -44,6 +44,8 @@ import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
+import { refundRowKnown } from "@/lib/refunds";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { givenOption } from "@/lib/gift-rules";
@@ -95,6 +97,8 @@ export const groupKeys = (id: string, pi: string): string[] => [...(id ? [groupK
 const anyKey = (sid: string) => `nl:grp:${sid}:any`;
 const anchorKey = (sid: string) => `nl:grp:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:grp:${sid}:seen`;
+/** Pages of a hundred refunds read in one run before the anchor can no longer move (a refund past them waits for the next run). */
+const REFUND_PAGES = 10;
 const now = () => Math.floor(Date.now() / 1000);
 
 /** How a place is named where purchases given to an address are kept. */
@@ -489,40 +493,69 @@ export async function revokeRefundedGroups(
   const since = Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
   let newest = Number(anchorRaw) || since;
   let revoked = 0;
-  const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
-  query.append("expand[]", "data.charge");
-  const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-  for (const refund of rows) {
+  // The refunds in Stripe's exact list shape, every row as refundRowKnown (lib/refunds.ts) reads it, page after page
+  // to the end (CX-123 rules 24 and 30; C4-20261106-0450-C5-16). A refund on a readable row takes its purchase back
+  // whatever the other rows; the anchor moves only once the list was read to its end with every row readable, so a
+  // page in another shape, a row not readable or more pages than are read leave those refunds to be read again.
+  let unsure = false;
+  let whole = false;
+  let after = "";
+  for (let page = 0; page < REFUND_PAGES; page += 1) {
     if (Date.now() >= deadline) return revoked;
-    const id = typeof refund.id === "string" ? refund.id : "";
-    const created = typeof refund.created === "number" ? refund.created : 0;
-    const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-    const charge = refund.charge as { refunded?: unknown } | null;
-    newest = Math.max(newest, created);
-    if (!id || !pi || refund.status !== "succeeded" || charge?.refunded !== true) continue;
-    const [fresh, groupId] = await redisPipeline([["SADD", seenKey(sid), id], ["GET", piKey(pi)]]);
-    if (Number(fresh) !== 1 || typeof groupId !== "string") continue;
-    const group = await readGroup(groupId);
-    if (!group || group.revoked || group.s !== sid) continue;
-    // Closed first, so nobody takes a place while the others are taken back.
-    await saveGroup({ ...group, revoked: now() }, GROUP_KEPT_SECONDS);
-    const [members] = await redisPipeline([["HGETALL", membersKey(group.id)]]);
-    for (const member of values(members).map(parseMember)) {
-      if (!member) continue;
-      // Only what this purchase gave: an address that also has the product
-      // another way keeps that.
-      const [rawGiven] = await redisPipeline([["HGET", importedKey(sid, member.e), group.p]]);
-      let job = "";
-      try {
-        job = String((JSON.parse(String(rawGiven)) as { job?: unknown }).job ?? "");
-      } catch {}
-      if (job !== groupJob(group.id)) continue;
-      await redisPipeline([["HDEL", importedKey(sid, member.e), group.p]]);
-      for (const productId of [group.p, ...(group.items ?? [])]) await dropStart(member.e, productId);
-      revoked += 1;
+    const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
+    query.append("expand[]", "data.charge");
+    if (after) query.set("starting_after", after);
+    let read: StripePage;
+    try {
+      read = readStripePage(await onAccount("GET", store.stripeAccountId, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION), refundRowKnown);
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable)) throw error;
+      console.error("reading refunds for group purchases failed", error);
+      unsure = true;
+      break;
     }
+    if (read.unreadable) unsure = true;
+    for (const refund of read.rows) {
+      if (Date.now() >= deadline) return revoked;
+      const id = typeof refund.id === "string" ? refund.id : "";
+      const created = typeof refund.created === "number" ? refund.created : 0;
+      const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
+      const charge = refund.charge as { refunded?: unknown } | null;
+      newest = Math.max(newest, created);
+      if (!id || !pi || refund.status !== "succeeded" || charge?.refunded !== true) continue;
+      const [fresh, groupId] = await redisPipeline([["SADD", seenKey(sid), id], ["GET", piKey(pi)]]);
+      if (Number(fresh) !== 1 || typeof groupId !== "string") continue;
+      const group = await readGroup(groupId);
+      if (!group || group.revoked || group.s !== sid) continue;
+      // Closed first, so nobody takes a place while the others are taken back.
+      await saveGroup({ ...group, revoked: now() }, GROUP_KEPT_SECONDS);
+      const [members] = await redisPipeline([["HGETALL", membersKey(group.id)]]);
+      for (const member of values(members).map(parseMember)) {
+        if (!member) continue;
+        // Only what this purchase gave: an address that also has the product
+        // another way keeps that.
+        const [rawGiven] = await redisPipeline([["HGET", importedKey(sid, member.e), group.p]]);
+        let job = "";
+        try {
+          job = String((JSON.parse(String(rawGiven)) as { job?: unknown }).job ?? "");
+        } catch {}
+        if (job !== groupJob(group.id)) continue;
+        await redisPipeline([["HDEL", importedKey(sid, member.e), group.p]]);
+        for (const productId of [group.p, ...(group.items ?? [])]) await dropStart(member.e, productId);
+        revoked += 1;
+      }
+    }
+    if (!read.hasMore) {
+      whole = true;
+      break;
+    }
+    // More pages, and no readable last row to read them from: not read whole.
+    if (!read.lastId) {
+      unsure = true;
+      break;
+    }
+    after = read.lastId;
   }
-  await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
+  if (whole && !unsure) await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
   return revoked;
 }

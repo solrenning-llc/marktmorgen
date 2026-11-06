@@ -124,7 +124,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     typeof row.status === "string" &&
     CHARGE_STATUSES.has(row.status) &&
     typeof row.paid === "boolean" &&
-    (row.status !== "succeeded" || row.paid === true) &&
+    row.paid === (row.status === "succeeded") &&
     typeof row.created === "number" &&
     Number.isSafeInteger(row.created) &&
     row.created >= 0;
@@ -227,7 +227,14 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (succeeded.some((c) => num(c.created) >= windowStart) && !succeeded.some((c) => num(c.created) < windowStart)) {
         return { refund: { kind: "unknown", reason: "too_many" } };
       }
-    } else if (chargesPage.has_more === false) first = oldestListed;
+    } else if (chargesPage.has_more === false) {
+      first = oldestListed;
+      // A still-pending charge created before the apparent first success may later settle and become the true first
+      // payment. Until Stripe resolves it, the once-per-person guarantee cannot be decided safely.
+      if (first && chargeRows.some((c) => c.status === "pending" && num(c.created) < num(first!.created))) {
+        return { refund: { kind: "unknown", reason: "unreadable" } };
+      }
+    }
     else return { refund: { kind: "unknown", reason: "unreadable" } };
 
     let personPaidBefore = false;
@@ -249,6 +256,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         const page = await get(`/charges?${new URLSearchParams({ customer: other, "created[lt]": String(before), limit: "100" })}`);
         const rows = list(page, 100);
         if (!rows || rows.some((row) => !chargeHistoryRow(row))) return { refund: { kind: "unknown", reason: "unreadable" } };
+        if (rows.some((c) => c.status === "pending")) return { refund: { kind: "unknown", reason: "unreadable" } };
         if (rows.some((c) => c.status === "succeeded" && c.paid === true)) personPaidBefore = true;
         else if (page.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
       }

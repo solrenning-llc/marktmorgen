@@ -1,4 +1,4 @@
-import { applyCourseTaskDrops, dropCourseTasks, readCourseTaskDrops } from "@/lib/assignment";
+import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -284,27 +284,29 @@ export async function POST(request: NextRequest) {
       // A course's handed-in work is read before the product goes (Revisor 1 on #2810): a read that fails answers 503
       // and removes nothing, so the work, its files and the room they take stay findable for the next try.
       let before: Awaited<ReturnType<typeof readListing>>;
-      let beforeCourse: Awaited<ReturnType<typeof readCourse>> = null;
+      let preparedCourse: Awaited<ReturnType<typeof readCourseExact>> = null;
+      let taskDrops: Awaited<ReturnType<typeof readCourseTaskDrops>> = [];
       try {
         before = await readListing(guarded.store, id);
-        if (before?.course) beforeCourse = await readCourse(before.course.id);
+        if (before?.course) {
+          preparedCourse = await readCourseExact(before.course.id);
+          if (preparedCourse) taskDrops = await readCourseTaskDrops(preparedCourse);
+        }
       } catch (error) {
         console.error("could not read a product or its course before removing it", error);
         return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       }
-      const taskDrops = beforeCourse
-        ? await readCourseTaskDrops(beforeCourse).catch((error: unknown) => (console.error("could not read a course's handed-in work", error), null))
-        : [];
-      if (!taskDrops) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       const removed = await removeProduct(ref, id, async (going, store) => {
         if (!going.course) return true;
         try {
           const found = await readCourseExact(going.course.id);
           if (found) {
+            if (!preparedCourse || JSON.stringify(found) !== JSON.stringify(preparedCourse)) return false;
             course = found;
             await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
           } else {
+            if (preparedCourse) return false;
             await dropCommentsAfterCourseGone(going.course.id, store);
           }
           return true;
@@ -323,10 +325,9 @@ export async function POST(request: NextRequest) {
         if (removedCourse) had.push(...filesInCourse(removedCourse));
         // And the work its students handed in for its assignments (lib/assignment.ts).
         if (removedCourse) {
-          // As read before the removal; a course that changed in between is read again here, and logged if it cannot be.
-          const handed = beforeCourse && beforeCourse.id === removedCourse.id
-            ? await applyCourseTaskDrops(beforeCourse, taskDrops, storeKey(removed.store), removed.store)
-            : await dropCourseTasks(removedCourse, storeKey(removed.store), removed.store).catch((error: unknown) => (console.error("could not read a removed course's handed-in work", error), [] as string[]));
+          // Prepared from the same exact course snapshot that removal accepted,
+          // before that course identity can be detached.
+          const handed = await applyCourseTaskDrops(removedCourse, taskDrops, storeKey(removed.store), removed.store);
           had.push(...handed.map((pathname) => ({ pathname })));
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});

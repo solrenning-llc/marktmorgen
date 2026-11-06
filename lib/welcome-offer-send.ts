@@ -11,7 +11,8 @@
  *   nl:wo:start:<statsId>:<hash>   when a person's offer began, in seconds
  *   nl:wo:due                      reminders to send: score = when, member = what, with the address;
  *                                  a person's is taken out when they are erased (forgetWelcomePerson)
- *   nl:wo:r:<statsId>:<hash>       that person's reminder is set, once
+ *   nl:wo:r:<statsId>:<hash>       that person's reminder is set, once; holds its time, so an erasure
+ *                                  reads only that second of the queue ("1" in a mark written before)
  *   nl:wo:n:<statsId>              how many people have been offered it, for the studio
  */
 import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consent";
@@ -82,7 +83,7 @@ export async function scheduleReminder(store: Store, claim: Claim, token: string
   const when = remindAt(began, store.welcomeOffer.hours);
   if (when <= nowSeconds) return false;
   // One reminder per person and store, whatever else they ask for.
-  const [first] = await redisPipeline([["SET", remindedKey(store.statsId, claim.e), "1", "NX", "EX", Math.max(60, offer.until - nowSeconds + 86_400)]]);
+  const [first] = await redisPipeline([["SET", remindedKey(store.statsId, claim.e), String(when), "NX", "EX", Math.max(60, offer.until - nowSeconds + 86_400)]]);
   if (first === null) return false;
   const member = JSON.stringify({ s: store.sid, i: store.statsId, h: hash(claim.e), e: claim.e, t: token });
   await redisPipeline([["ZADD", DUE_KEY, String(when), member]]);
@@ -213,11 +214,38 @@ export async function openWelcome(
 
 /** The most rounds a scan of the reminder queue may take before the erasure says this part did not finish. */
 const DUE_SCAN_ROUNDS = 10_000;
+/** The reminders of one second read at a time, and the most pages of that second before the erasure says this part did not finish. */
+const DUE_SECOND_PAGE = 100;
+const DUE_SECOND_ROUNDS = 50;
+/** What a reminder mark holds: its time in seconds; "1" in a mark written before it held the time. */
+const MARK_TIME = /^[1-9]\d{0,11}$/;
+const LEGACY_MARK = "1";
+
+/**
+ * Whether a queue member is this person's reminder in this store. A member
+ * that holds their address hash but does not read as a reminder may still hold
+ * their address: it throws (review L1 on #2998, rule 24), never "not theirs".
+ */
+function namesPerson(member: string, statsId: string, h: string): boolean {
+  if (!member.includes(h)) return false;
+  let v: unknown;
+  try {
+    v = JSON.parse(member);
+  } catch {
+    v = null;
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v) || typeof (v as { i?: unknown }).i !== "string" || typeof (v as { h?: unknown }).h !== "string") {
+    throw new UnknownReplyError("a welcome reminder waiting for its hour that names the person");
+  }
+  const { i, h: own } = v as { i: string; h: string };
+  return i === statsId && own === h;
+}
 
 /**
  * The reminders waiting for their hour that name one person in one store,
- * read from the queue with ZSCAN. Every reply is read in its exact shape;
- * any other shape, or a scan that does not end, throws.
+ * read from the queue with ZSCAN: only for a mark written before it held the
+ * reminder's time, which ends within a day after its offer. Every reply is
+ * read in its exact shape; any other shape, or a scan that does not end, throws.
  */
 async function dueFor(statsId: string, email: string): Promise<string[]> {
   const h = hash(email);
@@ -230,17 +258,32 @@ async function dueFor(statsId: string, email: string): Promise<string[]> {
       throw new UnknownReplyError("the scan of the welcome reminders waiting for their hour");
     }
     for (let i = 0; i < flat.length; i += 2) {
-      try {
-        const v = JSON.parse(flat[i]) as { i?: unknown; h?: unknown };
-        if (v && v.i === statsId && v.h === h && !found.includes(flat[i])) found.push(flat[i]);
-      } catch {
-        // Not a reminder this module wrote: not this person's.
-      }
+      if (namesPerson(flat[i], statsId, h) && !found.includes(flat[i])) found.push(flat[i]);
     }
     cursor = pair[0];
     if (cursor === "0") return found;
   }
   throw new UnknownReplyError("the scan of the welcome reminders waiting for their hour, which did not end");
+}
+
+/**
+ * The reminders of one second that name one person in one store (review L2 on
+ * #2998): the mark holds that second, so the erasure never walks the queue of
+ * every store. Read a page at a time within a fixed number of rounds; any
+ * other shape, or a second that does not end within them, throws.
+ */
+async function dueAtSecond(statsId: string, email: string, when: string): Promise<string[]> {
+  const h = hash(email);
+  const found: string[] = [];
+  for (let round = 0; round < DUE_SECOND_ROUNDS; round += 1) {
+    const page = stringList(
+      repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, when, when, "LIMIT", String(round * DUE_SECOND_PAGE), String(DUE_SECOND_PAGE)]]), 1)?.[0],
+    );
+    if (page === null || page.length > DUE_SECOND_PAGE) throw new UnknownReplyError("the welcome reminders of one second");
+    for (const member of page) if (namesPerson(member, statsId, h) && !found.includes(member)) found.push(member);
+    if (page.length < DUE_SECOND_PAGE) return found;
+  }
+  throw new UnknownReplyError("the welcome reminders of one second, which did not end");
 }
 
 /**
@@ -250,10 +293,16 @@ async function dueFor(statsId: string, email: string): Promise<string[]> {
  */
 export async function forgetWelcomePerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const gone = countOf(repliesFor(await redisPipeline([["DEL", startKey(statsId, email), remindedKey(statsId, email)]]), 1)?.[0]);
+  // The mark is read before it goes, in the same round trip: it says which second of the queue holds the reminder.
+  const replies = repliesFor(await redisPipeline([["GET", remindedKey(statsId, email)], ["DEL", startKey(statsId, email), remindedKey(statsId, email)]]), 2);
+  const gone = replies ? countOf(replies[1]) : null;
   // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
-  if (gone === null || gone > 2) throw new UnknownReplyError("the deletion of a person's welcome offer start and reminder mark");
-  const waiting = await dueFor(statsId, email);
+  if (!replies || gone === null || gone > 2) throw new UnknownReplyError("the deletion of a person's welcome offer start and reminder mark");
+  const mark = replies[0];
+  // No mark: no reminder was set for this person here (the mark outlives its reminder by a day).
+  if (mark === null) return gone;
+  if (typeof mark !== "string" || !MARK_TIME.test(mark)) throw new UnknownReplyError("a person's welcome reminder mark");
+  const waiting = mark === LEGACY_MARK ? await dueFor(statsId, email) : await dueAtSecond(statsId, email, mark);
   if (!waiting.length) return gone;
   const taken = countOf(repliesFor(await redisPipeline([["ZREM", DUE_KEY, ...waiting]]), 1)?.[0]);
   if (taken === null || taken > waiting.length) throw new UnknownReplyError("the removal of a person's welcome reminder from the queue");

@@ -16,7 +16,10 @@ process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 let reply: unknown = undefined;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  if (reply !== undefined && commands.length === 1 && commands[0]?.[0] === "DEL") return reply as unknown[];
+  // Rule 23, changed with review L2 on #2998: the DEL now goes in one round trip after the GET of the
+  // reminder mark (which second of the queue to read), so the stand-in answers that pipeline: no mark
+  // (null), then the DEL reply under test. Every case below still tests the DEL reply alone.
+  if (reply !== undefined && commands.length === 2 && commands[0]?.[0] === "GET" && commands[1]?.[0] === "DEL") return (Array.isArray(reply) ? [null, ...reply] : reply) as unknown[];
   return pipeline(commands);
 }) as typeof redis.pipeline;
 

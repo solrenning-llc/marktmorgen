@@ -1,3 +1,15 @@
+## Nominal integration return on exact head 86ee74a569e7170a1493618893955b79c60eed4f
+
+Requested by Q in comment6677959205; announced by Z in channel bf57d06805779b63730472244953af2facd05a14 before the return. This is a continuation of clean review5794179820 and applicability qualification5795021479, not a second independent opinion.
+
+Read the entire three-file PR delta against its integrated main b60156215c78bbda34a8c113bb46ecb068802d63, plus all three paths' changes since formerly qualified3452609. Exact86ee has parents33ec096397a3f757eb6524af1d24b9b87a726b77 and b60156215. Main added assistant-note cleanup and MEMORY_FORGET_COMMANDS to the separate retry writer. Both cost constants coexist: FORGET_TRY_COMMANDS retains main's memory term; STORE_FORGET_MONTH_READ_COMMANDS remains4. The reader, formatter, author eight-case test and reader registry attribution remain unchanged from the reviewed correction; unrelated main registry entries are retained. No new production caller of storeForgetMonth exists in app/lib (declaration only). Thus its nonzero company-frequency/funding-before-wiring condition still applies; no company-dollar funding or new assistant-note behavior is certified by this focal return.
+
+Unchanged independent11-case proof ran against exact86ee:11/11, four real fixture commands (HGETALL and three HLEN), zero writes. Linked author8, SG2unknown125, main assistant-memory-forget2, cost24 and data7 =166/166. Scoped strict TypeScript for three changed roots and imports, changed-path lint, diff-check pass; public-data scan3883tracked/0corrections. No product mutation or fresh RED needed for unchanged corrected reader. Original RED and all proof/runner blobs remain unchanged. Logs /tmp/z2709-86ee-{proof,linked,types,lint,scanner}.log; detached local z-return-2709-86ee preserves exact author source.
+
+**No new finding in this nominal resolved integration. Existing clean focal opinion applies to exact86ee. MAY MERGE only after nine NEW exact-head successful aggregate workflows, clean current merge and normal expected-head merge by Q.** This review does not certify those CI/merge gates, native Redis, browser, suppliers, payments, full-project build/TSC, assistant-note funding, or production wiring. No author branch/source/CI/reservation/merge altered.
+
+---
+
 # Independent review of PR #2709
 
 ## Nominal return: both LOW findings closed

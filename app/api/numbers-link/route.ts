@@ -27,8 +27,15 @@ export async function POST(request: NextRequest) {
   if (!LINK_ID.test(id)) return new Response("Not found", { status: 404 });
   const back = (query = "") => new Response(null, { status: 303, headers: { Location: `${origin}/numbers/${id}${query}`, "Cache-Control": "no-store" } });
   if (!(await withinLimit("numbers-link", `${clientAddress(request)}|${id}`, 10, 600))) return back("?tries=1");
-  const sid = await linkStore(id);
-  const store = sid ? await storeForId(sid) : null;
+  // A link that could not be read just now is said so (rule 24): never sent back as ended, never a crash.
+  let store: Awaited<ReturnType<typeof storeForId>>;
+  try {
+    const sid = await linkStore(id);
+    store = sid ? await storeForId(sid) : null;
+  } catch (error) {
+    console.error("a numbers link could not be read for its password", error);
+    return new Response("The link could not be checked just now. Try again in a moment.", { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   const link = store?.numbersLinks.find((l) => l.id === id);
   const now = Date.now();
   if (!link || link.expires <= Math.floor(now / 1000)) return back();

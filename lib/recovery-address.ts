@@ -32,6 +32,7 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
 
@@ -46,11 +47,16 @@ const setKey = (session: string) => `nl:auth:rec:set:${sha(`nimbus-rec-set:${ses
 const linkKey = (token: string) => `nl:auth:rec:link:${sha(`nimbus-rec-link:${token}`).slice(0, 40)}`;
 const untilKey = (email: string) => `nl:auth:rec:until:${sha(`nimbus-rec-until:${normaliseEmail(email)}`).slice(0, 40)}`;
 
-/** The account's recovery address, or "" for none. */
+/**
+ * The account's recovery address, or "" only when Redis confirms there is none. Any other answer throws (rule 24):
+ * read as none, a removal or a replacement would not tell the old address, and a move would drop it.
+ */
 export async function recoveryAddress(email: string): Promise<string> {
   if (!isRedisConfigured()) return "";
-  const [raw] = await redisPipeline([["GET", addressKey(email)]]);
-  return typeof raw === "string" && EMAIL_PATTERN.test(raw) ? raw : "";
+  const reply = repliesFor(await redisPipeline([["GET", addressKey(email)]]), 1);
+  if (reply && reply[0] === null) return "";
+  if (!reply || typeof reply[0] !== "string" || !EMAIL_PATTERN.test(reply[0])) throw new UnknownReplyError("a recovery address");
+  return reply[0];
 }
 
 /** Keeps an address already proved to be read (the two-step setup's own code). */
@@ -97,7 +103,10 @@ export async function startRecoveryAddress(email: string, session: string, raw: 
 
 /** Keeps the address once its code is right; the sign-in address is told. */
 export async function confirmRecoveryAddress(email: string, session: string, code: string): Promise<{ address: string } | "expired" | "wrong"> {
-  const [raw] = await redisPipeline([["GET", setKey(session)]]);
+  const reply = repliesFor(await redisPipeline([["GET", setKey(session)]]), 1);
+  // Absent (null) is an expired code; an answer in another shape is not known, never "expired" (rule 24).
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("a recovery address code");
+  const raw = reply[0];
   let pending: { e?: unknown; a?: unknown; c?: unknown } = {};
   try {
     pending = typeof raw === "string" ? (JSON.parse(raw) as typeof pending) : {};
@@ -207,10 +216,14 @@ const CLEARED_DAYS = 30;
  * can move the sign-in address to an inbox they have. 0 for such a login.
  */
 export async function recoveryLockUntil(email: string, now = Date.now()): Promise<number> {
-  const [raw] = await redisPipeline([["GET", untilKey(email)]]);
+  const reply = repliesFor(await redisPipeline([["GET", untilKey(email)]]), 1);
+  const raw = reply?.[0];
   const until = Number(raw);
-  if (typeof raw === "string" && Number.isFinite(until)) return until > now ? until : 0;
+  if (typeof raw === "string" && raw !== "" && Number.isFinite(until)) return until > now ? until : 0;
   const next = now + LOCK_DAYS * 86_400_000;
+  // Only a lock Redis confirms absent is started. One not known is never opened and never written over: this login
+  // is locked for the whole week, and what is kept stays for the next read (rule 24).
+  if (!reply || raw !== null) return next;
   await redisPipeline([["SET", untilKey(email), String(next), "EX", (LOCK_DAYS + CLEARED_DAYS) * 86_400]]);
   return next;
 }

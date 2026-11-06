@@ -285,22 +285,26 @@ export async function startPitch(
   const address = publishedAddresses(read.html, read.url, new URL(read.url).hostname).find((a) => a.email === email);
   if (!address) return { ok: false, reason: "unpublished" };
   const domain = siteDomain(new URL(read.url).hostname);
-  // A page that sent the reader on to another domain: that domain's stop lists are asked too, in the same exact
-  // shape. One more round trip, only then.
-  let stoppedThere = false;
-  if (domain !== pageDomain) {
-    const there = repliesFor(
-      await redisPipeline([
-        ["SISMEMBER", key(store.statsId, "stop"), domain],
-        ["SISMEMBER", STOP_ALL, domain],
-      ]),
-      2,
-    );
-    const mineThere = there ? stopOf(there[0]) : null;
-    const allThere = there ? stopOf(there[1]) : null;
-    if (mineThere === null || allThere === null) return { ok: false, reason: "unavailable" };
-    stoppedThere = mineThere || allThere;
-  }
+  // Read again after the page (Codex G on #2697): a stop asked for, or a pitch counted, while it was read stands, so
+  // the model is never asked on a state read before it. One round trip, with the stop lists of the domain the reader
+  // was sent on to when it is another one, all in the same exact shape.
+  // The same three reads as before the page, in the same order, then the other domain's two when there is one.
+  const elsewhere: (string | number)[][] = domain === pageDomain ? [] : [["SISMEMBER", key(store.statsId, "stop"), domain], ["SISMEMBER", STOP_ALL, domain]];
+  const fresh = repliesFor(
+    await redisPipeline([
+      ["SISMEMBER", key(store.statsId, "stop"), pageDomain],
+      ["GET", key(store.statsId, `day:${dayOf(now)}`)],
+      ["SISMEMBER", STOP_ALL, pageDomain],
+      ...elsewhere,
+    ]),
+    3 + elsewhere.length,
+  );
+  if (!fresh) return { ok: false, reason: "unavailable" };
+  const todayNow = textCountOf(fresh[1]);
+  const stops = [fresh[0], fresh[2], ...fresh.slice(3)].map(stopOf);
+  if (todayNow === null || stops.some((stop) => stop === null)) return { ok: false, reason: "unavailable" };
+  if (stops[0] || stops[1]) return { ok: false, reason: "stopped" };
+  const stoppedThere = stops.slice(2).some(Boolean);
   const before = pitches.filter((p) => p.domain === domain && p.status !== "draft");
   const problem = pitchProblem({
     country,
@@ -309,7 +313,7 @@ export async function startPitch(
     pageRefuses: refusesProposals(around(pageText(read.html), email)),
     stopped: stoppedThere || pitches.some((p) => p.domain === domain && p.status === "stopped"),
     lastWrittenAt: before.length ? Math.max(...before.map((p) => p.sentAt || p.createdAt)) : null,
-    sentToday: today === "absent" ? 0 : today,
+    sentToday: todayNow === "absent" ? 0 : todayNow,
     sender,
     now,
   });

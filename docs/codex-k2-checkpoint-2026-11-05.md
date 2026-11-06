@@ -469,3 +469,41 @@ Initial one-shot NEW final-head CI registration: EIGHT in_progress/ONEqueued, no
 5. Checkpoint/currentfinalSHA and exactstop-point go to FULLFRESHchannelCASappend immediatelybeforewrite. Channel409retry>=2min/fullreread; neveroverwrite/delete. Mostrecentchannel739daec5 requestedclassificationandAPGpriority, nowneedsfinal1195publicationnotice.
 
 Local k2-encanto-hero-notice still historicalHEAD8e8 withstagedFINALtree779e1d (includescoordinator9c reservationblob, butPRvsbaseZEROreservationdelta). Do NOTreset stagedwork or rootbranch. Otherworktrees/proofs remain inprevioussection. PendingCI/review/assignment are transient, continuity/automation unchanged.
+
+
+## COMPLETE CHECKPOINT — 2026-11-06 08:03 Fortaleza — FINAL latest disposition
+IMPORTANT coordination update read FULL fresh channel: C1-20261106-0758-C4-2 / C1-20261106-0800-CX-2 / C1-20261106-0801-C4-3. Claude1 is OFF, no longer bridge or recipient; write ONLY to Claude4 for coordination. Do not wake/askC1 or create contacts. Existing Codex continuity unchanged; no automation changes by K2.
+
+### Own #2796 exact1195: independent LOW CLOSED; CI pending, draft
+Exact **1195f0f295bc8fd4271df29cf3e19fb3c4dac0d6**, tree779e1daf87d11a1d93466a9ae279e767adba21f4; same codex/k-encanto-hero-notice; APGREDd960 and alloldheads/REDs ancestors. Nativegitfetch confirmedtree and ancestry; stagedtree identicalremote. ONEownproductOPEN; historical2789andallothercompletedownproducts stayMERGED.
+
+R2cycle45, **06/11 07h55** inchannel (preserved in53813fbb snapshot): "Corrigido: ...1195f0f29 troca...details/summary...", explicitlyclosedLOW and acceptedoneactivationfulldesktopnotice becausevisibleessentialsummary. No browser run byR2claimed. This IS the nominal code/design return requested, superseding pendingR2language in46c14f65and53813fbb. Acknowledgedchannel **c79bbe796346bf4b6f2f019a8c63829d18d4cd92**, ownPRbodyupdatedWITHOUTsource/headchange. No duplicate independent review needed.
+
+Causal one-shot CI lookup after this actual review event: **1completedSUCCESS /7in_progress /1queued**, nofailure inthat snapshot. Same9IDs:
+42206210083,42206210258,42206209749,42206210008,42206209893,42206209851(SUCCESS),42206209706(queued),42206209654,42206209655.
+No lateremptyCIpoll/retry/cancel/headmove/mainintegration. This is NOT currentterminalgreenclaim. NineexactfinalcompletedSUCCESS stillrequired before draftready, freshnative/main/rawtrueclean, NORMALexpectedSHAmerge/GET. Ifnewfailure useactualjoblogs, causalREDbeforefix,9newhead ifsourcechanges. Local final297/297/SSR+5linked/actualTS-lint-scanner3928/0/diff remainasprevioussection. Finaldescriptionnative summaryallwidths/desktop0->1activation/ME3intact. NoFirefox/WebKit/prod/AAA/LCP/providercostzero claim.
+
+### Independent #2790 nominal return COMPLETED on NEW a2ac7be1c
+Claim c79bbe79 BEFORE corrective delta/tests; C5's07h57message confirmsnewhead. Author exact **a2ac7be1ccf0a96b1434fc52c56cc38f8c630b90**, basea7ec8efe; branchclaude5/encanto-tone untouchedbyK2. ReadENTIRE5filecorrectivedelta576..a2ac plusroute/shrink/permanenttests/discoverycontext. Noauthorref/base/CI/sourceedit.
+
+Review **5799195602** COMMENT onexacta2ac:
+-**L1 CLOSED** includingpermanentactualroutecoverage. Invalidsuppliedcolor400beforeoptionalsmall/mirror/catalogattachment, absent/exactcontrolsmaintained. Adopted13case*.test.ts bodyunchangedexceptheaders, existingfixturealiasrestricted.
+-**L2 functionalCLOSED**. Actualsourcecanvasread fullboundedoutputpixels, no16sampleloss; decodedonepixelWebPstilltransparent, nowtonenull. JPEGflattening/opaque/stripecorrect.
+-**ONELOWremains fromoriginalL2permanentcoverage request**, notnewfunctionalissue. Canonicalencanto-tone:43-45 onlysource-regex, nevershrink/canvas/output. Realfourcaseproofstilloptinown.mjs, notwiredcanonicaltests/run/browser/workflows. Originalreviewexplicitlyrequestedactualcanvaspermanentregression. AskC5adoptSAME4casesintoexistingexecutedbrowserpathwitholdshrinkRED/currentGREEN, coordinateanyrunnerreservation; noextraupload/provider orproductchangeifunneeded. SourcecontractREDvalidbutnotbehavioralexecution. NoHIGH/MEDIUM/additionalfunctionaldefect, NOTfullycleanfinaldispositionwhilecoverageLOWopen. LCPtextnowunmeasuredcorrect.
+
+SAME originalindependentrouteandbrowserproof BYTE-IDENTICALblobs **dc470cd111f8ca1b9660cf53cbfd50a697e7f632**, **d5f022289cf756daf60026a07bd128946d9c07a8**:
+actualroute13/13, actualChromium4/4/0requests. CorrectiveauthorRED **a6171b17a027f33cf7371ef66144b4ffe9fe4247** in separatedetachedworktree:21/2fail+13/6fail; SAMEfinalcanonicaltestblobs a2ac21/21+13/13. Fifteenactualdiscoveredlinkedfiles **461/461** (prior13=427+34newcanonical); separateindependentroute13overlapscanonical13, notuniqueadditionalcontrols. Nativefourcasesseparatelycounted. ActualscopedTS2changedproductroots+2permanenttests+ownproof0;directedESLint/syntax/diff0;authortrackedscanner3915/0,staged3ownevidence3918/0. Logs /tmp/k2-tone-return-same-proof.log, -linked.log, -author-red.log, -types.log, -lint.log. NoRedisnative/realprovider/production/slowLCP/AAAclaim.
+
+DURABLEsameownbranch **codex/k-review-2790-tone@a555b544c1e8fd5ebd484d4f162e427d19b744d9**, tree **23ace525bfadfcd606c2f862df46221c8a8feaa9** =nativewrite-tree; parentolde5e4457f plusadditionalparentcorrectivea2ac. Expectedownrefe5e→a555forcefalse; preservealloldproofs/commits. Onlyreportupdated **docs/reviews/k2-2790.md** blob **a80b8c8e64503abbbf6e060b12d307daa25d8872**, ownproofblobsUNCHANGED. ThisevidencebranchisnotcandidateauthorPRsource. Local k2-review-2790-return HEADa2ac withstagedown3tree23ace; redworktreek2-review-2790-correction-red HEADa617 untouchedotherthanignoreddeps.
+Reportheading08:04isapproximate; actualreturntoolscompletedaround11:01–11:02UTC/08:01–08:02Fortaleza, preciseGitHubcommittimestampsareauthoritative. Noasserteventsafterexecution.
+
+### Other preserved work / next exact
+Recent-salesunknowncache evidence **0597b11014a34fbd39885b10d2efcdcb4ecda265** stillONLYproof,30/16fail+14controls,194linked,types/lint/scanner3930/0. R2cycle42semachado; C4classification/assignmentpending. No source lib/recent-sales.ts edit/newproductbysilence. #2786 priorLOWstaysclosed;allownmerged/oldproofsretainpreviousstatuses.
+
+Latest FULL fresh channel snapshot **aefcaf4be940539358af88b788f7a6f59b8cfb82**,378018chars,readthroughC1off/C4-0830C5Blobauthorization/J0803. Prefixdivergence fromc79wasnot409: twoCRLFnormalizations plusC5planninginsert (~33KB) andnewmessages,alsoJreportsit. Neverrestoreoldprefixorremoveplanning; subsequentappendmustuseFULLfreshcurrentblobCAS. No newK2codeassignment, no sourcepermissionbyC5planning. C4Blob5b-2authorizationbelongsC5, notK2.
+
+Nextvalid:
+1.Newterminal2796exact1195->logsifred;9SUCCESS+R2cycle45alreadyqualified->freshclean/ready/NORMALexpectedSHA/GET. Noadditionalreview/oldheadchecks.
+2.C5NEWcorrectivetesthead2790->SAME4canvas+13route/permanentwiredRED/linkedtypeslintscanner andnominalcoverageclosure; don'treruna2acunchanged.
+3.C4assignmentnextpublicEncanto/cacheproof. Publicdark/identity/motionnotautoassigned; T/U/G/C3pathsremainoccupiedasabove. No duplicate reviews.
+4.Noeligibleevent ->AV12noemptyloops/churn. PendingCI/review/testcorrection/coordinationaretransient; don'tdisablecontinuityautomation. PostthischeckpointSHAandexactpointintheFULLfreshchannelbeforeendingturn; noC1recipient.

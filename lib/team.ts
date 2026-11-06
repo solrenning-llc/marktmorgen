@@ -174,13 +174,44 @@ export function parseTeam(raw: unknown): Team {
   }
 }
 
+/** A team record that could not be read whole: never taken for an empty team, so nothing is written back over it and nobody is let past its rule. */
+export class TeamUnreadable extends Error {
+  constructor() {
+    super("The team could not be read just now.");
+  }
+}
+
+/**
+ * The team from the reply to its one GET: no record (null) is an empty team;
+ * a reply that is not that GET's, a value that is not text, or text that is
+ * not a team as saveTeam writes it (an object whose members and invites are
+ * lists, and whose two-step rule, when there, is true or false) throws
+ * TeamUnreadable (Claude 4's sweep, C4-2910, sweepA7 P3).
+ */
+function teamFromReply(reply: unknown): Team {
+  if (!Array.isArray(reply) || reply.length !== 1) throw new TeamUnreadable();
+  const [raw] = reply;
+  if (raw === null) return { members: [], invites: [] };
+  if (typeof raw !== "string" || !raw) throw new TeamUnreadable();
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new TeamUnreadable();
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TeamUnreadable();
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.members) || !Array.isArray(record.invites)) throw new TeamUnreadable();
+  if (Object.hasOwn(record, "requireTwoStep") && typeof record.requireTwoStep !== "boolean") throw new TeamUnreadable();
+  return parseTeam(raw);
+}
+
 const now = () => Math.floor(Date.now() / 1000);
 
-/** A store's team as it is now. Invitations past their seven days are left out. */
+/** A store's team as it is now. Invitations past their seven days are left out. A record that cannot be read whole throws TeamUnreadable. */
 export async function readTeam(sid: string): Promise<Team> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return { ...EMPTY };
-  const [raw] = await redisPipeline([["GET", teamKey(sid)]]);
-  const team = parseTeam(raw);
+  const team = teamFromReply(await redisPipeline([["GET", teamKey(sid)]]));
   return { members: team.members, invites: team.invites.filter((i) => i.expiresAt > now()), ...(team.requireTwoStep ? { requireTwoStep: true } : {}) };
 }
 
@@ -192,8 +223,7 @@ export async function readTeam(sid: string): Promise<Team> {
 async function saveTeam(sid: string, team: Team): Promise<void> {
   let required = team.requireTwoStep;
   if (required === undefined) {
-    const [raw] = await redisPipeline([["GET", teamKey(sid)]]);
-    required = parseTeam(raw).requireTwoStep === true;
+    required = teamFromReply(await redisPipeline([["GET", teamKey(sid)]])).requireTwoStep === true;
   }
   const kept: Team = { members: team.members, invites: team.invites, ...(required ? { requireTwoStep: true } : {}) };
   await redisPipeline([["SET", teamKey(sid), JSON.stringify(kept)]]);

@@ -19,13 +19,29 @@ type Params = { params: Promise<{ token: string }>; searchParams: Promise<{ [key
 export default async function OutreachStopPage({ params, searchParams }: Params) {
   const token = (await params).token.slice(0, 40);
   const query = await searchParams;
-  const found = STOP_LINK.test(token) ? await readStopLink(token).catch(() => null) : null;
+  // A link that could not be read just now is said so, never "not one we know": that would also take the stop buttons away.
+  let unread = false;
+  const found = STOP_LINK.test(token)
+    ? await readStopLink(token).catch((error: unknown) => {
+        console.error("an outreach stop link could not be read", error);
+        unread = true;
+        return null;
+      })
+    : null;
   const who = found?.storeName || "this creator";
 
   return (
     <main id="content" className="min-h-screen bg-paper px-4 py-20 text-ink">
       <div className="card mx-auto max-w-md p-7 sm:p-9">
-        {!found ? (
+        {unread ? (
+          <>
+            <h1 className="t-h3">This link could not be read just now</h1>
+            <p className="mt-3 text-ink-soft" role="status">
+              Nothing was changed. Try again in a moment. Or reply to the email and say you would rather not hear from them: they
+              are asked to stop at that, too.
+            </p>
+          </>
+        ) : !found ? (
           <>
             <h1 className="t-h3">This link is not one we know</h1>
             <p className="mt-3 text-ink-soft">

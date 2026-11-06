@@ -931,6 +931,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/add/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/add",
+      "parameters": []
+    },
+    {
       "source": "app/studio/affiliates/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/affiliates",
@@ -1226,6 +1232,7 @@
   ],
   "componentSources": [
     "components/ad-spend-editor.tsx",
+    "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",
     "components/affiliate-click.tsx",
     "components/affiliate-commission-history.tsx",
@@ -1241,6 +1248,7 @@
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",
+    "components/arrival-notice.tsx",
     "components/ask-box.tsx",
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",
@@ -1321,6 +1329,7 @@
     "components/email-suggestion.tsx",
     "components/email-sync-editor.tsx",
     "components/embed-messenger.tsx",
+    "components/empty-state.tsx",
     "components/exit-offer-editor.tsx",
     "components/exit-offer-slot.tsx",
     "components/exit-offer.tsx",
@@ -1498,6 +1507,7 @@
     "components/site-footer.tsx",
     "components/site-nav.tsx",
     "components/site-pages-editor.tsx",
+    "components/skip-link.tsx",
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
     "components/stats-panel.tsx",
@@ -1995,6 +2005,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 135
+    "pageTemplates": 136
   }
 }

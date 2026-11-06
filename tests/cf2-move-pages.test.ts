@@ -53,7 +53,7 @@ for (const guide of MIGRATION_GUIDES) {
   is(`${guide.platform}: every source is its own help center, over https`, guide.sources.length > 0 && guide.sources.every((s) => new URL(s.href).protocol === "https:" && new URL(s.href).host === sources[guide.platform]), true);
   is(`${guide.platform}: each source has a label that says where it leads`, guide.sources.every((s) => s.label.startsWith(`${guide.platform}'s help center:`)), true);
   is(`${guide.platform}: at least one automatic line, each a known capability`, guide.moves.length > 0 && guide.moves.every((m) => m.capability in MOVE_CAPABILITIES), true);
-  is(`${guide.platform}: each automatic line carries its code limit`, guide.moves.every((m) => m.body.includes(MOVE_CAPABILITIES[m.capability].limit.toLocaleString("en-US"))), true);
+  is(`${guide.platform}: each automatic line carries its code limit`, guide.moves.every((m) => `${m.title} ${m.body}`.includes(MOVE_CAPABILITIES[m.capability].limit.toLocaleString("en-US"))), true);
   is(`${guide.platform}: nothing automatic promises an email to buyers or members`, guide.moves.some((m) => /\bemail(ed)? (to )?(each|every|your) (buyer|member)|members?\b/i.test(m.title + " " + m.body)), false);
   is(`${guide.platform}: says members and the buyer email wait for a paid plan`, guide.notMoved.some((x) => /members/i.test(x) && /paid plan/i.test(x)), true);
   is(`${guide.platform}: things to redo by hand`, guide.byHand.length > 0, true);

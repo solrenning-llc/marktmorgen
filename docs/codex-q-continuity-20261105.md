@@ -509,3 +509,10 @@ Anúncio append-only foi publicado no canal em `92348da5fba4b63ffc6f80cadf374e2c
 - Cinco produtos continuam ocupados, nenhuma sexta unidade: #2438 `6da1a24763a718e88e157703542c24957bfc6123`; #2535 `ec05ad7766d22d2c6374e87fab31bf25a15aa263`; #2709 `33ec096397a3f757eb6524af1d24b9b87a726b77`; #2729 `801ccec3725971edbd4d46651cd79508f865ac22`; #2731 `276baf9cff710f4f7c96bb08c02f609cf7229dc4`.
 - #2535 ainda exige parecer formal/aplicável do Revisor2 e estado terminal limpo; #2709 exige retorno Z e terminal limpo. #2729 mantém parecer S aplicável por conteúdo; #2731 mantém K2/Revisor2 aplicáveis por conteúdo. Os dois novos heads exigem nove checks NOVOS; nenhum check antigo conta.
 - Nenhum produto Q foi incorporado nesta retomada. Próxima ação somente por novidade causal AV12: conclusão terminal, retorno nominal ou achado. Não mover #2535/#2709 durante execução; não repetir/cancelar CI; merge próprio só OPEN + revisão aplicável + 9/9 SUCCESS do head exato + raw true/clean.
+
+
+### Fechamento desta retomada — 06/11/2026 01h53 Fortaleza
+
+- Revisor2 registrou no canal às 01h50 **sem achado novo** nos heads #2729 `801ccec3725971edbd4d46651cd79508f865ac22` e #2731 `276baf9cff710f4f7c96bb08c02f609cf7229dc4`: ambos são somente merge do main e mantêm o diff já revisado.
+- Ponto de parada append-only publicado com sucesso no canal no commit `225d771dd7f01c3f2bb4b17d2b773d40895a5907`, blob `f7c8a30a028515ea8dba5f71285b45173a40c13f`. A primeira tentativa concorrente não escreveu; após espera integral de dois minutos, Q buscou blob fresco e acrescentou sem sobrescrever histórico novo.
+- Estado/next step permanecem os da seção anterior: nenhuma segunda consulta dos nove novos; nenhuma incorporação de produto; aguardar novidade causal.

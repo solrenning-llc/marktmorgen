@@ -23,6 +23,7 @@
  * subscription names no store) is counted as unmatched and logged.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { isAddOn, isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type PlanDisputeStatus, coveredUntil, disputeStatusOf } from "@/lib/plan-dispute-rules";
 import { recordPlanDispute, storeForHandle, storeForId, storeRef } from "@/lib/store";
@@ -114,10 +115,12 @@ function sameCustomer(customerId: string | null | undefined, subscription: Recor
 export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<DisputeCounts> {
   const counts: DisputeCounts = { seen: 0, recorded: 0, unmatched: 0, reread: 0, failed: 0, complete: false };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
-  const [raw] = await redisPipeline([["HGETALL", SEEN_KEY]]);
+  // The disputes already seen, only as a whole list of field/value pairs (rule 24): unknown, the run throws (the daily job
+  // logs it and the next run reads again) rather than handle every dispute as new and skip the open ones' re-read.
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", SEEN_KEY]]), 1)?.[0]);
+  if (!flat || flat.length % 2) throw new UnknownReplyError("the plan disputes seen");
   const seen = new Map<string, string>();
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) seen.set(String(raw[i]), String(raw[i + 1]));
-  else if (raw && typeof raw === "object") for (const [key, value] of Object.entries(raw)) seen.set(key, String(value));
+  for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], flat[i + 1]);
   const listed = new Set<string>();
   const since = nowSeconds - LOOKBACK_DAYS * 24 * 60 * 60;
   let after = "";

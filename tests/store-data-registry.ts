@@ -675,6 +675,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mv:@lib/move-members.ts": room("Members invited over from another platform", "lib/move-members.ts"),
   "nl:mv:due@lib/move-members.ts": company("Invites to remind", "One sorted set for every store, each an invite's."),
   "nl:mv:link:@lib/move-members.ts": room("An invite's link, until a while after the renewal it is for", "lib/move-members.ts"),
+  "nl:mv:open:@lib/move-members.ts": short("The checkout an invitation's link opened: one key an invitation, as long as Stripe keeps that checkout open and a minute, never more than a day and a minute", "request", 2, LINK_BYTES),
   // ---------------------------------------------------------------- lib/ n–p
   "nl:next:@lib/next-bought.ts": { what: "What buyers bought next, cached", parts: [capped(256 * KB, "One cached view.")] },
   "nl:next:lock:@lib/next-bought.ts": short("One reading at a time", "studio", 1, 128),

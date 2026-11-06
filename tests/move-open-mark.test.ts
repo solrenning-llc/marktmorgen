@@ -10,6 +10,8 @@ import { readProduct } from "@/lib/catalog";
 import { inviteMembers, openMove, readInvite } from "@/lib/move-members";
 import { store as redis, advance } from "./redis-stub";
 import { done, is, part } from "./check";
+import { moveWords } from "@/lib/buyer-words/move";
+import { LANGUAGE_CODES as LANGUAGES } from "@/lib/store-language";
 import { paidPeriod } from "./billing-period-fixture";
 
 const OWNER = "move-open-mark@example.com";
@@ -120,7 +122,13 @@ async function main(): Promise<void> {
   const b1 = await press("ben");
   const b2 = await press("ben");
   is("Stripe made the session but its answer was lost: the press is refused", b1.ok ? "opened" : b1.reason, "refused");
-  is("and a second press makes no second session", [b2.ok ? "opened" : b2.reason, checkouts.length - before], ["refused", 1]);
+  // Changed assertion (rule 23, Revisor 1 on #2685): the second press used to say "refused" ("try again in a few
+  // minutes") for a day. It now says the last try is still being checked, which is what is true.
+  is("and a second press makes no second session, and says the last try is still being checked", [b2.ok ? "opened" : b2.reason, checkouts.length - before], ["checking", 1]);
+  for (const language of LANGUAGES) {
+    const words = moveWords(language).notices as Record<string, { title: string; body: string } | undefined>;
+    is(`${language}: the words for a try still being checked exist and promise no minutes`, Boolean(words.checking?.title && words.checking.body) && !/minute|minuto|Minute|minuut|minutes/i.test(words.checking?.body ?? ""), true);
+  }
   refusedByStripe = true;
   const d1 = await press("dee");
   const d2 = await press("dee");

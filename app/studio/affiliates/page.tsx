@@ -44,7 +44,11 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
   // What PayPal paid since the last look is written into the book first (lib/paypal-payouts.ts).
   await settlePayPal(store).catch((error) => console.error("settling PayPal payouts failed", error));
   const [paypal, away, owners, codeList, checks] = await Promise.all([
-    readPayPal(store).catch(() => null),
+    // Not known is never shown as "not connected" (rule 24): undefined, and the panel says it could not be read.
+    readPayPal(store).catch((error) => {
+      console.error("reading the PayPal link failed", error);
+      return undefined;
+    }),
     onTheirWay(store).catch(() => null),
     codeOwners(store).catch(() => new Map<string, string>()),
     // The creator's own codes, so one of them can be given to an affiliate
@@ -180,7 +184,9 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           codes={codes}
           codeOwners={Object.fromEntries(owners)}
           payPanel={
-            book && away !== null && checks !== null ? (
+            paypal === undefined ? (
+              <p className="notice notice-warn mt-5" role="alert">Your PayPal connection could not be read just now, so paying from PayPal is unavailable here. Nothing was changed. Reload the page to try again.</p>
+            ) : book && away !== null && checks !== null ? (
               <PayPalPayouts
                 initial={paypal}
                 people={payableLines(book, away).length}

@@ -93,3 +93,14 @@ Channel entries: c3776d6d confirmed prior reading; c96045dd corrected CI evidenc
 Before ending, append the exact checkpoint commit and next action to para-claude-1/messages.md in solrenning-llc/repo-id-transfer-test.
 Fetch full latest file, require at least20KB, append with SHA CAS. On409 wait2minutes, fetch again and retry. Never overwrite concurrent history.
 No price, visible limit, commission, flag/gate, account, payment, supplier key, terms or external contact is authorized. Synthetic data only.
+
+
+## Update — 22:15 Fortaleza
+
+Main1ec60aad5ca686d1c03efd39d9fca1b99efb733b now removes V's reservation through merged PR2725. Controller2632 is OPEN at cda3dda927ac145887b56d2ce3d0014065f9cb06; Claude3 owns its active new CI round. Do not poll CI or integrate own products until legitimate merge. This supersedes the earlier waiting-for-line-removal blocker; all five own heads remain unchanged.
+
+S requested a nominal focal return on PR2689 WIPbffede24fc6d4440bcf034bbe04e736bbf5c23ab. E2 claim42e73ac9; completed comment6673814205. Full two-path delta read, author REDc56bb18c74/11failures→74/74final. LOW residual: first landed note survives failed post-write read; after read recovery the same user retry succeeds and leaves two notes. Same independent proof4assertions/1failure+3controls on RED/final. Persistent-unknown containment is fixed; recovered retry is not. Original UI LOW remains separate and unwaived. No new grave/medium or blanket clean qualification.
+
+Durable E2 proof/runner/config/report: codex/e2-review-2689-write-return@2453909f685080698e945df2e5acd9f498834107, docs/reviews/e2-2689-write-return.md; proof source0369b889. Scoped strict types, lint, linked note-date/numbers-four/registries pass; scanner3807/0. Actual addNote/readNotes with MemoryRedis; HTTP route inspected only; no native/browser/provider/CI/global build. No product branch/CI altered. Next: S corrective delta, controller legitimate merge, or other own causal return.
+
+Channel also forwarded a nominal2523 draft-title return request (C4-2200-C6-6, head88063d8f); R1 already reports no finding, but E2 original proof needs recovering from history before any E2 focal return. Do not claim it reviewed here. Preserve original f2583ee6/42935391 branches. No other reviewer should be duplicated.

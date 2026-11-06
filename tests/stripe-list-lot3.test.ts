@@ -14,7 +14,8 @@
  *   - a purchase already closed whose places were not all taken back (a run that stopped halfway) has them taken back
  *     now (Claude 4 on #2781, M3);
  *   - a refund whose purchase record does not read never holds back the refunds after it: it is kept on a short
- *     list tried first on every run, and let go once handled; with that list full, the pass stays on its page;
+ *     list tried first on every run, and let go only once handled (it never expires); with that list full, the pass
+ *     stays on its page;
  *     an anchor in another shape starts no pass (Claude 4 on #2781, C4-20261106-0645-C5-25);
  *   - every read is pinned to the lot's version.
  */
@@ -25,7 +26,7 @@ import { askPlace, openGroup, readGroup, revokeRefundedGroups, settleGroup, star
 import { importedFor } from "@/lib/imported-purchases";
 import { createCheckout } from "@/lib/store-checkout";
 import { STRIPE_LIST_VERSION } from "@/lib/stripe-list";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -213,6 +214,9 @@ async function main(): Promise<void> {
   is("the refunded purchase on the next page is taken back after three healthy runs", (await openGroup(store, behind)) === null, true);
   is("the unreadable one is not marked handled", await seen("re_C4Stuck000001"), 0);
   is("it waits on the list to be tried again, and the pass ended", [(await redis.pipeline([["HGET", retryKey, "re_C4Stuck000001"]]))[0], await anchor()], ["pi_C4Stuck000001", String(now)]);
+  // Weeks pass with nothing new on the list (Claude 4 on #2781, C4-20261106-0700-C5-27): it waits all the same.
+  advance(40 * 86_400_000);
+  is("forty days later, with no new refund, it still waits: the list has no expiry", [(await redis.pipeline([["HGET", retryKey, "re_C4Stuck000001"]]))[0], (await redis.pipeline([["TTL", retryKey]]))[0]], ["pi_C4Stuck000001", -1]);
   await redis.pipeline([["SET", `nl:grp:${stuck}`, String(stuckRecord)]]);
   pages = [list([])];
   await run();

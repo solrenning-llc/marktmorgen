@@ -4,8 +4,10 @@
  * twoStepStatus or recoveryAddress cannot be read, the read is unknown (null),
  * not off or none: where the managers would be, the studio says the two could
  * not be read just now, and offers neither "Turn on" nor "Add" on a guess.
- * The page still renders; with an address and nothing kept, they read as off
- * and none as before.
+ * Nor does the rest of the page: the "Keep a way back in" step is listed only
+ * when its tick is known, and the app's code is not offered while two-step
+ * login is unread. The page still renders; with an address and nothing kept,
+ * they read as off and none as before.
  */
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
@@ -30,5 +32,10 @@ is(
   [true, true],
 );
 is("the notice says nothing changed and how to try again", page.includes(`${NOTICE} Nothing was changed; reload the page in a moment.`), true);
+
+part("nor anywhere else on the page");
+const recoveryStep = /\.\.\.\(([^\n]*)\n\s*\? \[\{ key: "recovery"/.exec(page)?.[1] ?? "";
+is("'Keep a way back in' is listed only when its tick is known: the address read, or a passkey", recoveryStep, 'role === "owner" && (recoveryRead !== null || passkeys.length > 0)');
+is("the app's code is offered only when two-step login was read", /\{store && twoStepRead !== null && showAppCodeInvite\(/.test(page), true);
 is("no email still reads as off and none", [page.includes('Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" })'), page.includes(': Promise.resolve(""),')], [true, true]);
 done();

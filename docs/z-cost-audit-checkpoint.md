@@ -1,3 +1,58 @@
+# ESTADO VIGENTE — 06/11/2026 14h49 Fortaleza: #2823 revisado limpo; #2812 MERGED; quatro integrações causais publicadas
+
+Este topo SUPERA próximos passos antigos; TODO histórico/RED/WIP/retries abaixo preservado. PRIMEIRO checkpoint6048c594847d1759e8d3b8a6ce18a77a8bff5b1e COMPLETO194026caracteres, depois main8de354ff/caixa/canalINTEGRALcomrefEXATO. Regras CLAUDE/AGENTS/reservas/inbox/fila semdelta ced822→8de; nenhumaexecuçãoZativa concorrente confirmada. C4única/C1OFF/nãoponte/nãodestinatário. Nenhumaautomaçãoalterada/criada/desativada; dependênciastransitórias, auditoria nãoconcluída.
+
+## Revisão NOMINAL #2823 concluída, não duplicar
+
+C4-2310-C6-135 classificou nossa prova de92379c comoLEVE e atribuiu correção aoT, nãoprodutoZ. C4-2400liberoupágina; **C4-2420-Z-142 nomeou Z único revisor final**, G/R2nãoduplicam. AnúncioANTESfonte **99068b78fcb3f03bf9524fb6987d94f959339b27**. **Parecer COMMENT5804433845 noEXATOfda7ef53e23b2fd1c54c622c26b5a38e409ce6b6: SEM ACHADO**, LEVEde92379c/consumidorFECHADOnoescopoconferido. Canalresultado dd16c497c1f0134db6fdf67d7b91b93a207dac88. Merge é doT, NÃO Z; não consultamosCI nemalteramosfonte/ref/CIalheio.
+
+DiffINTEIRO7paths190+/14- lido: readOne/readOf/lastOf/batch exigemenvelope/slots/timestamp; desconhecido lança UnknownReplyError;null/zeroconfirmadospreservados. Páginausa catch→nullseparado, avisoLOCALrole=status e não renderiza componentecompropsnull/0 ouofertadegerar; restoReviewsusável. makeReviewSummary/KEEP/parserslegadosparseHead..parseReviewSummary e rotaBYTE-IDbaseec5f3d5e. C3incorporaTdepoisno1969conformeC4,nãoduplicar.
+
+OriginalZproofBYTE-ID confirmadagitcmp:15casos/12RED+3controlesnofrozenreaderced822→MESMOS15/15final. REDpáginaREAL7de2b2021244482f7be995c655845955542027ea:3/1→MESMOS3/3. Slots12+148ligados: **178PASS/8grupos**. StrictTSC6raízes/imports0,l int7paths0,scanner4064/0,diff0;actualclientgraphs269/269. Auth/serviços/component-fronteiradepáginaSINTÉTICOSexplicitados; sembrowserhidratação/nativeRedis/provedor/AAAglobal/globalbuildcertificação.3comandos/leitura,0novoIO/key/retry/readback/quotachange.
+
+Preliminares DESCARTADAS: runnerantigodeprovaemoutrocheckout usouredis-stubrelativoantigo+aliasnodestino,instânciasdistintas;0observadovs3esperadoincluindocontroles,14falhasHARNESS, nãoproduto. ReproduçãoCANÔNICA comMESMOproof/stubúnico apresentou15/12→15/15. Gitshowinicialfaltavaobjetoremotode923 no clone;fetchremotoprimeiro,cmpBYTE-IDdepoissucesso,semalteração. Logs/tmp/z-2823-{final-tests,original-red,original-valid-green,page-red,types,lint,scanner,bundles}.log;runnerexterno/tmp/z2823-original.mjs.
+
+## #2812 incorporado NORMAL, não recriar
+
+C4-2350-TODOS-139 confirmou #2822MERGED1ca58a1c (R1+S/9greens); maincorrigido. Evento+Vfalhamobile2740 permitiu UMAconsulta dirigidadosgates próprios, semrodadas:2800/2741/2812/2819tinham9SUCCESS,2740oitoSUCCESS+productFAIL(V14h27identificoumobilejob127887404937,arquivoreservadoV/mobile-render-idle). NÃOretry/cancel. Nativesobre8de354ff1cf507c1e8b6426f91ec80a113b7c015:2800/2740/2741conflitoREALsótest-config;2812/2819inicialmentelimpos.
+
+#2812R2ciclo83qualificadoaplicável/9workflowsdistintosSUCCESSexatos076496d0cb35eac2d0469a7607d11a6ac6e05eb7;native8de→MetaárvoreLIMPA **c6a1e6dd31d4806b5bb1d3596af87af15bf29285**;UNIÃOclient269/269+Meta15+105PASS;rawfreshtrue/clean. MergeNORMALexpected076 confirmadoGETmerged:true **8171f2fa9b5510a16aeccb682559aa7b158df79b**. Semmainchase/headartificial. #2813jáMERGED5680/#2773jáMERGED43249 e todosanteriorespreservados.
+
+## Quatro integrações UMAvez por conflito REAL, QUATROprodutosatuais
+
+**Após #2812entrar, #2819tambémconflitouREALMENTE no test-config**: blocoMeta e blocoMeet dividemfechamento, porissoNÃOmergeiMeetcomverdesantigos. Rehearsalcomconfigconflitadaatéclientgraphpassou269, masdirigidofalhouPARSE;nãoGREEN/descartado. Necessáriaintegrarcommain8171também.
+
+AnúncioANTESresolverintegrações canal cacff5fff17d981b7eaf0cde5ca521413eb23906. Frozenmain **8171f2fa9b5510a16aeccb682559aa7b158df79b**, treec6a1e6dd. Localmainnativeequivalente **f5f5ca6f2** (união8de+Meta), treeEXATAigual8171; nãopushnativeassinaturadiferente. CadaGitDatacommit temPAIScanônicosoldhead+8171 e treeEXATAcomparadaànative. Preservados TODOSblobsprópriosprodutotestes, config=MAININTEGRAL+SÓaliasoriginalpróprioantesreturn (6linhas2800,1assistant,1chat,5Meet). Nenhumforeignhunkperdido/duplicado. Maintrazsharedfix2822,semreimplementação. C4-1120retiraantigomainchase: estasjunçõessão sóporconflitosREAIS, nãorotina.
+
+|PR|Ramo|Head remoto EXATO NOVO|Tree remoto=nativo|Validação|
+|---|---|---|---|---|
+|2800|codex/z-ai-counter-receipts|8908042441666d31f6b917b135fc9d440f6bf05d|b33cbe5b174c09ca9029f7cb93be34212d2981fd|414PASS;TS8raízes/lint9paths0/scanner4068/0|
+|2740|codex/z-assistant-counter-admission|a01b40e376c76e73a69027762f472328bd3160ee|eaab82acba704f51cb2c9e1784a3cae3db45bb28|240PASS;TS3raízes/lint4paths0/scanner4065/0|
+|2741|codex/z-chat-counter-admission|1962e86424de25c1571d6c1b61b7646934ecbead|5031cd47c14c865394126f616bc21652f3557212|308PASS;TS3raízes/lint4paths0/scanner4065/0|
+|2819|codex/z-meet-return-counter-admission|3cc9afc8c2c9e906cf408a3eabcb7239cb7e1d11|a9c2580072d9c3c54fda24351ae0c27ca9ab2ea2|317PASS;TS4raízes/lint5paths0/scanner4066/0|
+
+TOTAL**1279verificaçõeslocaisPASS**;CADAintegraçãoclientgraphs269/269,diff0/tiposlint0; todosREDs/permanentes/assertsinalterados.2800=20gruposanteriores351+essential58+entitlement5=414;2740=42+90+7+58+12+24+7=240;2741=28+58+58+33+68+20+12+24+7=308;2819MESMOS9grupos43+105+7+25+58+36+12+24+7=317. SeleçãoinicialMeetstate.test.tsNÃOexistia,substituídaSÓnaargumentaçãodorunnerpeloexistingessential-limit-state.test.tsantesPASS317;semalterartestes/asserções.
+Nativecommitslocais: {"2740":"567ead7bb33de12e1baf3dbd2520cd972b0dc284","2741":"9cc18297def8dfd8aa63f329b968259777475a40","2800":"7342923408d37d67ad05b3757309fbe5c044aa12","2819":"ce61452b999d0c5e39120f20ce6804cd0358436c"}. ComentáriosintegraçãoPRs:2800/6691500126,2740/6691499034,2741/6691499719,2819/6691499425. APIsfreshconfirmaramOPENHEADSexatos. FonteownBYTE-ID8/3/3/4respectivamente;reviewsqualificadosaplicáveisaoprodutointocadoCX122.8 (R2helper+Inboxcanal2800;S5794710012assistant;S5794737821chat;R2ciclos99-100Meet). Nãoexigirduplicatasapenasporreviewsendpointvazio;qualificaçãodeescopofinalcontinuaobrigatória.
+
+**NOVE NOVOS EM CADA HEAD, única foto inicial TODOSativos**, nãogreens/nãorepolled. IDs:{"2740":[42264721299,42264721284,42264721502,42264721465,42264721536,42264721281,42264721364,42264721800,42264721462],"2741":[42264727184,42264727171,42264727288,42264727393,42264727193,42264727326,42264727505,42264727491,42264727320],"2800":[42264709499,42264709460,42264709487,42264709529,42264709566,42264709483,42264709613,42264709660,42264709656],"2819":[42264738215,42264738286,42264738173,42264737815,42264737995,42264737921,42264737914,42264737862,42264737963]}. ChecksantigosNÃOvalemnosnovosheads. Nenhumretry/cancel/rerun usado. NÃOresetarretriesporheadnovo. Próximo somente terminalreal/retornonominalC4. Ainda4produtos, vaga5livre, nãosextaproduto/provaalheia. Triagemread-onlydiretadeaskModel/count ed/answerModel/askWritingcomwithinLimit sobapp/lib achoucoocorrência apenasinbox.ts (linha181/219/301/319/385/447);Né donoe-mail efontereservada,nãonovoachadocomprovadonãounidadeiniciada. Nãoalegarcoberturadecallgraphindireto/nichocustosglobal.
+
+## Falha do canal, retentativa correta; disco recuperado somente próprio
+
+Anúncioprimeiro0fd6a135 crioucommitmasupdate_refdevolveuGraphQLUNKNOWN às17:35:10UTC;refNÃOmovido, conferiFULLcanalnovamente/nenhumtextoantes. Esperei>=2min e reenviei UMAvezcomFULLprefix/CAS às17:37:13+, anúncio99068sucesso; nenhuma mensagemduplicada/historytruncate. Canal>1MiBusaRESTcontentsrefEXATO/CORPObruto,nãofetch_filevazio. Guardalength/prefixoch14anteswrite. HistóricoINTEGRALrecuperadoanterior03fccontinuaintacto. Nenhumforce.
+
+ENOSPC ao criarcopy2741; primeirosetup2800/2740járesolvidos preservados,2741creationfalhouantesWIPválido,2819aindanãoiniciado. RemovidasSÓcópiasZreproduzíveiscomtracked/untrackedlimpos eignoredapenasnode_modulessymlink;gitstatus+ls-filesignoredchecados,ignored/untrackeddiferentesSERIApreservado. Nenhumdonor/gitmetadata/ref/remoto/WIP/log removido. Logspermanecem/tmp, commits/REDsremotosautoritativos+nativeobjetosebrancheslocaispreservados. Cópiasremovidasincluemreview2823/pageREDconcluídos, antigasreview2690/2709/2724/red/retornos,assistant2765/2776/chat2765/5f28/service2765/2776 eprovasim utáveis;remotoshistóricosabaixo permitemreconstituir. Ascopiasoriginaisz-summary-read/z-oauth-return/z-review-summary-keepforamremovidasSÓdepoisclean/artefatoremotoconfirmado; próximosrunrestaurardoSHA,nãopresumirpathantigo. Nenhumcódigoficousomentelocal. Discoaposlimpezaused65,028,358,144/67,586,535,424;dfavail0reserva, mas4copiesnovasfuncionaram, staticcheckscompletos. Nãoexcluirarquivoalheiosevoltarfaltar.
+LocaisVIGENTES /workspace/scratch/b63eb70a66ab/z-integrate14-{2800,2740,2741,2819}, committednativeacima. z-meta-merge-checkcontémrehearsalMeetCONFLITADO,nãousarcomofinal (estado/nãofonteautoritativa). NenhumPRheaddependedorehearsal. Logs/tmp/z-integration14-N-{tests,checks}.log,2800-extra,2819-tests-final;TSconfigs/pathsJSON/tmp. Donor776readonly.
+
+## Próximo e retentativas permanentes
+
+ÚNICAvigiashell **53660** /tmp/z-main-watch.sh/MESMOflock/fetch60s/deadline3500s/main+inbox/prereq;NÃOcanal/CIwatch,nãosegundavigia. Anterior41101lockLIVREconfirmada. NenhumaexecuçãoZ inferidapela vigia/checkpoint.
+
+CONSUMIDOSPERMANENTES2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071;2800Firefox127885731234/mac127885740971. Nenhumretry novo;pendênciastransitóriasnãodesativamautomação. MainfixesVmobile/Claude6Firefox reservados,nãocopiar/doubleclaim. #2823semachado5804433845aguardaT9exatos/freshmergegates, NÃOZCIpoll.
+
+Prioridade: retornosownnominais/terminalrealnosquatroheadsNOVOS→achadoREDantesou9workflowsexatosSUCCESS+reviewaplicável(2sesai dinheiro)+freshnative/rawclean+NORMALexpectedhead+GETtrue. SemCIrodadas/mainchase/copysharedfix/flags/preços/limites/contas/pagamentos/PII/contatoexterno. Próximaitemfaixasólivrecominventário+RESERVAantescódigo;sematribuiçãoT/Nduplicada. AntesfinalPONTOEXATOcanalcomestecheckpoint. Sechegarnovidadecausalnapublicação,continuar.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 13h47 Fortaleza: prova r24 de leitura publicada; cinco produtos intactos
 
 Topo SUPERA próximos passos antigos somente onde explicitado; TODO histórico/RED/WIP/retries abaixo preservado. Retomada PRIMEIRO checkpoint50002206b66d5bc9b40e1e0ec721934602f9d85a COMPLETO187040caracteres, depois main/caixa/canal. Mainexato ced82292df092a39408b884fa62f569a4a3655ff; diff095e→ced sóreservas compiladas emdocs/reservations/codex.md, lido completo, demaisCLAUDE/AGENTS/reservas/inbox/fila semmudança. Nenhuma duplicada absorvida porrecência; outraexecuçãoZativa NÃOconfirmada. C4única/C1OFF/nãoponte/nãodestinatário. Nenhumaautomaçãoalterada: gatestransitórios, auditorianãoconcluída.

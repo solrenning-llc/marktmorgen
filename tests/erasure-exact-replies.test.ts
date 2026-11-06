@@ -107,7 +107,11 @@ async function quiz(): Promise<void> {
   await markPassed(course, "ana-learner", "lesson000002", ROOM);
   const courses = [{ courseId: course, lessonIds: ["lesson000001", "lesson000002"] }];
   const before = await used();
-  for (const bad of [...BAD, [[]], [[[], [], undefined]], [[["lesson000002"], [null, null], 3]], [[["lesson000002"], [null, null, 1, null], "3"]], [[{}, [null, null, null, null], 1]]]) {
+  for (const bad of [...BAD, [[]], [[[], [], undefined]], [[["lesson000002"], [null, null], 3]], [[["lesson000002"], [null, null, 1, null], "3"]], [[{}, [null, null, null, null], 1]],
+    // A count that contradicts the rest of the same reply, or is not a safe count (Codex G on #2576): the set and each
+    // non-null value are exactly the keys the same DEL could take.
+    [[["lesson000002"], [null, null, null, null], 0]], [[["lesson000002"], [null, null, null, null], 2]], [[["lesson000002"], [null, null, null, null], 99]],
+    [[["lesson000002"], [null, null, null, null], 2 ** 53]], [[[], ["1", "x", null, null], 1]], [[["lesson000002"], [null, null, null, null], 1.5]]]) {
     is(`refused on ${JSON.stringify(bad)}`, await refused("set-and-values-take", () => bad, () => forgetQuizPerson(courses, "ana-learner", ROOM)), true);
     is(`no room given back on ${JSON.stringify(bad)}`, await used(), before);
   }

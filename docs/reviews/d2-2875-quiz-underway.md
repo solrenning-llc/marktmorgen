@@ -1,3 +1,23 @@
+# D2 focal return: runtime findings closed on ecf3f35a; permanent CI registration pending
+
+Returned exact head: ecf3f35ad6c8896d39bb4186f5a6c139b461168a, treef06e489ae06a0db17fea85fe5d44d97925ee34e3. Announced before new diff/source/tests in channel98b088adc8fe00759b1abb44f8ed66dad8b2ea6c. This section supersedes the two runtime findings' open status below ONLY in the demonstrated cases; it is not a whole-PR clean release.
+
+- SAME immutable proof blob2eb7875e5820d331e762d7d4591740c3c541a8ae, including all12 assertions: old1e8a12/5fail -> exactecf12/12. The author's RED8c27a9d5 adds ONLY that same proof and the unchanged historical runner to1e8a; all production preimage bytes match the actual old execution. Final uses52 synthetic commands under the unchanged5000preinstalled ceiling.
+- passedQuizzes now rejects unknown evidence, so the real quiz COPIER fails instead of resolving an incomplete section. Its old two healthy controls still pass. The personal-data module was not modified.
+- The eight access-gate consumers explicitly import the new passedForGate; source inventory and all nine corrective product patches read. Gates keep the conservative empty-set fallback, which does not open later lessons/certificates/assignments. No policy/gate activation is changed.
+- resetTries now accepts only string/null GET values before freeing room or deleting. Both original malformed-value vectors refuse, preserving exact attempts. D2's original conditional MEDIUM and LIGHT are CLOSED in these demonstrated cases, not by author report.
+- Original authored test remains blobdb3cd823 and passes28/28. D2 selection32files1121/1121, plus separate immutable12/12. Directed strict types now1108source files/0diagnostics including all changed product roots/proof/test/imports; lint all corrective paths0; scanner4130tracked/0; diff0.
+
+## Validation prerequisite still open
+
+The canonical test discovery at tests/run.mjs:24 selects only *.test.ts. D2 executed THAT ACTUAL source expression against the exact tree:1469selected filenames, authored quiz-underway-exact.test.ts included=true, d2-2875.proof.ts included=false. Therefore the copied proof is durable evidence but NOT a permanent normal-CI regression yet. Author notified immediately in comment6695767414. Register a *.test.ts copy with the SAME proof bytes/assertions, leaving the historical proof unchanged, or explicitly register it in the normal runner. This is a concrete validation prerequisite, not a new allegation that the two runtime repairs failed.
+
+The copied original proofs/d2/review-2875.mjs is pinned to1e8a. Its original validation mode must not be run as if it targetedecf, and copying it into a product does not register CI coverage. D2's OWN evidence branch now adds return-proof, return-validation and return-types modes for the exact corrective snapshot; all original modes and assertions remain preserved. Return-proof prints canonical discovery as evidence but does not itself change discovery or run a full global suite.
+
+Revisor2 execution/classification request for the original proof remains separate and was not falsely reported completed. No authenticated HTTP download, browser, nativeRedis, realStripe/Resend, globalTSC/build or nine-CI-success certification. No author branch/ref/CI/source touched. Await actual new head with permanent registration, verify the test-byte/discovery delta and same12, then publish a qualifying focal opinion if no additional delta. Five own fiscal products continue waiting on nine exact-head successes, with no retries or head churn.
+
+---
+
 # D2 independent review of PR #2875
 
 Reviewed exact head: `1e8a2925061099070bcb1e0255c5d17e88667088`.

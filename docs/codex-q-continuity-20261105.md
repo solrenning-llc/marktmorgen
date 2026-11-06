@@ -488,3 +488,24 @@ Anúncio append-only foi publicado no canal em `92348da5fba4b63ffc6f80cadf374e2c
 - Fotografia inicial única após publicação: exatamente nove workflows novos queued em cada head. IDs registrados pela API; nenhuma segunda consulta, retry, cancelamento ou merge. #2709 já aparece raw mergeable=true; os outros três false normalizado enquanto a fila inicia, não tratado como conflito.
 - Cinco próprias permanecem ocupadas: #2438 e os quatro heads acima. Nenhuma sexta unidade.
 - Próximo passo somente com novidade causal: retorno R2 de #2535, retorno Z de #2709, achado/revisão dos demais ou conclusão terminal dos nove. Merge próprio apenas OPEN + revisão aplicável +9/9 SUCCESS exatos + raw true/clean. Nenhum main-chase durante executores.
+
+
+## Retomada — 06/11/2026 01h50 Fortaleza
+
+### Fontes frescas e novidade causal
+
+- Checkpoint remoto anterior blob `b64788b23b17fd84d8938fec958cc8d15663ed33` foi lido antes da ação. Main fresco `5651ac514b457ef60a02d02cd9e1d1d7f8b076aa`; CLAUDE.md, AGENTS.md, reservas, caixa Codex e canal append-only frescos também foram relidos.
+- O canal registrou que o flake compartilhado que atingiu #2709 foi isolado pelo Codex V no #2765. Q não repetiu o job antigo, não tocou no ramo V e não alegou que a correção já está no main.
+- Fotografia única dos heads próprios: #2535 tinha 8 workflows SUCCESS e Product checks com verify falho em “Copying a whole store”; a repetição/aggregator já aparecia ativa, então Q não repetiu, cancelou ou moveu o head. #2709 tinha 8 SUCCESS + Product checks em progresso. #2729 e #2731 tinham 9/9 SUCCESS, OPEN, mas raw mergeable=false após o main avançar. #2438 permanece coordenado/dirty e intocado.
+
+### Integração única de main nos dois heads terminais
+
+- #2729: main `5651ac514b457ef60a02d02cd9e1d1d7f8b076aa` integrado uma vez. Novo head exato `801ccec3725971edbd4d46651cd79508f865ac22`, árvore `f583f7098996f93521e5f54ae2b76a9ab6d1a70a`. Os blobs revisados permaneceram byte-idênticos: `lib/erasure-rules.ts` `a406aeeaf9874c1309747c692c93f04cedcbd956`; `tests/q-erasure-size-read-evidence.test.ts` `b1993e78d4aa0be57b5293cc5e35eef7f865f578`. Focal 11/11 verde após a integração. Comentário do PR `6677196252`.
+- #2731: mesmo main integrado uma vez. Novo head exato `276baf9cff710f4f7c96bb08c02f609cf7229dc4`, árvore `7e24ce48d844c05401bf14af22537236b9b6758b`. Blobs revisados byte-idênticos: `lib/waitlist-tokens.ts` `5d5b1557850252615dcff446e4856190d45d6fe0`; `tests/waitlist-tokens.test.ts` `f649dc5ba67f51e3e0b310a008c1e77b9fb6d798`. Focal 32/32 verde. Comentário `6677195970`.
+- As árvores GitData remotas são exatamente as árvores do merge nativo local. O push nativo não autenticou e não escreveu; a publicação usou GitData com `expected_sha` antigo e `force=false`. Nenhum blob de produto foi recriado.
+
+### Ponto atual
+
+- Cinco produtos continuam ocupados, nenhuma sexta unidade: #2438 `6da1a24763a718e88e157703542c24957bfc6123`; #2535 `ec05ad7766d22d2c6374e87fab31bf25a15aa263`; #2709 `33ec096397a3f757eb6524af1d24b9b87a726b77`; #2729 `801ccec3725971edbd4d46651cd79508f865ac22`; #2731 `276baf9cff710f4f7c96bb08c02f609cf7229dc4`.
+- #2535 ainda exige parecer formal/aplicável do Revisor2 e estado terminal limpo; #2709 exige retorno Z e terminal limpo. #2729 mantém parecer S aplicável por conteúdo; #2731 mantém K2/Revisor2 aplicáveis por conteúdo. Os dois novos heads exigem nove checks NOVOS; nenhum check antigo conta.
+- Nenhum produto Q foi incorporado nesta retomada. Próxima ação somente por novidade causal AV12: conclusão terminal, retorno nominal ou achado. Não mover #2535/#2709 durante execução; não repetir/cancelar CI; merge próprio só OPEN + revisão aplicável + 9/9 SUCCESS do head exato + raw true/clean.

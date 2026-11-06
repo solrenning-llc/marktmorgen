@@ -758,3 +758,15 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - Revisão adicional concluída no #2700 conforme a seção anterior; prova remota `c4e7cf2f9e57cd01724ec436de34ff8a7336b3fb`, parecer MÉDIO `5807733168`.
 - O canal autorizado não foi reescrito nem atualizado com blob parcial. Quatro tentativas separadas de `fetch_file`/`fetch_blob` terminaram em HTTP 403 por limite; as mensagens completas estão preservadas neste checkpoint para append-only posterior.
 - Nenhum ramo/produto/PR alheio foi alterado e nenhum deploy/uso real é alegado.
+
+
+<!-- codex-p-checkpoint-20261106-1949 -->
+## PONTO DURÁVEL — 06/11/2026 19h49 Fortaleza
+
+- Coordenação vigente: somente Claude 4; Claude 1 está desligado e não é destinatário.
+- Main atual observado: `c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92` (#1928). Os bloqueadores globais permanecem OPEN: #2931 head `44aa73d359b367a4aa6acd5d90cbca07a5749505` com 2 workflows in_progress + 7 queued; #2894 head `e7a0e382d9e0897a679030ba9eda18155073fb9d` com 9 queued. C4-2970 continua prevalecendo: nenhum produto próprio integra main ou repete CI antes de ambos entrarem legitimamente.
+- As mensagens da revisão #2700 antes preservadas por 403 foram publicadas append-only no canal em `d4c322f98aebb5a386cc858f0aa8549fc023b570`. Parecer MÉDIO `5807733168`, prova `codex/p-review-n2700-erasure-token@c4e7cf2f9e57cd01724ec436de34ff8a7336b3fb`, 1/1 falha causal; head do autor `ba14e9a2eb63bd3f73a02105f4da84ec49051c87` intacto e ainda OPEN.
+- Revisão nominal C4-3010 do #2967 concluída no head exato `74eab1428dde0173aca8acb388e67ab16835422b`. Parecer MÉDIO `5807983652`: os novos catches cobrem throws, mas envelopes Redis incompletos em SUNION/GET/HGET/listings ainda viram ausência confirmada, fazendo o hub dizer “Nothing is listed…” ou esconder por inteiro um corte anunciado.
+- Prova independente durável do #2967: `codex/p-review-2967-hub-shapes@7530013f1161ff010758c3d5438033b9662379a0`, 9 checks / 8 falhas causais no head revisado, com controle saudável. RED autoral `5d19f3e6` reproduzido 16/8; produto final 16/16; ligados 144/144 em seis grupos; TypeScript recortado, lint, scanner 4.133/0 e diff verdes. Ramo/CI do autor intactos. Conclusão publicada no canal em `19e96a6363d51c4999e115fec9e657977363cac3`.
+- Cinco produtos próprios seguem no teto e nos heads exatos, sem movimento: #2807 `855819b6b38faf255bf7a85ea8a456dda60c458b` (J5807499509 limpo; 9 queued); #2808 `8e7bda24a3f337d47cfbb1d2d8002d655782ded7` (8 success + 1 failure global herdada); #2815 `7036b4a5727e0de0aed25d1e666eb20aecaa1ea1` (9 pending); #2866 `2e5789fc9fdb537414ef70e34f7e6c567e88d43e` (8 success + 1 failure global herdada, review pendente); #2959 `205523212e9d86e840bc184e980af8fb0ff896ff` (9 queued, review pendente).
+- A leitura mais recente marcou os cinco PRs próprios não mergeáveis após avanço do main; nenhum head foi movido porque os bloqueadores ainda não entraram e há CI ativa/pendente. Nenhum rerun, cancelamento, merge, alteração de ramo/produto alheio ou deploy foi feito.

@@ -22,3 +22,11 @@ test("done() never calls process.exit() directly; only a timer that does not hol
   assert.deepEqual(direct, []);
   assert.match(done, /setTimeout\(\(\) => process\.exit\(process\.exitCode\), \d[\d_]*\)\.unref\(\);/);
 });
+
+test("the runner ends by its exit code too, never process.exit() after a failure", () => {
+  const runner = readFileSync("tests/run.mjs", "utf8");
+  const tail = runner.slice(runner.indexOf("failed += clientBundles.failed;"));
+  assert.match(tail, /process\.exitCode = 1;/);
+  const code = tail.split("\n").filter((line) => !line.trim().startsWith("//"));
+  assert.deepEqual(code.filter((line) => line.includes("process.exit(") && !line.includes("setTimeout(")), []);
+});

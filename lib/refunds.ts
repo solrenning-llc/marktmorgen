@@ -47,9 +47,10 @@
  * purchaseRefunded(), and the jobs' lostDisputesSince(), which the jobs that
  * take back gifts (lib/gifts.ts) and pre-orders already handed over
  * (lib/preorders.ts, revokeRefundedPreorders) read too (queue 388 [TB14],
- * 5 November 2026). Doors still judged on refunds only (queue 388): a
- * booking's own row in lib/calls.ts (callFromRow) and the job that takes
- * back group places (lib/group-buy.ts). A payment added in one click after checkout is its own payment and
+ * 5 November 2026), and a booking's own row in lib/calls.ts, which asks
+ * Stripe with keptUnlessLost() for a charge marked disputed (callOrLost, at
+ * most DISPUTE_READS_PER_READING a reading). Door still judged on refunds
+ * only (queue 388): the job that takes back group places (lib/group-buy.ts). A payment added in one click after checkout is its own payment and
  * is judged on its own; a product ticked at checkout is part of the
  * checkout's payment and goes with it.
  *

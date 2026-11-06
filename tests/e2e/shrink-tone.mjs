@@ -4,7 +4,10 @@
  * a transparent stripe, and the same opaque one written as JPEG); each picture it gives back is decoded pixel by pixel,
  * and the color it reports must be null wherever the decoded picture has any transparency, and a color wherever it
  * has none. That holds in every engine: one that cannot write WebP gives a JPEG with white behind, which is opaque.
- * Nothing leaves the page: every request is refused and counted.
+ * Nothing leaves the page: every network request (http or https) is refused and counted. Only those are routed: WebKit
+ * sends a blob: URL through request interception too (playwright-core wkPage _onRequestWillBeSent skips only data: and
+ * about:), so a route on every URL aborted the picture's own blob: load and image.decode() failed with "EncodingError:
+ * Loading error" (WebKit job 127901687708 on #2790). A blob: or data: URL never leaves the page.
  */
 import { join } from "node:path";
 import { build } from "esbuild";
@@ -13,7 +16,7 @@ export async function checkShrinkTone({ browser, root, is, source = join(root, "
   const bundle = await build({ entryPoints: [source], bundle: true, platform: "browser", format: "iife", globalName: "MMShrink", alias: { "@": root }, write: false, logLevel: "error" });
   const context = await browser.newContext();
   let requests = 0;
-  await context.route("**/*", (route) => {
+  await context.route((url) => url.protocol === "http:" || url.protocol === "https:", (route) => {
     requests += 1;
     return route.abort();
   });

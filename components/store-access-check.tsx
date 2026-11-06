@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { type AccessCheck, ACCESS_DONE_FOR_YOU } from "@/lib/store-access-check";
+import { ACCESS_HELP_HREF } from "@/lib/help-accessibility";
 
 /**
  * "Can everyone use your store?" in the studio (98 [D2-COMPLIANCE-REVIEW]
@@ -19,6 +20,12 @@ export function StoreAccessCheck({ check }: { check: AccessCheck | null }) {
       </h2>
       <p className="mt-1 max-w-[80ch] text-sm text-ink-soft">
         Some of your buyers may use a screen reader, which reads your page aloud. This checks the products on the first page of your store and the links on its page. It is not a full accessibility review.
+      </p>
+      <p className="mt-2 max-w-[80ch] text-sm">
+        <Link href={ACCESS_HELP_HREF} className="link inline-flex min-h-[44px] items-center gap-1.5 font-medium">
+          Accessibility help for your files and store
+          <Icon name="arrow-right" size={16} />
+        </Link>
       </p>
       {pictures.unchecked > 0 ? (
         <p className="mt-5 max-w-[80ch] text-sm text-ink" data-access-unchecked={pictures.unchecked}>

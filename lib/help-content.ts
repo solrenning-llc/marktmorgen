@@ -51,6 +51,7 @@ import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+import { ACCESS_HELP_SECTION } from "@/lib/help-accessibility";
 
 /**
  * The help center's questions a feature page asks too, word for word, so
@@ -973,6 +974,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+  // 274 [AX1] Part B.3: help for creators (lib/help-accessibility.ts).
+  ACCESS_HELP_SECTION,
   {
     id: "outreach",
     emoji: "🤝",

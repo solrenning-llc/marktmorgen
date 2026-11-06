@@ -52,6 +52,7 @@ const DAY_SECONDS = 86_400;
 const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,128}$/;
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,128}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,128}$/;
+const CHARGE_STATUSES = new Set(["succeeded", "pending", "failed"]);
 
 /** One payment the refund gives back: its charge, the amount for it, and when it was paid (seconds). */
 export type PlanRefundPart = { chargeId: string; paymentIntent: string; invoiceId: string; cents: number; paidAtSeconds: number };
@@ -121,6 +122,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     typeof row.id === "string" &&
     CHARGE_ID.test(row.id) &&
     typeof row.status === "string" &&
+    CHARGE_STATUSES.has(row.status) &&
     typeof row.paid === "boolean" &&
     typeof row.created === "number" &&
     Number.isSafeInteger(row.created) &&

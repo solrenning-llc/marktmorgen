@@ -157,10 +157,13 @@ export async function takeRoom(room: string, bytes: number, limit: number = MAX_
     await redisPipeline([["INCRBY", bytesKey(room), added], ...(marked ? [["SET", takenKey(path), added, "EX", TAKEN_SECONDS]] : [])]),
     marked ? 2 : 1,
   );
+  // INCRBY answers the new total as a number. A total under `added` (a counter left below zero) is unknown here and
+  // throws; the increment stays, so the counter is back at or above zero for the next try (Revisor 1 on #2655).
   const used = replies ? countOf(replies[0]) : null;
   if (used === null || used < added || (marked && replies?.[1] !== "OK")) throw new UnknownReplyError("the room taken by handed-in files");
   if (used > limit) {
-    await redisPipeline([["DECRBY", bytesKey(room), added], ...(marked ? [["DEL", takenKey(path)]] : [])]);
+    const [left] = await redisPipeline([["DECRBY", bytesKey(room), added], ...(marked ? [["DEL", takenKey(path)]] : [])]);
+    if (typeof left === "number" && left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
     return false;
   }
   return true;
@@ -189,8 +192,18 @@ export async function undoTakeRoom(room: string, bytes: number, path: string): P
   return true;
 }
 
-/** What GET answers for a counter INCRBY/DECRBY keep: a whole number of bytes from 0, as text. */
-const BYTES_TEXT = /^(0|[1-9]\d{0,15})$/;
+/**
+ * What GET answers for the counter INCRBY/DECRBY keep: a whole number of bytes, as text. It can be below zero for a
+ * moment (a DECRBY racing releaseBytes' SET 0), and a counter below zero is nothing used, as releaseBytes reads it
+ * (Revisor 1 on #2655): never a store whose students can no longer hand in.
+ */
+const BYTES_TEXT = /^(0|-?[1-9]\d{0,15})$/;
+
+/** A counter's reply as a whole number, below zero read as zero; null for anything else. */
+function bytesUsed(reply: unknown): number | null {
+  const n = typeof reply === "string" && BYTES_TEXT.test(reply) ? Number(reply) : typeof reply === "number" ? reply : NaN;
+  return Number.isSafeInteger(n) ? Math.max(0, n) : null;
+}
 
 /**
  * Whether a file of this size would still fit, read without taking anything.
@@ -203,8 +216,8 @@ export async function hasRoom(room: string, bytes: number, limit: number = MAX_S
   if (!isRedisConfigured()) return false;
   const replies = repliesFor(await redisPipeline([["GET", bytesKey(room)]]), 1);
   const reply = replies?.[0];
-  const used = reply === null ? 0 : typeof reply === "string" && BYTES_TEXT.test(reply) ? Number(reply) : countOf(reply);
-  if (!replies || used === null || !Number.isSafeInteger(used)) throw new UnknownReplyError("how much room a store's handed-in files take");
+  const used = reply === null ? 0 : bytesUsed(reply);
+  if (!replies || used === null) throw new UnknownReplyError("how much room a store's handed-in files take");
   return used + bytes <= limit;
 }
 
@@ -212,7 +225,7 @@ export async function hasRoom(room: string, bytes: number, limit: number = MAX_S
 export async function releaseBytes(room: string, bytes: number): Promise<void> {
   if (!isRedisConfigured() || !(bytes > 0)) return;
   const [left] = await redisPipeline([["DECRBY", bytesKey(room), Math.ceil(bytes)]]);
-  if (Number(left) < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
+  if (typeof left === "number" && Number.isSafeInteger(left) && left < 0) await redisPipeline([["SET", bytesKey(room), 0]]);
 }
 
 /** What handing in did: where the work stands, and the earlier file it replaced, with its size, to delete. */

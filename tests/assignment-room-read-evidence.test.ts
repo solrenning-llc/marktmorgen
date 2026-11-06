@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { hasRoom } from "@/lib/assignment";
+import { hasRoom, releaseBytes, takeRoom } from "@/lib/assignment";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
@@ -31,7 +31,7 @@ async function roomFrom(reply: unknown[]): Promise<{ fits: boolean | "unknown"; 
 }
 
 test("an unknown assignment-room read never becomes zero free usage", async () => {
-  for (const reply of [[], [undefined], ["not-a-number"], [{}], ["1e3"], [" 5"], ["-1"], ["0x10"], [true], [null, null]]) {
+  for (const reply of [[], [undefined], ["not-a-number"], [{}], ["1e3"], [" 5"], ["-1.5"], ["0x10"], [true], [null, null]]) {
     const result = await roomFrom(reply);
     assert.equal(result.fits, "unknown", `unknown room evidence must refuse before upload: ${JSON.stringify(reply)}`);
     assert.deepEqual(result.commands, [["GET", `nl:tasks:bytes:${ROOM}`]], "the proof reaches only the existing bounded read");
@@ -56,4 +56,20 @@ test("the upload route asks the room reader before signing storage IO", () => {
   const upload = route.indexOf("await handleUploadPresigned(");
   const signed = route.indexOf("await issueSignedToken(");
   assert.ok(read >= 0 && upload > read && signed > upload, "unknown room evidence guards the upload and signing path");
+});
+
+test("a counter below zero is nothing used, never a store locked out (Revisor 1 on #2655)", async () => {
+  assert.equal((await roomFrom(["-10"])).fits, true, "a counter at -10 reads as nothing used");
+  assert.equal((await roomFrom(["-0"])).fits, "unknown", "\"-0\" is not a shape Redis writes");
+  const room = "assignment-room-below-zero";
+  redis.run(["SET", `nl:tasks:bytes:${room}`, "-10"]);
+  assert.equal(await hasRoom(room, FILE_BYTES, LIMIT), true, "the real read of a negative counter still lets a student hand in");
+  await assert.rejects(takeRoom(room, FILE_BYTES, LIMIT), UnknownReplyError, "a total under the bytes added is unknown once");
+  assert.equal(await takeRoom(room, FILE_BYTES, LIMIT), true, "and the next try takes room: never a store locked out");
+  assert.equal(await takeRoom(room, LIMIT, LIMIT), false, "a file past the room is refused");
+  redis.run(["SET", `nl:tasks:bytes:${room}`, "5"]);
+  assert.equal(await takeRoom(room, LIMIT, LIMIT), false, "refused past the limit");
+  await releaseBytes(room, 50);
+  assert.equal(redis.run(["GET", `nl:tasks:bytes:${room}`]), "0", "a release below zero comes back to zero");
+  assert.equal(await hasRoom(room, FILE_BYTES, LIMIT), true, "and the store can still take files");
 });

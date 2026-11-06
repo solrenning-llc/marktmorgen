@@ -54,7 +54,7 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
 }
 
 /** The checkout sweep's PayPal part for one store: pending payments cleared, refunds taken back. */
-export function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: number; revoked: number }> {
+export function sweepPayPal(store: Store, deadline: number): Promise<{ cleared: number; revoked: number; stuck: number }> {
   return watchPayPal(store, deadline, {
     handOver: async (paid) => {
       await handOverPayPal(store, paid);

@@ -813,15 +813,16 @@ export async function watchPayPal(
     /** Puts a course back for a payment that keeps the purchase (an HSETNX: nothing for one still there, no email). */
     restoreStart?: (email: string, productId: string, startSeconds: number) => Promise<void>;
   },
-): Promise<{ cleared: number; revoked: number }> {
-  const result = { cleared: 0, revoked: 0 };
+): Promise<{ cleared: number; revoked: number; stuck: number }> {
+  const result = { cleared: 0, revoked: 0, stuck: 0 };
   if (!paypalSalesConfigured() || !store.statsId || !store.paypalSeller || !isRedisConfigured()) return result;
   const statsId = store.statsId;
   const now = Math.floor(Date.now() / 1000);
 
   const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", "+inf", "LIMIT", "0", "25"]]);
-  for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
-    if (Date.now() >= deadline) return result;
+  // One pending order: asked about at PayPal, and settled and handed over once completed. Whatever it throws is caught
+  // by the loop below, so one order can never hold back the store's others or the refund watch after them.
+  const askPending = async (order: string): Promise<void> => {
     let opened: Opened | null;
     let written: Paid | null | "unknown";
     try {
@@ -831,16 +832,16 @@ export async function watchPayPal(
       // Unknown is not "ended": the order stays pending and is read again on the next pass (CX-123 rule 24).
       if (!(error instanceof UnknownReplyError)) throw error;
       console.error("a pending PayPal order could not be read", order, error);
-      continue;
+      return;
     }
     if (written === "unknown") {
       console.error("a pending PayPal order's payment could not be read", order);
-      continue;
+      return;
     }
     // Thirty days without PayPal settling it: no longer asked about.
     if (!opened) {
       await redisPipeline([["ZREM", pendingKey(statsId), order]]);
-      continue;
+      return;
     }
     // A record written while the order is still pending is not "handed over": the writes after it (which take it
     // off pending) were never confirmed, and the hand-over comes after them. It is asked about as any other below.
@@ -849,7 +850,7 @@ export async function watchPayPal(
       done = await call("GET", `/v2/checkout/orders/${encodeURIComponent(order)}`, { merchant: opened.m });
     } catch (error) {
       console.error("reading a PayPal order failed", error);
-      continue;
+      return;
     }
     const { capture, payee, email } = captureIn(done);
     // No capture in the answer. Only PayPal's word that the order was voided means nothing will be charged; any
@@ -857,11 +858,11 @@ export async function watchPayPal(
     // (CX-123 rule 24; review of Codex G on #2681). A kept order is let go when its record ends (30 days).
     if (!capture) {
       if (done.status === "VOIDED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
-      continue;
+      return;
     }
-    if (capture.status === "PENDING" || typeof capture.status !== "string") continue;
+    if (capture.status === "PENDING" || typeof capture.status !== "string") return;
     // Completed and what was asked, but without the buyer's address or the capture's id: paid, not yet readable.
-    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) continue;
+    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) return;
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {
       if (written) {
         // Written down before, never confirmed settled: handed over as written, then settled, so a hand-over that
@@ -869,12 +870,12 @@ export async function watchPayPal(
         // count, credit and webhook), so one that did happen is not repeated by this (CX-123 rule 24).
         if (written.store !== statsId || written.product !== opened.p || written.capture !== capture.id) {
           console.error("a pending PayPal order's record does not match its order", order);
-          continue;
+          return;
         }
         await on.handOver(written);
         await redisPipeline(settledWrites(written));
         result.cleared += 1;
-        continue;
+        return;
       }
       // Handed over before its settled writes take it off pending: a hand-over that fails leaves it pending, written
       // down, for the next pass (above).
@@ -885,13 +886,24 @@ export async function watchPayPal(
         // Not known to be written down by this pass: nothing handed over, still pending, asked again (CX-123 rule 24).
         if (!(error instanceof UnknownReplyError)) throw error;
         console.error("a PayPal payment could not be written down", order, error);
-        continue;
+        return;
       }
       if (settled.fresh) result.cleared += 1;
-      continue;
+      return;
     }
     // Declined, failed, or not what was asked: nothing is handed over.
     await redisPipeline([["ZREM", pendingKey(statsId), order]]);
+  };
+  for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
+    if (Date.now() >= deadline) return result;
+    try {
+      await askPending(order);
+    } catch (error) {
+      // Its reads, its hand-over or its settled writes failed: it stays pending, asked again next pass, and is counted;
+      // the store's other pending orders and the refund watch go on (review of #2895). Logged by the order, not the buyer.
+      result.stuck += 1;
+      console.error("a pending PayPal order was kept pending: it could not be settled or handed over", order, error instanceof Error ? `${error.name}: ${error.message.slice(0, 200)}` : typeof error);
+    }
   }
 
   const dropStart = on.dropStart;

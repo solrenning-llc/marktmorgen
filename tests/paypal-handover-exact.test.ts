@@ -146,7 +146,7 @@ test("a hand-over that fails leaves the order pending, and the next pass hands i
   await putWritten(order);
   const handed: Paid[] = [];
   const sweep = sweeper(handed, { times: 1 });
-  await assert.rejects(sweep);
+  assert.equal((await sweep()).stuck, 1, "counted as stuck, the sweep goes on");
   assert.notEqual(await pending(order), null, "still pending");
   await sweep();
   await sweep();

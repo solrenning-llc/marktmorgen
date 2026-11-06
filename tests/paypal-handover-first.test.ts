@@ -195,7 +195,7 @@ test("the sweep: a hand-over that fails leaves the order pending, and the next p
   await putOpened(order);
   await putPending(order);
   const given = new Set<string>();
-  await assert.rejects(() => sweep(given, { times: 1 }));
+  assert.equal((await sweep(given, { times: 1 })).stuck, 1, "counted as stuck, the sweep goes on");
   assert.equal((await marks(order)).pending, true, "still pending");
   await sweep(given);
   assert.deepEqual([...given], [order]);
@@ -212,7 +212,7 @@ test("the sweep: settled writes that applied in part and then threw never lose t
     await real(commands.slice(0, 4));
     return failed();
   };
-  await withRedis(once(settledWritesOf), partly, () => assert.rejects(() => sweep(given)));
+  assert.equal((await withRedis(once(settledWritesOf), partly, () => sweep(given))).stuck, 1, "counted as stuck, the sweep goes on");
   await sweep(given);
   assert.deepEqual([...given], [order], "handed over");
   assert.deepEqual(await marks(order), SETTLED);

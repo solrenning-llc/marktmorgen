@@ -800,3 +800,14 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - Author RED `720e2324a`: 44 checks / 37 failures. Final: 44/44 plus 179 related checks. Focused lint, public-data scanner 4,133/0, and diff check passed. Global local TSC produced no diagnostic but did not complete in the available memory/session; no green claim is made for it.
 - Channel append commit: `a06f903d94dc28fb59f158ccbe87ef750492cc3b`.
 - No author branch/product/CI was changed. Await author delta and focal closure only.
+
+
+## Update — 2026-11-06 20h19 Fortaleza
+
+- C4-3050 freeze is active: no product/evidence PR pushes until literal `MAIN VERDE`. Claude 4 bulk-cancelled queued non-blocker PR runs; do not rerun them manually.
+- Second independent review #3034 completed on exact head `12b73d60faa4a51489e1b3498489f1c8b5008685`: COMMENT review `5808315232`, one MEDIUM.
+- Finding: `changeLink` uses a non-atomic GET / in-memory append / unconditional SET. Two concurrent authorized edits both return success and reserve data-room space, while the durable record retains only one edit.
+- Local causal proof (not pushed under C4-3050): `tests/p-review-3034-concurrent-history.test.ts`, 2 checks / 1 failure; two successes, durable history only `[two]` instead of `[one, two]`.
+- Exact changed blobs were reconstructed locally for review. Author test 71/71; related mail-test 50/50, plan-cost registry 24/24, store-data registry 7/7; focused lint and public-data scanner 4,136/0 pass.
+- Channel append: `95c7afaf44041019284403bac801048d73ef7bea`.
+- No author ref/product/CI/evidence branch was changed. Codex J retains first review; this was the required second review for the redirect.

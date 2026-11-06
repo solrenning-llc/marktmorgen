@@ -75,19 +75,19 @@ export type ProductImage = {
    */
   r2?: true;
   /**
-   * The picture's average colour, exactly #rrggbb (TONE_PATTERN), painted under it while it loads (Encanto 5b): made
+   * The picture's average color, exactly #rrggbb (TONE_PATTERN), painted under it while it loads (Encanto 5b): made
    * in the creator's browser from the picture as it is shrunk, only for a picture with no transparency. Absent for
    * every picture from before, and for one that has transparency.
    */
   tone?: string;
 };
 
-/** A picture's colour as it is kept: # and six lowercase hex digits, nothing else. */
+/** A picture's color as it is kept: # and six lowercase hex digits, nothing else. */
 export const TONE_PATTERN = /^#[0-9a-f]{6}$/;
 
 /**
- * The average colour of a picture's pixels (RGBA, four bytes each, as canvas getImageData gives them), as #rrggbb;
- * null where any pixel is not fully opaque (the colour would show through once the picture loads), where there is
+ * The average color of a picture's pixels (RGBA, four bytes each, as canvas getImageData gives them), as #rrggbb;
+ * null where any pixel is not fully opaque (the color would show through once the picture loads), where there is
  * nothing to read, or where the bytes are not whole pixels.
  */
 export function toneOf(data: ArrayLike<number>): string | null {

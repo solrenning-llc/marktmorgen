@@ -1,6 +1,6 @@
 /**
  * Kept as a permanent test from Codex K2's review of #2790 (codex/k-review-2790-tone e5e4457f,
- * proofs/k2/review-2790-tone.proof.ts): the real image route, sign-in, picture door and catalog. A colour sent with a
+ * proofs/k2/review-2790-tone.proof.ts): the real image route, sign-in, picture door and catalog. A color sent with a
  * picture is absent or exactly #rrggbb; anything else refuses the picture without writing it (C4-20261106-0700-C5-27,
  * condition 1).
  */
@@ -24,7 +24,7 @@ async function main() {
   const jpeg=new Uint8Array([0xff,0xd8,0xff,0xe0,0,16,74,70,73,70,0,1,1,0,0,1,0,1,0,0]);
   const cases=[{name:"absent",tone:undefined,valid:true},{name:"exact",tone:"#336699",valid:true},{name:"short",tone:"#369",valid:false},{name:"uppercase",tone:"#ABCDEF",valid:false},{name:"CSS syntax",tone:"red; color:white",valid:false}];
   let n=0;
-  part("C4-0700: an invalid supplied colour refuses attachment without writing");
+  part("C4-0700: an invalid supplied color refuses attachment without writing");
   for(const c of cases){
     const made=await addProduct(owner,"Synthetic picture "+c.name,"","19",null);if(!made.ok)throw Error("fixture");
     const path=`images/${folder}/${(++n).toString(16).padStart(32,"0")}.jpg`;
@@ -33,9 +33,9 @@ async function main() {
     const response=await POST(request),answer=await response.json();
     const image=(await readListing((await storeForEmail(owner))!,made.product.id))?.image;
     console.log("ATTACH_OBSERVATION",JSON.stringify({case:c.name,status:response.status,answer,pathWritten:image?.path===path,tone:image?.tone??null}));
-    is(c.name+": success only for absent/exact colour",response.status,c.valid?200:400);
-    is(c.name+": invalid colour leaves the product picture untouched",image?.path===path,c.valid);
-    if(c.valid)is(c.name+": optional colour preserved exactly",image?.tone,c.tone);
+    is(c.name+": success only for absent/exact color",response.status,c.valid?200:400);
+    is(c.name+": invalid color leaves the product picture untouched",image?.path===path,c.valid);
+    if(c.valid)is(c.name+": optional color preserved exactly",image?.tone,c.tone);
   }
   is("a trailing newline is rejected",TONE_PATTERN.test("#123456\n"),false);
   done();

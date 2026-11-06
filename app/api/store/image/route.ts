@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
         await dropFresh([path, smallPath]);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
-      // The picture's colour (Encanto 5b): absent, or exactly #rrggbb. Anything else refuses the picture and writes
+      // The picture's color (Encanto 5b): absent, or exactly #rrggbb. Anything else refuses the picture and writes
       // nothing (C4-20261106-0700-C5-27, condition 1; Codex K2 on #2790).
       if (body.tone !== undefined && !(typeof body.tone === "string" && TONE_PATTERN.test(body.tone))) {
         await dropFresh([path, smallPath]);

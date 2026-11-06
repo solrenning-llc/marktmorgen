@@ -1,8 +1,8 @@
 /**
- * Encanto 5b-1, the picture's colour, in a real browser (Codex K2 on #2790, review 5799195602): the real
+ * Encanto 5b-1, the picture's color, in a real browser (Codex K2 on #2790, review 5799195602): the real
  * components/shrink-image.ts, bundled for the browser, shrinks four synthetic pictures (opaque, one transparent pixel,
  * a transparent stripe, and the same opaque one written as JPEG); each picture it gives back is decoded pixel by pixel,
- * and the colour it reports must be null wherever the decoded picture has any transparency, and a colour wherever it
+ * and the color it reports must be null wherever the decoded picture has any transparency, and a color wherever it
  * has none. That holds in every engine: one that cannot write WebP gives a JPEG with white behind, which is opaque.
  * Nothing leaves the page: every request is refused and counted.
  */
@@ -50,10 +50,10 @@ export async function checkShrinkTone({ browser, root, is, source = join(root, "
     });
     for (const item of seen) {
       const right = item.transparent > 0 ? item.tone === null : typeof item.tone === "string" && /^#[0-9a-f]{6}$/.test(item.tone);
-      is(`shrink's colour, ${item.kind} (${item.type}, ${item.transparent} transparent): none with any transparency, exact otherwise`, right, true);
+      is(`shrink's color, ${item.kind} (${item.type}, ${item.transparent} transparent): none with any transparency, exact otherwise`, right, true);
     }
-    is("shrink's colour: every case read", seen.length, 4);
-    is("shrink's colour: nothing left the page", requests, 0);
+    is("shrink's color: every case read", seen.length, 4);
+    is("shrink's color: nothing left the page", requests, 0);
   } finally {
     await context.close();
   }

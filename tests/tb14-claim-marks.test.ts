@@ -89,10 +89,17 @@ async function main(): Promise<void> {
     });
     return { to, key, give };
   };
-  for (const [label, reply] of [["text", ["1"]], ["true", [true]], ["a number", [1]], ["an empty reply", []], ["not a list", { result: "OK" }]] as [string, unknown][]) {
+  for (const [label, reply] of [["true", [true]], ["a number", [1]], ["an empty reply", []], ["not a list", { result: "OK" }]] as [string, unknown][]) {
     const g = await gift();
     rule = { when: (c) => setNx(g.key)(c) || getOf(g.key)(c), reply };
     is(`a giving mark answered as ${label}, not held after: unknown, nothing given`, [await outcome(() => g.give()), await has(g.to)], ["rejected: UnknownReplyError", false]);
+    rule = null;
+  }
+  {
+    // A SET answered as text, read back holding text that is not this run's value: somebody else's (lib/claim-mark.ts).
+    const g = await gift();
+    rule = { when: (c) => setNx(g.key)(c) || getOf(g.key)(c), reply: ["1"] };
+    is("a giving mark answered as text, read back as another value: already, nothing given", [await g.give(), await has(g.to)], ["already", false]);
     rule = null;
   }
   {
@@ -130,10 +137,16 @@ async function main(): Promise<void> {
     ordersLink: async () => null,
     recordStart,
   });
-  for (const [label, reply] of [["text", ["1"]], ["true", [true]], ["a number", [1]], ["an empty reply", []], ["not a list", { result: "OK" }]] as [string, unknown][]) {
+  for (const [label, reply] of [["true", [true]], ["a number", [1]], ["an empty reply", []], ["not a list", { result: "OK" }]] as [string, unknown][]) {
     const p = await preorder();
     rule = { when: (c) => setNx(p.key)(c) || getOf(p.key)(c), reply };
     is(`a pre-order's mark answered as ${label}, not held after: unknown, nothing handed over`, [await outcome(() => handOverPreorder(store, course, p.session, deps())), await has(p.to)], ["rejected: UnknownReplyError", false]);
+    rule = null;
+  }
+  {
+    const p = await preorder();
+    rule = { when: (c) => setNx(p.key)(c) || getOf(p.key)(c), reply: ["1"] };
+    is("a pre-order's mark answered as text, read back as another value: already, nothing handed over", [await handOverPreorder(store, course, p.session, deps()), await has(p.to)], ["already", false]);
     rule = null;
   }
   {

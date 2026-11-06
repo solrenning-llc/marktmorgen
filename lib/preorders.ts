@@ -23,6 +23,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { sendEmail } from "@/lib/email";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { givenBack } from "@/lib/refunds";
 import { canSell } from "@/lib/store-checkout";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
@@ -220,8 +222,12 @@ export type HandOverOutcome = "given" | "already" | "skip";
 export async function handOverPreorder(store: Store, product: Listing, sessionId: string, deps: HandOverDeps): Promise<HandOverOutcome> {
   if (!store.statsId || !isRedisConfigured()) return "skip";
   const sid = store.statsId;
-  const [claimed] = await redisPipeline([["SET", giveKey(sessionId), "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
+  // hands nothing over and says so, as when Redis does not answer, and the next run tries again.
+  const value = claimValue();
+  const claimed = await claimMark(giveKey(sessionId), 300, value);
+  if (claimed === "taken") return "already";
+  if (claimed === "unknown") throw new UnknownReplyError("a pre-order's giving mark");
   try {
     const entry = await readPreorder(store, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
@@ -234,7 +240,8 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
     await sendOut(store, product, entry.to, deps, `nimbus-preorder-out:${sessionId}`);
     return "given";
   } finally {
-    await redisPipeline([["DEL", giveKey(sessionId)]]).catch(() => {});
+    // Let go only while it still holds this run's value (releaseMark never throws).
+    await releaseMark(giveKey(sessionId), value);
   }
 }
 

@@ -22,6 +22,8 @@ import { cleanLine, cleanText } from "@/lib/community-text";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -147,8 +149,13 @@ export async function deliverGift(input: {
   const gift = await readGift(id);
   if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
   if (gift.given) return "already";
-  const [claimed] = await redisPipeline([["SET", `${giftKey(id)}:giving`, "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
+  // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
+  const mark = `${giftKey(id)}:giving`;
+  const value = claimValue();
+  const claimed = await claimMark(mark, 300, value);
+  if (claimed === "taken") return "already";
+  if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
@@ -165,8 +172,9 @@ export async function deliverGift(input: {
   await redisPipeline([
     ...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS] as (string | number)[]] : []),
     ["SET", anyKey(gift.s), "1"],
-    ["DEL", `${giftKey(id)}:giving`],
   ]);
+  // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
+  await releaseMark(mark, value);
 
   const g = givingWords(store.language);
   const who = gift.from || g.someone;

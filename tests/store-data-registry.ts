@@ -434,8 +434,16 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:@lib/community-approval.ts": {
     what: "Posts and comments waiting for the creator's approval, the notes left to their authors, and each member's approved count (543 [CM2])",
     room: ["lib/community-approval.ts"],
-    parts: [capped(MAX_SPACES * KB, "Each space's approval rule, pruned to the community's spaces.", src("lib/community-text.ts", "MAX_SPACES"))],
+    parts: [
+      capped(MAX_SPACES * KB, "Each space's approval rule, pruned to the community's spaces.", src("lib/community-text.ts", "MAX_SPACES")),
+      // Unit 2: the day's mark of the creator's notice (lib/community-held-notice.ts), kept two days, so at most two at once.
+      capped(2 * KEY, "The daily notice's mark: one key a day, kept two days.", src("lib/community-held-notice.ts", "MARK_SECONDS")),
+    ],
   },
+  "nl:cm:ap:stores@lib/community-approval.ts": company(
+    "Stores whose community held a post or comment for approval lately, for the creator's daily notice (543 [CM2] unit 2)",
+    "One sorted set for every store, a member a store id with the time of its last hold; a store is let go a day after nothing it held can still wait (HELD_DAYS), so it is never larger than the number of stores.",
+  ),
   "nl:cm:@lib/community-chat.ts": {
     what: "The live room: its messages, their counter, each speaker's cooldown",
     parts: [capped(MAX_CHAT_KEPT * (MAX_CHAT_TEXT * 3 + 512), "MAX_CHAT_KEPT messages, the oldest let go.", src("lib/community-chat-rules.ts", "MAX_CHAT_KEPT", "MAX_CHAT_TEXT")), per("buyer", 1, KEY, "A speaker's cooldown, minutes.")],

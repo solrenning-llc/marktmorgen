@@ -26,6 +26,13 @@
  *   nl:cm:<id>:ap:w:<who>    one member's items and notes (sorted set)
  *   nl:cm:<id>:ap:n          how many of each member's posts ("<who>:p")
  *                            and comments ("<who>:c") were approved (hash)
+ *   nl:cm:<id>:ap:t:<day>    the creator was told today that items wait
+ *                            (lib/community-held-notice.ts), two days
+ *
+ * And one list for the company (unit 2): nl:cm:ap:stores, the stores whose
+ * community held something lately, by the time of the last hold, so the
+ * daily notice reads only those. A store leaves it by itself a day after
+ * nothing it held could still wait (storesWithHeld).
  *
  * Bounded: at most MAX_HELD waiting in a community and MAX_MINE items and
  * notes per member; a hold past either is refused, and nothing of it stays.
@@ -110,6 +117,12 @@ const queueKey = (id: string) => `${base(id)}:ap:q`;
 const itemKey = (id: string, item: string) => `${base(id)}:ap:i:${item}`;
 const mineKey = (id: string, who: string) => `${base(id)}:ap:w:${who}`;
 const countKey = (id: string) => `${base(id)}:ap:n`;
+/** The day's mark of the creator's notice (lib/community-held-notice.ts): `day` is YYYY-MM-DD. */
+export const heldNoticeKey = (id: string, day: string) => `${base(id)}:ap:t:${day}`;
+/** The company's list of stores whose community held something lately: store id -> last hold, in seconds. */
+const HELD_STORES = "nl:cm:ap:stores";
+/** A store's id as lib/store.ts makes it (STORE_ID_PATTERN); a room without one lists nothing. */
+const STORE_SID = /^[0-9a-f]{32}$/;
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
@@ -308,17 +321,17 @@ async function hold(id: string, held: Held, room: DataStore, now: number): Promi
   await needData(room, [{ until: (now + KEEP_SECONDS) * 1000, bytes: dataBytes([json], 3) }]);
   const written = repliesFor(await redisPipeline([["SET", itemKey(id, held.id), json, "EX", KEEP_SECONDS, "NX"]]), 1);
   if (!written || written[0] !== "OK") throw new UnknownReplyError("writing a held community item");
-  const replies = repliesFor(
-    await redisPipeline([
-      ["ZREMRANGEBYSCORE", mineKey(id, held.a), "-inf", now - KEEP_SECONDS],
-      ["ZADD", queueKey(id), held.at, held.id],
-      ["ZCARD", queueKey(id)],
-      ["ZADD", mineKey(id, held.a), held.at, held.id],
-      ["ZCARD", mineKey(id, held.a)],
-      ["EXPIRE", mineKey(id, held.a), KEEP_SECONDS],
-    ]),
-    6,
-  );
+  const placing: (string | number)[][] = [
+    ["ZREMRANGEBYSCORE", mineKey(id, held.a), "-inf", now - KEEP_SECONDS],
+    ["ZADD", queueKey(id), held.at, held.id],
+    ["ZCARD", queueKey(id)],
+    ["ZADD", mineKey(id, held.a), held.at, held.id],
+    ["ZCARD", mineKey(id, held.a)],
+    ["EXPIRE", mineKey(id, held.a), KEEP_SECONDS],
+  ];
+  // Unit 2: the store goes on the list the daily notice reads, by the time of this hold.
+  if (typeof room.sid === "string" && STORE_SID.test(room.sid)) placing.push(["ZADD", HELD_STORES, now, room.sid]);
+  const replies = repliesFor(await redisPipeline(placing), placing.length);
   const counts = replies?.map(countOf);
   if (!counts || counts.some((n) => n === null) || counts[1] !== 1 || counts[3] !== 1) {
     throw new UnknownReplyError("placing a held community item");
@@ -439,6 +452,25 @@ export async function sweepHeld(id: string, now = nowSeconds()): Promise<number>
     if (held?.state === "held") await leaveNote(id, noteOf(held, "expired", "", now), held.img?.path, now);
   }
   return swept;
+}
+
+/**
+ * The stores whose community held something lately, the latest first, at most
+ * `limit` (543 [CM2] unit 2). A store whose last hold is more than a day past
+ * HELD_DAYS has nothing that can still wait, so it is let go here first; an
+ * unknown reply is thrown, so a run never reads the list as empty.
+ */
+export async function storesWithHeld(now = nowSeconds(), limit = 500): Promise<string[]> {
+  const replies = repliesFor(
+    await redisPipeline([
+      ["ZREMRANGEBYSCORE", HELD_STORES, "-inf", now - (HELD_DAYS + 1) * DAY],
+      ["ZREVRANGE", HELD_STORES, 0, Math.max(0, limit - 1)],
+    ]),
+    2,
+  );
+  const sids = replies && countOf(replies[0]) !== null ? stringList(replies[1]) : null;
+  if (!sids || sids.some((sid) => !STORE_SID.test(sid))) throw new UnknownReplyError("the stores with held community items");
+  return sids;
 }
 
 /** The creator's queue: what waits, oldest first, after the sweep. */

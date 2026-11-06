@@ -23,7 +23,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { sendEmail } from "@/lib/email";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
-import { givenBack } from "@/lib/refunds";
+import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { canSell } from "@/lib/store-checkout";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -419,15 +419,26 @@ export async function revokeRefundedPreorders(
   const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
   query.append("expand[]", "data.charge");
   const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-  for (const refund of rows) {
+  const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+  // A dispute closed as lost takes a pre-order back as a full refund does, whatever its amount (lib/refunds.ts, the
+  // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts
+  // does. A read that fails or does not reach the end keeps the place, so it is read again next run.
+  const lost = await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("pre", sid));
+  let unsure = !lost.complete;
+  for (const refund of [...lost.rows, ...refunds]) {
     if (Date.now() >= deadline) return revoked;
     const id = typeof refund.id === "string" ? refund.id : "";
     const created = typeof refund.created === "number" ? refund.created : 0;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
     const charge = refund.charge as { refunded?: unknown } | null;
+    const dispute = refund.object === "dispute";
     newest = Math.max(newest, created);
-    if (!id || !pi || refund.status !== "succeeded" || charge?.refunded !== true) continue;
+    if (dispute && id && !pi) {
+      // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
+      await redisPipeline([["SADD", seenKey(sid), id]]);
+      continue;
+    }
+    if (!id || !pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) continue;
     const [fresh, found] = await redisPipeline([["SADD", seenKey(sid), id], ["GET", piKey(pi)]]);
     if (Number(fresh) !== 1 || typeof found !== "string") continue;
     const [foundSid, productId, session] = found.split("|");
@@ -453,6 +464,10 @@ export async function revokeRefundedPreorders(
     await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]);
     revoked += 1;
   }
-  await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
+  // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead), and the
+  // anchor with it: the closing events are read from the anchor, so it waits while they are not all read.
+  if (!(await confirmLostRead(lost, seenKey(sid)))) unsure = true;
+  else if (lost.complete && lost.resumed) newest = Math.min(newest, Math.max(lost.newest, since));
+  if (!unsure) await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
   return revoked;
 }

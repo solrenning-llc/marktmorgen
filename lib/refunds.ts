@@ -44,11 +44,12 @@
  * On the current API Stripe does not send a charge's dispute with it, so
  * refundedInFull() alone sees refunds only. Disputes are seen only through
  * disputeLost() and what is built on it: givenBack(), keptUnlessLost(),
- * purchaseRefunded(), and the jobs' lostDisputesSince(). Doors still judged
- * on refunds only (queue 388): a booking's own row in lib/calls.ts
- * (callFromRow, reserved by another lane), and the jobs that take back
- * gifts (lib/gifts.ts), group places (lib/group-buy.ts) and pre-orders
- * already handed over (lib/preorders.ts, revokeRefundedPreorders). A payment added in one click after checkout is its own payment and
+ * purchaseRefunded(), and the jobs' lostDisputesSince(), which the jobs that
+ * take back gifts (lib/gifts.ts) and pre-orders already handed over
+ * (lib/preorders.ts, revokeRefundedPreorders) read too (queue 388 [TB14],
+ * 5 November 2026). Doors still judged on refunds only (queue 388): a
+ * booking's own row in lib/calls.ts (callFromRow) and the job that takes
+ * back group places (lib/group-buy.ts). A payment added in one click after checkout is its own payment and
  * is judged on its own; a product ticked at checkout is part of the
  * checkout's payment and goes with it.
  *
@@ -174,10 +175,10 @@ export function rowGivesBack(row: GivenBackRow): boolean {
 
 /**
  * The most pages of closing events one job's run reads for one store: each
- * a GET /events of up to 100, every five minutes, by the three jobs that
+ * a GET /events of up to 100, every five minutes, by the five jobs that
  * take things back (lib/licence-keys.ts, lib/call-meetings.ts,
- * lib/review-proof.ts). No other call: the dispute in the event says all a
- * row needs.
+ * lib/review-proof.ts, lib/gifts.ts, lib/preorders.ts). No other call: the
+ * dispute in the event says all a row needs.
  */
 export const LOST_DISPUTE_PAGES = 3;
 

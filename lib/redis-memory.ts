@@ -99,6 +99,18 @@ export class MemoryRedis {
     const name = String(rawName).toUpperCase();
     const key = String(rest[0] ?? "");
     const args = rest.slice(1).map(String);
+    // Redis checks command arity before looking up or changing any key.
+    const minimum = name === "HSET" || name === "ZADD" ? 4
+      : name === "DEL" || name === "MGET" ? 2
+      : ["HDEL", "SADD", "SREM", "ZREM", "LPUSH", "RPUSH", "HMGET"].includes(name) ? 3 : 0;
+    if (command.length < minimum || (name === "HSET" && command.length % 2 !== 0)) {
+      throw new Error(`ERR wrong number of arguments for '${name.toLowerCase()}' command`);
+    }
+    if (name === "ZADD") {
+      let firstPair = 0;
+      while (["NX", "XX", "GT", "LT", "CH", "INCR"].includes(args[firstPair]?.toUpperCase())) firstPair += 1;
+      if ((args.length - firstPair) === 0 || (args.length - firstPair) % 2 !== 0) throw new Error("ERR syntax error");
+    }
     this.live(key);
 
     switch (name) {
@@ -113,6 +125,34 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
+        if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, notes, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(json === "" ? ["DEL", notes] : ["SET", notes, json]);
+          return 1;
+        }
+        // lib/assistant-memory-store.ts MEMORY_FORGET: the lock made the forgetting's own and the notes deleted in one step.
+        if (key.startsWith("-- marktmorgen:amem-forget:v3\n") && args[0] === "2" && args.length === 5) {
+          this.run(["SET", args[1], args[3], "EX", args[4]]);
+          const length = this.run(["STRLEN", args[2]]);
+          return [this.run(["DEL", args[2]]), length];
+        }
+        // DR1: one provider receipt and its campaign counter, atomically.
+        if (key.startsWith("-- marktmorgen:mail-report:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, daily, receipt, aggregate, count, expiry, limit] = args;
+          const type = this.run(["TYPE", daily]);
+          if (type !== "none" && type !== "hash") return -1;
+          const old = this.run(["HGET", daily, receipt]);
+          const total = this.run(["HGET", daily, aggregate]);
+          if (total !== null && (!/^(0|[1-9][0-9]*)$/.test(String(total)) || Number(total) > 1_000_000_000)) return -1;
+          if (old !== null) return old === count && total !== null && Number(total) >= Number(count) ? 2 : -1;
+          if (Number(this.run(["HLEN", daily])) + (total === null ? 2 : 1) > Number(limit)) return -1;
+          this.run(["HSET", daily, receipt, count]);
+          this.run(["HINCRBY", daily, aggregate, count]);
+          this.run(["EXPIREAT", daily, expiry]);
+          return 1;
+        }
         // CX-67: existing exposure reservation used by held-store company work.
         if (key.includes("local receiptField='case:'..ARGV[3]..':'..ARGV[4]") && args[0] === "1" && args.length === 9) {
           const [, ledger, review, binding, scope, id, rawCharge, rawLimit, rawFunded] = args;
@@ -186,6 +226,14 @@ export class MemoryRedis {
           const [, lock, target, token, value] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", target, value]);
+          return 1;
+        }
+        // The customer voice's summary, written only while its reading's lock is its own (lib/customer-voice.ts, VOICE_KEEP).
+        if (key.startsWith("-- marktmorgen:voice-keep:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lock, target, token, value, seconds] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", target, value, "EX", seconds]);
+          this.run(["DEL", lock]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:fenced-set-new:v1\n") && args[0] === "2" && args.length === 5) {
@@ -557,6 +605,33 @@ export class MemoryRedis {
           return value;
         }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
+        // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
+        if (key.startsWith("-- marktmorgen:api-key-record-swap:v1\n") && args[0] === "1" && (args.length - 2) % 3 === 0) {
+          const [, list, ...triples] = args;
+          const changed: string[] = [];
+          for (let i = 0; i + 2 < triples.length; i += 3) {
+            if (this.run(["HGET", list, triples[i]]) !== triples[i + 1]) continue;
+            this.run(["HSET", list, triples[i], triples[i + 2]]);
+            changed.push(triples[i]);
+          }
+          return changed;
+        }
+        // lib/api-keys.ts HOLD_SWAP: each field still in the list, whose hold is one of the allowed, takes the new one.
+        if (key.startsWith("-- marktmorgen:api-hold-swap:v1\n") && args[0] === "2" && args.length >= 5) {
+          const [, holds, list, next, rawCount, ...rest] = args;
+          const count = Number(rawCount);
+          const fields = rest.slice(0, count);
+          const allowed = rest.slice(count);
+          const changed: string[] = [];
+          for (const field of fields) {
+            if (Number(this.run(["HEXISTS", list, field])) !== 1) continue;
+            const now = this.run(["HGET", holds, field]);
+            if (!allowed.includes(typeof now === "string" ? now : "")) continue;
+            this.run(next === "" ? ["HDEL", holds, field] : ["HSET", holds, field, next]);
+            changed.push(field);
+          }
+          return changed;
+        }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
           const n = Number(this.data.get(args[1]) ?? "0") || 0;
@@ -595,6 +670,21 @@ export class MemoryRedis {
           }
           this.hash(names).delete(who);
           return gone;
+        }
+        if (key.startsWith("-- marktmorgen:kept-any:v1\n")) {
+          // lib/two-step.ts KEEP_ANY: KEYS[1] the list, ARGV[1] a tag, ARGV[2] the most tags, ARGV[3] seconds.
+          const [list, tag, most, seconds] = [args[1], args[2], Number(args[3]), Number(args[4])];
+          this.live(list);
+          const held = this.data.get(list);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          let value = held ?? "";
+          if (value !== "*" && !value.split(" ").includes(tag)) {
+            const n = value.split(" ").filter(Boolean).length;
+            value = n >= most ? "*" : value === "" ? tag : `${value} ${tag}`;
+          }
+          this.data.set(list, value);
+          this.until.set(list, this.now() + seconds * 1000);
+          return value === "*" ? 0 : 1;
         }
         if (key.startsWith("-- marktmorgen:list-blank:v1\n")) {
           const count = Number(args[0]);

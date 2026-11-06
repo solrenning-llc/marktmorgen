@@ -173,9 +173,10 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     .sort((a, b) => num(a.status_transitions?.paid_at) - num(b.status_transitions?.paid_at));
   if (!ordered.length) return 0;
 
-  // Read exactly (CX-123 rule 24, L9): one reply per invoice, each 0 or 1; anything else waits for the next run.
+  // Read exactly (CX-123 rule 24, L9): one reply per invoice, each 0 or 1; anything else fails the store this run.
   const seen = repliesFor(await redisPipeline(ordered.map((inv) => ["EXISTS", creditKey(String(inv.id))])), ordered.length);
-  if (!seen) return 0;
+  // Not one exact 0 or 1 for each: unknown, so the store fails this run and nothing is relisted or written (Codex N on #2722).
+  if (!seen || seen.some((reply) => countOf(reply) !== 0 && countOf(reply) !== 1)) throw new UnknownReplyError("invite credits: EXISTS");
   // Written before: a credit still owed is put back on the lists it is paid from (both idempotent), so one whose
   // listing failed after its record was written is never left unpaid (L9).
   await relist(ordered.filter((_, i) => countOf(seen[i]) === 1).map((inv) => String(inv.id)), sid);

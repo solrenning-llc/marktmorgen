@@ -31,17 +31,17 @@ export function MorningHeader({ current }: { current?: "/pricing" }) {
       <a href="#content" className="hm-skip">Skip to the page content</a>
       {PLANS_ON_SALE ? null : (
         <div className="hm-topbar" data-preview-bar="">
-          <p className="hm-preview-wide">
+          {/* One complete paragraph at every width. The mobile-only native
+              checkbox reveals it without client code or duplicated links. */}
+          <input id="hm-preview-toggle" className="hm-preview-toggle hm-sr" type="checkbox" aria-controls="hm-preview-detail" />
+          <label className="hm-preview-compact" htmlFor="hm-preview-toggle">
+            <span aria-hidden="true" className="hm-preview-chevron" />
+            <span className="hm-sr">Show full notice: </span><span data-preview-summary>Still being built. Plans closed.</span>
+          </label>
+          <p id="hm-preview-detail" className="hm-preview-full">
             {PREVIEW_LINE}{" "}
             <a href={PREVIEW_LINK.href}>{PREVIEW_LINK.label}</a>
           </p>
-          <details className="hm-preview-compact">
-            <summary>Still being built. Plans closed.</summary>
-            <p>
-              {PREVIEW_LINE}{" "}
-              <a href={PREVIEW_LINK.href}>{PREVIEW_LINK.label}</a>
-            </p>
-          </details>
         </div>
       )}
       <header className="hm-top">

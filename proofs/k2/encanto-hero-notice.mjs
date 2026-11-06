@@ -57,18 +57,24 @@ try{
    await page.setViewportSize({width:320,height:1000});
    await page.goto(origin+"/",{waitUntil:"networkidle",timeout:60000});
    await page.addStyleTag({content:"html { font-size: 200% !important; }"});
-   const summary=page.locator(".hm-preview-compact summary");
+   const summary=page.locator(".hm-preview-compact");
    is("200% native summary retained",await summary.isVisible(),true);
    if(await summary.count()){
     const size=await summary.evaluate(node=>({client:node.clientWidth,scroll:node.scrollWidth,height:node.getBoundingClientRect().height,font:parseFloat(getComputedStyle(node).fontSize)}));
     is("200% summary uses enlarged type",size.font,32);
     is("200% summary reflows without clipping",size.scroll<=size.client,true);
     is("200% summary keeps large target",size.height>=44,true);
-    await summary.focus();await page.keyboard.press("Enter");
-    is("200% full notice accessible",(await page.locator(".hm-preview-compact").innerText()).includes("its paid plans are not on sale yet"),true);
+    await page.locator(".hm-preview-toggle").focus();await page.keyboard.press("Space");
+    is("200% full notice accessible",(await page.locator(".hm-preview-full").innerText()).includes("its paid plans are not on sale yet"),true);
    }
    await context.close();
   }
+  const plain=await browser.newContext({viewport:{width:320,height:1000},javaScriptEnabled:false,serviceWorkers:"block",reducedMotion:"reduce"});
+  await guard(plain);
+  const plainPage=await plain.newPage();
+  await plainPage.goto(origin+"/",{waitUntil:"networkidle",timeout:60000});
+  await checkHomeHeroLayout({page:plainPage,width:320,is});
+  await plain.close();
   // Preserve the existing full hero/typed-address/native sign-in journey and axe checks.
   if(process.env.K2_FULL_HERO==="1"){
    // In Next dev the document can arrive before its compiled client chunks.

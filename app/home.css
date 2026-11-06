@@ -99,6 +99,7 @@
 
 /* The line above everything while plans are not on sale (lib/opening.ts). */
 .hm-topbar {
+  position: relative;
   background: var(--hm-sky-2);
   color: var(--hm-text);
 }
@@ -116,30 +117,46 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.hm-preview-toggle,
 .hm-preview-compact {
   display: none;
 }
 @media (max-width: 639px) {
-  .hm-topbar .hm-preview-wide {
+  .hm-preview-toggle:not(:checked) ~ .hm-preview-full {
     display: none;
   }
-  .hm-preview-compact {
+  .hm-preview-toggle {
     display: block;
-    padding-inline: 1rem;
   }
-  .hm-preview-compact summary {
+  .hm-preview-compact {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
     min-height: 44px;
-    padding-block: 0.625rem;
+    padding: 0.625rem 1rem;
     box-sizing: border-box;
     font-size: 1rem;
     line-height: 1.5;
     cursor: pointer;
     text-align: center;
   }
-  .hm-preview-compact p {
-    padding-inline: 0;
+  .hm-preview-chevron {
+    flex: 0 0 auto;
+    border-block: 0.25rem solid transparent;
+    border-inline-start: 0.375rem solid var(--hm-text);
   }
-  .hm-preview-compact a {
+  .hm-preview-toggle:checked + .hm-preview-compact .hm-preview-chevron {
+    transform: rotate(90deg);
+  }
+  .hm-preview-toggle:focus-visible + .hm-preview-compact {
+    outline: 3px solid var(--hm-text);
+    outline-offset: -3px;
+  }
+  .hm-topbar .hm-preview-full {
+    padding-top: 0;
+  }
+  .hm-preview-full a {
     display: inline-flex;
     align-items: center;
     min-height: 44px;

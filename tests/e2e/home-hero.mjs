@@ -11,10 +11,10 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
    is("HT1 creator result "+width,(await hero.locator("h1").innerText()).replace(/\s+/g," ").trim(),"Your link in bio, now a store.");
    is("HT1 subhead "+width,(await hero.locator(".hm-hero-lead").innerText()).trim(),"Simple to set up, easy to run, and every sale goes straight to your own account.");
    // The closed-sale truth stays in two places: the line above the page and the offer under the field.
-   const compact=page.locator(".hm-preview-compact");
-   if(await compact.isVisible())await compact.locator("summary").click();
+   const compact=page.locator(".hm-preview-toggle");
+   if(await compact.isVisible())await page.locator(".hm-preview-compact").click();
    is("HT1 closed-sale notice above the page "+width,(await page.locator("[data-preview-bar]").innerText()).includes("its paid plans are not on sale yet"),true);
-   if(await compact.isVisible())await compact.locator("summary").click();
+   if(await compact.isVisible())await page.locator(".hm-preview-compact").click();
    is("HT1 closed-sale offer line "+width,(await hero.locator("[data-home-offer]").innerText()).trim(),"Free to set up. When plans open: 14 days free, then $69 a month.");
    const field=hero.getByLabel("Pick your store address",{exact:true});
    const claim=hero.getByRole("button",{name:"Claim it",exact:true});
@@ -66,19 +66,22 @@ export async function checkHomeHeroLayout({page,width,is}){
  if(width<640){
   is("Encanto14 native compact notice visible "+width,await compact.isVisible(),true);
   if(await compact.count()){
-   const summary=compact.locator("summary");
-   const size=await summary.evaluate(node=>({height:node.getBoundingClientRect().height,line:parseFloat(getComputedStyle(node).lineHeight),text:node.textContent}));
+   const toggle=page.getByRole("checkbox",{name:"Show full notice: Still being built. Plans closed.",exact:true});
+   const size=await compact.evaluate(node=>({height:node.getBoundingClientRect().height,text:node.querySelector("[data-preview-summary]").textContent}));
    is("Encanto14 factual summary "+width,size.text,"Still being built. Plans closed.");
    is("Encanto14 single line at default text size "+width,size.height,44);
-   await summary.focus();await page.keyboard.press("Enter");
-   is("Encanto14 keyboard opens full notice "+width,await compact.getAttribute("open"),"");
-   is("Encanto14 full closed-plan fact visible "+width,(await compact.innerText()).includes("its paid plans are not on sale yet"),true);
-   const link=compact.getByRole("link",{name:"See what is built",exact:true});
+   await toggle.focus();await page.keyboard.press("Space");
+   is("Encanto14 keyboard opens full notice "+width,await toggle.isChecked(),true);
+   is("Encanto14 open notice is rendered "+width,await page.locator(".hm-preview-full").isVisible(),true);
+   is("Encanto14 visible label carries the keyboard ring "+width,await compact.evaluate(node=>getComputedStyle(node).outlineWidth),"3px");
+   is("Encanto14 full closed-plan fact visible "+width,(await page.locator(".hm-preview-full").innerText()).includes("its paid plans are not on sale yet"),true);
+   const link=page.locator(".hm-preview-full").getByRole("link",{name:"See what is built",exact:true});
    is("Encanto14 original detail destination "+width,await link.getAttribute("href"),"/mission");
    await page.keyboard.press("Tab");
    is("Encanto14 keyboard reaches detail link "+width,await link.evaluate(node=>node===document.activeElement),true);
-   await summary.focus();await page.keyboard.press("Enter");
-   is("Encanto14 keyboard closes notice "+width,await compact.getAttribute("open"),null);
+   await toggle.focus();await page.keyboard.press("Space");
+   is("Encanto14 keyboard closes notice "+width,await toggle.isChecked(),false);
+   is("Encanto14 closed notice is hidden "+width,await page.locator(".hm-preview-full").isVisible(),false);
   }
  }else{
   is("Encanto14 desktop keeps complete notice visible "+width,(await page.locator("[data-preview-bar]").innerText()).includes("its paid plans are not on sale yet"),true);

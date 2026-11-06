@@ -21,7 +21,7 @@ import { RatingLine } from "@/components/review-list";
 import type { Summary } from "@/lib/review-summary";
 import { MIN_BUNDLE_ITEMS, bundleReady, picks } from "@/lib/bundle-rules";
 import { payPalPrice, paypalReady } from "@/lib/paypal-sales";
-import { comparable, startingOption } from "@/lib/product-option";
+import { comparable, optionsInPickOrder } from "@/lib/product-option";
 import { DEFAULT_PEOPLE, MAX_PEOPLE, MIN_PEOPLE } from "@/lib/group-rules";
 import { givableOptions } from "@/lib/gift-rules";
 import { productSegment } from "@/lib/product-slug";
@@ -266,18 +266,22 @@ export function PackageOffer({ store, product }: { store: Store; product: Listin
 
 /**
  * Which of a product's prices is being bought for somebody else: a list to
- * pick from, each with its price, opened on the creator's pick. Nothing for
+ * pick from, each with its price, the creator's pick listed first and none
+ * chosen for the buyer (487 [IT4]): the form asks for a choice. Nothing for
  * a product sold at one price. The price charged is read on the server from
  * the option's id, never from this list.
  */
 function GivenOptionPicker({ store, product, each = false }: { store: Store; product: Listing; each?: boolean }) {
-  const options = givableOptions(product);
+  const options = optionsInPickOrder(givableOptions(product));
   if (options.length === 0) return null;
   const { w, money } = speech(store);
   return (
     <label className="block">
       <span className="st-label">{w.whichOne}</span>
-      <select className="st-field mt-2" name="option" required defaultValue={(startingOption(options) ?? options[0]).id}>
+      <select className="st-field mt-2" name="option" required defaultValue="">
+        <option value="" disabled>
+          {w.chooseOne}
+        </option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {w.priced(option.label, `${money(option.priceCents)}${each ? w.perPerson : ""}`)}
@@ -555,6 +559,7 @@ export function BuyBox({
   place = "",
   consentAgain = false,
   embed = null,
+  stepped = false,
 }: {
   store: Store;
   product: Listing;
@@ -586,7 +591,23 @@ export function BuyBox({
   consentAgain?: boolean;
   /** Opened from a card on one of the creator's listed sites: carried to the checkout, which checks it against the store's list. */
   embed?: { site: string; back: string } | null;
+  /**
+   * Drawn on a card in a list of products (the store page, a collection): where buying asks for the box to start
+   * access at once (lib/digital-consent.ts), the card leads to the product's own buy step instead, so the box, its
+   * note and the closing sentence are drawn once, directly above the Buy button they belong to (Encanto 3,
+   * C4-20261106-0520-TODOS-19), not repeated on every card.
+   */
+  stepped?: boolean;
 }) {
+  // The card's way to the buy step: the words the product page's own buttons use (pageAction), and its name for a
+  // screen reader, so the link says on its own what it is for (WCAG 2.4.9).
+  const toStep = (anchor: string) => (
+    <Link prefetch={false} href={`${productPath(store, product)}${anchor}`} className="btn st-btn btn-block mt-4" data-buy-step="">
+      {pageAction(store, product, remaining, selling, related, soon, preorder).label}
+      <span className="sr-only">{`: ${product.title}`}</span>
+    </Link>
+  );
+  if (soon && !isFree(product) && preorder && stepped) return toStep("#preorder");
   if (soon && !isFree(product)) return preorder ? <PreorderForm store={store} product={product} day={preorder} writes={writes} consentAgain={consentAgain} /> : <WaitlistForm store={store} product={product} writes={writes} />;
   const { w, money } = speech(store);
   const options = sellableOptions(product);
@@ -672,7 +693,7 @@ export function BuyBox({
   // The creator's own PayPal, as well as Stripe or instead of it (lib/paypal-sales.ts).
   const withPayPal = ready && paypalReady(store, product);
   if (!canSellProduct(store, product) || !ready) {
-    if (withPayPal) return <PayPalButton store={store} product={product} alone consentAgain={consentAgain} />;
+    if (withPayPal) return stepped ? toStep("#buy") : <PayPalButton store={store} product={product} alone consentAgain={consentAgain} />;
     /*
       Sellable store, but this one has nothing attached to hand over. Better to
       say so than to take the money and work out the delivery afterward.
@@ -716,8 +737,9 @@ export function BuyBox({
   // checked, where only an added product does (beside a shipped one). Its
   // form also carries the PayPal button, so one box serves both.
   const formId = `buy-${place}${product.id}`;
-  const digitalHere = deliversDigitally(product, startingOption(options)?.id ?? null);
+  const digitalHere = deliversDigitally(product, null);
   const digitalAdded = !digitalHere && extras.some((extra) => deliversDigitally(extra.target));
+  if (stepped && (digitalHere || digitalAdded)) return toStep("#buy");
   return (
     <>
     <form id={formId} action="/api/store/checkout" method="post" target="_top" className="mt-4" data-checkout="">
@@ -747,8 +769,11 @@ export function BuyBox({
         */
         <div className="mb-4">
           <label htmlFor={`os-${product.id}`} className="st-label">{w.chooseOptionFor(product.title)}</label>
-          <select id={`os-${product.id}`} name="option" defaultValue={startingOption(options)?.id} className="st-field mt-2">
-            {options.map((option) => (
+          <select id={`os-${product.id}`} name="option" required defaultValue="" className="st-field mt-2">
+            <option value="" disabled>
+              {w.chooseOne}
+            </option>
+            {optionsInPickOrder(options).map((option) => (
               <option key={option.id} value={option.id}>
                 {`${w.priced(option.label, `${money(option.priceCents)}${every}`)}${units.get(option.id) ? ` (${unitWords(units.get(option.id)!)})` : ""}${planAt(option.id) ? ` · ${w.orPlan(planAt(option.id)!)}` : ""}${option.best ? w.recommendedAfter : ""}`}
               </option>
@@ -761,11 +786,13 @@ export function BuyBox({
           {/*
             With what each includes written down, the cards stand side by side
             on a wide screen so the buyer can compare them; on a phone they
-            stack. The creator's pick opens chosen and says so, in the
-            creator's voice: "Recommended", never a claim about other buyers.
+            stack. The creator's pick is listed first and says so, in the
+            creator's voice: "Recommended", never a claim about other buyers;
+            nothing is chosen for the buyer, and the form asks for a choice
+            (487 [IT4]).
           */}
           <div className={comparable(options) ? `st-compare st-compare-${Math.min(options.length, 3)}` : "space-y-2"}>
-            {options.map((option) => (
+            {optionsInPickOrder(options).map((option) => (
               <label key={option.id} htmlFor={`o-${option.id}`} className={comparable(options) ? "st-option st-option-card" : "st-option"}>
                 <span className="flex items-center gap-3">
                   <input
@@ -773,7 +800,7 @@ export function BuyBox({
                     type="radio"
                     name="option"
                     value={option.id}
-                    defaultChecked={option.id === startingOption(options)?.id}
+                    required
                     className="h-4 w-4"
                   />
                   <span className="font-bold">{option.label}</span>
@@ -1097,6 +1124,7 @@ export function ProductCard({
   preorder = null,
   cart = false,
   sold = null,
+  grid = false,
 }: {
   store: Store;
   product: Listing;
@@ -1126,6 +1154,8 @@ export function ProductCard({
   bundleItems?: Listing[] | null;
   /** "Bought N times", from the creator's own Stripe account, when they chose to show it (lib/sold-count.ts). */
   sold?: string | null;
+  /** It stands in the store page's grid, two to a row on a computer (Encanto 3): its cover is described at that width. */
+  grid?: boolean;
 }) {
   const href = productPath(store, product);
   const { w, num } = speech(store);
@@ -1143,7 +1173,7 @@ export function ProductCard({
     <img
       src={servedImageUrl(image)}
       srcSet={servedSrcSet(image)}
-      sizes={image.small ? (style === "preview" ? IMAGE_SIZES.cover : IMAGE_SIZES.thumb) : undefined}
+      sizes={image.small ? (style === "preview" ? (grid ? IMAGE_SIZES.grid : IMAGE_SIZES.cover) : IMAGE_SIZES.thumb) : undefined}
       alt={image.alt}
       width={image.width}
       height={image.height}
@@ -1151,7 +1181,8 @@ export function ProductCard({
       fetchPriority={first ? "high" : undefined}
       decoding="async"
       className={style === "preview" ? "st-cover" : style === "callout" ? "st-callout-img" : "st-thumb"}
-      style={style === "preview" ? { aspectRatio: `${image.width} / ${image.height}` } : undefined}
+      // The picture's color under it while it loads (Encanto 5b), when it has one.
+      style={style === "preview" || image.tone ? { ...(style === "preview" ? { aspectRatio: `${image.width} / ${image.height}` } : {}), ...(image.tone ? { backgroundColor: image.tone } : {}) } : undefined}
     />
   ) : null;
 
@@ -1204,6 +1235,7 @@ export function ProductCard({
         ready={!product.bundle || (bundleItems?.length ?? 0) >= MIN_BUNDLE_ITEMS}
         soon={soon}
         preorder={preorder}
+        stepped
       />
       {cart ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {product.recurring && manageable ? (

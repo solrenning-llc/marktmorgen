@@ -46,7 +46,7 @@ import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Listing, type Store, appendSitePages, ensureStatsId, setProductExtras, setProductFunnel, storeForId, storeRef } from "@/lib/store";
 import { idsOfKind, readListings, readProduct } from "@/lib/catalog";
 import { offerableAfterPaying } from "@/lib/bundles";
-import { MAX_BLOCKS, type PageBlock, oversized, pageProblem, parsePage } from "@/lib/sales-page";
+import { MAX_BLOCKS, type PageBlock, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
 import { writePage } from "@/lib/sales-page-store";
 import { MAX_SITE_PAGES, SITE_KINDS, type SitePage, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 import { freeSlug } from "@/lib/funnel-types";
@@ -140,6 +140,9 @@ function checkDraft(raw: unknown): Checked {
     else if (pageProblem({ blocks: sent }, parsed)) problem = "Its blocks could not be read as a page. Choose the file again.";
     else if (sent.length > MAX_BLOCKS || oversized(parsed)) problem = "It holds more than one page can.";
     else if (parsed.blocks.some((b) => !SITE_KINDS.includes(b.kind))) problem = "It has a block a store's own page cannot have. Choose the file again.";
+    // A picture is never brought over from a file: a page may show only a picture the door gave it or one it already
+    // shows (lib/picture-door.ts), as the funnel bundle refuses them too (Claude 4 on #2156).
+    else if (picturePaths(parsed).length) problem = "It has a picture, which cannot be brought over. Choose the file again, then add your pictures in the page editor.";
     else if (parsed.blocks.filter((b) => b.kind === "form").length > 1 || (parsed.blocks.some((b) => b.kind === "form") !== Boolean(form))) problem = "Its form could not be read. Choose the file again.";
     else if (parsed.blocks.length === 0) problem = "Nothing on it could be brought over: there is no page to make.";
   }

@@ -181,7 +181,7 @@ export default async function CollectionPage({ params }: Params) {
           {products.map((product, i) => (
             <ProductCard
               key={product.id}
-              eager={i < 3}
+              eager={i < 1}
               first={i === 0}
               store={store}
               product={product}

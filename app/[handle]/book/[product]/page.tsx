@@ -5,9 +5,12 @@ import { boughtByToken, packageState } from "@/lib/call-packages";
 import { isSoon } from "@/lib/waitlist";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
@@ -40,7 +43,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)).catch(() => null) : null;
   const product = (store ? await readListing(store, productId) : null);
-  if (!store || !product?.call) return { title: "Book a call — Marktmorgen", robots: { index: false, follow: true } };
+  // A draft call's tab names nothing for whoever only knows its id (MM-SA-30): the same as an id that does not exist.
+  if (!store || !product?.call || (product.hidden && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value)))) {
+    return { title: "Book a call — Marktmorgen", robots: { index: false, follow: true } };
+  }
   const { w } = speech(store);
   const pick = product.call.kind === "live" ? w.pickSession : w.pickTime;
   return { title: `${pick}${bookingWords(store.language).colon}${product.title} — ${store.name}`, robots: { index: false, follow: true } };
@@ -74,6 +80,11 @@ export default async function BookPage({ params, searchParams }: Params) {
   const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
   const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
+  // A draft call is left off the store (lib/catalog.ts): its title, price and
+  // times are for the store's owner and team, signed in, and for a package
+  // already bought for it (a booking already paid is moved above, read from
+  // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
+  if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const pkgState = pkg ? await packageState(pkg.bought) : null;
   const open = canSellProduct(store, product) && !(await isSoon(store, product.id).catch(() => false));
   // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".

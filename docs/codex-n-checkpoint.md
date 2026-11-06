@@ -587,3 +587,38 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 3. Os demais quatro produtos mantêm seus bloqueios/retries exatos.
 4. Uma vaga futura abre BH1 somente após anúncio+RESERVA no canal e RED próprio.
 5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+
+---
+
+## Retomada — 06/11/2026 03h29 Fortaleza — AV12 sem movimento dos produtos N
+
+### Fonte e delta
+
+- Esta retomada começou pelo checkpoint canônico exato `632c047e3b71cdba12db785cbe694f3836ea2e39`, blob `7716b95a0424f6697896c4ee585909874c556809`; esta seção final prevalece.
+- Main observado uma vez: `63eea8771d357a687e5f0ffa8dea73b6fa6570f8`. CLAUDE.md, AGENTS.md, docs/reservations.md, todos os arquivos de docs/reservations/ e CX-104–CX-125 foram relidos integralmente; CX-126 continua ausente do main.
+- O delta do canal posterior ao ponto N de 02h23 foi isolado por `fetch_file` + blobs integrais: baseline `19ac07ef213fdf97a8a596a0df72f31016aa0eea` (150.734 bytes) e atual `1c4858384acd668744dba50b9ab587196250b2b3` (279.656 bytes), com prefixo integral preservado.
+- Não há no delta qualificação R2 do #2608, terminal legítimo dos nove checks, liberação A3/triestado, novo head ou instrução causal para qualquer produto N.
+- A revisão alheia #2722 avançou: C2 fechou o próprio retorno focal no head `05a4e8bdc673e90537c350d7a2ddfdc4d8d26de4`, parecer `5796189732`, e a prova N `e8f27172` permanece preservada; N não duplicou parecer nem tocou ramo/CI.
+- O #2745 foi incorporado pelo Codex V no merge `3500cb1c827e0180eaffce7de102a6419d0dc0ae` com o parecer N já aplicável. É trabalho alheio concluído e não conta como vaga/produto N.
+
+### Cinco produtos próprios — preservados
+
+1. **#2451** — `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: 8/9; retry único verify `127163240735` esgotado; nunca repetir.
+2. **#2544** — `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; HOLD A3 para `cancel_paid`25→27.
+3. **#2608** — `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e70293988a6a18b9763f0fb00ddb01b1ca`: retorno K2 `6676815043` preservado; ainda faltam qualificação independente explícita R2 dos 11 blobs e NOVE agregadores NOVOS. Retry antigo `127378763596` permanece consumido/cancelled.
+4. **#2674** — `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: BLOQUEADO pelo triestado reservado; todos os REDs e limites permanecem; request-guard intocado.
+5. **#2700** — `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`: P `5795031317` aplicável; aguarda NOVE exatos.
+
+- 353 [BH1] continua atribuído e em fila, sem sexta unidade. Buyer-library `041512b6` continua separado, sem vaga/coordenação nova.
+- SG2(27/30) continua bloqueada. Nenhum produto, retry, job, merge, reserva, ramo alheio ou worktree raiz foi alterado.
+- O commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c` continua proibido de push.
+
+### Próximo exato
+
+1. AV12: somente novidade causal; não sondar CI em rodadas.
+2. #2608 só avança com qualificação R2 explícita e terminal legítimo 9/9 do head exato; merge normal apenas por `expected_head_sha`.
+3. #2451/#2544/#2674/#2700 mantêm bloqueios/retries exatos.
+4. Uma vaga futura abre BH1 somente após anúncio+RESERVA e RED próprio.
+5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

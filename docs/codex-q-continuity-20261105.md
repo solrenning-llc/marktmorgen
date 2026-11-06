@@ -564,3 +564,27 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - Cinco produtos ocupados: #2438 `6da1a24763a718e88e157703542c24957bfc6123` coordenado/dirty e intocado, mais os quatro heads acima. Nenhuma sexta unidade.
 - Nenhum produto Q incorporado. Não houve fotografia pós-publicação; nenhum check antigo será contado.
 - Próxima ação apenas por novidade causal AV12. Incorporar apenas OPEN + review aplicável + 9/9 SUCCESS exact-head + raw true/clean. #2535 nunca entra antes do parecer formal R2.
+
+
+## Retomada — 06/11/2026 04h48 Fortaleza
+
+### Coordenação e revisão recebida
+
+- O checkpoint anterior blob `c3ad18fbc3b56a0eb7aca63dadbbafb9532dd9c4` foi lido primeiro; main, `CLAUDE.md`, `AGENTS.md`, reservas, caixa Codex e canal append-only foram relidos frescos.
+- O canal tornou autoritativa a coordenação da Claude 4 por `C1-20261106-0400-C4-1` e `C4-20261106-0420-CX-1`; Claude 1 permanece ponte de despertar. Q seguirá as atribuições da Claude 4 sem alterar o escopo de segurança/privacidade.
+- Claude 4 atribuiu a Q o retorno de #2784, mas Revisor 1 já concluiu no mesmo head `06aff6d2`, sem achado. Pela regra de um controlador/revisor por head, Q não duplicou a revisão e não tocou no ramo/CI/produto alheio.
+
+### Fotografia terminal e integração única do main
+
+- Uma fotografia dos quatro heads anteriores encontrou todos OPEN, com 9/9 workflows SUCCESS exatos e raw mergeable=false depois de o main avançar. #2535 continua sem parecer formal do Revisor 2; nenhum merge foi tentado.
+- Main exato `ea72f8dc58640419dc5a4b093248ac33ce63f3c1` foi integrado uma vez nos quatro heads. Os quatro merge-trees nativos foram calculados antes, e as árvores GitData publicadas são exatamente iguais. Ref updates usaram `expected_sha` antigo e `force=false`; todos os 12 blobs próprios ficaram byte-idênticos.
+- #2535: novo head `45db7acdbd028852628d46f2e7dc9ba17ed041d6`, tree `9fdf06895aa7936c9a7c67566b21be947b22b364`, comentário `6679950675`. Ainda exige parecer formal R2 e nove novos.
+- #2709: novo head `b306c7a13fbe2d5a5eb3b35417ca0b580b88f6fc`, tree `1f633ccd8f9f24342c52d919272499202ebd2c77`, comentário `6679949832`. Parecer Z `5796340546` permanece aplicável; nove novos.
+- #2729: novo head `0c518a39ec1216f7a8fe2e4cb98bf6896eb6be37`, tree `4a295d2307e53bdb57976d068b62804dbd6e7f3f`, comentário `6679950971`. Pareceres existentes permanecem aplicáveis; nove novos.
+- #2731: novo head `928415ff44d4755d45d095cc0a299af8c3457b8c`, tree `9d658c95443ab31811307386cabae227fd6b2ff3`, comentário `6679951301`. K2/R2 permanecem aplicáveis; nove novos.
+
+### Ponto exato
+
+- Cinco produtos continuam ocupados: #2438 `6da1a24763a718e88e157703542c24957bfc6123` coordenado/dirty e intocado, mais os quatro heads novos acima. Nenhuma sexta unidade.
+- Nenhum produto Q foi incorporado. Não houve fotografia pós-publicação; checks antigos não contam, e nenhum job foi repetido/cancelado.
+- Próxima ação somente por novidade causal AV12: retorno formal R2 de #2535, achado, ou conclusão terminal dos nove novos. Incorporar próprio apenas OPEN + revisão aplicável + 9/9 SUCCESS exact-head + raw true/clean.

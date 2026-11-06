@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { codeRateAnswer, takeSignInCode } from "@/lib/auth";
 import { finishProvenSignIn } from "@/lib/signin-finish";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 /**
  * The six-digit code from the login email (652 [WG12]), typed on the page
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+  const ip = clientAddress(request);
   let answer: Awaited<ReturnType<typeof takeSignInCode>>;
   try {
     // The machine's tries, counted before any record is read (Claude 3 on #2736): past them, nothing is read.

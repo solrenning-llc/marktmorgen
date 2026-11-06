@@ -418,3 +418,9 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 4. #2722 é revisão alheia: nenhum merge por N. Retorno final concluído; não duplicar.
 5. SG2(27/30) continua somente prova `3d4cb847`, bloqueada por #2270/#1969. Cinco produtos; não abrir sexta.
 6. Só sintético; UNKNOWN nunca0; teto antes do gasto. Nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+### Higiene local desta execução
+
+- O worktree raiz local `/workspace/scratch/d28fe5e80a85/repo` ficou em `codex/n-mail-click-read-shape` com commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c` e aparece ahead do remoto. **Esse commit nunca foi enviado e não é head de produto; não fazer push dele.** Os heads remotos corretos são os registrados acima, criados pela API GitHub.
+- Worktrees locais de validação/merge são somente descartáveis: `n-product-2700-main.50m7Rq`, `n-product-2608-main.sWN3V4` e `n-review-2722-final.l6Nf6b`. Não promover seus commits locais; usar apenas os heads remotos exatos do checkpoint.

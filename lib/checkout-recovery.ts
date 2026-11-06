@@ -256,7 +256,10 @@ export async function remindAbandoned(
   // Only something that can still be bought, and bought now.
   const product = meta.product ? await readListing(store, meta.product) : null;
   if (!product || product.call || !canSellProduct(store, product)) return "skip";
-  const left = await stockLeft(store, product).catch(() => null);
+  // Stock that cannot be read is unknown, never "no limit" (CX-123 rule 24):
+  // not sent this round, with nothing marked, so a later pass decides on it.
+  const left = await stockLeft(store, product).catch(() => undefined);
+  if (left === undefined) return "failed";
   if (left === 0) return "skip";
 
   return deliver(store, { kind: "product", product }, email, {
@@ -299,7 +302,10 @@ export async function remindAsked(
   }
   const product = await readListing(store, ask.productId);
   if (!product || product.call || product.hidden || !canSellProduct(store, product)) return "skip";
-  const left = await stockLeft(store, product).catch(() => null);
+  // Stock that cannot be read is unknown, never "no limit" (CX-123 rule 24):
+  // not sent this round, with nothing marked, so a later pass decides on it.
+  const left = await stockLeft(store, product).catch(() => undefined);
+  if (left === undefined) return "failed";
   if (left === 0) return "skip";
   const g = givingWords(store.language);
   return deliver(store, { kind: "product", product }, ask.email, {
@@ -343,7 +349,10 @@ export async function remindAssisted(
   }
   const product = meta.product ? await readListing(store, meta.product) : null;
   if (!product || product.call || meta.kind === "call" || !canSellProduct(store, product)) return "skip";
-  const left = await stockLeft(store, product).catch(() => null);
+  // Stock that cannot be read is unknown, never "no limit" (CX-123 rule 24):
+  // not sent this round, with nothing marked, so a later pass decides on it.
+  const left = await stockLeft(store, product).catch(() => undefined);
+  if (left === undefined) return "failed";
   if (left === 0) return "skip";
   return deliver(store, { kind: "product", product }, input.email, how);
 }

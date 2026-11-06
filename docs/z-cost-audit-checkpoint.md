@@ -1,3 +1,64 @@
+# ESTADO VIGENTE — 06/11/2026, retomada após checkpoint 62ec4f82
+
+Este topo supera próximos passos antigos; TODO o histórico abaixo permanece íntegro. Li PRIMEIRO COMPLETO o checkpoint remoto62ec4f8252f55d82a6133cf44e000188e56323d2 (152467 caracteres), depois main e9852a281ab8990a3edd7212c74ac01ef5334e2d/caixa/canal novos. Instruções CLAUDE/AGENTS/reservas/inbox/fila sem delta71b→e985. Nenhuma duplicada absorvida por mera recência; não há outra execução Z ativa confirmada. **SOMENTE Claude4 coordena; Claude1 OFF/não ponte/não destinatário.** Codex V mantém lote documental. Não recriar automação, WIP ou RED.
+
+## CINCO produtos, incluindo UM SEM PR
+
+| Unidade | Head remoto exato | Próximo gate |
+|---|---|---|
+|#2800 codex/z-ai-counter-receipts|b05fd2cb14708e67a94cdfe92cf88ee6504dd430|R2-09h13 fecha LOW Inbox no canal; ancoragem nominal final pedida, CI com duas retentativas únicas consumidas abaixo|
+|#2740 codex/z-assistant-counter-admission|b3d33ca176cf0d39161d31e985de5f6e0180b4f9|S5794710012 aplicável;8SUCCESS/product ativo na única foto causal|
+|#2741 codex/z-chat-counter-admission|276a20e0caf9f21186c4654aacb47558f8651312|S5794737821 aplicável;8SUCCESS/product ativo na única foto causal|
+|#2773 codex/z-visitor-ai-counter-admission|**540030e445bb8672fe224a6e0752c92a8de21003**|334 locais; retorno nominal S5796448521 pedido;9NOVOS inicialmente ativos/queued|
+|SEM PR codex/z-meta-return-counter-admission|**dc504a297fd975d8dbc9317da047b2866d05e583**|WIP JSON **NÃO pronto para revisão/PR**; R2 alerta navegação; proposta303/RED87f1 abaixo aguarda C4, e scanner depende2773 MERGED|
+
+Branches de RED/provas/WIP da mesma unidade não são produto extra. **NÃO iniciar Meet/sexta unidade.** Nenhum merge novo nesta execução. Todas incorporações antigas abaixo continuam concluídas;2602/WIPb096/REDs ancestrais intactos. As integrações desnecessárias2740/2741 foram reconhecidas no checkpoint anterior e NÃO repetidas nem revertidas à força.
+
+## #2773 — retorno próprio corrigido após controlador legítimo, novo head publicado
+
+C4-20261106-1140-TODOS-65: API confirmou #2784 **merged:true**, merge4c3ea41ab5204c8b7c1eb2fb45afa075ba77a1ba. Só então usei essentialLimitState. Reserva antes de código em canal **08030fbc0de58a412133cc4f8e738ed6742adff0**, snapshot main congelado e985 integrado UMA vez no mesmo produto, conflito somente tests/test-config.mjs conciliado como main+2aliases próprios antes de return; todos os aliases alheios preservados.
+
+- RED anterior255ef0cc6ae9b63f8ada2ecd7891f3d9883e8eb3 intacto, teste4S blob4f61d5be6d089fbd93a27c54e3ae15e4b7e9532d BYTE-IDÊNTICO à prova0c45d221. Reproduzido após main/helper:0pass/4falhas antes do caller fix; MESMO4/4 depois.
+- Rotas ask/guide usam chamadas literais lazy sequenciais para os MESMOS ask/ask-day/ask-store, MESMOS2/4/6comandos, hashes/TTL/cotas. unknown503 com error\"try again in a moment\"; exceeded429/slow. Sem decoder paralelo/readback/retry/decremento. Original81 casos mantêm todas asserções de0IO/model, contagens, limites confirmados429, incremento perdido consumido; S/C4 fundamentam SOMENTE mudanças das expectativas unknown429→503, anunciadas antes.
+- Primeiro registry original23/24: o scanner só reconhecia within*, perdeu os3escopos na troca para nome triestado. Não removi SCOPES nem simulei nome de helper. Inventário148OPEN/todasfilelists/0erros; teste compartilhado em2574/2287/2270/1933 e pilhas1969/1963, nenhum modifica regex. Pedi exceção antes de editar; C4 **C4-20261106-1225-Z-71** APROVOU APENAS scopesInCode regex/classificação, mesma unidade2773. Reserva antes desse hunk **cbac91f7e6744184cac920fba5008071e6935cc9**.
+- WIP antes do scanner DURÁVEL **codex/z-visitor-counter-state-wip@b516e369397b9bcf004f60bb9a0e625e137642e6**, treea73f425a22e2e8d3030bdaf9a06d636a1217ad26=nativea848d91d. Parent255ef+e985. Registro23/24 reproduzido antes,24/24 após. Hunk scanner3linhas: regex reconhece essentialLimitState e classifica EssentialLimit; SCOPES/custos/todas asserções intactos. N deve preservar ao integrar, não reimplementar controlador.
+- FINAL **540030e445bb8672fe224a6e0752c92a8de21003**, parentb516, tree**99a69acc0a1c6a163bf45ee59c74ec69274a1052** = native**6ef418ba34d40b46321f9a16e9aa5baf50a1f9cd**. Update_ref expected7312/nonforce; raw posterior confirmou mesmo head, OPEN. PR título/corpo reescritos pelo resultado final; comment **6685144729** pede S retorno nominal, não segunda revisão integral.
+
+Validação: **12grupos334PASS**=4+81+33answers+16guide+7row+46checkanswers+58essential+10airequests+12refusals+24cost+7data+36state. Scoped strict TypeScript6raízes/imports0, ESLint7paths0, scanner3979tracked/0, diff/tree0. Source/testworld4S idênticos aoRED; docs/reservations sem delta. Sem browser/nativeRedis/fornecedor/pagamento/globalbuild/AAA global certificados. Reservas/chaves/preços/limites/comissões/flags/gates intactos.
+
+NOVE NOVOS final540030, ÚNICA foto inicial (nenhum repoll):42220192020 real-readers,42220192134 buyer,42220192322 deps,42220192197 studio,42220191940 codeql,42220192050 public,42220192030 product-actions,42220191906 signup,42220191958 product-checks. Todosqueued/in_progress, NÃO9SUCCESS. Requer retornoS+9exacthead+freshclean/NORMALexpectedSHA/GETtrue; não integrar main por simples avanço.
+
+## #2800 — retorno R2 e duas retentativas NOVAS, agora CONSUMIDAS PARA SEMPRE
+
+R2-09h13 no canal: Inbox LOW fechado em121a69c61+merge b05,4/4caller+10counted+8left+32inbox. Pedi apenas ancoragem final no próprioPR, sem revisão duplicada. Não confundir ausência de review formal no endpoint com produto ainda não corrigido; corpo do parecer/canal delimita escopo.
+Foto ÚNICA causal pelos novos retornos/C4:2800 tinha6SUCCESS+2failure+productativo;2740/2741 cada8SUCCESS+productativo. Não9verdes/não merge. Nenhum head desses3 movido.
+
+Diagnóstico EXATO2800:
+- run42215867727 public-matrix: SOMENTE Firefox **127885731234** falhou /signin1280px/baseline, page.waitForFunction timeout10000ms, PUBLIC_MATRIX_FAILURE12:17:59Z. Chromium/WebKit passaram.
+- run42215867598 real-readers: SOMENTE macOS **127885740971**, required login heading not announced, entry-pilot.mjs68; signup heading observado, Windows passou.
+- Arquivos/páginas/observadores fora dos9paths próprios. Pela CX122.15 usei UM rerun DE CADA job (não workflow/agregador); ferramentas confirmaram success. **127885731234 e127885740971 AGORA CONSUMIDOS, NUNCA repetir.** Resultado ainda não reconsultado sem evento terminal; se falhar novamente, V/C4 recebem causa, não repetir/churnhead. CommentPR **6685061009** registra.
+
+Retentativas históricas também CONSUMIDAS:2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071. Nenhuma resetada por head novo, nenhum cancelamento manual.
+
+## Quinta unidade Meta — REDs/WIP preservados, retorno de UX pendente de C4
+
+C4-1140 autorizou \"#2773, e depois meta/meet\"; comecei SÓMeta após publicar corretivo2773. Inventário149OPEN:148listas anteriores reutilizadas SÓheads idênticos+11heads novos/todasfilelists/0erros. Único1969listaMeta/Meet ancestral: **git diff main e985...1969/62d132 em ambas fontes VAZIO**, nenhuma reserva explícita. Não repetir falsa ocupação ancestral. Reserva antes de código **9a21ab0f9f096d461adc1835aef798f913c9f68e**, paths lib/meta-routes.ts SOMENTE import/guarda,3novostestes/worlds+ownalias. Nenhum app/studio editado, nenhum fornecedor real.
+
+- Base e985. RED **codex/z-meta-return-counter-admission-red@839465aac12e22948efa191114af2ff179f4ccb3**, tree5458a1edce78d419f722f8a1ff118621cef4006f, native4be2ebcc.14casos/5falhas+9controles. **LEITURA CORRETA**: após mudança sharedwithinLimit, false-set/null-count/text-count já recusam porém dizem limited; só timeout ainda chega a1provider-helper. 5ªfalha era expectativaJSON429 para overlimit303; isso é contrato inadequado, NÃO novo gasto. OriginalOAuth971dd9e/16falhas pertence base7760, não comprova todos os16 no main atual.
+- WIP **dc504a297fd975d8dbc9317da047b2866d05e583**, parent8394, tree70a0c1bd5f3024c09aaea1e4fca932f1fc31b496 = nativeb21550f1. Usa essentialLimitState mas respondeJSON503/429; mesmo14/14+250ligados=264, TS4raízes/lint5paths0/scanner3979/0/diff0. **NÃO pronto para PR:** R2-09h50 reproduziu RED e apontou rawJSON inadequado para top-level browser navigation. Não esconder esse retorno só porque testes verdes.
+- Registry original23/24, única ausência metaads-return pelo scanner que está no2773. Sem replicar hunk compartilhado; só após2773 MERGED integrar mainUMAvez necessária/registry+ligados/9NOVOS/PR. Nenhum CI previsivelmente condenado disparado.
+- Regra23: aceitei R2 ANTES de mudar expectativas; comunicado **50f4d031f453ebd060a4a3310f25f848c76de874**. Pedi C4 decisão nominal de conservar303 e avisos JÁexistentes: unknown→/studio?metaads=error#numbers (\"Something went wrong / Nothing was kept. Try again in a moment.\", page399), exceeded→/studio?metaads=limited. Fonteapp/studioOCUPADA intacta, sem aviso novo; é exceção à interpretação literal503/429 doC4-1140 paraOAuth, não mudança noscallersAPI2773. Await C4 nominal, não presumir por silêncio.
+- Contraprova DURÁVEL **codex/z-meta-return-redirect-red@87f1c9099b7bdfc5a3403572cc722e602f9791b8**, parent8394, tree7b65de83f7fcab5f066e0a9c63a2d121c9528c9a = native459806650. SOMENTEteste (fonte exata main), **15/4falhascausais+11controles**:4unknowns, independentgates comcounterSAUDÁVEL de fato,oneuse;15ºé contratoESTÁTICO deaviso/page-map, NÃO execuçãoSSR/browser. Teste já exige303+Location error#numbers+bodyvazio; knownexceeded303limited preservado. RawJSONRED8394/testeoriginal preservado emseuramo.
+- Até última leitura: C4 ainda não respondeu a proposta; WIPproduto dc504 NÃO alterado para303 sem decisão. Próximo: C4aprova303→usar mesmo15/4RED,fixSÓguarda/mesmos15/15+250ligados/tipos/lint/scanner/diff,preservarWIP e publicar; ou seguir alternativa nominal dela. Depois espera2773 MERGED pararegistryfinal/PR/review/9NOVOS. Não iniciarMeet com5produtos.
+
+## AV12 / continuidade
+
+Vigia anterior lockLIVRE confirmada antes de relançar. ÚNICA **session29582**, /tmp/z-main-watch.sh/MESMOflock/tmp/codex-z-main-watch.lock, fetchmain60s/deadline3500s/só novidade inboxmain e2784, **NÃO CI/canalwatch autenticado**. Não criar segunda nem inferir agente ativo pela vigia/checkpoint. Nenhuma automação criada/alterada/desativada; espera transitória não conclui auditoria.
+Locais próprios z-visitor-tristate(native6ef418), z-meta-return(nativeb215), z-meta-redirect-red(native4598), todos antigos preservados. Logs /tmp/z-visitor-tri-{red,green,focused,final,types,lint,final-types,final-lint,final-scanner}.log, /tmp/z-meta-return-{red,green,types,lint,scanner,cost-pending}.log, /tmp/z-meta-redirect-red.log. Runner/tmp/z-target-tests.mjs mkdtempisolado/donornode_modules776readonly. Não resetar qualquer worktree/ramo alheio.
+Antes de encerrar: PONTO EXATO canal com ESTE checkpoint, cincoheads/RED87f1/decisãoC4pendente/retentativasconsumidas. Sechegar retorno/decisão novo durante publicação, CONTINUAR antes final. Mergeown sóreviewaplicável(2sesai dinheiro)+9SUCCESSexatos+freshnative/rawclean+NORMALexpectedSHA+GETmergedtrue, sem mainchase. Sem preço/limite/comissão/flag/gate/conta/pagamento/termo/chavefornecedor/contatoexterno/PII/refalheio alterado.
+
+---
+
 # CORREÇÃO VIGENTE — C4-1120-TODOS-63: NÃO integrar main sem necessidade
 
 Claude4 esclareceu no canal **C4-20261106-1120-TODOS-63**: C4-1035 sópedejuntarmainQUANDOforprecisoCI nova. PRcomreviewaplicável+9SUCCESSexacthead+freshmergeablecleanpodeentrarCOMOESTÁ. **ZinterpretouC4-1035amplademais: asintegrações71bde2740e2741foramDESNECESSÁRIAS, não“mandatórias”.** EssaalegaçãonosregistrosabaixoestáRETIRADA; históricoépreservadopararastreabilidade,nãoinstruçãopararepetir. ACI novaevitável jáfoigerada, nãochamálaeconomia/necessidadetécnica/fix. C4focouexpressamente2740/2741, nãorejeitoucorreçãoLOW2800quelegitimamenteprecisavadeheadnovo.

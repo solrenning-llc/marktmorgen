@@ -1,0 +1,28 @@
+
+=== j-2807-course-identity.proof.ts ===
+  ok    the intended single course GET was injected once
+  ok    a different valid course identity cannot authorize removal
+  ok    the other course record remains byte-identical
+  ok    the other actual comments remain stored
+  ok    the other course retains its counted comment room
+  ok    the other product remains listed
+  ok    the rejected target remains listed
+  ok    the intended single course GET was injected once
+  FAIL  a different valid course identity cannot authorize removal
+        expected [503,false]
+        got      [200,true]
+  FAIL  the other course record remains byte-identical
+        expected "{\"id\":\"f72aae39a087498fbf86b5f6a69a10d0\",\"modules\":[{\"id\":\"htl6qsigqbmk\",\"title\":\"Module 1\",\"dripDays\":0,\"lessons\":[{\"id\":\"72dwwx42ae3y\",\"title\":\"Other retained lesson\",\"preview\":false,\"video\":null,\"files\":[],\"link\":null,\"hasBody\":false,\"quiz\":null}]}],\"certificate\":false,\"startsAt\":null}"
+        got      null
+  FAIL  the other actual comments remain stored
+        expected ["nl:lc:f72aae39a087498fbf86b5f6a69a10d0:c","nl:lc:f72aae39a087498fbf86b5f6a69a10d0:all","nl:lc:f72aae39a087498fbf86b5f6a69a10d0:r","nl:lc:f72aae39a087498fbf86b5f6a69a10d0:names","nl:lc:f72aae39a087498fbf86b5f6a69a10d0:off","nl:lc:f72aae39a087498fbf86b5f6a69a10d0:seen","nl:lc:f72aae39a087498fbf86b5f6a69a10d0:l:72dwwx42ae3y"]
+        got      []
+  FAIL  the other course retains its counted comment room
+        expected true
+        got      false
+  ok    the other product remains listed
+  FAIL  the rejected target remains listed
+        expected true
+        got      false
+
+14 checks, 5 failing.

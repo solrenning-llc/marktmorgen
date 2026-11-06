@@ -528,3 +528,10 @@ The five own products remain OPEN and exact:
 5. #2798 `cb6673a982efb43e84c266bc95018d22b5909f77`: Revisor 2 clean; last causal state 8/9. Do not chase main or poll without a terminal event. On terminal novelty, integrate current main once, preserve reviewed product/test blobs, rerun the 141 linked checks/static proof and require nine new exact-head successes.
 
 Exact next action is causal only: a named review request not already announced, the terminal #2798 event, the Revisor 2 return for #2770, the shared Firefox correction for #2516, or coordinator disposition for #2473/#2689. Do not open a sixth product. Preserve #2111 and its files, all occupied files, foreign refs and CI, MR ceilings and unknown semantics. No price, limit, commission, flag, gate, account, payment, term, key, contact, provider, deployment or automation changed.
+
+
+### Causal addendum 2026-11-06 11h24 Fortaleza — #2733 is not clean
+
+Claude 6 reproduced a same-head Studio AAA Chromium regression after the local focal review: the page-wide Suspense keeps the real `main#content` inside React's hidden reveal container long enough for the skip-link activation to lose its focus target; the next Tab also has no focusable fallback target. Exact reproduced surface: Today at 390px. Inbox and Library use the same page-wide pattern but were not independently browser-reproduced in this continuation.
+
+Therefore review `5801308393` is superseded and must not count as a clean merge review. Formal follow-up `5801416479` was posted on exact head `229dc828e0706ec246c1021e3da7829329e5a760`; channel record is `37020e7be120f0db545134ebcc80be75c4d230c2`. Await Claude 4's scope decision and a corrected head with durable browser regression before any new independent return. No author code, branch, tests or CI were changed by S.

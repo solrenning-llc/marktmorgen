@@ -92,7 +92,9 @@ export async function importedBuyers(statsId: string | null): Promise<Map<string
     }
     out.set(email, at);
   }
-  if (!out.size && unknown) throw new UnknownReplyError("imported buyers");
+  // This list drives the one-time closing notice. A legible row proves only
+  // that buyer, never that the list is complete enough to advance the notice.
+  if (unknown) throw new UnknownReplyError("imported buyers");
   return out;
 }
 

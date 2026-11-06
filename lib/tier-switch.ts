@@ -155,6 +155,16 @@ export function switchReply(updated: unknown, subscription: string, price: strin
   return "applied";
 }
 
+/**
+ * The API version the charging update is sent with (Codex CX1 on #2764): it
+ * carries the buyer's yes as metadata with payment_behavior=
+ * pending_if_incomplete, which Stripe accepts only from 2026-05-27.dahlia
+ * (docs.stripe.com/changelog/dahlia/2026-05-27/pending-subscription-update-metadata;
+ * before it, an error), so the account's own default never decides. The
+ * same version as lib/yearly-fallback.ts, which sends the same combination.
+ */
+export const SWITCH_STRIPE_VERSION = "2026-08-26.dahlia";
+
 /** The switch itself, at the same second: charged at once, and made only if it is paid. */
 export function switchBody(itemId: string, price: string, at: number): URLSearchParams {
   const body = new URLSearchParams({
@@ -287,7 +297,7 @@ export async function switchTier(store: Store, token: string, subscription: stri
       const body = switchBody(found.itemId, price, at);
       const kept = digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.to)) : "";
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.to));
-      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
+      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
       const answered = switchReply(updated, subscription, price, kept);
       if (answered === "unknown") {
         // Not known to be made: nothing more is written or sent, and the member is told it did not go through.

@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { previewBody, switchBody, switchReply, PREVIEW_SECONDS } from "@/lib/tier-switch";
+import { previewBody, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -220,7 +220,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
       const body = switchBody(found.itemId, price, at);
       const kept = digital && validConsent(consent) ? consentMetaValue(consent, consentKind(found.product)) : "";
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.product));
-      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
+      const updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
       // Read exactly, as a switch between tiers reads it (lib/tier-switch.ts, switchReply; Codex CX1 on #2764).
       const answered = switchReply(updated, subscription, price, kept);
       if (answered === "unknown") {

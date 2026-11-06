@@ -16,7 +16,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 let serial=0;
 const base=redis.pipeline.bind(redis);
-async function fixture(two=false){
+async function fixture(two=false,before=(id:string)=>"Original "+id){
  redis.clear();serial++;
  const owner=`gagent${serial}@example.test`,handle=`gagent${serial}`;
  await claimHandle(owner,handle,"Agent Review","");await ensureStatsId(owner);
@@ -27,7 +27,7 @@ async function fixture(two=false){
  if(two){const b=await addProduct(owner,"Guide B","Another guide.","29",null);if(!b.ok)throw Error("synthetic B missing");ids.push(b.product.id);}
  const store=(await storeForEmail(owner))!;if(!store.statsId)throw Error("no stats id");
  const statsId=store.statsId;
- for(const id of ids){const marked=await setProductAbout(owner,id,true);if(!marked.ok)throw Error("mark missing");await writeAbout(statsId,id,"Original "+id,marked.store);}
+ for(const id of ids){const marked=await setProductAbout(owner,id,true);if(!marked.ok)throw Error("mark missing");await writeAbout(statsId,id,before(id),marked.store);}
  const proposals:string[]=[];
  for(const id of ids){const r=await proposeDescription((await storeForEmail(owner))!,"key-g",{product:id,description:"Agent "+id});const p=JSON.parse(r.content[0].text).proposal;if(typeof p!=="string")throw Error("proposal missing");proposals.push(p);}
  const fresh={...(await storeForEmail(owner))!,statsId};
@@ -82,9 +82,9 @@ async function main(){
   is(mode+": the history says undone exactly when the text was put back",[value==="Original "+id,undone],mode==="throw-before"?[false,false]:[true,true]);
   is(mode+": answered as the store holds it",(u.value as {ok:boolean}|null)?.ok===true,mode!=="throw-before");
  }
- part("A lost restore read back in an unknown shape is never taken for a value");
- for(const shape of [[],[17],[{}]] as unknown[][]){
-  const f=await fixture(),p=f.proposals[0],id=f.ids[0];await confirmFor(f.store,f.owner,[p],f.owner);let wrote=0,read=0;
+ part("A lost restore read back in an unknown shape is never taken for a value, the description before it empty or not");
+ for(const [shape,empty] of [[[],false],[[17],false],[[{}],false],[[],true],[[17],true],[[{}],true]] as [unknown[],boolean][]){
+  const f=await fixture(false,empty?()=>"":undefined),p=f.proposals[0],id=f.ids[0];await confirmFor(f.store,f.owner,[p],f.owner);let wrote=0,read=0;
   const about=`nl:product:about:${f.statsId}:${id}`;
   redis.pipeline=(async commands=>{
    const c=commands[0];
@@ -94,7 +94,7 @@ async function main(){
   }) as typeof redis.pipeline;
   let u:Awaited<ReturnType<typeof outcome>>;
   try{u=await outcome(()=>undoFor(f.store,f.owner,p,f.owner));}finally{redis.pipeline=base;}
-  is(`read back as ${JSON.stringify(shape)}: never answered done; the mark kept, said as not confirmed; the text unchanged`,[read,u.error,(u.value as {ok:boolean}|null)?.ok===true,Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone),await readAbout(f.statsId,id)],[1,"BookWriteUnconfirmed",false,true,"Agent "+id]);
+  is(`${empty?"empty before, ":""}read back as ${JSON.stringify(shape)}: never answered done; the mark kept, said as not confirmed; the text unchanged`,[read,u.error,(u.value as {ok:boolean}|null)?.ok===true,Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone),await readAbout(f.statsId,id)],[1,"BookWriteUnconfirmed",false,true,"Agent "+id]);
  }
  part("A restore whose outcome stays unknown keeps the mark and is said as not confirmed");
  {

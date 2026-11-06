@@ -45,7 +45,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -1025,10 +1025,17 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
  */
 export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
-  const [orders] = await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(Math.max(0, since)), "+inf", "WITHSCORES", "LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)]]);
-  const flat = Array.isArray(orders) ? (orders as string[]) : [];
+  const from = Math.max(0, since);
+  // The refunds, member and score, as a list of text no longer than the LIMIT asked ([] is none); each score whole
+  // seconds, as the sweep writes it (REDIS_SCORE), and within the range asked. Anything else is unknown and throws,
+  // never "no refunds" nor a refund dated 0 (CX-123 rules 24 and 30).
+  const flat = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(from), "+inf", "WITHSCORES", "LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0 || flat.length > 2 * (PAYPAL_REFUNDS_READ + 1)) throw new UnknownReplyError("the PayPal refunds");
   const listed: { order: string; at: number }[] = [];
-  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
+  for (let i = 1; i < flat.length; i += 2) {
+    if (!REDIS_SCORE.test(flat[i]) || Number(flat[i]) < from) throw new UnknownReplyError("a PayPal refund's date");
+  }
+  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) });
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
   let missing = listed.some((entry) => !ORDER_ID.test(entry.order));
   const readable = listed.filter((entry) => ORDER_ID.test(entry.order));

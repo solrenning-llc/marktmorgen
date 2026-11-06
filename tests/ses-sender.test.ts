@@ -1235,7 +1235,7 @@ async function main(): Promise<void> {
   is("a spam report is heard the same way, under the older signature too", [(await spam.json()).result, await isMailable(list, "angry@example.com"), (await listHealth(healthId(store))).complained], ["counted", false, 1]);
   const soft = await POST(announce({ event: bounce("fine@example.com", "Transient") }));
   is("a bounce that may yet deliver takes nobody off", [(await soft.json()).result, await isMailable(list, "fine@example.com")], ["ignored", true]);
-  is("a delivery, or anything else, is acknowledged and left", await (await POST(announce({ event: { eventType: "Delivery", mail: { tags } } }))).json(), { ok: true });
+  is("a delivery, or anything else, is acknowledged and left", await (await POST(announce({ event: { eventType: "Delivery", delivery: { recipients: ["fine@example.com"] }, mail: { tags } } }))).json(), { ok: true });
 
   part("Only Amazon, and only our topic");
   const refused = async (request: NextRequest) => [(await POST(request)).status, await isMailable(list, "fine@example.com")];

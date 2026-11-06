@@ -36,7 +36,7 @@ import { MAX_VERSIONS } from "@/lib/sales-page-store";
 import { MAX_CHOICES, MAX_CHOICE_LENGTH, MAX_EXPLANATION_LENGTH, MAX_QUESTIONS, MAX_QUESTION_LENGTH } from "@/lib/quiz";
 import { MAX_TASK_PROMPT } from "@/lib/assignment-rules";
 import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
-import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
+import { MAX_SECTION_BYTES, MAX_SECTION_NAME } from "@/lib/saved-blocks";
 import { SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { DELIVERY_MAX_BYTES, LOG_SIZE, READ_DELIVERIES_CALLS_EACH, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
@@ -526,8 +526,13 @@ export const TEST_SENT_BYTES = 8_192;
 export const READING_SENT_BYTES = MAX_BLOCKS * 256 + DEPTH_RECORD_BYTES;
 /** Saved sections a store's library holds at the most, on any plan (lib/funnel-share-rules.ts, savedBlocks; the write refuses past it). */
 export const SAVED_SECTIONS_MAX = Math.max(...Object.values(SHARE_LIMITS).map((limits) => limits.savedBlocks));
-/** One saved section as stored and as sent (lib/saved-blocks.ts). */
-export const SECTION_BYTES = MAX_SECTION_BYTES;
+/**
+ * One saved section as stored and as sent (lib/saved-blocks.ts): the write
+ * measures its blocks in characters (MAX_SECTION_BYTES), and a character is at
+ * most three bytes of UTF-8 for each unit JavaScript counts; with its name
+ * (MAX_SECTION_NAME) and its id and time.
+ */
+export const SECTION_BYTES = (MAX_SECTION_BYTES + MAX_SECTION_NAME + 256) * 3;
 /** What an answer's own fields send besides what it read: names, ids, notes. */
 export const TOOL_NOTE_BYTES = 2_048;
 

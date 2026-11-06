@@ -85,13 +85,16 @@ export async function POST(request: NextRequest) {
                 ? "download"
                 : "link";
     // The product's own PDF, its first pages only, when the creator asked for it to be read (lib/ai.ts, readPdfFacts).
-    let pdf: Uint8Array | null = null;
+    // Read only once the month's jobs are taken (lib/ai.ts, writePage): a store with no allowance left never spends a
+    // paid file-store read on a request it is then refused.
+    let pdf: (() => Promise<Uint8Array | null>) | null = null;
     if (body.readFile === true) {
       const file = readableFile(product);
       if (!file) return fail("file");
-      const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES).catch(() => null);
-      pdf = bytes ? await firstPages(bytes, READ_PDF_PAGES).catch(() => null) : null;
-      if (!pdf) return fail("file");
+      pdf = async () => {
+        const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES);
+        return bytes ? firstPages(bytes, READ_PDF_PAGES) : null;
+      };
     }
     return answer(
       writePage(store, {

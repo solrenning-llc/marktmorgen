@@ -342,10 +342,18 @@ export async function describePicture(
     return sentence || null;
   });
   if (unread.reason === null) return done;
-  // Taken, then nothing started: given back. A release that fails leaves the job counted, never more than was used.
-  const key = monthKey(store, new Date(now));
-  if (key) await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
+  await giveBack(store, now, 1);
   return { ok: false, reason: unread.reason };
+}
+
+/**
+ * Jobs taken by `counted` for work that then never started (a file that could
+ * not be read once they were taken), given back. A release that fails leaves
+ * them counted, never more than was used.
+ */
+async function giveBack(store: Store, now: number, jobs: number): Promise<void> {
+  const key = monthKey(store, new Date(now));
+  if (key) await redisPipeline([["DECRBY", key, jobs]]).catch(() => {});
 }
 
 /** The JSON object in an answer, whatever the model put around it. */
@@ -1305,18 +1313,37 @@ async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | nul
 
 export async function writePage(
   store: Store,
-  input: { title: string; price: string; kind: ProductKind | "free"; summary: string; about: string; notes: string; pdf?: Uint8Array | null },
+  input: {
+    title: string;
+    price: string;
+    kind: ProductKind | "free";
+    summary: string;
+    about: string;
+    notes: string;
+    pdf?: Uint8Array | null | (() => Promise<Uint8Array | null>);
+  },
   now = Date.now(),
-): Promise<AiResult<PageDraft>> {
+): Promise<AiResult<PageDraft> | { ok: false; reason: "file" }> {
   const notes = block(input.notes, MAX_AI_NOTES);
   const about = block(input.about, MAX_ABOUT_LENGTH);
   const summary = line(input.summary, MAX_SUMMARY_LENGTH);
-  const pdf = input.pdf && input.pdf.length > 0 ? input.pdf : null;
+  const given = input.pdf;
+  const pdf = typeof given === "function" ? given : given && given.length > 0 ? given : null;
   // Something has to be said about the product, by the creator or by its own file.
   if (!notes && !about && !summary && !pdf) return { ok: false, reason: "notes" };
-  return counted(store, now, async () => {
+  const jobs = pdf ? 1 + READ_PDF_JOBS : 1;
+  // The file may be given as how to read it (6 November 2026): it is read only once the jobs are taken, so a store
+  // with no allowance left (Creator's is 0) never spends a paid file-store read on a request that is refused. A file
+  // that cannot be read then gives every job back, since nothing was asked of the model.
+  const unread = { file: false };
+  const done = await counted(store, now, async () => {
+    const pages = typeof pdf === "function" ? await pdf().catch(() => null) : pdf;
+    if (pdf && (!pages || pages.length === 0)) {
+      unread.file = true;
+      return null;
+    }
     // What the product's own first pages hold, when the creator asked for them to be read.
-    const fileFacts = pdf ? await readPdfFacts(store, pdf) : null;
+    const fileFacts = pages ? await readPdfFacts(store, pages) : null;
     if (pdf && !fileFacts && !notes && !about && !summary) return null;
     const free = input.kind === "free";
     const system = [
@@ -1379,7 +1406,10 @@ export async function writePage(
       seoDescription: line(json.seoDescription, 160),
     };
     return draft.headline && draft.benefits.length ? draft : null;
-  }, pdf ? 1 + READ_PDF_JOBS : 1);
+  }, jobs);
+  if (!unread.file) return done;
+  await giveBack(store, now, jobs);
+  return { ok: false, reason: "file" };
 }
 
 /**

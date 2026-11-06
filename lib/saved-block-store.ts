@@ -100,10 +100,11 @@ return 1`;
 
 /** Keeps a section. "full" when the library has no room for a new one, "gone" when an edited one was removed meanwhile. */
 export async function writeSection(statsId: string, section: SavedSection, isNew: boolean, limit: number): Promise<"ok" | "full" | "gone"> {
-  const replies = await redisPipeline([["EVAL", SAVE_SECTION, 1, sectionsKey(statsId), section.id, JSON.stringify(section), limit, isNew ? "new" : "edit"]]);
-  if (replies.length !== 1) throw new Error("Saved section write could not be confirmed");
+  const replies = repliesFor(await redisPipeline([["EVAL", SAVE_SECTION, 1, sectionsKey(statsId), section.id, JSON.stringify(section), limit, isNew ? "new" : "edit"]]), 1);
+  if (!replies) throw new Error("Saved section write could not be confirmed");
   // Only the script's own whole number counts (CX-123 rule 24): a "1" or a [1] is not a section kept.
-  const reply = Number.isSafeInteger(replies[0]) ? (replies[0] as number) : null;
+  const [answer] = replies;
+  const reply = typeof answer === "number" && Number.isSafeInteger(answer) ? answer : null;
   if (reply === 1) return "ok";
   if (reply === 0) return "full";
   if (reply === -2) return "gone";

@@ -273,7 +273,8 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
       why: unread.length
         ? "Some of your store's numbers for this product could not be read just now, so this check may be off. Reload the page to read them again."
         : "Your store has counted numbers for this product. Shown big, they say in a second what a paragraph says in a minute.",
-      done: blocks.some((b) => b.kind === "facts" && b.show.some((key) => input.facts[key] || unread.includes(key))),
+      // Only a counted number shown is done: an unread one keeps the check open, so its "may be off" reason is seen (Claude 5 on #3025).
+      done: blocks.some((b) => b.kind === "facts" && b.show.some((key) => Boolean(input.facts[key]))),
       weight: 1,
       add: "facts",
     });

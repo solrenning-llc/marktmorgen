@@ -101,9 +101,17 @@ async function main(): Promise<void> {
   const unread = coach({ facts: {}, factsUnread: ["rating", "buyers"] });
   is("unread: kept, and said so", [unread?.done, unread?.why], [false, "Some of your store's numbers for this product could not be read just now, so this check may be off. Reload the page to read them again."]);
   const withBlock = { ...page, blocks: [...page.blocks, { ...(emptyBlock("facts") as Extract<PageBlock, { kind: "facts" }>), show: ["rating"] }] as PageBlock[] };
+  // Claude 5 on #3025: a number that could not be read is not a number shown, so the check stays open and says why.
+  const onlyUnread = coachChecks({ page: withBlock, productTitle: "Field notes", free: false, picture: false, pictureAlt: "", facts: {}, factsUnread: ["rating"] }).find((c) => c.id === "facts");
   is(
-    "a numbers block showing an unread number is not called missing",
-    coachChecks({ page: withBlock, productTitle: "Field notes", free: false, picture: false, pictureAlt: "", facts: {}, factsUnread: ["rating"] }).find((c) => c.id === "facts")?.done,
+    "a numbers block showing only an unread number is not called done, and says it may be off",
+    [onlyUnread?.done, onlyUnread?.why],
+    [false, "Some of your store's numbers for this product could not be read just now, so this check may be off. Reload the page to read them again."],
+  );
+  const bothShown = { ...withBlock, blocks: [...page.blocks, { ...(emptyBlock("facts") as Extract<PageBlock, { kind: "facts" }>), show: ["rating", "buyers"] }] as PageBlock[] };
+  is(
+    "a numbers block showing a counted number is done, though another is unread",
+    coachChecks({ page: bothShown, productTitle: "Field notes", free: false, picture: false, pictureAlt: "", facts: healthy.facts?.buyers ? { buyers: healthy.facts.buyers } : {}, factsUnread: ["rating"] }).find((c) => c.id === "facts")?.done,
     true,
   );
 
@@ -129,6 +137,15 @@ async function main(): Promise<void> {
   is("written answered as a list: not called saved", await writeSection(statsId, section, true, 5).then((r) => r, () => "refused"), "refused");
   redis.pipeline = answering((c) => c[0] === "EVAL", "1");
   is("written answered as a string: not called saved", await writeSection(statsId, section, true, 5).then((r) => r, () => "refused"), "refused");
+  // Claude 5 on #3025: the reply is read from its own slot once (repliesFor), so a getter is never a section kept.
+  redis.pipeline = (async () => {
+    const replies: unknown[] = [];
+    Object.defineProperty(replies, 0, { get: () => 1, enumerable: true });
+    return replies;
+  }) as unknown as Pipe;
+  is("written answered by a getter: not called saved", await writeSection(statsId, section, true, 5).then((r) => r, () => "refused"), "refused");
+  redis.pipeline = (async () => [1, 1]) as unknown as Pipe;
+  is("written answered twice: not called saved", await writeSection(statsId, section, true, 5).then((r) => r, () => "refused"), "refused");
   redis.pipeline = answering((c) => c[0] === "EVAL", 0);
   is("written answered 0: full, as before", await writeSection(statsId, section, true, 5), "full");
   redis.pipeline = answering((c) => c[0] === "EVAL", -2);

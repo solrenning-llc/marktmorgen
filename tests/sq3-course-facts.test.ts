@@ -58,9 +58,16 @@ async function record(n: number, state: string, seconds: number) {
 }
 
 let commands = 0;
+/** When set, the database answers this instead (a reply of unknown shape), once. */
+let forced: { reply: unknown } | null = null;
 const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
   commands += list.length;
+  if (forced) {
+    const { reply } = forced;
+    forced = null;
+    return Promise.resolve(reply);
+  }
   return real(list);
 }) as typeof redis.pipeline;
 async function counted<T>(work: () => Promise<T>): Promise<{ commands: number; value: T }> {
@@ -116,6 +123,34 @@ async function main() {
     await redisPipeline([["SET", `nl:stream:v:${id}`, JSON.stringify({ id, path: streamPath(FOLDER, lessonId(8), id), name: "v", type: "", bytes: 1, state: "ready", at: 1, seconds: 99, width: 1, height: 1, settled: true })]]);
     const mismatched = await readCourseFacts(course([lesson(7, streamPath(FOLDER, lessonId(7), id))]));
     is("a record for another path is not believed", mismatched.videoSeconds, null);
+  }
+
+  part("an MGET reply of unknown shape leaves the total out, never estimated (rule 24, LEVE on #3011)");
+  {
+    await record(1, "ready", 600);
+    await record(2, "ready", 300);
+    const two = course([lesson(1, streamed(1)), lesson(2, streamed(2))]);
+    const row = async (n: number) => (await redisPipeline([["GET", `nl:stream:v:${uuid(n)}`]]))[0];
+    const [one, other] = [await row(1), await row(2)];
+    is("control: the exact reply gives the total", (await readCourseFacts(two)).videoSeconds, 900);
+    const shapes: [string, unknown][] = [
+      ["three rows for two keys", [[one, other, one]]],
+      ["one row for two keys", [[one]]],
+      ["a row that is a number", [[one, 600]]],
+      ["a row that is an object", [[one, { seconds: 300 }]]],
+      ["two replies for one command", [[one, other], [one, other]]],
+      ["no reply", []],
+      ["a reply that is not a list", [{ 0: one, 1: other, length: 2 }]],
+      ["a pipeline that is not a list", { 0: [one, other] }],
+      ["a row list with a hole", [Object.assign(new Array(2), { 0: one })]],
+    ];
+    for (const [name, reply] of shapes) {
+      forced = { reply };
+      const facts = await readCourseFacts(two).catch(() => null);
+      is(`${name}: lessons only, no video figure`, facts, { lessons: 2, videoSeconds: null });
+    }
+    forced = { reply: [[one, null]] };
+    is("a missing record (null) is read as not known: no figure", (await readCourseFacts(two)).videoSeconds, null);
   }
 
   part("the biggest course is still one command, inside a later page's budget");

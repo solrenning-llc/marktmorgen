@@ -99,7 +99,8 @@ export async function exportSnapshot(limits: ExportLimits): Promise<ExportResult
     if (replies.length !== 2 * part.length) return { ok: false, reason: "unreadable", commands };
     for (let i = 0; i < part.length; i += 1) {
       const dump = replies[2 * i];
-      const ends = Number(replies[2 * i + 1]);
+      // PEXPIRETIME's own integer only: true, [1] or "01" would read as a time long past and leave the key out unseen.
+      const ends = typeof replies[2 * i + 1] === "number" ? (replies[2 * i + 1] as number) : Number.NaN;
       // Gone between the walk and its copy, or ended by the time of the copy: left out, never copied empty.
       if (dump === null || ends === -2 || (ends !== -1 && ends <= now)) continue;
       if (typeof dump !== "string" || !dump || !BASE64.test(dump) || !Number.isSafeInteger(ends) || ends < -1) return { ok: false, reason: "unreadable", commands };

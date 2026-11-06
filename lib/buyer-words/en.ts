@@ -101,7 +101,7 @@ export const en = {
   buyAsGift: "Buy as a gift",
   buyAsGiftFor: (price: string) => `Buy as a gift — ${price}`,
   giftNote: (store: string) =>
-    `You pay on Stripe's page. Right after, they get one email from ${store} with your name, your message and a link to open it on their own address. You get the receipt, not a copy.`,
+    `You pay on Stripe's page. After payment, the gift belongs to their address. If the one email from ${store} reaches them, it has your name, your message and a link to open it. You get the receipt, not a copy.`,
   giftProblems: {
     email: "That does not look like an email address. Check the recipient's address and try again.",
     option: "Choose which one to give, then try again. Nothing was charged.",

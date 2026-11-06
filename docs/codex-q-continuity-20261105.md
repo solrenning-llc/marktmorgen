@@ -868,3 +868,14 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - Cinco heads próprios preservados: #2438 `6da1a247`, #2535 `993dc83e`, #2709 `7add83c5`, #2729 `b96252c5`, #2731 `4a350f69`. GET metadata mostrou OPEN/mergeable=false após avanço do main. Nenhum movimento, retry, cancelamento ou merge nesta retomada; estados de CI ainda não relidos antes do intervalo de5min.
 - M informou #2648 main-only `e71bb48f`, com três blobs próprios byte-idênticos ao head do parecer Q5789086413; não pediu novo retorno e não se duplica a revisão.
 - Coordenação somente Claude 4; Claude 1 está desligado/não destinatário. Próximo: vigia2min, estado próprio>=5min, agir em retorno/achado/terminal permitido, preservando o limite de cinco produtos.
+
+
+## Novidade causal durante a vigia — #2729 incorporado
+
+- Nova fotografia respeitando >=5min: #2535 `993dc83e`, #2729 `b96252c5` e #2731 `4a350f69` têm NOVE workflows distintos completed/SUCCESS. #2709 `7add83c5` tem8SUCCESS+1IN_PROGRESS (run42276223523). Nenhum retry/rerun/cancel.
+- REST bruto acessado por github_fetch resolve a ambiguidade do conector: #2729 e #2731 inicialmente true/clean; conector get_pr_info havia normalizado desconhecido como false. Main nativo fresco `6c8f5c40918311bd81a7e29344f080ddafb323c5`.
+- #2729 incorporado normalmente pelo Q com expected_head_sha `b96252c5f10106a771afbd7a44769fa92b135d71`; GitHub retornou merged=true, merge `0ce2ecb074e11325d4f2d51e7e581a7c387c86f0`. Gates: S5794570601 aplicável pelos2blobs exatos;9/9;rawtrue/clean;merge-tree nativo `0afeadb4dc5884034dc5b3058f836419b9d5909e`; client269/269/diff0. Nenhum head novo ou CI novo foi criado para esse merge.
+- #2731 união contra6c nativa1cf1c772/client269/269; depois do merge2729, união contra0ce nativa `c4fa83cd8c8e85aea878ada01cf8822a2028df2b`, client269/269/diff0,2blobs próprios5d5b1557/f649dc5b exatos. K2nominal6675105022 relido: MEDIUMfechado/semnovoachado no4d700566, doisblobs idênticos tornam aplicável CX122.8. REST recalcula null/unknown após2729; aguarda true/clean sem presumir conflito ou moverhead.
+- #2535 ainda sem parecer formalR2 noGitHub;9/9 não remove essa exigência. #2438/#2576 congelados/intocados.
+- Canal informou merge2729 e ponto em `471cd6101c663c4399dc6adc1412050cf859ff38`. CX127vigia ativa; não encerrado.
+- Correção operacional: shell com login=false funciona; o erro anterior era inicialização do shell. Nova cópia própria de gate `/dev/shm/codex-q-mergegate.IUUoYI`, somente verificações locais, nenhuma branch produtiva movida. Nenhum trabalho alheio apagado.

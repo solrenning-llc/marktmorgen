@@ -28,6 +28,8 @@ import { consentMetaValue } from "@/lib/digital-consent";
 const emails: { to: string | string[]; text: string; subject: string }[] = [];
 const calls: { method: string; path: string; body: URLSearchParams }[] = [];
 let declined = false;
+/** Stripe answers the charging update in a shape no subscription has (Revisor 2, LEVE on #2764). */
+let unreadable = false;
 let tierA = "";
 let priceMeta: Record<string, string> = {};
 // The currency the member pays in: the store's, unless it changed its currency since (22 [E5], unit 2b).
@@ -78,6 +80,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (method === "POST" && path === "/subscriptions/sub_Member0001") {
     if (body.get("items[0][price]")) {
+      if (unreadable) return json({});
       return json(
         declined
           ? { id: "sub_Member0001", pending_update: { expires_at: 1 }, latest_invoice: { id: "in_Declined0001", status: "open", total: 1240 } }
@@ -210,6 +213,16 @@ async function main(): Promise<void> {
   is("and the invoice is voided, so nothing is owed", calls.some((c) => c.path === "/invoices/in_Declined0001/void"), true);
   is("and nobody is told it happened", emails.length, 0);
   declined = false;
+  unreadable = true;
+  emails.length = 0;
+  const unsure = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at, TEST_CONSENT);
+  unreadable = false;
+  // The card may have been charged: the member is told it could not be confirmed, never that nothing changed.
+  is("an answer that cannot be read: not confirmed, and nobody is told it happened", [unsure.ok ? "switched" : unsure.reason, emails.length], ["unconfirmed", 0]);
+  is("said in every language without claiming nothing changed", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => {
+    const notice = membershipWords(l).manageNotices.unconfirmed;
+    return Boolean(notice && notice.title.length > 10 && notice.body.length > 40) && notice.body !== membershipWords(l).manageNotices.error.body;
+  }), true);
   const made = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at, TEST_CONSENT);
   is("switched", made.ok ? made.title : made.reason, "Pro");
   const update = calls.filter((c) => c.path === "/subscriptions/sub_Member0001" && c.body.get("items[0][price]")).at(-1)!.body;

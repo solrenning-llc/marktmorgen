@@ -51,6 +51,7 @@ import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { countOrder } from "@/lib/orders";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -155,47 +156,65 @@ export const confirmedKey = (session: string) => `nl:call:confirmed:${session}`;
  */
 export const CONFIRMED_SECONDS = 430 * 86_400;
 
-function readEntries(flat: string[]): { field: string; entry: Entry }[] {
-  const out: { field: string; entry: Entry }[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      out.push({ field: flat[i], entry: JSON.parse(flat[i + 1]) as Entry });
-    } catch {
-      out.push({ field: flat[i], entry: { e: NaN, until: -1 } });
-    }
-  }
+/**
+ * The busy hash, read whole from its HGETALL pipeline reply (rule 24): each field with its value as written and the entry
+ * it holds. Only one reply that is a list of strings of even length is a hash, and `[]` alone means nothing is held or
+ * booked. A value that is not a JSON object with a numeric end and hold time (`e`, `until`), and a start (`s`) and session
+ * and product when it has them, is not an entry. Anything else throws UnknownReplyError: never read as nothing busy, and
+ * never as a stale hold to delete, so a real hold or booking is neither offered again nor HDEL'd.
+ */
+function readEntries(replies: unknown): { field: string; value: string; entry: Entry }[] {
+  const reply = repliesFor(replies, 1);
+  const flat = reply ? stringList(reply[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a call diary");
+  const out: { field: string; value: string; entry: Entry }[] = [];
+  for (let i = 0; i < flat.length; i += 2) out.push({ field: flat[i], value: flat[i + 1], entry: entryOf(flat[i + 1]) });
   return out;
+}
+
+/** One busy-hash value as the entry it holds, or UnknownReplyError (readEntries). */
+function entryOf(value: string): Entry {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new UnknownReplyError("a call diary entry");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError("a call diary entry");
+  const { s, e, until, session, p } = parsed as Record<string, unknown>;
+  if (typeof e !== "number" || typeof until !== "number") throw new UnknownReplyError("a call diary entry");
+  if ((s !== undefined && typeof s !== "number") || (session !== undefined && typeof session !== "string") || (p !== undefined && typeof p !== "string")) {
+    throw new UnknownReplyError("a call diary entry");
+  }
+  return parsed as Entry;
 }
 
 export { PAST_CALL_DAYS };
 
 async function heldAndBooked(store: Store, now: number): Promise<(TeamBusy & { field: string })[]> {
   const callsId = store.callsId as string;
-  const [raw] = await redisPipeline([["HGETALL", busyKey(callsId)]]);
-  const flat = Array.isArray(raw) ? (raw as string[]) : [];
+  // Read whole or not at all: an unknown reply throws, and every caller refuses rather than offer or tidy anything.
+  const entries = readEntries(await redisPipeline([["HGETALL", busyKey(callsId)]]));
   const busy: (TeamBusy & { field: string })[] = [];
   const stale: string[] = [];
   const past: string[] = [];
   let freed = 0;
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const entry = JSON.parse(flat[i + 1]) as Entry;
-      if (entry.until === 0 && Number.isFinite(entry.e) && entry.e < now - PAST_CALL_DAYS * 86_400_000) {
-        past.push(flat[i]);
-        freed += fieldReleaseBytes(flat[i], flat[i + 1]);
-      }
-    } catch {
-      // Read as stale below.
+  for (const { field, value, entry } of entries) {
+    if (entry.until === 0 && Number.isFinite(entry.e) && entry.e < now - PAST_CALL_DAYS * 86_400_000) {
+      past.push(field);
+      freed += fieldReleaseBytes(field, value);
     }
   }
-  for (const { field, entry } of readEntries(flat)) {
+  for (const { field, entry } of entries) {
     if (past.includes(field)) continue;
-    if (entry.until === -1 || (entry.until !== 0 && entry.until < now)) {
+    // Only a hold read whole whose time is genuinely up is tidied.
+    if (entry.until !== 0 && entry.until < now) {
       stale.push(field);
       continue;
     }
+    // An entry filed before group calls is under its start; one whose start cannot be read is unknown, never free time.
     const start = typeof entry.s === "number" ? entry.s : Number(field);
-    if (!Number.isFinite(start) || !Number.isFinite(entry.e)) continue;
+    if (!Number.isFinite(start) || !Number.isFinite(entry.e)) throw new UnknownReplyError("a call diary entry");
     const team = teamOf(entry);
     busy.push({ start, end: entry.e, product: entry.p, session: entry.session, field, ...(team ? { hosts: team.hosts, claim: team.claim } : {}) });
   }
@@ -505,9 +524,8 @@ function ownerOf(store: Pick<Store, "email">): string {
 export async function releaseOwnHold(store: Store, session: string): Promise<void> {
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return;
   if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
-  const [raw] = await redisPipeline([["HGETALL", busyKey(store.callsId)]]);
-  const flat = Array.isArray(raw) ? (raw as string[]) : [];
-  const held = readEntries(flat).filter(({ entry }) => entry.session === session && entry.until !== 0);
+  // An unknown reply throws (readEntries): the hold is kept, nothing is closed at Stripe, and it runs out by itself.
+  const held = readEntries(await redisPipeline([["HGETALL", busyKey(store.callsId)]])).filter(({ entry }) => entry.session === session && entry.until !== 0);
   const fields = held.map(({ field }) => field);
   if (!fields.length) return;
   try {
@@ -1235,14 +1253,15 @@ export async function moveBooking(input: {
       if (!isBookable(at, now, others, start, product.id)) return { ok: false, reason: "taken" };
     }
 
-    await writeMove(session, { s: start, e: end, n: from.moves + 1 });
     // The seat moves in the diary too: whatever was written under this
     // checkout — a hold, a booking, one filed by its start before group calls
-    // — gives way to one entry at the new time.
-    const [raw] = await redisPipeline([["HGETALL", busyKey(callsId)]]);
-    const old = readEntries(Array.isArray(raw) ? (raw as string[]) : [])
+    // — gives way to one entry at the new time. Read before the move is
+    // written, so an unknown reply (readEntries throws) refuses the move
+    // whole, never half written with an old entry left behind.
+    const old = readEntries(await redisPipeline([["HGETALL", busyKey(callsId)]]))
       .filter(({ field, entry }) => entry.session === session && field !== session)
       .map(({ field }) => field);
+    await writeMove(session, { s: start, e: end, n: from.moves + 1 });
     const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(teamOwn ? { h: teamOwn.hosts, c: teamOwn.claim } : {}) };
     // Counted in the store's room at what it really adds (lib/order-data.ts).
     await orderWrite(store, [

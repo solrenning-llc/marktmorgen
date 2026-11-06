@@ -2,11 +2,15 @@
  * The cart-link builder settles at what it really read (Claude 4,
  * C4-20261106-1740-C3-104, #1928): when listing records grow between their
  * STRLEN and their GET, the bytes beyond what was taken before the read are
- * debited from the same studio count afterwards, with no new read.
+ * debited from the same studio count afterwards, with no new read, past the
+ * figure if it must (C4-20261106-1810-C3-107): it was already spent. The next
+ * opening is then refused as usual.
  */
 import { cartLinkProducts, cartLinkUnits, CART_LINK_UNIT_BYTES } from "@/lib/cart-link-products";
 import { KIND, productIds } from "@/lib/catalog";
 import { addDraftProducts, claimHandle, ensureStatsId, setProductFile, setProductHidden, setSubscription, storeForEmail } from "@/lib/store";
+import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
+import { allowanceFor } from "@/lib/store-allowance-rules";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is } from "./check";
@@ -32,6 +36,11 @@ async function main(): Promise<void> {
   shop = (await storeForEmail(owner))!;
   const paidIds = shop.catalog.items.filter((p) => (p.kind & KIND.paid) !== 0).map((p) => p.id);
 
+  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more.
+  const figure = allowanceFor(shop, "studio");
+  const used = await allowanceUsed(shop, "studio");
+  const spare = figure - used - 10;
+  if (spare > 0) await takeAllowance(shop, "studio", spare);
   const base = redis.pipeline.bind(redis);
   const debits: number[] = [];
   let bytes = 0;
@@ -72,6 +81,9 @@ async function main(): Promise<void> {
   is("the records grew between their measure and their read, beyond what was taken before it", [grown, bytes > paidBeforeRead * CART_LINK_UNIT_BYTES], [true, true]);
   is("the builder still lists the 24 products", listed.length, 24);
   is("what was really read is taken in all, the difference after the read", total >= cartLinkUnits(2 * 24, bytes), true);
+  const after = await allowanceUsed(shop, "studio");
+  is("the figure now counts past its limit, what was really spent", after > figure, true);
+  is("the next opening is refused as usual, with nothing read", (await cartLinkProducts(shop)).length, 0);
   done();
 }
 

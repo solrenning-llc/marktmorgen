@@ -25,6 +25,7 @@ import { soonState } from "@/lib/preorders";
 import { redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
+import { forceAllowance } from "@/lib/store-allowance";
 import { countStudio } from "@/lib/studio-route";
 
 /** The most products the builder lists, in the store's order: the first page of the store, which a cart of MAX_CART is chosen from. */
@@ -81,6 +82,7 @@ export async function cartLinkProducts(store: Store): Promise<{ id: string; titl
     const held = new Set(store.catalog.head.map((listing) => listing.id));
     const toRead = store.catalog.inline ? [] : ids.filter((id) => !held.has(id));
     let taken = 0;
+    let counted: Store = store;
     if (toRead.length) {
       // The data room's weights, raised to what each listing record weighs now (Codex G on #1928: a record that grew
       // after it was weighed is paid at its new size before it is read); one that cannot be measured at its ceiling.
@@ -89,15 +91,19 @@ export async function cartLinkProducts(store: Store): Promise<{ id: string; titl
       const bytes = weights.reduce((sum, weight, i) => sum + Math.min(MAX_PRODUCT_BYTES, sizes ? Math.max(weight, sizes[i]) : MAX_PRODUCT_BYTES), 0);
       // One STRLEN and one GET per listing, and the weighing.
       const units = cartLinkUnits(2 * toRead.length, bytes);
-      if (!(await countStudio(store, null, units)).ok) return [];
+      const admitted = await countStudio(store, null, units);
+      if (!admitted.ok) return [];
+      if (admitted.store) counted = admitted.store;
       taken = units;
     }
     const coming = await soonState(store);
     const { listings: listed, bytes: read } = await readListingsMeasured(store, ids);
-    // Settled at what was really read (Claude 4, C4-20261106-1740-C3-104): a record that grew between its STRLEN and
-    // its GET has its difference taken from the same count, with no new read; refused, nothing is listed.
+    // Settled at what was really read (Claude 4, C4-20261106-1740-C3-104 and 1810-C3-107): a record that grew between
+    // its STRLEN and its GET has its difference counted in the same figure, with no new read, past the figure if it
+    // must, because it was already spent; the next opening is then refused as usual. A count that is not confirmed
+    // lists nothing.
     const due = toRead.length ? cartLinkUnits(2 * toRead.length, read) - taken : 0;
-    if (due > 0 && !(await countStudio(store, null, due)).ok) return [];
+    if (due > 0 && !(await forceAllowance(counted, "studio", due))) return [];
     return listed.filter((p) => cartable(p) && !coming.soon.has(p.id)).map((p) => ({ id: p.id, title: p.title }));
   } catch {
     return [];

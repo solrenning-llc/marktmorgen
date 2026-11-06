@@ -58,7 +58,8 @@ part("Its cost, at the plan's studio ceiling, from the official price");
 const line = COST_LINES.find((each) => each.id === "picture-thumbnails");
 is("a line for the thumbnail copy's Blob operations", Boolean(line), true);
 for (const tier of ["creator", "pro", "scale"] as const) {
-  const perRequest = 5 / 1e6 + 3 * (0.4 / 1e6) + 40_000 * (0.1 / 1e9);
+  // Its put with every try again the Blob SDK may send, 1 + 10 (Revisor 1 on #2803, rule 30): unknown is never zero.
+  const perRequest = 11 * (5 / 1e6) + 3 * (0.4 / 1e6) + 40_000 * (0.1 / 1e9);
   is(`${tier}: the plan's studio figure, each at the dearest request it may be`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
 is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);

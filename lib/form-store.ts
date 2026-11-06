@@ -27,30 +27,37 @@ const responsesKey = (statsId: string, formId: string) => `nl:form:r:${statsId}:
 /** Every form of a store, newest change first. */
 export async function readForms(statsId: string | null): Promise<FormDef[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", formsKey(statsId)]]);
-  const list = Array.isArray(raw) ? raw : [];
-  return list
-    .map((value) => {
-      try {
-        return parseForm(JSON.parse(String(value)));
-      } catch {
-        return null;
-      }
-    })
-    .filter((f): f is FormDef => f !== null)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const what = "the store's forms";
+  const [raw] = exactReplies(await redisPipeline([["HVALS", formsKey(statsId)]]), 1, what);
+  const list = plainList(raw);
+  if (!list) throw new UnknownReply(what);
+  return list.map(value => confirmedForm(value, what)).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /** One form, or null. */
 export async function readForm(statsId: string | null, id: string): Promise<FormDef | null> {
   if (!statsId || !FORM_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", formsKey(statsId), id]]);
-  if (typeof raw !== "string") return null;
-  try {
-    return parseForm(JSON.parse(raw));
-  } catch {
-    return null;
+  const what = "the form";
+  const [raw] = exactReplies(await redisPipeline([["HGET", formsKey(statsId), id]]), 1, what);
+  return raw === null ? null : confirmedForm(raw, what);
+}
+
+/** Only a stored, readable form is evidence of its contents. */
+function confirmedForm(raw: unknown, what: string): FormDef {
+  if (typeof raw === "string") {
+    try {
+      const form = parseForm(JSON.parse(raw));
+      if (form) return form;
+    } catch {
+      // The record is unavailable, rather than absent.
+    }
   }
+  throw new UnknownReply(what);
+}
+
+function confirmedCount(raw: unknown, what: string): number {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) throw new UnknownReply(what);
+  return raw;
 }
 
 /** Checks capacity before a multi-step setup; writeForm still checks concurrent changes. */
@@ -79,12 +86,14 @@ export async function writeForm(statsId: string, form: FormDef): Promise<boolean
 
 /** Removes a form and every answer kept for it, and gives back the answers' room. */
 export async function dropForm(statsId: string, id: string, room: DataStore): Promise<boolean> {
-  const [removed] = await redisPipeline([
+  const what = "the removal of the form and its answers";
+  const [removed, answers] = exactReplies(await redisPipeline([
     ["HDEL", formsKey(statsId), id],
     ["DEL", responsesKey(statsId, id)],
-  ]);
+  ]), 2, what);
+  if ((removed !== 0 && removed !== 1) || (answers !== 0 && answers !== 1)) throw new UnknownReply(what);
   await giveData(room, [{ slot: ANSWERS_SLOT(id), bytes: 0, set: true }]);
-  return Number(removed) === 1;
+  return removed === 1;
 }
 
 const ANSWERS_SLOT = (formId: string) => `fr:${formId}`;
@@ -107,12 +116,18 @@ return out`;
  */
 export async function addResponse(statsId: string, formId: string, response: FormResponse, room: DataStore): Promise<void> {
   const json = JSON.stringify(response);
-  const [kept, oldest] = await redisPipeline([["LLEN", responsesKey(statsId, formId)], ["LINDEX", responsesKey(statsId, formId), -1]]);
-  const guessed = Number(kept) >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
+  const what = "the keeping of a form response";
+  const [rawKept, oldest] = exactReplies(await redisPipeline([["LLEN", responsesKey(statsId, formId)], ["LINDEX", responsesKey(statsId, formId), -1]]), 2, what);
+  const kept = confirmedCount(rawKept, what);
+  if (kept === 0 ? oldest !== null : parseResponse(oldest) === null) throw new UnknownReply(what);
+  const guessed = kept >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const charged = dataBytes([json], 1) - guessed;
   await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
-  const [gone] = await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]);
-  const dropped = (Array.isArray(gone) ? gone : []).reduce<number>((sum, raw) => sum + (typeof raw === "string" ? dataBytes([raw], 1) : 0), 0);
+  const [gone] = exactReplies(await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]), 1, what);
+  const list = plainList(gone);
+  if (!list || list.some(raw => parseResponse(raw) === null)) throw new UnknownReply(what);
+  // Unknown writes retain their reservation; only an exact receipt can release room.
+  const dropped = list.reduce<number>((sum, raw) => sum + dataBytes([raw as string], 1), 0);
   const off = dataBytes([json], 1) - dropped - charged;
   if (off > 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: off }]);
   else if (off < 0) await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: -off }]);
@@ -161,8 +176,9 @@ export async function readResponses(statsId: string | null, formId: string, limi
 /** How many responses each of these forms has kept. */
 export async function responseCounts(statsId: string | null, ids: string[]): Promise<Record<string, number>> {
   if (!statsId || !ids.length || !isRedisConfigured()) return {};
-  const counts = await redisPipeline(ids.map((id) => ["LLEN", responsesKey(statsId, id)]));
-  return Object.fromEntries(ids.map((id, i) => [id, Number(counts[i]) || 0]));
+  const what = "the form response counts";
+  const counts = exactReplies(await redisPipeline(ids.map((id) => ["LLEN", responsesKey(statsId, id)])), ids.length, what);
+  return Object.fromEntries(ids.map((id, i) => [id, confirmedCount(counts[i], what)]));
 }
 
 /**

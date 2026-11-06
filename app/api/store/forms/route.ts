@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { UnknownReply } from "@/lib/redis-exact";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { FORM_ID, badPoints, newFormId, parseForm, tierIssueText, tierIssues } from "@/lib/forms";
 import { SENSITIVE_WHY, sensitiveFieldOf } from "@/lib/form-sensitive";
@@ -60,6 +61,7 @@ export async function POST(request: NextRequest) {
     if (!(await writeForm(statsId, form))) return Response.json({ ok: false, error: "full" }, { status: 400 });
     return Response.json({ ok: true, form });
   } catch (error) {
+    if (error instanceof UnknownReply) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("saving a form failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

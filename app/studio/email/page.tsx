@@ -62,6 +62,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
+  const loadedForms = allowance !== 0 ? await readForms(store.statsId).catch(() => null) : [];
   const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     usedThisMonth(store.listId, windowId(store)),
@@ -89,7 +90,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const emailTemplate = typeof query.emailTemplate === "string" ? MAIL_TEMPLATES.find(item => item.id === query.emailTemplate) : undefined;
   const visiblePaid = idsOfKind(store,"paid").filter(id => !idsOfKind(store,"hidden").includes(id));
   const firstPaid = visiblePaid.find(id => listings.has(id));
-  const sequence = loadedFlows && can(role,"send") && (query.sequenceTemplate === "welcome" || query.sequenceTemplate === "bought")
+  const sequence = loadedForms !== null && loadedFlows && can(role,"send") && (query.sequenceTemplate === "welcome" || query.sequenceTemplate === "bought")
     ? starterFlows({
       fromName:store.mail?.fromName || store.name,storeLink:storeBase(store),ordersLink:storeBase(store)+"/orders",
       product:firstPaid ? {title:listings.get(firstPaid)!,link:productLink(store,firstPaid)} : null,paidCount:visiblePaid.length
@@ -230,6 +231,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
             </section>
           ) : null}
+          {loadedForms === null ? <p role="status" className="notice notice-warn mt-6">Forms could not be checked. Reload before creating or changing a sequence.</p> : null}
           {(emailTemplate || query.sequenceTemplate) ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{emailTemplate ? "Library email opened as an unsaved draft. Replace every placeholder and review consent before saving or sending." : initialSequence ? "Library sequence opened as an unsaved paused draft. Review every step before saving; activation is a separate action." : "A new sequence could not be opened: its trigger may already be in use, your role may not allow it, or its records or products could not be confirmed. Existing sequences were preserved."}</p> : null}
           <EmailStudio
             initialTemplate={emailTemplate ? {label:emailTemplate.label,subject:"",body:serializeMailBlocks(emailTemplate.blocks)} : undefined}
@@ -287,7 +289,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             }))}
             currency={store.currency}
             sells={sellsSomething(store)}
-            flowsReadFailed={loadedFlows === null}
+            flowsReadFailed={loadedFlows === null || loadedForms === null}
             draftsReadFailed={loadedDrafts === null}
             flows={flows.map((f) => ({ ...f, statsAvailable: stats?.has(f.id) ?? false, stats: stats?.get(f.id) ?? { started: 0, sent: 0, reached: 0, skipped: 0, acted: 0 }, money: flowMoney(revenue, f.id) }))}
             links={Object.fromEntries([...listings].map(([id]) => [id, productLink(store, id)]))}
@@ -298,7 +300,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             calls={idsOfKind(store, "call")}
             paidProducts={idsOfKind(store, "paid")}
             automation={{
-              forms: (await readForms(store.statsId).catch(() => [])).filter((f) => f.fields.some((x) => x.type === "email")).map((f) => ({ id: f.id, name: f.name, outcomes: f.outcomes.map((o) => ({ id: o.id, title: o.title })) })),
+              forms: (loadedForms ?? []).filter((f) => f.fields.some((x) => x.type === "email")).map((f) => ({ id: f.id, name: f.name, outcomes: f.outcomes.map((o) => ({ id: o.id, title: o.title })) })),
               fields: (await readFields(store.statsId).catch(() => [])).map((f) => ({ id: f.id, name: f.name, type: f.type, options: f.options })),
               // Each stage named with its pipeline once there is more than one (lib/crm-rules.ts).
               stages: labeledStages(await readPipelines(store.statsId).catch(() => [])).map((st) => ({ id: st.id, name: st.name })),

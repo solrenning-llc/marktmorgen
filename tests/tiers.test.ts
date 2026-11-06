@@ -50,7 +50,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = new URLSearchParams(init?.body ? String(init.body) : "");
   calls.push({ method, path, body });
   const json = (v: unknown) => new Response(JSON.stringify(v));
-  if (method === "GET" && path === "/customers") return json({ data: [{ id: "cus_Member0001", created: 1 }] });
+  // A list as Stripe gives it, with has_more (rule 23: fixture only; findMember reads lists exactly since sweep APP2).
+  if (method === "GET" && path === "/customers") return json({ data: [{ id: "cus_Member0001", created: 1 }], has_more: false });
   if (method === "GET" && path === "/customers/cus_Member0001") return json({ id: "cus_Member0001", email: "dana@example.com" });
   if (method === "GET" && path === "/subscriptions") {
     return json({
@@ -64,6 +65,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
           items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: paidIn, metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
         },
       ],
+      has_more: false,
     });
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Tier00000001" });

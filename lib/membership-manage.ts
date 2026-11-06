@@ -25,6 +25,8 @@ import { saleHandles } from "@/lib/store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
+import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import type { Store } from "@/lib/store";
@@ -93,6 +95,21 @@ const configKey = (account: string, language: unknown = "en") => {
 /** What Stripe's own pages are asked to speak (the portal's `locale`). */
 const stripeLocale = (store: Store) => LANGUAGES[parseLanguage(store.language)].stripe;
 
+/**
+ * Counts one more open of an emailed link and answers the count, or null when Redis answered in a shape it does
+ * not know (CX-123 rule 24; Claude 5, sweep APP2 finding 2). Only a whole count from 1 up is a count: a missing
+ * reply, nil or a word is not "under the limit", so the caller refuses the press and opens nothing at Stripe.
+ */
+async function countOpen(key: string): Promise<number | null> {
+  const replies = repliesFor(await redisPipeline([
+    ["SET", key, "0", "EX", MANAGE_LINK_SECONDS, "NX"],
+    ["INCR", key],
+  ]), 2);
+  if (!replies || (replies[0] !== "OK" && replies[0] !== null)) return null;
+  const count = countOf(replies[1]);
+  return count !== null && count >= 1 ? count : null;
+}
+
 async function within(key: string, limit: number): Promise<boolean> {
   const [, count] = await redisPipeline([
     ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
@@ -130,24 +147,26 @@ export async function findMember(store: Store, email: string): Promise<string | 
   if (!account) return null;
   const handles = saleHandles(store);
 
-  const customers = (await onAccount(
-    "GET",
-    account,
-    `/customers?email=${encodeURIComponent(email)}&limit=20`,
-  )) as Listed;
-  const list = Array.isArray(customers.data) ? (customers.data as { id?: unknown; created?: unknown }[]) : [];
+  // Each list is read in its exact shape (lib/stripe-list.ts; Claude 5, sweep APP2, the findMember sibling of
+  // finding 4): a membership found on a readable row stands, but "no membership" is said only when every list
+  // was read to its end with every row readable. Anything else throws StripeListUnreadable, so the form says
+  // something went wrong (the route's "error"), never "sent" with no email behind it.
+  let unknown = false;
+  const customers = readStripePage(
+    await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=20`),
+    () => true,
+    CUSTOMER_PATTERN,
+  );
+  if (customers.unreadable > 0 || customers.hasMore) unknown = true;
 
   let best: { id: string; at: number } | null = null;
-  for (const customer of list) {
-    if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) continue;
-    const subs = (await onAccount(
-      "GET",
-      account,
-      `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`,
-    )) as Listed;
-    const rows = Array.isArray(subs.data)
-      ? (subs.data as { status?: unknown; metadata?: Record<string, string> | null; created?: unknown }[])
-      : [];
+  for (const customer of customers.rows) {
+    const subs = readStripePage(
+      await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`),
+      (row) => typeof ownField(row, "status") === "string" && plainObject(ownField(row, "metadata")),
+    );
+    if (subs.unreadable > 0 || subs.hasMore) unknown = true;
+    const rows = subs.rows as { status?: unknown; metadata?: Record<string, string> | null; created?: unknown }[];
     for (const sub of rows) {
       if (typeof sub.status !== "string" || !LIVE.has(sub.status)) continue;
       if (!handles.has(sub.metadata?.store ?? "")) continue;
@@ -158,6 +177,7 @@ export async function findMember(store: Store, email: string): Promise<string | 
       if (!best || at > best.at) best = { id: customer.id, at };
     }
   }
+  if (!best && unknown) throw new StripeListUnreadable("the customers or memberships of an address, not read to their end");
   return best?.id ?? null;
 }
 
@@ -306,12 +326,9 @@ export async function openPortal(store: Store, token: string, origin: string): P
   const grant = parseGrant(raw);
   if (!grant || grant.a !== store.stripeAccountId) return { ok: false, reason: "expired" };
 
-  const key = await opensKey(token);
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", MANAGE_LINK_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  if (Number(count) > MAX_OPENS) return { ok: false, reason: "used" };
+  const count = await countOpen(await opensKey(token));
+  if (count === null) return { ok: false, reason: "error" };
+  if (count > MAX_OPENS) return { ok: false, reason: "used" };
 
   const session = async (configuration: string) =>
     onAccount(
@@ -523,12 +540,9 @@ export async function openCancel(store: Store, token: string, subscription: stri
 
   // The same counter as the portal button: one link opens Stripe a limited
   // number of times, whichever button is pressed.
-  const key = await opensKey(token);
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", MANAGE_LINK_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  if (Number(count) > MAX_OPENS) return { ok: false, reason: "used" };
+  const count = await countOpen(await opensKey(token));
+  if (count === null) return { ok: false, reason: "error" };
+  if (count > MAX_OPENS) return { ok: false, reason: "used" };
 
   try {
     const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
@@ -546,8 +560,12 @@ export async function openCancel(store: Store, token: string, subscription: stri
     let withOffer = false;
     if (saveOn(store) && canOffer(offer, interval, every)) {
       // Kept for good, once a membership: counted in the store's room (lib/order-data.ts).
-      const [claimed] = await orderWrite(store, [["SET", offeredKey(grant.a, subscription), String(Date.now()), "NX"]]);
-      withOffer = claimed !== null;
+      // Only an exact "OK" is a claim made now; nil is the offer already made. Any other reply is unknown: the
+      // mark may be written already, so the offer is left out (the creator's coupon is never given twice) and
+      // the member can still cancel, which is what they came for (Claude 5, sweep APP2 finding 1).
+      const claimed = repliesFor(await orderWrite(store, [["SET", offeredKey(grant.a, subscription), String(Date.now()), "NX"]]), 1)?.[0];
+      if (claimed !== "OK" && claimed !== null) console.error("the offer to stay was left out: its mark answered in an unknown shape", store.handle);
+      withOffer = claimed === "OK";
     }
 
     // The reason given on the store's own page (lib/leave-rules.ts), written

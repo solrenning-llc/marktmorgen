@@ -25,6 +25,7 @@
  * (lib/payment-recovery.ts), so nothing depends on the redirect arriving.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -130,11 +131,15 @@ export async function openCardUpdate(store: Store, token: string, origin: string
   const grant = await cardGrant(store, token);
   if (!grant) return { ok: false, reason: "expired" };
   const key = await opensKey(token);
-  const [, count] = await redisPipeline([
+  // Only a whole count from 1 up is a count (CX-123 rule 24; Claude 5, sweep APP2 finding 2): a missing reply,
+  // nil or a word is not "under the limit", so the press is refused and no Stripe page is made.
+  const replies = repliesFor(await redisPipeline([
     ["SET", key, "0", "EX", CARD_LINK_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  if (Number(count) > MAX_OPENS) return { ok: false, reason: "used" };
+  ]), 2);
+  const count = replies && (replies[0] === "OK" || replies[0] === null) ? countOf(replies[1]) : null;
+  if (count === null || count < 1) return { ok: false, reason: "error" };
+  if (count > MAX_OPENS) return { ok: false, reason: "used" };
   try {
     const sub = await subFor(store, grant.a, grant.c, grant.s);
     if (!sub) return { ok: false, reason: "error" };

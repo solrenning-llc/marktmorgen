@@ -25,6 +25,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -195,8 +196,10 @@ export async function advanceAnnouncement(
   load: (handle: string) => Promise<Store | null>,
   deadline: number,
 ): Promise<AnnouncementJob | null> {
-  const [got] = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]);
-  if (got === null) return null;
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run, or not known to
+  // be ours, nothing is sent this time, and the lock is let go only while it still holds this run's own value.
+  const lock = claimValue();
+  if ((await claimMark(lockKey(id), 90, lock)) !== "ours") return null;
   try {
     let job = await readJob(id);
     if (!job || job.status === "sent" || job.status === "failed") {
@@ -279,7 +282,7 @@ export async function advanceAnnouncement(
     if (job.status === "sent" || job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
     return job;
   } finally {
-    await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
+    await releaseMark(lockKey(id), lock);
   }
 }
 

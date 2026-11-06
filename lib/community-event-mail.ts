@@ -44,6 +44,8 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
 import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
@@ -156,8 +158,15 @@ async function startJob(
   if (!community) return null;
   const seq = kind === "moved" ? `m${event.moves}` : kind === "cancelled" ? "x" : `${event.start}`;
   const id = createHash("sha256").update(`${community}|${event.id}|${kind}|${seq}`).digest("hex").slice(0, 24);
-  const [claimed] = await redisPipeline([["SET", madeKey(id), "1", "NX", "EX", KEEP_SECONDS]]);
-  if (claimed === null) return null;
+  // Made once, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): taken is made already; unknown makes nothing
+  // and lets go of the mark only while it holds our own value, so asking again (or the next run) makes it.
+  const mark = claimValue();
+  const claimed = await claimMark(madeKey(id), KEEP_SECONDS, mark);
+  if (claimed === "taken") return null;
+  if (claimed !== "ours") {
+    await releaseMark(madeKey(id), mark);
+    throw new UnknownReplyError("an event email's once-only mark");
+  }
   const readers = (await rsvpList(community, event.id)).map((r) => r.key);
   if (!readers.length) return null;
   const job: EventMailJob = {
@@ -287,8 +296,9 @@ export async function advanceEventJob(
   load: (handle: string) => Promise<Store | null>,
   deadline: number,
 ): Promise<EventMailJob | null> {
-  const [got] = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]);
-  if (got === null) return null;
+  // One run at a time, on an exact claim: held by another run, or not known to be ours, nothing is done this time.
+  const lock = claimValue();
+  if ((await claimMark(lockKey(id), 90, lock)) !== "ours") return null;
   try {
     let job = await readEventJob(id);
     if (!job || job.status !== "sending") {
@@ -376,7 +386,7 @@ export async function advanceEventJob(
     await save(job);
     return job;
   } finally {
-    await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
+    await releaseMark(lockKey(id), lock);
   }
 }
 
@@ -448,6 +458,8 @@ export async function runEventQueue(
       } else counts.dropped += 1;
     } catch (error) {
       console.error("a live event reminder failed", error);
+      // Not known whether its mark is ours: it stays due, and the next run makes it once.
+      if (error instanceof UnknownReplyError) continue;
     }
     await redisPipeline([["ZREM", EVENT_QUEUE, member]]);
   }

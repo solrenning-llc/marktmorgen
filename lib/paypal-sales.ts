@@ -591,8 +591,21 @@ async function watchLater(order: string, opened: Opened): Promise<void> {
   ]);
 }
 
-/** Writes a completed payment down, once. Returns it, and whether this call wrote it. */
-async function settle(order: string, opened: Opened, captureId: string, email: string): Promise<{ paid: Paid; fresh: boolean }> {
+/**
+ * Writes a completed payment down, once, and hands it over when this call wrote it: the record (SET NX), then the
+ * hand-over, then its settled writes, the last of which takes the order off pending. Whatever fails after the record
+ * leaves the order pending with its record written, and the sweep hands it over (watchPayPal). `markPending` (the
+ * return, where the order is not yet pending) marks it pending in the same pipeline, before the record, so a record
+ * whose reply is lost is never left outside the sweep's reach. Returns the payment, and whether this call wrote it.
+ */
+async function settle(
+  order: string,
+  opened: Opened,
+  captureId: string,
+  email: string,
+  handOver: (paid: Paid) => Promise<void>,
+  markPending: boolean,
+): Promise<{ paid: Paid; fresh: boolean }> {
   const paid: Paid = {
     store: opened.s,
     order,
@@ -608,18 +621,27 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     ...(opened.off ? { off: opened.off, sale: opened.sale } : {}),
   };
   // "OK" is this call's write, null one made before it. Anything else is unknown: thrown before anything is handed
-  // over, and the order is asked about again (CX-123 rule 24).
-  const wrote = repliesFor(await redisPipeline([["SET", paidKey(order), JSON.stringify(paid), "NX", "EX", PAID_KEPT_SECONDS]]), 1);
-  if (!wrote || (wrote[0] !== "OK" && wrote[0] !== null)) throw new UnknownReplyError("writing a PayPal payment down");
-  if (wrote[0] === null) return { paid: (await readPaid(order)) ?? paid, fresh: false };
+  // over, and the order is asked about again (CX-123 rule 24). The pending mark (ZADD NX: an order already pending
+  // keeps its place) answers 0 or 1.
+  const commands: (string | number)[][] = [
+    ...(markPending ? [["ZADD", pendingKey(opened.s), "NX", String(paid.at), order]] : []),
+    ["SET", paidKey(order), JSON.stringify(paid), "NX", "EX", PAID_KEPT_SECONDS],
+  ];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const wrote = replies?.[commands.length - 1];
+  if (!replies || (markPending && countOf(replies[0]) === null) || (wrote !== "OK" && wrote !== null)) throw new UnknownReplyError("writing a PayPal payment down");
+  if (wrote === null) return { paid: (await readPaid(order)) ?? paid, fresh: false };
+  await handOver(paid);
   await redisPipeline(settledWrites(paid));
   return { paid, fresh: true };
 }
 
 /**
- * What a payment written down leaves beside its record: watched for a refund, among the buyer's orders, no longer
- * pending, and counted in the store's numbers like a Stripe sale (lib/stats.ts readPaidSales). Each is the same
- * written twice, so the sweep writes them again for a record whose writes were never confirmed (watchPayPal).
+ * What a payment written down and handed over leaves beside its record: watched for a refund, among the buyer's
+ * orders, counted in the store's numbers like a Stripe sale (lib/stats.ts readPaidSales), and, last, no longer
+ * pending: a pipeline that applied only part of them before it failed leaves the order pending, never neither
+ * pending nor settled. Each is the same written twice, so the sweep writes them again for a record whose writes were
+ * never confirmed (watchPayPal).
  */
 function settledWrites(paid: Paid): (string | number)[][] {
   const { store, order, email, product, at } = paid;
@@ -627,10 +649,10 @@ function settledWrites(paid: Paid): (string | number)[][] {
     ["ZADD", watchKey(store), String(nextLook(at, at) ?? at), order],
     ["SADD", ownKey(store, email, product), order],
     ["EXPIRE", ownKey(store, email, product), PAID_KEPT_SECONDS],
-    ["ZREM", pendingKey(store), order],
     ["ZADD", salesKey(store), String(at), order],
     ["ZREMRANGEBYSCORE", salesKey(store), "-inf", String(at - SALES_KEPT_SECONDS)],
     ["EXPIRE", salesKey(store), SALES_KEPT_SECONDS],
+    ["ZREM", pendingKey(store), order],
   ];
 }
 
@@ -641,8 +663,12 @@ function settledWrites(paid: Paid): (string | number)[][] {
  *
  * A payment PayPal holds as pending (an eCheck, a review) is not handed over:
  * it is watched (watchPayPal) and handed over when PayPal completes it.
+ *
+ * `handOver`, when given (the return route), is run when this call wrote the payment down, before the order leaves
+ * pending: if it fails, the answer is "error" and the order stays pending for the sweep to hand over. Without it the
+ * caller hands over after, on `fresh` (tests that look at each step).
  */
-export async function captureOrder(store: Store, order: string): Promise<CaptureResult> {
+export async function captureOrder(store: Store, order: string, handOver: (paid: Paid) => Promise<void> = async () => undefined): Promise<CaptureResult> {
   if (!ORDER_ID.test(order) || !store.statsId || !isRedisConfigured()) return { ok: false, reason: "unknown" };
   let already: Paid | null = null;
   let opened: Opened | null = null;
@@ -697,13 +723,13 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   }
   if (capture.status !== "COMPLETED") return { ok: false, reason: "declined" };
   try {
-    const { paid, fresh } = await settle(order, opened, capture.id, email);
+    const { paid, fresh } = await settle(order, opened, capture.id, email, handOver, true);
     return { ok: true, paid, fresh };
   } catch (error) {
-    // Taken, but whether it was written down here is unknown (a reply in another shape, or one lost after Redis
-    // applied it): nothing is handed over on it; the order is kept pending, and the sweep hands it over once
-    // PayPal confirms it, whether or not its record was written (watchPayPal).
-    console.error("a PayPal payment could not be written down", order, error);
+    // Taken, but not known to be written down and handed over here (a reply in another shape, one lost after Redis
+    // applied it, or a hand-over that failed): the order is kept pending, and the sweep hands it over once PayPal
+    // confirms it, whether or not its record was written (watchPayPal).
+    console.error("a PayPal payment could not be written down and handed over", order, error);
     await watchLater(order, opened);
     return { ok: false, reason: "error" };
   }
@@ -850,20 +876,18 @@ export async function watchPayPal(
         result.cleared += 1;
         continue;
       }
+      // Handed over before its settled writes take it off pending: a hand-over that fails leaves it pending, written
+      // down, for the next pass (above).
       let settled: { paid: Paid; fresh: boolean };
       try {
-        settled = await settle(order, opened, capture.id, email);
+        settled = await settle(order, opened, capture.id, email, on.handOver, false);
       } catch (error) {
         // Not known to be written down by this pass: nothing handed over, still pending, asked again (CX-123 rule 24).
         if (!(error instanceof UnknownReplyError)) throw error;
         console.error("a PayPal payment could not be written down", order, error);
         continue;
       }
-      const { paid, fresh } = settled;
-      if (fresh) {
-        await on.handOver(paid);
-        result.cleared += 1;
-      }
+      if (settled.fresh) result.cleared += 1;
       continue;
     }
     // Declined, failed, or not what was asked: nothing is handed over.

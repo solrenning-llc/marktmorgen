@@ -86,9 +86,9 @@ async function writeThenLose<T>(lost: "unknown" | "throws", run: () => Promise<T
   const original = redis.pipeline;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await original.call(redis, commands);
-    if (commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:ppsell:paid:")) {
+    if (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ppsell:paid:"))) {
       if (lost === "throws") throw new Error("Redis request failed with status 502");
-      return ["QUEUED"];
+      return [...replies.slice(0, -1), "QUEUED"];
     }
     return replies;
   }) as typeof redis.pipeline;

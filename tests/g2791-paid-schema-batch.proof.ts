@@ -347,10 +347,10 @@ async function main(): Promise<void> {
     return actualPipeline(commands);
   };
   // An unreadable old/fractional time must not falsely expire a still-paid order's watch.
-  if (mode === "atnegative" || mode === "atfraction") captures.set(twice.paid.capture,"COMPLETED");
+  if (mode === "atnegative" || mode === "atfraction" || mode === "atnormal") captures.set(twice.paid.capture,"COMPLETED");
   try { await watchPayPal(store, Date.now() + 10_000, on); }
   finally { redis.pipeline = actualPipeline; }
-  if (mode === "atnegative" || mode === "atfraction") captures.set(twice.paid.capture,"REFUNDED");
+  if (mode === "atnegative" || mode === "atfraction" || mode === "atnormal") captures.set(twice.paid.capture,"REFUNDED");
   is("G: exact transport boundary was reached", injected, 1);
   is("G: purchase state after the first run", (await importedFor(store, "buyer@example.com")).length, mode === "control" ? 0 : 1);
   const watchAfterUnknown = (await redis.pipeline([["ZRANGEBYSCORE", `nl:ppsell:watch:${store.statsId}`, "-inf", "+inf"]]))[0];

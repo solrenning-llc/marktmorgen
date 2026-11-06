@@ -27,7 +27,7 @@ is("a save that puts it live, moves versions, deletes a file or restarts a test:
 is("a store that does not pay (trial, no plan, ended): never", at({ paying: false }), { act: "off", why: "paying" });
 is(`a draft over ${AUTOSAVE_MAX_BYTES} bytes, past a studio request's priced shape: never`, [at({ bytes: AUTOSAVE_MAX_BYTES }).act, at({ bytes: AUTOSAVE_MAX_BYTES + 1 }), at({ bytes: Number.NaN })], ["save", { act: "off", why: "big" }, { act: "off", why: "big" }]);
 const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
-is("the priced shape it stays inside: twenty commands and fifty kilobytes a studio request", registry.includes('studio: request("studio", 20 + TAKE_COMMANDS, 50_000)') && AUTOSAVE_MAX_BYTES * 2 <= 50_000, true);
+is("the priced shape it stays inside: twenty commands and fifty kilobytes a studio request", registry.includes('studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000)') && AUTOSAVE_MAX_BYTES * 2 <= 50_000, true);
 
 part("An hour of typing, on a virtual clock");
 {

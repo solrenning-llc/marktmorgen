@@ -49,7 +49,7 @@ import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { noteForErasure } from "@/lib/erasure-index";
 import { orderWrite } from "@/lib/order-data";
-import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { suppressedCommand } from "@/lib/suppression";
 
 /** Orders looked at in one run of the job. */
 export const MAX_ASKS_PER_RUN = 50;
@@ -271,13 +271,18 @@ export async function sendReviewRequests(
       continue;
     }
     const email = proof.proof.email;
-    const [off, contact, deleted] = await redisPipeline([
+    const checks = await redisPipeline([
       ["EXISTS", offKey(entry.statsId, email)],
       store.listId ? ["HGET", leadsKey(store.listId), normaliseEmail(email)] : ["EXISTS", "nl:none"],
       suppressedCommand(store.listId, email),
-    ]);
+    ]).catch(() => null);
+    const recipient = reviewRecipientState(checks, Boolean(store.listId));
+    if (recipient === "unknown") {
+      await later(member, nowSeconds + RETRY_SECONDS.stripe);
+      continue;
+    }
     // Nobody who pressed stop, left the list, or was deleted from the store (lib/suppression.ts).
-    if (Number(off) === 1 || (store.listId && parseContact(contact)?.unsub) || wasSuppressed(deleted)) {
+    if (recipient === "stopped") {
       await drop(member);
       continue;
     }
@@ -363,5 +368,29 @@ export async function sendReviewRequests(
     counts.sent += ready.length;
   }
   return counts;
+}
+
+/** A missing/malformed opt-out or erasure response never grants permission to send. */
+function reviewRecipientState(checks: unknown, hasList: boolean): "unknown" | "stopped" | "open" {
+  if (!Array.isArray(checks) || checks.length !== 3) return "unknown";
+  for (let i = 0; i < 3; i++) if (!Object.hasOwn(checks, i)) return "unknown";
+  const [off, raw, erased] = checks;
+  if ((off !== 0 && off !== 1) || (erased !== 0 && erased !== 1)) return "unknown";
+  let unsubscribed = false;
+  if (hasList) {
+    if (raw !== null) {
+      if (typeof raw !== "string") return "unknown";
+      try {
+        const value: unknown = JSON.parse(raw);
+        // Legacy contacts can omit unsub; a present value must be boolean.
+        if (!value || typeof value !== "object" || Array.isArray(value) ||
+            ("unsub" in value && typeof value.unsub !== "boolean")) return "unknown";
+      } catch { return "unknown"; }
+      const contact = parseContact(raw);
+      if (!contact) return "unknown";
+      unsubscribed = contact.unsub;
+    }
+  } else if (raw !== 0 && raw !== 1) return "unknown";
+  return off === 1 || unsubscribed || erased === 1 ? "stopped" : "open";
 }
 

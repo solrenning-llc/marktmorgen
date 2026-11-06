@@ -1,3 +1,31 @@
+## Latest checkpoint — 2026-11-05 22:09 Fortaleza / 2026-11-06 01:09 UTC
+
+This section supersedes only the affected facts below. Active work was confirmed; the duplicate continuation was absorbed. Every existing branch, head, RED, PR and the hourly automation remains preserved. No product merge, deployment, CI retry/cancellation, whole-workflow rerun or head move occurred in this slice.
+
+### #2692 recovery-note second financial return
+
+H2 completed the nominal SECOND financial review of recovery-note WIP exact `3a61b5bc8a8ebbeae37746be07024e3ef999225d` with NO FINDING in comment/review `6673595529`: immutable proof 10/10, linked405/405, H2 hostile4/4, directed TS/lint/diff0 and scanner3799/0. D2 retains the first financial review. This approves only the recovery-note WIP; it does not move or approve PRIMARY `35e670e3cf35a9997821bd5e47bb104afb9f6453`. The four-screen outage MEDIUM remains open because the homepage caller is occupied by A3/#2020 without a nominal exception. Preserve display WIP `01f8156506ea6d1b0a85cf373425f4fdec76ee1e`, refund-underway WIP `fabb5e8504d36129a25783cf1994f46c29105712`, permanent REDs and all prior evidence.
+
+### #2685 nominal C2 return on exact A5 corrective head
+
+Reviewed exact product head `04df109342ed2f9da0aa1f4a829016feaf84781a`, not the ancestor. GitHub review `5794316170` is NOT CLEARED. A5 correctly closes its local live-membership note/release behavior and creates no new financial defect. Replayed the immutable cost proof: 4 checks / 1 causal failure, still exactly one admitted public unit before and after, 102 Stripe GETs, 765386 response bytes and one synthetic checkout POST. Kept proof17/17; linked move-open-mark24, move-invite-off-sale34, move-members41, named-price-gone62 and option-off-sale22: 183/183 total. Directed TS0, lint0, diff0, scanner3805/0. Therefore the existing paid-fanout MEDIUM from reviews5793736677/5793844344 remains open; the new 04df delta did not add an admission/bound or change the expanded liveMembership model. C4 controls product/CI; await nominal causal correction and do not repeat unchanged evidence.
+
+### NEW CX-123 rule24 finding in occupied #1969
+
+A full audit of 179 open PR paths showed that `lib/closing-plan-guard.ts` and its canonical test are occupied only by Claude3/#1969. No product/branch/CI edit was made. The channel reservation was limited to two new opt-in evidence files. On main exact `1ec60aad5ca686d1c03efd39d9fca1b99efb733b`, lines409-411 turn an invoice-list envelope without required `data` into `[]`; `settleOne` then leaves `settled=true`, writes `done` and removes a possibly paid invoice from the refund retry path.
+
+Durable evidence branch: `codex/c-review-1969-closing-plan-guard-evidence`, exact remote head `88ac828c94eaddd710117e088d433961817a6496`, tree `9d4f9d0879081219bea7eaabcf74bd13f55bb6d2`. Product diff is zero. Runner `node proofs/c2/run-1969-closing-plan-unknown.mjs` gives 2 checks / 1 causal RED: expected `[false,false,1,0]`, actual `[true,true,0,0]`; the exact paid-invoice control refunds once and only then marks done. Directed TS0, lint0, diff-check0, scanner3803/0. GitHub PR comment `6673875800` requests explicit Claude1/Claude3 ownership and the same proof unchanged green. Severity MEDIUM; never edit the occupied product without nominal assignment.
+
+### Preserved current gates
+
+- OWN #2695 exact `33bbd1fd7637ef1bbb39faca109b15206eb500b0` / tree3e63 remains untouched. Its two individual unrelated retries are consumed. Last meaningful state remains six success plus three in progress and no applicable H2/R2 final return. AV12: do not poll, retry, cancel or move the head absent causal novelty; merge only after nominal no-finding review and nine exact successes.
+- OWN #2601 exact `a12c62f9d67810d9db42039c0c58da17445e3466` remains eight success plus deterministic pricing failure, zero retry. #2632 is exact `cda3dda927ac145887b56d2ce3d0014065f9cb06` under Claude3 with nine NEW workflows. Only after its normal merge may #2601 integrate main once for this demonstrated cause, preserving test901dc254 and N6654503257 and requiring nine NEW exact successes.
+- #2654 remains fec0 with the product slot/getter MEDIUM open. Commercial-margin stays J-owned; tax-threshold/proof2325 remains forbidden without explicit C1 assignment.
+
+Channel writes this slice: #2685/H2 acknowledgement `b50998ec22d90981da4c2c6a9cbd090548c8f711`; #1969 reservation `9ac4e16f9b6a26797f46bf1430601ee574076929`; #1969 RED report `6a5edd66711c13933e57d1c5a6d759dcfa40e12d`. Continue append-only/CAS after a full fresh channel read >=20KB; on 409/error wait two minutes and reread all. Unknown never means zero/empty/success; paid IO requires a counted ceiling before spend; no prohibited commercial or personal-data changes.
+
+---
+
 ## Newer channel event — 2026-11-05 21:45 Fortaleza / 2026-11-06 00:45 UTC
 
 This section supersedes only the affected facts in the 21:42 checkpoint immediately below.

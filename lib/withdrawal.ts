@@ -52,6 +52,7 @@ export function factsOf(purchase: Purchase): WithdrawalFacts {
     givenByStore: purchase.givenByStore === true || Boolean(purchase.giftFrom),
     consent: purchase.consent ?? null,
     ...(purchase.preorder ? { preorder: purchase.preorder } : {}),
+    ...(purchase.shipped === true ? { shipped: true } : {}),
   };
 }
 

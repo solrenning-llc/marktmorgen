@@ -184,7 +184,9 @@ export function chargedOf(invoice: unknown): { cents: number; currency: string }
 /**
  * Whether Stripe's invoice preview can be read for the amount a switch
  * charges now (Codex J on #2764; CX-123 rule 24): its currency, a starting
- * balance in whole cents or none, and a list of lines, each with its amount
+ * balance in whole cents or none, and a whole list of lines (has_more false:
+ * Stripe sends it on every list, so a list without it, or one that goes on, is
+ * not known to hold every line, and no further page is read), each with its amount
  * and the start of its period in whole numbers, and its discounts and taxes,
  * when it has them, each with a whole amount. Anything else is unknown: the
  * page then says Stripe could not work out the price, never that nothing is
@@ -196,7 +198,8 @@ export function previewKnown(invoice: unknown): boolean {
   const amounts = (value: unknown) => value === undefined || value === null || (Array.isArray(value) && value.every((one) => record(one) && whole(one.amount)));
   if (!record(invoice) || typeof invoice.currency !== "string" || !invoice.currency) return false;
   if (invoice.starting_balance !== undefined && invoice.starting_balance !== null && !whole(invoice.starting_balance)) return false;
-  const lines = record(invoice.lines) ? invoice.lines.data : undefined;
+  if (!record(invoice.lines) || invoice.lines.has_more !== false) return false;
+  const lines = invoice.lines.data;
   if (!Array.isArray(lines)) return false;
   return lines.every((line) => record(line) && whole(line.amount) && record(line.period) && whole(line.period.start) && amounts(line.discount_amounts) && amounts(line.taxes) && amounts(line.tax_amounts));
 }

@@ -1,0 +1,21 @@
+[
+  "campaign-landing-races.test.ts",
+  "campaign-landing-store.test.ts",
+  "campaign-landing.test.ts",
+  "landing-store-evidence.test.ts",
+  "sales-page-row.test.ts",
+  "sales-page-row-words.test.ts",
+  "sales-page-booking.test.ts",
+  "page-versions.test.ts",
+  "site-pages.test.ts",
+  "site-page-append.test.ts",
+  "store-data.test.ts",
+  "store-data-registry.test.ts",
+  "plan-cost-registry.test.ts",
+  "closing-families.test.ts",
+  "closing-cost.test.ts",
+  "locked-deletes.test.ts",
+  "product-remove-landing-cleanup.test.ts",
+  "product-remove-retry-id.test.ts",
+  "campaign-landing-id-gate.test.ts"
+]

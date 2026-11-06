@@ -824,3 +824,30 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - As revisões limpas já aplicáveis dos demais PRs continuam registradas, pois a integração alterou somente o main e preservou exatamente os blobs próprios.
 - Cinco produtos próprios seguem ocupados, sem sexta unidade: #2438 congelado e os quatro heads acima.
 - Próximo gatilho causal: acompanhar os nove checks novos sem rerun; resolver qualquer vermelho causal com RED. Só incorporar um produto próprio se estiver OPEN, com revisão qualificada aplicável, 9/9 SUCCESS exatos e REST raw `mergeable=true/clean`. #2438 só se move depois de #2576 entrar e da coordenação correspondente.
+
+
+## Retomada de 06/11/2026 às 16h04 (Fortaleza)
+
+### Retorno nominal #2790 concluído
+
+- C4-20261106-2620-ALL-154 e a correção C4-20261106-2630-ALL-155 atribuíram a Q a revisão nominal do #2790 no head exato `a1c93ee4bda2872826adb9e07c3a4cdd822692c1`. O anúncio append-only saiu no commit de canal `5e4d5560664574847eee87350dfc4db4acda9631` após um 409 e a espera integral de dois minutos.
+- O PR foi incorporado concorrentemente pelo autor durante a revisão, merge `0c2d621c0d70e9928b733ae84291f0e9457de9bb`. Q publicou o parecer retrospectivo formal `5805390991`, sem HIGH/MEDIUM/LOW, explicitamente como evidência e não autorização retroativa.
+- Diff inteiro de 13 paths lido; 12/13 blobs idênticos ao head já aprovado por K2 e somente `tests/test-config.mjs` conciliou aliases do main sem perder o alias do Encanto. Focais 21/21 + 13/13; ligados 245/245; Chromium canônico 6/6 e, contra o produto original, 1 falha causal + 5 controles; lint limpo, scanner 4062/0 e diff-check limpo. O TSC recortado passou; o TSC whole-tree morreu com exit 137 sem diagnóstico e não foi certificado. Nenhum ramo, ref, CI ou arquivo do autor foi alterado.
+
+### Falha anterior do #2535 classificada
+
+- O verify job `128049954866` do head anterior falhou somente em `microsoft-teams-authorization-state.test.ts`: o teste esperava `null`, mas recebeu um objeto com `verifier` e `nonce`. É fora dos cinco blobs próprios do #2535; Browser bundles 269/269 e os demais grupos continuaram. Nenhum retry/cancelamento foi feito.
+
+### Main 31b0 integrado uma vez nos quatro produtos independentes
+
+- Main fresco `31b0d0bedebd03365b98bb65375a3bb95401eae7`, já com #2790 e #2818, foi integrado uma vez. Os quatro merges de dois pais são limpos; as árvores construídas pela API coincidem exatamente com `git merge-tree --write-tree`. Refs usaram `expected_sha` e `force=false`; os 12 blobs próprios foram relidos e permanecem byte-idênticos.
+- #2535: head `993dc83e9417dd534a9f1727f0575a02d0ad5840`, tree `81b916f1e1f9b5d5742a9042fdc05b70696240c9`, comentário `6693046749`; OPEN/raw mergeable=true. Formal R2 ainda exigido.
+- #2709: head `7add83c51b4eac73e555670f78a610abf0e67439`, tree `8f205269603ea632775c606c6558c3eb1e478b1f`, comentário `6693047199`; OPEN/raw true; Z clean aplicável.
+- #2729: head `b96252c5f10106a771afbd7a44769fa92b135d71`, tree `23d0ec73fea7bb66d7d22d9a579e98026dfa572a`, comentário `6693047681`; OPEN/raw true; S clean aplicável.
+- #2731: head `4a350f69b64167c727c6968270ce4e2846d14426`, tree `1c73392dcb77c93d25d42b57e43f1ce5946f7b1d`, comentário `6693047948`; OPEN/raw true; K2/R2 anteriores aplicáveis conforme CX122.8.
+- Os nove agregadores NOVOS de cada head estão queued/in_progress. Nenhum resultado foi contado como verde, e nenhum job foi repetido, cancelado ou movido. O checkpoint desta ação foi anunciado no canal no commit `ae08e57a80cac4e9ed3aa10f40ab454583304b78`, blob `92e7206f1b4c4eefb2e64f950c83b5f9b52b37c4`.
+
+### Ponto exato
+
+- #2438 segue congelado em `6da1a24763a718e88e157703542c24957bfc6123`; #2576 segue OPEN em `d8d8c3d557166cb32b4ae87084dd88c48ded2ce4`. Ambos intocados.
+- Próxima ação apenas por novidade causal: retorno formal R2 do #2535, vermelho causal ou conclusão terminal dos nove novos. Só incorporar produto próprio OPEN com revisão aplicável, 9/9 SUCCESS exact-head e REST raw true/clean.

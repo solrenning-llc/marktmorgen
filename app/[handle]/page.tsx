@@ -642,9 +642,10 @@ export default async function StorePage({ params, searchParams }: Params) {
                   </h2>
                   <div className="space-y-3">
                     {store.faq.map((item) => (
-                      <details key={item.q} className="st-card st-faq px-5 py-4 sm:px-6">
+                      // Each question opens from a 44 px row (.st-faq > summary, WCAG 2.5.5); the card's padding gives up what the row adds.
+                      <details key={item.q} className="st-card st-faq px-5 py-2 sm:px-6">
                         <summary className="cursor-pointer font-bold">{item.q}</summary>
-                        <p className="st-muted mt-2 whitespace-pre-line leading-relaxed [overflow-wrap:anywhere]">{item.a}</p>
+                        <p className="st-muted mb-2 mt-2 whitespace-pre-line leading-relaxed [overflow-wrap:anywhere]">{item.a}</p>
                       </details>
                     ))}
                   </div>

@@ -2343,6 +2343,11 @@ a.chip {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
+  /* A 44 px target (WCAG 2.5.5) reaching into the band's own padding, so the band keeps its height. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  margin-block: -0.75rem;
 }
 /* The menu of a store's own pages (components/store-pages-nav.tsx). */
 .st-pages-nav {
@@ -2479,6 +2484,28 @@ select.st-field:not([multiple]),
 .st-footer-link:hover {
   color: var(--st-accent-text);
 }
+/* On the store front every such link stands alone (the foot of the page, a search's way back, "Watch on ..."):
+   a 44 px target (WCAG 2.5.5 AAA). */
+[data-store-layout] .st-footer-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+/* A line of the store front's sentences stays under 80 letters at any width (WCAG 1.4.8): the cards (li) keep the
+   grid's columns, their words are capped. 56ch held at most 78 letters a line (tests/store-front-accessibility.test.ts). */
+[data-store-layout] :where(p, dd, blockquote, figcaption) {
+  max-width: 56ch;
+}
+[data-store-layout] :where(p.text-center, .text-center > p, p.st-note) {
+  margin-inline: auto;
+}
+/* A question of the store's FAQ opens from a 44 px row (WCAG 2.5.5), its words centred in it by padding, so the summary
+   stays a list item and keeps its disclosure triangle. The first padding is for a browser without the lh unit. */
+.st-faq > summary {
+  min-height: 2.75rem;
+  padding-block: 0.5rem;
+  padding-block: max(0px, calc((2.75rem - 1lh) / 2));
+}
 /* The pages of a long store: previous, where we are, next. */
 .st-pager {
   display: grid;
@@ -2501,9 +2528,10 @@ select.st-field:not([multiple]),
 .st-pager > :last-child {
   justify-self: end;
 }
+/* "Previous"/"Next" that cannot be pressed: readable (7:1, WCAG 1.4.6), told apart by its dashed edge, not its colour. */
 .st-pager-off {
   color: var(--st-muted);
-  opacity: 0.45;
+  border: 1px dashed var(--st-line);
 }
 @media (prefers-reduced-motion: reduce) {
   .st-pager-link:hover {

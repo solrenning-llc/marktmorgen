@@ -25,7 +25,7 @@ import { HOLD_SECONDS, TWO_STEP_COOKIE, endRecoveryAccess, holdSignIn, resetIfDu
 export async function finishProvenSignIn(
   request: NextRequest,
   owner: string | null,
-  way: "link" | "google",
+  way: "link" | "code" | "google",
   next: string,
   failed = "/signin?status=expired",
 ): Promise<Response> {

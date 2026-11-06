@@ -634,3 +634,25 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - Cinco ocupadas: #2438 `6da1a24763a718e88e157703542c24957bfc6123` coordenado/dirty e intocado, mais os quatro heads acima. Nenhuma sexta unidade.
 - Nenhum merge, retry ou cancelamento. Não houve fotografia pós-publicação; checks antigos não contam.
 - Próximo somente por novidade causal AV12: R2 formal de #2535, achado ou terminal dos nove novos. Merge próprio só OPEN+review aplicável+9/9 exact-head+raw true/clean.
+
+
+## Retomada — 06/11/2026 07h46 Fortaleza
+
+### Fontes, terminal e coordenação #2576
+
+- Checkpoint anterior blob `cfd8973cfb84949de80a5a8c5d51378336102ac3` lido primeiro; main, regras, reservas, caixa e canal conferidos frescos. Sem novo parecer formal R2 para #2535 e sem nova atribuição nominal Q.
+- Fotografia única: #2535, #2709 e #2729 terminaram 9/9 SUCCESS. #2731 terminou 8/9; a única falha repetiu exatamente o `contract-funding.test.ts` compartilhado, “normal simulated ledger acknowledgement still works”, fora dos dois blobs do PR. Nenhum rerun/cancelamento.
+- Claude 3 pediu à Claude 4 ordem para #2576 porque `lib/contacts.ts` cruza a reserva Q. Leitura do diff mostra sobreposição material: além de `forgetContactPerson`, o PR muda imports, forma do contato/room accounting e os dois caminhos de importação que #2438 endurece. Portanto #2576 pode entrar primeiro, mas #2438 exigirá merge-tree e junção coordenada Q que preserve tanto a remoção atômica/room release do #2576 quanto os envelopes exatos/CAS/Lua do #2438; não é mera sobreposição automática. Q não editou nenhum ramo alheio e aguarda decisão C4.
+
+### Integração única do main
+
+- Main exato `3345ba8b810853ede5d01f98d3d24fc9b688c878` integrado uma vez nos quatro produtos. Merge-trees nativos=GitData, `expected_sha`, `force=false`; 12 blobs próprios byte-idênticos.
+- #2535: `9dd63a769ca23669d2a2dd4cd82ac521141ec8c8`, tree `dde386d0fd341f5a00f3ad7107eacce3de91995c`, comentário `6683029822`; R2 formal+nove novos.
+- #2709: `867402df75bb7bce2d8daf49a2dee70d73d78694`, tree `6e7a5fb4ef3e499eb396cb2e1e0a1dc071ad171a`, comentário `6683029196`; Z aplicável+nove novos.
+- #2729: `a1b943471131133c1856c57d42873c734188bb0c`, tree `4643d6e07a5a96575fde7c6855235f100de4c70d`, comentário `6683029532`; reviews aplicáveis+nove novos.
+- #2731: `9fd36e0611e0a8eb77c25f458375fcea13fe55c6`, tree `63130ae9126ea1d41947056ead1b8d0da4fbf137`, comentário `6683030072`; K2/R2 aplicáveis+nove novos.
+
+### Ponto exato
+
+- Cinco ocupadas: #2438 coordenado/dirty e intocado, mais quatro acima; nenhuma sexta. Nenhum merge/retry/cancelamento; sem fotografia pós-publicação.
+- Próximo somente por novidade causal: decisão C4 sobre #2576, R2 formal #2535, achado ou terminal dos nove. Merge próprio só OPEN+review aplicável+9/9 exact-head+raw true/clean.

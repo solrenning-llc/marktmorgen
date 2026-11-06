@@ -223,6 +223,74 @@ function sectionsOfRecord(raw: unknown): string[] {
 export type PageVersion = { at: number; page: SalesPage };
 
 /** The page as it was before each of its last saves, newest first. */
+/**
+ * How many versions of a page are kept, read exactly (LLEN) and at most the
+ * MAX_VERSIONS readVersions reads, so a reading of them is paid for before it
+ * is made (lib/mcp-tools.ts); null when Redis answered in another shape.
+ */
+export async function countVersions(statsId: string | null, productId: string): Promise<number | null> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const replies: unknown = await redisPipeline([["LLEN", versionsKey(statsId, productId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const n = replies[0];
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? Math.min(n, MAX_VERSIONS) : null;
+}
+
+/**
+ * A product's page exactly as kept, for a reader that must never take an
+ * answer it does not know for an empty page (the MCP tools): null when no
+ * page is kept; throws when Redis's answer is not exactly one text or null,
+ * or when the kept record is not a page.
+ */
+export async function readPageExact(statsId: string, productId: string): Promise<{ page: SalesPage | null; bytes: number }> {
+  if (!isRedisConfigured()) throw new Error("the page could not be read");
+  const reply: unknown = await redisPipeline([["GET", pageKey(statsId, productId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new Error("the page could not be read");
+  const raw = reply[0];
+  if (raw === null) return { page: null, bytes: 0 };
+  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_PAGE_BYTES) throw new Error("the page could not be read");
+  return { page: pageRecordExact(raw, "the page could not be read"), bytes: Buffer.byteLength(raw, "utf8") };
+}
+
+/** A kept page record decoded: an object with its list of blocks, before the forgiving normalization; anything else throws (Codex J on #1821: JSON null or [] is not an empty page). */
+function pageRecordExact(json: string, what: string): SalesPage {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(json);
+  } catch {
+    throw new Error(what);
+  }
+  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded) || !Array.isArray((decoded as { blocks?: unknown }).blocks)) throw new Error(what);
+  try {
+    return parsePage(decoded);
+  } catch {
+    throw new Error(what);
+  }
+}
+
+/**
+ * A page's kept versions exactly as kept, newest first, for a reader that must
+ * never take an answer it does not know for "no versions" (the MCP tools):
+ * throws when Redis's answer is not exactly one list of texts, or when a kept
+ * version is not one, so nothing is left out unsaid.
+ */
+export async function readVersionsExact(statsId: string, productId: string): Promise<{ versions: PageVersion[]; bytes: number }> {
+  if (!isRedisConfigured()) throw new Error("the page's versions could not be read");
+  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
+  const versions: PageVersion[] = [];
+  let bytes = 0;
+  for (const entry of reply[0] as unknown[]) {
+    if (typeof entry !== "string") throw new Error("the page's versions could not be read");
+    bytes += Buffer.byteLength(entry, "utf8");
+    const cut = entry.indexOf("\n");
+    const at = Number(entry.slice(0, cut));
+    if (cut < 1 || !Number.isFinite(at)) throw new Error("the page's versions could not be read");
+    versions.push({ at, page: pageRecordExact(entry.slice(cut + 1), "the page's versions could not be read") });
+  }
+  return { versions, bytes };
+}
+
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const [list] = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);

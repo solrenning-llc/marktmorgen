@@ -4,7 +4,13 @@ export async function checkComposerAmericanEnglish({browser,LOCAL,session,sid,pr
  try{
   await context.addCookies([{name:"nl_session",value:session,url:LOCAL}]);const page=await context.newPage();
   let writes=0;page.on("request",request=>{if(request.method()==="POST")writes++;});
+  // The button is server-rendered: a click before hydration opens nothing, and the
+  // picker never shows (seen on CI in firefox and webkit). PageEditor's depth read
+  // starts in its useEffect, so it proves the controls are live before clicking,
+  // as tests/e2e/template-library.mjs waits for it; no sleep and no second click.
+  const editorHydrated=page.waitForRequest(request=>{const url=new URL(request.url());return request.method()==="GET"&&url.pathname==="/api/store/depth"&&url.searchParams.get("id")===product;},{timeout:60000});
   await page.goto(LOCAL+"/studio/pages?store="+sid+"&product="+product,{waitUntil:"domcontentloaded",timeout:60000});
+  await editorHydrated;
   await page.getByRole("button",{name:/^Add a block \(/}).click();
   // Native click delivery may finish before React commits the opened picker.
   // Wait for the actual accessible region and comparison hint, never re-click.

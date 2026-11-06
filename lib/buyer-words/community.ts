@@ -82,6 +82,7 @@ const en = {
     out: "Your session here ended. Ask for a new link below.",
     off: "This community is closed right now.",
     error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
+    unconfirmed: "We could not confirm that this went through. Check the conversation before you try again.",
   } as Record<string, string>,
   /** After asking for a link to come in (?link=...). */
   linkNotices: {
@@ -367,7 +368,7 @@ const en = {
     out: "Your place here has ended, so this no longer takes messages.",
     empty: "There was nothing to send.",
     resting: "This store is resting for now, so nothing can be written here until it opens again.",
-    unknown: "That did not send. Try again in a moment.",
+    unknown: "We could not confirm this message. Check the room before sending it again.",
   } as Record<string, string>,
   slowRefusal: (n: number, more: number) => `One message every ${n} seconds here. ${more} to go.`,
   removeFailed: "That message could not be removed.",
@@ -651,6 +652,7 @@ const es: CommunityWords = {
     out: "Tu sesión aquí ha terminado. Pide un enlace nuevo abajo.",
     off: "Esta comunidad está cerrada ahora mismo.",
     error: "Algo falló por nuestra parte. No se cambió nada; vuelve a intentarlo en un momento.",
+    unconfirmed: "No pudimos confirmar si esto se completó. Revisa la conversación antes de volver a intentarlo.",
   },
   linkNotices: {
     sent: {
@@ -922,7 +924,7 @@ const es: CommunityWords = {
     out: "Tu plaza aquí ha terminado, así que ya no admite mensajes.",
     empty: "No había nada que enviar.",
     resting: "Esta tienda está en pausa por ahora, así que aquí no se puede escribir hasta que vuelva a abrir.",
-    unknown: "No se envió. Vuelve a intentarlo en un momento.",
+    unknown: "No pudimos confirmar este mensaje. Revisa la sala antes de volver a enviarlo.",
   },
   slowRefusal: (n, more) => `Aquí, un mensaje cada ${n} segundos. Faltan ${more}.`,
   removeFailed: "No se pudo quitar ese mensaje.",
@@ -1198,6 +1200,7 @@ const fr: CommunityWords = {
     out: "Votre session ici a pris fin. Demandez un nouveau lien ci-dessous.",
     off: "Cette communauté est fermée pour le moment.",
     error: `Un problème est survenu de notre côté. Rien n'a été modifié${S}; réessayez dans un instant.`,
+    unconfirmed: "Nous n’avons pas pu confirmer que cela a abouti. Consultez la conversation avant de réessayer.",
   },
   linkNotices: {
     sent: {
@@ -1469,7 +1472,7 @@ const fr: CommunityWords = {
     out: "Votre place ici a pris fin, il n'accepte donc plus de messages.",
     empty: "Il n'y avait rien à envoyer.",
     resting: `Cette boutique est en pause pour le moment${S}: rien ne peut être écrit ici avant sa réouverture.`,
-    unknown: "Cela ne s'est pas envoyé. Réessayez dans un instant.",
+    unknown: "Nous n’avons pas pu confirmer ce message. Consultez le salon avant de l’envoyer à nouveau.",
   },
   slowRefusal: (n, more) => `Ici, un message toutes les ${n}${S}secondes. Encore ${more}.`,
   removeFailed: "Ce message n'a pas pu être retiré.",
@@ -1745,6 +1748,7 @@ const de: CommunityWords = {
     out: "Ihre Sitzung hier ist beendet. Fordern Sie unten einen neuen Link an.",
     off: "Diese Community ist gerade geschlossen.",
     error: "Bei uns ist etwas schiefgelaufen. Es wurde nichts geändert; versuchen Sie es gleich noch einmal.",
+    unconfirmed: "Wir konnten nicht bestätigen, dass das geklappt hat. Prüfen Sie die Unterhaltung, bevor Sie es erneut versuchen.",
   },
   linkNotices: {
     sent: {
@@ -2016,7 +2020,7 @@ const de: CommunityWords = {
     out: "Ihr Platz hier ist beendet, daher nimmt er keine Nachrichten mehr an.",
     empty: "Es gab nichts zu senden.",
     resting: "Dieser Shop pausiert gerade, daher kann hier nichts geschrieben werden, bis er wieder öffnet.",
-    unknown: "Das wurde nicht gesendet. Versuchen Sie es gleich noch einmal.",
+    unknown: "Wir konnten diese Nachricht nicht bestätigen. Prüfen Sie den Chat, bevor Sie sie erneut senden.",
   },
   slowRefusal: (n, more) => `Hier eine Nachricht alle ${n} Sekunden. Noch ${more}.`,
   removeFailed: "Diese Nachricht konnte nicht entfernt werden.",
@@ -2292,6 +2296,7 @@ const it: CommunityWords = {
     out: "La tua sessione qui è terminata. Chiedi un nuovo link qui sotto.",
     off: "Questa community è chiusa in questo momento.",
     error: "Qualcosa è andato storto da parte nostra. Non è stato modificato nulla; riprova tra un momento.",
+    unconfirmed: "Non è stato possibile confermare che sia andato a buon fine. Controlla la conversazione prima di riprovare.",
   },
   linkNotices: {
     sent: {
@@ -2563,7 +2568,7 @@ const it: CommunityWords = {
     out: "Il tuo posto qui è terminato, quindi non accetta più messaggi.",
     empty: "Non c'era niente da inviare.",
     resting: "Questo negozio è in pausa per ora, quindi qui non si può scrivere finché non riapre.",
-    unknown: "Non è stato inviato. Riprova tra un momento.",
+    unknown: "Non è stato possibile confermare questo messaggio. Controlla la chat prima di inviarlo di nuovo.",
   },
   slowRefusal: (n, more) => `Qui, un messaggio ogni ${n} secondi. Ne mancano ${more}.`,
   removeFailed: "Non è stato possibile rimuovere quel messaggio.",
@@ -2839,6 +2844,7 @@ const nl: CommunityWords = {
     out: "Je sessie hier is afgelopen. Vraag hieronder een nieuwe link aan.",
     off: "Deze community is op dit moment gesloten.",
     error: "Er ging aan onze kant iets mis. Er is niets gewijzigd; probeer het zo meteen opnieuw.",
+    unconfirmed: "We konden niet bevestigen dat dit is gelukt. Controleer het gesprek voordat je het opnieuw probeert.",
   },
   linkNotices: {
     sent: {
@@ -3110,7 +3116,7 @@ const nl: CommunityWords = {
     out: "Je plek hier is afgelopen, dus hij neemt geen berichten meer aan.",
     empty: "Er was niets om te versturen.",
     resting: "Deze winkel rust even, dus hier kan niets geschreven worden tot hij weer opengaat.",
-    unknown: "Dat is niet verstuurd. Probeer het zo meteen opnieuw.",
+    unknown: "We konden dit bericht niet bevestigen. Controleer de chat voordat je het opnieuw verstuurt.",
   },
   slowRefusal: (n, more) => `Hier één bericht per ${n} seconden. Nog ${more}.`,
   removeFailed: "Dat bericht kon niet worden verwijderd.",
@@ -3386,6 +3392,7 @@ const pt: CommunityWords = {
     out: "A sua sessão aqui terminou. Peça uma nova ligação abaixo.",
     off: "Esta comunidade está fechada neste momento.",
     error: "Algo correu mal do nosso lado. Nada foi alterado; tente novamente daqui a pouco.",
+    unconfirmed: "Não foi possível confirmar que isso foi concluído. Confira a conversa antes de tentar novamente.",
   },
   linkNotices: {
     sent: {
@@ -3657,7 +3664,7 @@ const pt: CommunityWords = {
     out: "O seu lugar aqui terminou, por isso já não aceita mensagens.",
     empty: "Não havia nada para enviar.",
     resting: "Esta loja está em pausa por agora, por isso não se pode escrever aqui até reabrir.",
-    unknown: "Não foi enviado. Tente novamente daqui a pouco.",
+    unknown: "Não foi possível confirmar esta mensagem. Confira a sala antes de enviá-la novamente.",
   },
   slowRefusal: (n, more) => `Aqui, uma mensagem a cada ${n} segundos. Faltam ${more}.`,
   removeFailed: "Não foi possível retirar essa mensagem.",

@@ -49,7 +49,7 @@ async function fakeUpstash(reply: (commands: unknown[]) => unknown): Promise<{ s
 /** Runs a command without blocking this process, so the stand-in server can answer it. */
 function runChild(command: string, args: string[], env: Record<string, string>): Promise<{ status: number | null; output: string }> {
   return new Promise((accept) => {
-    const child = spawn(command, args, { cwd: root, env });
+    const child = spawn(command, args, { cwd: root, env: env as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));
     child.stderr.on("data", (chunk) => (output += chunk));

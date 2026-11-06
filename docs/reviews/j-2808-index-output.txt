@@ -30,3 +30,37 @@
   ok    legacy/unknown: application only reads
 
 24 checks, 3 failing.
+
+
+=== J nominal return on ed600617733a50d579561a818b39406d1b2b153d ===
+  ok    personal/healthy: copy is complete or explicitly unknown
+  ok    personal/healthy: only intended index response injected
+  ok    personal/healthy: actual certificate remains stored
+  ok    personal/healthy: application only reads
+  ok    personal/unknown: copy is complete or explicitly unknown
+  ok    personal/unknown: only intended index response injected
+  ok    personal/unknown: actual certificate remains stored
+  ok    personal/unknown: application only reads
+  ok    standing/healthy: copy is complete or explicitly unknown
+  ok    standing/healthy: only intended index response injected
+  ok    standing/healthy: actual certificate remains stored
+  ok    standing/healthy: application only reads
+  ok    standing/unknown: copy is complete or explicitly unknown
+  ok    standing/unknown: only intended index response injected
+  ok    standing/unknown: actual certificate remains stored
+  ok    standing/unknown: application only reads
+  ok    legacy/healthy: copy is complete or explicitly unknown
+  ok    legacy/healthy: only intended index response injected
+  ok    legacy/healthy: actual certificate remains stored
+  ok    legacy/healthy: application only reads
+  ok    legacy/unknown: copy is complete or explicitly unknown
+  ok    legacy/unknown: only intended index response injected
+  ok    legacy/unknown: actual certificate remains stored
+  ok    legacy/unknown: application only reads
+
+24 checks, all passing.
+
+Actual test discovery: 1418 *.test.ts files; proofDiscovered=false; importers=[].
+Linked: 3 node groups and170 custom checks passing.
+Actual strictTS/lint/diff: exit0.
+Public data check:4059 tracked files;0 files require correction.

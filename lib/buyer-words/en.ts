@@ -153,7 +153,7 @@ export const en = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store: string) => `The ${store} blog`,
-  blogEmpty: "Nothing here yet.",
+  blogEmptyBody: (store: string) => `When ${store} writes a post, it shows up here.`,
   blogMinutes: (n: number) => `${n} min read`,
   blogNewer: "Newer posts",
   blogOlder: "Older posts",

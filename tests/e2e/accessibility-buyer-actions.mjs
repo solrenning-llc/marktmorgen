@@ -169,6 +169,29 @@ try{
   }catch(error){failed++;console.error("BUYER_MATRIX_FAILURE:"+JSON.stringify({engine,width,mode,phase,error:redact(error)}));}
   finally{cases++;await context.close();}
  }
+ // 656 [WG16]: a store with nothing on it and its blog with no posts (tests/e2e/seed.ts, freshshop) each show the empty
+ // state: a heading and one sentence, no dead button, nothing blank, axe AAA. Baseline at 320 and 1280 px only; its time is
+ // printed so the cost it adds to this job is measured, never taken as zero.
+ const emptyStarted=Date.now();let emptyCases=0;
+ for(const width of [320,1280])for(const path of ["/@freshshop","/@freshshop/blog"]){
+  const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(10+emptyCases)}});
+  try{
+   const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));
+   await context.route("**/*",route=>{const url=new URL(route.request().url());if(url.origin!==origin&&url.origin!==FAKE)return route.abort();if(url.pathname==="/api/store/hit")return route.fulfill({status:204,body:""});if(!["GET","HEAD"].includes(route.request().method()))return route.abort();return route.continue();});
+   const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});
+   if(response?.status()!==200)throw Error("HTTP "+response?.status());
+   const empty=await page.evaluate(()=>[...document.querySelectorAll("[data-empty-state]")].map(node=>({heading:node.querySelector("h2")?.textContent?.trim()??"",sentence:node.querySelector("p")?.textContent?.trim()??"",actions:[...node.querySelectorAll("a,button")].map(a=>({tag:a.tagName,href:a.getAttribute("href")})),visible:node.getBoundingClientRect().height>0})));
+   if(empty.length!==1||!empty[0].heading||!empty[0].sentence||!empty[0].visible)throw Error("Empty state missing or blank "+JSON.stringify(empty));
+   if(empty[0].actions.some(a=>a.tag!=="A"||!/^\/(?!\/)/.test(a.href??"")))throw Error("Dead or foreign action in the empty state "+JSON.stringify(empty[0].actions));
+   await page.addScriptTag({content:axe});
+   const result=await page.evaluate(async()=>{const root=document.documentElement,run=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});return {scroll:root.scrollWidth,client:root.clientWidth,violations:run.violations.map(v=>({id:v.id,nodes:v.nodes.length})),incomplete:run.incomplete.map(v=>v.id)};});
+   audits++;console.log("EMPTY_STATE_AUDIT:"+JSON.stringify({engine,width,path,empty:empty[0],...result}));
+   if(result.scroll>result.client||result.violations.length||errors.length)throw Error("Empty state accessibility/overflow/page failure "+JSON.stringify({violations:result.violations,errors}));
+   if(result.incomplete.length)gaps.push({width,mode:"baseline",state:"empty "+path,manualReview:result.incomplete});
+  }catch(error){failed++;console.error("EMPTY_STATE_FAILURE:"+JSON.stringify({engine,width,path,error:redact(error)}));}
+  finally{emptyCases++;cases++;await context.close();}
+ }
+ console.log("EMPTY_STATE_COST:"+JSON.stringify({engine,cases:emptyCases,milliseconds:Date.now()-emptyStarted}));
  console.log("BUYER_MATRIX_OPEN_GAPS:"+JSON.stringify(gaps));
  console.log("BUYER_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,audits,failed,scope:"Real local app checkout against fake Stripe paid return; local captured inbox/library/orders. No real checkout/payment/provider/message/account or external download."}));
 }finally{await browser?.close();if(app&&app.exitCode===null){const closed=new Promise(resolve=>app.once("exit",resolve));const forced=setTimeout(()=>app.kill("SIGKILL"),5_000);app.kill("SIGTERM");await closed;clearTimeout(forced);}await services.close();if(reviewedApp)await reviewedApp.cleanup();}

@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { POSTS_PER_PAGE, postSegment, publishedPosts } from "@/lib/store-blog";
 import { speech } from "@/lib/buyer-words";
+import { EmptyState } from "@/components/empty-state";
 import { lookStyle } from "@/lib/store-look";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
@@ -84,7 +85,7 @@ export default async function BlogPage({ params, searchParams }: Params) {
         </Link>
         <h1 className="font-display mt-8 text-center text-3xl font-semibold leading-tight sm:text-4xl">{w.blogOf(store.name)}</h1>
         {posts.length === 0 ? (
-          <p className="st-muted mt-8 text-center">{w.blogEmpty}</p>
+          <EmptyState title={w.nothingYet} body={w.blogEmptyBody(store.name)} className="mt-8" />
         ) : (
           <ol className="mt-8 space-y-4">
             {posts.map((post) => (

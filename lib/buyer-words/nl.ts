@@ -133,7 +133,7 @@ export const nl: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog van ${store}`,
-  blogEmpty: "Hier staat nog niets.",
+  blogEmptyBody: (store) => `Zodra ${store} een bericht schrijft, verschijnt het hier.`,
   blogMinutes: (n) => `${n} min lezen`,
   blogNewer: "Nieuwere berichten",
   blogOlder: "Oudere berichten",

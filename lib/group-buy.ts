@@ -104,6 +104,16 @@ const REFUND_PAGES = 10;
 const passKey = (sid: string) => `nl:grp:${sid}:refunds:pass`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
 const PASS_SECONDS = 7 * 86_400;
+/**
+ * Refunds whose work was left unknown (a record that does not read, a reply in another shape), refund id to payment,
+ * tried again first on every run, so one of them never holds back the refunds after it (Claude 4 on #2781).
+ */
+const retryKey = (sid: string) => `nl:grp:${sid}:refunds:retry`;
+/** At most this many waiting; with the list full, the pass stops on the page it could not hand over. */
+const RETRY_CAP = 100;
+const RETRY_SECONDS = 30 * 86_400;
+const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
+const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
 const now = () => Math.floor(Date.now() / 1000);
 
 /** How a place is named where purchases given to an address are kept. */
@@ -508,8 +518,9 @@ function readPass(raw: unknown): RefundPass | null | undefined {
  * on from there instead of starting over (Codex G on #2781, M1); a run that resumes a pass first reads the newest page,
  * so a refund made meanwhile does not wait for the pass. The anchor moves, and the pass ends, only once the list was
  * read to its end. A refund is marked handled only after everything it takes back was written and confirmed, so a
- * run that stops halfway leaves it to the next (Codex G on #2781, M2); a reply in an unknown shape marks nothing and
- * keeps the pass on that page.
+ * run that stops halfway leaves it to the next (Codex G on #2781, M2); one whose work was left unknown (a reply in
+ * another shape, a record that does not read) marks nothing and is kept on a short list tried first on every run, so
+ * it never holds back the refunds after it (Claude 4 on #2781); with that list full, the pass stays on its page.
  */
 export async function revokeRefundedGroups(
   store: Store,
@@ -523,6 +534,8 @@ export async function revokeRefundedGroups(
   if (!begun) return 0;
   const [any, anchorRaw, passRaw] = begun;
   if (!any) return 0;
+  // The anchor read exactly: in another shape, no pass starts (Claude 4 on #2781), never one from a week back.
+  if (anchorRaw !== null && (typeof anchorRaw !== "string" || !/^\d{1,12}$/.test(anchorRaw))) return 0;
   const kept = readPass(passRaw);
   // A pass kept in an unknown shape is started again from the anchor, which never moved past it.
   const since = kept ? kept.since : Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
@@ -599,6 +612,33 @@ export async function revokeRefundedGroups(
     }
   };
 
+  /** Keeps a refund whose work was left unknown for the next runs; false when that could not be written for sure. */
+  const later = async (refund: Record<string, unknown>): Promise<boolean> => {
+    const id = refund.id as string;
+    const pi = refund.payment_intent;
+    if (typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) return false;
+    const counted = countOf(repliesFor(await redisPipeline([["HLEN", retryKey(sid)]]), 1)?.[0]);
+    if (counted === null || counted >= RETRY_CAP) return false;
+    const kept = repliesFor(await redisPipeline([["HSET", retryKey(sid), id, pi], ["EXPIRE", retryKey(sid), RETRY_SECONDS]]), 2);
+    return oneWrite(kept?.[0]) && kept?.[1] === 1;
+  };
+
+  // Those left unknown before, first: each tried again, and let go once handled.
+  const waiting = repliesFor(await redisPipeline([["HGETALL", retryKey(sid)]]), 1)?.[0];
+  if (waiting !== undefined && waiting !== null && typeof waiting === "object") {
+    const pairs: [unknown, unknown][] = Array.isArray(waiting)
+      ? waiting.flatMap((field, i) => (i % 2 === 0 ? [[field, waiting[i + 1]] as [unknown, unknown]] : []))
+      : Object.entries(waiting as Record<string, unknown>);
+    for (const [id, pi] of pairs) {
+      if (Date.now() >= deadline) return revoked;
+      if (typeof id !== "string" || typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) continue;
+      // Only a refund in full is ever kept here (handle reads nothing else), so it is read again as one.
+      if (await handle({ id, payment_intent: pi, status: "succeeded", charge: { refunded: true } })) {
+        await redisPipeline([["HDEL", retryKey(sid), id]]);
+      }
+    }
+  }
+
   let pages = REFUND_PAGES;
   if (after) {
     // Resuming a pass: the newest refunds first, so one made meanwhile is not left until the pass ends. What is read
@@ -617,10 +657,11 @@ export async function revokeRefundedGroups(
     let whole = read.unreadable === 0;
     for (const refund of read.rows) {
       if (Date.now() >= deadline) return revoked;
-      // A refund on a readable row is taken back whatever the other rows.
-      if (!(await handle(refund))) whole = false;
+      // A refund on a readable row is taken back whatever the other rows. One whose work was left unknown is kept to
+      // be tried again first on the next runs, and the pass goes on; when it cannot be kept for sure, the page stays.
+      if (!(await handle(refund)) && !(await later(refund))) whole = false;
     }
-    // A page with a row not readable, or a row whose work was left unknown, is read again next run: the pass stays.
+    // A page with a row not readable, or a row neither handled nor kept for later, is read again next run.
     if (!whole) return revoked;
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {

@@ -1,0 +1,35 @@
+=== red ===
+  FAIL  missing: an unknown inventory fails the deletion
+        expected true
+        got      false
+  FAIL  undefined: an unknown inventory fails the deletion
+        expected true
+        got      false
+  FAIL  null: an unknown inventory fails the deletion
+        expected true
+        got      false
+  FAIL  wrong-type: an unknown inventory fails the deletion
+        expected true
+        got      false
+  FAIL  sparse: an unknown inventory fails the deletion
+        expected true
+        got      false
+  FAIL  unparseable: an unknown inventory fails the deletion
+        expected true
+        got      false
+19 checks, 6 failing.
+
+=== green ===
+19 checks, all passing.
+35 checks, all passing.
+46 checks, all passing.
+9 checks, all passing.
+
+=== types ===
+
+
+=== lint ===
+
+
+=== scan ===
+Public data check: 3758 tracked files; 0 file(s) require correction.

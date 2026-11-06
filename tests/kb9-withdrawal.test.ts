@@ -35,7 +35,7 @@ import { windowOf, withdrawalKey } from "@/lib/withdrawal";
 
 /** lib/withdrawal.ts, WITHDRAWAL_ACK_SENDS: the most times one order's acknowledgement is tried. */
 const ACK_SENDS = 3;
-import { readInbox } from "@/lib/inbox";
+import { openConversation, readInbox } from "@/lib/inbox";
 import { POST as withdrawRoute } from "@/app/api/store/withdraw/route";
 import WithdrawPage from "@/app/[handle]/orders/withdraw/page";
 
@@ -206,7 +206,8 @@ test("an acknowledgement that did not go is sent again on the next statement, wi
   assert.equal(acks().length, 1);
   assert.equal(await recorded(store.sid!, ref), first, "the first statement's time is kept");
   const inbox = await readInbox(store.statsId!);
-  assert.equal(inbox.filter((c) => JSON.stringify(c).includes(ref)).length, 1, "the creator is told once");
+  const threads = await Promise.all(inbox.map((c) => openConversation(store.statsId!, c.id)));
+  assert.equal(JSON.stringify(threads).split(`order ${ref}`).length - 1, 1, "the creator is told once, whether or not the inbox puts both in one conversation");
   assert.equal(stateOf(await post({ handle: "mara", token, ref, name: "Ana Souza", email: BUYER })), "already", "once it went, nothing more is sent");
   assert.equal(acks().length, 1);
 

@@ -46,7 +46,7 @@ const en = {
   ackSentOn: "Sent on",
   ackNext: (store: string) => `${store} handles what happens next, including any refund owed to you. Keep this email: it shows that and when you withdrew.`,
   creatorNote: (product: string, order: string, when: string) =>
-    `Withdrawal from contract (EU consumer law): the buyer withdrew from “${product}”, order ${order}, on ${when}. They were sent a confirmation. Cancel and refund from your Stripe account as your terms and the law require.`,
+    `Withdrawal from contract (EU consumer law): the buyer withdrew from “${product}”, order ${order}, on ${when}. Cancel and refund from your Stripe account as your terms and the law require.`,
 };
 
 export type WithdrawalWords = typeof en;
@@ -86,7 +86,7 @@ const es: WithdrawalWords = {
   ackSentOn: "Enviado el",
   ackNext: (store) => `${store} se encarga de lo que sigue, incluido cualquier reembolso que te corresponda. Guarda este email: muestra que desististe y cuándo.`,
   creatorNote: (product, order, when) =>
-    `Desistimiento del contrato (ley de consumo de la UE): quien compró desistió de «${product}», pedido ${order}, el ${when}. Se le envió una confirmación. Cancela y reembolsa desde tu cuenta de Stripe como exigen tus condiciones y la ley.`,
+    `Desistimiento del contrato (ley de consumo de la UE): quien compró desistió de «${product}», pedido ${order}, el ${when}. Cancela y reembolsa desde tu cuenta de Stripe como exigen tus condiciones y la ley.`,
 };
 
 const fr: WithdrawalWords = {
@@ -124,7 +124,7 @@ const fr: WithdrawalWords = {
   ackSentOn: "Envoyé le",
   ackNext: (store) => `${store} s'occupe de la suite, y compris de tout remboursement qui vous est dû. Gardez cet e-mail : il montre que vous vous êtes rétracté et quand.`,
   creatorNote: (product, order, when) =>
-    `Rétractation du contrat (droit de la consommation de l'UE) : l'acheteur s'est rétracté de « ${product} », commande ${order}, le ${when}. Une confirmation lui a été envoyée. Annulez et remboursez depuis votre compte Stripe comme vos conditions et la loi l'exigent.`,
+    `Rétractation du contrat (droit de la consommation de l'UE) : l'acheteur s'est rétracté de « ${product} », commande ${order}, le ${when}. Annulez et remboursez depuis votre compte Stripe comme vos conditions et la loi l'exigent.`,
 };
 
 const de: WithdrawalWords = {
@@ -162,7 +162,7 @@ const de: WithdrawalWords = {
   ackSentOn: "Gesendet am",
   ackNext: (store) => `${store} kümmert sich um alles Weitere, auch um eine Ihnen zustehende Erstattung. Bewahren Sie diese E-Mail auf: Sie zeigt, dass und wann Sie widerrufen haben.`,
   creatorNote: (product, order, when) =>
-    `Widerruf des Vertrags (EU-Verbraucherrecht): Die Käuferin oder der Käufer hat „${product}“, Bestellung ${order}, am ${when} widerrufen. Eine Bestätigung wurde gesendet. Kündigen und erstatten Sie in Ihrem Stripe-Konto, wie Ihre Bedingungen und das Gesetz es verlangen.`,
+    `Widerruf des Vertrags (EU-Verbraucherrecht): Die Käuferin oder der Käufer hat „${product}“, Bestellung ${order}, am ${when} widerrufen. Kündigen und erstatten Sie in Ihrem Stripe-Konto, wie Ihre Bedingungen und das Gesetz es verlangen.`,
 };
 
 const it: WithdrawalWords = {
@@ -200,7 +200,7 @@ const it: WithdrawalWords = {
   ackSentOn: "Inviato il",
   ackNext: (store) => `${store} si occupa di quello che segue, compreso qualsiasi rimborso che ti spetta. Conserva questa email: mostra che hai receduto e quando.`,
   creatorNote: (product, order, when) =>
-    `Recesso dal contratto (diritto dei consumatori UE): chi ha comprato è receduto da «${product}», ordine ${order}, il ${when}. Gli è stata inviata una conferma. Annulla e rimborsa dal tuo account Stripe come richiedono le tue condizioni e la legge.`,
+    `Recesso dal contratto (diritto dei consumatori UE): chi ha comprato è receduto da «${product}», ordine ${order}, il ${when}. Annulla e rimborsa dal tuo account Stripe come richiedono le tue condizioni e la legge.`,
 };
 
 const nl: WithdrawalWords = {
@@ -238,7 +238,7 @@ const nl: WithdrawalWords = {
   ackSentOn: "Verstuurd op",
   ackNext: (store) => `${store} regelt de rest, ook een terugbetaling waar je recht op hebt. Bewaar deze e-mail: hij laat zien dat en wanneer je herriep.`,
   creatorNote: (product, order, when) =>
-    `Herroeping van de overeenkomst (EU-consumentenrecht): de koper herriep ‘${product}’, bestelling ${order}, op ${when}. Er is een bevestiging gestuurd. Zeg op en betaal terug vanuit je Stripe-account zoals je voorwaarden en de wet vereisen.`,
+    `Herroeping van de overeenkomst (EU-consumentenrecht): de koper herriep ‘${product}’, bestelling ${order}, op ${when}. Zeg op en betaal terug vanuit je Stripe-account zoals je voorwaarden en de wet vereisen.`,
 };
 
 const pt: WithdrawalWords = {
@@ -276,7 +276,7 @@ const pt: WithdrawalWords = {
   ackSentOn: "Enviado em",
   ackNext: (store) => `${store} trata do que se segue, incluindo qualquer reembolso que lhe seja devido. Guarde este email: mostra que desistiu e quando.`,
   creatorNote: (product, order, when) =>
-    `Desistência do contrato (direito do consumidor da UE): quem comprou desistiu de «${product}», encomenda ${order}, em ${when}. Foi-lhe enviada uma confirmação. Cancele e reembolse a partir da sua conta Stripe, como exigem os seus termos e a lei.`,
+    `Desistência do contrato (direito do consumidor da UE): quem comprou desistiu de «${product}», encomenda ${order}, em ${when}. Cancele e reembolse a partir da sua conta Stripe, como exigem os seus termos e a lei.`,
 };
 
 export const WITHDRAWAL_WORDS: Record<LanguageCode, WithdrawalWords> = { en, es, fr, de, it, nl, pt };

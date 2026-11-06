@@ -5,9 +5,9 @@ import {
   EMAIL_PATTERN,
   MAX_EMAIL_LENGTH,
   isAuthConfigured,
+  addressLimitAnswer,
+  rateLimitAnswer,
   sendSignInLink,
-  withinAddressLimit,
-  withinRateLimit,
 } from "@/lib/auth";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { isAutomated } from "@/lib/bot-check";
@@ -62,7 +62,11 @@ export async function POST(request: NextRequest) {
     "unknown";
 
   try {
-    if (!(await withinRateLimit(ip))) {
+    // Past the limit is "too many tries"; a count that could not be read is our side's trouble, said as such
+    // (CX-123 rules 24 and 27): nothing is sent either way.
+    const machine = await rateLimitAnswer(ip);
+    if (machine === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    if (machine === "over") {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     // A program typing other people's addresses into this form would send
@@ -75,7 +79,9 @@ export async function POST(request: NextRequest) {
     }
     // The counter above bounds one machine. This one bounds one inbox, so a
     // flood sent from many machines cannot bury a creator in sign-in emails.
-    if (!(await withinAddressLimit(email))) {
+    const inbox = await addressLimitAnswer(email);
+    if (inbox === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    if (inbox === "over") {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     // The link always points at this site, whatever host the request named.

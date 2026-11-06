@@ -8,7 +8,7 @@
  *   - the setting: off on every store until switched on, read safely from
  *     anything, percentages only from the list, ids clean, sizes capped;
  *   - who is a member, from the creator's own Stripe account: an active
- *     membership counts; cancelled, paused, past due or a payment plan do
+ *     membership counts; canceled, paused, past due or a payment plan do
  *     not; a one-off purchase counts only when paid and never refunded (in
  *     full or in part) nor disputed; another store's sale, a gift, a group
  *     place or a pre-order bought for others never counts; an answer that is
@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   ]);
   const held = (rows: unknown[]) => [...heldFromSessions(rows as Record<string, unknown>[], handles, kinds)];
   is("an active membership", held([joined("club", "active")]), ["club"]);
-  is("cancelled, unpaid, incomplete, past due or in a free trial: not proved", [
+  is("canceled, unpaid, incomplete, past due or in a free trial: not proved", [
     held([joined("club", "canceled")]),
     held([joined("club", "unpaid")]),
     held([joined("club", "incomplete")]),
@@ -270,7 +270,7 @@ async function main(): Promise<void> {
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active"), oneOff(guide.product.id)] };
   is("a member who also bought the guide: the larger percentage", await check(), { state: "member", percent: 30, email: MEMBER });
   sessionsByEmail = { [MEMBER]: [joined(club.product.id, "canceled")] };
-  is("a cancelled membership: no member price", await check(), { state: "none" });
+  is("a canceled membership: no member price", await check(), { state: "none" });
   sessionsByEmail = { [MEMBER]: [oneOff(guide.product.id, { payment_intent: intent({}, { refunded: true, amount_refunded: 1200 }) })] };
   is("a refunded purchase: no member price", await check(), { state: "none" });
   sessionsByEmail = { "someone@example.com": [joined(club.product.id, "active")] };
@@ -365,7 +365,7 @@ async function main(): Promise<void> {
   sent = await open({ member: { percent: 20, email: MEMBER } });
   is("the checkout opens with the proved address fixed", [sent.get("metadata[member]"), sent.get("customer_email")], ["20", MEMBER]);
   const charge_ = readFileSync(join(process.cwd(), "lib/store-checkout.ts"), "utf8");
-  is("never with a box ticked: a coupon comes off every line, and a ticked product may be one no rule covers", charge_.includes("const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;"), true);
+  is("never with a box checked: a coupon comes off every line, and a checked product may be one no rule covers", charge_.includes("const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;"), true);
   const route = readFileSync(join(process.cwd(), "app/api/store/checkout/route.ts"), "utf8");
   const alone = route.indexOf("if (memberAsked && (plan || bumps.length > 0 || giftTo.trim() || people.trim() || wantsPreorder)) return away(");
   is("the route refuses a claim on anything but the member's own purchase alone, before a gift or a group is written down", alone > 0 && alone < route.indexOf("startGift(") && alone < route.indexOf("startGroup("), true);

@@ -37,3 +37,42 @@ Actual scoped TypeScript of the seven source/test roots with their real imports 
 The note boundary now mounts a status paragraph instead of an empty editor when the read throws, keeping the existing after-paying heading and section relationship. Confirmed null and a healthy stored note still mount their appropriate editor. No focus movement is introduced. The funnel panel reuses its existing alert and gives a reload next step. These source and element-tree observations do not certify a screen reader, dynamic announcement across navigation, contrast, browser rendering or global AAA conformance.
 
 The source parser now refuses missing, surplus, non-text and unparseable funnel reads; its three existing consumers were inspected. The visitor's funnelHere and hit route retain their existing catches, while collectBundle propagates refusal to the new route boundary. Form refusal still depends on #2857; page refusal depends on #2830. The stack prerequisites and all exact-head CI gates remain the author's responsibility. The already documented readCards gap and schema sanitization are not claimed repaired here.
+
+## Focal return on e010132b: counted-attempt notice
+
+This is an append to the original review, not a replacement of its executions, provenance, credits or limits. The return was claimed before reading the new source: PR comment 6696478767 and channel commit 43fd8b0488cf91b07c28add3ed13a76b92e03e59. Reviewed return head: e010132bf85e2c710c1058501b8983045d9bd984, tree aeaf4eebb5cf60a574b280ad0cba60c104f426c8. The previous reviewed head remains d3977d579754deb1a7ace5abed6a2458980691f6 and the stacked base remains c2376695972ef9da567fcb75038683fcb0ca754f. C6 retains authorship of the repair and RED a656efe78d448e6dec72d990188a4426ff0f1a85; the earlier review and R2/C4 opinions retain their original provenance.
+
+The complete previous-head-to-return-head diff has exactly these two paths:
+
+| Path | Return blob |
+| --- | --- |
+| app/api/store/funnel-share/route.ts | 0a2d26aa7fedc31045cc3f31503dbcb382ae91ae |
+| tests/funnel-share-counted-stage.test.ts | 0337d11a3d817cac64f48fcc9057dbe6ecf053a0 |
+
+The route now records whether this request reached an existing countUse call and passes that stage to unread. The existing counter calls and their literal keys remain in place. This closes the original LOW counted-attempt notice finding in the demonstrated source-read, destination-read and healthy cases. No new HIGH or MEDIUM finding is reported. This focal result does not certify global cost accounting or every possible counter failure.
+
+### Same proof, actual permanent discovery
+
+The original independent proof was unchanged: tests/k-2880-note-funnel.proof.ts blob bf8396a6fd880ca2f3ac457d0e0599be5d7749e8 and proofs/k2/review-2880.mjs blob d06bed8a12ad83819567624c3931211c7b703308. The same runner against the return source passed 21/21. The author's permanent test has the same body and assertions after its first comment line. Independently compiling that permanent test with canonical test aliases against the old d397 source produced 21 checks with one causal failure; compiling it against e010 produced 21/21 passes. This old-source reproduction is not described as a new execution of the author's a656 commit.
+
+Permanent discovery was checked through the actual chain, not inferred only from the filename: .github/workflows/product-checks.yml blob 875a808ed53fa24ef6b7c35cf11dd0f291760fef runs npm test in Behavior regressions; package.json blob ebf1c49d29cb16f051ce0bc7a3c27a074c74761b maps test to node tests/run.mjs; tests/run.mjs blob ed4c6885361ecaaf52c535e8914325d51ae7d959 reads the tests directory, selects names ending in .test.ts, sorts them and passes each through the real testAliases/runTestFiles/runBundle path. The new tests/funnel-share-counted-stage.test.ts is therefore selected by that checked discovery code. This is a source/discovery observation, not a claim that hosted CI ran or passed.
+
+| Scenario | Independently observed result |
+| --- | --- |
+| Healthy clone | 200/ok, import counter 1, two pages and one funnel |
+| Unread source | 503/funnel_unread, counter absent, no destination pages or funnel |
+| Unread destination inventory after admission | 503/funnel_unread_counted, import counter 1, no destination pages or funnel |
+
+The unchanged independent runner counted 116 synthetic commands, admitting each dispatch under its 10,000-command ceiling, used four in-process POST requests with bodies at most 4 KiB, attempted no external fetch and enforced a 120-second child timeout.
+
+### Exact source closure and focused checks
+
+The return was executed through a symlink overlay of the earlier read-only source snapshot, with the two changed paths supplied from the exact return head. It was not represented as a complete physical checkout. A non-truncated target Git tree and an esbuild metafile independently identified the proof's closure: all 229 real repository source inputs were byte-identical by Git blob hash to the return tree, with zero mismatches; the independent proof matched bf8396a6 and there were 746 vendor inputs.
+
+Actual scoped TypeScript for the new route and permanent-test roots with their real imports reported zero diagnostics. Directed ESLint for the two changed paths reported zero errors.
+
+Twelve related files completed green: funnel-share-counted-stage, funnel-bundle-reads-exact, thanks-note-unread, funnel-share, funnel-copy-account, funnel-inventory, funnel-capacity, page-funnel, store-copy, funnel-starter, funnel-types and funnel-step-review. Their total is 350 custom checks plus 12 Node tests. The permanent 21-check author test is included in that total; the separate unchanged independent 21-check proof is not added to it. The original 678-check execution recorded above was not rerun or relabeled as current.
+
+The additional plan-cost-registry run completed 22/24 Node tests. Its remaining two cases failed because the partial source snapshot lacked vercel.json and docs/zapier-app.md. Exact return-head blobs were subsequently obtained (4ccc6a11f7024f1543d675aa2aa15f6c613ea3ed and f4c75168d90224d2a09c1d943975b7827fd00eb2), but the execution environment then lost the workspace and temporary logs before those cases could be retried. Those two cases are not passing evidence and no complete cost-registry result is claimed.
+
+The environment loss also occurred before new public-data scanner and diff-check executions. There are no new green results for those checks in this focal return. The earlier review's existing evidence remains historical evidence only. No full suite, production build, browser flow, hosted nine-check status, global MR audit or merge readiness is certified by this return.

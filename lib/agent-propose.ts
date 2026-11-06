@@ -20,13 +20,15 @@ export async function proposeDescription(store: Store, keyId: string, args: Reco
   const raw = typeof args.description === "string" ? args.description : null;
   if (!product || raw === null) return answer({ error: "Send product (from list_products) and description (the whole new text)." }, true);
   if (raw.length > MAX_ABOUT_LENGTH * 2) return answer({ error: `A description holds at most ${MAX_ABOUT_LENGTH.toLocaleString("en-US")} characters.` }, true);
-  const listing = await readListing(store, product);
-  if (!listing || !store.statsId) return answer({ error: "There is no such product in this store. Use list_products for the ids." }, true);
-  const after = cleanAbout(raw);
-  // The words the studio would refuse on this product are refused here too, before the creator ever sees them.
-  const refused = await PRODUCT_DESCRIPTION.refusal?.(store, product, after);
-  if (refused) return answer({ error: `${refused} Nothing was proposed.` }, true);
   try {
+    // Inside the try, so a failed read of the product answers as the tool's failure, never as an error thrown
+    // out of the route (Claude 5 on #1856, CX72).
+    const listing = await readListing(store, product);
+    if (!listing || !store.statsId) return answer({ error: "There is no such product in this store. Use list_products for the ids." }, true);
+    const after = cleanAbout(raw);
+    // The words the studio would refuse on this product are refused here too, before the creator ever sees them.
+    const refused = await PRODUCT_DESCRIPTION.refusal?.(store, product, after);
+    if (refused) return answer({ error: `${refused} Nothing was proposed.` }, true);
     const before = await PRODUCT_DESCRIPTION.current(store, product);
     const made = await addProposal({ ...store, statsId: store.statsId }, PRODUCT_DESCRIPTION, { target: product, before, after, asked: { by: "mcp", who: keyId } }, Date.now(), admit);
     if (!made.ok) {

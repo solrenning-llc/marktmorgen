@@ -6,10 +6,11 @@ import {
   editOption,
   moveOption,
   removeOption,
-  setOptionOnSale,
+  setOptionOnSaleChecked,
   type OptionResult,
 } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
+import { planPausedByRestore } from "@/lib/product-extras";
 import { keptNumbersWithin, membersOnOption } from "@/lib/membership-numbers";
 import { pendingInvitesOnOptions } from "@/lib/move-members";
 import { MAX_OPTION_DETAILS, MAX_OPTION_DETAIL_LENGTH, MAX_OPTION_LABEL_LENGTH } from "@/lib/product-option";
@@ -28,6 +29,7 @@ const STATUS: Record<string, number> = {
   too_many: 409,
   store_too_many: 409,
   unknown: 404,
+  plan_pauses: 409,
 };
 
 /**
@@ -106,7 +108,14 @@ export async function POST(request: NextRequest) {
       if (typeof body.onSale !== "boolean") {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
-      result = await setOptionOnSale(ref, id, body.onSale);
+      // Whether putting it back stops the payment plan is decided in the write, from the product as stored then
+      // (Claude 5 on #2690): the studio's own copy may be stale. Only planPauseConfirmed exactly true lets it stop.
+      const sale = await setOptionOnSaleChecked(ref, id, body.onSale, planPausedByRestore, body.planPauseConfirmed === true);
+      if (!sale.ok) {
+        return Response.json({ ok: false, error: sale.reason, limit: sale.limit }, { status: STATUS[sale.reason] ?? 400 });
+      }
+      // Nothing is removed by this action, so there is no file to delete.
+      return Response.json({ ok: true, planStopped: sale.planStopped });
     } else if (action === "remove") {
       result = await removeOption(ref, id);
     } else {

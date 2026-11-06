@@ -117,6 +117,7 @@ const OPTION_MESSAGES: Record<string, string> = {
   store_too_many: `Your store holds ${MAX_STORE_OPTIONS.toLocaleString("en-US")} prices across all its products, which is the most it can. Remove a price you no longer use to add this one.`,
   bundle: "A bundle has one price for everything in it, so it cannot have several.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, to make room.",
+  plan_pauses: "Putting this price back on sale would stop the payment plan for every price. Nothing was changed.",
 };
 
 export { fastMoneyMessage } from "@/lib/terms-check-rules";
@@ -983,7 +984,7 @@ function OptionsBlock({
   }, [recurring, optionIds, offSaleIds, product.id]);
   const allOffSale = product.options.length > 0 && product.options.every((option) => option.offSale);
 
-  async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string) {
+  async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string | ((data: unknown) => string)) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
@@ -1001,6 +1002,13 @@ function OptionsBlock({
         const reason = refusal && typeof data === "object" && data !== null
           && Object.hasOwn(data, "error") && typeof (data as { error?: unknown }).error === "string"
           ? (data as { error: string }).error : null;
+        // The server read the product as stored and putting this price back would stop the plan (Claude 5 on
+        // #2690): this copy was stale, so ask the same question as when the studio knows it, and refresh.
+        if (reason === "plan_pauses" && typeof payload.id === "string") {
+          setRestoringId(payload.id);
+          router.refresh();
+          return;
+        }
         setError(
           reason === "fast_money"
             ? fastMoneyMessage((data as { passage?: unknown }).passage, "save")
@@ -1015,7 +1023,7 @@ function OptionsBlock({
         return;
       }
       done();
-      if (confirmation) toast(confirmation);
+      if (confirmation) toast(typeof confirmation === "function" ? confirmation(data) : confirmation);
       router.refresh();
     } catch {
       setError(OPTION_NOT_CONFIRMED);
@@ -1444,12 +1452,16 @@ function OptionsBlock({
                         aria-busy={busy} disabled={busy}
                         onClick={() =>
                           run(
-                            { action: "sale", id: option.id, onSale: true },
+                            { action: "sale", id: option.id, onSale: true, planPauseConfirmed: true },
                             () => {
                               refocusSale.current = option.id;
                               setRestoringId(null);
                             },
-                            `${option.label} is back on sale. The payment plan has stopped.`,
+                            // The server says whether the plan did stop: another tab may have covered this price since.
+                            (data) =>
+                              (data as { planStopped?: unknown }).planStopped === false
+                                ? `${option.label} is back on sale. The payment plan goes on.`
+                                : `${option.label} is back on sale. The payment plan has stopped.`,
                           )
                         }
                         className="btn btn-primary btn-sm"

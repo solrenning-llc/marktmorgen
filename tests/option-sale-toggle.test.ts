@@ -71,11 +71,11 @@ async function main(): Promise<void> {
 
   part("The route");
   const session = await openSession(OWNER);
-  is("off sale through the route", await post(session, { action: "sale", id: plus, onSale: false }), [200, { ok: true }]);
+  is("off sale through the route", await post(session, { action: "sale", id: plus, onSale: false }), [200, { ok: true, planStopped: false }]);
   is("it is off sale", (await read()).options.find((o) => o.id === plus)!.offSale, true);
   for (const bad of ["false", 0, null, undefined]) is(`onSale ${JSON.stringify(bad)} is refused`, (await post(session, { action: "sale", id: plus, onSale: bad }))[0], 400);
   is("an unknown option is a 404", (await post(session, { action: "sale", id: "nope123456", onSale: true }))[0], 404);
-  is("back on sale through the route", [await post(session, { action: "sale", id: plus, onSale: true }), Object.hasOwn((await read()).options.find((o) => o.id === plus)!, "offSale")], [[200, { ok: true }], false]);
+  is("back on sale through the route", [await post(session, { action: "sale", id: plus, onSale: true }), Object.hasOwn((await read()).options.find((o) => o.id === plus)!, "offSale")], [[200, { ok: true, planStopped: false }], false]);
 
   part("How many are still on it, from the kept reading only");
   is("no Stripe account: unknown, never 0", await post(session, { action: "count", id: pid }), [200, { ok: true, members: { [basic]: null, [plus]: null } }]);

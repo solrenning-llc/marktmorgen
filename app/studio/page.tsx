@@ -1215,7 +1215,7 @@ export default async function StudioPage({
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
   const [passkeys, team, freshLogin, lockedTill, twoStepRead, recoveryShown] = await firstReads.person;
-  // What the managers below are handed when it could not be read, as before; the banner over Today says it could not be read.
+  // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
   const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
   const connectReady = isConnectConfigured();
   const billingReadyForSteps = isBillingConfigured();
@@ -1326,7 +1326,7 @@ export default async function StudioPage({
         ) : null}
 
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
-        {store && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
+        {store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
@@ -3370,7 +3370,7 @@ export default async function StudioPage({
                 removalDays={REMOVAL_DAYS}
               />
               <RecoveryAddressManager shown={recoveryShown} />
-              <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
+              <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
 
               {role !== "owner" ? (
                 <section aria-labelledby="leave-title" className="mt-8 border-t border-line pt-6">
@@ -3460,7 +3460,7 @@ export default async function StudioPage({
                   removalDays={REMOVAL_DAYS}
                 />
                 <RecoveryAddressManager shown={recoveryShown} />
-                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
+                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
                 <p className="text-sm text-ink-soft">
                   <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
                     Once it is set up, log in again with it

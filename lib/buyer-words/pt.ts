@@ -135,7 +135,8 @@ export const pt: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog de ${store}`,
-  blogEmpty: "Ainda não há nada aqui.",
+  blogPastEnd: "Não há publicações nesta página",
+  blogPastEndBody: "Esta página fica depois da última publicação.",
   blogMinutes: (n) => `${n} min de leitura`,
   blogNewer: "Publicações mais recentes",
   blogOlder: "Publicações anteriores",
@@ -148,6 +149,7 @@ export const pt: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `poupa ${percent}%`,
   chooseOptionFor: (title) => `Escolha uma opção para ${title}`,
+  chooseOne: "Escolha uma",
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Como pagar ${title}`,
@@ -299,6 +301,7 @@ export const pt: BuyerWords = {
   newer: "Mais recentes",
   older: "Mais antigas",
   askUnknown: (store) => `Esta página não o indica. Pergunte a ${store} antes de comprar.`,
+  askTermsCut: () => "Não tenho aqui as condições completas. Pergunte ao criador antes de comprar.",
 
   noLongerOnSale: "Este produto já não está à venda.",
   seeStore: (store) => `Ver ${store}`,

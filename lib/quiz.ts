@@ -413,30 +413,88 @@ export type Attempt = {
 
 const NO_ATTEMPT: Attempt = { used: 0, last: null, best: 0, passed: false };
 
-function parseAttempt(raw: unknown, used: unknown): Attempt {
-  const count = Number(used);
-  const tries = Number.isInteger(count) && count > 0 ? count : 0;
-  if (typeof raw !== "string" || !raw) return { ...NO_ATTEMPT, used: tries };
+class QuizAttemptReadError extends Error {
+  constructor() {
+    super("Quiz attempt evidence is unavailable");
+    this.name = "QuizAttemptReadError";
+  }
+}
+
+function exactAttemptReply(reply: unknown): [string | null, string | null] {
+  if (!Array.isArray(reply)) throw new QuizAttemptReadError();
+  const length = Object.getOwnPropertyDescriptor(reply, "length");
+  const raw = Object.getOwnPropertyDescriptor(reply, "0");
+  const used = Object.getOwnPropertyDescriptor(reply, "1");
+  if (!length || !Object.hasOwn(length, "value") || length.value !== 2 ||
+      !raw || !Object.hasOwn(raw, "value") || !used || !Object.hasOwn(used, "value") ||
+      (raw.value !== null && typeof raw.value !== "string") ||
+      (used.value !== null && typeof used.value !== "string")) {
+    throw new QuizAttemptReadError();
+  }
+  return [raw.value, used.value];
+}
+
+function storedCount(raw: string | null): number {
+  if (raw === null) return 0;
+  if (!/^[1-9]\d*$/.test(raw)) throw new QuizAttemptReadError();
+  const count = Number(raw);
+  if (!Number.isSafeInteger(count)) throw new QuizAttemptReadError();
+  return count;
+}
+
+function storedRecord(raw: unknown): raw is Record<string, unknown> {
+  return !!raw && typeof raw === "object" && !Array.isArray(raw);
+}
+
+function storedAnswers(raw: unknown): raw is Answers {
+  return storedRecord(raw) && Object.values(raw).every(
+    (picked) => Array.isArray(picked) && picked.every((choice) => Number.isSafeInteger(choice) && choice >= 0),
+  );
+}
+
+function storedGrade(raw: unknown): raw is Grade {
+  if (!storedRecord(raw) || !Number.isSafeInteger(raw.right) || !Number.isSafeInteger(raw.total) ||
+      !Number.isSafeInteger(raw.percent) || typeof raw.passed !== "boolean" || !storedRecord(raw.marks)) return false;
+  if ((raw.right as number) < 0 || (raw.total as number) < 0 || (raw.right as number) > (raw.total as number) ||
+      (raw.percent as number) < 0 || (raw.percent as number) > 100) return false;
+  return Object.values(raw.marks).every((mark) => typeof mark === "boolean");
+}
+
+function storedLast(raw: unknown): raw is Attempt["last"] {
+  if (raw === null) return true;
+  if (!storedRecord(raw) || !storedAnswers(raw.answers) || !storedGrade(raw.grade)) return false;
+  return Number.isSafeInteger(raw.at) && (raw.at as number) >= 0;
+}
+
+function parseAttempt(raw: string | null, used: string | null): Attempt {
+  const tries = storedCount(used);
+  if (raw === null) return { ...NO_ATTEMPT, used: tries };
+  if (!raw || used === null) throw new QuizAttemptReadError();
   try {
-    const value = JSON.parse(raw) as Partial<Attempt>;
+    const value = JSON.parse(raw) as unknown;
+    if (!storedRecord(value) || !Number.isSafeInteger(value.used) || (value.used as number) < 1 ||
+        !storedLast(value.last) || !Number.isSafeInteger(value.best) || (value.best as number) < 0 ||
+        (value.best as number) > 100 || typeof value.passed !== "boolean") throw new QuizAttemptReadError();
     return {
       used: tries,
-      last: value.last && typeof value.last === "object" ? value.last : null,
-      best: typeof value.best === "number" ? value.best : 0,
-      passed: value.passed === true,
+      last: value.last,
+      best: value.best as number,
+      passed: value.passed,
     };
-  } catch {
-    return { ...NO_ATTEMPT, used: tries };
+  } catch (error) {
+    if (error instanceof QuizAttemptReadError) throw error;
+    throw new QuizAttemptReadError();
   }
 }
 
 /** How this student has done on this quiz. `who` is lib/learn.ts emailKey. */
 export async function attemptOf(courseId: string, lessonId: string, who: string): Promise<Attempt> {
   if (!isRedisConfigured()) return NO_ATTEMPT;
-  const [raw, used] = await redisPipeline([
+  const reply = await redisPipeline([
     ["GET", resultKey(courseId, lessonId, who)],
     ["GET", triesKey(courseId, lessonId, who)],
   ]);
+  const [raw, used] = exactAttemptReply(reply);
   return parseAttempt(raw, used);
 }
 
@@ -474,7 +532,13 @@ export async function submitQuiz(
   /** The question ids the page showed; needed when the quiz draws from a bank. */
   shown: string[] | null = null,
 ): Promise<SubmitResult> {
-  const before = await attemptOf(courseId, lessonId, who);
+  let before: Attempt;
+  try {
+    before = await attemptOf(courseId, lessonId, who);
+  } catch (error) {
+    if (error instanceof QuizAttemptReadError) return { ok: false, reason: "unavailable" };
+    throw error;
+  }
   if (before.passed) return { ok: false, reason: "passed" };
   if (quiz.attempts > 0 && before.used >= quiz.attempts) return { ok: false, reason: "no_tries" };
   if (quizWait(quiz, before, Date.now()) > 0) return { ok: false, reason: "wait" };

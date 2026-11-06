@@ -198,9 +198,24 @@ return out`;
  */
 export async function forgetFormsPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const forms = await readForms(statsId);
-  if (!forms.length) return 0;
   const what = "the deletion of a person's form responses";
+  // Which forms there are, read exactly (Codex G on #2584): the list as asked, every value a form that reads. Only an
+  // exact empty list means no forms; a reply in another shape, or a form record that does not read, is not "no
+  // responses to delete", so it throws UnknownReply and the erasure is said as incomplete.
+  const [listed] = exactReplies(await redisPipeline([["HVALS", formsKey(statsId)]]), 1, `${what} (its forms)`);
+  const values = plainList(listed);
+  if (!values) throw new UnknownReply(`${what} (its forms)`);
+  const forms = values.map((value) => {
+    if (typeof value !== "string") throw new UnknownReply(`${what} (its forms)`);
+    try {
+      const form = parseForm(JSON.parse(value));
+      if (form) return form;
+    } catch {
+      // Falls through to the refusal below.
+    }
+    throw new UnknownReply(`${what} (its forms)`);
+  });
+  if (!forms.length) return 0;
   const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]), 1, what);
   // Exactly {form's place, response, times removed} for each: any other shape
   // leaves the deletion unknown (UnknownReply), and nothing is given back.

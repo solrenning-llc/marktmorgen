@@ -4,7 +4,7 @@
  * (lib/agent-kinds.ts) under the book's lock (lib/agent-book.ts). Kept out of
  * the route so the studio and the tests use the same steps.
  */
-import type { Json } from "@/lib/agent-proposal-rules";
+import { type Json, sameValue } from "@/lib/agent-proposal-rules";
 import { AGENT_KINDS } from "@/lib/agent-kinds";
 import { type Confirmed, confirmProposals, declineProposal, readBook, undoDone } from "@/lib/agent-book";
 import type { Store } from "@/lib/store";
@@ -50,8 +50,18 @@ export async function undoFor(store: Store & { statsId: string }, ref: string, i
     (d) => (now.has(d.id) ? (now.get(d.id) as Json) : null),
     // Put back only over what was confirmed (`after`), checked in the write itself.
     async (d, value) => {
-      const written = await AGENT_KINDS.get(d.kind)?.write(store, ref, d.target, value, d.after);
-      return written === "changed" ? "changed" : written === true;
+      const kind = AGENT_KINDS.get(d.kind);
+      try {
+        const written = await kind?.write(store, ref, d.target, value, d.after);
+        return written === "changed" ? "changed" : written === true;
+      } catch (error) {
+        // The write's answer was lost (Codex G on #1856): what the store holds now says whether it was made.
+        console.error("putting back an agent's change could not be confirmed", error);
+        const now = await kind?.current(store, d.target).catch(() => undefined);
+        if (now !== undefined && sameValue(now, value)) return true;
+        if (now !== undefined && sameValue(now, d.after)) return false;
+        return "unknown";
+      }
     },
     who,
   );

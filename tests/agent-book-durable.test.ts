@@ -10,7 +10,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductAbout, setSubscriptio
 import { readAbout, writeAbout } from "@/lib/product-about";
 import { proposeDescription } from "@/lib/agent-propose";
 import { confirmFor, undoFor } from "@/lib/agent-confirm";
-import { readBook } from "@/lib/agent-book";
+import { readBook, undoDone } from "@/lib/agent-book";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -67,6 +67,26 @@ async function main(){
   is(mode+": nothing put back and the history does not say undone",[u.error===""&&(u.value as {ok:boolean}|null)?.ok===true,await readAbout(f.statsId,id),Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone)],[false,"Agent "+id,false]);
   const again=await outcome(()=>undoFor(f.store,f.owner,p,f.owner));
   is(mode+": tried again, it is put back and marked undone",[(again.value as {ok:boolean}|null)?.ok===true,await readAbout(f.statsId,id),Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone)],[true,"Original "+id,true]);
+ }
+ part("A restore whose answer is lost: what the store holds decides, and a made restore keeps its mark");
+ for(const mode of ["empty-after","throw-after","throw-before"] as const){
+  const f=await fixture(),p=f.proposals[0],id=f.ids[0];await confirmFor(f.store,f.owner,[p],f.owner);let injected=0;
+  redis.pipeline=(async commands=>{
+   if(injected===0&&commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).startsWith("-- marktmorgen:about-write-if:")){injected++;if(mode==="throw-before")throw Error("lost before");await base(commands);if(mode==="throw-after")throw Error("lost after");return[];}
+   return base(commands);
+  }) as typeof redis.pipeline;
+  let u:Awaited<ReturnType<typeof outcome>>;
+  try{u=await outcome(()=>undoFor(f.store,f.owner,p,f.owner));}finally{redis.pipeline=base;}
+  const value=await readAbout(f.statsId,id),undone=Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone);
+  is(mode+": the restore's write was reached once",injected,1);
+  is(mode+": the history says undone exactly when the text was put back",[value==="Original "+id,undone],mode==="throw-before"?[false,false]:[true,true]);
+  is(mode+": answered as the store holds it",(u.value as {ok:boolean}|null)?.ok===true,mode!=="throw-before");
+ }
+ part("A restore whose outcome stays unknown keeps the mark and is said as not confirmed");
+ {
+  const f=await fixture(),p=f.proposals[0];await confirmFor(f.store,f.owner,[p],f.owner);
+  const u=await outcome(()=>undoDone(f.store,p,()=>"Agent "+f.ids[0],async()=>{throw Error("unknown");},f.owner));
+  is("not confirmed, and the mark kept",[u.error,Boolean((await readBook(f.statsId)).history.find(x=>x.id===p)?.undone)],["BookWriteUnconfirmed",true]);
  }
  part("Every write of the book failing: an undo never leaves the text put back without the history saying so");
  {

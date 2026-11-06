@@ -300,13 +300,14 @@ export async function confirmProposals(
  * hides a restore. A restore that did not happen takes the mark back, on the
  * book as it is now; where even that cannot be written, the history says
  * undone though nothing was put back (BookWriteUnconfirmed), never the
- * other way round.
+ * other way round. A restore whose outcome is unknown (`restore` answering
+ * "unknown" or throwing) keeps the mark and is said as not confirmed.
  */
 export async function undoDone(
   store: DataStore & { statsId: string },
   id: string,
   current: (done: Done) => Json,
-  restore: (done: Done, value: Json) => Promise<boolean | "changed">,
+  restore: (done: Done, value: Json) => Promise<boolean | "changed" | "unknown">,
   who: string,
   now = Date.now(),
 ): Promise<{ ok: true } | { ok: false; error: UndoRefusal | "failed" }> {
@@ -319,8 +320,11 @@ export async function undoDone(
     const marked = await writeBook(store, held, recordUndone(book, id, who, now), now).catch(() => "unknown" as const);
     if (marked === "lost") return { ok: false, error: "failed" };
     if (marked === "written") {
-      const restored = await restore(plan.done, plan.restore).catch(() => false as const);
+      // A restore whose answer was lost may have been made (Codex G on #1856): unknown, never taken for "not made".
+      const restored = await restore(plan.done, plan.restore).catch(() => "unknown" as const);
       if (restored === true) return { ok: true };
+      // The mark stays, so a restore that was made is never left out of the history; said as not confirmed.
+      if (restored === "unknown") throw new BookWriteUnconfirmed();
       // Changed again between the check and the write: refused as the rules refuse it, nothing put back.
       answer = { ok: false, error: restored === "changed" ? "changed_since" : "failed" };
     } else answer = { ok: false, error: "failed" };

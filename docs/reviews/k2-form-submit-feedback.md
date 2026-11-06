@@ -150,3 +150,26 @@ NODE
 ~~~
 
 This evidence is server-side rendering and handler execution. The marker remains forgeable informational feedback, not a receipt or an existence claim. It establishes no browser hydration journey, provider delivery, publication, accessibility conformance or final CI status. Independent review and the parent's publication/merge gates still apply.
+
+## Additional test-only boundary controls
+
+The parent published the local G7 WIP as a82c8ce3b246c30fd705d9ac668df53bb7dee7dc. This phase uses that source context: the own worktree still has detached HEAD 4490711, with the parent's staged WIP content, rather than pretending HEAD itself is a82c8ce3. Native Git-object comparison confirms the POST, FormDone, old 61-check test and feedback world are byte-identical to their a82c8ce3 files. No product or old-test repair occurs in this phase.
+
+Only cases were added to the two new test files; native diff against a82c8ce3 contains no removed test line or rewritten original assertion. The runner's declared POST scenario count changes only from four to eight. Every per-scenario ceiling remains 40 application commands, checked before each batch; request size remains 4 KiB and the runner deadline remains 120 seconds. The aggregate admitted maximum is therefore 8 * 40 = 320 commands, replacing the original four-scenario aggregate of 160, before any application dispatch. There are exactly four new POST scenarios, not eight new ones.
+
+| Additional POST input | Predicted and observed retained feedback query | Actual application commands |
+| --- | --- | ---: |
+| Both page and funnel omitted | status=unavailable | 1 |
+| Known page, funnel omitted | status=unavailable and p=page000001 | 1 |
+| Page omitted, valid funnel marker | status=unavailable and f=funnel0001 | 1 |
+| External page text and invalid funnel marker | status=unavailable | 1 |
+
+All four use a syntactically valid store/form and the real form-data parser, with only the requested form HGET reply changed to unknown. They do not invent invalid fields that the route would reject before reading the definition. Each performs exactly one selected injection, zero later commands, zero saved responses, zero admission/enrollment/funnel/join effects and zero provider fetches; the stored form stays unchanged. Direct native MemoryRedis setup and inspection remain outside application counts.
+
+The additional pure-SSR controls add 24 checks: a missing store cannot bypass body notFound and performs no definition/product/funnel work; metadata preserves the existing non-feedback title and noindex/nofollow for a different status, an array status, malformed form id, missing store and suspended store. Each metadata case performs the existing one synthetic store lookup and zero definition reads. These are constructed SSR query values, not evidence that a browser or Next's HTTP query parser was exercised. Noindex/nofollow is not a privacy or access-control claim.
+
+Fresh execution of the unchanged standalone command produces 123/123 POST checks and 190/190 SSR checks: 313/313 total, comprising the original 237 checks necessarily rerun in the same files plus 76 new checks (52 POST, 24 SSR). Across all eight POST scenarios, actual application commands total 12, within the preregistered aggregate ceiling of 320. The previously passed 61 legacy checks and nine public-page cases are historical validation from the prior GREEN phase and were not rerun here. No inherited RED, unrelated test, global suite or build was run.
+
+Scoped TypeScript over the three new test/world roots and their actual source imports reports zero diagnostics. ESLint on the two changed tests and runner exits zero; git diff --check exits zero. The full public-data scan reports 4,139 tracked files and zero files requiring correction. The feedback world and production remain byte-identical to a82c8ce3. Independent external review is not claimed.
+
+The local capability inventory found playwright-core 1.56.1, but its expected Chromium 1194, Firefox 1495 and WebKit 2215 executables were absent; no Chrome/Chromium/Firefox command or matching binary was found in the inspected standard local locations. No browser was launched, no binary downloaded and no new browser path created. Real native keyboard, focus paint, redirects followed by a browser, NextLink hydration, font/layout geometry and assistive-technology announcement remain outside this evidence.

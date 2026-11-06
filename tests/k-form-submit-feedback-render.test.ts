@@ -92,6 +92,32 @@ async function main() {
   is('well-formed unverified id: informational feedback is not an existence claim', drawn.error, null);
   is('well-formed unverified id: existence is not read', state.definitionReads, 0);
   is('well-formed unverified id: safe root navigation remains', links.length > 0 && links.every(link => link.pathname === `/@${shop.handle}`), true);
+
+  // Additional controls only. Missing stores remain 404 in the body. Metadata's existing
+  // non-feedback title is preserved for non-string statuses and invalid/unavailable routes.
+  part('Additional missing-store body and strict metadata controls');
+  resetFeedback(); state.storeMissing = true; drawn = await draw({ status: 'unavailable' });
+  is('missing store: feedback cannot bypass notFound', drawn.error instanceof KnownNotFound, true);
+  is('missing store: definition is not read', state.definitionReads, 0);
+  is('missing store: product is not read', state.listingReads, 0);
+  is('missing store: funnel is not read', state.funnelReads, 0);
+
+  const metadataCases: { name: string; status: string | string[]; id: string; missing: boolean; suspended: boolean }[] = [
+    { name: 'other status', status: 'other-status', id: form.id, missing: false, suspended: false },
+    { name: 'array status', status: ['unavailable'], id: form.id, missing: false, suspended: false },
+    { name: 'malformed form id', status: 'unavailable', id: 'bad!', missing: false, suspended: false },
+    { name: 'missing store', status: 'unavailable', id: form.id, missing: true, suspended: false },
+    { name: 'suspended store', status: 'unavailable', id: form.id, missing: false, suspended: true },
+  ];
+  for (const { name, status, id, missing, suspended } of metadataCases) {
+    resetFeedback(); state.storeMissing = missing; shop.suspended = suspended ? 'Synthetic suspension' : '';
+    const metadata = await generateMetadata(args({ status }, id));
+    is(`metadata ${name}: the original non-feedback title remains`, metadata.title, `${formWords('en').doneHeading} — ${missing ? 'Marktmorgen' : shop.name}`);
+    is(`metadata ${name}: robots remain private`, metadata.robots, { index: false, follow: false });
+    is(`metadata ${name}: no definition IO`, state.definitionReads, 0);
+    is(`metadata ${name}: exactly the existing store lookup`, state.storeReads, 1);
+    console.log('FORM_FEEDBACK_ADDITIONAL_METADATA_OBSERVATION', JSON.stringify({ name, title: metadata.title, robots: metadata.robots, storeReads: state.storeReads, definitionReads: state.definitionReads }));
+  }
   done();
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

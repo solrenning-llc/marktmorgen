@@ -70,6 +70,53 @@ async function main() {
       is(`${mode}: no provider operation`, providerCalls, 0);
       console.log('FORM_FEEDBACK_POST_OBSERVATION', JSON.stringify({ mode, status: response.status, location, commands, injected, afterUnknown, effects: { ...effects }, saved }));
     }
+
+    // Four additional cases only: unknown definitions still stop before effects; omitted or
+    // unrecognized page ids disappear, while an independently valid funnel marker survives.
+    // Together with the four original cases: 8 * 40 = 320 commands, admitted before batches.
+    const navigationCases: { name: string; page: string | null; mark: string | null; expected: Record<string, string> }[] = [
+      { name: 'both markers omitted', page: null, mark: null, expected: { status: 'unavailable' } },
+      { name: 'known page without funnel', page: 'page000001', mark: null, expected: { status: 'unavailable', p: 'page000001' } },
+      { name: 'valid funnel without page', page: null, mark: 'funnel0001', expected: { status: 'unavailable', f: 'funnel0001' } },
+      { name: 'hostile page and funnel', page: 'https://outside.example/leave', mark: '../../outside', expected: { status: 'unavailable' } },
+    ];
+    for (const { name, page, mark, expected } of navigationCases) {
+      part(`Additional POST navigation: ${name}`); redis.pipeline = pipeline; redis.clear();
+      for (const key of Object.keys(effects) as (keyof typeof effects)[]) effects[key] = 0;
+      await writeForm(shop.statsId!, stored); // Setup, outside the application's admitted command count.
+      const body = new URLSearchParams({ handle: shop.handle, form: form.id, q_name00: 'Synthetic', q_email0: 'person@example.com' });
+      if (page !== null) body.set('page', page);
+      if (mark !== null) body.set('f', mark);
+      if (Buffer.byteLength(body.toString()) > 4096) throw Error('Four KiB is the local request-body ceiling');
+      let commands = 0, injected = 0, afterUnknown = 0;
+      redis.pipeline = async batch => {
+        if (commands + batch.length > 40) throw Error('Forty application commands per POST scenario is the ceiling');
+        commands += batch.length;
+        if (batch.length === 1 && batch[0][0] === 'HGET' && batch[0][1] === formsKey && batch[0][2] === form.id) {
+          injected++; return [false];
+        }
+        if (injected) afterUnknown += batch.length;
+        return pipeline(batch);
+      };
+      const response = await POST(new Request('https://example.com/api/store/form', { method: 'POST', body }) as NextRequest);
+      const location = response.headers.get('location'), target = location ? new URL(location) : null;
+      const [saved, definition] = await pipeline([['LLEN', answersKey], ['HGET', formsKey, form.id]]);
+      const sorted = (entries: [string, string][]) => entries.sort(([a], [b]) => a.localeCompare(b));
+      is(`${name}: unknown definition still redirects`, response.status, 303);
+      is(`${name}: response is not cached`, response.headers.get('cache-control'), 'no-store');
+      is(`${name}: redirect stays on the request origin`, target?.origin, 'https://example.com');
+      is(`${name}: the destination is dedicated feedback`, target?.pathname, `/@${shop.handle}/form/${form.id}`);
+      is(`${name}: only the admitted markers are carried`, target ? sorted([...target.searchParams.entries()]) : null, sorted(Object.entries(expected)));
+      is(`${name}: feedback carries no fragment`, target?.hash, '');
+      is(`${name}: no response is actually saved`, saved, 0);
+      is(`${name}: the definition remains unchanged`, definition, JSON.stringify(stored));
+      is(`${name}: exactly one selected HGET is injected`, injected, 1);
+      is(`${name}: only the definition command is dispatched`, commands, 1);
+      is(`${name}: no command follows the unknown definition`, afterUnknown, 0);
+      is(`${name}: no service effect is attempted`, effects, { admission: 0, enroll: 0, funnel: 0, funnelReads: 0, joins: 0 });
+      is(`${name}: no provider operation`, providerCalls, 0);
+      console.log('FORM_FEEDBACK_ADDITIONAL_POST_OBSERVATION', JSON.stringify({ name, status: response.status, location, commands, injected, afterUnknown, saved, effects: { ...effects } }));
+    }
   } finally { redis.pipeline = pipeline; globalThis.fetch = beforeFetch; }
   done();
 }

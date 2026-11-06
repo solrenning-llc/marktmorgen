@@ -16,7 +16,7 @@ for (const path of ['app/api/store/form/route.ts', 'app/[handle]/form/[form]/pag
   const bytes = readFileSync(join(sourceRoot, path));
   console.log('FORM_FEEDBACK_SOURCE', path, createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex'));
 }
-console.log('FORM_FEEDBACK_BOUNDS', JSON.stringify({ postScenarios: 4, applicationCommandsPerScenario: 40, requestBytes: 4096, deadlineMs: 120_000, providerCallsAllowed: 0, pureSsrLocales: 7 }));
+console.log('FORM_FEEDBACK_BOUNDS', JSON.stringify({ postScenarios: 8, applicationCommandsPerScenario: 40, requestBytes: 4096, deadlineMs: 120_000, providerCallsAllowed: 0, pureSsrLocales: 7 }));
 const temp = mkdtempSync(join(tmpdir(), 'k2-form-feedback-'));
 let failures = 0;
 try {

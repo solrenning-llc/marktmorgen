@@ -4,7 +4,7 @@
  * every page of the creator's Stripe account at its most, about forty of a
  * store's API requests, so a Store plan's month went in a dozen readings).
  *
- *   nl:stats:<statsId>:apinum:<variant>   [variant, statsId, Stripe account, currency, sales, at] \n <the numbers as JSON>
+ *   nl:stats:<statsId>:apinum:<variant>   [variant, statsId, Stripe account, currency, sales, at, body digest] \n <the numbers as JSON>
  *
  * A reading first looks up how big the copy is (STRLEN). Kept: what reading
  * it and sending the answer may take is set aside (lib/api-guard.ts,
@@ -30,6 +30,7 @@
  * reading whose listings were not covered by the requests left is answered
  * without them and not kept.
  */
+import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 import { type StatsData, readsSales } from "@/lib/stats";
@@ -60,8 +61,12 @@ export const keptNumbersKey = (statsId: string, variant: NumbersVariant) => `nl:
  * under, nothing secret (the store's numbers id, its Stripe account, currency
  * and whether it reads sales), and when, as JSON on one line.
  */
-function headOf(store: Store, variant: NumbersVariant, at: number): string {
-  return JSON.stringify([variant, String(store.statsId ?? ""), String(store.stripeAccountId ?? ""), String(store.currency), readsSales(store), at]);
+function digestOf(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function headOf(store: Store, variant: NumbersVariant, at: number, digest: string): string {
+  return JSON.stringify([variant, String(store.statsId ?? ""), String(store.stripeAccountId ?? ""), String(store.currency), readsSales(store), at, digest]);
 }
 
 /** The kept copy, when its first line is exactly this store's and this variant's, and less than an hour old; else null. */
@@ -69,16 +74,21 @@ export function openKeptNumbers(store: Store, variant: NumbersVariant, raw: unkn
   if (typeof raw !== "string" || !store.statsId) return null;
   const end = raw.indexOf("\n");
   if (end < 0 || end > HEAD_BYTES) return null;
-  let at: unknown;
+  let head: unknown;
   try {
-    at = (JSON.parse(raw.slice(0, end)) as unknown[])[5];
+    head = JSON.parse(raw.slice(0, end));
   } catch {
     return null;
   }
+  if (!Array.isArray(head) || head.length !== 7) return null;
+  const at = head[5];
+  const digest = head[6];
   if (typeof at !== "number" || !Number.isSafeInteger(at) || !(at <= now && now - at < NUMBERS_KEPT_SECONDS * 1000)) return null;
-  if (raw.slice(0, end) !== headOf(store, variant, at)) return null;
+  if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) return null;
+  const json = raw.slice(end + 1);
+  if (digestOf(json) !== digest || raw.slice(0, end) !== headOf(store, variant, at, digest)) return null;
   try {
-    const data = JSON.parse(raw.slice(end + 1)) as StatsData;
+    const data = JSON.parse(json) as StatsData;
     if (!data || typeof data !== "object" || !Array.isArray(data.days) || !data.totals) return null;
     return { data, at };
   } catch {
@@ -90,7 +100,7 @@ export function openKeptNumbers(store: Store, variant: NumbersVariant, raw: unkn
 export function keptNumbersCopy(store: Store, variant: NumbersVariant, data: StatsData, at: number): string | null {
   const json = JSON.stringify(data);
   if (!store.statsId || Buffer.byteLength(json) > NUMBERS_KEPT_BYTES) return null;
-  return `${headOf(store, variant, at)}\n${json}`;
+  return `${headOf(store, variant, at, digestOf(json))}\n${json}`;
 }
 
 /**

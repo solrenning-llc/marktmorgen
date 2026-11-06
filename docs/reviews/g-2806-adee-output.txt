@@ -1,0 +1,1356 @@
+===== /tmp/g2806-4304-frozen-red.log =====
+G_LOCK_ENVELOPE {"mode":"extra","evals":3,"kept":true,"wrote":true,"gone":true,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    extra: exactly three actual script boundaries reached
+  FAIL  extra: unknown receipt cannot confirm lease held by successor
+        expected false
+        got      true
+  FAIL  extra: unknown receipt cannot confirm unwritten record
+        expected false
+        got      true
+  FAIL  extra: unknown receipt cannot confirm unapplied deletion
+        expected false
+        got      true
+  ok    extra: no getter invoked
+  ok    extra: actual successor and record unchanged
+G_LOCK_ENVELOPE {"mode":"accessor","evals":3,"kept":true,"wrote":true,"gone":true,"getters":3,"owner":"legitimate-successor","target":"before"}
+  ok    accessor: exactly three actual script boundaries reached
+  FAIL  accessor: unknown receipt cannot confirm lease held by successor
+        expected false
+        got      true
+  FAIL  accessor: unknown receipt cannot confirm unwritten record
+        expected false
+        got      true
+  FAIL  accessor: unknown receipt cannot confirm unapplied deletion
+        expected false
+        got      true
+  FAIL  accessor: no getter invoked
+        expected 0
+        got      3
+  ok    accessor: actual successor and record unchanged
+G_LOCK_ENVELOPE {"mode":"inherited","evals":3,"kept":true,"wrote":true,"gone":true,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    inherited: exactly three actual script boundaries reached
+  FAIL  inherited: unknown receipt cannot confirm lease held by successor
+        expected false
+        got      true
+  FAIL  inherited: unknown receipt cannot confirm unwritten record
+        expected false
+        got      true
+  FAIL  inherited: unknown receipt cannot confirm unapplied deletion
+        expected false
+        got      true
+  ok    inherited: no getter invoked
+  ok    inherited: actual successor and record unchanged
+
+18 checks, 10 failing.
+DESCRIPTOR_PROTOTYPE {"parsed":[1],"renewed":true,"written":true,"deleted":true,"calls":3,"owner":"next","record":"before"}
+  FAIL  accessor descriptor cannot inherit data value from Object.prototype
+        expected null
+        got      [1]
+  FAIL  unknown polluted receipt does not confirm renew
+        expected false
+        got      true
+  FAIL  unknown polluted receipt does not confirm write
+        expected false
+        got      true
+  FAIL  unknown polluted receipt does not confirm delete
+        expected false
+        got      true
+  FAIL  getter stays uncalled
+        expected 0
+        got      6
+  ok    actual successor and record survive
+
+6 checks, 5 failing.
+
+
+===== /tmp/g2806-adee-focal.log =====
+G_LOCK_ENVELOPE {"mode":"extra","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    extra: exactly three actual script boundaries reached
+  ok    extra: unknown receipt cannot confirm lease held by successor
+  ok    extra: unknown receipt cannot confirm unwritten record
+  ok    extra: unknown receipt cannot confirm unapplied deletion
+  ok    extra: no getter invoked
+  ok    extra: actual successor and record unchanged
+G_LOCK_ENVELOPE {"mode":"accessor","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    accessor: exactly three actual script boundaries reached
+  ok    accessor: unknown receipt cannot confirm lease held by successor
+  ok    accessor: unknown receipt cannot confirm unwritten record
+  ok    accessor: unknown receipt cannot confirm unapplied deletion
+  ok    accessor: no getter invoked
+  ok    accessor: actual successor and record unchanged
+G_LOCK_ENVELOPE {"mode":"inherited","evals":3,"kept":false,"wrote":false,"gone":false,"getters":0,"owner":"legitimate-successor","target":"before"}
+  ok    inherited: exactly three actual script boundaries reached
+  ok    inherited: unknown receipt cannot confirm lease held by successor
+  ok    inherited: unknown receipt cannot confirm unwritten record
+  ok    inherited: unknown receipt cannot confirm unapplied deletion
+  ok    inherited: no getter invoked
+  ok    inherited: actual successor and record unchanged
+
+18 checks, all passing.
+
+Codex G's proof: a script receipt not in its exact shape confirms nothing
+  ok    extra: three script boundaries reached
+  ok    extra: a hold on the successor's lock is not confirmed
+  ok    extra: an unwritten record is not confirmed
+  ok    extra: an unapplied deletion is not confirmed
+  ok    extra: no getter called
+  ok    extra: the successor's lock and the record are unchanged
+  ok    accessor: three script boundaries reached
+  ok    accessor: a hold on the successor's lock is not confirmed
+  ok    accessor: an unwritten record is not confirmed
+  ok    accessor: an unapplied deletion is not confirmed
+  ok    accessor: no getter called
+  ok    accessor: the successor's lock and the record are unchanged
+  ok    inherited: three script boundaries reached
+  ok    inherited: a hold on the successor's lock is not confirmed
+  ok    inherited: an unwritten record is not confirmed
+  ok    inherited: an unapplied deletion is not confirmed
+  ok    inherited: no getter called
+  ok    inherited: the successor's lock and the record are unchanged
+  ok    hole: three script boundaries reached
+  ok    hole: a hold on the successor's lock is not confirmed
+  ok    hole: an unwritten record is not confirmed
+  ok    hole: an unapplied deletion is not confirmed
+  ok    hole: no getter called
+  ok    hole: the successor's lock and the record are unchanged
+
+The acquisition receipt too: only its exact shape takes a lock
+  ok    extra: not taken, said busy
+  ok    extra: no getter called
+  ok    accessor: not taken, said busy
+  ok    accessor: no getter called
+  ok    inherited: not taken, said busy
+  ok    inherited: no getter called
+  ok    hole: not taken, said busy
+  ok    hole: no getter called
+
+The exact shapes still work
+  ok    a hold on our own lock
+  ok    a fenced write while ours
+  ok    a fenced delete while ours
+
+35 checks, all passing.
+
+Codex G's proof: a release whose script fails never deletes the successor's mark
+  ok    courses: the release's script was tried once
+  ok    courses: no read-then-delete after it
+  ok    courses: the successor's mark is kept
+  ok    reminders: the release's script was tried once
+  ok    reminders: no read-then-delete after it
+  ok    reminders: the successor's mark is kept
+  ok    discord: the release's script was tried once
+  ok    discord: no read-then-delete after it
+  ok    discord: the successor's mark is kept
+  ok    quiet: the release's script was tried once
+  ok    quiet: no read-then-delete after it
+  ok    quiet: the successor's mark is kept
+
+Codex G's exact race: the old fallback read our mark, then the successor took it, then the DEL landed on it
+  ok    courses: after the failed script, no DEL is sent
+  ok    courses: the successor's mark, taken once ours ran out, survives
+  ok    reminders: after the failed script, no DEL is sent
+  ok    reminders: the successor's mark, taken once ours ran out, survives
+  ok    discord: after the failed script, no DEL is sent
+  ok    discord: the successor's mark, taken once ours ran out, survives
+  ok    quiet: after the failed script, no DEL is sent
+  ok    quiet: the successor's mark, taken once ours ran out, survives
+
+A hold whose script fails says the lock is not held, and extends nothing
+  ok    not held, so the caller does not write
+  ok    and no separate GET or EXPIRE was sent
+
+A fenced write whose script fails writes nothing
+  ok    not written
+  ok    and no separate GET, EXISTS or SET was sent
+
+On a healthy Redis each is one script, and does what it says
+  ok    a hold on our own lock: held
+  ok    a fenced write while ours: written
+  ok    a fenced write of something new, already there: not written
+  ok    our release deletes our lock
+  ok    a release never deletes another holder's lock
+  ok    a hold on another's lock: not held
+  ok    a fenced write under another's lock: not written
+
+31 checks, all passing.
+
+
+===== /tmp/g2806-adee-descriptor-prototype.log =====
+DESCRIPTOR_PROTOTYPE {"parsed":[1],"renewed":true,"written":true,"deleted":true,"calls":0,"owner":"next","record":"before"}
+  FAIL  accessor descriptor cannot inherit data value from Object.prototype
+        expected null
+        got      [1]
+  FAIL  unknown polluted receipt does not confirm renew
+        expected false
+        got      true
+  FAIL  unknown polluted receipt does not confirm write
+        expected false
+        got      true
+  FAIL  unknown polluted receipt does not confirm delete
+        expected false
+        got      true
+  ok    getter stays uncalled
+  ok    actual successor and record survive
+
+6 checks, 4 failing.
+
+
+===== /tmp/g2806-adee-boundaries.log =====
+  ok    plain copy keeps first snapshot
+  ok    copy identity separate
+  ok    unknown shape stays unknown
+  ok    unknown shape stays unknown
+  ok    unknown shape stays unknown
+  ok    unknown shape stays unknown
+  ok    unknown shape stays unknown
+  ok    throwing getter refused unread
+  ok    getter never called
+  ok    unreadable proxy cannot confirm hold
+  ok    unreadable proxy cannot confirm write
+  ok    unreadable proxy cannot confirm delete
+  ok    unreadable proxy cannot confirm hold
+  ok    unreadable proxy cannot confirm write
+  ok    unreadable proxy cannot confirm delete
+  ok    all four script boundaries for both proxies
+  ok    no separate fallback command
+  ok    actual held key retained
+
+18 checks, all passing.
+
+
+===== /tmp/g2806-adee-linked.log =====
+
+Off three ways today, and nothing is sent while off
+  ok    no reviewed cost ceiling exists yet
+  ok    no review: off, nothing sent
+  ok    no store: off, nothing sent
+  ok    no key: off, nothing sent
+  ok    the key: none without the setting
+  ok    the key: not 32 bytes, none
+  ok    the key: 32 bytes from base64
+  ok    the default run, with a key but no review or bucket, is off and sends nothing
+  ok    the default store: none without the bucket settings
+
+A review counts only with its date, its source, a retention and a storage ceiling the copies cannot pass
+  ok    the synthetic review is whole
+  ok    a cap behind a getter: refused, off, nothing sent, the getter never run
+  ok    a review inherited from another object: refused, nothing sent
+  ok    a field added to Object.prototype is never read into the copy
+  ok    a retention of 3 days is admitted
+  ok    a revoked proxy: refused as a result, never an exception
+  ok    no date: refused, off, nothing sent
+  ok    a date that is not one: refused, off, nothing sent
+  ok    no source: refused, off, nothing sent
+  ok    no retention: refused, off, nothing sent
+  ok    a retention of 1 day: refused, off, nothing sent
+  ok    a retention of 2 days: refused, off, nothing sent
+  ok    a storage ceiling the kept copies could pass: refused, off, nothing sent
+  ok    a storage ceiling one byte short of retention + 2 sets: refused, off, nothing sent
+  ok    no room for the run's own commands: refused, off, nothing sent
+  ok    a cap that is not a count: refused, off, nothing sent
+  ok    more parts than a set may have: refused, off, nothing sent
+  ok    parts whose stored weight the ceiling cannot hold: refused, off, nothing sent
+
+With all three, a copy is made, written once and read back the same
+  ok    done, with the keys copied (its own day count and lock among them), one part and its manifest
+  ok    a second run the same day is refused before anything is written
+  ok    the good copy's time and its manifest are kept, and survive that refusal
+  ok    the last good copy's mark is kept for good: it names the copy never deleted to make room
+
+Failures say which step, and keep the last good copy's time
+  ok    a copy that does not read back the same is a failure
+  ok    its reason is kept, with its time
+  ok    a failure's note expires by itself
+  ok    one failed day after a good one: a good copy is still under 48 hours old
+  ok    a cap reached is a failure that says which
+  ok    the reason kept is the latest
+  ok    no good copy for over 48 hours: seen
+  ok    the database failing during the export: a result, not an exception
+  ok    and its reason is kept
+  ok    a refused day mark: the run stops before copying, as a result
+  ok    a good copy whose outcome could not be written is still reported done
+  ok    with nothing ever kept, the report says there is no good copy
+
+At most one run a day and one new try after a failure, counted before any cost (inbox C4-49)
+  ok    the day's first run fails
+  ok    one new try the same day runs, and is done
+  ok    a third call that day: refused at the day's count, four commands (the lock; the count; the lock let go only if it is its own, in one script), nothing listed or written
+  ok    a day whose first run is done
+  ok    no new try after a good run: refused, four commands, nothing written
+  ok    two failures in a day: the second was the new try
+  ok    and nothing more that day
+  ok    the count of the day expires by itself
+
+A walk past its pages is a failure that says so, never a partial copy (inbox C4-46)
+  ok    refused at the walk's page cap, nothing written
+  ok    and the owner's report says so
+
+Write first, then delete past the retention; under the ceiling a failed delete never costs the day's copy (inbox C4-53)
+  ok    the normal case: written, then the copy older than 30 days deleted, the one of exactly 30 days and the younger kept
+  ok    a delete that fails under the ceiling: the day's copy is still written, done
+  ok    and the owner's report says the deletion failed
+  ok    the good copy's time is the new one
+  ok    the next run deletes what was left past the retention
+
+At the ceiling, the oldest go first, never the last verified copy; a failed delete there writes nothing (inbox C4-53)
+  ok    at the ceiling, a delete that fails: nothing written, said so
+  ok    the day's new try makes room from the oldest, keeps the last verified copy, and writes
+  ok    and the bucket stays within the review's ceiling
+
+The last verified copy is known for sure before any copy is deleted to make room (Codex G on e95705e66)
+  ok    an empty answer from the database: no copy deleted to make room, nothing written, said so
+  ok    two answers for one command: no copy deleted to make room, nothing written, said so
+  ok    a value that is not text: no copy deleted to make room, nothing written, said so
+  ok    a value that is not the kept shape: no copy deleted to make room, nothing written, said so
+  ok    an old mark with a time and no manifest: no copy deleted to make room, nothing written, said so
+  ok    no mark at all, with copies in the bucket: no copy deleted to make room, nothing written, said so
+
+The bucket's rule outlives the retention, and a last good copy lost to it never stops the backup (Reviewer 1 on e81007570)
+  ok    the bucket's lifecycle rule to set: 60 days, longer than the 30-day retention
+  ok    30 days more than the retention
+  ok    the last good copy was taken by the bucket's rule
+  ok    the first good run after it writes again
+  ok    and the report says the last good copy was lost
+  ok    the run's own note: last good copy lost
+  ok    only objects with no valid manifest were deleted to make room
+
+A failed day deletes nothing after it: the last good copy stays past the retention while new ones fail (Codex G on e95705e66)
+  ok    day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole
+  ok    the next good copy is written, and only then is the old one, past the retention, deleted
+
+When even deleting every other copy leaves no room, nothing is written
+  ok    the others deleted, the last verified copy kept, and still no room: room_error, nothing written
+
+A listing longer than the ceiling allows: nothing written, said so
+  ok    more than its 1 page: refused as room_pages after one page, nothing written or deleted
+
+Two calls at once: one runs, the other is refused before anything costly (inbox C4-53)
+  ok    one is done, the other refused as busy; one set written
+  ok    the busy call left the day's new try untouched
+
+The lock: only its own run lets it go, it outlives the run's cutoff, and a busy call is reported
+  ok    the lock lives longer than the cutoff and the admission's two requests, with a minute to spare
+  ok    held, while writing, for at least the cutoff
+  ok    a lock taken by another run since is never let go by this one
+  ok    a call that finds the lock: busy, and the owner's report says so
+
+What the code proves: never past the review's ceiling in objects, and the last verified copy always kept
+  ok    never more than the review's 36199424 bytes (seen 21656)
+  ok    objects are what limits here: 64 reached, never passed, one listing page of 1
+  ok    the last verified copy is never deleted
+  ok    after each run whose deletion finished, none of its own copies older than 30 days
+  ok    the ceiling in sets: retention + 2 = 32
+
+The same 90 days with copies that weigh more than half a set each: bytes are what limits
+  ok    never more than the review's 36199424 bytes as listed (seen 35633871)
+  ok    and fewer objects than the 64 the count allows (seen 63)
+  ok    the last verified copy is never deleted
+
+A run that passes its cutoff stops before its manifest (independent review of #2175)
+  ok    the run's cutoff: 800 s, under a day (the retention's proof needs it)
+  ok    past the cutoff: refused as such, its part left unreferenced, no manifest written
+
+With the shortest retention, the report says no good copy before the last one can be deleted
+  ok    two failed days: the good copy is still there, and the report already says no good copy for 48 hours
+
+Nothing schedules it
+  ok    vercel.json names no backup route
+
+96 checks, all passing.
+✔ unknown script acknowledgments never confirm a lease or fenced write (4.418724ms)
+✔ when the script cannot run, no renewal or fenced write is confirmed and no separate command is sent (0.573432ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13.7597
+✔ lock admission requires explicit OK and never grants ownership on unknown storage response (5.33316ms)
+✔ unknown stock lock acknowledgment cannot open checkout (34.505406ms)
+✔ malformed lock receipt never grants ownership or retries an uncertain acquisition (1.251341ms)
+✔ strict fenced CAS never downgrades an ambiguous EVAL to separate reads or writes (1.119393ms)
+✔ strict fenced CAS refuses unsafe or over-budget inputs before any IO (0.351559ms)
+✔ strict release cannot turn an ambiguous EVAL into a GET/DEL race (0.733463ms)
+✔ strict release rejects unknown ownership without reading executable fields (0.67198ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 51.880642
+
+Taken and let go by the same run
+  ok    taken
+  ok    taken again by another: not ours
+  ok    let go by its own run
+
+A mark that ran out and was taken by another run is not ours to let go
+  ok    the second run takes it
+  ok    the first run failing later leaves the second run's mark alone
+
+5 checks, all passing.
+
+deliverGift: the giving mark is read exactly
+  ok    a giving mark answered as true, not held after: unknown, nothing given
+  ok    a giving mark answered as a number, not held after: unknown, nothing given
+  ok    a giving mark answered as an empty reply, not held after: unknown, nothing given
+  ok    a giving mark answered as not a list, not held after: unknown, nothing given
+  ok    a giving mark answered as text, read back as another value: somebody else's, so not done here and not said as done
+  ok    a mark another run holds, the gift not given yet: thrown, nothing given, so the next run tries again
+  ok    the gift given by another run
+  ok    a mark another run holds, the gift given already: already
+  ok    the mark free: given
+  ok    and let go after
+  ok    a mark taken over meanwhile is not deleted by this run
+
+handOverPreorder: the giving mark is read exactly
+  ok    a pre-order's mark answered as true, not held after: unknown, nothing handed over
+  ok    a pre-order's mark answered as a number, not held after: unknown, nothing handed over
+  ok    a pre-order's mark answered as an empty reply, not held after: unknown, nothing handed over
+  ok    a pre-order's mark answered as not a list, not held after: unknown, nothing handed over
+  ok    a pre-order's mark answered as text, read back as another value: somebody else's, thrown, nothing handed over
+  ok    a mark another run holds, not given yet: thrown, nothing handed over
+  ok    and the other run's mark is left alone
+  ok    the mark free: given
+  ok    and let go after
+  ok    a mark taken over meanwhile is not deleted by this run
+
+21 checks, all passing.
+
+The script, as Redis runs it
+  ok    its sizes are the constants'
+  ok    it runs the commands the code allows, and no other
+  ok    nothing is fixed in it
+
+Each write is charged what it adds
+  ok    a new key and field: its name and the key's own, the field, the value and the entry's own, a quarter more, in steps
+  ok    the reply is HSETNX's
+  ok    the room's slot for orders, and its total with the slot's own field
+  ok    what is already there costs nothing: a buyer's second order of it
+  ok    a value made longer is charged what it grew by
+  ok    one made shorter is charged nothing, and given nothing back
+  ok    a command outside the list is refused before it is sent
+  ok    one Redis refuses throws, as a pipeline does
+
+Never below what is stored
+  ok    after each of 300 writes of every kind, all that was charged is at least all that is kept
+
+What one order really leaves, and what a room now holds
+  a new buyer's one-product course order leaves 1584 bytes, a repeat buyer's next 160; the ceiling held at the checkout is 8960
+  ok    a new buyer's order is a small part of the ceiling it was charged before
+  ok    a buyer who has bought before costs less still
+  creator: 18,000,000 bytes held 2,008 orders at the fixed charge; 11,363 orders of new buyers now, each a new address
+  pro: 135,000,000 bytes held 15,066 orders at the fixed charge; 85,227 orders of new buyers now, each a new address
+  scale: 250,000,000 bytes held 27,901 orders at the fixed charge; 157,828 orders of new buyers now, each a new address
+  ok    the order's own records were all counted, nothing kept beside them uncounted
+
+15 checks, all passing.
+
+Was the confirmation already sent? Only an exact 0 says no
+  ok    a mark read in an unknown shape (no answer) sends nothing this run, and the run counts it as failed
+  ok    nor one answered as text, counted as failed
+  ok    nor an answer with more replies than were asked, counted as failed
+  ok    an exact answer on the next run sends it, once
+  ok    and never again
+
+A page of checkouts that is not a list is not "no checkouts"
+  ok    it is said to have failed, so the run is not taken as a clean read
+
+6 checks, all passing.
+
+The first email: only an exact reading or claim sends it
+  ok    marks answered with an extra reply: nothing sent
+  ok    a first mark with no answer: nothing sent
+  ok    a claim answered oddly that did not land: nothing sent this run
+  ok    a claim answered oddly that did land with our own value: read back, and the first email goes with the card kept
+  ok    and not twice
+
+A reminder: a count read as text or missing never picks the email
+  ok    a reminder count answered as text: nothing sent
+  ok    a reply missing: nothing sent
+  ok    on a whole reading, the reminder due goes once
+
+No more than a hundred written about per store per run, however many are behind (Claude 3 on #2714)
+  ok    150 behind: a hundred looked after this run
+  ok    the other fifty on the next
+
+10 checks, all passing.
+
+The upload door needs its whole write acknowledgement
+  ok    a short write reply does not open the upload door
+  ok    the canonical write reply opens it
+
+Taking a picture needs an exact removal acknowledgement
+  ok    a numeric-looking removal string is unknown
+  ok    the canonical score and numeric removal acknowledge the picture
+
+A page's pictures not read exactly are ours to say, never "add it again" (Claude 4 on #2156)
+  ok    an HMGET answer of the wrong length throws, so the route answers server_error
+
+5 checks, all passing.
+
+What a request may ask
+  ok    an amount, a channel and an offered number of days
+  ok    anything else is nothing
+  ok    nothing asked is not narrowed
+
+The store's buyers, from its sales
+  ok    each address once, all it paid, where it first came from
+  ok    how many times each bought: each checkout once, an offer taken after paying not again (270 [GR1])
+  ok    support and another store's sales are not buyers here
+  ok    a buyer who paid in another currency is a buyer: the order and the date count, the money does not
+  ok    the channels, the most buyers first
+  ok    read again within ten minutes: nothing asked of Stripe
+
+Who each narrowing keeps
+  ok    spent at least $80: euros are not added, so not eve
+  ok    first found you through Instagram
+  ok    first found you directly, eve among them
+  ok    has not bought in 90 days, but has bought: not eve, who bought three days ago
+  ok    all three at once
+  ok    one group of buyers: loyal, bought once, new
+  ok    a group nobody is in keeps nobody, and never someone who is not a buyer
+  ok    a draft keeps its group; one that is not a group is refused, never read as everyone
+  ok    a narrowing with a field this version does not know is refused, never read as a broader group; a null group is none
+  ok    a group is read from a request only when it is one of the groups
+
+A list narrowed that way
+  ok    only those who may be written to and match
+
+Saved groups
+  ok    a group needs a name
+  ok    and needs to choose somebody
+  ok    a product the store does not have is refused
+  ok    saved
+  ok    the same name replaces it
+  ok    and it can be removed
+
+Renewals, refunds and disputes (270 [GR1], unit 2)
+  ok    a member's renewal moves their last purchase and adds what it paid, and is one more time they bought
+  ok    a renewal with no checkout read is still a buyer, its payment one time they bought
+  ok    another store's renewal is not
+  ok    refunded in full is not a purchase; in part, what was kept counts
+  ok    a dispute the buyer won, or one still open, is not a purchase either
+  ok    a renewal in another currency moves the last payment, adding nothing
+  ok    a buyer known only by a renewal came from the subscription's channel
+  ok    a membership payment refunded in full, matched through the invoice's payments, does not count
+  ok    all of it read: not partial
+
+A membership's payment found through the account's invoice payments (270 [GR1], unit 3a)
+  ok    a membership's first payment through checkout, refunded, is not a purchase
+  ok    nor is a renewal refunded, matched by its invoice
+  ok    still read in full
+  ok    an invoice paid in parts: each part's refund is taken off
+  ok    a member of a year counts every payment, and is a best customer
+  ok    an unread list of invoice payments, when one was needed, makes the reading partial
+
+41 checks, all passing.
+
+What can be bought for several
+  ok    a paid download
+  ok    not what cannot be given
+  ok    not a limited quantity
+  ok    not a private podcast
+
+How many people
+  ok    a whole number in range
+  ok    one is an ordinary purchase
+  ok    never clamped, rounded or guessed
+  ok    a payment Stripe can take
+  ok    what the page says is left
+
+Before the checkout
+  ok    a number that is not one
+  ok    written down with its number
+  ok    not open before it is paid
+
+Its checkout
+  ok    the price, that many times, on one line
+  ok    marked
+  ok    named for what it is
+  ok    one payment, nothing added, no offer after, nothing opened for the buyer
+  ok    refused where the charge is built, too
+  ok    an ordinary checkout is still for one
+
+The buyer's own checkout
+  ok    opens nothing for whoever paid
+
+Once paid
+  ok    settled
+  ok    twice is once
+  ok    the receipt: how many, what was paid, the link
+  ok    one email so far
+  ok    open now, with its payment
+
+Asking for a place
+  ok    an address that is not one
+  ok    a link is sent
+  ok    to the address as one, with the way to take it
+  ok    and nothing is taken by typing
+
+Taking it
+  ok    taken, on that address
+  ok    it is theirs
+  ok    a course would be dated from that day
+  ok    opening the link again takes nothing more
+  ok    a link nobody was sent
+  ok    the second place
+  ok    never one more than was paid for
+  ok    and nothing was handed to the third
+  ok    a new address is told so
+  ok    someone with a place is sent the way in again
+
+On the list of purchases
+  ok    a place, not something brought over or a gift
+
+An address that already has it
+  ok    uses no place
+  ok    someone new takes one
+
+A link cannot be used to fill inboxes
+  ok    it stops sending after a generous number a day
+
+A refund
+  ok    a full refund takes every place back
+  ok    from each address
+  ok    and their courses
+  ok    the other purchase's place is untouched
+  ok    and so is what an import gave
+  ok    closed for good
+  ok    read once
+
+At one of several prices
+  ok    it can be bought for several
+  ok    no option named: refused, never guessed
+  ok    the option is kept with it, and named
+  ok    that option's price, times the people
+  ok    named for all of it
+  ok    the receipt names it
+  ok    someone takes a place
+  ok    and opens that option, and no other
+
+Each place is one of the month's orders (18 October 2026)
+  ok    it knows the hour its checkout held room in, and that the room is held
+  ok    a place taken in that day uses what was held, and gives it back as it is counted
+  ok    taken after its day, a place is admitted like a new order: with none left, nothing is handed over and the place stays open
+  ok    with room in the month, the same person takes it
+
+61 checks, all passing.
+
+The setting
+  ok    a store that never chose: one email, and the card notice
+  ok    only what is offered
+
+When each email is due
+  ok    one chosen: never a second
+  ok    three chosen: the second from day 3, the third from day 7
+  ok    a missed day sends the next one, never two
+
+When a card stops working
+  ok    10/2026 still pays on October 31, not on November 1
+  ok    told only inside the ten days
+
+What the emails say
+  ok    a reminder says so, first
+  ok    the card notice names the card and the day
+  ok    in the store's language
+
+A store with a membership
+  ok    one email and the card notice, unless chosen
+  ok    a setting not offered is refused
+
+A failed payment, with one email chosen
+  ok    the first email
+  ok    and no second
+
+With three chosen
+  ok    saved
+  ok    the second, three days on
+  ok    not twice the same day
+  ok    the third, seven days on, and then no more
+
+Paid, it stops
+  ok    the first about another payment
+  ok    paid: no reminder
+
+An email from before reminders existed
+  ok    gets no reminder
+
+A card that stops working before the next payment
+  ok    told once: only the one whose card ends before a payment within ten days
+  ok    names the card
+  ok    not told twice about the same card
+  ok    with a link to the card page
+
+The card page
+  ok    the link names that membership
+  ok    and only on its own store
+  ok    reading it changes nothing
+  ok    the button opens Stripe's page that saves a card and charges nothing
+  ok    left before saving: nothing changes
+  ok    saved: the card is set on that membership
+  ok    on the membership itself
+  ok    a payment already failed is paid with it
+  ok    declined: the card is still set, and it says so
+  ok    a membership of another customer is not touched
+
+What came back
+  ok    paid after failing, and after an email; a renewal in another currency counted, never added
+  ok    read from Stripe, with the emails sent this month
+
+37 checks, all passing.
+
+
+===== /tmp/g2806-adee-shared-callers.log =====
+
+What can be given
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options that hand nothing over
+  ok    with price options, at one that is paid and hands something over
+  ok    a course at several prices: every paid one
+  ok    not with license keys
+  ok    not something that hands over nothing
+
+Who it is for
+  ok    an address that is not one
+  ok    kept, the address as one
+
+Its checkout
+  ok    marked as a gift
+  ok    one payment, nothing added, no offer after
+
+The buyer's own checkout
+  ok    opens nothing for whoever paid
+  ok    an ordinary one still does
+
+Once paid
+  ok    given
+  ok    twice is once
+  ok    it is the recipient's
+  ok    a course would be dated from the payment
+  ok    the recipient's one email: who, the message, the way in
+  ok    the buyer's receipt says who it went to and what was paid
+  ok    two emails in all
+  ok    on the recipient's list, as a gift from Ana
+  ok    remembered, with its payment
+
+A refund
+reading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): no stand-in for GET /events
+    at onAccount (/tmp/codex-g-proof-rVsuKJ/proof.cjs:5861:11)
+    at async lostDisputesSince (/tmp/codex-g-proof-rVsuKJ/proof.cjs:16747:20)
+    at async lostDisputesOrRetry (/tmp/codex-g-proof-rVsuKJ/proof.cjs:16775:12)
+    at async revokeRefundedGifts (/tmp/codex-g-proof-rVsuKJ/proof.cjs:18982:16)
+    at async main (/tmp/codex-g-proof-rVsuKJ/proof.cjs:65489:38) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'no stand-in for GET /events'
+}
+  ok    a full refund takes it back
+  ok    from the recipient's purchases
+  ok    and their course
+reading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): no stand-in for GET /events
+    at onAccount (/tmp/codex-g-proof-rVsuKJ/proof.cjs:5861:11)
+    at async lostDisputesSince (/tmp/codex-g-proof-rVsuKJ/proof.cjs:16747:20)
+    at async lostDisputesOrRetry (/tmp/codex-g-proof-rVsuKJ/proof.cjs:16775:12)
+    at async revokeRefundedGifts (/tmp/codex-g-proof-rVsuKJ/proof.cjs:18982:16)
+    at async main (/tmp/codex-g-proof-rVsuKJ/proof.cjs:65492:20) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'no stand-in for GET /events'
+}
+  ok    read once
+
+At one of several prices
+  ok    no option named: refused, never guessed
+  ok    the option is kept with the gift
+  ok    its price is what is charged
+  ok    both emails name it
+  ok    the recipient opens that option, and no other
+
+33 checks, all passing.
+
+The expected day
+  ok    today is a day
+  ok    tomorrow is the first day that can be chosen
+  ok    up to 365 days ahead, and no further
+  ok    never a day that does not exist, or anything else
+  ok    taken until the day itself, and not after
+
+What can be pre-ordered
+  ok    a file, a link or a course at one price
+  ok    never something free, a membership, a call, a bundle or a podcast
+  ok    nor several prices, a limited number, license keys or a price the buyer chooses
+  ok    something in it to hand over: a file, a link, or a course with a lesson
+  ok    a pre-order's checkout hands over nothing by itself
+  ok    a kept pre-order reads back, and nonsense does not
+  ok    counted as waiting, handed over or refunded
+
+Paid while it is coming soon
+  ok    the page reads coming soon and the day, in one request
+  ok    and the store page reads every product's
+  ok    a receipt
+  ok    with what, how much, and the day it is expected
+  ok    written down, waiting
+  ok    two waiting, the first kept once
+
+Put on sale
+  ok    its day is let go
+  ok    the one still paid is handed over; the refunded one is not
+  ok    and its buyer is emailed the way in, once
+  ok    with the link to their purchases
+  ok    written down under their address
+  ok    marked given, and the refunded one marked refunded
+  ok    nothing left to hand over, and run again it sends nothing
+
+Paid after it went on sale
+  ok    handed over at once
+  ok    and emailed the way in
+
+Refunded after it was handed over
+reading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount (/tmp/codex-g-proof-rVsuKJ/proof.cjs:12166:11)
+    at async lostDisputesSince (/tmp/codex-g-proof-rVsuKJ/proof.cjs:15427:20)
+    at async lostDisputesOrRetry (/tmp/codex-g-proof-rVsuKJ/proof.cjs:15455:12)
+    at async revokeRefundedPreorders (/tmp/codex-g-proof-rVsuKJ/proof.cjs:60699:16)
+    at async main (/tmp/codex-g-proof-rVsuKJ/proof.cjs:60971:25) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+  ok    one taken back
+  ok    from its buyer only
+  ok    its course start dropped too
+reading the disputes closed as lost failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount (/tmp/codex-g-proof-rVsuKJ/proof.cjs:12166:11)
+    at async lostDisputesSince (/tmp/codex-g-proof-rVsuKJ/proof.cjs:15427:20)
+    at async lostDisputesOrRetry (/tmp/codex-g-proof-rVsuKJ/proof.cjs:15455:12)
+    at async revokeRefundedPreorders (/tmp/codex-g-proof-rVsuKJ/proof.cjs:60699:16)
+    at async main (/tmp/codex-g-proof-rVsuKJ/proof.cjs:60975:43) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+  ok    and the same refund is read once
+
+31 checks, all passing.
+
+Where a first email to a business may be written
+  ok    the countries that are open
+  ok    the ones that ask for consent first are closed
+  ok    a country nobody read the law of is closed too
+  ok    and says that it was not read, not that it refuses
+  ok    the United States asks the email to say what it is
+  ok    the United Kingdom: companies, and a desk's address
+  ok    France and Ireland: a desk's address
+  ok    named as a sentence names them
+  ok    every open country carries the law it rests on
+
+A desk, or a person
+  ok    partnerships@ is a desk
+  ok    hello@ is a desk
+  ok    press.media@ is a desk
+  ok    jane.doe@ is a person
+  ok    dana@ is a person
+
+Only the business's own address, from its own page
+  ok    an address at its domain is its own
+  ok    one at a part of its domain too
+  ok    the agency that built the site is not
+  ok    nor a free mailbox
+  ok    a mailto: link is read, without what follows the address
+  ok    an address written with &#64; is read, and the desk comes before the person
+  ok    each says whether it is a desk
+  ok    and keeps the words around it
+  ok    what a page wrote as numbered or named entities is read as a reader sees it
+  ok    a picture's name is not an address
+
+A page that says no
+  ok    no solicitations
+  ok    we do not accept unsolicited proposals
+  ok    please do not send sales emails
+  ok    an ordinary contact line is not a refusal
+
+The pages worth reading, and what robots.txt closes
+  ok    its own partner and contact pages, the likeliest first; nobody else's
+  ok    the rules for everybody are read
+  ok    a path under one is closed
+  ok    the rest is open
+  ok    a group that names this reader is the one that counts
+  ok    and closes the whole site
+  ok    named with nothing closed means open, whatever everybody else is told
+  ok    Shopify's own robots.txt, on every Shopify store, leaves the front page open
+  ok    and the contact page
+  ok    a star stands for any run of characters
+  ok    a query a rule names is closed, another is not
+  ok    a rule that ends in $ covers only what ends there
+  ok    a plain rule is a prefix
+  ok    an exact rule with $
+  ok    a shop's shelves and journal are not contact pages, and one of each kind comes before a second of any
+
+Reading a business's website
+  ok    its name, as it calls itself
+  ok    its own description
+  ok    its addresses, the partner page's before the front page's
+  ok    each with the page it is printed on
+  ok    four pages at most, and robots.txt
+  ok    something that is not an address is refused before reading
+  ok    a private address is never read
+  ok    a site that closes itself to this reader is not read
+  ok    a closed page is left alone
+  ok    and what it printed is not found
+
+The rules, asked in order
+  ok    nothing against it
+  ok    a closed country
+  ok    a business that asked to stop
+  ok    a page that refuses
+  ok    the United Kingdom, not said to be a company
+  ok    the United Kingdom, a person's address
+  ok    the United Kingdom, a company's desk
+  ok    nobody to sign it
+  ok    written to too recently
+  ok    long enough ago
+  ok    the day's number used
+
+What every email carries
+  ok    who is writing, their store and a postal address
+  ok    where the address was found
+  ok    in the United States, that it is a business proposal
+  ok    how to stop it: a reply, or a link
+  ok    elsewhere the line about a proposal is not added
+  ok    the creator's words, a blank line, the footer
+
+The draft, opened in the creator's own mailbox
+  ok    Gmail's own compose page
+  ok    or whatever opens an email address
+  ok    the longest email there can be still fits in a link
+  ok    and one in plain letters does
+
+Who is writing
+  ok    starts from the store's own name, with no postal address
+  ok    without a postal address nothing is written
+  ok    a name alone is not saved
+  ok    a name and an address are
+
+Writing one
+  ok    to the address the page prints
+  ok    kept with where it was found, the words around it and when
+  ok    a draft, not sent
+  ok    the model's words
+  ok    the footer with the creator's name and the store's address
+  ok    and a stop link of its own
+  ok    one writing job counted
+  ok    the model is told what the business says of itself
+  ok    and never the address
+  ok    it is told not to invent an audience
+  ok    and that a website's text is not an instruction
+  ok    the rules against invented numbers and results go with it
+  ok    nothing was sent anywhere but to the model
+
+What stops one before it is written
+  ok    Germany
+  ok    a country not on the list
+  ok    an address the page does not print
+  ok    an address at another domain
+  ok    a page that cannot be read
+  ok    a page robots.txt has closed since
+  ok    a person, where only a desk may be written to
+  ok    the United Kingdom without saying it is a company
+  ok    a page that says no solicitations
+  ok    nothing to write from
+  ok    none of them asked the model, or kept anything
+
+One pitch to a business at a time
+  ok    a new draft takes the place of the old one
+  ok    so one is kept
+  ok    and the old one's stop link no longer opens anything
+
+The creator's own changes
+  ok    the subject and the words are theirs
+  ok    the footer is not
+  ok    an empty one keeps what was there
+
+Sent, and what follows
+  ok    marked as sent, with when
+  ok    what was sent can no longer be changed
+  ok    or deleted
+  ok    the same business is not written to again so soon
+  ok    a draft can be deleted, and its stop link with it
+
+The business's own way out
+  ok    the page behind the link names who wrote and to whom
+  ok    a link nobody made opens nothing
+  ok    one press, by the business
+  ok    the pitch is marked, with nobody at the store doing anything
+  ok    the page says so
+  ok    and that store can never write to them again
+  ok    not a year later either
+  ok    once stopped, it cannot be marked as anything else
+
+Closed to every store
+  ok    another store may still write, until the business says otherwise
+  ok    the business closes itself to everyone, from the first store's link
+  ok    the page says nobody can
+  ok    and a store that never wrote to them cannot start
+
+The creator's own button does the same
+  ok    they replied
+  ok    they asked to stop
+  ok    and nothing more is written to them
+
+A day's number
+  ok    15 are written
+  ok    the next is refused
+  ok    and not counted against the month
+  ok    the next day it is open again
+
+A model that fails
+  ok    says so
+  ok    the started attempt remains counted
+
+A funded manual business lookup refuses before any external reader
+  ok    an unmarked lookup still uses the existing reader
+  ok    missing funding refuses a manual lookup
+  ok    not even its front page or robots file is read
+  ok    no pitch was created
+
+A funded new pitch refuses before page verification or AI work
+  ok    new draft work needs financial approval before its page
+  ok    no reader, model call, writing allowance or pitch is consumed
+
+Nothing here sends an email
+  ok    no mail service is called from any of it
+  ok    the studio opens a draft in the creator's own mailbox
+  ok    the stop link's page changes nothing until a button is pressed
+  ok    and the reader says who it is
+  ok    with a page that explains it
+
+145 checks, all passing.
+PASS find refuses missing counter before provider work
+PASS find refuses empty counter before provider work
+PASS find refuses partial counter before provider work
+PASS find refuses extra counter before provider work
+PASS find refuses text counter before provider work
+PASS find refuses null counter before provider work
+PASS find refuses zero counter before provider work
+PASS find refuses negative counter before provider work
+PASS find refuses unknown SET counter before provider work
+PASS find refuses a counter timeout
+PASS draft refuses missing counter before provider work
+PASS draft refuses empty counter before provider work
+PASS draft refuses partial counter before provider work
+PASS draft refuses extra counter before provider work
+PASS draft refuses text counter before provider work
+PASS draft refuses null counter before provider work
+PASS draft refuses zero counter before provider work
+PASS draft refuses negative counter before provider work
+PASS draft refuses unknown SET counter before provider work
+PASS draft refuses a counter timeout
+PASS confirmed daily counters preserve sixty reads and the original expiry
+PASS confirmed AI counters preserve the existing minute limit
+PASS a confirmed daily counter does not bypass a monthly refusal
+PASS authorization refusal precedes the counters
+PASS unrelated actions do not consume these counters
+25 passed; 0 failed
+
+The table
+  ok    admin: none of the owner's four
+  ok    editor: none of the owner's four
+  ok    support: none of the owner's four
+  ok    the owner has every permission
+  ok    support edits nothing
+  ok    an editor cannot send, export, import, delete a person or touch settings
+  ok    deleting a person is the owner's and an admin's (lib/person-erasure.ts)
+  ok    whatever two-step login locks after a recovery is beyond an editor and support
+  ok    a word that is not a permission is not one, even on an object's prototype
+
+The door, store by store
+  ok    the team member is added
+  ok    the owner cannot be added as a member of their own store
+  ok    an editor edits products
+  ok    but cannot send to the list
+  ok    nor download buyers' data
+  ok    support reads orders
+  ok    but changes no product
+  ok    an admin changes settings
+  ok    but not the plan, the Stripe connection, the team or deleting
+  ok    the owner may do all four
+  ok    a store they are not on is gone, never another store
+  ok    not even for its owner's neighbour
+  ok    an id that is not one is gone
+  ok    no store named: their own store only
+  ok    the switcher's cookie naming a store they are not on is only a preference
+
+Taken off the team
+  ok    removed
+  ok    refused at once
+
+The routes say what they need
+  ok    store/team/route.ts needs member and team
+  ok    store/export/route.ts needs export and stats
+  ok    store/import/route.ts needs import
+  ok    store/leads/route.ts needs export
+  ok    store/audience/route.ts needs export
+  ok    store/api-keys/route.ts needs export
+  ok    store/webhooks/route.ts needs settings
+  ok    store/affiliates/export/route.ts needs export
+  ok    store/paypal/connect/route.ts needs payments
+  ok    store/paypal/disconnect/route.ts needs payments
+  ok    stripe/connect/route.ts needs payments
+  ok    stripe/disconnect/route.ts needs payments
+  ok    billing/checkout/route.ts needs billing
+  ok    billing/cancel/route.ts needs billing
+  ok    billing/switch/route.ts needs billing
+  ok    every permission a route's guard names is in the table
+  ok    and there are routes to check
+
+43 checks, all passing.
+
+Off: everybody on the team opens the studio as before
+  ok    owner
+  ok    a member with no second step
+
+On: a member without a second step opens nothing
+  ok    switched on
+  ok    the team record says so
+  ok    the owner still opens it
+  ok    a member without a second step is refused
+  ok    a route answers 403 with its own error
+
+Owning an authenticator app or a passkey is not enough: the session must have been opened with it
+  ok    an authenticator app, without a session opened with its code
+  ok    Ben still has none
+  ok    a passkey, without a session opened with it
+
+Team changes never switch it off
+  ok    after someone joins
+  ok    after someone leaves
+
+Off again, and the log says who did each
+  ok    a member without a second step opens it again
+  ok    both switches are in the activity log
+
+14 checks, all passing.
+
+A member who has only a passkey, logging in with the emailed link
+  ok    the link opens a session
+  ok    with no second step written on it
+  ok    the team holds it at the door
+  ok    and says to log in again with the passkey
+  ok    the studio refuses the store to it
+  ok    and so does every studio route
+
+The same member, logging in with the passkey
+  ok    a session opens
+  ok    opened with the passkey
+  ok    the team lets it in
+  ok    the studio opens the store to it
+  ok    the link's session was replaced: it is gone
+
+A member with an authenticator app: the link waits for the code
+  ok    the link opens no session
+  ok    the app's code opens one, marked so
+  ok    the team lets it in
+  ok    the studio opens the store to it
+  ok    a recovery code opens one, marked so
+  ok    the team lets that in too
+
+What has no second step is held, and has a way out
+  ok    a session from before the mark existed
+  ok    a session left out of the question
+  ok    somebody else's session does not count
+  ok    an app user is told to log in again with the code
+  ok    a member with neither is held, and told to set one up
+  ok    every way out has a title, words and a place to go, and keeps what was typed
+  ok    a session logged out loses its mark with it
+
+The owner, and a store that does not ask, do not change
+  ok    the owner is never held, whatever the session
+  ok    the owner opens the store
+  ok    pia-passkey@example.com on a store that does not ask is never held
+  ok    pia-passkey@example.com opens the store that does not ask
+  ok    ned-nothing@example.com on a store that does not ask is never held
+  ok    ned-nothing@example.com opens the store that does not ask
+
+30 checks, all passing.
+✔ missing acknowledgement is unknown, with no replay or false zero (5.959241ms)
+✔ undefined acknowledgement is unknown, with no replay or false zero (0.20628ms)
+✔ null acknowledgement is unknown, with no replay or false zero (0.118338ms)
+✔ string acknowledgement is unknown, with no replay or false zero (0.118438ms)
+✔ false acknowledgement is unknown, with no replay or false zero (0.235124ms)
+✔ array acknowledgement is unknown, with no replay or false zero (0.217577ms)
+✔ object acknowledgement is unknown, with no replay or false zero (0.162334ms)
+✔ negative acknowledgement is unknown, with no replay or false zero (0.147812ms)
+✔ fraction acknowledgement is unknown, with no replay or false zero (0.247742ms)
+✔ NaN acknowledgement is unknown, with no replay or false zero (0.294513ms)
+✔ infinite acknowledgement is unknown, with no replay or false zero (0.19291ms)
+✔ unsafe acknowledgement is unknown, with no replay or false zero (0.49856ms)
+✔ extra acknowledgement is unknown, with no replay or false zero (0.15283ms)
+✔ sparse acknowledgement is unknown, with no replay or false zero (0.168824ms)
+✔ the actual person-erasure flow stays incomplete on a lost list receipt (applied=false) (33.963922ms)
+✔ the actual person-erasure flow stays incomplete on a lost list receipt (applied=true) (7.636173ms)
+✔ confirmed counts keep positions and distinguish a real zero (0.24587ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 57.906736
+✔ every unknown grant shape remains pending without rewriting its retained evidence (22.741407ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.23615
+
+transport error
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+missing reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+undefined reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+null reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+wrong scalar
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+A confirmed store can finish the same deletion
+  ok    the same link can be read after recovery
+  ok    real erasure finishes once its store can be read
+  ok    the contact really is removed
+  ok    the grant goes only after confirmed erasure
+  ok    the consumed link cannot delete again
+
+35 checks, all passing.
+✔ a store inside the allowance is counted and not named (4.492414ms)
+✔ the delivery that crosses the line is the one that writes it down (0.756638ms)
+✔ a store far over is named once, not once per file (1.003019ms)
+✔ nothing is ever blocked, whatever the number says (0.178789ms)
+✔ the worst offender is listed first, because that is the one to call (0.397848ms)
+✔ a path that is not a store's file is not counted against anyone (0.703648ms)
+✔ a size that is not a size is ignored rather than stored (5.344762ms)
+✔ the figures read as figures in an email (0.161633ms)
+✔ the watch reads nothing when there is nothing written (0.572531ms)
+✔ the promise in the Terms is one the machine can keep alone (2.563204ms)
+✔ a download is counted and published, and never charged for (1.69592ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24.265192
+
+What a product delivers
+  ok    a file, a link, or a call's own meeting link
+  ok    nothing checked for a course's lessons, a bundle, nothing yet, or a call in person, in our room, a meeting with no link of the creator's behind it, or no sessions to come
+  ok    each price option's own file or link too, named by its option; a course's options, not its lessons
+  ok    a call's own link behind a Meet or Zoom meeting, said as the fallback; each dated session's link still to come, not one that is over
+
+A file
+  ok    in place at its size: fine
+  ok    missing, empty or of another size: a problem, with what to do
+  ok    storage not asked: not checked
+
+An address
+  ok    it answers, or answers with something long: fine
+  ok    gone, not https, or inside a private network: a problem
+  ok    asks to sign in, did not answer, redirected too often, or answered oddly: not checked, never fine and never broken
+  ok    each refusal in its own words: not https, not an address we can open, a port, not reachable from outside, a name not found
+  ok    a problem names the address and what to do
+
+One product
+  ok    its verdict from its target and what was read; none for nothing to check; an address not asked is not checked
+
+Plain words
+  ok    every problem says what to do, and every sentence ends
+
+14 checks, all passing.
+
+Known global refusal precedes tokens and recovery-account lookup
+  ok    existing and unknown addresses get the same honest sign-in failure
+  ok    recovery presence never changes the global-unavailable answer
+  ok    no new token is minted and an unrelated live token is preserved
+  ok    an unrelated token retains its value and original lifetime
+  ok    the existing confirmed recovery address is unchanged
+  ok    no provider read or POST occurs while the default binding is absent
+  ok    a globally unavailable route gives the public demo the same refusal
+
+Existing origin, input, honeypot and rate guards keep their responses
+  ok    invalid email still gets its existing response
+  ok    honeypot remains neutral and successful
+  ok    cross-site requests are refused before sending
+  ok    the address rate limit is still enforced
+
+The existing recovery form says what is actually known
+  ok    an unavailable recovery request has an alert
+  ok    the original form and passkey alternative remain usable
+  ok    processed recovery requests do not claim delivery or a queued retry
+  ok    the existing short-lived link is still described
+
+Configured SES does not become a preflight authorization or extra I/O
+  ok    an unsuccessful actual send fails equally without a creator lookup
+  ok    a refused sender never posts a message
+  ok    the deliberately ignored public demo owner keeps its neutral reply
+  ok    a recipient-dependent recovery outcome still cannot enumerate an account
+  ok    actual SES acceptance preserves the successful route
+  ok    the original login email goes to the original inbox
+  ok    the link keeps its existing 15-minute lifetime
+  ok    the helper added no SES account read before the original sender
+  ok    Resend was never opened by a configured-SES or missing-proof case
+
+The real fallback still requires its independent synthetic funded proof
+  ok    the real guard accepts one explicitly funded synthetic fallback
+  ok    inbound usage consumes the same last included slot
+  ok    only the funded message generated a synthetic POST
+  ok    no uncontrolled network request occurred in this test
+
+28 checks, all passing.
+
+
+===== /tmp/g2806-adee-tsc.log =====
+
+
+===== /tmp/g2806-adee-lint.log =====

@@ -72,6 +72,9 @@ export function exportUnits(shape: ExportShape): number {
 /** What exporting this store reads, counted before it is read: the room's bytes, and its products, lessons, posts, forms and contacts. */
 export async function exportShape(store: Store): Promise<ExportShape> {
   const used = await dataUsed(store);
+  // The full export is paid for from this measurement. Unknown room usage
+  // cannot be priced as an empty room before the remaining reads begin.
+  if (!used) throw new Error("The data-room size could not be read");
   const listings = await readAllListings(store);
   const ids = listings.flatMap((l) => (l.course ? [l.course.id] : []));
   const courses = ids.length ? await readCourses(ids) : new Map();
@@ -81,7 +84,7 @@ export async function exportShape(store: Store): Promise<ExportShape> {
   const forms = (await readForms(store.statsId)).length;
   const contacts = (await listSize(store)).total;
   return {
-    bytes: used?.used ?? 0,
+    bytes: used.used,
     commands: Math.ceil(EXPORT_COMMANDS.fixed + 3 * Math.ceil(listings.length / 100) + Math.ceil(courses.size / 100) + Math.ceil(lessons / BODIES_PER_READ) + Math.ceil(posts / 100) + EXPORT_COMMANDS.form * forms + contacts / 1000),
   };
 }

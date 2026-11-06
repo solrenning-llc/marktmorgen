@@ -157,13 +157,14 @@ async function main(): Promise<void> {
   {
     const p = await preorder();
     rule = { when: (c) => setNx(p.key)(c) || getOf(p.key)(c), reply: ["1"] };
-    is("a pre-order's mark answered as text, read back as another value: already, nothing handed over", [await handOverPreorder(store, course, p.session, deps()), await has(p.to)], ["already", false]);
+    is("a pre-order's mark answered as text, read back as another value: somebody else's, thrown, nothing handed over", [await outcome(() => handOverPreorder(store, course, p.session, deps())), await has(p.to)], ["rejected: Error", false]);
     rule = null;
   }
   {
     const p = await preorder();
     await pipeline([["SET", p.key, "someone-else", "EX", 300]]);
-    is("a mark another run holds: already, nothing handed over", [await handOverPreorder(store, course, p.session, deps()), await has(p.to)], ["already", false]);
+    // As for a gift: confirmPreorder answers "given" for "already", so it is said only once the pre-order is given.
+    is("a mark another run holds, not given yet: thrown, nothing handed over", [await outcome(() => handOverPreorder(store, course, p.session, deps())), await has(p.to)], ["rejected: Error", false]);
     is("and the other run's mark is left alone", (await pipeline([["GET", p.key]]))[0], "someone-else");
   }
   {

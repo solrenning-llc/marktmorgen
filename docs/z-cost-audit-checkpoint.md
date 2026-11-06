@@ -1,3 +1,73 @@
+# ESTADO VIGENTE — 06/11/2026 15h54 Fortaleza: #2830 revisão NÃO limpa/MR; nova evidência IA local; quatro próprios intactos
+
+Topo SUPERA próximos passos antigos somente onde explicitado; TODO histórico/RED/WIP/retries preservado abaixo. PRIMEIRO checkpointc37269423c3ed112713ed87c6af99319cb220c8c COMPLETO204330caracteres. Depois main18f7f89744e09afbfccd4591ea4b9e1ac5efa801/caixa/canalINTEGRALrefEXATO. Difere8de sódocs/reservations/claude2.md (PF1thanks/cart/cartcheckoutliberados), FULLdelta lido; CLAUDE/AGENTS/outrasreservas/inbox/fila semdelta. Nenhuma outra execuçãoZativa confirmada, nenhumaduplicadaabsorvidaporrecência. C4única/C1OFF/nãoponte/nãodestinatário. Nenhumaautomaçãoalterada/criada/desativada;gatestransitórios,nãoauditoriaconcluída.
+
+## Próprios QUATRO, nenhuma movimentação nesta retomada
+
+APIsfreshconfirmaram4OPEN/headsexatosabaixo, reviews/commentssemretornonominalnovo. **NenhumCIquery/rerun/retry/cancel/merge/mainintegration** nesta execução;tempo/retomada nãosãoeventoAV12. Últimasfotosiniciaisdosheadsseguem9ativosnãotransformadosemverde.
+|PR|Ramo|Head remoto EXATO|Próximo|
+|---|---|---|---|
+|2800|codex/z-ai-counter-receipts|8908042441666d31f6b917b135fc9d440f6bf05d|R2helper+Inboxqualificado/9NOVOSpor evento|
+|2740|codex/z-assistant-counter-admission|a01b40e376c76e73a69027762f472328bd3160ee|S5794710012aplicável/9NOVOSpor evento|
+|2741|codex/z-chat-counter-admission|1962e86424de25c1571d6c1b61b7646934ecbead|S5794737821aplicável/9NOVOSpor evento|
+|2819|codex/z-meet-return-counter-admission|3cc9afc8c2c9e906cf408a3eabcb7239cb7e1d11|R2c99-100aplicável/9NOVOSpor evento|
+
+#2812jáMERGED8171/#2813jáMERGED5680/#2773jáMERGED43249/2602+anteriores concluídos, nãorecriar. #2823Taviso15h12MERGED5d2c7bdc6f6ff1d33af3e9e70c292a47e0bea95e comnossareview5804433845/9greens/uniãoclient269; nãoopereiCI/ref/mergeT. Nossa provaorigde923foicreditadaecorrigidanoT,semnovaunidadeZ.
+
+## #2830 nominal: MÉDIO MR proposto, NÃO CLEAN
+
+C4-2620/2630LIDASINTEGRAIS: Zsegundo revisor da unidadeAClaude6juntoR2,aoabrirPR;até lá1928sóapósreenviopósPF1. InicialGETunitAsemPR/1928antigo;duranteprovaIA #2830abriu e ENTREI no nominal, semesperarordemrepetida. AnúncioANTESdiff/testes **2e7f962df85c65ee1cacfdf3bc8f3a526731fc73**. Target EXATO **3fe660003a7f158f792337289ff18d417bd7d3fb**, pai/PRbase **aa0f45907ef439571cf75e55985ab9f6bac47f86** (#1947). Todo9-file diff357+/25- lido.
+
+**Parecer COMMENT5805314075 NÃOlimpo**, MÉDIOpropostoMR/ordemdeadmissão. Inlineapp/api/store/saved-blocks/route.ts:152; causa144–161 lêcards+requestedpagesANTEScountUse,inclusiveapplies_full. C6jádescrevia2refusalpathsnovasleiturasnoPR;provaZconcretizaorçamento, nãoalegarqueautoraocultou. R2independenterespeitado/C4classificafinal. Canalachado **0ba016b7ed4b387a9c9597264e9f99f3b6b41efd**. Nãoreparo/editoC6.
+
+Evidência PERMANENTE **codex/z-review-2830-apply-read@cc6a2e2bc490c1f03b18a4568857e72064cd54d1**, tree **8b324d6974b8ccb7376a5f4d441a42d7bedf0ecc** = native **4f0a3cd659b2b4d80ed5ea3e6b915a1cf6c934f8**, parent3fe. Só3novospróprios:tests/z2830-apply-read.proof.ts,tests/z2830-apply-read-run.mjs,docs/reviews/z-2830-apply-read.md. ReservaANTEScódigo **28b9ee1d58e58cab7b84b89877443c757515070e**. Fonte/config/CI/refC6 INTACTOS;reviewnãoéprodutovaga5.
+
+**MESMAproofbytes:parentAA0PASS1/1/headFAIL1/1 SOMENTEnoassertbytecoverage**. Rotareal/sessãoreal/helpersreais/MemoryRedis,semguard/ACKmockados. Duaspáginasválidas21blocks(section+20textos3000chars);healthyapplyREAIS200consome1,helpercountUseexhaustoutros4. Requestseguinte:
+|Medição|PaiAA0|Head3fe|
+|---|---|---|
+|resposta|429applies_full|429applies_full|
+|comandosAPP|10|12|
+|GETspágina|0|2|
+|pageJSONbytes|0|123216|
+|contadorREALstudio|2→3|2→3|
+|unidadesstudioadmitidas|1|1|
+|budgetbytesUNIT_COST.studio:552|50000|50000|
+|contadorapplyREAL|5→6|5→6|
+|additionaladmittedapply|0|0|
+
+**73216pagebytesalémdaúnicaunidadejácontada**,cards/auth/outrosbytesEXCLUÍDOS(nãomedidos,lowerbound). Funnel-share:1009preçaleituralargaatéappliesPerMonth,semnovaapplyadmitida. Contadormensal6éincrementorecusado, NÃOzeronemcontadorinalterado;nomeioissoexplicitamente. InspeçãodiretadoMapconfirmaREALstudio2→3,nãosóINCRBYlogs;interceptoraSÓobservaresultadosverdadeiros,nãomudaresposta. Cotaestúdioaindaboundedrepetição: NÃOinfinito/totalmenteunmetered/realUSD/margemglobalnegativacomprovada. Éregressãodeadmissão/coberturabyteemJSONNORMAL,nãoproxy/gettercondicional. Desconhecido503page_unreaddevepermanecer;autora/C4devemreservarleituralimitadaANTESGETporhelperexistente/preflightcoordenado,sempreço/limitevisível/flag/gatealterado,nãodesfazerexatidãodereadPage.
+
+**Validaçãoautora/ligados:** MESMOreaderRED12/9→12/12, MESMOrouteRED118/26→118/118. Onzegrupos337PASS (12+118+21pageblocks+13pageversions+12sitepages+7MCPsaved+79funnelshare+24cost+7data+2partner+42US). ScopedTSC10raízes/imports0,lint11paths0,scanner4070/0,diff0. **Clientgraphs268/269**,UMafalhaHERDADAnode:util/blog-editornohelperantigodopai1947;#2822mainjáresolveu. Nãonovofinding/nãogreen;C6deveherdarmaincorrigidonaintegraçãoapropriada,parentMERGEDprimeiro,semcopiarfixshared. NenhumCIfoiconsultado/operado. SemRedis/Luanativo/provedor/browserAT/globalbuild/AAAglobal/margemcertificados.
+
+Preliminares: named sales-page-store.test.ts inexistente falhouseleção,substituídoporgruposreaisantes337;NÃOfinding. PrimeirofixtureMResperavamonthly5apósrecusa,aprendido6pelohelperreal;assertprecondiçãocorrigidoANTESdurável,adicionadohealthy200+counterreal2→3;asserçãofinalcoverageNÃOafrouxada. OriginalsourcefixtureC6comparadocreditado,nãoalterado. Locais/dev/shm/z-review2830-15(ownbranchproofcommit) e/dev/shm/z-review2830-parent15(AA0read-only),node_modulesdonor776readonly. RunnerTMPDIR=/dev/shm paraevitarrootENOSPC. Logs/dev/shm/z2830-apply-read-{parent,final}.log,/dev/shm/z-review2830-15-{linked-final,types-final,lint-final,scanner,bundles}.log,/dev/shm/z2830-author-red15.log. Runners/shapefilesGitHubduráveis;logsreproduzíveis.
+
+## Nova prova r24 IA — somente LOCAL/condicional, não exploração remota
+
+Antes#2830abrir,provaautorizadanafaixaconcluída **codex/z-ai-spend-receipt-proof@d7a1a92410dc2c807cc73e6f235b2cf014b62408**, tree19497cb10bef357891d23e493fc9ecbb13f0cb7d = nativecdbe1572f635c7cdaf1f3011ccfe153882eb6574, base18f7.3novospróprios:tests/z-ai-spend-receipt.proof.ts,tests/z-ai-spend-receipt-run.mjs,docs/reviews/z-ai-spend-receipt.md. ReservaANTEScódigo **4f633dfcb93d125c17e1b44f1ae1a86e85a9015e**. Nenhumprodutofix/aliasglobal/refalheio/quintaunidadeiniciado.
+
+**LEVELOCALcondicionalPROPOSTO**,lib/ai-spend.ts:149–150(annunciopreliminarlocal166–174corrigidonocanal). Nonautomaticreviewedpolicypathvalidadelength/indexsemownslots. Inheritedarrayhole/getter/Proxy/arraylikeconfirmamtruecomfixturetransportsemEVALaplicado. **6testes/4REDcausais+2gruposcontrolePASS**.1EVALAPP/caso;ledgerMAPexistingai-spend-redistestdoublecontinua0company/nostorefield;0provider/callback/nativelua. Getter1/Proxy2leiturasguardlength+0 (promiseassimilationthenNÃOcontadacomoguard). ControleshealthyconsomeREALmap100units(company+store),ordinary[]/0/null/true/string/extraalreadyrefuse. PolíticafinitaSINTÉTICAteste,nãoprodução/contareal/preçoreal. **NÃOdefaultautomaticpolicybypass/remotepath/USDeconomy/prejuízo**:JSONparsenãocriaessesobjetos;lib/redis.ts:50mapeiaparaarray;precisariaJScódigo/stubtransportadulterado. Branchautomatic154–155analogiaSÓestática, NÃOtestada. C4classifica/atribui,nãoimplementarporcontaprópria.
+
+Ligados95PASS=ai-spend22+automatic11+provider8+replyenvelope23+cost24+data7;TS1raiz/imports0,lint2executores0,scanner4071/0,diff/treeiguais. InstrumentaçãoProxyinicialcontavatrapthenjunto,foirefinadaANTESdurávelparaSÓlength/index;4falhas/6testes/assertsinalterados. Runneragoracheckout-localparaevitarinstânciasfixtureduplas. Fonteai-spend/configBYTE-IDbase,nenhumacredencial. Roda TMPDIR=/dev/shm node tests/z-ai-spend-receipt-run.mjs. Local/dev/shm/z-ai-spend-receipt15,logs/shapes/dev/shm/z-ai-spend-receipt15-*. Notadonocanal2e7f962d;C4/R2aindasemclassificaçãonominalnoúltimorecorte.
+
+## Coordenação nova e fila precisa
+
+- C4-2600 corrige diagnóstico: backup-runTERMINA96/96,travaDEPOIS,causaindefinida;nãocopiarfixC5/G2826. AutoresverifycanceladocomESSAcausapodemUMAretentativaDESSEheadcomjobanunciado. NenhumpróprioCIconferidocausalmenteaqui/nemretrytomadosemjob/log;**nãoresetarconsumidosanteriores**.
+- C4-2620/2630: revisão2830agoraexecutada/med5805314075aguardacorreção+NOVOheadnominal;R2outrareviewnãoinvento. #1928somentequandoreenviarapósPF1. GETinicialOPEN13f318832f1052488f310eb04d49048a6e2f56a3,semreenviopresente;main2829liberoucartpathsmasAINDAnãoheadnovoNOMINAL. Não reexecutar igual.
+- **C4-2640-DONO-156 (15h52/cabeçalho16h00) LIDA INTEGRALMENTE**: donotetointernoriscoCreator66aprovado(nãopreço/limitevisível),J/E2#25452comandosaceitos/KB9decisõesficamcomdonosnomeados. **Z+R1 revisores #2803 depoisC5ajustarread-ceilings/plan-marginpara66/tirardraft**. GETfresh#2803AINDADRAFT**6e5159b5515e1ab11dcb4f10ea6ddc66652364b6**,updated12:25UTC/bodyainda65/REDintencional;NÃOreviewforaprecondição/nãomudotestesalheios. DepoisatualizaçãonominalC5reviewfinanceiracomR1,após2830atual. #2801éR2+S,nãoduplicar.
+- #2818JONLY,#2826GONLY,#2828SONLY,#2824R1ONLY,#2790Q/J;UnitBdisplayC5/B2C4/publicpageU/formK2/maildraftH2. Nenhumclaimparaleloindevido/nenhumaexecuçãodelegada.
+- ÚltimocanalFULLrecortefinalmostraC6preparandoreservaWebKit,semheadcorretivo2830;C4newdecision2640acima,semnovaownreview/CIterminalanunciada.
+
+## Continuidade e preservação
+
+ÚNICAvigiashell **63993** /tmp/z-main-watch.sh/MESMOflockfetch60s/deadline3500s/main+inbox/prereq;NÃOCI/canalwatch. Anterior53660lockLIVREconfirmadaantesstart;nenhumavigia2/nãoinferirZativoporCP. Canal>1MiB lidoRESTcontentsrefEXATO/corpobruto+FULLprefixoCAS;nenhumerro409/GitHub/retrycanalnestaretomada,nenhumtruncate/restauraçãosnapshot.
+
+Retentativas PERMANENTEMENTECONSUMIDAS2484verify127130387972;2615verify127143841589/mac127144213372;2741Windows127737110071;2800Firefox127885731234/mac127885740971. **NENHUMretrynovo**,nenhumCIquery/move ownheads/merge. Novaheadnãorestabelecebudgetretry.
+Cópiasownfinaisz-integrate14-{2800,2740,2741,2819}preservadas;históricolimpezareproduzívelabaixo,nãopresumirpathantigoremovido. Rootdisk0livre;novosartefatosRAM/dev/shm+GitHubimediato,nenhumtrabalhoalheioapagado. REDs/duráveisremote/nativetreesacima;semconta/pagamento/PII/preço/limite/flag/gate/provedorreal/contatoexterno.
+
+Próximo EXATO: (1) retornosownnovos/terminalcausal:9distinctSUCCESSheadEXATO+qualifiedreview(2sesai dinheiro)+freshnative/rawclean/NORMALexpectedSHA/GETtrue;semCIrodadas/mainchase. (2) novo2830headnominalcorretivo→MESMAproofcc6a+originais/readcoverage+static,semigualrerun. (3) #1928reenvioPF1→reviewnominalZ,ou#2803novohead66READY→reviewR1+Z. Sóaquiloqueabrirlegitimamente;quatroprodutossemquinta/sextaartificial. PublicarPONTOEXATOantesfinal;sechegarnovidadecausalna publicação,continuar.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 14h49 Fortaleza: #2823 revisado limpo; #2812 MERGED; quatro integrações causais publicadas
 
 Este topo SUPERA próximos passos antigos; TODO histórico/RED/WIP/retries abaixo preservado. PRIMEIRO checkpoint6048c594847d1759e8d3b8a6ce18a77a8bff5b1e COMPLETO194026caracteres, depois main8de354ff/caixa/canalINTEGRALcomrefEXATO. Regras CLAUDE/AGENTS/reservas/inbox/fila semdelta ced822→8de; nenhumaexecuçãoZativa concorrente confirmada. C4única/C1OFF/nãoponte/nãodestinatário. Nenhumaautomaçãoalterada/criada/desativada; dependênciastransitórias, auditoria nãoconcluída.

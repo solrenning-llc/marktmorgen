@@ -9,8 +9,9 @@
  * range with 206 or bills only the bytes sent (lib/uploaded-image.ts, firstBytes reads a stream it cancels): unknown is
  * never zero.
  *
- * Counted honestly, the refunded first year on Creator passes the owner's US$ 65 ceiling (tests/read-ceilings.test.ts,
- * tests/plan-margin.test.ts): this change stays unmerged until the owner decides; no price, limit or ceiling moves.
+ * Counted honestly, the refunded first year on Creator passed the owner's US$ 65 ceiling (tests/read-ceilings.test.ts,
+ * tests/plan-margin.test.ts). The owner raised that ceiling to US$ 66 on 6 November 2026 (C4-20261106-2640-DONO-156)
+ * for this line; no price, visible limit or commission moves.
  */
 import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE } from "./plan-cost-registry";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";

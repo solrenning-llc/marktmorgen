@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { LockedSpace } from "@/lib/community-locked";
+import type { LockedSpace } from "@/lib/community-gate";
 import { lockedWords } from "@/lib/buyer-words/community-locked";
 
 /**
@@ -8,19 +8,22 @@ import { lockedWords } from "@/lib/buyer-words/community-locked";
  * It is given nothing else about a space (lib/community-locked.ts), so it
  * cannot show what is inside: no posts, no members, no counts, no address.
  */
-export function LockedSpaces({ spaces, language }: { spaces: LockedSpace[]; language: unknown }) {
+export function LockedSpaces({ spaces, language, level = 2 }: { spaces: LockedSpace[]; language: unknown; level?: 2 | 4 }) {
   if (spaces.length === 0) return null;
   const w = lockedWords(language);
+  // The list's heading, and each space's under it: one level deeper in the studio's preview, under its own heading.
+  const Title = `h${level}` as "h2" | "h4";
+  const Name = `h${level + 1}` as "h3" | "h5";
   return (
     <section id="cm-locked" aria-labelledby="cm-locked-title" className="mb-6">
-      <h2 id="cm-locked-title" className="text-lg font-semibold tracking-[-0.02em]">{w.heading}</h2>
+      <Title id="cm-locked-title" className="text-lg font-semibold tracking-[-0.02em]">{w.heading}</Title>
       <p className="st-muted mt-1 text-sm">{w.intro}</p>
       <ul className="mt-3 space-y-3">
         {spaces.map((space, i) => (
           <li key={i} className="st-note">
-            <h3 className="font-bold" style={{ color: "var(--st-text)" }}>
+            <Name className="font-bold" style={{ color: "var(--st-text)" }}>
               <span className="break-words">{space.name}</span>
-            </h3>
+            </Name>
             {space.about ? <p className="mt-1 break-words text-sm">{space.about}</p> : null}
             <p className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--st-text)" }}>
               <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

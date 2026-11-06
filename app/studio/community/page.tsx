@@ -3,7 +3,8 @@ import { type Reward, pointsOf, readRewards } from "@/lib/community-points";
 import { idsOfKind, readCards } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
+import { unlocksOf } from "@/lib/community-locked";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
@@ -216,6 +217,13 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
             : formatMoney(p.priceCents, store.currency),
   }));
 
+  // "View as a member" draws a space shown Visible and locked as a member sees it (542 [CM1]): its way in worked out
+  // by the real page's own unlocksOf, its reads paid in studio requests first; refused or failed, each says it is not known.
+  const unlocks =
+    config && can(view.role, "settings")
+      ? await unlocksOf(store, config, (units) => countStudio(store, null, units).then((counted) => counted.ok, () => false))
+      : null;
+
   return (
     <div className="min-h-screen bg-paper text-ink">
       <StudioHeader
@@ -250,6 +258,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
           canSettings={can(view.role, "settings")}
           isOwner={view.role === "owner"}
           rewards={rewards}
+          lockedPreview={config ? { unlocks, language: store.language, look: store.look } : null}
           courses={[...course].flatMap((id) => {
             const card = cards.get(id);
             return card ? [{ id, title: card.title }] : [];

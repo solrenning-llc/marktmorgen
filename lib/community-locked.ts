@@ -20,6 +20,10 @@
  * With none, the space says access is not available yet; when the products
  * could not be read, it says so, and names nothing.
  *
+ * The way in is worked out for every space shown locked at once (unlocksOf),
+ * so the studio's "View as a member" (components/community-member-preview.tsx)
+ * draws, for the products the creator checks, the very list this draws.
+ *
  * What it reads is paid before it reads, as a collection page pays for its
  * cards (lib/page-read-rules.ts): at most MAX_UNLOCK_PRODUCTS listings with
  * their stock and keys (collectionUnits), then the items of any bundle among
@@ -27,8 +31,8 @@
  * takes the store's public requests (lib/traffic.ts). Refused, nothing is
  * read and the answer is null.
  */
-import type { CommunityConfig, Space } from "@/lib/community";
-import { spaceGate } from "@/lib/community-gate";
+import type { CommunityConfig } from "@/lib/community";
+import { type LockedSpace, type Unlock, lockedList, lockedOf } from "@/lib/community-gate";
 import { readListings } from "@/lib/catalog";
 import { bundleItemsToRead } from "@/lib/bundles";
 import { productsBuyableNow } from "@/lib/mail-product-sellable";
@@ -37,27 +41,51 @@ import { MAX_COLLECTION_PRODUCTS } from "@/lib/store-collections";
 import { productSegment } from "@/lib/product-slug";
 import type { Listing, Store } from "@/lib/store";
 
+export { type LockedSpace, type Unlock, lockedOf } from "@/lib/community-gate";
+
 /** The most products read for one page's locked spaces: one collection page's worth, the figure its requests are held to. */
 export const MAX_UNLOCK_PRODUCTS = MAX_COLLECTION_PRODUCTS;
-
-/** How a locked space can be opened: by buying a product, not now, or not known. */
-export type Unlock = { title: string; href: string } | "none" | "unknown";
-
-/** All the page draws of one locked space. */
-export type LockedSpace = { name: string; about: string; unlock: Unlock };
-
-/** The kept spaces shown locked that a member was not let into, in the creator's order, each with the products that would open it. */
-export function lockedOf(config: CommunityConfig, opened: ReadonlySet<string>): { space: Space; needs: string[] }[] {
-  return config.spaces.flatMap((space) => {
-    if (space.shown !== true || opened.has(space.id)) return [];
-    const gate = spaceGate(space, config.access);
-    return gate.open ? [] : [{ space, needs: gate.needs }];
-  });
-}
 
 /** The products to read for them: each space's in its order, once each, at most MAX_UNLOCK_PRODUCTS. */
 export function unlockCandidates(locked: readonly { needs: string[] }[]): string[] {
   return [...new Set(locked.flatMap((entry) => entry.needs))].slice(0, MAX_UNLOCK_PRODUCTS);
+}
+
+/**
+ * The way into every space shown locked, by space id, whoever is asking:
+ * worked out once for all of them, so a member's page and the studio's
+ * "View as a member" name the same product for a space (or none). Null when
+ * `take` refused the reads; an empty answer when the products could not be
+ * read, which each space then says ("unknown", lockedList).
+ */
+export async function unlocksOf(
+  store: Store,
+  config: CommunityConfig,
+  take: (units: number) => Promise<boolean>,
+): Promise<Record<string, Unlock> | null> {
+  const locked = lockedOf(config, new Set());
+  if (locked.length === 0) return {};
+  const ids = unlockCandidates(locked);
+  let listings: Listing[];
+  let buyable: Set<string>;
+  if (!(await take(collectionUnits(ids.length)))) return null;
+  try {
+    listings = await readListings(store, ids);
+    const items = bundleItemsToRead(listings);
+    if (items.length > 0 && !(await take(bundleItemUnits(items.length)))) return null;
+    buyable = await productsBuyableNow(store, listings);
+  } catch (error) {
+    console.error("reading a locked space's products failed", error);
+    return {};
+  }
+  const byId = new Map(listings.map((p) => [p.id, p]));
+  return Object.fromEntries(
+    locked.map(({ space, needs }) => {
+      const product = needs.map((id) => byId.get(id)).find((p): p is Listing => Boolean(p && buyable.has(p.id)));
+      const unlock: Unlock = product ? { title: product.title, href: `/@${store.handle}/p/${productSegment(product)}` } : "none";
+      return [space.id, unlock];
+    }),
+  );
 }
 
 /**
@@ -73,23 +101,6 @@ export async function lockedSpaces(
 ): Promise<LockedSpace[] | null> {
   const locked = lockedOf(config, opened);
   if (locked.length === 0) return [];
-  const ids = unlockCandidates(locked);
-  let listings: Listing[];
-  let buyable: Set<string>;
-  if (!(await take(collectionUnits(ids.length)))) return null;
-  try {
-    listings = await readListings(store, ids);
-    const items = bundleItemsToRead(listings);
-    if (items.length > 0 && !(await take(bundleItemUnits(items.length)))) return null;
-    buyable = await productsBuyableNow(store, listings);
-  } catch (error) {
-    console.error("reading a locked space's products failed", error);
-    return locked.map(({ space }) => ({ name: space.name, about: space.about, unlock: "unknown" }));
-  }
-  const byId = new Map(listings.map((p) => [p.id, p]));
-  return locked.map(({ space, needs }) => {
-    const product = needs.map((id) => byId.get(id)).find((p): p is Listing => Boolean(p && buyable.has(p.id)));
-    const unlock: Unlock = product ? { title: product.title, href: `/@${store.handle}/p/${productSegment(product)}` } : "none";
-    return { name: space.name, about: space.about, unlock };
-  });
+  const unlocks = await unlocksOf(store, config, take);
+  return unlocks === null ? null : lockedList(locked, unlocks);
 }

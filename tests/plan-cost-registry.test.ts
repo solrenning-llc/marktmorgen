@@ -252,6 +252,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   for (const checks of [1, 2, 20]) assert.ok(checkUnits(checks) * laterPageCost() >= checks * ACCESS_CHECK_READ, `${checks} checks`);
   // A member's locked spaces read at most one collection page's products, so the collection's figures above hold them (542 [CM1]).
   assert.ok(MAX_UNLOCK_PRODUCTS <= MAX_COLLECTION_PRODUCTS, `${MAX_UNLOCK_PRODUCTS} unlock products > ${MAX_COLLECTION_PRODUCTS}`);
+  // The studio's "View as a member" reads the same products, paid in studio requests (542 [CM1]): each covers what a public one does.
+  for (let products = 1; products <= MAX_UNLOCK_PRODUCTS; products += 1) assert.ok(collectionUnits(products) * UNIT_COST.studio >= collectionRead(products), `studio: unlock of ${products}`);
+  for (let items = 1; items <= MAX_UNLOCK_PRODUCTS * MAX_BUNDLE_ITEMS; items += 1) assert.ok(bundleItemUnits(items) * UNIT_COST.studio >= bundleItemRead(items), `studio: ${items} bundle items`);
   for (const commands of [0, 1, 24, 25, 26, 600, 30_000]) for (const bytes of [0, 1, 999_999, 1_000_000, 1_000_001, 51_200_000]) {
     assert.ok(walkUnits(commands, bytes) * laterPageCost() >= walkRead(commands, bytes), `walk step ${commands} commands ${bytes} bytes`);
   }

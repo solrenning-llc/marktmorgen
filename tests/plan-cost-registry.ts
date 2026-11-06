@@ -1084,6 +1084,8 @@ export const COST_LINES: CostLine[] = [
       // A member's locked spaces read their products as a collection page reads its cards, paid before they are read (542 [CM1], 6 November 2026).
       { file: "lib/community-locked.ts", names: ["MAX_UNLOCK_PRODUCTS = MAX_COLLECTION_PRODUCTS", "take(collectionUnits(ids.length))", "take(bundleItemUnits(items.length))"] },
       { file: "app/[handle]/community/page.tsx", names: ["takePublicRequest(store, \"buyer\", undefined, units)"] },
+      // The studio's "View as a member" reads them the same way, paid in studio requests before it reads.
+      { file: "app/studio/community/page.tsx", names: ["unlocksOf(store, config, (units) => countStudio(store, null, units)"] },
       { file: "lib/traffic.ts", names: ["countRequest", "takePublicRequest", "requestsKey"] },
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).

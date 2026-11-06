@@ -8,7 +8,8 @@
  *   - the preview's locked list, for the products the creator checks, is the
  *     same markup the real page draws for a member holding just those, word
  *     for word: name, one line, "Locked", "Unlock with <product>" and its link,
- *     or "Access isn't available yet";
+ *     or "Access isn't available yet" (only its headings sit deeper, under the
+ *     preview's own);
  *   - a space the checked products open, or one left "Hidden", is not in it;
  *   - nothing from inside a space (posts, members, its address) is in it;
  *   - the way in is worked out once, by the function the real page uses
@@ -91,6 +92,8 @@ async function main(): Promise<void> {
     return renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {}, replace() {}, prefetch() {} } as never }, page));
   }
   const lockedPart = (html: string) => html.match(/<section[^>]*id="cm-locked"[\s\S]*?<\/section>/)?.[0] ?? "";
+  // The preview's headings sit two levels deeper, under its own (h4 and h5 for the page's h2 and h3); nothing else may differ.
+  const asOnPage = (html: string) => html.replace(/<(\/?)h4\b/g, "<$1h2").replace(/<(\/?)h5\b/g, "<$1h3");
 
   part("The way in is worked out by the real page's function, paid for before it reads");
   const unlocksOf = (locked as Record<string, unknown>).unlocksOf as undefined | ((s: typeof store, c: CommunityConfig, take: (units: number) => Promise<boolean>) => Promise<Record<string, gate.Unlock> | null>);
@@ -118,7 +121,8 @@ async function main(): Promise<void> {
   const real = lockedPart(await draw(OUTSIDER));
   is("the real page shows it (control)", [real.includes("Inner circle"), real.includes("Unlock with Guide"), real.includes("Draft room")], [true, true, true]);
   const shown = drawPreview([starter]);
-  is("the same markup in the preview", lockedPart(shown), real);
+  is("the same markup in the preview, its headings one step under the preview's", asOnPage(lockedPart(shown)), real);
+  is("headings h4 and h5 in the studio, under its h3", [/<h4[ >]/.test(lockedPart(shown)), /<h5[ >]/.test(lockedPart(shown)), /<h[23][ >]/.test(lockedPart(shown))], [true, true, false]);
   is("drawn in the store's language and look", [shown.includes(`lang="`), shown.includes("st-page")], [true, true]);
   is("a space left Hidden is not in it", [shown.includes("Secret room"), shown.includes("A line nobody outside should read")], [false, false]);
   is("nothing from inside a space, nor its address", [shown.includes("PRIVATE-INNER-TEXT"), shown.includes("Inside news"), shown.includes(inner), shown.includes(later)], [false, false, false, false]);
@@ -126,7 +130,7 @@ async function main(): Promise<void> {
   part("A member who also has Bonus: the space it opens leaves the locked list, as on the real page");
   const realInsider = lockedPart(await draw(INSIDER));
   const shownInsider = drawPreview([starter, bonus]);
-  is("the same markup as the real page", lockedPart(shownInsider), realInsider);
+  is("the same markup as the real page", asOnPage(lockedPart(shownInsider)), realInsider);
   is("Inner circle is no longer locked; Draft room still is", [lockedPart(shownInsider).includes("Inner circle"), lockedPart(shownInsider).includes("Draft room")], [false, true]);
 
   part("Nothing checked is not a member: no locked list is drawn");

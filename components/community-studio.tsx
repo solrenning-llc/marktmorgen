@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { MemberPreview } from "@/components/community-member-preview";
+import { type LockedPreviewData, MemberPreview } from "@/components/community-member-preview";
 import type { CommunityConfig, Space } from "@/lib/community";
 import {
   MAX_COMMENTS_PER_POST,
@@ -116,6 +116,7 @@ export function CommunityStudio({
   events = null,
   rewards = [],
   courses = [],
+  lockedPreview = null,
 }: {
   handle: string;
   address: string;
@@ -140,6 +141,8 @@ export function CommunityStudio({
   rewards?: Reward[];
   /** The store's courses: what a level can hand over. */
   courses?: { id: string; title: string }[];
+  /** The way into each space shown locked, worked out on the server, for "View as a member" (542 [CM1]). */
+  lockedPreview?: LockedPreviewData | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -207,7 +210,7 @@ export function CommunityStudio({
             <Welcome config={config} busy={busy} run={run} problem={problem} />
             <Messages config={config} busy={busy} run={run} problem={problem} />
             <Room config={config} busy={busy} run={run} problem={problem} />
-            <Spaces config={config} products={products} busy={busy} run={run} problem={problem} />
+            <Spaces config={config} products={products} busy={busy} run={run} problem={problem} lockedPreview={lockedPreview} />
             <Levels config={config} rewards={rewards} courses={courses} busy={busy} run={run} problem={problem} />
           </>
         ) : (
@@ -978,12 +981,14 @@ function Spaces({
   busy,
   run,
   problem,
+  lockedPreview,
 }: {
   config: CommunityConfig;
   products: ProductChoice[];
   busy: string | null;
   run: Runner;
   problem: Problem;
+  lockedPreview: LockedPreviewData | null;
 }) {
   const [name, setName] = useState("");
   const [about, setAbout] = useState("");
@@ -1016,7 +1021,7 @@ function Spaces({
         ))}
       </ul>
       {config.spaces.map((s) => <div key={s.id}>{problem(`space-${s.id}`)}</div>)}
-      <MemberPreview spaces={config.spaces} access={config.access} open={open} />
+      <MemberPreview spaces={config.spaces} access={config.access} open={open} locked={lockedPreview} />
 
       {!full ? (
         <form

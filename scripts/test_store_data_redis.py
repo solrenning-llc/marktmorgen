@@ -70,6 +70,18 @@ def main():
         print("PASS: what expires by itself comes off the room once its month is over")
 
         redis.command("DEL", room)
+        # A store idle for years: at most two months that are over come off a call, the oldest first,
+        # so one call's commands stay bounded (review of #3001); the rest stay listed and counted.
+        idle = ["2020-%02d" % m for m in range(1, 13)] + ["2021-01"]
+        redis.command("HSET", room, "#", str(len(idle) * 164), "~", ",".join(idle), *[part for m in idle for part in ("~" + m, "100")])
+        assert take(redis, 100_000, ("a", "p:new", 10), month="2026-11") == [1, (len(idle) - 2) * 164 + 74]
+        assert redis.command("HGET", room, "~") == ",".join(idle[2:])
+        assert [redis.command("HEXISTS", room, "~" + m) for m in idle[:3]] == [0, 0, 1]
+        assert take(redis, 100_000, ("a", "p:new", 10), month="2026-11") == [1, (len(idle) - 4) * 164 + 84]
+        assert redis.command("HGET", room, "~") == ",".join(idle[4:])
+        print("PASS: a long-idle room sheds at most two expired months a call, oldest first")
+
+        redis.command("DEL", room)
         assert take(redis, 10_000, ("a", "~2026-09", 100), month="2026-10")[0] == -1
         assert take(redis, 10_000, ("s", "~2026-11", 100), month="2026-10")[0] == -1
         assert take(redis, 10_000, ("s", "#", 100))[0] == -1

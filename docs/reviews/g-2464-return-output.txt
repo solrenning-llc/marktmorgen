@@ -1,0 +1,475 @@
+
+=== g2464-return-red-confirmed.log ===
+=== g-2464-unknown-provider.proof.ts ===
+  FAIL  missing data: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  missing data: no negative cache invented
+        expected 0
+        got      1
+  FAIL  missing data: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  null data: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  null data: no negative cache invented
+        expected 0
+        got      1
+  FAIL  null data: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  unscanned next page: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  unscanned next page: no negative cache invented
+        expected 0
+        got      1
+  FAIL  unscanned next page: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+109 checks, 9 failing.
+=== g-2464-return-boundaries.proof.ts ===
+  FAIL  missing data: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  missing data: no negative cache invented
+        expected 0
+        got      1
+  FAIL  missing data: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  null data: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  null data: no negative cache invented
+        expected 0
+        got      1
+  FAIL  null data: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  unscanned next page: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  unscanned next page: no negative cache invented
+        expected 0
+        got      1
+  FAIL  unscanned next page: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  empty row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  empty row: negative cache absent
+        expected 0
+        got      1
+  FAIL  empty row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  empty row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  empty row: strict throws
+        expected true
+        got      false
+  FAIL  array row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  array row: negative cache absent
+        expected 0
+        got      1
+  FAIL  array row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  array row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  array row: strict throws
+        expected true
+        got      false
+  FAIL  missing has_more: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  missing has_more: negative cache absent
+        expected 0
+        got      1
+  FAIL  missing has_more: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  missing has_more: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  missing has_more: strict throws
+        expected true
+        got      false
+  FAIL  string has_more: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  string has_more: negative cache absent
+        expected 0
+        got      1
+  FAIL  string has_more: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  string has_more: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  string has_more: strict throws
+        expected true
+        got      false
+  FAIL  primitive entry: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  primitive entry: negative cache absent
+        expected 0
+        got      1
+  FAIL  primitive entry: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  primitive entry: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  primitive entry: strict throws
+        expected true
+        got      false
+  FAIL  unknown session status: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  unknown session status: negative cache absent
+        expected 0
+        got      1
+  FAIL  unknown session status: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  unknown session status: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  unknown session status: strict throws
+        expected true
+        got      false
+  FAIL  11 customers: result
+        expected "unknown"
+        got      false
+155 checks, 40 failing.
+
+=== g2464-return-green-original.log ===
+=== g-2464-unknown-provider.proof.ts ===
+109 checks, all passing.
+
+=== g2464-return-green.log ===
+=== letter-members.test.ts ===
+109 checks, all passing.
+=== g-2464-unknown-provider.proof.ts ===
+109 checks, all passing.
+
+=== g2464-return-boundaries-final.log ===
+=== g-2464-return-boundaries.proof.ts ===
+  FAIL  empty row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  empty row: negative cache absent
+        expected 0
+        got      1
+  FAIL  empty row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  empty row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  empty row: strict throws
+        expected true
+        got      false
+  FAIL  array row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  array row: negative cache absent
+        expected 0
+        got      1
+  FAIL  array row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  array row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  array row: strict throws
+        expected true
+        got      false
+  FAIL  unknown session status: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  unknown session status: negative cache absent
+        expected 0
+        got      1
+  FAIL  unknown session status: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  unknown session status: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  unknown session status: strict throws
+        expected true
+        got      false
+  FAIL  intent empty row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  intent empty row: negative cache absent
+        expected 0
+        got      1
+  FAIL  intent empty row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  intent empty row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  intent empty row: strict throws
+        expected true
+        got      false
+  FAIL  intent array row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  intent array row: negative cache absent
+        expected 0
+        got      1
+  FAIL  intent array row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  intent array row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  intent array row: strict throws
+        expected true
+        got      false
+179 checks, 25 failing.
+
+=== g2464-return-boundaries-final-red.log ===
+=== g-2464-return-boundaries.proof.ts ===
+  FAIL  missing data: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  missing data: no negative cache invented
+        expected 0
+        got      1
+  FAIL  missing data: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  null data: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  null data: no negative cache invented
+        expected 0
+        got      1
+  FAIL  null data: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  unscanned next page: ownership unknown, not closed
+        expected "unknown"
+        got      "closed"
+  FAIL  unscanned next page: no negative cache invented
+        expected 0
+        got      1
+  FAIL  unscanned next page: real page says unknown and never shows body/false denial
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  empty row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  empty row: negative cache absent
+        expected 0
+        got      1
+  FAIL  empty row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  empty row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  empty row: strict throws
+        expected true
+        got      false
+  FAIL  array row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  array row: negative cache absent
+        expected 0
+        got      1
+  FAIL  array row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  array row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  array row: strict throws
+        expected true
+        got      false
+  FAIL  missing has_more: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  missing has_more: negative cache absent
+        expected 0
+        got      1
+  FAIL  missing has_more: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  missing has_more: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  missing has_more: strict throws
+        expected true
+        got      false
+  FAIL  string has_more: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  string has_more: negative cache absent
+        expected 0
+        got      1
+  FAIL  string has_more: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  string has_more: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  string has_more: strict throws
+        expected true
+        got      false
+  FAIL  primitive entry: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  primitive entry: negative cache absent
+        expected 0
+        got      1
+  FAIL  primitive entry: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  primitive entry: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  primitive entry: strict throws
+        expected true
+        got      false
+  FAIL  unknown session status: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  unknown session status: negative cache absent
+        expected 0
+        got      1
+  FAIL  unknown session status: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  unknown session status: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  unknown session status: strict throws
+        expected true
+        got      false
+  FAIL  intent empty row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  intent empty row: negative cache absent
+        expected 0
+        got      1
+  FAIL  intent empty row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  intent empty row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  intent empty row: strict throws
+        expected true
+        got      false
+  FAIL  intent array row: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  intent array row: negative cache absent
+        expected 0
+        got      1
+  FAIL  intent array row: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  intent array row: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  intent array row: strict throws
+        expected true
+        got      false
+  FAIL  intent missing pagination: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  intent missing pagination: negative cache absent
+        expected 0
+        got      1
+  FAIL  intent missing pagination: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  intent missing pagination: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  intent missing pagination: strict throws
+        expected true
+        got      false
+  FAIL  intent more pages: reader unknown
+        expected "unknown"
+        got      "closed"
+  FAIL  intent more pages: negative cache absent
+        expected 0
+        got      1
+  FAIL  intent more pages: no false denial or body
+        expected [true,false,false]
+        got      [false,true,false]
+  FAIL  intent more pages: nonstrict cache absent
+        expected null
+        got      "{\"v\":\"g\",\"ok\":false}"
+  FAIL  intent more pages: strict throws
+        expected true
+        got      false
+  FAIL  11 customers: result
+        expected "unknown"
+        got      false
+179 checks, 60 failing.
+
+=== g2464-return-linked.log ===
+=== community-welcome.test.ts ===
+15 checks, all passing.
+=== access-revocation.test.ts ===
+31 checks, all passing.
+=== lost-dispute-doors.test.ts ===
+22 checks, all passing.
+=== lost-dispute-access.test.ts ===
+37 checks, all passing.
+=== discord.test.ts ===
+35 checks, all passing.
+=== person-erasure.test.ts ===
+32 checks, all passing.
+=== letters.test.ts ===
+21 checks, all passing.
+=== email-fields.test.ts ===
+48 checks, all passing.
+=== buyer-actions.test.ts ===
+ℹ tests 9
+ℹ pass 9
+ℹ fail 0
+ℹ skipped 0
+=== store-data-registry.test.ts ===
+ℹ tests 7
+ℹ pass 7
+ℹ fail 0
+ℹ skipped 0
+=== person-data-registry.test.ts ===
+20 checks, all passing.
+=== plan-cost-registry.test.ts ===
+ℹ tests 24
+ℹ pass 24
+ℹ fail 0
+ℹ skipped 0
+=== accessibility-inventory.test.ts ===
+16 checks, all passing.
+=== accessibility-statement.test.ts ===
+  ok    creators' stores: what the studio checks, and that their content is theirs
+77 checks, all passing.
+
+=== g2464-return-types.log ===
+[empty output; exit status zero confirmed]
+
+=== g2464-return-lint.log ===
+[empty output; exit status zero confirmed]
+
+=== g2464-return-scanner.log ===
+Public data check: 3620 tracked files; 0 file(s) require correction.

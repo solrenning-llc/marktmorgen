@@ -100,6 +100,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   copy: "Copies this store into another store of the account, an account action rather than a part of the store.",
   checkup: "A health check of payments, the domain, email and checkout, opened from the studio home.",
   totals: "Figures for the stores of the account, a report rather than a part of the store.",
+  earnings: "Earnings by month from the store's own Stripe and PayPal, a report opened from the studio home rather than a part of the store.",
   paused: "Shown only when the studio's requests for the period are used up.",
   "closing-refunds": "The review before members get unused time back when a store closes.",
   refund: "The review before a refund of the store's own Marktmorgen plan.",

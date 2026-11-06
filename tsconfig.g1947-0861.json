@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "app/api/store/product/route.ts",
+    "app/api/store/site-page/route.ts",
+    "lib/campaign-landing-store.ts",
+    "lib/campaign-landing.ts",
+    "lib/data-families.ts",
+    "lib/redis-memory.ts",
+    "lib/sales-page-store.ts",
+    "tests/campaign-landing-races.test.ts",
+    "tests/campaign-landing-store.test.ts",
+    "tests/campaign-landing.test.ts",
+    "tests/landing-store-evidence.test.ts",
+    "tests/store-data-registry.ts",
+    "tests/g1947-frozen-g2.proof.ts",
+    "tests/g1947-product-cleanup.proof.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

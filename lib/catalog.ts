@@ -680,23 +680,30 @@ function wanted(store: Store, ids: Iterable<string> | undefined): string[] {
  * holds is not read again.
  */
 export async function readListings(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
+  return (await readListingsMeasured(store, ids)).listings;
+}
+
+/** readListings, and how many bytes of listing records it read from Redis (0 for those the store record holds whole). */
+export async function readListingsMeasured(store: Store, ids?: Iterable<string>): Promise<{ listings: Listing[]; bytes: number }> {
   const asked = wanted(store, ids);
   const catalog = store.catalog;
   if (catalog.inline) {
     const byId = new Map(catalog.inline.map((p) => [p.id, p]));
-    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+    return { listings: asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf), bytes: 0 };
   }
-  if (asked.length === 0) return [];
+  if (asked.length === 0) return { listings: [], bytes: 0 };
   const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
   const missing = asked.filter((id) => !found.has(id));
+  let bytes = 0;
   if (missing.length && catalog.id && isRedisConfigured()) {
     const raws = await getMany(missing.map((id) => listingKey(catalog.id!, id)));
+    bytes = raws.reduce<number>((sum, raw) => sum + (typeof raw === "string" ? Buffer.byteLength(raw, "utf8") : 0), 0);
     missing.forEach((id, i) => {
       const listing = parseListing(parseJson(raws[i]));
       if (listing && listing.id === id) found.set(id, listing);
     });
   }
-  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
+  return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
 }
 
 /**

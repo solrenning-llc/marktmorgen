@@ -19,7 +19,7 @@
  *     shape (tests/plan-cost-registry.ts, line studio) before a single one is
  *     read. Refused, nothing is read and nothing is offered.
  */
-import { KIND, MAX_PRODUCT_BYTES, STORE_PAGE_SIZE, listingSizes, readListings } from "@/lib/catalog";
+import { KIND, MAX_PRODUCT_BYTES, STORE_PAGE_SIZE, listingSizes, readListingsMeasured } from "@/lib/catalog";
 import { cartable } from "@/lib/cart-rules";
 import { soonState } from "@/lib/preorders";
 import { redisPipeline } from "@/lib/redis";
@@ -80,6 +80,7 @@ export async function cartLinkProducts(store: Store): Promise<{ id: string; titl
     if (ids.length < 2) return [];
     const held = new Set(store.catalog.head.map((listing) => listing.id));
     const toRead = store.catalog.inline ? [] : ids.filter((id) => !held.has(id));
+    let taken = 0;
     if (toRead.length) {
       // The data room's weights, raised to what each listing record weighs now (Codex G on #1928: a record that grew
       // after it was weighed is paid at its new size before it is read); one that cannot be measured at its ceiling.
@@ -89,9 +90,14 @@ export async function cartLinkProducts(store: Store): Promise<{ id: string; titl
       // One STRLEN and one GET per listing, and the weighing.
       const units = cartLinkUnits(2 * toRead.length, bytes);
       if (!(await countStudio(store, null, units)).ok) return [];
+      taken = units;
     }
     const coming = await soonState(store);
-    const listed = await readListings(store, ids);
+    const { listings: listed, bytes: read } = await readListingsMeasured(store, ids);
+    // Settled at what was really read (Claude 4, C4-20261106-1740-C3-104): a record that grew between its STRLEN and
+    // its GET has its difference taken from the same count, with no new read; refused, nothing is listed.
+    const due = toRead.length ? cartLinkUnits(2 * toRead.length, read) - taken : 0;
+    if (due > 0 && !(await countStudio(store, null, due)).ok) return [];
     return listed.filter((p) => cartable(p) && !coming.soon.has(p.id)).map((p) => ({ id: p.id, title: p.title }));
   } catch {
     return [];

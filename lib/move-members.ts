@@ -31,7 +31,7 @@ import { moveWords } from "@/lib/buyer-words/move";
 import { activeIntro } from "@/lib/intro-price";
 import { firstChargeAt, linkSeconds, reminderAt } from "@/lib/move-rules";
 import { giveData, needData } from "@/lib/store-data";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takePublicRequest } from "@/lib/traffic";
 import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -471,15 +471,20 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const fields = productIds.map((p) => inviteField(email, p));
-  const [rows] = await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]);
-  const held = fields.flatMap((field, i) => {
-    const invite = parseInvite(Array.isArray(rows) ? rows[i] : null);
-    return invite ? [{ field, invite }] : [];
-  });
+  // CX-123 rule 24 (Claude 4, C4-2890): a reply out of its exact shape is unknown, never "no invitations": it throws,
+  // so the erasure lists this part as not finished instead of reporting 0 while the invitation and its link stay.
+  const rows = repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1)?.[0];
+  if (!Array.isArray(rows) || rows.length !== fields.length || rows.some((row) => row !== null && typeof row !== "string")) {
+    throw new UnknownReplyError("a person's invitations");
+  }
+  // An invitation kept under the person's field is deleted even when its record no longer reads: its field, schedule and
+  // checkout mark are known from the field alone; only a link read from the record can be deleted by its token.
+  const held = fields.flatMap((field, i) => (rows[i] === null ? [] : [{ field, invite: parseInvite(rows[i]) }]));
   if (!held.length) return 0;
+  const links = held.flatMap((h) => (h.invite ? [linkKey(h.invite.t)] : []));
   await redisPipeline([
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
-    ["DEL", ...held.map((h) => linkKey(h.invite.t))],
+    ...(links.length ? [["DEL", ...links]] : []),
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
     // The checkout their link last opened, kept a day so it is not opened twice.
     ["DEL", ...held.map((h) => openKey(statsId, h.field))],

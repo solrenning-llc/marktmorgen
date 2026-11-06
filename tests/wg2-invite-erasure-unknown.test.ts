@@ -38,6 +38,8 @@ async function main(): Promise<void> {
   }
   part("Controls");
   is("no invitation on either product: 0, nothing deleted", await attempt((n) => Array(n).fill(null)), { result: 0, deletes: 0 });
+  // Added after the RED: a field holding a record that no longer reads is still the person's, so it is deleted and counted.
+  is("a field whose record does not read is still deleted and counted", await attempt((n) => ["not json", ...Array(n - 1).fill(null)]), { result: 1, deletes: 3 });
   done();
 }
 

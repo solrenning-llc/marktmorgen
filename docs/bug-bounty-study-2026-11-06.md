@@ -111,7 +111,7 @@ Conclusão sobre as plataformas: **nenhuma das quatro publica preço**. Todas ex
   - **sem recompensa em dinheiro**;
 - criar o SECURITY.md na raiz, apontando para a mesma política.
 
-O custo é zero e não há contrato.
+Não há custo novo além da página que já existe, e não há contrato.
 
 Reavaliar a recompensa paga **depois da abertura, quando a base mínima for atingida**, por programa próprio com teto. A proposta de partida é US$ 500/mês e US$ 3.000/ano, com a tabela do item 5. Antes de abrir, o programa precisa de:
 - linha nova em lib/llc-fixed-costs.ts, com valor e fonte;

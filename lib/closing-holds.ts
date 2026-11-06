@@ -248,12 +248,27 @@ export async function membersOf(folder: string): Promise<{ emails: string[]; mis
   return out;
 }
 
+/**
+ * A store's score in the closing day's line (FINAL_INDEX: the end of its plan, ms), or null when the line says it
+ * is not there. ZSCORE answers Redis's text of the score, or a number from a client that parses it, or null
+ * (CX-123 rule 24): any other shape, a score that is not a positive number, or a pipeline answer that is not
+ * exactly one reply is unknown and throws, so no caller reads it as "not closing" nor as a score of 0.
+ */
+export async function closingScore(ref: string): Promise<number | null> {
+  const replies = repliesFor(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]]), 1);
+  if (!replies) throw new UnknownReplyError("the closing day's line (ZSCORE)");
+  const [score] = replies;
+  if (score === null) return null;
+  const value = typeof score === "number" ? score : typeof score === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(score) ? Number(score) : Number.NaN;
+  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("the closing day's line (ZSCORE)");
+  return value;
+}
+
 /** Whether a store's closing day has begun: then no plan may be started for it (app/api/billing/checkout). Throws when it cannot be read. */
 export async function inClosingDay(ref: string): Promise<boolean> {
-  // With no database there is no closing day to be in (the line lives there); one that does not answer throws, and the caller refuses.
+  // With no database there is no closing day to be in (the line lives there); one that does not answer, or answers in an unknown shape, throws, and the caller refuses.
   if (!isRedisConfigured()) return false;
-  const [score] = await redisPipeline([["ZSCORE", FINAL_INDEX, ref]]);
-  return score !== null && score !== undefined;
+  return (await closingScore(ref)) !== null;
 }
 
 /** How the hold stands: the members it could not reach yet, and those past the budget. */

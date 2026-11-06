@@ -42,7 +42,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
-import { FINAL_INDEX } from "@/lib/closing-holds";
+import { closingScore } from "@/lib/closing-holds";
 import { formatMoney } from "@/lib/money";
 
 export const UNDO_KEY = "nl:closing:undo";
@@ -187,8 +187,9 @@ export async function shutSince(handle: string): Promise<number | null> {
  */
 export async function closingSince(store: Store): Promise<ClosingTimes | null> {
   if (!store.planEndedAt || !isRedisConfigured()) return null;
-  const [score] = await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)]]);
-  if (score === null || score === undefined || !Number.isFinite(Number(score))) return null;
+  // Null only when the line says the store is not in it; a reply in any other shape throws (lib/closing-holds.ts).
+  const score = await closingScore(storeRef(store));
+  if (score === null) return null;
   // The line's score is the end of the plan (lib/plan-closing.ts, closingDay).
   const ended = Number(score);
   const marked = await shutOf(store.handle);

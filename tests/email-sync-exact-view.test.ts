@@ -15,6 +15,7 @@ const store = {
   email: "exact-view@example.test",
   sid: "11111111111111111111111111111111",
   extra: false,
+  catalog: { id: "synthetic", items: [] },
 } as Store;
 const config = JSON.stringify({
   handle: "exact-view",

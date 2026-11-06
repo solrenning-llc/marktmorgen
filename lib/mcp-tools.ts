@@ -21,8 +21,20 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
  */
 import type { Store } from "@/lib/store";
 import { type StatsData, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
-import { readListings } from "@/lib/catalog";
+import { readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
+import { readAbout } from "@/lib/product-about";
+import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
+import { readQuizFor } from "@/lib/quiz";
+import { readTaskFor } from "@/lib/assignment";
+import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";
+import { countSections, readSectionsExact } from "@/lib/saved-block-store";
+import type { PageBlock } from "@/lib/sales-page";
+import { EMPTY_PAGE, type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
+import { expectedShareB, readCounts } from "@/lib/headline-test";
+import { type Counts, testState } from "@/lib/headline-test-rules";
+import { reachShares, readDepth } from "@/lib/page-depth";
+import { isFree } from "@/lib/store-field-rules";
 import { keptMembershipBytes, membershipNumbersPaid } from "@/lib/membership-numbers";
 import { broadcastSizes, listBroadcasts } from "@/lib/broadcasts";
 import { broadcastMoney, flowMoney, keptMailRevenueBytes, readMailRevenuePaid } from "@/lib/mail-revenue";
@@ -31,7 +43,9 @@ import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
 import {
-  EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, emailsWork, listingsWork, mailRevenueColdWork, membershipsWork, settledUnits,
+  EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
+  membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
+  COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork,
 } from "@/lib/api-read-rules";
 import { paypalCounts } from "@/lib/paypal-sales";
 import { insightsFrom } from "@/lib/insights";
@@ -465,4 +479,254 @@ export function insightsTool(data: StatsData, w: Window) {
     window: NAMES[w],
     worth_knowing: insightsFrom(data, w, [], 6).map((i) => ({ text: i.text, tone: i.tone, arithmetic: i.math ?? null })),
   };
+}
+
+/** A block as an agent may read it: testimonials counted, never quoted. */
+export function blockForAgent(block: PageBlock) {
+  return block.kind === "quotes" ? { id: block.id, kind: block.kind, heading: block.heading, testimonials: block.items.length } : block;
+}
+
+/**
+ * A product's sales page as the creator saved it, block by block, so an agent
+ * sees what is there before it prepares any change (631 [AA1] (a), unit 9).
+ * Testimonials are counted, never quoted: a buyer's words stay out of an
+ * assistant's conversation, as everywhere on this server.
+ */
+export function salesPageTool(productId: string, title: string, page: SalesPage) {
+  return {
+    product: productId,
+    title,
+    note: "Blocks in page order, as saved. Testimonials (kind quotes) are counted, not quoted. Reviews blocks name review ids only. An empty list means the product has no sales page of its own yet.",
+    seo_title: page.seoTitle,
+    seo_description: page.seoDescription,
+    blocks: page.blocks.map(blockForAgent),
+  };
+}
+
+/**
+ * What reading one product's listing and then `work` takes, paid before
+ * anything is read (lib/api-read-rules.ts): the listing only when the store's
+ * own record does not hold it (lib/catalog-read-count.ts).
+ */
+async function payFor(store: Store, id: string, work: Parameters<typeof addWork>[1], charge: Charge): Promise<Response | null> {
+  return charge(apiReadUnits(addWork(listingsWork(listingsToRead(store, [id])), work)));
+}
+
+/** One product's long description, or null for an unknown product; the refusal when the store's API requests are used up. */
+export async function productTextTool(store: Store, id: string, charge: Charge): Promise<Response | { product: string; title: string; description: string } | null> {
+  const refused = await payFor(store, id, productTextWork(), charge);
+  if (refused) return refused;
+  const listing = await readListing(store, id);
+  if (!listing) return null;
+  return { product: listing.id, title: listing.title, description: listing.about ? await readAbout(store.statsId, listing.id) : "" };
+}
+
+/** A product's sales page, or null when the store has no such product; the refusal when the store's API requests are used up. */
+export async function readSalesPageTool(store: Store, id: string, charge: Charge) {
+  const refused = await payFor(store, id, salesPageWork(), charge);
+  if (refused) return refused;
+  const listing = await readListing(store, id);
+  if (!listing) return null;
+  // Read exactly: an answer that is not known is "unavailable", never an empty page (Codex J on #1821).
+  const kept = store.statsId ? await readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 };
+  if (kept === undefined) return { error: "The sales page could not be read just now. Try again in a moment." };
+  return salesPageTool(listing.id, listing.title, kept.page ?? { ...EMPTY_PAGE, blocks: [] });
+}
+
+/**
+ * A course's outline as the studio edits it (631 [AA1] (a), unit 10): modules
+ * and lessons in order, with what each lesson holds. Files and videos by
+ * their names only, never where they are kept: a paid course's files are
+ * private, and their place in the store is the only handle to them.
+ */
+export function courseOutlineTool(productId: string, title: string, course: Course) {
+  return {
+    product: productId,
+    title,
+    certificate: course.certificate,
+    note: "Modules and lessons in order. drip_days counts from the course's start. Files and videos are named, never located. Read a lesson's text, quiz and task with get_lesson.",
+    modules: course.modules.map((unit) => ({
+      id: unit.id,
+      title: unit.title,
+      drip_days: unit.dripDays,
+      lessons: unit.lessons.map((lesson) => ({
+        id: lesson.id,
+        title: lesson.title,
+        preview: lesson.preview,
+        has_text: lesson.hasBody,
+        video: lesson.video ? lesson.video.name : null,
+        files: lesson.files.map((file) => file.name),
+        link: lesson.link,
+      })),
+    })),
+  };
+}
+
+/** The course of one of this store's products, or null; the refusal when the store's API requests are used up. */
+export async function readCourseTool(store: Store, id: string, charge: Charge) {
+  const refused = await payFor(store, id, courseOutlineWork(), charge);
+  if (refused) return refused;
+  const listing = await readListing(store, id);
+  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  return listing && course ? courseOutlineTool(listing.id, listing.title, course) : null;
+}
+
+/** One lesson's text, its quiz with the right answers and its task, as the studio edits them; null when there is no such lesson. */
+export async function readLessonTool(store: Store, id: string, lessonId: string, charge: Charge) {
+  const refused = await payFor(store, id, lessonWork(), charge);
+  if (refused) return refused;
+  const listing = await readListing(store, id);
+  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  const found = course ? findLesson(course, lessonId) : null;
+  if (!listing || !course || !found) return null;
+  const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);
+  return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz, task };
+}
+
+/**
+ * How a product's page test stands (631 [AA1] (a), unit 12): the views,
+ * checkouts, sales and money of each version, and the state the studio's own
+ * rule gives (lib/headline-test-rules.ts testState), never a winner of this
+ * tool's own making.
+ */
+export function pageTestTool(productId: string, page: SalesPage, counts: Counts, measure: "money" | "checkouts", shareB: number, now = Date.now()) {
+  const state = testState(counts, measure, { declared: declaredMeasure(page), shareB, now });
+  const version = (v: "a" | "b") => ({ views: counts[`v${v}`], checkouts_started: counts[`c${v}`], sales: counts[`s${v}`] ?? null, revenue: counts[`r${v}`] ?? null });
+  return {
+    product: productId,
+    test: page.variant ? "whole_page" : "headline",
+    headlines: page.test && !page.variant ? { b: page.test.headline, b_line: page.test.sub } : null,
+    measure,
+    note: "a is the page as saved, b the version tested against it. state is the studio's own rule: won, running, too_few, split, maturing, measure_changed or unavailable. Money is in the store currency's smallest unit; null is not counted.",
+    state: state.state,
+    winner: state.winner,
+    a: version("a"),
+    b: version("b"),
+  };
+}
+
+/** A product's page test as the studio reads it, or why there is none; the refusal when the store's API requests are used up. */
+export async function readPageTestTool(store: Store, id: string, charge: Charge): Promise<Response | { found: false; error: string } | { found: true; value: ReturnType<typeof pageTestTool> }> {
+  const refused = await payFor(store, id, pageTestWork(), charge);
+  if (refused) return refused;
+  const listing = await readListing(store, id);
+  if (!listing) return { found: false, error: "There is no product with that id in this store. Use list_products for the ids." };
+  // Read exactly: an answer that is not known is "unavailable", never a page with no test.
+  const kept = store.statsId ? await readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 };
+  if (kept === undefined) return { found: false, error: "The page could not be read just now. Try again in a moment." };
+  const page = kept.page ?? { ...EMPTY_PAGE, blocks: [] };
+  const test = runningTest(page);
+  if (!test) return { found: false, error: "This product's page is not running a test." };
+  const counts = await readCounts(store.statsId, listing.id, test);
+  if (counts.unavailable) return { found: false, error: "The test's numbers could not be read just now. Try again in a moment." };
+  return { found: true, value: pageTestTool(listing.id, page, counts, isFree(listing) ? "checkouts" : "money", expectedShareB(test)) };
+}
+
+/** How far down a product's sales page visitors read, block by block, as the studio shows it; null for an unknown product. */
+export async function readPageReadingTool(store: Store, id: string, charge: Charge) {
+  const refused = await payFor(store, id, pageReadingWork(), charge);
+  if (refused) return refused;
+  const listing = await readListing(store, id);
+  if (!listing) return null;
+  // The page read exactly: an answer that is not known is "unavailable", never a page with no blocks.
+  const [kept, depth] = await Promise.all([store.statsId ? readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 }, readDepth(store.statsId, listing.id)]);
+  if (kept === undefined) return { error: "The page could not be read just now. Try again in a moment." };
+  const page = kept.page ?? { ...EMPTY_PAGE, blocks: [] };
+  // While a whole second version is tested, each visitor reads one of two pages: no single depth means anything.
+  const reach = page.variant ? null : reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);
+  return {
+    product: listing.id,
+    note: "reached is the percent of measured visitors who scrolled to each block, in page order. Null while a whole second version of the page is tested. why_not counts the reasons visitors picked for not buying; videos count how far each video was watched.",
+    visitors_measured: reach ? reach.visitors : null,
+    blocks: reach ? page.blocks.map((b) => ({ id: b.id, kind: b.kind, reached_percent: reach.shares[b.id] ?? 0 })) : null,
+    why_not: depth.whyNot,
+    videos: depth.videos,
+  };
+}
+
+/**
+ * A product's sales page as it was before its last saves (631 [AA1] (a),
+ * unit 13): the list, or one version block by block, with testimonials
+ * counted as on get_sales_page. What an agent shows as "before" when it
+ * prepares a change, and how a creator can ask to bring one back.
+ */
+export async function readPageVersionsTool(store: Store, id: string, version: number | null, hold: Hold) {
+  // Set aside at its most before anything is read: the listing and every version the page may keep. Counted and read
+  // afterwards, and settled at the larger of that ceiling for what was read and what was really read and sent, so a
+  // version saved between the count and the read is paid for (Codex J on #1821).
+  const listings = listingsWork(listingsToRead(store, [id]));
+  const most = apiReadUnits(addWork(listings, pageVersionsWork(MAX_VERSIONS, version !== null)));
+  const settle = await hold(most);
+  if (settle instanceof Response) return settle;
+  const unavailable = { found: false as const, error: "The page's versions could not be read just now. Try again in a moment." };
+  const listing = await readListing(store, id);
+  if (!listing) {
+    const refused = await settle(settledUnits(listings, most));
+    return refused ?? { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
+  }
+  const kept = store.statsId ? await countVersions(store.statsId, listing.id) : 0;
+  if (kept === null || !store.statsId) {
+    // Nothing of the versions was read: only the listing and the count are kept.
+    const refused = await settle(settledUnits(addWork(listings, pageVersionsWork(0, false)), most));
+    return refused ?? unavailable;
+  }
+  const read = await readVersionsExact(store.statsId, listing.id).catch(() => null);
+  // Read but not known: how much was read is not known either, so all that was set aside is kept (Codex J on #1821).
+  if (!read) return (await settle(most)) ?? unavailable;
+  const { versions } = read;
+  let value: unknown;
+  let answer: { found: true; value: unknown } | { found: false; error: string };
+  if (version === null) {
+    value = {
+      product: listing.id,
+      note: "Newest first. at is when that version was saved over, in milliseconds since 1970 (UTC). Read one with version.",
+      versions: versions.map((v, index) => ({ version: index, at: v.at, blocks: v.page.blocks.length, headline: v.page.blocks[0]?.kind === "hero" ? v.page.blocks[0].headline : "" })),
+    };
+    answer = { found: true as const, value };
+  } else {
+    const one = versions[version];
+    value = one ? { ...salesPageTool(listing.id, listing.title, one.page), version, at: one.at } : null;
+    answer = one ? { found: true as const, value } : { found: false as const, error: "There is no such version. Read the list first, without version." };
+  }
+  const ceiling = addWork(listings, pageVersionsWork(versions.length, version !== null));
+  const sent = Buffer.byteLength(JSON.stringify(answer.found ? answer.value : { error: answer.error }, null, 2) ?? "", "utf8");
+  const refused = await settle(settledUnits(atLeast(ceiling, { bytes: COUNT_REPLY_BYTES + read.bytes, sent }), most));
+  return refused ?? answer;
+}
+
+/**
+ * The creator's saved sections, the blocks kept to reuse on any page (631
+ * [AA1] (a), unit 14), newest change first, testimonials counted.
+ */
+export async function savedBlocksTool(store: Store, hold: Hold) {
+  // Set aside at its most before anything is read: every section a library may hold. Counted and read afterwards, and
+  // settled at the larger of that ceiling for what was read and what was really read and sent, so sections saved
+  // between the count and the read are paid for (Codex J on #1821).
+  const most = apiReadUnits(savedBlocksWork(SAVED_SECTIONS_MAX));
+  const settle = await hold(most);
+  if (settle instanceof Response) return settle;
+  const unavailable = { sections: null, note: "The saved sections could not be read just now. Try again in a moment." };
+  const held = await countSections(store.statsId);
+  if (held === null || held > SAVED_SECTIONS_MAX || !store.statsId) {
+    // Nothing of the sections was read: only the count is kept.
+    const refused = await settle(settledUnits(savedBlocksWork(0), most));
+    return refused ?? unavailable;
+  }
+  const read = await readSectionsExact(store.statsId).catch(() => null);
+  // Read but not known, or more than a library holds: how much was read is not known, so all that was set aside is kept.
+  if (!read || read.sections.length > SAVED_SECTIONS_MAX) return (await settle(most)) ?? unavailable;
+  const value = {
+    note: "Sections the creator saved to reuse on any page, newest change first. updated_at is in seconds since 1970 (UTC). Testimonials are counted, not quoted.",
+    sections: [...read.sections]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((section) => ({ id: section.id, name: section.name, updated_at: section.updatedAt, blocks: section.blocks.map(blockForAgent) })),
+  };
+  const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
+  const refused = await settle(settledUnits(atLeast(savedBlocksWork(read.sections.length), { bytes: COUNT_REPLY_BYTES + read.bytes, sent }), most));
+  return refused ?? value;
+}
+
+/** A work's ceiling, raised to what was really read and sent where that came to more. */
+function atLeast(work: ReadWork, measured: { bytes: number; sent: number }): ReadWork {
+  return { ...work, bytes: Math.max(work.bytes, measured.bytes), sent: Math.max(work.sent, measured.sent) };
 }

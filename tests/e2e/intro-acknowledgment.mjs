@@ -56,6 +56,17 @@ export async function checkIntroAcknowledgment({browser,LOCAL,fixture,axeSource,
     if(scenario===cases[0])await checkIntroDraftProtection({page,is,label:"local draft/"+source.video.provider+"/"+width});
     let release;const held=new Promise(resolve=>{release=resolve;});work={scenario,held};
     const seen=page.waitForRequest(r=>r.method()==="POST"&&new URL(r.url()).pathname==="/api/store/intro");seen.catch(()=>{});
+    // Read the leave guard in the very microtask the saved toast enters the page: a reading after the toast is
+    // found can come after React's effect cleanup or before it, so only this one is the same on every run.
+    if(scenario.confirmed)await page.evaluate(()=>{
+     delete window.__introGuardAtToast;
+     const watch=new MutationObserver(()=>{
+      if([...document.querySelectorAll(".nb-toast-region [role=status]")].some(node=>node.textContent?.includes("Welcome video settings saved."))){
+       window.__introGuardAtToast=!window.dispatchEvent(new Event("beforeunload",{cancelable:true}));watch.disconnect();
+      }
+     });
+     watch.observe(document.body,{childList:true,subtree:true,characterData:true});
+    });
     const name=source.video.provider+"/"+scenario.name+"/"+width;
     try{
      await form.getByRole("button",{name:"Save the video",exact:true}).click();
@@ -65,6 +76,7 @@ export async function checkIntroAcknowledgment({browser,LOCAL,fixture,axeSource,
     }finally{release();}
     if(scenario.confirmed){
      await page.locator(".nb-toast-region [role=status]").getByText("Welcome video settings saved.",{exact:true}).waitFor({state:"attached"});
+     is("confirmed intro had released unload protection when its toast appeared "+name,await page.evaluate(()=>window.__introGuardAtToast),false);
      is("confirmed intro releases unload protection "+name,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),false);
     }else{
      const alert=form.getByRole("alert");await alert.waitFor();

@@ -619,13 +619,53 @@ function withTerms(affiliate: Affiliate, terms: PartnerTerms): Affiliate {
  */
 export async function sharePromiseProblem(store: Store, id: string | null, share: PartnerShare, nowSeconds: number): Promise<ShareProblem | null> {
   const others: Record<string, number[]> = {};
-  for (const other of await listPartners(store)) {
+  for (const other of await listPartnersExact(store)) {
     if (other.id === id || other.status !== "approved" || !shareRunning(other.share, nowSeconds) || !other.share) continue;
     for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
   }
   const affiliatePercent: Record<string, number> = {};
   for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
   return shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
+}
+
+/**
+ * A Redis hash reply read exactly (Codex G on #1924): one plain list (no hole, no getter) of strings, field and value
+ * in pairs. Null for any other shape, which is never "no partners".
+ */
+function exactPairs(replies: unknown): [string, string][] | null {
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const reply: unknown = Object.getOwnPropertyDescriptor(replies, "0")?.value;
+  if (!Array.isArray(reply)) return null;
+  const length = Object.getOwnPropertyDescriptor(reply, "length")?.value;
+  if (typeof length !== "number" || length % 2 !== 0) return null;
+  const out: [string, string][] = [];
+  for (let i = 0; i < length; i += 2) {
+    const field = Object.getOwnPropertyDescriptor(reply, String(i));
+    const value = Object.getOwnPropertyDescriptor(reply, String(i + 1));
+    if (!field || !("value" in field) || !value || !("value" in value)) return null;
+    if (typeof field.value !== "string" || typeof value.value !== "string") return null;
+    out.push([field.value, value.value]);
+  }
+  return out;
+}
+
+/**
+ * The partners whose shares ride on a sale, read exactly, for the cap a new or
+ * raised share is checked against (sharePromiseProblem). A reply in another
+ * shape, or a record that does not read, cannot show it holds no share, so it
+ * is unknown: LockBusyError, and nothing is promised on it (Codex G on #1924).
+ */
+async function listPartnersExact(store: Store): Promise<Affiliate[]> {
+  if (!store.statsId || !isRedisConfigured()) return [];
+  const read = exactPairs(await redisPipeline([["HGETALL", peopleKey(store.statsId)]]));
+  if (!read) throw new LockBusyError("the partners' commitments could not be read");
+  const out: Affiliate[] = [];
+  for (const [, raw] of read) {
+    const affiliate = parseAffiliate(raw);
+    if (!affiliate) throw new LockBusyError("a partner's record could not be read");
+    if (affiliate.share !== null) out.push(affiliate);
+  }
+  return out;
 }
 
 /** Everybody in this programme who holds a standing share of something. */
@@ -843,7 +883,14 @@ async function putAffiliate(store: Store, next: Affiliate, held: HeldAffiliate, 
       JSON.stringify(next),
     ],
   ]);
-  if (Number(won) !== 1) return false;
+  if (won === 0) return false;
+  if (won !== 1) {
+    // Answered in another shape: the script may have run. Read back what is there; only our own record written in
+    // full proves it was written. Anything else is "not written", and the caller works again on what is there
+    // (Codex G on #1924: an applied invitation must not have its address and code let go).
+    const [there] = await redisPipeline([["HGET", peopleKey(statsId), next.id]]).catch(() => [null]);
+    if (there !== JSON.stringify(next)) return false;
+  }
   // Found again from their own page across every store (lib/affiliate-hub.ts).
   await rememberAffiliate(store.sid, next.email);
   return true;
@@ -899,7 +946,14 @@ async function changeAffiliate<T>(
     if (next.id !== id) throw new Error("an affiliate record is written under its own id");
     const counts = startsToCount(held.affiliate, next, nowSeconds);
     if (counts) {
-      const problem = await sharePromiseProblem(store, id, next.share as PartnerShare, nowSeconds);
+      // Unknown commitments are never zero (Codex G on #1924): the change is answered busy, nothing written.
+      let problem: ShareProblem | null;
+      try {
+        problem = await sharePromiseProblem(store, id, next.share as PartnerShare, nowSeconds);
+      } catch (error) {
+        if (error instanceof LockBusyError) return busy();
+        throw error;
+      }
       if (problem) return capped(problem, held);
     }
     if (await putAffiliate(store, next, held, counts)) return out;

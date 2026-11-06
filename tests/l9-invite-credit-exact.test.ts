@@ -81,6 +81,19 @@ async function main(): Promise<void> {
   }
   is("the write that lists it failed, after the record was kept", [failed, redis.run(["EXISTS", creditKey("in_BeaFirst01")])], [true, 1]);
 
+  part("An unknown EXISTS result is never a complete successful settlement");
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command[0] === "EXISTS" && command[1] === creditKey("in_BeaFirst01"))) return commands.map(() => "QUEUED");
+    return real(commands);
+  }) as typeof redis.pipeline;
+  let unknownExists;
+  try {
+    unknownExists = await settleInvites(Date.now() + 60_000, NOW);
+  } finally {
+    redis.pipeline = real;
+  }
+  is("unknown existence is reported for retry and remains unpaid", [unknownExists.failed, unknownExists.complete, balance.get("cus_Ana0001") ?? []], [1, false, []]);
+
   part("An unreadable stored credit is unknown, never a complete successful settlement");
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await real(commands);

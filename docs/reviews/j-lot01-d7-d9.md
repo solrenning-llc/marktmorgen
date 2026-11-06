@@ -14,6 +14,20 @@ Pedido fila2231: produtos e páginas importados podem cumprir fatos corresponden
 
 Menor trabalho real: prova de integração do importador com link, antes/depois de publicar, e importação sem inventar leads/vendas. O resultado pode ser teste/documentação de comportamento existente, não produto novo. lib/imports está em1933/2048; store/catalog em1933 e reservaB2; não editar esses autores. Nenhuma decisão de preço/flag/conta necessária; páginas significam apenas fatos correspondentes, sem missão nova.
 
+### D7 — atualização factual após a prova de integração 53da5c56
+
+A lacuna de prova descrita acima foi verificada no ramo `codex/j-d7-imported-path-proof`, commit `53da5c560a2d17db51e7e904f97233030c97e464`, árvore `65d2818b0f46bfa777b5f5d9b48f18c9d94acc8c`, sobre a mesma fonte congelada `2bfa8ade8f59555b8d57aa03e554a99092a1285b`. A conferência inicial fica preservada como histórico; esta atualização acrescenta execução concreta ao que antes era inferência de código.
+
+Resultado: **28/28 checks, exit 0**, usando `startImport → addRows → finishUpload → runImport`, escritores reais de publicação e leitores/regras reais do Path. O produto com link foi realmente importado como oculto e deixou Day 2 aberto; `setProductHidden(..., false)` confirmou a publicação e o leitor passou a Day 2 concluído. Contato importado com acordo relatado e compra importada com `email:false` tiveram seus registros reais confirmados, sem criar lead do Path, venda ou campo `fs:*`. A compra importada continuou presente enquanto o controle financeiro sintético passou de uma venda própria para zero, sem confundir grant com venda.
+
+Também foi importada e publicada uma página nativa com os escritores reais: ela não concluiu Day 1 enquanto faltava a introdução da própria loja. Somente a gravação real de `store.bio` por `updateDetails` concluiu esse fato. Não há missão nova para página adicional nem mudança na regra de fatos correspondentes.
+
+O runner verificou **417 arquivos rastreados do grafo e de sua configuração** contra os blobs da fonte congelada. Prova adicional: **155 checks relacionados aprovados** (ClickFunnels/importação 56, Path facts 39 e Path rules 60), TypeScript estrito do grafo real, lint dos dois executáveis, scanner oficial 4.104/zero mais os três caminhos próprios/zero e whitespace sem achados. Execução reproduzível em `scripts/j-d7-imported-path.mjs`; relatório completo em `docs/reviews/j-d7-imported-path.md` no commit da prova.
+
+Antes de avaliar o grafo, o runner bloqueou a rede no dispatcher real do SDK com `MockAgent.disableNetConnect()`, no socket e no fetch de inicialização. Os controles deliberadamente bloqueados passaram. Foram **19 GETs Stripe explicitamente sintéticos** (9 sessões, 9 payment intents, 1 refunds), sem tentativa adicional no dispatcher/socket e sem email, busca de link, Blob, outro provedor ou HTTP de inicialização. MemoryRedis canônico em processo isolado; nenhuma operação em fornecedor ou registro real.
+
+Estado qualificado: **comportamento D7 existente verificado por integração sintética**. Não houve RED de produto, implementação nova, PR, CI ou entrega global D7. Navegador, Next hospedado, Redis nativo, concorrência arbitrária do importador e fornecedor real não foram certificados. A lacuna D10 sobre envio versus confirmação permanece separada. A prova evita reconstruir importadores e não autoriza alteração de preço, limite, flag, gate ou conta; custos de desenvolvimento/infraestrutura continuam desconhecidos, nunca zero.
+
 ## D8 — item11: resumo local em andamento, não um segundo cron de e-mail
 
 Pedido fila2237–2241: resumo semanal factual no estúdio no fuso salvo, e-mail apenas se justificado/franquia/mayNotify/MR; escopo e custo antes/depois. Recurso irmão: weeklyMessage(stats-report375–435) e cron/weekly74–115; calcula UTC(stats-report271–275, SummaryWindow36), não usa mayNotify, e-mail pela empresa. Não concluir D8 por existir esse cron.

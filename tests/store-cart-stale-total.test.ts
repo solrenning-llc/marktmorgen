@@ -361,6 +361,20 @@ async function main() {
     cart.unmount();
   }
 
+  for (const [label, first, gone] of [
+    ["a shipping row", bothShipped, ["$32.00", "$5.00"]],
+    ["an \"add more\" row", bothNext, [c.dealNext(1, 10)]],
+  ] as const) {
+    part(`N1: after a removal, while the re-read runs, no old ${label}`);
+    const cart = await openCart(["a", "b"], [answer(first), hang()]);
+    is(`first panel shows ${label}`, gone.every((g) => cart.view().text.includes(g)), true);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === c.remove("Product b"));
+    const v = cart.view();
+    is(`before any wait runs out, no old ${label}`, gone.some((g) => v.text.includes(g)), false);
+    is("the button says only \"Check out\"", v.button, [c.checkoutUnpriced]);
+    cart.unmount();
+  }
+
   part("N2: \"Try again\" says it is checking, keeps its button, and a new failure is said again");
   {
     const again = later();

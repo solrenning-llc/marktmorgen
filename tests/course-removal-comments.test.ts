@@ -102,6 +102,18 @@ async function main(): Promise<void> {
   await seedComments(first.courseId, firstLesson);
   const firstKeys = commentKeys(first.courseId, [firstLesson]);
   is("the course has every comment family and counted room before removal", [present(firstKeys).length, roomSlot(first.courseId) > 0], [firstKeys.length, true]);
+  const original = redis.pipeline.bind(redis);
+  let injections = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "DEL" && command[1] === `nl:lc:${first.courseId}:c`)) {
+      injections += 1;
+      return [];
+    }
+    return original(commands);
+  };
+  const failed = await removeProduct(first.id);
+  redis.pipeline = original;
+  is("product: an unknown comment deletion refuses removal", [failed.status, injections], [503, 1]);
   const removed = await removeProduct(first.id);
   is("the product removal succeeds", [removed.status, removed.body.ok], [200, true]);
   is("the removed course leaves no comment family or counted room", [present(firstKeys), roomSlot(first.courseId)], [[], 0]);
@@ -114,6 +126,13 @@ async function main(): Promise<void> {
   is("the last lesson is removed first", [lessonRemoved.status, lessonRemoved.body.ok, lessonsInOrder((await readCourse(second.courseId))!).length], [200, true, 0]);
   const secondKeys = commentKeys(second.courseId, []);
   is("course-level comment records and room still exist until the course goes", [present(secondKeys).length > 0, roomSlot(second.courseId) > 0], [true, true]);
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "DEL" && command[1] === `nl:lc:${second.courseId}:c`)) return [];
+    return original(commands);
+  };
+  const failedDisable = await courseCall({ action: "disable", id: second.id });
+  redis.pipeline = original;
+  is("course: an unknown comment deletion refuses disable", failedDisable.status, 503);
   const disabled = await courseCall({ action: "disable", id: second.id });
   is("the empty course is disabled", [disabled.status, disabled.body.ok], [200, true]);
   is("disabling leaves no course-level comment family or counted room", [present(secondKeys), roomSlot(second.courseId)], [[], 0]);

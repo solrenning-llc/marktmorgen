@@ -136,7 +136,8 @@ async function main(): Promise<void> {
   part("The person page never says 'Nothing bought' when the reading is partial (RED)");
   const page = readFileSync("app/studio/people/page.tsx", "utf8");
   const empty = page.slice(page.indexOf("{!bought ? ("), page.indexOf("Nothing bought from this store under this address."));
-  is("the empty list checks partial and Stripe's failure before saying nothing was bought", /profile\.partial \|\| profile\.stripeError \?/.test(empty), true);
+  // Rule 23: the RED regex wanted " ?" on the same line; the page is formatted with the "?" on the next line, so any whitespace is read.
+  is("the empty list checks partial and Stripe's failure before saying nothing was bought", /profile\.partial \|\| profile\.stripeError\s*\?/.test(empty), true);
   is("and says the list may be incomplete instead", page.includes("Their purchases could not all be read just now, so this list may be missing some."), true);
 
   part("Control after the failures");

@@ -297,6 +297,9 @@ type Row = Record<string, unknown>;
 const rowsOf = (listed: { data?: unknown }): Row[] => (Array.isArray(listed.data) ? (listed.data as Row[]) : []);
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
+/** A PayPal paid record's money fields in their own format: a whole amount of cents (0 or more), a lowercase three-letter currency, a whole positive time. */
+const paidRecordReadable = (paid: { cents?: unknown; currency?: unknown; at?: unknown }): boolean =>
+  Number.isSafeInteger(paid.cents) && (paid.cents as number) >= 0 && typeof paid.currency === "string" && /^[a-z]{3}$/.test(paid.currency) && Number.isSafeInteger(paid.at) && (paid.at as number) > 0;
 const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "usd");
 const idOf = (value: unknown) => (typeof value === "string" ? value : value && typeof value === "object" ? str((value as Row).id) : "");
 
@@ -532,10 +535,12 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
       const listing = await find(given.productId);
       productIds.push(given.productId, ...(given.items ?? []));
       // A sale paid with PayPal is a sale (lib/paypal-sales.ts): its amount, its channel, counted in what they paid.
-      const paypal = given.job.startsWith("paypal:") ? await readPaid(given.job.slice(7)).catch(() => null) : null;
-      // Its paid record unread (gone, another shape, another store's, or the read failed): the amount is unknown, never $0, and the page says so.
-      if (given.job.startsWith("paypal:") && paypal?.store !== store.statsId) partial = true;
-      if (paypal && paypal.store === store.statsId) {
+      const read = given.job.startsWith("paypal:") ? await readPaid(given.job.slice(7)).catch(() => null) : null;
+      // Only this store's record with a whole amount of cents, a lowercase currency code and a whole time is money (Claude 4 on #2908).
+      const paypal = read && read.store === store.statsId && paidRecordReadable(read) ? read : null;
+      // Its paid record unread (gone, another shape, another store's, a field in another format, or the read failed): the amount is unknown, never $0, and the page says so.
+      if (given.job.startsWith("paypal:") && !paypal) partial = true;
+      if (paypal) {
         const channel = saleChannel(paypal.meta ?? {});
         const recorded = Boolean(paypal.meta && "channel" in paypal.meta);
         orders.push({

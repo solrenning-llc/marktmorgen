@@ -183,7 +183,7 @@ async function main(): Promise<void> {
   const endedPast = await exportCall("store", kept.ended, kept.endedCookie);
   is("a confirmed count past it is refused as before", [endedPast.status, endedPast.file, endedPast.body.startsWith("You have downloaded your store's main data")], [429, false, true]);
 
-  part("The licence check");
+  part("The license check");
   const licenceCall = async () => {
     const response = await settled(() => licenceRoute(new NextRequest(`https://marktmorgen.com/api/store/licence?store=${store.handle}&product=${made.product.id}&key=ABCD-EFGH-IJKL-MNOP`, { headers: { "x-forwarded-for": "203.0.113.9" } })));
     if (response === "threw") return { status: 500, body: { error: "threw" } as { error?: string; status?: string } };

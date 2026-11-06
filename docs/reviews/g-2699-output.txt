@@ -1,0 +1,380 @@
+=== g2699-refund-response.proof.ts ===
+
+missing
+  ok    request is for the real fixture payment and exactly its unused 500 cents
+{"label":"missing","posts":1,"refunded":0,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  ok    one POST reached; provider fixture has applied no refund
+  FAIL  unknown, failed or foreign payment evidence cannot settle this member as refunded
+        expected [0,false]
+        got      [1,true]
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+        expected 1
+        got      0
+
+failed
+  ok    request is for the real fixture payment and exactly its unused 500 cents
+{"label":"failed","posts":1,"refunded":0,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  ok    one POST reached; provider fixture has applied no refund
+  FAIL  unknown, failed or foreign payment evidence cannot settle this member as refunded
+        expected [0,false]
+        got      [1,true]
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+        expected 1
+        got      0
+
+requiresaction
+  ok    request is for the real fixture payment and exactly its unused 500 cents
+{"label":"requiresaction","posts":1,"refunded":0,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  ok    one POST reached; provider fixture has applied no refund
+  FAIL  unknown, failed or foreign payment evidence cannot settle this member as refunded
+        expected [0,false]
+        got      [1,true]
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+        expected 1
+        got      0
+
+canceled
+  ok    request is for the real fixture payment and exactly its unused 500 cents
+{"label":"canceled","posts":1,"refunded":0,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  ok    one POST reached; provider fixture has applied no refund
+  FAIL  unknown, failed or foreign payment evidence cannot settle this member as refunded
+        expected [0,false]
+        got      [1,true]
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+        expected 1
+        got      0
+
+wrongpayment
+  ok    request is for the real fixture payment and exactly its unused 500 cents
+{"label":"wrongpayment","posts":1,"refunded":0,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  ok    one POST reached; provider fixture has applied no refund
+  FAIL  unknown, failed or foreign payment evidence cannot settle this member as refunded
+        expected [0,false]
+        got      [1,true]
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+        expected 1
+        got      0
+
+textamount
+  ok    request is for the real fixture payment and exactly its unused 500 cents
+{"label":"textamount","posts":1,"refunded":0,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  ok    one POST reached; provider fixture has applied no refund
+  FAIL  unknown, failed or foreign payment evidence cannot settle this member as refunded
+        expected [0,false]
+        got      [1,true]
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+        expected 1
+        got      0
+
+exact successful refund control
+  ok    request is for the real fixture payment and exactly its unused 500 cents
+{"label":"control","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  ok    exact response corresponds to one actually applied synthetic refund
+  ok    the confirmed refund alone completes the stored member
+
+27 checks, 12 failing.
+
+=== sg2-l8-usage-marks.test.ts ===
+
+the monthly switch (a write to Stripe): a plain answer
+  ok    free: the switch is asked for once, and the line billed
+  FAIL  free: the mark is kept, holding a value of its own (time and a random part), not a bare 1
+        expected true
+        got      false
+  FAIL  two attempts write two different values
+        expected true
+        got      false
+  ok    taken by another run (nil): Stripe is not asked again
+
+the monthly switch: an odd answer, the mark another run's
+  FAIL  no reply at all: read back as another's, Stripe is not asked again
+        expected [0,"1"]
+        got      [1,"1"]
+  FAIL  a reply of another shape: read back as another's, Stripe is not asked again
+        expected [0,"1"]
+        got      [1,"1"]
+  FAIL  a reply with one too many: read back as another's, Stripe is not asked again
+        expected [0,"1"]
+        got      [1,"1"]
+  FAIL  a reply of the wrong type: read back as another's, Stripe is not asked again
+        expected [0,"1"]
+        got      [1,"1"]
+  ok    a database that does not answer: read back as another's, Stripe is not asked again
+
+the monthly switch: an odd answer, and nothing readable after
+  FAIL  no reply at all, read back as no reply: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  no reply at all, read back as a number: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  no reply at all, read back as no answer: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply of another shape, read back as no reply: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply of another shape, read back as a number: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply of another shape, read back as no answer: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply with one too many, read back as no reply: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply with one too many, read back as a number: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply with one too many, read back as no answer: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply of the wrong type, read back as no reply: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply of the wrong type, read back as a number: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  FAIL  a reply of the wrong type, read back as no answer: unknown, Stripe is not asked
+        expected [0,null]
+        got      [1,null]
+  ok    a database that does not answer, read back as no reply: unknown, Stripe is not asked
+  ok    a database that does not answer, read back as a number: unknown, Stripe is not asked
+  ok    a database that does not answer, read back as no answer: unknown, Stripe is not asked
+
+the monthly switch: an odd answer, but our write landed
+  FAIL  no reply at all: read back as our own value, the switch is asked for once
+        expected [1,true]
+        got      [1,false]
+  FAIL  a reply of another shape: read back as our own value, the switch is asked for once
+        expected [1,true]
+        got      [1,false]
+  FAIL  a reply with one too many: read back as our own value, the switch is asked for once
+        expected [1,true]
+        got      [1,false]
+  FAIL  a reply of the wrong type: read back as our own value, the switch is asked for once
+        expected [1,true]
+        got      [1,false]
+  FAIL  a database that does not answer: read back as our own value, the switch is asked for once
+        expected [1,true]
+        got      [0,false]
+
+the monthly switch: let go only while it is still ours
+  ok    Stripe refuses: our mark is let go, so the next line tries again
+  FAIL  Stripe refuses after another run took the mark: the other run's mark stays
+        expected {"switched":1,"mark":"another-run","state":"billed"}
+        got      {"switched":1,"mark":null,"state":"billed"}
+
+the word to the creator (an email): firstWordOf
+  ok    free, then taken: written to once
+  FAIL  no reply at all, the mark another run's: not written to again
+        expected false
+        got      true
+  FAIL  no reply at all, nothing readable after: unknown, not written to
+        expected false
+        got      true
+  ok    no reply at all, our write landed: written to once
+  FAIL  a reply of another shape, the mark another run's: not written to again
+        expected false
+        got      true
+  FAIL  a reply of another shape, nothing readable after: unknown, not written to
+        expected false
+        got      true
+  ok    a reply of another shape, our write landed: written to once
+  FAIL  a reply with one too many, the mark another run's: not written to again
+        expected false
+        got      true
+  FAIL  a reply with one too many, nothing readable after: unknown, not written to
+        expected false
+        got      true
+  ok    a reply with one too many, our write landed: written to once
+  FAIL  a reply of the wrong type, the mark another run's: not written to again
+        expected false
+        got      true
+  FAIL  a reply of the wrong type, nothing readable after: unknown, not written to
+        expected false
+        got      true
+  ok    a reply of the wrong type, our write landed: written to once
+  FAIL  a database that does not answer, the mark another run's: not written to again
+        expected false
+        got      "rejected"
+  FAIL  a database that does not answer, nothing readable after: unknown, not written to
+        expected false
+        got      "rejected"
+  FAIL  a database that does not answer, our write landed: written to once
+        expected true
+        got      "rejected"
+
+the common path: one round trip
+  ok    free and taken each take one command to Redis
+
+48 checks, 35 failing.
+
+=== sg2-l8-watch-resync.test.ts ===
+
+measure: one deleted video's malformed total does not stop the store's metering (the review's reproduction)
+  FAIL  each round adds only what the video grew by
+        expected [300,3600,36000]
+        got      [null,null,null]
+  FAIL  the month's video grows with it
+        expected 39900
+        got      0
+  FAIL  the deleted video's entry is let go; the video's total is the newest
+        expected {"00000000-0000-4000-8000-0000000000b1":"40000"}
+        got      {"00000000-0000-4000-8000-0000000000b1":"100","old-deleted-video":"12.5"}
+
+measure: a video whose stored total is malformed is resynced, never counted from 0, and counts from then on
+  FAIL  round 1: only the good video's growth is added; the malformed one adds nothing
+        expected 300
+        got      null
+  FAIL  round 1: the malformed entry is rewritten with the video's current total, the deleted one let go
+        expected {"00000000-0000-4000-8000-0000000000b1":"400","00000000-0000-4000-8000-0000000000b2":"1000"}
+        got      {"00000000-0000-4000-8000-0000000000b1":"100","00000000-0000-4000-8000-0000000000b2":"12.5","old-deleted-video":"lots"}
+  FAIL  round 1: the month's video grew
+        expected 300
+        got      0
+  FAIL  round 1: the dropped entries are logged
+        expected true
+        got      false
+  FAIL  round 2: the resynced video counts normally, with the good one
+        expected 4100
+        got      null
+  FAIL  round 2: both totals kept
+        expected {"00000000-0000-4000-8000-0000000000b1":"4000","00000000-0000-4000-8000-0000000000b2":"1500"}
+        got      {"00000000-0000-4000-8000-0000000000b1":"100","00000000-0000-4000-8000-0000000000b2":"12.5","old-deleted-video":"lots"}
+  FAIL  round 2: the month's video grew
+        expected 4400
+        got      0
+  FAIL  round 3: the good video goes on counting
+        expected 36000
+        got      null
+  FAIL  round 3: the month's video grew
+        expected 40400
+        got      0
+
+measure: an entry written malformed again later is resynced again, never counted from 0
+  FAIL  a negative total: nothing added, resynced
+        expected 0
+        got      null
+  FAIL  a negative total: rewritten with the current total
+        expected {"00000000-0000-4000-8000-0000000000b1":"900"}
+        got      {"00000000-0000-4000-8000-0000000000b1":"-5"}
+  ok    nothing was added to the month
+  FAIL  then it counts what it grew by
+        expected 50
+        got      null
+
+16 checks, 15 failing.
+
+=== sg2-l8-credit-giveback.test.ts ===
+
+tellBuyers: the credit of the addresses already taken comes back when a later take is unknown
+  ok    the round stops (unknown is never "sent")
+  FAIL  the credit is the start less only the unknown take
+        expected 98
+        got      94
+  ok    nobody is marked told
+
+tellRefundShort: the emails already taken come back when a later take is unknown
+  ok    the round stops
+  FAIL  the credit is the start less only the unknown take (one email)
+        expected 49
+        got      47
+
+giveBackUnused: on the closing day, the reserve's calls come back when the budget's take is unknown
+  ok    the run stops
+  FAIL  the reserve is whole again; the budget is less only the unknown take
+        expected [38,10]
+        got      [38,7]
+  ok    the lock is let go
+
+a give-back whose own reply is unknown is logged, never tried again in a loop
+  ok    the round stops
+  FAIL  one give-back, never repeated
+        expected 1
+        got      0
+  FAIL  its unknown reply is logged
+        expected true
+        got      false
+
+giveBackUnused: a give-back of calls whose own reply is unknown is logged, never tried again in a loop
+  ok    the run stops
+  FAIL  one give-back, never repeated
+        expected 1
+        got      0
+  FAIL  its unknown reply is logged
+        expected true
+        got      false
+
+14 checks, 7 failing.
+
+  ok    a reply of the wrong type, nothing readable after: unknown, not written to
+  ok    a reply of the wrong type, our write landed: written to once
+  ok    a database that does not answer, the mark another run's: not written to again
+  ok    a database that does not answer, nothing readable after: unknown, not written to
+  ok    a database that does not answer, our write landed: written to once
+
+the common path: one round trip
+  ok    free and taken each take one command to Redis
+
+Codex G: replacement after release fallback GET and before DEL
+  ok    G: actual failed monthly switch reached exactly one fallback ownership read
+  FAIL  G: release preserves the successor mark installed after the captured own value
+        expected "g-replacement-run"
+        got      null
+
+50 checks, 1 failing.
+
+/tmp/g2699-reviews-linked.log:=== review-after-purchase.test.ts ===
+/tmp/g2699-reviews-linked.log:20 checks, all passing.
+/tmp/g2699-reviews-linked.log:=== review-list-read-proof.test.ts ===
+/tmp/g2699-reviews-linked.log:28 checks, all passing.
+/tmp/g2699-reviews-linked.log:=== picked-reviews.test.ts ===
+/tmp/g2699-reviews-linked.log:15 checks, all passing.
+/tmp/g2699-linked.log:=== watch.test.ts ===
+/tmp/g2699-linked.log:64 checks, all passing.
+/tmp/g2699-linked.log:=== traffic.test.ts ===
+/tmp/g2699-linked.log:75 checks, all passing.
+/tmp/g2699-linked.log:=== renewal-unpaid.test.ts ===
+/tmp/g2699-linked.log:73 checks, all passing.
+/tmp/g2699-linked.log:=== delivery-watch.test.ts ===
+/tmp/g2699-linked.log:ℹ tests 11
+/tmp/g2699-linked.log:ℹ pass 11
+/tmp/g2699-linked.log:ℹ fail 0
+/tmp/g2699-linked.log:ℹ skipped 0
+/tmp/g2699-linked.log:=== plan-cost-registry.test.ts ===
+/tmp/g2699-linked.log:ℹ tests 24
+/tmp/g2699-linked.log:ℹ pass 24
+/tmp/g2699-linked.log:ℹ fail 0
+/tmp/g2699-linked.log:ℹ skipped 0
+/tmp/g2699-linked.log:=== plan-margin.test.ts ===
+/tmp/g2699-linked.log:ℹ tests 39
+/tmp/g2699-linked.log:ℹ pass 39
+/tmp/g2699-linked.log:ℹ fail 0
+/tmp/g2699-linked.log:ℹ skipped 0
+/tmp/g2699-linked.log:=== usage-meter.test.ts ===
+/tmp/g2699-linked.log:ℹ tests 6
+/tmp/g2699-linked.log:ℹ pass 6
+/tmp/g2699-linked.log:ℹ fail 0
+/tmp/g2699-linked.log:ℹ skipped 0
+/tmp/g2699-linked.log:=== video-usage-notice.test.ts ===
+/tmp/g2699-linked.log:ℹ tests 4
+/tmp/g2699-linked.log:ℹ pass 4
+/tmp/g2699-linked.log:ℹ fail 0
+/tmp/g2699-linked.log:ℹ skipped 0
+/tmp/g2699-new.log:=== sg2-l8-counts.test.ts ===
+/tmp/g2699-new.log:188 checks, all passing.
+/tmp/g2699-new.log:=== sg2-l8-credit-giveback.test.ts ===
+/tmp/g2699-new.log:14 checks, all passing.
+/tmp/g2699-new.log:=== sg2-l8-usage-billing.test.ts ===
+/tmp/g2699-new.log:25 checks, all passing.
+/tmp/g2699-new.log:=== sg2-l8-usage-marks.test.ts ===
+/tmp/g2699-new.log:48 checks, all passing.
+/tmp/g2699-new.log:=== sg2-l8-watch-resync.test.ts ===
+/tmp/g2699-new.log:16 checks, all passing.
+/tmp/g2699-linked3.log:=== store-closing-fair.test.ts ===
+/tmp/g2699-linked3.log:103 checks, all passing.
+/tmp/g2699-linked3.log:=== closing-refunds-unknown.test.ts ===
+/tmp/g2699-linked3.log:25 checks, all passing.
+/tmp/g2699-linked3.log:=== plan-closing.test.ts ===
+/tmp/g2699-linked3.log:90 checks, all passing.

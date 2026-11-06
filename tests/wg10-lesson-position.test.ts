@@ -19,6 +19,7 @@ import {
   clockOf,
   forgetCoursePlaces,
   keptSpeed,
+  placeToRemove,
   positionKey,
   readPlace,
   readSpeed,
@@ -45,6 +46,10 @@ is("what was written reads back", readPlace(writePlace(40.7, NOW), NOW + 1_000),
 is("nothing kept, not JSON, not an object", [readPlace(null, NOW), readPlace("40", NOW), readPlace("[40]", NOW)], [null, null, null]);
 is("a time that is not whole, negative, or from the future", [readPlace('{"s":4.5,"t":1}', NOW), readPlace('{"s":-1,"t":1}', NOW), readPlace(JSON.stringify({ s: 40, t: NOW + 3_600_000 }), NOW)], [null, null, null]);
 is(`kept ${KEEP_DAYS} days after it was written, not a day more`, [readPlace(writePlace(40, NOW), NOW + KEEP_DAYS * 86_400_000)?.seconds, readPlace(writePlace(40, NOW), NOW + KEEP_DAYS * 86_400_000 + 1)], [40, null]);
+
+part("A place past its days, or not one we wrote, is removed as it is read (Claude 4 on #2728)");
+is("too old, broken: removed; ours and fresh, or nothing there: left", [placeToRemove(writePlace(40, NOW), NOW + KEEP_DAYS * 86_400_000 + 1), placeToRemove("{broken", NOW), placeToRemove(writePlace(40, NOW), NOW + 1_000), placeToRemove(null, NOW)], [true, true, false, false]);
+is("the player removes it when it reads it", /if \(placeToRemove\(raw, now\)\) \{\s*try \{\s*store\.removeItem\(key\);/.test(readFileSync("components/lesson-player.tsx", "utf8")), true);
 
 part("What is offered back");
 is("40 seconds in: continue at 40", resumeFrom({ seconds: 40, at: NOW }, 600), 40);
@@ -110,7 +115,7 @@ if (stripeKey !== undefined) process.env.STRIPE_SECRET_KEY = stripeKey;
 
 part("Said in the privacy policy, and in the person-data registry");
 const privacy = readFileSync("app/privacy/page.tsx", "utf8");
-is("the policy names both keys, the 90 days, and that nothing is sent to us", [privacy.includes('<p id="lesson-places">'), privacy.includes("<code>mm:lp:</code>"), privacy.includes("<code>mm:lp-speed</code>"), /after 90 days/.test(privacy), /never sent to\s+us/.test(privacy)], [true, true, true, true, true]);
+is("the policy names both keys, the 90 days, and that nothing is sent to us", [privacy.includes('<p id="lesson-places">'), privacy.includes("<code>mm:lp:</code>"), privacy.includes("<code>mm:lp-speed</code>"), /older than\s+90 days is never used, and is removed the next time that lesson is\s+opened/.test(privacy) && /the next time they open the course in\s+that browser/.test(privacy), /never sent to\s+us/.test(privacy)], [true, true, true, true, true]);
 is("the registry line", readFileSync("lib/person-data.ts", "utf8").includes('{ file: "lib/lesson-position.ts", how: "none"'), true);
 
 part("The words, in every language");

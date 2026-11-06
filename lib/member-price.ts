@@ -42,7 +42,7 @@
  */
 import { SESSION_COOKIE, normaliseEmail } from "@/lib/auth";
 import { takeBuyerRead } from "@/lib/buyer-actions";
-import { readListings } from "@/lib/catalog";
+import { productIds, readListings } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { importedFrom, importedRead } from "@/lib/imported-purchases";
 import { TOKEN_PATTERN, learnerFrom, passCookieName } from "@/lib/learn";
@@ -50,6 +50,7 @@ import { memberState } from "@/lib/membership-access";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { type MemberPrices, allQualifying, isMemberPercent, memberOffFrom, memberRulesFor, qualifyingFor } from "@/lib/member-price-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import type { SaleCandidate } from "@/lib/store-sale";
 import { STRIPE_LIST_VERSION, plainObject, readStripePage } from "@/lib/stripe-list";
@@ -120,6 +121,17 @@ export function heldFromSessions(rows: readonly unknown[], handles: ReadonlySet<
   return held;
 }
 
+/**
+ * The imported purchases' HGETALL reply, only as a flat list of text fields
+ * and values (rule 24, review L1 on #2999). Any other shape throws: a larger
+ * rule may rest on a purchase not read, so it is unknown, never "none".
+ */
+function importedReply(replies: unknown): string[] {
+  const flat = stringList(repliesFor(replies, 1)?.[0]);
+  if (flat === null || flat.length % 2 !== 0) throw new UnknownReplyError("an address's imported purchases");
+  return flat;
+}
+
 /** The qualifying products this address holds here, or null when that could not be read. */
 async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, QualifyingKind>): Promise<{ held: Set<string>; complete: boolean } | null> {
   const account = store.stripeAccountId;
@@ -141,7 +153,7 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
           return readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_LIST_VERSION), plainObject, SESSION_ROW);
         }),
       ),
-      read ? redisPipeline([read]).then(([raw]) => raw) : Promise.resolve(null),
+      read ? redisPipeline([read]).then(importedReply) : Promise.resolve(null),
     ]);
     for (const page of pages) {
       for (const id of heldFromSessions(page.rows, handles, kinds)) held.add(id);
@@ -165,8 +177,9 @@ async function heldHere(store: Store, email: string, kinds: ReadonlyMap<string, 
 
 /**
  * What one proof found for this browser's address: the qualifying products
- * it holds, whether every row that could prove more was read, and the
- * qualifying products that exist. Nothing is kept past the request.
+ * it holds, whether every row and listing that could prove more was read,
+ * and the qualifying products that exist (read or not). Nothing is kept past
+ * the request.
  */
 export type MemberProof = { email: string; held: ReadonlySet<string>; complete: boolean; known: ReadonlySet<string> };
 
@@ -198,10 +211,15 @@ async function prove(store: Store, qualifying: string[], cookies: CookieJar): Pr
   }
   const kinds = new Map<string, QualifyingKind>();
   for (const listing of listings) kinds.set(listing.id, { recurring: listing.recurring !== null });
-  if (kinds.size === 0) return "none";
+  // readListings leaves out a product the store has but whose listing could not be read (rule 30, sibling of
+  // review L1 on #2999): a larger rule may rest on it, so it is known to exist and the proof is not complete.
+  const has = new Set(productIds(store));
+  const present = qualifying.filter((id) => has.has(id));
+  const unread = present.some((id) => !kinds.has(id));
+  if (kinds.size === 0) return unread ? "unknown" : "none";
   const found = await heldHere(store, learner.email, kinds);
   if (found === null) return "unknown";
-  return { email: learner.email, held: found.held, complete: found.complete, known: new Set(kinds.keys()) };
+  return { email: learner.email, held: found.held, complete: found.complete && !unread, known: new Set(present) };
 }
 
 /**

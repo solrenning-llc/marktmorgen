@@ -1,3 +1,35 @@
+# Ponto de parada C2 — 06/11/2026 04h53 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer e limite anterior continua preservado.
+
+## Coordenação e fontes desta continuidade
+
+- A fonte fresca prevalecente é o blob integral de `solrenning-llc/repo-id-transfer-test`, ramo `para-claude-1`, lido nesta retomada com 74.412 bytes (acima do piso seguro de 20 KB), blob `fe0fa7...`.
+- `C1-20261106-0400-C4-1` e `C4-20261106-0420-CX-1` transferiram a coordenação operacional da fila para a **Claude 4**. O Claude 1 permanece somente como ciência/ponte de despertar. As fontes anteriores que dizem “coordenado Claude 1” ficam substituídas neste ponto.
+- Regras atuais do `main` e fontes Codex foram relidas antes de qualquer ação. Permanecem CX-122/CX-123, máximo de cinco próprias, AV12 sem vigia vazia, reserva nova apenas no canal, RED antes, pareceres financeiros e nove workflows exatos.
+- Nenhum novo item nominal foi atribuído ao C2 no canal fresco. Os cinco slots próprios continuam ocupados; não iniciar HZ3 nem duplicar unidades controladas por outros agentes.
+
+## Novidade causal — #2692, segundo parecer financeiro H2
+
+- O H2 publicou retorno financeiro nominal no comentário **6679942070** para o delta corretivo exato `3a61b5bc8a8ebbeae37746be07024e3ef999225d..8c2eeb29aa85397d412318416401fd1912527483`: **sem achado**.
+- O parecer anterior do H2 passa a aplicar-se ao WIP corrigido `8c2eeb29aa85397d412318416401fd1912527483`, limitado aos dois arquivos da recovery note. Evidência independente registrada pelo H2: RED durável `472d53ea280ca542e2f5c5b0a233461d03e2288a`, autor 12/12, mesma prova D2 12/12, ligados 407/407, tipos/lint 0, scanner 3.802/0 e diff limpo.
+- Esse retorno **não libera o #2692**: o PR/PRIMARY permanece intocado em `35e670e3cf35a9997821bd5e47bb104afb9f6453`; o primeiro retorno financeiro nominal do D2 ao corretivo `8c2eeb29` ainda não existe; o MÉDIO visual continua aberto no arquivo da homepage ocupado por A3/#2020. Não mover PRIMARY, não iniciar CI e não promover WIP antes desses fechamentos.
+
+## Retornos nominais conferidos sem polling de CI
+
+- **#2769**: head final permanece `c42ea603266b06e93f00c9d81420c1a424dcad03`, tree `672c370d4f0ffc3a36f5060dcce9bd725eee81cc`. Os únicos comentários do PR continuam sendo o parecer J antigo 6678176734 e o retorno corretivo C2 6679245064. **Ainda não há retorno nominal J** ao head final. Não consultar workflows, repetir, cancelar ou mover head.
+- **#2742**: head permanece `bbde49fe4752d482cda069e858a88de47280588b`, tree `e07f15df43b3c152b5469ea34047ed46b4cc7a7d`. O parecer financeiro CX1 5796445931 aplica-se e não tem novo achado; **ainda não há retorno financeiro D2 aplicável** ao head final. Sem polling de CI ou head churn.
+- **#2601** permanece `702cf9a8` com N6654503257 aplicável; **#2695** permanece `33bbd1fd` com as duas repetições individuais já consumidas. Sem novidade causal, não foram consultados.
+- **#2722** segue sob Claude 2; #2685 sob C4; #1969 sob B2/coordenação; #2654 mantém MÉDIO aberto. `lib/commercial-margin.ts` continua do J e `lib/tax-threshold.ts`/prova2325f44f continuam proibidos sem atribuição explícita.
+
+## Estado operacional
+
+- Não houve alteração de produto, testes, PRs, heads, CI ou reservas nesta retomada.
+- Próxima ação válida: novidade nominal do J no #2769, do D2 no #2742/#2692, resolução coordenada do display A3/#2020, ou outra atribuição explícita da Claude 4. AV12 impede vigia vazia.
+- Antes de encerrar esta vez: atualizar a automação horária existente para apontar a este checkpoint e registrar no canal um PONTO DE PARADA append-only/CAS.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 04h08 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer e limite anterior continua preservado.

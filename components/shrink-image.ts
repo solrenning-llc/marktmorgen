@@ -66,7 +66,7 @@ export async function shrink(
 }
 
 /**
- * The picture's average colour, from every pixel of the canvas it was drawn on (lib/product-image.ts, toneOf): null
+ * The picture's average color, from every pixel of the canvas it was drawn on (lib/product-image.ts, toneOf): null
  * for a picture with any transparency, even one pixel (a sample shrunk to a few pixels would average it away; Codex
  * K2 on #2790), or where the browser will not read the canvas back.
  */

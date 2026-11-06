@@ -401,12 +401,26 @@ export class RemovalBusyError extends Error {
 /** How long a request asked again waits before it is emailed again. */
 const RETELL_MS = 60 * 60 * 1000;
 
+/**
+ * The passkeys set to be removed, read exactly as listPasskeys is (rule 24): no key is a known "none"; no reply, a
+ * reply of another shape or a record that is not a JSON object throws UnknownReplyError, so a removal that cannot be
+ * read is never taken as none (a passkey set to go would get a second step, and one due would log in).
+ */
 async function readDrop(email: string): Promise<DropRecord | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", dropKey(email)]]);
+  const reply = repliesFor(await redisPipeline([["GET", dropKey(email)]]), 1);
+  if (!reply || (reply[0] !== null && (typeof reply[0] !== "string" || !reply[0]))) throw new UnknownReplyError("a passkey removal");
+  const raw = reply[0];
+  if (raw === null) return null;
+  let parsed: unknown;
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { atOf?: unknown; ids?: unknown; at?: unknown; told?: unknown; telling?: unknown; untold?: unknown }) : null;
-    if (!value) return null;
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("a passkey removal");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError("a passkey removal");
+  try {
+    const value = parsed as { atOf?: unknown; ids?: unknown; at?: unknown; told?: unknown; telling?: unknown; untold?: unknown };
     const atOf: Record<string, number> = {};
     if (value.atOf && typeof value.atOf === "object" && !Array.isArray(value.atOf)) {
       for (const [id, at] of Object.entries(value.atOf as Record<string, unknown>)) if (typeof at === "number" && Number.isFinite(at)) atOf[id] = at;

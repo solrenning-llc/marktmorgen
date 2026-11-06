@@ -1,3 +1,11 @@
+# Atualização causal compartilhada — 05/11/2026 21h49 Fortaleza
+
+#2725 MERGED legítimo, main1ec60aad5ca686d1c03efd39d9fca1b99efb733b removeuV. #2632 consultado PORNOVIDADE: continuaOPEN/merged=false, novoheadcda3dda927ac145887b56d2ce3d0014065f9cb06 (C3integroumain,9NOVOSemcurso segundo canal). Isso SUPERA a esperaporlimpezaV abaixo, mas NÃO libera integrar ramosZantes2632MERGED. Nenhuma própria mudou,noretry,nopolldeCI. Vigia91766continuaflock60s,aguardamerge/inbox.
+
+Publicação final2724/ponto teve422NONFASTFORWARD; histórico preservado, esperar2min e refrescar antesappend. Relatório#2724JÁnoPR5794216212/prova638de1d3; retorno#2709JÁnoPR5794179820/eebdb70c. Não confundir falha de canal com prova perdida. No commit098f18e4f1d7e55257323a65ba3c8502ab4149b6 existe o append tentado, mas NÃO está no ramo do canal; nãoalegarpostado. Próximo: republicaresumo+PONTO comblobfresco; sefalhardenovo,persistirestadopendente aqui. Demais heads/REDs/WIPs/3retriesCONSUMIDOSpreservados abaixo.
+
+---
+
 Vigia: a sessão25117 não pôde ser confirmada (resumption devolveu network approval cancelled); novo lançamento no MESMOflock retornou91766, confirmada ainda rodando após espera5s. Esta nota supera a sessão da seção abaixo; uma vigia60s, semCIpolling. Sem escalada depermissão ououtroprocesso de agente confirmado.
 
 # PONTO VIGENTE — 05/11/2026 21h46 Fortaleza: retorno2709 e revisão2724

@@ -29,6 +29,7 @@
  * another page is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
@@ -108,12 +109,14 @@ export async function claimPictures(statsId: string, productId: string, paths: s
 export async function claimNewPictures(statsId: string, pageId: string, paths: string[]): Promise<boolean> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return true;
-  if (!isRedisConfigured()) return false;
+  // Not known is ours to say, never "add the picture again" (Claude 4 on #2156): it throws, and the route answers
+  // server_error before anything is written.
+  if (!isRedisConfigured()) throw new UnknownReplyError("page pictures: no database");
   const [owners] = await redisPipeline([["HMGET", picsKey(statsId), ...unique]]);
-  const list = Array.isArray(owners) ? owners : [];
-  if (list.length !== unique.length) return false;
-  // An owner is a name or nobody (null); any other answer is unknown, so nothing is taken from the door for it.
-  if (list.some((owner) => owner !== null && typeof owner !== "string")) return false;
+  if (!Array.isArray(owners) || owners.length !== unique.length) throw new UnknownReplyError("page pictures: HMGET");
+  const list = owners;
+  // An owner is a name or nobody (null); any other answer is unknown, and throws as the read above does.
+  if (list.some((owner) => owner !== null && typeof owner !== "string")) throw new UnknownReplyError("page pictures: an owner");
   if (unique.some((_, i) => typeof list[i] === "string" && list[i] !== "" && list[i] !== pageId)) return false;
   const unclaimed = unique.filter((_, i) => list[i] !== pageId);
   const taken = await takePictureDoor(unclaimed);

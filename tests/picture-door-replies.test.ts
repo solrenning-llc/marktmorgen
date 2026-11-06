@@ -79,7 +79,8 @@ async function main(): Promise<void> {
   bend = { command: "HMGET", reply: [5] };
   const refused = await claimNewPictures(statsId, pageId, [owned]).catch(() => "throws");
   bend = null;
-  is("HMGET answers [5] for the owner: the claim is refused", refused, false);
+  // Since Claude 4's LEVE 2 on #2156, an owner read in an unknown shape throws (server_error) instead of returning false.
+  is("HMGET answers [5] for the owner: the claim is refused, as unknown (it throws)", refused, "throws");
   is("and the picture's note stays on the door", noted(owned), true);
   is("the owner read as null (nobody's): claimed", await claimNewPictures(statsId, pageId, [owned]), true);
 

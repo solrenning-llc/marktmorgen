@@ -65,7 +65,12 @@ export async function POST(request: NextRequest) {
       }
       // A name in the shared folder that is neither fresh from the door nor this link's own may be a product's,
       // another link's, a page's, a buyer's review photo or an email's picture: refused and kept, so taking this
-      // link or its picture off later can never delete it (lib/picture-door.ts).
+      // link or its picture off later can never delete it (lib/picture-door.ts). A link that is not there says so.
+      if (!link) {
+        // No such link: nothing to put the picture on, so a fresh one is dropped and the answer says so (Claude 4 on #2156).
+        await dropFresh(path);
+        return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      }
       if (!fresh.has(path) && link.image?.path !== path) {
         return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }

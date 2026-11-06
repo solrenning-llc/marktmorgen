@@ -66,13 +66,17 @@ try {
     return route.request().url() === origin + "/" ? route.continue() : route.abort();
   });
   await page.goto(origin);
+  console.log("Shipping scope: real SSR document loaded");
   check("unrelated forms are actually present in SSR", await page.locator("form").count(), 27);
   check("the real closed shipping editor has no shipping form", await shippingForm(page, productId).count(), 0);
   check("the other product's form is selected only for its own id", await shippingForm(page, "other").count(), 1);
   await page.addScriptTag({ content: client.outputFiles[0].text });
+  console.log("Shipping scope: hydration script supplied");
   await page.waitForFunction(() => document.documentElement.dataset.fixtureReady === "yes" && !document.querySelector("#shipping-fixture button")?.disabled);
+  console.log("Shipping scope: real component ready");
   await page.locator("#shipping-fixture").getByRole("button", { name: "Change", exact: true }).click();
   await page.locator("#ship-" + productId + "-sku").waitFor();
+  console.log("Shipping scope: real form opened");
   check("opening the real editor adds exactly one form", await page.locator("form").count(), 28);
   check("an actually open shipping form is still detected", await shippingForm(page, productId).count(), 1);
   check("the other product's form is still isolated after opening", await shippingForm(page, "other").count(), 1);

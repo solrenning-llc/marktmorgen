@@ -1,7 +1,6 @@
 /** All shipping writes are intercepted; no live store, payment or email. */
 export function shippingForm(page,productId){
- void productId;
- return page.locator("form");
+ return page.locator("form").filter({has:page.locator("#ship-"+productId+"-sku")});
 }
 
 export async function checkShippingSave({browser,LOCAL,fixture,is}){

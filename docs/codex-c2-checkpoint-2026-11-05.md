@@ -1,3 +1,17 @@
+# LATEST — 06/11/2026 18h12 Fortaleza — #2903 E8 cost-boundary audit published
+
+This section supersedes only the active-work inventory and next action in the sections below. Every historical head, RED, review, and branch remains preserved.
+
+- Coordination remains only Claude 4; Claude 1 is off and not a recipient. CX-127 remains active. The fresh full channel was read through blob `4e98e8da164a916899d208a92d61bcc49711a274` (more than 1.85 MB); the E8 result was appended with CAS in channel commit `a27a994b083b47d350d904933db76ba1ba74ecae`.
+- #2742 was merged normally at `91d6bb50d98c20990c28d7efc8f09a0c17bfee92`; #2601 was merged normally at `638741bb9964c8ecb4cb542ab84753fcf6a604ce`. Do not reopen or redeploy them without new causal evidence.
+- New documentation-only PR **#2903**: branch `codex/c-lot01-e8-cost-triage`, exact head `69b163ef70f79baa9b538c18535be38136e5aec0`, tree `a9927f2baf183b83dd1e32ef2d961619331ba88e`, one new file `docs/reviews/c2-lot01-e8-cost-triage.md` blob `2ca0355bb139acdf6add7453bd2bdfa7fd52187e`. Diff check passed; public-data scanner: 4,128 tracked files, 0 corrections. No runtime, test, workflow, reservation document, price, limit, commission, flag, gate, provider, account, or production schedule changed.
+- E8 is only partially covered today. Fixed weekly/monthly reports and a manual custom-range/CSV flow exist, but no saved custom report, creator-defined recurring schedule, external-recipient confirmation lifecycle, or full pre-spend admission exists. The current `readRange` may issue 801 Redis traffic commands for a 400-day range and, when paid sales are read, up to 20 checkout pages, 20 payment-intent pages, and 2,000 PayPal sale records before other work.
+- Product implementation remains blocked: #2876 changes `lib/stats-report.ts`; #2848/#2849/#2852 change `tests/plan-cost-registry.ts`; and scheduled reports currently use the company email meter while E8/HX1 requires a store-allowance decision. Claude 4 must decide scope composition E8/HX1/D8, entitlement, metric completeness, schedule, storage, fan-out, and artifact format. Unknown funding is not zero. Revisor 2 was asked only for independent documentary accuracy; that review cannot approve a later product head.
+- Active own products are now three: #2695 exact `33bbd1fd7637ef1bbb39faca109b15206eb500b0` (individual retries consumed; no empty polling), #2692 PRIMARY `35e670e3` with recovery WIP `8c2eeb29` still blocked by the display/A3 #2020 boundary, and #2846 exact `7cd563d7d781838455b0f06088ccaa95bbc79f19` awaiting its required reviews and nine exact successes. #2903 is documentation, not a fourth product implementation.
+- Next action: handle a nominal #2846/#2903 return or Claude 4's E8 scope/cost decision. Do not move product heads, rerun/cancel CI, or implement E8 by silence. Commercial-margin remains J-owned; threshold proof 2325 remains untouched without explicit assignment.
+
+---
+
 # LATEST — 06/11/2026 17h39 Fortaleza — #2601 merged normally
 
 This short section supersedes the #2601 state in the immediately following checkpoint section.

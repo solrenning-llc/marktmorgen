@@ -23,6 +23,7 @@ import { heldBack, passedQuizzes, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
+import { ForgetLessonPositions } from "@/components/forget-lesson-positions";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
@@ -125,6 +126,11 @@ export default async function CoursePage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <main id="content" className="relative mx-auto max-w-2xl px-4 py-12 sm:py-16">
+        {/* Access not open for a signed-in student (a refund, a lost dispute, an ended membership, taken off):
+            where they stopped in this course's videos is removed from their device (650 [WG10]). */}
+        {access.state !== "open" && access.learner && !access.learner.owner ? (
+          <ForgetLessonPositions courseId={course.id} learner={emailKey(access.learner.email)} />
+        ) : null}
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element

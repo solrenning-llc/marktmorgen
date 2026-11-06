@@ -94,7 +94,9 @@ async function main() {
     part("Nothing happens before the start");
     calls = [];
     let found = 0;
-    const deps = { findStore: async (sid: string) => { found += 1; return sid === SID ? shop : null; }, markDiscounts: async () => { marked += 1; } };
+    const deps = { findStore: async (sid: string) => { found += 1; return sid === SID ? shop : null; }, markDiscounts: async () => { marked += 1; return true; } };
+    // Review M1 (rule 23): the stand-in box now answers `true`, the only answer that confirms the box
+    // is on; the assertions on `marked` and `activated` below are unchanged.
     let marked = 0;
     let run = await sched.activateScheduledCodes(Date.now() + 10_000, start - 1, deps);
     is("no Stripe call before the start", calls.length, 0);
@@ -151,6 +153,77 @@ async function main() {
     is("no Stripe call past the end", calls.length, 0);
     const late = await sched.readSchedules(STATS);
     is("shown as failed", late.ok && late.schedules[0]?.failed, true);
+
+    part("Review M1: the checkout's code box is switched on, and confirmed, before the schedule goes");
+    const boxMember = `${SID}|${STATS}|promo_ck3synthetic`;
+    const boxRead = () => redis.pipeline([["HGET", `nl:dsched:${STATS}`, "promo_ck3synthetic"], ["ZSCORE", "nl:dsched:due", boxMember]]);
+    const switchedOn = typeof sched.boxSwitchedOn === "function" ? sched.boxSwitchedOn : null;
+    is("only a store read back with the box on confirms it", switchedOn && [switchedOn(null), switchedOn({ hasDiscounts: false }), switchedOn({ hasDiscounts: true })], [false, false, true]);
+    await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due"]]);
+    await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    let box = false;
+    // setHasDiscounts' own null: the store was not written.
+    let boxAnswer: () => Promise<unknown> = async () => null;
+    const boxDeps = {
+      findStore: async (sid: string) => (sid === SID ? shop : null),
+      markDiscounts: async () => {
+        const answer = await boxAnswer();
+        if (answer === true) box = true;
+        return answer;
+      },
+    };
+    calls = [];
+    run = await sched.activateScheduledCodes(Date.now() + 10_000, start, boxDeps);
+    is("a box not confirmed on is not counted as activated", run.activated, 0);
+    is("it is counted as a try", run.retried, 1);
+    const kept = await boxRead();
+    is("the schedule is kept, with the try counted", [typeof kept[0] === "string" ? JSON.parse(kept[0]).t : kept[0], kept[1] === null ? null : Number(kept[1])], [1, start + RETRY_SECONDS]);
+    is("the code is switched back off meanwhile: never Live while buyers have no code box", calls.map((c) => c.body), ["active=true", "active=false"]);
+    boxAnswer = async () => true;
+    calls = [];
+    run = await sched.activateScheduledCodes(Date.now() + 10_000, start + RETRY_SECONDS, boxDeps);
+    is("the next healthy run switches it on and the box with it", [run.activated, box], [1, true]);
+    is("one switch-on call, with a new key", calls.length === 1 && calls[0].body === "active=true" && typeof calls[0].key === "string", true);
+    is("only then does the schedule go", await boxRead(), [null, null]);
+
+    await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due"]]);
+    await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    boxAnswer = async () => {
+      throw Error("synthetic store write failure");
+    };
+    calls = [];
+    clock = start;
+    let boxActivated = 0;
+    for (let i = 0; i < ACTIVATION_TRIES; i += 1) {
+      run = await sched.activateScheduledCodes(Date.now() + 10_000, clock, boxDeps);
+      boxActivated += run.activated;
+      clock += RETRY_SECONDS;
+    }
+    is("a box that never switches on is never counted as activated", boxActivated, 0);
+    const boxFailed = await sched.readSchedules(STATS);
+    is("after the last try the code is kept as failed, out of the due list", [boxFailed.ok && boxFailed.schedules[0]?.failed, (await boxRead())[1]], [true, null]);
+    is("and left switched off on Stripe", calls.at(-1)?.body, "active=false");
+    is("one switch-on and one switch-off a try, no more", calls.length, 2 * ACTIVATION_TRIES);
+    calls = [];
+    await sched.activateScheduledCodes(Date.now() + 10_000, clock + HOUR, boxDeps);
+    is("no more tries once failed", calls.length, 0);
+
+    part("Review L1: a record that cannot be read leaves the due list and never holds the codes behind it");
+    await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due"]]);
+    for (let i = 0; i < sched.DUE_PER_RUN; i += 1) {
+      const bad = `promo_bad${String(i).padStart(2, "0")}`;
+      await redis.pipeline([["HSET", `nl:dsched:${STATS}`, bad, "{not json"], ["ZADD", "nl:dsched:due", start - 1, `${SID}|${STATS}|${bad}`]]);
+    }
+    await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    calls = [];
+    const first = await sched.activateScheduledCodes(Date.now() + 10_000, start, deps);
+    const second = await sched.activateScheduledCodes(Date.now() + 10_000, start + RETRY_SECONDS, deps);
+    is("the unreadable ones are taken off the due list, Stripe never asked about them", first.dropped, sched.DUE_PER_RUN);
+    is("the healthy code behind them is switched on by the next run", first.activated + second.activated, 1);
+    is("one Stripe call in all, for the healthy code", calls.map((c) => c.path), ["/promotion_codes/promo_ck3synthetic"]);
+    is("the due list is empty", await redis.pipeline([["ZCARD", "nl:dsched:due"]]), [0]);
+    is("the unreadable records themselves are kept, not erased", await redis.pipeline([["HLEN", `nl:dsched:${STATS}`]]), [sched.DUE_PER_RUN]);
+    await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due"]]);
 
     part("A store that is gone, or not this store, is dropped without a call");
     await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due"], ["ZADD", "nl:dsched:due", start, `${"c".repeat(32)}|${STATS}|promo_ck3synthetic`], ["ZADD", "nl:dsched:due", start, "garbage"]]);

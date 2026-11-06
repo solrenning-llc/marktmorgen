@@ -15,6 +15,8 @@ import { calendarWindow } from "@/lib/allowance-window";
 import { FREE_POOL_BASE_STORES, PAYING_INDEX, freePoolSize } from "@/lib/free-pool-rules";
 import { type PlanFields, standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
+import { repliesFor } from "@/lib/redis-reply";
 
 const KEEP_SECONDS = 40 * 86_400;
 const REFUSED_SECONDS = 3_600;
@@ -55,12 +57,17 @@ export async function poolPlace(store: PoolStore, now = Date.now()): Promise<"in
     // A place not handed out is not counted, so a ceiling that grows later has it free.
     if (!fits && Number.isSafeInteger(n) && n >= 1) await redisPipeline([["DECR", countKey(month)]]);
     // A place held lasts the month; a refusal an hour, so a store asks again when places grow.
-    const [set] = await redisPipeline([["SET", inKey(month, id), fits ? "1" : "0", "NX", "EX", fits ? KEEP_SECONDS : REFUSED_SECONDS]]);
-    if (set === null) {
+    // Read exactly (CX-123 rule 24): written, or read back holding this same answer, it stands; holding the other one,
+    // written a moment earlier by another request, that one stands; unreadable, the store is not let through.
+    const set = await claimMark(inKey(month, id), fits ? KEEP_SECONDS : REFUSED_SECONDS, fits ? "1" : "0");
+    if (set === "unknown") return "unknown";
+    if (set === "taken") {
       // Decided a moment ago by another request: that answer stands, and the
       // place this one counted is not handed out again.
-      const [again] = await redisPipeline([["GET", inKey(month, id)]]);
-      return again === "1" ? "in" : "full";
+      // Read exactly (Codex CX1 on #2723): one reply, "1" or "0"; anything else is not known, never a place.
+      const read = repliesFor(await redisPipeline([["GET", inKey(month, id)]]), 1);
+      const again = read ? read[0] : undefined;
+      return again === "1" ? "in" : again === "0" ? "full" : "unknown";
     }
     return fits ? "in" : "full";
   } catch {

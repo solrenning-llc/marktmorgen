@@ -56,6 +56,8 @@ export type Health = {
   atRisk: number;
   /** Members at risk paying in another currency than the store's: counted, never added to atRisk (22 [E5], unit 2e). */
   atRiskElsewhere?: number;
+  /** Running memberships omitted because their own reporting evidence was incomplete. */
+  unscored: number;
   complete: boolean;
 };
 
@@ -139,10 +141,18 @@ export async function runningMembers(store: Store): Promise<{ rows: Raw[]; compl
   return { rows, complete: false };
 }
 
-/** Every running member with a score, the lowest first. */
-export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()): Promise<MemberRow[]> {
+/** Every evidenced running member with a score, plus the number omitted. */
+async function scoredMembers(store: Store, rows: Raw[], now = Date.now()): Promise<{ members: MemberRow[]; unscored: number }> {
   const nowSeconds = Math.floor(now / 1000);
-  const members = rows.map(memberEvidence);
+  const members: ReturnType<typeof memberEvidence>[] = [];
+  let unscored = 0;
+  for (const row of rows) {
+    try {
+      members.push(memberEvidence(row));
+    } catch {
+      unscored += 1;
+    }
+  }
   const ids = [...new Set(members.map((m) => m.product))];
   const listings = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p]));
 
@@ -151,7 +161,9 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
   const config = community ? await readConfig(community).catch(() => null) : null;
   const opens = new Set(config?.access ?? []);
   const inCommunity = members.filter((m) => opens.has(m.product)).map((m) => m.email);
-  const communitySeen = community && inCommunity.length ? await lastSeenIn(community, inCommunity).catch(() => new Map<string, number>()) : new Map<string, number>();
+  // An unavailable activity reading is not evidence that every member never visited.
+  // Refuse the report before it can be cached or used by the return-email job.
+  const communitySeen = community && inCommunity.length ? await lastSeenIn(community, inCommunity) : new Map<string, number>();
 
   // Each course, and the members whose membership is it.
   const courseSeen = new Map<string, number>();
@@ -161,11 +173,11 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
     if (course) byCourse.set(course, [...(byCourse.get(course) ?? []), m.email]);
   }
   for (const [course, emails] of byCourse) {
-    const seen = await lastSeenMany(course, [...new Set(emails)]).catch(() => new Map<string, number>());
+    const seen = await lastSeenMany(course, [...new Set(emails)]);
     for (const [email, at] of seen) courseSeen.set(`${course}|${email}`, at);
   }
 
-  return members
+  const scored = members
     .map(({ raw, email, product, amount, interval, intervalCount, periodEnd, currency }) => {
       const listing = listings.get(product);
       const course = listing?.course?.id ?? "";
@@ -201,6 +213,12 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
       };
     })
     .sort((a, b) => a.score - b.score || b.monthly - a.monthly);
+  return { members: scored, unscored };
+}
+
+/** Every evidenced running member with a score, the lowest first. */
+export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()): Promise<MemberRow[]> {
+  return (await scoredMembers(store, rows, now)).members;
 }
 
 export async function memberHealth(store: Store, fresh = false, now = Date.now()): Promise<Health | null> {
@@ -209,14 +227,17 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     const [cached] = await redisPipeline([["GET", cacheKey(store)]]);
     if (typeof cached === "string") {
       try {
-        return JSON.parse(cached) as Health;
+        const health = JSON.parse(cached) as Health;
+        // Copies written before omitted rows were counted cannot certify that
+        // their zeroes are complete. Read the source again instead.
+        if (natural(health.unscored)) return health;
       } catch {
         // Read again below.
       }
     }
   }
   const { rows, complete } = await runningMembers(store);
-  const members = await scoreMembers(store, rows, now);
+  const { members, unscored } = await scoredMembers(store, rows, now);
   const counts: Record<Band, number> = { well: 0, slipping: 0, risk: 0 };
   let atRisk = 0;
   let atRiskElsewhere = 0;
@@ -226,7 +247,7 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     if (m.own && m.own.currency !== store.currency) atRiskElsewhere += 1;
     else atRisk += m.monthly;
   }
-  const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, complete };
+  const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, unscored, complete };
   if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
   return health;
 }

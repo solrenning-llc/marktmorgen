@@ -42,6 +42,7 @@ import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/l
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { NotConnected, accessFor, disconnect, hostConnectionFrom, hostConnectionKey, hostConnectionView } from "@/lib/meet-connect";
 import { type GoogleCalendar, MAX_READ_CALENDARS, ProviderError, googleCalendars, googleFreeBusy, grantedParts, hostSyncOn } from "@/lib/meet-providers";
+import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 import { hostId } from "@/lib/host-claims";
 import type { Store } from "@/lib/store";
 
@@ -52,9 +53,9 @@ import type { Store } from "@/lib/store";
  * host's calendar filled in the meantime is still never booked twice through
  * us, because every hold is claimed on each host's own list (lib/host-claims.ts).
  */
-export const SYNC_SECONDS = 900;
+export const SYNC_SECONDS = HOST_SYNC_MINUTES * 60;
 /** How old the last good reading may be before the host is blocked: three readings missed. */
-export const STALE_SECONDS = 45 * 60;
+export const STALE_SECONDS = HOST_STALE_MINUTES * 60;
 /** How far ahead busy times are read: past the longest booking horizon. */
 export const HOST_LOOKAHEAD_DAYS = 92;
 /** How long the last reading and the last failure are kept, for the studio. */
@@ -74,46 +75,72 @@ const lockKey = (host: string) => `nl:hostcal:lock:${host}`;
 export const hostCalendarKeys = (host: string): string[] => [cfgKey(host), goodKey(host), errKey(host), lockKey(host)];
 const icsContext = (host: string) => `hostcal|${host}|ics`;
 
+const unreadable = () => new Error("the hosts' calendars could not be read");
+
+/** Only an explicit null proves that a stored value is absent. */
+function storedValues(raw: unknown, count: number): (string | null)[] {
+  if (!Array.isArray(raw) || raw.length !== count) throw unreadable();
+  const values: (string | null)[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const slot = Object.getOwnPropertyDescriptor(raw, String(i));
+    if (!slot || !("value" in slot) || (slot.value !== null && typeof slot.value !== "string")) throw unreadable();
+    values.push(slot.value);
+  }
+  return values;
+}
+
+function storedReply(reply: unknown, count: number): (string | null)[] {
+  if (!Array.isArray(reply) || reply.length !== 1) throw unreadable();
+  const slot = Object.getOwnPropertyDescriptor(reply, "0");
+  if (!slot || !("value" in slot)) throw unreadable();
+  return storedValues(slot.value, count);
+}
+
 function parseConfig(raw: unknown): Config | null {
-  if (typeof raw !== "string" || !raw) return null;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw unreadable();
   try {
     const v = JSON.parse(raw) as Partial<Config>;
-    const source: HostSource = v.source === "google" || v.source === "ics" ? v.source : "none";
+    if (!v || (v.source !== "google" && v.source !== "ics" && v.source !== "none") ||
+      typeof v.email !== "string" || !Array.isArray(v.read) || v.read.length > MAX_READ_CALENDARS ||
+      !v.read.every((id) => typeof id === "string" && id.length > 0 && id.length <= 300) ||
+      typeof v.write !== "string" || v.write.length > 300 || typeof v.ics !== "string" || typeof v.icsAddedAt !== "string") throw unreadable();
     return {
-      email: typeof v.email === "string" ? v.email : "",
-      source,
-      read: Array.isArray(v.read) ? v.read.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 300).slice(0, MAX_READ_CALENDARS) : [],
-      write: typeof v.write === "string" && v.write.length <= 300 ? v.write : "",
-      ics: typeof v.ics === "string" ? v.ics : "",
-      icsAddedAt: typeof v.icsAddedAt === "string" ? v.icsAddedAt : "",
+      email: v.email, source: v.source, read: v.read, write: v.write, ics: v.ics, icsAddedAt: v.icsAddedAt,
     };
   } catch {
-    return null;
+    throw unreadable();
   }
 }
 
 function parseGood(raw: unknown): Good | null {
-  if (typeof raw !== "string" || !raw) return null;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw unreadable();
   try {
     const v = JSON.parse(raw) as Good;
-    return typeof v.at === "number" && Array.isArray(v.busy) ? v : null;
+    if (!v || !Number.isSafeInteger(v.at) || v.at < 0 || (v.source !== "google" && v.source !== "ics") ||
+      !Array.isArray(v.busy) || !v.busy.every((pair) => Array.isArray(pair) && pair.length === 2 &&
+        Number.isSafeInteger(pair[0]) && Number.isSafeInteger(pair[1]) && pair[1] > pair[0])) throw unreadable();
+    return v;
   } catch {
-    return null;
+    throw unreadable();
   }
 }
 
 function parseError(raw: unknown): { at: number; message: string } | null {
-  if (typeof raw !== "string" || !raw) return null;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw unreadable();
   try {
     const v = JSON.parse(raw) as { at?: unknown; message?: unknown };
-    return typeof v.at === "number" && typeof v.message === "string" ? { at: v.at, message: v.message } : null;
+    if (!v || typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at < 0 || typeof v.message !== "string") throw unreadable();
+    return { at: v.at, message: v.message };
   } catch {
-    return null;
+    throw unreadable();
   }
 }
 
 async function readConfig(host: string): Promise<Config | null> {
-  const [raw] = await redisPipeline([["GET", cfgKey(host)]]);
+  const [raw] = storedValues(await redisPipeline([["GET", cfgKey(host)]]), 1);
   return parseConfig(raw);
 }
 
@@ -204,8 +231,7 @@ export async function prefetchHosts(store: Pick<Store, "statsId">, emails: strin
     const host = hostId(email);
     return [cfgKey(host), goodKey(host), errKey(host), hostConnectionKey(statsId, host)];
   });
-  const [raw] = await redisPipeline([["MGET", ...keys]]);
-  if (!Array.isArray(raw) || raw.length !== keys.length) throw new Error("the hosts' calendars could not be read");
+  const raw = storedReply(await redisPipeline([["MGET", ...keys]]), keys.length);
   emails.forEach((email, i) => out.set(email, { cfg: raw[4 * i], good: raw[4 * i + 1], err: raw[4 * i + 2], conn: raw[4 * i + 3] }));
   return out;
 }
@@ -230,11 +256,13 @@ export async function hostSync(
   try {
     // One command, not three: this runs for every host on every view of a team call's page
     // (tests/plan-cost-registry.ts, line team-scheduling).
-    const [raw] = options.known ? [[options.known.cfg, options.known.good, options.known.err]] : await redisPipeline([["MGET", cfgKey(host), goodKey(host), errKey(host)]]);
-    const [c, g, e] = Array.isArray(raw) ? raw : [null, null, null];
+    const [c, g, e] = options.known
+      ? storedValues([options.known.cfg, options.known.good, options.known.err], 3)
+      : storedReply(await redisPipeline([["MGET", cfgKey(host), goodKey(host), errKey(host)]]), 3);
     config = parseConfig(c);
     good = parseGood(g);
     failure = parseError(e);
+    if (good && good.at > now) throw unreadable();
   } catch {
     // Not knowing whether a host has a calendar is not knowing whether they are free.
     return result("none", "failed", null, "Your calendar settings could not be read just now.");
@@ -259,8 +287,13 @@ export async function hostSync(
   // Failed automatic reads share the same host-wide retry interval as good reads.
   // A kept failure must not turn each booking-page view into another provider call.
   if (!options.force && failure && Number.isFinite(failure.at) && failure.at <= now && now - failure.at < SYNC_SECONDS * 1000) return fallback();
-  const [mine] = await redisPipeline([["SET", lockKey(host), "1", "NX", "EX", 20]]).catch(() => [null]);
-  if (mine === null) return fallback();
+  let mine: string | null;
+  try {
+    [mine] = storedValues(await redisPipeline([["SET", lockKey(host), "1", "NX", "EX", 20]]), 1);
+  } catch {
+    return fallback();
+  }
+  if (mine !== "OK") return fallback();
   try {
     const busy = await readBusyNow(store.statsId, host, config, tz, now, options.hooks ?? {});
     const reading: Good = { at: now, busy, source };

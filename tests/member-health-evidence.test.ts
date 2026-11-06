@@ -86,6 +86,13 @@ async function main() {
   reset([page([scoredMember({ items: { data: [{ quantity: 3, current_period_end: 1_900_000_000, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } })])]);
   const quantity = await memberHealth(store, true, 1_800_000_000_000);
   is("confirmed item quantity remains exact", [quantity?.members[0]?.monthly, quantity?.atRisk], [6000, 6000]);
+  part("Copies from before partial evidence was counted are refreshed");
+  reset([page([scoredMember({ customer: null })])]);
+  await redis.pipeline([["SET", `nl:health:${store.statsId}`, JSON.stringify({
+    at: 1_799_999_999, currency: "usd", members: [], counts: { well: 0, slipping: 0, risk: 0 }, atRisk: 0, complete: true,
+  }), "EX", 600]]);
+  const refreshed = await memberHealth(store, false, 1_800_000_000_000);
+  is("an old copy without the omitted-row count cannot hide a partial report", [paths.length, refreshed?.unscored], [1, 1]);
   part("Confirmed empty, filtered and paginated controls");
   reset([page([])]);
   is("explicit empty list confirms absence", await runningMembers(store), { rows: [], complete: true });

@@ -14,7 +14,7 @@ import { VISITS_INCLUDED, publicVisitLimit } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED, CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { AUTOMATIC_UPLOAD_CAPS } from "@/lib/upload-budget-policy";
-import { ALLOWANCE_KINDS, STORE_ALLOWANCES, KIND_WORDS, API_WRITE_UNITS } from "@/lib/store-allowance-rules";
+import { ALLOWANCE_KINDS, STORE_ALLOWANCES, KIND_WORDS, API_WRITE_UNITS, API_SALES_UNITS } from "@/lib/store-allowance-rules";
 import { AI_MONTHLY } from "@/lib/ai-rules";
 import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { ACTIVE_FLOWS_BY_TIER, DAILY_RUNS_BY_TIER, MAX_FLOWS, MAX_STEPS } from "@/lib/flow-limits";
@@ -86,7 +86,7 @@ export const PRICING_GROUPS:PricingGroup[]=[
  ]},
  {id:"operating-allowances",title:"Other monthly allowances",period:"These counters share the store's billing-month window, including on annual plans. A request or action can use more than one unit.",rows:
   ALLOWANCE_KINDS.map(kind=>row("operation-"+kind,KIND_WORDS[kind].what,t=>count(STORE_ALLOWANCES[t][kind]),
-   kind==="api"?"Each contact added or product given through the API uses "+API_WRITE_UNITS+" units; key permissions and endpoint rules still apply.":undefined)),
+   kind==="api"?"Each contact added or product given through the API uses "+API_WRITE_UNITS+" units, and each page of sales read "+API_SALES_UNITS+"; key permissions and endpoint rules still apply.":undefined)),
  },
 ];
 export const PRICING_ADDONS=[

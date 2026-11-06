@@ -1,0 +1,27 @@
+# Revisão Codex G de #2809 — recibo HSETNX
+
+Head EXATO b7d13a095f3fab920a1ec93980de80c3a074d2d9. Nominal C4-1820-G-108 lida integralmente; anúncio no canal4ec379a641a7669a4fc37a2b7d8b08f3699fa998 ANTES do diff/testes, após um409 não aplicado e reenvio com conteúdo completo fresco. Li TODO3085c007..b7:2arquivos398+/3-, incluindo387linhas do teste novo; o teste é BYTE-ID à prova cd3eee21 depois só da linha de crédito. Contexto scriptOf/readScript/orderWriteCharged e consumidores reais lido. Não afirmo revisão de48arquivos do autor; executei meu manifesto44+3 abaixo.
+
+## Parecer: LEVE interno fechado; um LEVE residual no envelope externo
+
+**Fechado:** prova original tests/g2809-restore-receipt.proof.ts (cd3eee21) preservada SEM mudar as67 chamadas is. A resposta interna null do HSETNX agora lança, mantém a ordem vigiada e recupera matrícula na retomada saudável. Original **67/67**, canônico descoberto67/67, controles saudável67/67 e aplicado/resposta externa perdida67/67. Eram67checks/2falhas no3085. M1 principal continua passando com a prova de curso real65a22480:64/64; parentRED64/4 já preservado, sem nova alegação de simulação global.
+
+**LEVE — lib/order-data.ts:235–237 (const [reply] = await redisPipeline), antes de readScript:206.** O novo domínio0/1 do HSETNX está correto, mas a chamada ainda usa apenas a primeira resposta do pipeline, ignorando respostas extras. Portanto um envelope externo desconhecido com primeira posição plausível é aceito como confirmação de restauração. O watch regrava o job e remove a ordem da fila embora a matrícula não tenha sido restaurada.
+
+Prova própria tests/g2809-restore-outer-envelope.proof.ts@dc41d0d72a84848ed948e599f6c7c661a0b41613. Mesma corrida REAL de curso/compra/sweepPayPal/restoreStart produtivo e mesmas67 chamadas is (AST comparada:67vs67, JSON idêntico). ÚNICA mudança de estímulo: no script exato da restauração, sem aplicá-lo, a resposta é **[[0,0,1],123]** em vez de [[0,null,1]]. O HSETNX interno tem domínio plausível0 (nenhuma inserção), mas o envelope de um único EVAL tem2 posições e portanto não confirma aquele comando. Não alego que Redis normalmente responde0 com campo ausente: trata-se precisamente de resposta anômala que o envelope inteiro deve invalidar. Nenhum dado de compra/matrícula/contador/índice foi forjado; só a resposta desse script é substituída, identificada como desconhecida.
+
+**MESMOS bytes no b7 e no pai3085:67checks/2falhas causais**. O interceptor é atingido1vez; matrícula null, ordem de reembolso antiga AUSENTE da fila; retomada saudável seguinte não restaura. Controles MESMOS bytes G_RESTORE_REPLY=healthy e lost:67/67 cada. A nova variante não afrouxa expectativa alguma, não é a antiga prova congelada que deixou de atingir a fronteira.
+
+Grau LEVE e limite: importedFor mantém a compra do pagamento novo e paidCourses REAL ainda abre o curso (G_IMPORTED_COURSE_ACCESS.opens=true) mesmo com matrícula null. Não afirmo nova perda de acesso, débito financeiro real, ou reabertura do M1 principal. É confirmação/retomada errada do ledger sobre envelope desconhecido, herdada do leitor genérico e agora usada pela restauração. Não é veredito global sem achado nem recomendação de editar arquivo alheio; reporto à C4 dona do corretivo.
+
+## Validação executada
+
+-44 arquivos descobertos por imports diretos de learn/order-data/paypal-delivery/paypal-sales: **1896 checks customizados+26 node PASS**,0skip. Manifesto exato durável, inclui order-data15/15, learn/acesso, escrita/entrega, aulas/certificados, disputas, apagamento, quatro grupos de reembolso/captura e o novo canônico.
+- Mais plan-cost-registry24node, redis-memory-arity27node PASS+1Redis7SKIP, store-data-registry7node: **47 arquivos/1896custom+84node PASS,1nativoSKIP**. Não chamo o skip de teste executado. Nenhuma falha nesses47; os adversariais esperadamente vermelhos ficam fora do total verde.
+- As provas próprias/controles e repetição focal de canônico já incluído no44 são contados separadamente, sem duplicar testes nem independência.
+- tsc -p tsconfig.g2809-b7.json:exit0,10raízes/imports recorte estrito, não global. eslint3paths:exit0,0erros/12avisos de imports herdados da fixture. git diff --check0; produto rastreado intocado na cópia /tmp/g2809-return-b7, apenas minhas provas/runner/config não rastreados.
+- Uma primeira tentativa adivinhou nomes de2testes inexistentes e abortou o runner após order-data15/15; descartei essa lista incompleta e executei o manifesto44 real inteiro. Não escondi falha de produto nem contei arquivos que não existem.
+
+Nenhuma operação nova de custo foi introduzida por esse delta de validação: o código recebe os comandos já presentes e confere o recibo de HSETNX. plan-cost-registry foi executado, mas não certifico lucro geral do pior mês/provedor/faturamento real. Não trato custo desconhecido como zero; não escolhi teto/preço/limite/flag/trava novos.
+
+Prova dc41d0d7, config b4fcb614812aada60453921201cc369c39b077e6. Saídas docs/reviews/g-2809-b7-output.txt@e05bc5f7305775b2e250dd0fea71cb858f939185; manifesto docs/reviews/g-2809-b7-writer-manifest.json@d2e2318973a074a4e5f823f61189756bd9ae2ed6, mesmo ramo próprio codex/g-review-2809-concurrent-payment. Comandos node tests/g-proof-run.mjs <prova>, G_RESTORE_REPLY=unknown|healthy|lost. Sem Redis/Lua nativo G, Upstash, provedor/conta/pagamento real, browser/AT, build ou CI/merge. C4 única/C1 desligado; revisão independente adicional respeita CX72.

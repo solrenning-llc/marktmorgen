@@ -50,6 +50,9 @@ export function testAliases(file,root,here){
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
+ if(file==='bx2-u4-csv.test.ts'){
+  for(const name of ['next/headers','next/navigation','@/lib/studio-route','@/components/studio-header','@/components/studio-store-pin'])aliases[name]=join(here,'bx2-u4-csv-world.tsx');
+ }
  if(file==='bx2-u3-page.test.ts'){
   for(const name of ['next/headers','next/navigation','@/lib/studio-route','@/components/studio-header','@/components/studio-store-pin'])aliases[name]=join(here,'bx2-u3-page-world.tsx');
  }

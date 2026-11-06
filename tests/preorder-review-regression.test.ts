@@ -1,5 +1,5 @@
 /** A store's unknown pre-sale state must not delay another store's release. */
-import { runPreorderReleases } from "@/lib/preorders";
+import { runPreorderReleases, soonState } from "@/lib/preorders";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
@@ -14,6 +14,17 @@ const members = stores.map((store) => `${store.statsId}|${product.id}|${store.ha
 globalThis.fetch = async () => { throw new Error("No external network in this regression"); };
 
 async function main() {
+  for (const [label, membersReply, daysReply] of [
+    ["odd days", [product.id], [product.id]],
+    ["object days", [product.id], {}],
+    ["non-text days", [product.id], [product.id, 7]],
+    ["mixed members", [product.id, null], []],
+  ] as const) {
+    redis.pipeline = async () => [membersReply, daysReply];
+    const reading = await soonState(stores[0]).catch(() => null);
+    is(`${label}: a known coming-soon product is not removed from the storefront/cart decision`, reading?.soon.has(product.id), true);
+  }
+  redis.pipeline = pipeline;
   redis.clear();
   await pipeline([["SADD", "nl:pre:jobs", ...members]]);
   let commands = 0;

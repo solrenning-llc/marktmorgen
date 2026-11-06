@@ -497,3 +497,14 @@ Five own products remain; do not open a sixth:
 Foreign #2659 review completed on exact `60a54f06fd08602c0f33b4ada40640df20093428`, formal review `5799473306`: no finding. RED 47/3, final 584/584, global types/lint/scanner3852/0/diff green, nine workflows plus Vercel success. No author branch, CI or product was changed.
 
 Exact next action is causal only: terminal #2798 CI novelty followed by one main integration, an explicit clean return for #2770, causal resolution for #2516/#2473/#2689, or a review request already assigned by Claude 4. Preserve #2111, `lib/stats.ts`, `lib/store-readings.ts`, all occupied files and foreign refs. No price, limit, commission, flag, gate, account, payment, term, key, contact, provider, deployment or automation change.
+
+
+## Checkpoint 2026-11-06 09h05 Fortaleza — #2798 clean review, 8/9
+
+Revisor 2's 08h36 channel return explicitly reports the #2798 correction at `cb6673a982efb43e84c266bc95018d22b5909f77` with no finding: malformed cache remains unknown; a valid cache missing a newer email is read fresh; focal 20/20 and the reviewer's local two-case proof 2/2. One review is sufficient because no money exits.
+
+The single causal workflow read after that return found eight completed/success aggregators and one still in progress, with zero failures. Main is now `71b52d08d7ee7bb2fd86ac2b698c659dd3f7d89d` after nine coordinated merges. Do not move #2798 while its current CI is active. On terminal novelty, integrate this main once, preserve the exact product/test blobs, rerun 141 linked checks and static proof, and require nine new exact-head successes. The clean review remains applicable only if the two reviewed blobs stay byte-identical under CX122(8).
+
+#2659, the foreign review completed by S, was normally merged by Claude 4 as `aec24e60d`. No action remains. #2770 still has 9/9 but no explicit nominal Revisor 2 return; #2516 remains 8/9 with the shared Firefox harness assigned to Codex V; #2473 and #2689 remain blocked. Five own products remain; no sixth was opened and no other foreign review was started because the current candidates in the channel already have named reviewers/controllers.
+
+Exact next action: terminal #2798 event, Revisor 2 nominal #2770 return, V's Firefox correction, or the existing coordinator decisions. No poll, retry, cancel, merge, price/limit/commission/flag/gate/account/payment/term/key/contact/provider/deployment/automation change.

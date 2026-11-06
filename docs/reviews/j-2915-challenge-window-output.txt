@@ -1,0 +1,2485 @@
+# G8 #2915 — exact observed outputs
+Nominal head149a6fdf0c2808f525601cb5588674ebcf1a1abd
+Trailing whitespace normalized for Git; no diagnostic or assertion output omitted. Original raw logs remain preserved locally.
+
+## Author entire RED04fa7ab06967c0637ca817abf73d7ef9e8bd61f6, missing new export
+TEST community-challenge-rules.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+✖ the new pure window rule is exported (3.112201ms)
+✖ before the start is scheduled (0.473092ms)
+✖ the exact start is active (0.123616ms)
+✖ inside the window is active (0.21295ms)
+✖ the last millisecond before the end is active (0.315124ms)
+✖ the exact end is ended (0.115884ms)
+✖ after the end remains ended (0.091037ms)
+✖ equal boundaries are invalid (0.090797ms)
+✖ reversed boundaries are invalid (0.11309ms)
+✖ a one-millisecond window has an active start (0.161163ms)
+✖ a one-millisecond window ends at its end (0.151878ms)
+✖ the epoch is a valid start (0.096826ms)
+✖ negative zero does not invent a date restriction (0.110386ms)
+✖ a window before the epoch is valid (0.070316ms)
+✖ a window can cross the epoch (0.109644ms)
+✖ the earliest representable date is a valid start (0.161313ms)
+✖ the latest representable date is a valid end (0.091448ms)
+✖ the latest representable date can be the current ended instant (0.135034ms)
+✖ a representable current instant before a far-future start is scheduled (0.211298ms)
+✖ the full representable window stays active without duration overflow (0.098218ms)
+✖ reject undefined as the start without coercion (0.11305ms)
+✖ reject undefined as the end without coercion (0.107261ms)
+✖ reject undefined as the current instant without coercion (0.152609ms)
+✖ reject null as the start without coercion (0.130296ms)
+✖ reject null as the end without coercion (0.083966ms)
+✖ reject null as the current instant without coercion (0.075483ms)
+✖ reject a numeric string as the start without coercion (0.081493ms)
+✖ reject a numeric string as the end without coercion (0.071067ms)
+✖ reject a numeric string as the current instant without coercion (0.069925ms)
+✖ reject an ISO date string as the start without coercion (0.069445ms)
+✖ reject an ISO date string as the end without coercion (0.073991ms)
+✖ reject an ISO date string as the current instant without coercion (0.105659ms)
+✖ reject an empty string as the start without coercion (0.114372ms)
+✖ reject an empty string as the end without coercion (0.092008ms)
+✖ reject an empty string as the current instant without coercion (0.07328ms)
+✖ reject true as the start without coercion (0.070035ms)
+✖ reject true as the end without coercion (0.069825ms)
+✖ reject true as the current instant without coercion (0.073751ms)
+✖ reject false as the start without coercion (0.068723ms)
+✖ reject false as the end without coercion (0.068162ms)
+✖ reject false as the current instant without coercion (0.068013ms)
+✖ reject an empty array as the start without coercion (0.068113ms)
+✖ reject an empty array as the end without coercion (0.067352ms)
+✖ reject an empty array as the current instant without coercion (0.103085ms)
+✖ reject a singleton array as the start without coercion (0.113721ms)
+✖ reject a singleton array as the end without coercion (0.196526ms)
+✖ reject a singleton array as the current instant without coercion (0.088763ms)
+✖ reject a plain object as the start without coercion (0.104638ms)
+✖ reject a plain object as the end without coercion (1.70219ms)
+✖ reject a plain object as the current instant without coercion (0.219871ms)
+✖ reject a Date object as the start without coercion (0.084137ms)
+✖ reject a Date object as the end without coercion (0.072669ms)
+✖ reject a Date object as the current instant without coercion (0.070005ms)
+✖ reject a boxed number as the start without coercion (0.254028ms)
+✖ reject a boxed number as the end without coercion (0.145769ms)
+✖ reject a boxed number as the current instant without coercion (0.090606ms)
+✖ reject a bigint as the start without coercion (0.076315ms)
+✖ reject a bigint as the end without coercion (0.069024ms)
+✖ reject a bigint as the current instant without coercion (0.104958ms)
+✖ reject a symbol as the start without coercion (0.108132ms)
+✖ reject a symbol as the end without coercion (0.302305ms)
+✖ reject a symbol as the current instant without coercion (0.125058ms)
+✖ reject a positive fraction as the start without coercion (0.079289ms)
+✖ reject a positive fraction as the end without coercion (0.098198ms)
+✖ reject a positive fraction as the current instant without coercion (0.161162ms)
+✖ reject a negative fraction as the start without coercion (0.09312ms)
+✖ reject a negative fraction as the end without coercion (0.074331ms)
+✖ reject a negative fraction as the current instant without coercion (0.105018ms)
+✖ reject NaN as the start without coercion (0.07333ms)
+✖ reject NaN as the end without coercion (0.070596ms)
+✖ reject NaN as the current instant without coercion (0.068163ms)
+✖ reject positive infinity as the start without coercion (0.066871ms)
+✖ reject positive infinity as the end without coercion (0.065729ms)
+✖ reject positive infinity as the current instant without coercion (0.077016ms)
+✖ reject negative infinity as the start without coercion (0.114392ms)
+✖ reject negative infinity as the end without coercion (0.281904ms)
+✖ reject negative infinity as the current instant without coercion (0.092339ms)
+✖ reject one millisecond above the Date range as the start without coercion (0.103345ms)
+✖ reject one millisecond above the Date range as the end without coercion (0.078508ms)
+✖ reject one millisecond above the Date range as the current instant without coercion (0.070987ms)
+✖ reject one millisecond below the Date range as the start without coercion (0.100051ms)
+✖ reject one millisecond below the Date range as the end without coercion (0.108242ms)
+✖ reject one millisecond below the Date range as the current instant without coercion (0.279871ms)
+✖ reject an unsafe positive integer as the start without coercion (0.128674ms)
+✖ reject an unsafe positive integer as the end without coercion (0.074042ms)
+✖ reject an unsafe positive integer as the current instant without coercion (0.085429ms)
+✖ reject an unsafe negative integer as the start without coercion (0.069285ms)
+✖ reject an unsafe negative integer as the end without coercion (0.068272ms)
+✖ reject an unsafe negative integer as the current instant without coercion (0.068934ms)
+✖ objects are rejected without invoking conversion hooks (0.160011ms)
+✖ the supplied instant alone determines state, with no clock mutation (0.27962ms)
+ℹ tests 91
+ℹ suites 0
+ℹ pass 0
+ℹ fail 91
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 27.47198
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:45:29
+✖ the new pure window rule is exported (3.112201ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:46:27)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ before the start is scheduled (0.473092ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ the exact start is active (0.123616ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ inside the window is active (0.21295ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ the last millisecond before the end is active (0.315124ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ the exact end is ended (0.115884ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ after the end remains ended (0.091037ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ equal boundaries are invalid (0.090797ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ reversed boundaries are invalid (0.11309ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ a one-millisecond window has an active start (0.161163ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ a one-millisecond window ends at its end (0.151878ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ the epoch is a valid start (0.096826ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ negative zero does not invent a date restriction (0.110386ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ a window before the epoch is valid (0.070316ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:65:31
+✖ a window can cross the epoch (0.109644ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:65:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:76:31
+✖ the earliest representable date is a valid start (0.161313ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:76:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:76:31
+✖ the latest representable date is a valid end (0.091448ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:76:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:76:31
+✖ the latest representable date can be the current ended instant (0.135034ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:76:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:76:31
+✖ a representable current instant before a far-future start is scheduled (0.211298ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:76:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:76:31
+✖ the full representable window stays active without duration overflow (0.098218ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:76:72)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject undefined as the start without coercion (0.11305ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject undefined as the end without coercion (0.107261ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject undefined as the current instant without coercion (0.152609ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject null as the start without coercion (0.130296ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject null as the end without coercion (0.083966ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject null as the current instant without coercion (0.075483ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a numeric string as the start without coercion (0.081493ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a numeric string as the end without coercion (0.071067ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a numeric string as the current instant without coercion (0.069925ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject an ISO date string as the start without coercion (0.069445ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject an ISO date string as the end without coercion (0.073991ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject an ISO date string as the current instant without coercion (0.105659ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject an empty string as the start without coercion (0.114372ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject an empty string as the end without coercion (0.092008ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject an empty string as the current instant without coercion (0.07328ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject true as the start without coercion (0.070035ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject true as the end without coercion (0.069825ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject true as the current instant without coercion (0.073751ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject false as the start without coercion (0.068723ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject false as the end without coercion (0.068162ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject false as the current instant without coercion (0.068013ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject an empty array as the start without coercion (0.068113ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject an empty array as the end without coercion (0.067352ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject an empty array as the current instant without coercion (0.103085ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a singleton array as the start without coercion (0.113721ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a singleton array as the end without coercion (0.196526ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a singleton array as the current instant without coercion (0.088763ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a plain object as the start without coercion (0.104638ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a plain object as the end without coercion (1.70219ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a plain object as the current instant without coercion (0.219871ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a Date object as the start without coercion (0.084137ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a Date object as the end without coercion (0.072669ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a Date object as the current instant without coercion (0.070005ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a boxed number as the start without coercion (0.254028ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a boxed number as the end without coercion (0.145769ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a boxed number as the current instant without coercion (0.090606ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a bigint as the start without coercion (0.076315ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a bigint as the end without coercion (0.069024ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a bigint as the current instant without coercion (0.104958ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a symbol as the start without coercion (0.108132ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a symbol as the end without coercion (0.302305ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a symbol as the current instant without coercion (0.125058ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a positive fraction as the start without coercion (0.079289ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a positive fraction as the end without coercion (0.098198ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a positive fraction as the current instant without coercion (0.161162ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject a negative fraction as the start without coercion (0.09312ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject a negative fraction as the end without coercion (0.074331ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject a negative fraction as the current instant without coercion (0.105018ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject NaN as the start without coercion (0.07333ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject NaN as the end without coercion (0.070596ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject NaN as the current instant without coercion (0.068163ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject positive infinity as the start without coercion (0.066871ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject positive infinity as the end without coercion (0.065729ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject positive infinity as the current instant without coercion (0.077016ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject negative infinity as the start without coercion (0.114392ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject negative infinity as the end without coercion (0.281904ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject negative infinity as the current instant without coercion (0.092339ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject one millisecond above the Date range as the start without coercion (0.103345ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject one millisecond above the Date range as the end without coercion (0.078508ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject one millisecond above the Date range as the current instant without coercion (0.070987ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject one millisecond below the Date range as the start without coercion (0.100051ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject one millisecond below the Date range as the end without coercion (0.108242ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject one millisecond below the Date range as the current instant without coercion (0.279871ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject an unsafe positive integer as the start without coercion (0.128674ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject an unsafe positive integer as the end without coercion (0.074042ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject an unsafe positive integer as the current instant without coercion (0.085429ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:104:31
+✖ reject an unsafe negative integer as the start without coercion (0.069285ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:104:114)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:105:31
+✖ reject an unsafe negative integer as the end without coercion (0.068272ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:105:112)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:106:31
+✖ reject an unsafe negative integer as the current instant without coercion (0.068934ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:106:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:108:29
+✖ objects are rejected without invoking conversion hooks (0.160011ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:120:33)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j-2915-challenge-INZbPy/current.cjs:125:29
+✖ the supplied instant alone determines state, with no clock mutation (0.27962ms)
+  AssertionError [ERR_ASSERTION]: the new challengeWindowState contract must be implemented
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at state (/dev/shm/j-2915-challenge-INZbPy/current.cjs:42:27)
+      at TestContext.<anonymous> (/dev/shm/j-2915-challenge-INZbPy/current.cjs:131:40)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+GROUP_EXIT community-challenge-rules.test.ts 1
+FAILED_GROUPS 1
+
+## Author91 GREEN and independent initial18, exact final head
+TEST community-challenge-rules.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+(node:22) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/scratch/72485b6ecfa0/j-review-2769-red/lib/community-challenge-rules.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /workspace/scratch/72485b6ecfa0/j-review-2769-red/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ the new pure window rule is exported (3.276034ms)
+✔ before the start is scheduled (0.162564ms)
+✔ the exact start is active (0.073941ms)
+✔ inside the window is active (0.060631ms)
+✔ the last millisecond before the end is active (0.136516ms)
+✔ the exact end is ended (0.062814ms)
+✔ after the end remains ended (0.144227ms)
+✔ equal boundaries are invalid (0.057917ms)
+✔ reversed boundaries are invalid (0.070506ms)
+✔ a one-millisecond window has an active start (0.111698ms)
+✔ a one-millisecond window ends at its end (0.064527ms)
+✔ the epoch is a valid start (0.042514ms)
+✔ negative zero does not invent a date restriction (0.036284ms)
+✔ a window before the epoch is valid (0.033661ms)
+✔ a window can cross the epoch (0.05996ms)
+✔ the earliest representable date is a valid start (0.069465ms)
+✔ the latest representable date is a valid end (0.034602ms)
+✔ the latest representable date can be the current ended instant (0.030626ms)
+✔ a representable current instant before a far-future start is scheduled (0.040602ms)
+✔ the full representable window stays active without duration overflow (0.082274ms)
+✔ reject undefined as the start without coercion (0.101382ms)
+✔ reject undefined as the end without coercion (0.082143ms)
+✔ reject undefined as the current instant without coercion (0.065729ms)
+✔ reject null as the start without coercion (0.039249ms)
+✔ reject null as the end without coercion (0.070005ms)
+✔ reject null as the current instant without coercion (0.046941ms)
+✔ reject a numeric string as the start without coercion (0.059209ms)
+✔ reject a numeric string as the end without coercion (0.038228ms)
+✔ reject a numeric string as the current instant without coercion (0.076706ms)
+✔ reject an ISO date string as the start without coercion (0.066159ms)
+✔ reject an ISO date string as the end without coercion (0.034932ms)
+✔ reject an ISO date string as the current instant without coercion (0.03996ms)
+✔ reject an empty string as the start without coercion (0.03345ms)
+✔ reject an empty string as the end without coercion (0.034392ms)
+✔ reject an empty string as the current instant without coercion (0.030957ms)
+✔ reject true as the start without coercion (0.156465ms)
+✔ reject true as the end without coercion (0.103766ms)
+✔ reject true as the current instant without coercion (0.057847ms)
+✔ reject false as the start without coercion (0.085618ms)
+✔ reject false as the end without coercion (0.041383ms)
+✔ reject false as the current instant without coercion (0.036845ms)
+✔ reject an empty array as the start without coercion (0.057416ms)
+✔ reject an empty array as the end without coercion (0.042854ms)
+✔ reject an empty array as the current instant without coercion (0.075443ms)
+✔ reject a singleton array as the start without coercion (0.030947ms)
+✔ reject a singleton array as the end without coercion (2.901091ms)
+✔ reject a singleton array as the current instant without coercion (0.071137ms)
+✔ reject a plain object as the start without coercion (0.052599ms)
+✔ reject a plain object as the end without coercion (0.031858ms)
+✔ reject a plain object as the current instant without coercion (0.157407ms)
+✔ reject a Date object as the start without coercion (0.088262ms)
+✔ reject a Date object as the end without coercion (0.030817ms)
+✔ reject a Date object as the current instant without coercion (0.021423ms)
+✔ reject a boxed number as the start without coercion (0.019549ms)
+✔ reject a boxed number as the end without coercion (0.044046ms)
+✔ reject a boxed number as the current instant without coercion (0.034692ms)
+✔ reject a bigint as the start without coercion (0.023285ms)
+✔ reject a bigint as the end without coercion (0.022324ms)
+✔ reject a bigint as the current instant without coercion (0.019108ms)
+✔ reject a symbol as the start without coercion (0.018928ms)
+✔ reject a symbol as the end without coercion (0.018758ms)
+✔ reject a symbol as the current instant without coercion (0.030396ms)
+✔ reject a positive fraction as the start without coercion (0.021002ms)
+✔ reject a positive fraction as the end without coercion (0.068003ms)
+✔ reject a positive fraction as the current instant without coercion (0.024987ms)
+✔ reject a negative fraction as the start without coercion (0.019429ms)
+✔ reject a negative fraction as the end without coercion (0.018858ms)
+✔ reject a negative fraction as the current instant without coercion (0.018227ms)
+✔ reject NaN as the start without coercion (0.025048ms)
+✔ reject NaN as the end without coercion (0.01957ms)
+✔ reject NaN as the current instant without coercion (0.027101ms)
+✔ reject positive infinity as the start without coercion (0.149135ms)
+✔ reject positive infinity as the end without coercion (0.033791ms)
+✔ reject positive infinity as the current instant without coercion (0.022824ms)
+✔ reject negative infinity as the start without coercion (0.022284ms)
+✔ reject negative infinity as the end without coercion (0.021723ms)
+✔ reject negative infinity as the current instant without coercion (0.021723ms)
+✔ reject one millisecond above the Date range as the start without coercion (0.021412ms)
+✔ reject one millisecond above the Date range as the end without coercion (0.021473ms)
+✔ reject one millisecond above the Date range as the current instant without coercion (0.021602ms)
+✔ reject one millisecond below the Date range as the start without coercion (0.021523ms)
+✔ reject one millisecond below the Date range as the end without coercion (0.022003ms)
+✔ reject one millisecond below the Date range as the current instant without coercion (0.022023ms)
+✔ reject an unsafe positive integer as the start without coercion (0.022394ms)
+✔ reject an unsafe positive integer as the end without coercion (0.021822ms)
+✔ reject an unsafe positive integer as the current instant without coercion (0.052569ms)
+✔ reject an unsafe negative integer as the start without coercion (0.02673ms)
+✔ reject an unsafe negative integer as the end without coercion (0.029394ms)
+✔ reject an unsafe negative integer as the current instant without coercion (0.02637ms)
+✔ objects are rejected without invoking conversion hooks (0.141082ms)
+✔ the supplied instant alone determines state, with no clock mutation (0.816097ms)
+ℹ tests 91
+ℹ suites 0
+ℹ pass 91
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 27.760296
+GROUP_EXIT community-challenge-rules.test.ts 0
+TEST j-2915-challenge-window.proof.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+Exhaustive independent ordering matrix
+  ok    all 1331 ordered triples match the BigInt membership oracle
+  ok    earliest inclusive start
+  ok    earliest exclusive end
+  ok    latest inclusive start
+  ok    latest exclusive end
+  ok    negative and positive zero
+
+Malformed primitives remain invalid at every argument position
+  ok    all 25 malformed inputs at position 0 are rejected
+  ok    all 25 malformed inputs at position 1 are rejected
+  ok    all 25 malformed inputs at position 2 are rejected
+
+No coercion, reflection or ambient-clock dependency
+  ok    conversion hooks are never used
+  ok    zero conversion/property hooks ran
+  ok    revoked proxies are rejected without reflection
+  ok    safe integers outside the Date range remain invalid
+  ok    omitted supplied now never invents an ambient instant
+  ok    the explicit instants determine state even with a forbidden clock
+  ok    no ambient clock was consulted
+
+Translation invariance without additive clock arithmetic
+  ok    three widely separated epochs have the same supplied-time states
+  ok    a duration wider than MAX_SAFE_INTEGER does not overflow classification
+MATRIX {"orderedTriples":1331,"invalidVectors":75,"translationVectors":15}
+
+18 checks, all passing.
+GROUP_EXIT j-2915-challenge-window.proof.ts 0
+FAILED_GROUPS 0
+
+## Independent18 final source after BigInt(0) fixture normalization
+TEST j-2915-challenge-window.proof.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+Exhaustive independent ordering matrix
+  ok    all 1331 ordered triples match the BigInt membership oracle
+  ok    earliest inclusive start
+  ok    earliest exclusive end
+  ok    latest inclusive start
+  ok    latest exclusive end
+  ok    negative and positive zero
+
+Malformed primitives remain invalid at every argument position
+  ok    all 25 malformed inputs at position 0 are rejected
+  ok    all 25 malformed inputs at position 1 are rejected
+  ok    all 25 malformed inputs at position 2 are rejected
+
+No coercion, reflection or ambient-clock dependency
+  ok    conversion hooks are never used
+  ok    zero conversion/property hooks ran
+  ok    revoked proxies are rejected without reflection
+  ok    safe integers outside the Date range remain invalid
+  ok    omitted supplied now never invents an ambient instant
+  ok    the explicit instants determine state even with a forbidden clock
+  ok    no ambient clock was consulted
+
+Translation invariance without additive clock arithmetic
+  ok    three widely separated epochs have the same supplied-time states
+  ok    a duration wider than MAX_SAFE_INTEGER does not overflow classification
+MATRIX {"orderedTriples":1331,"invalidVectors":75,"translationVectors":15}
+
+18 checks, all passing.
+GROUP_EXIT j-2915-challenge-window.proof.ts 0
+FAILED_GROUPS 0
+
+## Actual project ES2017 scoped strict typecheck, after correct Node type roots
+tests/community-challenge-rules.test.ts(82,18): error TS2737: BigInt literals are not available when targeting lower than ES2020.
+
+## Scoped typecheck with explicit ES2022 override
+exit0; zero diagnostics. This is not the project-target check.
+
+## Product module alone at project target
+exit0; zero diagnostics.
+
+## ESLint final
+exit0; zero errors/warnings.
+
+## Tracked scanner
+Public data check: 4133 tracked files; 0 file(s) require correction.
+
+## Discovery
+Canonical .test.ts inventory includes community-challenge-rules.test.ts. Manual .proof.ts is not auto-discovered.

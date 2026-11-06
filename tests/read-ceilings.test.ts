@@ -327,14 +327,19 @@ async function main(): Promise<void> {
   is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && STORE_READING_SHAPES.length === 3, true);
   is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst), true);
   {
-    // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
-    // payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) stays under it,
-    // and one more heavy reading a day would pass it. Computed as that test computes it.
+    // Inbox C4-33 (1): the day's heavy readings are the most the margin allowed, with the room that existed: the first
+    // payment refunded in full (tests/plan-margin.test.ts) stays under the owner's ceiling, computed as that test does.
+    // Rule 23 (C4-20261106-2640-DONO-156): the ceiling is US$ 66 since 6 November 2026, US$ 65 before. The dollar more
+    // is room for the picture-uploads line (the Blob operations of every picture upload), not for more readings: the
+    // figure is still the one sized under US$ 65, where, without that line, one more heavy reading a day would pass it.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
     const oneMore = 32 * (heavyWorst - lightWorst);
-    is("the first year given back stays under US$ 65 with the day's heavy readings", year < 65, true);
-    is("and one more heavy reading a day would pass it: the figure is the most the margin allows", year + oneMore >= 65, true);
+    // Rule 23 (#2801, the thumbnail copy): the US$ 66 is room for the Blob operations of picture uploads, the studio
+    // pictures' line and the thumbnail's; both are left out to show the readings figure is still the one sized under 65.
+    const uploads = ["picture-uploads", "picture-thumbnails"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd("creator") ?? Number.NaN), 0);
+    is("the first year given back stays under the owner's US$ 66 with the day's heavy readings and every picture upload", year < 66, true);
+    is("the readings figure is still the one sized under US$ 65: without the picture-upload lines, one more heavy reading a day would pass it", year - uploads < 65 && year - uploads + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }
   {

@@ -12,7 +12,9 @@
  *   - "OK", or a reply of another shape whose read-back holds this run's
  *     value, is ours, and the purchase is handed over once;
  *   - null, or a read-back holding another value, is somebody else's:
- *     "already", nothing handed over;
+ *     nothing handed over; for a gift, "already" only once it is given, and
+ *     otherwise an error, so the caller keeps no "sent" mark and the next
+ *     run tries again (Claude 4 on #2726);
  *   - anything else is unknown: UnknownReplyError, nothing handed over and
  *     no "sent" mark (the caller reads it as Redis not answering, and the
  *     next run tries again);
@@ -99,13 +101,22 @@ async function main(): Promise<void> {
     // A SET answered as text, read back holding text that is not this run's value: somebody else's (lib/claim-mark.ts).
     const g = await gift();
     rule = { when: (c) => setNx(g.key)(c) || getOf(g.key)(c), reply: ["1"] };
-    is("a giving mark answered as text, read back as another value: already, nothing given", [await g.give(), await has(g.to)], ["already", false]);
+    is("a giving mark answered as text, read back as another value: somebody else's, so not done here and not said as done", [await outcome(() => g.give()), await has(g.to)], ["rejected: Error", false]);
     rule = null;
   }
   {
     const g = await gift();
     await pipeline([["SET", g.key, "someone-else", "EX", 300]]);
-    is("a mark another run holds: already, nothing given", [await g.give(), await has(g.to)], ["already", false]);
+    // Not "already" while the gift is not given (Claude 4 on #2726): confirmGift (lib/purchase-email.ts) keeps its "sent"
+    // mark on "already", and if the other run then failed, the paid gift would never be given.
+    is("a mark another run holds, the gift not given yet: thrown, nothing given, so the next run tries again", [await outcome(() => g.give()), await has(g.to)], ["rejected: Error", false]);
+  }
+  {
+    const g = await gift();
+    // The other run finished meanwhile: then it is "already".
+    is("the gift given by another run", await g.give(), "given");
+    await pipeline([["SET", g.key, "someone-else", "EX", 300]]);
+    is("a mark another run holds, the gift given already: already", await g.give(), "already");
   }
   {
     const g = await gift();

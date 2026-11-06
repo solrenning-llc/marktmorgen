@@ -433,6 +433,31 @@ export async function readPaid(order: string): Promise<Paid | null> {
 }
 
 /**
+ * A paid order read exactly, for the refund watch (Codex G on #2791; CX-123 rules 24 and 30): null only when Redis
+ * answered that there is no record; a reply in another envelope, text that is not JSON, or a record without its own
+ * order, email, product, capture and time is "unknown", never "no record".
+ */
+async function readPaidExact(order: string): Promise<Paid | null | "unknown"> {
+  if (!ORDER_ID.test(order)) return null;
+  const read = repliesFor(await redisPipeline([["GET", paidKey(order)]]), 1);
+  if (!read) return "unknown";
+  const raw = read[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") return "unknown";
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return "unknown";
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return "unknown";
+  const r = v as Record<string, unknown>;
+  const text = (key: string) => typeof r[key] === "string";
+  if (r.order !== order || !text("email") || !text("product") || !text("capture") || !Number.isFinite(r.at)) return "unknown";
+  return v as Paid;
+}
+
+/**
  * A person's paid PayPal orders for these products, for the copy of their
  * data (619 [SZ3], lib/person-copy.ts): kept on purpose as the order's
  * record (lib/person-data.ts). Only reads.
@@ -702,7 +727,12 @@ export async function watchPayPal(
   let revoked = 0;
   for (const order of Array.isArray(due) ? (due as string[]) : []) {
     if (Date.now() >= deadline) break;
-    const paid = await readPaid(order);
+    const paid = await readPaidExact(order);
+    // Unknown is looked at again in an hour, never dropped from the watch (Codex G on #2791).
+    if (paid === "unknown") {
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      continue;
+    }
     if (!paid || !paid.capture) {
       await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
@@ -775,10 +805,23 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }
+    // Another payment that stands keeps it; one that cannot be read leaves it unknown, looked at again in an hour.
     let kept: Paid | null = null;
+    let unread = false;
     for (const other of others as string[]) {
-      kept = await readPaid(other);
-      if (kept) break;
+      const read = await readPaidExact(other);
+      if (read === "unknown") {
+        unread = true;
+        continue;
+      }
+      if (read) {
+        kept = read;
+        break;
+      }
+    }
+    if (!kept && unread) {
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      continue;
     }
     if (kept) {
       await redisPipeline([

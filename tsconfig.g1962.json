@@ -1,0 +1,38 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "app/[handle]/contact/page.tsx",
+    "app/[handle]/contact/vcard/route.ts",
+    "components/creator-card-view.tsx",
+    "lib/buyer-words/contact.ts",
+    "lib/creator-card.ts",
+    "lib/traffic.ts",
+    "tests/creator-card-page.test.ts",
+    "tests/creator-card-page-evidence.test.ts",
+    "tests/creator-card.test.ts",
+    "tests/creator-card-races.test.ts",
+    "tests/creator-card-receipt.test.ts",
+    "tests/public-reads-ceiling.test.ts",
+    "tests/public-reads-ceiling-2.test.ts",
+    "tests/traffic-admission.test.ts",
+    "tests/plan-cost-registry.test.ts",
+    "tests/store-data-registry.test.ts",
+    "tests/store-language.test.ts",
+    "tests/store-contact.test.ts",
+    "tests/site-pages.test.ts",
+    "tests/accessibility-inventory.test.ts",
+    "tests/accessibility-statement.test.ts",
+    "tests/pricing-optimization.test.ts",
+    "tests/review-g2-card-admission.test.ts",
+    "tests/review-g2-card-unknown-admission.test.ts",
+    "tests/g1962-admission-matrix.proof.ts",
+    "tests/g1962-card-off-race.proof.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

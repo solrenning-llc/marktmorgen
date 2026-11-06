@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "lib/redis-lock.ts",
+    "lib/redis-reply.ts",
+    "lib/redis-memory.ts",
+    "tests/lock-receipt-exact.test.ts",
+    "tests/lock-release-atomic.test.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

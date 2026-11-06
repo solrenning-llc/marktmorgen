@@ -334,10 +334,13 @@ export function lookColours(look: LookPaint): LookColours {
     (c) => contrast(c, palette.card) >= 3 && contrast(c, onAccent) >= 7,
   );
 
+  // Text in the creator's colour ("3 left", "Sold out", "Coming soon") is small text: 7:1 (WCAG 1.4.6 AAA, 274 [AX1])
+  // on the card, an item and the page behind them, which the page's own text always reaches, so it only grows darker
+  // (or lighter on Night) to pass. It was 4.5:1: the default violet read 6.56:1 (tests/product-page-accessibility.test.ts).
   const accentText = nearestPassing(
     picked,
     palette.text,
-    (c) => contrast(c, palette.card) >= 4.5 && contrast(c, palette.item) >= 4.5,
+    (c) => contrast(c, palette.card) >= 7 && contrast(c, palette.item) >= 7 && contrast(c, palette.bg) >= 7,
   );
 
   const accentSoft = nearestPassing(

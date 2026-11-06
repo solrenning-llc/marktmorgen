@@ -3745,6 +3745,10 @@ a.sp-product:focus-visible {
   min-height: 1.5rem;
   font-size: 0.875rem;
 }
+/* A link on its own, not in a sentence: a 44 px target (WCAG 2.5.5 AAA, 274 [AX1]). */
+a.rv-line {
+  min-height: 2.75rem;
+}
 a.rv-line:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -5033,4 +5037,17 @@ html:has([data-product-editor]) {
       contain-intrinsic-block-size: auto 800px;
     }
   }
+}
+
+/*
+ * A line of text on the store's product page, its reviews page and a call's booking page is at most 80 characters
+ * (WCAG 1.4.8 AAA, 274 [AX1]). 1ch is the width of "0", wider than an average letter: in Chromium 72ch still held
+ * 92-101 letters a line, 56ch at most 78. :where keeps it at no weight, so any width a block sets for itself still
+ * wins; a centred line stays centred.
+ */
+.st-measure :where(p, li, dd, blockquote, figcaption) {
+  max-width: 56ch;
+}
+.st-measure :where(p.text-center, li.text-center, .text-center > p) {
+  margin-inline: auto;
 }

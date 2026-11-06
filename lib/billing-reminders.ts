@@ -10,6 +10,7 @@
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue } from "@/lib/claim-mark";
 import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -44,12 +45,19 @@ export const TRIAL_FLOOR_SECONDS = 7 * DAY;
  */
 export const YEAR_NOTICE_DAYS = 30;
 
-/** The end of one full billing period that starts at `at` (calendar, UTC). */
+/**
+ * The end of one full billing period that starts at `at` (calendar, UTC).
+ * A day the target month lacks is that month's last day, as Stripe ends the
+ * period: 31 January + a month is 28 (or 29) February, 29 February 2028 + a
+ * year is 28 February 2029, never a day of the month after.
+ */
 export function fullPeriodAfter(at: number, cycle: Cycle): number {
   const date = new Date(at * 1000);
-  if (cycle === "year") date.setUTCFullYear(date.getUTCFullYear() + 1);
-  else date.setUTCMonth(date.getUTCMonth() + 1);
-  return Math.floor(date.getTime() / 1000);
+  const year = date.getUTCFullYear() + (cycle === "year" ? 1 : 0);
+  const month = date.getUTCMonth() + (cycle === "year" ? 0 : 1);
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const end = Date.UTC(year, month, Math.min(date.getUTCDate(), lastDay), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds());
+  return Math.floor(end / 1000);
 }
 
 /** Whole UTC calendar days from the day of `now` to the day of `at`. */
@@ -347,10 +355,15 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
   late: number;
   /** Due but never sent, found a day or less before the charge: counted, not sent. */
   missed: number;
+  /**
+   * A claim the store answered in a shape that proves nothing (CX-123 rule
+   * 24): nothing sent and nothing counted as missed; the next run tries again.
+   */
+  unknown: number;
   failed: number;
   seen: number;
 }> {
-  const counts = { sent: 0, late: 0, missed: 0, failed: 0, seen: 0 };
+  const counts = { sent: 0, late: 0, missed: 0, unknown: 0, failed: 0, seen: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
 
   for (const status of ["trialing", "active"] as const) {
@@ -364,19 +377,30 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
           const missed = missedReminder(subscription, nowSeconds);
           if (missed) {
             // The same key a sent notice holds: claimed here only if no notice
-            // went for this charge, so a missed one is counted once.
+            // went for this charge, so a missed one is counted once. Ours only
+            // on an exact claim (lib/claim-mark.ts); somebody else's is a sent
+            // or counted notice; unknown is neither, and the next run asks again.
             const missedKey = `nl:remind:${missed.kind}:${missed.subscription}:${missed.at}`;
-            const [unsent] = await redisPipeline([["SET", missedKey, "1", "NX", "EX", 60 * DAY]]);
-            if (unsent !== null) {
+            const unsent = await claimMark(missedKey, 60 * DAY, claimValue());
+            if (unsent === "ours") {
               counts.missed += 1;
               console.warn(`billing reminder missed: ${missed.kind}, ${daysWords(missed.at, nowSeconds)} before the charge`);
+            } else if (unsent === "unknown") {
+              counts.unknown += 1;
+              console.warn(`billing reminder claim unknown: ${missed.kind}, not counted as missed; tried again on the next run`);
             }
           }
           continue;
         }
+        // Sent only on an exact claim (lib/claim-mark.ts): taken is a notice
+        // already sent; unknown sends nothing, and the next run asks again.
         const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-        const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 60 * DAY]]);
-        if (claimed === null) continue;
+        const claimed = await claimMark(key, 60 * DAY, claimValue());
+        if (claimed === "unknown") {
+          counts.unknown += 1;
+          console.warn(`billing reminder claim unknown: ${reminder.kind}, not sent; tried again on the next run`);
+        }
+        if (claimed !== "ours") continue;
         const { subject, text } = reminderEmail(reminder);
         const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
         if (ok) {

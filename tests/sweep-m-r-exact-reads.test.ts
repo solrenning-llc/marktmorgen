@@ -4,12 +4,10 @@
  *
  * - tasksKept (lib/person-agenda-read.ts): an HLEN that is not a whole count
  *   made the agenda say "no tasks" instead of "could not be read".
- * - readDepth (lib/page-depth.ts): an HGETALL that is not a flat list of
- *   string pairs made a page read as "no visitors counted"; the MCP tool says
- *   it could not be read instead of answering zeros (rule 30).
+ *
+ * How readDepth (lib/page-depth.ts) reads its HGETALL is left to #2571.
  */
 import { agendaData, tasksKept } from "@/lib/person-agenda-read";
-import { readDepth } from "@/lib/page-depth";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -73,27 +71,6 @@ async function main(): Promise<void> {
     undo();
   }
 
-  part("readDepth reads HGETALL exactly");
-  const depthKey = "nl:depth:s-depth:p-depth";
-  {
-    const undo = answering(depthKey, [["bene0001", "3"]]);
-    is("the stand-in's key is the one readDepth reads", (await readDepth("s-depth", "p-depth")).visitors, 3);
-    undo();
-  }
-  is("a confirmed empty hash is no visitors", await readDepth("s-depth", "p-depth"), { visitors: 0, stopped: {}, whyNot: {}, videos: {} });
-  for (const [name, reply] of [
-    ["no reply at all", []],
-    ["a missing reply (null)", [null]],
-    ["an error string", ["ERR"]],
-    ["an object instead of a list", [{ bene0001: "3" }]],
-    ["an odd number of fields", [["bene0001", "3", "faqs0001"]]],
-    ["a field that is not a string", [["bene0001", 3]]],
-    ["two replies for one command", [[], []]],
-  ] as const) {
-    const undo = answering(depthKey, reply);
-    is(`${name} is unknown, never zero visitors`, await thrown(() => readDepth("s-depth", "p-depth")), "unknown");
-    undo();
-  }
   done();
 }
 

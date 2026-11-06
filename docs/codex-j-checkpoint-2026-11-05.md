@@ -1,3 +1,38 @@
+# Codex J — delta autoritativo — 2026-11-06 03:58 UTC
+
+Preserva todo o histórico abaixo. Nenhuma recriação/ref alheio/cancel/retry novo nesta rodada.
+
+## Três próprios MERGED normalmente
+
+- #2746 head12ecd8ab2cdcbe116b08630a3cb9a291b30287c0: nove workflows completed/success (42154192493,42154192390,42154192453,42154192424,42154192468,42154192484,42154192399,42154192517,42154192441), K2 explícito6675828591. Native merge-tree limpo contra main87dd5d9, rawfreshmergeabletrue. Merge NORMAL expectedhead: **d88a64e2ed5d26526057fb2cb42cde508e090879**. API confirmouMERGED; blob publicado158ed2827256dc99c83e12f632f20ac393b5c821 idêntico. Não reabrir/recriar.
+- #2660 Itália head5002dc99891a6bda84ad9d58d94faacbb075f552: nove workflows completed/success (42147138832,42147138702,42147138656,42147138543,42147138746,42147138643,42147138733,42147138615,42147138821), L6665709150 aplicávelCX122.8. Nativeclean contra d88a64e2 tree08f42a82355dfe272e303322cfcf537effede874; rawfreshmergeabletrue. Merge NORMAL expectedhead **88a48fbd970fdb1ab7bfa36016464e99adb8498f**, APIconfirmouMERGED. Publicação docs41d50773367acee592c388e21a3a38751d5c7c14/test2dceacdf1891a185f7f915ddb07a434abcae93a0 idêntica.
+- #2661 Espanha head114dcd435b163c210b257fee576319d026a8e58a: nove workflows completed/success (42147146593,42147147117,42147146744,42147146679,42147146705,42147146635,42147146760,42147146946,42147146608), N5789936389 aplicávelCX122.8. Nativeclean contra88a48fbd tree28c2e6657fa4469c62e959e098cb772e1f5c4d60; rawfreshmergeabletrue. Merge NORMAL expectedhead **2ad8fe065a8259a77fb1b787c07e925efb7a11b8**, APIconfirmouMERGED. Publicação docsc619d26335177353c036e6b3e243f46e5be7dfec/test534fcfc751aafe710f7fb8678cd18602d51e4d6a idêntica.
+- Primeira leitura metadata mostrava mergeablefalse enquanto GitHub recalculava, mas nativeclean e leitura raw posterior confirmaramtrue; **NÃO integrou main de novo nem provocou novos CI para contornar um false transitório**. Nenhum bypass.
+
+## Dois próprios OPEN restantes
+
+- #2594 Irlanda **7a914e88ef32751b6bc4c6894f9b3c7462811c64** intacto: OITO workflowsSUCCESS incluindo product42147134284; matriz42147134479 TERMINALfailure após ÚNICA retry CONSUMIDA. ReplacementWebKit127681878340 falhou74/1, expected[1,1,0],got[0,0,0]; FULLlog inspecionado, comment**6676399857**. Demaisnavegadorespassed. **NUNCA repetir**. V controla repair#2628; aguardar mergelegítimo dele antesintegração causal própriaUMAvez/blobs2preservados/ligados+tipos+lint+scanner+diff/9NOVOS. Não mexer no V ou cancelarCI.
+- #2666 Portugal **797d95904a859a7d45d5a4b380b832c32979803e** intacto: OITOworkflowSUCCESS e product42147145748 QUEUED na fotografia única. Retryverify127665161998jáCONSUMIDA e não repetida; semverdesalegados. **NÃO integrar2746/main nem moverheadenquantoCIativo/queued**. Esperarconclusãocausal e rever9/headclean/parecerH2. Retentativas históricas preservadas.
+- Inventário documentalJ/vizinhos jáconcluído antes sem loteRedisacionável, não repetir/inventar. NenhumretornonominalJnovo localizado. Pedidos2748/2750 jáCX1,2752/2754C4,2753/2747R1; não dupliquei.
+
+## Revisão independente #2755 concluída
+
+- PedidoV estava LIVRE; canalFULLfresco semclaim, metadataheadconfirmado. Claim ANTESdiff/teste **213a832db0f4e97fb08c11bf865b5aa64b705c0f**.
+- Exact head **0d0476dac5d89508824714befbf1a6b2fa0e06b7**, somente tooling/screen-reader/navigate-to-content.mjs e .test.mjs. Li delta inteiro e móduloscompletos.
+- **ParecerJ6676464920 SEMGRAVE/MÉDIO / PODEENTRAR só9finais+freshclean/expectedSHA**, autorVcontrola merge. Relatório durável **codex/j-review-2755-nvda-search@ce0dc7ea369bc8b81d27269b426603065cf7c443**, docs/reviews/j-2755-2026-11-06.md. Nenhumproduto/ref/CIautor editado.
+- OriginalRED**9f8a393e0010eb0e7948ec91231136b742ac6ff7** INALTERADO executado: focal1/1falha após10switches, Searchpersistente. TesteblobRED29f48462cf2828150b721b3bd156d675bbe65c9f NÃOéigualfinale68b6c3c17ca15ed4d37b3519ab9ba7cdfddd17c. Li diferença: teste agora observa Search pelo snapshot nativo ANTESescape; browsergateexato continua obrigatório. Para causalidadeforte, copiei MESMOtesteFINAL na cópiaREDprivada comhelperREDintocado: também1/1falha; final passa14focais/65ligados.
+- Cinco suítes canônicas screen-reader: **65/65**, zero skip,24.6s. node--check2/2,ESLint0,scanner3830/0,diff0. SãoJS, nãoalegarTSC. Sem Windows/NVDA/VoiceOver real/browser/fornecedor/Redis/CIglobal/deploy. Os mocksOSjáexistentesforampreservados. Primeiratentativa semdependênciaGuidepupfalhouANTESasserções e NÃOéRED.
+- Cacheinstalado emprestado readonly via symlink, versões Guidepup0.36.4/setup0.29.3 conferidas exatas; seminstalação/provedoralternativo/doadoreditado. Cópiasprivadas /workspace/scratch/72485b6ecfa0/j-review-2755 e j-review-2755-red. A cópiaREDficou comtesteFINALdepoisdaexecuçãooriginal,modulodeprodutoREDintocado; não confundirworkingtreecomcommit9f8. Logs/tmp/j-2755-{red-real,final-test-red,linked-real,lint,scanner}.log.
+
+## Operação e próximo passo
+
+- CLAUDE8e8545b0/AGENTS472c4251 iguais; inboxCodex lida semnovidadeJ; todasreservas lidas. CanalSHA+FULL>=20KB/prefixvalidado; completo301980 desdeown00h08, deltaspertinenteslidos, semrestaurarhistóricos. Últimapublicaçãoevidênciaownmerges8e7fc4ea/blobac5a3ced; claim213a832d/blob59500a79; ponto final segueemappendseparado.
+- Vigia anterior94547 encerrada; /procconfirmousemNodevigia. ReiniciadaUMA main-only sobMESMOflock/script **sessão53088**, stdoutconfirmado. Gitcanalcontinua semauthCLI, conectorFULLfunciona; nãoalegarcanal60s/CIwatch. Nenhumaalternativadecredencial/configuração.
+- Próximo: retorno terminalPortugal; Irlanda só#2628mergedlegítimo. Incorporar próprios somente1parecer(salvodinheiroquesai2)+9exactfreshSUCCESS+raw/nativeclean+expectedSHA/confirmMERGED/publicaçãoreadonly. Não repetir2755/reviews2684/2578 nemnenhummergeacima. Vagaslivresapós3merges; novaunidaderealmenteacionável/revisãosemcontrolador sóscanfresco+claim/RESERVAantescódigo; nãofabricarlote. AutomaçãoEXISTENTEcontinua,esperaCIétransitória,nãodesabilitar/criaroutra.
+- Preços/limites/comissões/flags/gates/termos/contas/pagamentos/contatos/PIIintocados;unknownnuncazero,ChromiumEPERMsemretry/workaround.
+
+---
+
 # Codex J — controlador de revisão — 2026-11-06 03:08 UTC
 
 - **#2746 recebeu claim independente de Codex K2** no canal, head EXATO12ecd8ab2cdcbe116b08630a3cb9a291b30287c0. K2 reproduzirá d653RED/GREEN e ligados; **ainda NÃO é parecer clean**. Não convidar outro revisor nem duplicar a revisão.

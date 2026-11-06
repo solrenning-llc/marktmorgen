@@ -1,3 +1,8 @@
+import {renderToStaticMarkup} from "react-dom/server";
+import SwitchPage from "@/app/[handle]/manage/switch/page";
+let jPreviewUnknown = false;
+/** Codex J, return on 669e541d: a preview whose lines say more follow (has_more), read as unknown. */
+let jPreviewPartial = false;
 /**
  * Membership tiers: a member switching up or down, on their own.
  *
@@ -15,17 +20,21 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStoreTiers, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { canTier, currentMeta, direction, dueNow, parseTiers, productOfSub } from "@/lib/tier-rules";
-import { choicesFor, liveTiers, previewSwitch, switchTier } from "@/lib/tier-switch";
+import { choicesFor, liveTiers, previewKnown, previewSwitch, switchTier } from "@/lib/tier-switch";
 import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { TEST_CONSENT } from "./digital-consent-fixture";
+import { consentMetaValue } from "@/lib/digital-consent";
 
 const emails: { to: string | string[]; text: string; subject: string }[] = [];
 const calls: { method: string; path: string; body: URLSearchParams }[] = [];
 let declined = false;
+/** Stripe answers the charging update in a shape no subscription has (Revisor 2, LEVE on #2764). */
+let unreadable = false;
 let tierA = "";
 let priceMeta: Record<string, string> = {};
 // The currency the member pays in: the store's, unless it changed its currency since (22 [E5], unit 2b).
@@ -59,6 +68,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Tier00000001" });
   if (method === "POST" && path === "/invoices/create_preview") {
+    if (jPreviewUnknown) return json({});
+    if (jPreviewPartial) return json({currency:"usd",starting_balance:0,lines:{object:"list",has_more:true,data:[{amount:0,proration:true,period:{start:Number(body.get("subscription_details[proration_date]"))}}]}});
     // Stripe's next invoice: the switch's prorations, and the renewal at the period's end.
     const at = Number(body.get("subscription_details[proration_date]"));
     return json({
@@ -66,6 +77,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       currency: "usd",
       starting_balance: 0,
       lines: {
+        object: "list",
+        has_more: false,
         data: [
           { amount: -500, parent: { subscription_item_details: { proration: true } }, period: { start: at } },
           { amount: 1740, parent: { subscription_item_details: { proration: true } }, period: { start: at } },
@@ -76,10 +89,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (method === "POST" && path === "/subscriptions/sub_Member0001") {
     if (body.get("items[0][price]")) {
+      if (unreadable) return json({});
       return json(
         declined
           ? { id: "sub_Member0001", pending_update: { expires_at: 1 }, latest_invoice: { id: "in_Declined0001", status: "open", total: 1240 } }
-          : { id: "sub_Member0001", pending_update: null, latest_invoice: { id: "in_Paid0001", status: "paid", total: 1240, amount_paid: 1240, currency: "usd" } },
+          : // Applied: Stripe answers the subscription as it now is, on the new price and with the yes sent (lib/tier-switch.ts, switchReply).
+            { id: "sub_Member0001", pending_update: null, items: { data: [{ id: "si_Member0001", price: { id: body.get("items[0][price]") } }] }, metadata: body.get("metadata[dc]") ? { dc: body.get("metadata[dc]") } : {}, latest_invoice: { id: "in_Paid0001", status: "paid", total: 1240, amount_paid: 1240, currency: "usd" } },
       );
     }
     return json({ id: "sub_Member0001" });
@@ -178,36 +193,78 @@ async function main(): Promise<void> {
   const other = (await membershipsFor(store, token))!;
   is("no tier offered to it", [other[0].currency, choicesFor(store, other[0], tiers)], ["eur", []]);
   const otherPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
-  const otherSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000));
+  const otherSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000), TEST_CONSENT);
   is("a link to a switch says why and changes nothing", [otherPreview.ok ? "shown" : otherPreview.reason, otherSwitch.ok ? "switched" : otherSwitch.reason], ["currency", "currency"]);
   is("no price made, no preview asked, no subscription touched", calls.slice(before).filter((c) => c.method === "POST").map((c) => c.path), []);
   is("the member is told so in every language", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => membershipWords(l).switchProblems.currency?.body.length > 40 && membershipWords(l).manageNotices.currency?.title.length > 10), true);
   paidIn = "usd";
 
+  part("The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)");
+  is("the preview says the tier is delivered at once, so the page shows the box", preview.preview.digital, true);
+  const unasked = calls.length;
+  const noYes = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at, null);
+  is("without the box checked: refused, and nothing sent to Stripe", [noYes.ok ? "switched" : noYes.reason, calls.slice(unasked).filter((c) => c.method === "POST").length], ["consent", 0]);
+  const oldYes = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at, { version: "2026-10-30.1", at: TEST_CONSENT.at });
+  is("a yes to older words: refused the same", [oldYes.ok ? "switched" : oldYes.reason, calls.slice(unasked).filter((c) => c.method === "POST").length], ["consent", 0]);
+
   part("The switch");
-  const old = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at - 16 * 60);
+  const old = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at - 16 * 60, TEST_CONSENT);
   is("a figure more than 15 minutes old is not used", old.ok ? "switched" : old.reason, "stale");
   await redisPipeline([["SET", "nl:tier:sub_Member0001:lock", "another-change", "EX", 60]]);
   const sentBefore = calls.length;
-  const held = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at);
+  const held = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at, TEST_CONSENT);
   await redisPipeline([["DEL", "nl:tier:sub_Member0001:lock"]]);
   is("another change to the membership holding the lock: busy, never an error, and nothing sent", [held.ok ? "switched" : held.reason, calls.length - sentBefore], ["busy", 0]);
   declined = true;
   emails.length = 0;
-  const refused = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at);
+  const refused = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at, TEST_CONSENT);
   is("a declined card changes nothing", refused.ok ? "switched" : refused.reason, "declined");
   is("and the invoice is voided, so nothing is owed", calls.some((c) => c.path === "/invoices/in_Declined0001/void"), true);
   is("and nobody is told it happened", emails.length, 0);
   declined = false;
-  const made = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at);
+  unreadable = true;
+  emails.length = 0;
+  const unsure = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at, TEST_CONSENT);
+  unreadable = false;
+  // The card may have been charged: the member is told it could not be confirmed, never that nothing changed.
+  is("an answer that cannot be read: not confirmed, and nobody is told it happened", [unsure.ok ? "switched" : unsure.reason, emails.length], ["unconfirmed", 0]);
+  is("said in every language without claiming nothing changed", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => {
+    const notice = membershipWords(l).manageNotices.unconfirmed;
+    return Boolean(notice && notice.title.length > 10 && notice.body.length > 40) && notice.body !== membershipWords(l).manageNotices.error.body;
+  }), true);
+  const made = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at, TEST_CONSENT);
   is("switched", made.ok ? made.title : made.reason, "Pro");
   const update = calls.filter((c) => c.path === "/subscriptions/sub_Member0001" && c.body.get("items[0][price]")).at(-1)!.body;
+  is("the yes is kept on the subscription with the charge itself", update.get("metadata[dc]"), consentMetaValue(TEST_CONSENT, "membership"));
   is("charged at once, only if paid", [update.get("items[0][id]"), update.get("proration_behavior"), update.get("proration_date"), update.get("payment_behavior")], ["si_Member0001", "always_invoice", String(preview.preview.at), "pending_if_incomplete"]);
   const record = calls.filter((c) => c.path === "/subscriptions/sub_Member0001" && c.body.get("metadata[product]")).at(-1)!.body;
   is("the subscription's record follows", [record.get("metadata[product]"), record.get("metadata[switched_from]"), record.get("metadata[option]")], [b.product.id, a.product.id, ""]);
   is("a receipt to the member, a note to the creator", emails.map((e) => e.subject), ["You switched to Pro", "A member switched to Pro"]);
   is("the receipt says what was charged", emails[0].text.includes("Charged today: $12.40"), true);
 
+  part("J: an unreadable invoice preview is not a known zero charge");
+  jPreviewUnknown = true;
+  const unknownPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+  const unknownHtml = renderToStaticMarkup(await SwitchPage({params:Promise.resolve({handle:"@harbor"}),searchParams:Promise.resolve({token,sub:"sub_Member0001",to:b.product.id})}));
+  is("unknown preview never tells the buyer nothing is charged today", unknownHtml.includes(membershipWords("en").nothingToday), false);
+  const priorCharges = calls.filter(c=>c.method==="POST" && c.body.has("items[0][price]")).length;
+  const chargedAfterUnknown = await switchTier(store, token, "sub_Member0001", b.product.id, unknownPreview.ok ? unknownPreview.preview.at : Math.floor(Date.now()/1000), TEST_CONSENT);
+  is("valid consent control still reaches exactly one charging update", [chargedAfterUnknown.ok,calls.filter(c=>c.method==="POST" && c.body.has("items[0][price]")).length-priorCharges], [true,1]);
+  jPreviewUnknown = false;
+  is("an unreadable preview refuses to certify the amount shown to the member", unknownPreview.ok, false);
+  part("J: a preview whose lines are not all there is not a known zero charge");
+  jPreviewPartial = true;
+  const partialPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+  const partialHtml = renderToStaticMarkup(await SwitchPage({params:Promise.resolve({handle:"@harbor"}),searchParams:Promise.resolve({token,sub:"sub_Member0001",to:b.product.id})}));
+  jPreviewPartial = false;
+  is("lines said to go on (has_more) never tell the buyer nothing is charged today", [partialPreview.ok, partialHtml.includes(membershipWords("en").nothingToday)], [false, false]);
+  // Stripe sends has_more on every list: a list without it is not known to be whole either.
+  const line = { amount: 0, proration: true, period: { start: 1_800_000_000 } };
+  is("lines are whole only when they say so (has_more false)", [
+    previewKnown({ currency: "usd", lines: { object: "list", has_more: false, data: [line] } }),
+    previewKnown({ currency: "usd", lines: { object: "list", data: [line] } }),
+    previewKnown({ currency: "usd", lines: { object: "list", has_more: "false", data: [line] } }),
+  ], [true, false, false]);
   part("Afterward");
   priceMeta = { product: b.product.id };
   const after = (await membershipsFor(store, token))!;

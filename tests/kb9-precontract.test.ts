@@ -23,36 +23,20 @@
  *
  * Synthetic store and orders only; no email is sent and Stripe is never
  * reached (any call is answered 404).
+ *
+ * The second check (the confirmation email) waits in
+ * tests/kb9-precontract-email.pending.ts, unit 2b's RED: it reads
+ * lib/purchase-email.ts, built in its own unit. This file holds the first.
  */
 import { DIGITAL_CONSENT_WORDS } from "@/lib/buyer-words/digital-consent";
 import { WITHDRAWAL_WORDS, withdrawalWords } from "@/lib/buyer-words/withdrawal";
-import { CONSENT_META, EU_WITHDRAWAL_CONSENT_VERSION, consentMetaValue } from "@/lib/digital-consent";
+import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { WITHDRAW_FROM_CONTRACT } from "@/lib/withdrawal-rules";
-import { confirmationFor, storeBase } from "@/lib/purchase-email";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { readListing } from "@/lib/catalog";
-import { TEST_CONSENT } from "./digital-consent-fixture";
-import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { paidPeriod } from "./billing-period-fixture";
-
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
-  new Response(JSON.stringify({ error: { message: `no stand-in for ${init?.method ?? "GET"} ${String(input)}` } }), { status: 404 })) as typeof fetch;
 
 const LANGUAGES = ["en", "es", "fr", "de", "it", "nl", "pt"] as const;
-const OWNER = "precontract@example.com";
 
-/** The confirmation's lines that name the function, each with the line after it (the link may sit on its own line). */
-function functionLinks(text: string, label: string, base: string): { named: boolean; linked: boolean } {
-  const lines = text.split("\n");
-  const at = lines.flatMap((line, index) => (line.includes(label) ? [index] : []));
-  const link = new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/orders(/withdraw)?(\\?|\\s|$)`);
-  return { named: at.length > 0, linked: at.some((index) => link.test(lines[index]) || link.test(lines[index + 1] ?? "")) };
-}
-
-async function main(): Promise<void> {
-  redis.clear();
-
+function main(): void {
   part("The box says where the withdrawal function is (art. 6(1)(h), Annex I instruction 3)");
   is("the label in English is the law's own words", WITHDRAWAL_WORDS.en.withdrawLink, WITHDRAW_FROM_CONTRACT);
   for (const kind of ["digital", "membership"] as const) {
@@ -79,57 +63,7 @@ async function main(): Promise<void> {
   );
   is("the sentence changed, so its version moved past the one buyers saw before", EU_WITHDRAWAL_CONSENT_VERSION !== "2026-10-30.2", true);
 
-  part("The confirmation email says where it is, while the period runs");
-  await claimHandle(OWNER, "precontract", "Precontract Shop", "");
-  await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPrecontr01", true);
-  await setSubscription(OWNER, { customerId: "cus_Precontr001", subscriptionId: "sub_Precontr001", active: true, period: paidPeriod() });
-  const club = await addProduct(OWNER, "Supper Club", "", "20", { interval: "month", trialDays: 0, payments: 0 });
-  const pack = await addProduct(OWNER, "Recipe pack", "", "27", null);
-  if (!club.ok || !pack.ok) throw new Error("no products");
-  await setProductLink(OWNER, club.product.id, "https://example.com/club");
-  await setProductLink(OWNER, pack.product.id, "https://example.com/pack");
-  const store = (await storeForEmail(OWNER))!;
-  const membership = (await readListing(store, club.product.id))!;
-  const digital = (await readListing(store, pack.product.id))!;
-  const base = storeBase(store);
-  const now = Math.floor(Date.now() / 1000);
-  const settled = (product: string, meta: Record<string, string>, mode = "payment") => ({
-    id: `cs_test_${"k".repeat(24)}`,
-    status: "complete",
-    payment_status: "paid",
-    mode,
-    created: now,
-    amount_total: 2000,
-    currency: "usd",
-    customer_details: { email: "buyer@example.com" },
-    metadata: { store: store.handle, product, ...meta },
-  });
-  const letter = (language: string, session: ReturnType<typeof settled>, listing: typeof membership) =>
-    confirmationFor({ ...store, language: language as typeof store.language }, session, now, [], [listing])?.text ?? "";
-
-  // A membership joined today: the 14 days run (lib/withdrawal-rules.ts, withdrawalWindow; the yes never ends a membership's right).
-  const joined = settled(club.product.id, { [CONSENT_META]: consentMetaValue(TEST_CONSENT, "membership") }, "subscription");
-  is("a membership joined today: the email is sent", letter("en", joined, membership).length > 0, true);
-  is(
-    "it names the function by its label, in the store's language, with a link to the store's list of purchases or the withdrawal page",
-    LANGUAGES.map((lang) => [lang, functionLinks(letter(lang, joined, membership), withdrawalWords(lang).withdrawLink, base)]),
-    LANGUAGES.map((lang) => [lang, { named: true, linked: true }]),
-  );
-
-  // Digital content with the art. 16(m) yes, handed over at once: no right left, so no function to point to.
-  const opened = settled(pack.product.id, { [CONSENT_META]: consentMetaValue(TEST_CONSENT, "digital") });
-  is("digital content opened at once with the yes: the email is sent", letter("en", opened, digital).length > 0, true);
-  is(
-    "and it never offers the function, in any language",
-    LANGUAGES.map((lang) => [lang, letter(lang, opened, digital).includes(withdrawalWords(lang).withdrawLink)]),
-    LANGUAGES.map((lang) => [lang, false]),
-  );
-
   done();
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+main();

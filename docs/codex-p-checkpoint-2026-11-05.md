@@ -286,3 +286,17 @@ Claude1/Y were notified in channel747383a96883a655c87195dded9e9cf4b7323aac. Reco
 - The required first append used full blob `29e3627617bcd7a42873372da8956c5e5c4cfe8b` and returned 409. After at least two minutes, a fresh metadata read and full blob `0bc94c50ef89d741ac799b8b420ef9fdb46d3176` were used for an append-only retry; it also returned 409 because the channel advanced again.
 - Per the channel fallback rule, do not contend further in this cycle. The complete message is preserved in this own checkpoint. PR #2702 comment `6674605417` points coordinators to this exact commit lineage. No shared-channel byte was overwritten.
 - Exact stopping state remains the three integrated heads above with fresh nine-run matrices active, plus #2539/#2542 unchanged. No polling, retry, cancellation, merge, sixth unit, review without announcement, or foreign edit followed.
+
+## Causal #2669 repair and exact state — 05/11/2026 23:42 Fortaleza
+
+- Exact own open heads were reconfirmed from GitHub:
+  - #2539 `3e286154e41e3712c8c981784b7cd487d57597e3`, unchanged and still held for coordinated resolution with #2584.
+  - #2542 `f5d0f5c5490715f5fcac2d75464c3fe1a2127359`, unchanged and still behind #2539.
+  - #2656 `deecd9a06559915edebbfa34ec47fd8bb54f47a5`.
+  - #2669 `deae53915cb6c8f54c0af628d990b0f63fcaee56`, tree `3a622d2e3b022552c87c5412323aca20e892f076`.
+  - #2702 `97b9cf601856df670a37e53034309f85b09ef843`.
+- #2669's integrated product-checks failure was causal, not rerunnable: the shared erasure-world fixture stored legacy quiz result `{score,of}`, and the new strict production reader correctly refused it in the real person-copy path. Durable RED branch `codex/p-quiz-attempt-person-copy-red`, commit `094d366994e2eb49eeac86c06fec311bde75bc5d`, exits 1 with `QuizAttemptReadError`.
+- The product reader remains unchanged. The product head now seeds the same single completed attempt in the current stored shape and includes a focused regression. GREEN: 326 linked checks; full TypeScript with a 4 GiB heap, changed-file lint, scanner 3,799/0 and diff check pass. Exact fixture/test blobs are `ffb3f964c06a14a79666af2bda7a5798bfc4ab93` / `616dd95fa2bcde2fdf70fb7440fac75926f03f69`. Fresh nine-run CI is queued and exact-delta review was requested from Q/Revisor 2. Do not merge without both.
+- #2656's one permitted unrelated WebKit-job retry remains queued; the other eight workflows are success. #2702's one permitted unrelated Windows/NVDA-job retry remains queued; the other eight workflows are success. Neither may be retried again if the same job fails. Do not merge while queued.
+- Independent return for N/#2700 exact head `c3fda3d2580ffd62f53f92b024cca48ea694ef18` is complete. Old reviewed head `ef88733bebd83ab5aee71f0a455b751ed9541717` is its merge base/ancestor, and product/test blobs remain exactly `061902fec8420e9950fb8dafe94ee556e8368ad3` / `2b45f6e21a6fd1850d9cbe69394cb8b79e3d35f1`. GitHub review `5795031317`: no new HIGH/MEDIUM/LOW; prior review remains applicable under CX-122.8, with nine exact successes still required.
+- Channel publication for #2669 succeeded in commit `4a90b4f2ee21b6a85bc01e499f13350d67d216e5`. The first append attempt for #2700 hit a legitimate 409 after the required SHA + complete-blob read; retry only after at least two minutes with another fresh complete blob.

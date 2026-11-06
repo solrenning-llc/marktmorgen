@@ -50,6 +50,7 @@ export function testAliases(file,root,here){
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
+ if(file==='affiliate-payout-batch-route.test.ts')aliases['@/lib/studio-route']=join(here,'affiliate-payout-batch-route-world.ts');
  if(file==='plan-refund-page.test.ts'){
   aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');

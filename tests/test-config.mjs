@@ -33,7 +33,7 @@ export function testAliases(file,root,here){
   aliases['next/server']=join(here,'next-server-after-world.ts');
   aliases['@/lib/account-notice']=join(here,'meeting-disabled-world.ts');
  }
- if(file==='letter-members.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
+ if(file==='letter-members.test.ts'||file==='bv1-letter-preview.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
  if(['public-reads-ceiling.test.ts','draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(['draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='encanto-tone-route.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
@@ -86,6 +86,12 @@ export function testAliases(file,root,here){
  if(['commercial-review-input.test.ts','commercial-terms-snapshot.test.ts','net-margin.test.ts','customer-base.test.ts','plan-revenue-ceilings.test.ts','commercial-ai-coverage.test.ts'].includes(file))aliases['@/lib/ai-spend-policy']=join(here,'commercial-ai-approved-policy.ts');
  if(file==='ai-spend-provider.test.ts')aliases['@/lib/ai-spend-policy']=join(here,'ai-spend-approved-policy.ts');
  if(['video-admission.test.ts','video-tier.test.ts'].includes(file)){aliases['@/lib/redis']=join(here,'video-admission-redis.ts');aliases['@/lib/stream']=join(here,'video-admission-stream.ts');}
+ if(['ai-counted-ack.test.ts','ai-left-envelope.test.ts'].includes(file))for(const name of ['redis','ai-spend'])aliases['@/lib/'+name]=join(here,'z-counted-ack-world.ts');
+ if(file==='ai-inbox-balance-page.test.ts'){
+  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'z-ai-inbox-page-world.ts');
+  for(const name of ['studio-route','ai','email','house-store','inbox','team'])aliases['@/lib/'+name]=join(here,'z-ai-inbox-page-world.ts');
+  for(const name of ['studio-header','studio-store-pin','inbox-studio'])aliases['@/components/'+name]=join(here,'z-ai-inbox-page-world.ts');
+ }
  if(file==='storage-measurement.test.ts')for(const name of ['blob','vault','stream'])aliases['@/lib/'+name]=join(here,'storage-provider-stub.ts');
  if(file==='blob-download-attachment.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
  if(file==='sg2-l1-serve-file.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
@@ -188,12 +194,7 @@ export function testAliases(file,root,here){
   for(const name of ['studio-route','store-request','form-store','catalog','crm','team','pipeline-access','form-opportunity','form-response-pdf'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'form-response-unavailable-world.tsx');
  }
- if(['ai-counted-ack.test.ts','ai-left-envelope.test.ts'].includes(file))for(const name of ['redis','ai-spend'])aliases['@/lib/'+name]=join(here,'z-counted-ack-world.ts');
- if(file==='ai-inbox-balance-page.test.ts'){
-  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'z-ai-inbox-page-world.ts');
-  for(const name of ['studio-route','ai','email','house-store','inbox','team'])aliases['@/lib/'+name]=join(here,'z-ai-inbox-page-world.ts');
-  for(const name of ['studio-header','studio-store-pin','inbox-studio'])aliases['@/components/'+name]=join(here,'z-ai-inbox-page-world.ts');
- }
+ if(file==='assistant-counter-admission.test.ts')for(const name of ['redis','store','store-assistant','metered-limits'])aliases['@/lib/'+name]=join(here,'assistant-counter-admission-world.ts');
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

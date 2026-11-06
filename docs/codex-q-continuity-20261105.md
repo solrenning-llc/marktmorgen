@@ -516,3 +516,27 @@ Anúncio append-only foi publicado no canal em `92348da5fba4b63ffc6f80cadf374e2c
 - Revisor2 registrou no canal às 01h50 **sem achado novo** nos heads #2729 `801ccec3725971edbd4d46651cd79508f865ac22` e #2731 `276baf9cff710f4f7c96bb08c02f609cf7229dc4`: ambos são somente merge do main e mantêm o diff já revisado.
 - Ponto de parada append-only publicado com sucesso no canal no commit `225d771dd7f01c3f2bb4b17d2b773d40895a5907`, blob `f7c8a30a028515ea8dba5f71285b45173a40c13f`. A primeira tentativa concorrente não escreveu; após espera integral de dois minutos, Q buscou blob fresco e acrescentou sem sobrescrever histórico novo.
 - Estado/next step permanecem os da seção anterior: nenhuma segunda consulta dos nove novos; nenhuma incorporação de produto; aguardar novidade causal.
+
+
+## Retomada — 06/11/2026 02h55 Fortaleza
+
+### Novidade causal e fotografia terminal
+
+- Checkpoint canônico anterior blob `144e59dad3d73b5144bc605e755f446117f276bd` lido primeiro. Main, CLAUDE.md, AGENTS.md, reservas, caixa Codex e canal append-only foram relidos frescos.
+- Main observado e usado nesta rodada: `b60156215c78bbda34a8c113bb46ecb068802d63`. Ele contém como ancestral o merge `5a25c3dc` do #2765, correção causal do flake compartilhado de store-copy/reveal que havia atingido #2535/#2709.
+- Uma única fotografia dos heads anteriores encontrou: #2535 8/9, com Product checks terminalmente falho no mesmo passo “Copying a whole store” e nenhum executor ativo; #2709 9/9 SUCCESS; #2729 9/9 SUCCESS; #2731 9/9 SUCCESS. Todos OPEN e raw mergeable=false após o main avançar. Nenhum retry/cancelamento foi acionado.
+
+### Integração única do main terminal
+
+Merge-tree nativo foi calculado antes de publicar; os quatro merges foram criados por GitData com árvores exatamente iguais, `expected_sha` antigo e `force=false`. Todos os 12 blobs próprios ficaram byte-idênticos.
+
+- #2535: novo head `ecacebabe2987a3f5bb316e52652ab8c182ff74d`, tree `690c8fc82aa46eda0af64acf6e3effa43f29ed58`, cinco blobs preservados; comentário `6677959915`. Isto inicia um ciclo novo com a correção V já no main, não é uma segunda repetição do job antigo. Ainda exige parecer formal/aplicável do Revisor2 e nove novos.
+- #2709: novo head `86ee74a569e7170a1493618893955b79c60eed4f`, tree `52ad1710ebaf1406c5a0cdf4dc88887df4a1f6e7`, três blobs preservados; comentário `6677959205`. Retorno Z ainda pendente; nove novos obrigatórios.
+- #2729: novo head `ec64216f32608f6fed5a9e208c23f33aa1bceb65`, tree `3ec29e78acbdab159c74bb14443932d470b963be`, dois blobs preservados; comentário `6677959721`. Pareceres S/R2 aplicáveis pela identidade; nove novos obrigatórios.
+- #2731: novo head `6bdc7ef89b60554afc580eabc6c0ac51f2eac3fd`, tree `ead00cead1669bb0e7e05bbaea3cbfaa53cdc4be`, dois blobs preservados; comentário `6677959416`. Pareceres K2/R2 aplicáveis; nove novos obrigatórios.
+
+### Ponto atual
+
+- Cinco produtos ocupados, nenhuma sexta unidade: #2438 `6da1a24763a718e88e157703542c24957bfc6123` coordenado/dirty e intocado; mais os quatro heads novos acima.
+- Nenhum produto Q foi incorporado. Os estados pós-publicação não foram consultados novamente; nenhum check antigo será contado.
+- Próxima ação somente por novidade causal AV12: retorno R2 de #2535, retorno Z de #2709, achado ou conclusão terminal dos nove novos. Merge próprio apenas OPEN + revisão aplicável + 9/9 SUCCESS exact-head + raw true/clean. Sem main-chase durante executores.

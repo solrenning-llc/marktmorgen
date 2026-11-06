@@ -19,6 +19,9 @@
 import { createHash } from "node:crypto";
 import { DOMAINS_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, releaseMark } from "@/lib/claim-mark";
+import { RELEASE } from "@/lib/redis-lock";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canUse } from "@/lib/plan";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -142,10 +145,38 @@ const SWAP_KEEPING_TTL = [
   "return 1",
 ].join("\n");
 
-/** Whether the domain is proved to be the store's: always for one connected before proofs were asked for. */
+/**
+ * What the domain's key holds, read exactly (CX-123 rule 24): the value, or null when nobody holds it. A reply in any
+ * other shape throws UnknownReplyError, so nothing that depends on who holds a domain (asking Vercel to drop it,
+ * deleting its key, telling the creator it is taken) is done on a guess.
+ */
+export async function domainHolder(name: string): Promise<string | null> {
+  const replies = repliesFor(await redisPipeline([["GET", domainKey(name)]]), 1);
+  const raw = replies?.[0];
+  if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("who holds a domain");
+  return raw;
+}
+
+/**
+ * Whether the domain is proved to be the store's: always for one connected before proofs were asked for. Throws
+ * UnknownReplyError when that cannot be read, never "not proved".
+ */
 export async function domainProved(name: string): Promise<boolean> {
-  const [raw] = await redisPipeline([["GET", domainKey(name)]]);
+  const raw = await domainHolder(name);
   return typeof raw === "string" && raw !== "" && !raw.startsWith(UNPROVED);
+}
+
+/**
+ * Deletes the domain's key only while it still holds `value` (one script, lib/redis-lock.ts RELEASE): true when that
+ * is known to be done or the key holds something else now (not ours to delete), false when the answer is not known.
+ */
+async function letGoOf(name: string, value: string): Promise<boolean> {
+  try {
+    const replies = repliesFor(await redisPipeline([["EVAL", RELEASE, 1, domainKey(name), value]]), 1);
+    return replies !== null && (replies[0] === 0 || replies[0] === 1);
+  } catch {
+    return false;
+  }
 }
 
 type VercelAnswer = { status: number; body: Record<string, unknown> };
@@ -223,7 +254,9 @@ async function readDomain(name: string, store: Pick<Store, "sid">, tellGone: boo
     return own.status === 200 ? "gone" : null;
   }
   if (project.status !== 200) return null;
-  const proved = await domainProved(name);
+  // Not known whether it is proved: not known whether it is live (the studio's check would take a live domain off).
+  const proved = await domainProved(name).catch(() => null);
+  if (proved === null) return null;
   const config = await vercel("GET", `/v6/domains/${name}/config?projectIdOrName=${vercelProject()}`);
   // An answer whose verdicts are not there is not read as records that are wrong.
   if (config.status !== 200 || typeof config.body.misconfigured !== "boolean" || typeof project.body.verified !== "boolean") return null;
@@ -283,9 +316,13 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
   if (!name) return { ok: false, reason: "shape" };
 
   // Claimed as not proved yet: it serves nothing, and lapses, until the
-  // creator adds the TXT record that proves it is theirs.
-  const [claimed] = await redisPipeline([["SET", domainKey(name), `${UNPROVED}${store.handle}`, "NX", "EX", UNPROVED_SECONDS]]);
-  if (claimed === null) return { ok: false, reason: "taken" };
+  // creator adds the TXT record that proves it is theirs. Read exactly
+  // (CX-123 rule 24, claimMark): "OK" is ours, nil is taken, any other reply
+  // is read back; one that cannot be read asks Vercel nothing.
+  const claim = `${UNPROVED}${store.handle}`;
+  const claimed = await claimMark(domainKey(name), UNPROVED_SECONDS, claim);
+  if (claimed === "taken") return { ok: false, reason: "taken" };
+  if (claimed === "unknown") throw new UnknownReplyError("a domain's claim");
 
   const added = await vercel("POST", `/v10/projects/${vercelProject()}/domains`, { name });
   // Already on this project (a second press, or added by hand) is fine;
@@ -293,7 +330,9 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
   const alreadyHere =
     added.status === 409 && (await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`)).status === 200;
   if (added.status !== 200 && !alreadyHere) {
-    await redisPipeline([["DEL", domainKey(name)]]);
+    // Only this store's own claim is let go of, never a key another store holds by now; one that cannot be let go
+    // lapses on its own.
+    await releaseMark(domainKey(name), claim);
     cache.delete(name);
     if (added.status === 409) return { ok: false, reason: "elsewhere" };
     if (added.status === 400) return { ok: false, reason: "shape" };
@@ -311,13 +350,16 @@ export async function verifyDomain(name: string): Promise<void> {
 /** Takes a domain off a store. The marktmorgen.com address carries on as before. */
 export async function disconnectDomain(name: string, handles: string[]): Promise<boolean> {
   // A claim that lapsed and was taken by another store is theirs now: only
-  // this store's side of it is let go of.
-  const [raw] = await redisPipeline([["GET", domainKey(name)]]);
-  const holder = typeof raw === "string" ? raw.replace(/^\?/, "") : "";
+  // this store's side of it is let go of. Who holds it is read exactly: one
+  // that cannot be read throws before Vercel is asked or anything deleted.
+  const raw = await domainHolder(name);
+  const holder = raw === null ? "" : raw.replace(/^\?/, "");
   if (holder && !handles.includes(holder)) return true;
   const removed = await vercel("DELETE", `/v9/projects/${vercelProject()}/domains/${name}`);
   if (removed.status !== 200 && removed.status !== 404) return false;
-  await redisPipeline([["DEL", domainKey(name)]]);
+  // The key is deleted only while it holds what was read; a let-go not known to be done is not said as done, and
+  // the next press finds Vercel's side already gone (404) and lets the key go again.
+  const letGo = raw === null || (await letGoOf(name, raw));
   cache.delete(name);
-  return true;
+  return letGo;
 }

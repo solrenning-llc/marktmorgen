@@ -1,0 +1,191 @@
+
+FILE g2699-9fa-canonical.log
+=== g2699-refund-response.test.ts ===
+{"label":"missing","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"failed","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+{"label":"requiresaction","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":1,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"pending"}
+{"label":"canceled","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+{"label":"wrongpayment","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"textamount","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"control","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+27 checks, all passing.
+=== g2699-refund-schema.test.ts ===
+{"label":"missing","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"missingid","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"emptyid","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"wrongcurrency","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"missingcurrency","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"failed","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+{"label":"requiresaction","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":1,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"pending"}
+{"label":"canceled","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+{"label":"wrongpayment","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"textamount","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"control","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+{"label":"listaction","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":1,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"pending"}
+{"label":"listmissing","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"listforeign","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"listpending","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":1,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"pending"}
+55 checks, all passing.
+=== closing-refund-refused-final.test.ts ===
+{"label":"refusedfinal","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+4 checks, all passing.
+
+FILE g2699-9fa-frozen.log
+=== g2699-refund-response.proof.ts ===
+{"label":"missing","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"failed","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+{"label":"requiresaction","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":1,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"pending"}
+{"label":"canceled","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+{"label":"wrongpayment","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"textamount","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"control","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+27 checks, 2 failing.
+=== g2699-refund-schema.proof.ts ===
+{"label":"missing","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"missingid","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"emptyid","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"wrongcurrency","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"missingcurrency","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"failed","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+{"label":"requiresaction","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":1,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"pending"}
+{"label":"canceled","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[{"sub":"sub_g2699refund","amount":500,"cur":"usd","email":"member@example.com"}],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"over"}
+  FAIL  unconfirmed refund remains discoverable for reconciliation on a later run
+{"label":"wrongpayment","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"textamount","posts":1,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"control","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+{"label":"listaction","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":1,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"pending"}
+{"label":"listmissing","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"listforeign","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"listpending","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":1,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"pending"}
+55 checks, 2 failing.
+
+FILE g2699-9fa-linked.log
+=== watch.test.ts ===
+64 checks, all passing.
+=== traffic.test.ts ===
+75 checks, all passing.
+=== renewal-unpaid.test.ts ===
+73 checks, all passing.
+=== delivery-watch.test.ts ===
+ℹ tests 11
+ℹ fail 0
+ℹ skipped 0
+=== plan-cost-registry.test.ts ===
+ℹ tests 24
+ℹ fail 0
+ℹ skipped 0
+=== plan-margin.test.ts ===
+ℹ tests 39
+ℹ fail 0
+ℹ skipped 0
+=== usage-meter.test.ts ===
+ℹ tests 6
+ℹ fail 0
+ℹ skipped 0
+=== video-usage-notice.test.ts ===
+ℹ tests 4
+ℹ fail 0
+ℹ skipped 0
+=== store-closing-fair.test.ts ===
+103 checks, all passing.
+=== closing-refunds-unknown.test.ts ===
+25 checks, all passing.
+=== plan-closing.test.ts ===
+90 checks, all passing.
+=== review-after-purchase.test.ts ===
+20 checks, all passing.
+=== review-list-read-proof.test.ts ===
+28 checks, all passing.
+=== picked-reviews.test.ts ===
+15 checks, all passing.
+=== sg2-l8-counts.test.ts ===
+188 checks, all passing.
+=== sg2-l8-credit-giveback.test.ts ===
+14 checks, all passing.
+=== sg2-l8-usage-billing.test.ts ===
+25 checks, all passing.
+=== sg2-l8-usage-marks.test.ts ===
+48 checks, all passing.
+=== sg2-l8-watch-resync.test.ts ===
+16 checks, all passing.
+=== closing-plan-guard.test.ts ===
+53 checks, all passing.
+=== plan-closing-news.test.ts ===
+33 checks, all passing.
+=== closing-plan-routes.test.ts ===
+15 checks, all passing.
+
+FILE g2699-9fa-lint.log
+
+/tmp/g2699-return-9fa/tests/closing-refund-refused-final.test.ts
+  13:5  error  'listRows' is never reassigned. Use 'const' instead  prefer-const
+
+/tmp/g2699-return-9fa/tests/g2699-prior-list-envelope.proof.ts
+  6:20  warning  'part' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 2 problems (1 error, 1 warning)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+
+
+
+FILE g2699-9fa-list-unknown.log
+=== g2699-prior-list-envelope.proof.ts ===
+{"label":"unknown0","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"unknown1","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"unknown2","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"unknown3","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"unknown4","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"emptyknown","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+23 checks, 15 failing.
+
+FILE g2699-9fa-parent-list.log
+=== g2699-prior-list-envelope.proof.ts ===
+{"label":"unknown0","posts":0,"refunded":0,"out":{"done":[],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":1,"left":0},"saved":null}
+{"label":"unknown1","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"unknown2","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"unknown3","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"unknown4","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+  FAIL  G unknown list: no money-moving POST on unreadable reconciliation
+  FAIL  G unknown list: no settlement while reconciliation is unknown
+  FAIL  G unknown list: keep reconciliation discoverable
+{"label":"emptyknown","posts":1,"refunded":500,"out":{"done":[{"sub":"sub_g2699refund","amount":500,"cur":"usd"}],"short":[],"unmade":[],"pending":0,"disputed":0,"none":0,"over":0,"failed":0,"left":0},"saved":"done"}
+22 checks, 12 failing.
+
+FILE g2699-9fa-scan.log
+Public data check: 3974 tracked files; 0 file(s) require correction.
+
+
+FILE g2699-9fa-types.log
+tests/closing-refund-refused-final.test.ts(61,73): error TS2339: Property 'unmade' does not exist on type '"changed" | "unavailable" | "busy" | Settled'.
+  Property 'unmade' does not exist on type '"changed"'.
+tests/closing-refund-refused-final.test.ts(61,85): error TS7006: Parameter 'u' implicitly has an 'any' type.
+tests/closing-refund-refused-final.test.ts(62,72): error TS2339: Property 'failed' does not exist on type '"changed" | "unavailable" | "busy" | Settled'.
+  Property 'failed' does not exist on type '"changed"'.
+

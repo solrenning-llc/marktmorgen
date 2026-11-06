@@ -1,3 +1,19 @@
+# Nominal return: export measurement MEDIUM closed
+
+Exact corrected head `778f182222d9770c3010a3b7f11502c02c914a9d`; full corrective delta from `dd1ca9d9dbf5a69c9bed77807e105ce15a4ce6f7` read (lib/store-data.ts and the canonical test only). Nominal return announced before tests in channel10d41f44482b95f64a0ba6c23f615a61f072de55. No author source/branch/CI edited.
+
+**MEDIUM5795470462 CLOSED. NO NEW HIGH/MEDIUM IN THE FOCAL CORRECTION. MAY MERGE after the required nine final exact-head successful aggregators and a clean normal expected-head merge by S.** R2's separate opinion remains independent; this return does not certify unrelated main or future integration.
+
+The SAME immutable independent eight-case proof now passes8/8, versus8tests/6causal failures/2controls on the prior dd1 head. All six malformed replies refuse before any downstream measurement command; exact positive usage and confirmed absent fields remain correct. The canonical author RED f91b9099 reproduces9tests/6failures, while all9 pass on the exact corrected head.
+
+The shared producer now requires one pipeline result and a two-field HMGET array; each stored value must be a canonical decimal string representing a safe nonnegative integer, or explicit null for a known absent field. There is no Number coercion of booleans/blank strings, negative clamping, fractional size, or ignored extra field/slot. Missing/unsafe/malformed values return null and exportShape refuses before subsequent reads. The two selected fields are decoded independently under the same rule. The native Redis wrapper already maps a successful REST pipeline to an array or throws; this review does not claim universal protection against arbitrary JS Proxies/getters. No new command, key, readback, retry, visible limit or TTL is introduced.
+
+Validation: independent proof8/8; author9, closing-cost6, help-export-promise33, store-data33, cost24, data7 =112linked passing. Strict scoped types/imports including the retained independent proof0; changed-file ESLint0; public-data scanner3831tracked/0corrections; diffcheck clean. Proof unchanged from durable e20795f9. Full previous-report limitations remain: the units are computed quotes, not an observed authenticated allowance debit or300MB streamed file; upstream auth/studio cost is not measured or presumed zero. The route's canonical test is source-order evidence, not an executed HTTP journey.
+
+No browser/AAA, native Redis, actual supplier/payment, global build/TSC or hosted CI certified. No company-wide dollar margin or downstream store-copy/studio UI behavior is newly certified. Their shared producer now receives the exact same strict decoder, but their journeys were not separately tested here. No author merge by Z. Historical review follows unchanged and is superseded only by this focal closure.
+
+---
+
 # Independent cost-boundary review of #2751
 
 Exact head: `dd1ca9d9dbf5a69c9bed77807e105ce15a4ce6f7`; base72804f7f. All three changed paths and direct exportShape/exportUnits callers read. Announced before review in channel1455f348; own proof reserved5898a2c6. No product, author branch, CI or commercial ceiling changed.

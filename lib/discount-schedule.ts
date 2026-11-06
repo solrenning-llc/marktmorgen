@@ -375,11 +375,11 @@ async function tellOne<S extends Shop>(shop: S, statsId: string, id: string, now
     }
     if (typeof raw !== "string") return "unknown";
     const entry = readRecord(id, raw);
-    // Unreadable: never told about on a guess, and moved an hour on, so it never holds the
-    // front of the list (read lowest first) against the codes that can be told.
+    // Unreadable: never told about on a guess. It leaves the list to tell (the record kept for the studio),
+    // so it neither holds the front of the list against the codes that can be told nor costs a run for ever.
     if (!entry) {
-      await counted([["ZADD", TELL_KEY, nowSeconds + NOTICE_RETRY_SECONDS, member]]);
-      return "unknown";
+      await drop(member, TELL_KEY);
+      return "dropped";
     }
     // Not failed, already told (or being told), or out of tries: never sent.
     if (!entry.failed || entry.mailed || entry.notices >= NOTICE_TRIES) {

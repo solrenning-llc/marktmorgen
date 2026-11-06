@@ -39,7 +39,7 @@ for (const [label,answer] of [
 });
 for (const [label,answer] of [
  ["missing",[]],["extra",[null,null]],["undefined",[undefined]],["object",[{}]],
- ["broken JSON",["{"]],["null JSON",["null"]],["array JSON",["[]"]],
+ ["broken JSON",["{"]],["null JSON",["null"]],["array JSON",["[]"]],["missing token",['{"agreed":true}']],
  ["bad token type",['{"t":7}']],["bad token value",['{"t":"broken"}']],
 ] as [string,unknown[]][]) test(`erasure preserves its work when contact read is ${label}`,async()=>{
  await seed(); const writes:Command[]=[];

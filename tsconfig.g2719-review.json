@@ -1,0 +1,1 @@
+{"extends": "./tsconfig.json", "compilerOptions": {"incremental": false, "plugins": []}, "include": ["lib/buyer-list.ts", "lib/checkout-sweep.ts", "lib/claim-mark.ts", "lib/order-data.ts", "tests/l7-buyer-list-exact.test.ts", "tests/l7-order-write-receipts.test.ts", "tests/g2719-command-domain.proof.ts"], "exclude": ["node_modules"]}

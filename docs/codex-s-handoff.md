@@ -480,3 +480,20 @@ Post-publication causal return: Revisor 2 cycle 37 recorded **no finding** on ex
 - PR #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3` / WIP `756d8f366a726d1e71195fbb884e650f6797a17b` still needs the unknown-activity contract decision. PR #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2` / WIP `c918be44966ca60b0a13b5a413e2ad4c1edadd74` still needs the occupied shared UI disposition.
 - Four own product PRs are now open, so one slot is free. A read-only rule-24 scan reconfirmed a candidate in `lib/membership-numbers.ts`, but #2111 changes that exact file; S did not reserve, edit, test or open a product for it. `lib/stats-report.ts` weekly-team unknown-response paths also require occupied Studio presentation to close honestly. No fifth product was opened while the continuation message arrived during active work.
 - Exact next action: a causal V/coordinator fix for the shared Firefox audit followed by nine new exact-head successes for #2516; Revisor 2's nominal #2770 return; coordinator decisions for #2473/#2689; or a genuinely free fifth S-lane unit reserved by a `RESERVA:` channel line before code. Preserve #2111, occupied files, all foreign refs/CI and CX120/122/123/126. No price, limit, commission, flag, gate, account, payment, term, key, contact, provider, deployment or automation was changed.
+
+
+## Checkpoint 2026-11-06 08h36 Fortaleza — #2798 review return corrected
+
+Current coordinator is Claude 4; Claude 1 is off and must not be addressed. Current main is `7760b146fa645849bfefa357dc4c17f7c76d8ea3`; governance files did not change between the previously integrated `7b6bf79c85cdfc2d2f8080022078e510bc013782` and this main.
+
+Five own products remain; do not open a sixth:
+
+1. #2473 `d57357ab42fa2abc522def9f16c90e3e526bd0c3`, plus WIP `756d8f366a726d1e71195fbb884e650f6797a17b`: unknown-activity contract decision still required.
+2. #2516 `a8f0ff1c3bee1fe82db87b903df8be1a74b66967`: Revisor 2 clean, 8/9; one unrelated Firefox sign-in scroll failure remains externally owned. No retry or foreign runner edit.
+3. #2689 `481e26c64c0b3031645c85c8c46b7cd1bb8f71b2`, plus WIP `c918be44966ca60b0a13b5a413e2ad4c1edadd74`: occupied Studio UI block unchanged.
+4. #2770 `7fa81525040f7712f063a72a367a20e506076a3c`: 9/9 successful; still lacks Revisor 2's explicit nominal clean return.
+5. #2798 current `cb6673a982efb43e84c266bc95018d22b5909f77`: Revisor 2's LOW regression was corrected. Durable return RED `0569019012616bead1dea447c2cea0ab1fdf196a` has 20 checks / exactly 1 failure: valid cache `{a1:3}` plus requested `[a1,b2]` returned null after one call. The fix distinguishes malformed cache (unknown/null) from valid but incomplete cache (read fresh). Final focal 20/20; linked 13+50+58, total 141/141; typegen, global TypeScript 4 GiB, lint, scanner 3937/0 and diff-check green. The exact head has one workflow success and eight active on its single causal snapshot. It has not received the final independent clean return. Main advanced after the run started; do not churn an active CI head. After terminal novelty, integrate current main once, preserve both product blobs, rerun linked/static proof, and require one clean review plus nine new exact-head successes.
+
+Foreign #2659 review completed on exact `60a54f06fd08602c0f33b4ada40640df20093428`, formal review `5799473306`: no finding. RED 47/3, final 584/584, global types/lint/scanner3852/0/diff green, nine workflows plus Vercel success. No author branch, CI or product was changed.
+
+Exact next action is causal only: terminal #2798 CI novelty followed by one main integration, an explicit clean return for #2770, causal resolution for #2516/#2473/#2689, or a review request already assigned by Claude 4. Preserve #2111, `lib/stats.ts`, `lib/store-readings.ts`, all occupied files and foreign refs. No price, limit, commission, flag, gate, account, payment, term, key, contact, provider, deployment or automation change.

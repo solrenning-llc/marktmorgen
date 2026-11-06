@@ -189,11 +189,23 @@ export async function undoTakeRoom(room: string, bytes: number, path: string): P
   return true;
 }
 
-/** Whether a file of this size would still fit, read without taking anything. */
+/** What GET answers for a counter INCRBY/DECRBY keep: a whole number of bytes from 0, as text. */
+const BYTES_TEXT = /^(0|[1-9]\d{0,15})$/;
+
+/**
+ * Whether a file of this size would still fit, read without taking anything.
+ * Only an explicit nil is "nothing used"; a whole number from 0 is what is
+ * used; any other reply is unknown and throws UnknownReplyError (Codex P on
+ * #2655; CX-123 rule 24), so no upload is signed on a guess and nobody is
+ * told the room is full when it was not read.
+ */
 export async function hasRoom(room: string, bytes: number, limit: number = MAX_STORE_TASK_BYTES): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const [used] = await redisPipeline([["GET", bytesKey(room)]]);
-  return (Number(used) || 0) + bytes <= limit;
+  const replies = repliesFor(await redisPipeline([["GET", bytesKey(room)]]), 1);
+  const reply = replies?.[0];
+  const used = reply === null ? 0 : typeof reply === "string" && BYTES_TEXT.test(reply) ? Number(reply) : countOf(reply);
+  if (!replies || used === null || !Number.isSafeInteger(used)) throw new UnknownReplyError("how much room a store's handed-in files take");
+  return used + bytes <= limit;
 }
 
 /** Gives back room taken for files that are no longer kept. */

@@ -453,7 +453,16 @@ async function deliver(
   const name = store.name;
   const { w, money } = speech(store);
   const g = givingWords(store.language);
-  const stop = await stopLink(store, email);
+  // An unknown stop link write sends nothing (stopLink throws), and lets go
+  // of both claims as a failed send does: a "sending" mark left behind would
+  // skip this checkout, and the once-a-week mark the address, for a week.
+  let stop: Awaited<ReturnType<typeof stopLink>>;
+  try {
+    stop = await stopLink(store, email);
+  } catch (error) {
+    await redisPipeline([["DEL", sentKey(id)], ["DEL", onceKey(statsId, email, onceFor)]]);
+    throw error;
+  }
   const noted = how.note ? await how.note(about.kind === "cart" ? about.items : [about.product]).catch(() => [] as string[]) : [];
   const note = noted.length ? ["", ...noted] : [];
   const foot = [how.only ?? g.recoverOnly(how.why), "", g.recoverStop(name, stop.page), `${name} · ${store.recovery.address}`, g.sentWith];

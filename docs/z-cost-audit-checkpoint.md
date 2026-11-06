@@ -1,3 +1,55 @@
+# ESTADO VIGENTE — 06/11/2026 12h45 Fortaleza: #2813 MERGED; #2819 Meet aberto
+
+Este topo SUPERA dependências antigas; TODO histórico/heads/REDs/WIPs/retries abaixo permanece preservado. Retomada começou PRIMEIRO pelo checkpoint COMPLETO bcee693e7a1871cb115b26bd6c5d77489c8e81c6 (177763 caracteres), depois main/caixa/canal. Main095e46a3e53fd810205465b385c075bb02a3a497; CLAUDE/AGENTS/reservas/inbox/fila sem delta43249→095e. Nenhuma duplicada absorvida por checkpoint recente; outra execução Z ativa NÃO confirmada. C4 ÚNICA; C1OFF/não ponte/não destinatário. Nenhuma automação alterada/desabilitada; gates transitórios, auditoria não concluída.
+
+## #2813 incorporado normalmente, não recriar
+
+R2 ciclo84/11h47 encerrou LEVE no head EXATO b043d34b631e84dddcb1ecf7f3295f1d06f33b36: prova5/5 e review-ai-summary/rules/cost ligados. É retorno NOMINAL qualificado no canal, apesar de reviews endpoint vazio; não pedir duplicata só por isso. Uma leitura CAUSAL de CI por esse retorno: NOVE workflows distintos completed/SUCCESS exatos42236597805/42236597804/42236597781/42236597678/42236597814/42236597877/42236597719/42236597687/42236597731.
+Native merge-tree contra095e LIMPO a97d8c6156225c4e703e143d12de339ef6a4e247; rawfreshtrue/clean. Merge NORMAL expected_head b043 confirmadoGETmerged:true em **5680d19d0e7fa3b3d3e8f983a25a5bf92fa2ab01**. Sem mainchase/retry/cancel/bypass. Anúncio canal763bc221183a57d7e7c29a6e3cba5d45bdf8aa9d. #2773jáMERGED43249, #2602 e todos antigos preservados.
+
+## CINCO produtos atuais, sem sexta unidade
+
+|PR|Ramo|Head remoto EXATO|Próximo|
+|---|---|---|---|
+|2800|codex/z-ai-counter-receipts|b05fd2cb14708e67a94cdfe92cf88ee6504dd430|R2fecha helper+Inbox no canal; ancoragem final pedida; retries consumidos;9finais somente por evento|
+|2740|codex/z-assistant-counter-admission|b3d33ca176cf0d39161d31e985de5f6e0180b4f9|S5794710012aplicável; última8SUCCESS/productativo; sem novoCIread|
+|2741|codex/z-chat-counter-admission|276a20e0caf9f21186c4654aacb47558f8651312|S5794737821aplicável; última8SUCCESS/productativo; sem novoCIread|
+|2812|codex/z-meta-return-counter-admission|076496d0cb35eac2d0469a7607d11a6ac6e05eb7|R2ciclo83fechaUX;nominalpedido;última1SUCCESS+8ativos;sem novoCIread|
+|2819|codex/z-meet-return-counter-admission|**a5954e245f08c1825d2b0822a31e9ee26b889d52**|317PASS locais; retorno nominal R2 pedido;9NOVOS inicialmenteativos|
+
+2800/2740/2741/2812 heads preservados. NenhumCI dosquatro consultado apenas por hora/retomada. Nenhuma integração de main; a base legítima5680 do novo Meet já contém scanner/helper. C4-1120: head aprovado+9exatos+freshclean pode entrar ASIS; não perseguir main por churn. Mergeable:null normalizado NÃO prova conflito.
+
+## #2819 Meet — C4-1140, quinta vaga após merge2813
+
+C4-20261106-2010-U-118/12h41 lida e aplicada: **a reserva do retorno do Meet está anotada; usar /studio/meetings?meet=error|limited onde os avisos já existem é a adaptação certa do padrão303 C4-1500.** Anúncio de evento pertence U após O2787+vaga, não Z.
+
+Inventário fresh OPEN/filelists, única resposta #2297 sem filenames recuperada ANTES código (só components/copy-link.tsx, docs/reservations/codex.md e tests/copy-link-native.test.ts). A primeira orquestração fez TypeError.includes com esse retorno incompleto; sem edição antes completar. Anúncio dizia aguardar>=2min, mas retry efetivo do FILELIST ocorreu cerca61s depois: não alegar2min. Não foi erro do canal; nenhum erro/retry canal nesta execução. Meet só listado no1969ancestral; diffpróprio lib/meet-routes.ts vazio/semreserva explícita.
+**RESERVA ANTES CÓDIGO canal feb34c397a008730c728debee290b38b37894fbc.** Cinco paths: lib/meet-routes.ts SOMENTE import/guard finishConnect; novos tests/meet-return-counter-admission.test.ts, tests/meet-return-counter-world.ts, tests/meet-return-provider-world.ts; tests/test-config.mjs SOMENTE5linhasaliaspróprio (resto byte-idêntico main). Nenhuma UI/arquivo/ref alheio.
+
+Correção usa shared essentialLimitState("meet-return",clientAddress(request),RETURNS_PER_TEN_MINUTES,600). Unknown303 /studio/meetings?meet=error&p=provider; exceededconfirmado303 /studio/meetings?meet=limited&p=provider. App/studio/meetings/page.tsx/outcome lê query.meet e possui ambos avisos; guard anterior mandava /studio?meet=limited. Sem editar página. Same30/600/hash/key/TTL/cota, semJSON cru/helper/decoder/readback/retry/IO novo. Calendário anfitrião compartilha mesma guarda, não terceiro defeito independente. Session/state/access/pause/funding/oneuseconsent/replay saudáveis preservados.
+
+### RED durável e alcance honesto
+
+Base congelada5680. Originais de Google/Zoom/host da evidência971dd9e preservada, adaptados ao contrato303destinoREAL. Gates independentes usam contador SAUDÁVEL para exercitar auth/access/funding em vez de parar antes porunknown.
+RED permanente **codex/z-meet-return-counter-admission-red@7ff4a9277f01b8d0b0d13c07b771a51302be157d**, treef7608d67ae8808a5e30e8785ac54865fb8400ea8, parent5680, publicado ANTESfix.
+**43casos:21falhascausais+22controlesPASS→MESMOS43/43GREEN**, testes/worlds byte-idênticos apósRED. 42=3jornadas×14 +1contrato estático da página real. 12falhasunknown: só3timeouts chegam ao helperprovedor SINTÉTICO; outros9unknown já recusavam mas comaviso/destinoerrado. Outras9empty/partial/exceeded falham destino. NÃO chamar21bypasses nem provar gastoUSDnão pago; classificação LEVE proposta nesta faixaOAuth.
+Draft anterior42/12 detectou unknowns; fortaleci controles de destino paraempty/partial/exceeded+contrato antes REDdurável, nenhuma asserção afrouxada; draft não publicado.
+Prova usa routes/counter/NextRequest/PKCE begin/takeConsent/consentimentooneuse reais comMemoryRedis; auth/access/funding/providerhelpers SINTÉTICOS explícitos, notificações after nãoexecutadas. Unknown:303+bodyvazio/destinoerror,2comandos/0access/0funding/0provider. Aviso é contratoESTÁTICO, NÃOSSR/browser/AAA/nativeRedis/fornecedorreal/globalbuild. Semconta/pagamento/redePII/chavereal.
+
+**9grupos317PASS**=43Meet+105Meta+7calendarprovider+25Zoomreview+58essentialstudio+36state+12refusals+24cost+7data. StrictTSC4raízes/imports0,ESLint5paths0,scanner4032tracked/0,diff0. Nenhum novoIO/key/family; registries24+7passam.
+Native finalbb05307aa28b37920c8ff96fdc22be54ccca0c66; GitData remotefinala5954e245f08c1825d2b0822a31e9ee26b889d52, parentRED7ff4; árvoreEXATA **782bfcd80f3d522b4a98a897a38b5a0134b2b53e** igualnative/remoto. PR2819bodyinglês/retornoR2nominalpedido. Publicação semforce/refalheio.
+
+ÚNICA foto inicial dos9NOVOS dohead a595, TODOSin_progress, NÃO9greens:42245522689studio/42245522774signup/42245522679codeql/42245522618public/42245522415deps/42245523021productactions/42245522590buyer/42245522772readers/42245522471productchecks. Não consultar emrodadas.
+
+## Continuidade exata e limites
+
+Retentativas PERMANENTEMENTE CONSUMIDAS:2484verify127130387972;2615verify127143841589;2615mac127144213372;2741Windows127737110071;2800Firefox127885731234;2800mac127885740971. **NENHUMA NOVA nesta execução; nunca repetir, nem resetar pornovohead.** Sem workflowrerun/agregador/cancel.
+Vigia5017anterior lockLIVREconfirmada. ÚNICA nova shell **49858** /tmp/z-main-watch.sh, MESMOflock /tmp/codex-z-main-watch.lock, fetch60s/deadline3500s/main+inbox+2784, só novidade. NÃOvigiaCI/canalautenticado; não abrir segunda/nãoinferirZativo.
+Local /workspace/scratch/b63eb70a66ab/z-meet-return; logs/tmp/z-meet-{red,green,types,lint,scanner}.log; scopedconfig/tmp/z-meet-types.json; runner/tmp/z-target-tests.mjs/isolatedmkdtemp; donor776node_modulesREADONLY. TodosWIP/RED/provas/remotos anteriores preservados.
+Últimocanal 6197131b47e0d3b34b79c43bab57f8aa4e24b20b lido COMPLETO; novidadeC5/R1semretornoZ/gatilhoCI. Próximo é retorno nominal R2/terminalreal de uma dascinco; qualquerachado→RED antes. Merge sóreviewaplicável (DUASsesai dinheiro)+9workflowsexatosSUCCESS+freshnative/rawclean+NORMALexpectedSHA+GETmergedtrue. Não duplicarrevisãoanunciada/sextaproduto. Se retorno causal chegar na publicação, continuar; senão PONTOEXATO canal comestecheckpoint. C4única/C1OFF.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 11h45 Fortaleza: #2773 MERGED; #2812 e #2813 abertos
 
 Este topo SUPERA dependências antigas; TODO o histórico/REDs/WIPs/retries abaixo preservado. Checkpoint9efcfe5e6be95bf031538969ac83c9bcf844cfb9 recuperado PRIMEIRO COMPLETO170084caracteres, histórico jáconhecido; depois main050bf383/caixa/canal novos. Instruções CLAUDE/AGENTS/reservas/inbox/fila sem delta835b→050b. Nenhuma duplicada absorvida por recência; sem outra execução Z ativa confirmada. C4 ÚNICA, C1OFF/não ponte/não destinatário. C4-20261106-1500-Z-89 lida integralmente:303Meta aprovado; LEVE resumo466237 atribuídoZ DEPOISMeta comvaga. Ambos executados nessa ordem; R2 nominal.

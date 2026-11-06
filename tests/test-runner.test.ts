@@ -167,5 +167,67 @@ test('every file in tests/run.mjs runs under the limit, generous over the slowes
   assert.ok((limit as number) >= 5 * 100_800, 'at least five times the slowest file measured');
   assert.ok((limit as number) <= 15 * 60_000, 'well under the job\'s 50 minutes, so a stuck file is named, not cancelled');
   const run = readFileSync('tests/run.mjs', 'utf8');
-  assert.match(run, /runBundle\(bundle, testEnvironment\(process\.env\), process\.execPath, \{timeoutMs: TEST_FILE_TIMEOUT_MS, label: file\}\)/);
+  // Rule 23 (C4-20261106-2600-C5-152): the compilation of each file is under the same limit, and a timeout's line says
+  // whether the next compilation had settled; the per-file limit itself is unchanged.
+  assert.match(run, /compileTimeoutMs: TEST_FILE_TIMEOUT_MS/);
+  assert.match(run, /runBundle\(bundle, testEnvironment\(process\.env\), process\.execPath, \{timeoutMs: TEST_FILE_TIMEOUT_MS, label: file, diagnose: \(\) => `next compile \$\{next\(\)\}`\}\)/);
+});
+
+// C4-20261106-2600-C5-152: in the four CI cases backup-run printed "96 checks, all passing." and the next file's heading
+// never came, so either the child hung inside its exit (a) or the runner did not move on: the next compilation never
+// settled, or the child was never reaped (b). The limit must catch both, and say which before it kills anything.
+test('a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread\'s wchan and the next compilation', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'runner-timeout-'));
+  const worker = join(directory, 'never.cjs'), pidFile = join(directory, 'pid');
+  writeFileSync(worker, `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`);
+  const lines: string[] = [];
+  const write = console.error;
+  console.error = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
+  let guard: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const status = await Promise.race([
+      (runBundle as (...args: unknown[]) => Promise<number>)(worker, process.env, process.execPath, {timeoutMs: 500, label: 'never.test.ts', diagnose: () => 'next compile resolved'}),
+      new Promise<'hung'>(done => { guard = setTimeout(() => done('hung'), 5000); }),
+    ]);
+    assert.equal(status, 1);
+    const line = lines.find(text => text.includes('TIMEOUT')) ?? '';
+    assert.match(line, /never\.test\.ts/);
+    assert.match(line, /exit not seen/);
+    if (process.platform === 'linux') {
+      assert.match(line, /state=[A-Z]/, 'State from /proc/<pid>/status');
+      assert.match(line, /wchan=\d+:/, 'each thread\'s wchan from /proc/<pid>/task/*/wchan');
+    }
+    assert.match(line, /next compile resolved/);
+  } finally {
+    console.error = write;
+    clearTimeout(guard);
+    try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL'); } catch { /* already gone */ }
+    rmSync(directory, {recursive: true, force: true});
+  }
+});
+
+test('a next compilation that never settles fails naming the file at the limit, and the runner does not hang on it', async () => {
+  const never = new Promise<string>(() => {});
+  let guard: ReturnType<typeof setTimeout> | undefined;
+  const runs: string[] = [];
+  const outcome = await Promise.race([
+    (runTestFiles as (options: unknown) => Promise<number>)({files: ['a.test.ts', 'b.test.ts'], compileTimeoutMs: 300,
+      compile: async (file: string) => file === 'b.test.ts' ? never : file,
+      run: async (file: string) => { runs.push(file); return 0; },
+    }).then(() => 'resolved', (error: Error) => error.message),
+    new Promise<string>(done => { guard = setTimeout(() => done('hung'), 5000); }),
+  ]);
+  clearTimeout(guard);
+  assert.deepEqual(runs, ['a.test.ts']);
+  assert.match(outcome, /b\.test\.ts/, 'names the file whose compilation did not finish');
+  assert.match(outcome, /TIMEOUT/);
+});
+
+test('a run is told whether the next file\'s compilation has settled, and that there is none after the last', async () => {
+  const seen: string[] = [];
+  await (runTestFiles as (options: unknown) => Promise<number>)({files: ['a', 'b'],
+    compile: async (file: string) => file,
+    run: async (file: string, _bundle: string, next: () => string) => { await setImmediate(); seen.push(file + ':' + next()); return 0; },
+  });
+  assert.deepEqual(seen, ['a:resolved', 'b:none']);
 });

@@ -90,10 +90,18 @@ async function refundedOn(invoice: Invoice): Promise<number> {
     const query = new URLSearchParams({ limit: "100" });
     query.set(intent ? "payment_intent" : "charge", intent || charge);
     const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/refunds?${query}`);
-    for (const refund of (list.data as { amount?: unknown; status?: unknown }[] | undefined) ?? []) {
-      if (refund.status === "succeeded" || refund.status === "pending" || refund.status === "requires_action") {
-        total += num(refund.amount);
+    // Read exactly (Codex C2 on #2722): a whole list, at most the hundred asked for, each refund with a whole
+    // non-negative amount and a status in words. Anything else is not "no refund": the store fails this run and no
+    // credit is written (earnFrom lets the error through).
+    const rows = list && list.object === "list" && list.has_more === false && Array.isArray(list.data) && list.data.length <= 100 ? list.data : null;
+    if (!rows) throw new UnknownReplyError("invite credits: the refunds of a payment");
+    for (const refund of rows as unknown[]) {
+      if (!refund || typeof refund !== "object") throw new UnknownReplyError("invite credits: a refund");
+      const { amount, status } = refund as { amount?: unknown; status?: unknown };
+      if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof status !== "string") {
+        throw new UnknownReplyError("invite credits: a refund");
       }
+      if (status === "succeeded" || status === "pending" || status === "requires_action") total += amount;
     }
   }
   return total;

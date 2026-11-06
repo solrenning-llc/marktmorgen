@@ -442,7 +442,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                       <ul className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
                         {group.products.map((product) => (
                           <ProductCard
-                            eager={(position.get(product.id) ?? 9) < 3 && page === 1}
+                            eager={(position.get(product.id) ?? 9) < 1 && page === 1}
                             first={position.get(product.id) === 0 && page === 1}
                             key={product.id}
                             store={store}
@@ -459,6 +459,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
                             cart={cartOn && !soon.has(product.id) && cartable(product)}
                             sold={soldLine(soldCounts?.byProduct[product.id])}
+                            grid
                           />
                         ))}
                       </ul>

@@ -879,3 +879,11 @@ Main exato `6e01c123b31d890bb5a7100d0bce8ef498988b20` integrado uma vez nos quat
 - #2535 ainda sem parecer formalR2 noGitHub;9/9 não remove essa exigência. #2438/#2576 congelados/intocados.
 - Canal informou merge2729 e ponto em `471cd6101c663c4399dc6adc1412050cf859ff38`. CX127vigia ativa; não encerrado.
 - Correção operacional: shell com login=false funciona; o erro anterior era inicialização do shell. Nova cópia própria de gate `/dev/shm/codex-q-mergegate.IUUoYI`, somente verificações locais, nenhuma branch produtiva movida. Nenhum trabalho alheio apagado.
+
+
+### #2731 incorporado; terceiro merge aguardando recomputação
+
+- #2731 foi incorporado normalmente pelo Q com expected_head_sha `4a350f69b64167c727c6968270ce4e2846d14426`; retorno merged=true/merge `a79e8a5fc9fb6f0dd2f63bc70c4a75fa5d2a1517`. REST bruto havia voltado a true/clean;9/9;K2nominal6675105022 relido e aplicável aos2blobs exatos;união nativa com main0ce treec4fa83cd/client269/269/diff0. Nenhum head novo/CIretry/cancel.
+- #2709 `7add83c51b4eac73e555670f78a610abf0e67439` também concluiu9/9. REST ainda null/unknown após os dois merges; aguardo true/clean. União nativa com maina79e tree `1fbafed332a212578ad559cc7ad0de7a92ceaf3b`, trêsblobs BYTE-ID (eee54791/d3174401/0abf6b8a), client269/269/diff0. Z5796340546 relido no GitHub e aplicável. Não é necessário movimentar o head apenas para atualizar main.
+- Tentativa de anúncio do merge2731 recebeu409 e NÃO escreveu. Recuperação deve aguardar>=2min desde409, ler FULL/SHAfresco e acrescentar sobre histórico atual, preservando a mensagem.
+- Próximo gate2709:rawtrue/clean nointervalo>=5min; então merge NORMAL expectedSHA. #2535 segue9/9 mas semformalR2. #2438 congelado;3produtos própriosOPEN.

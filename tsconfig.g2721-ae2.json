@@ -1,0 +1,50 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@/lib/content-jsx",
+    "incremental": false,
+    "plugins": [],
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "app/api/cron/courses/route.ts",
+    "app/api/cron/discord/route.ts",
+    "app/api/cron/quiet/route.ts",
+    "app/api/cron/reminders/route.ts",
+    "lib/checkout-trouble.ts",
+    "lib/quiet-sales.ts",
+    "lib/sale-events.ts",
+    "lib/store-alerts.ts",
+    "tests/l10a-claims-exact.test.ts",
+    "lib/claim-mark.ts",
+    "lib/redis-lock.ts",
+    "lib/redis-reply.ts",
+    "tests/g2721-release-fallback-race.proof.ts",
+    "tests/g2806-release-route-control.proof.ts",
+    "tests/g2721-shared-release.proof.ts",
+    "tests/g2806-descriptor-prototype.proof.ts",
+    "tests/g2806-script-envelope.proof.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

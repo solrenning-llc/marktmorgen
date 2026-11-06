@@ -38,8 +38,25 @@ export default async function NumbersLinkPage({ params, searchParams }: Params) 
   const { id } = await params;
   const query = await searchParams;
   const now = moment();
-  const sid = LINK_ID.test(id) ? await linkStore(id) : null;
-  const store = sid ? await storeForId(sid) : null;
+  // A read that fails, or answers in an unknown shape, is said as not read: never "ended" or "opened too many times".
+  const unread = (error: unknown) => {
+    console.error("a shared numbers link could not be read", error);
+    return (
+      <Shell>
+        <div className="card p-6 sm:p-8" role="status">
+          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-ink">These numbers could not be read just now</h1>
+          <p className="mt-3 text-ink-soft">The link has not ended because of this. Try again in a moment.</p>
+        </div>
+      </Shell>
+    );
+  };
+  let store: Awaited<ReturnType<typeof storeForId>>;
+  try {
+    const sid = LINK_ID.test(id) ? await linkStore(id) : null;
+    store = sid ? await storeForId(sid) : null;
+  } catch (error) {
+    return unread(error);
+  }
   const link = store?.numbersLinks.find((l) => l.id === id) ?? null;
 
   if (!store || !link || link.expires <= Math.floor(now / 1000) || store.suspended) {
@@ -77,7 +94,13 @@ export default async function NumbersLinkPage({ params, searchParams }: Params) 
   }
 
   // Each opening is one of the store's public requests for its window (lib/traffic.ts).
-  if (!(await countOpen(id, now)) || !(await takePublicRequest(store, "public", now))) {
+  let opened: boolean;
+  try {
+    opened = (await countOpen(id, now)) && (await takePublicRequest(store, "public", now));
+  } catch (error) {
+    return unread(error);
+  }
+  if (!opened) {
     return (
       <Shell>
         <div className="card p-6 sm:p-8">
@@ -88,7 +111,12 @@ export default async function NumbersLinkPage({ params, searchParams }: Params) 
     );
   }
 
-  const verified = await readVerified(store);
+  let verified: Awaited<ReturnType<typeof readVerified>>;
+  try {
+    verified = await readVerified(store);
+  } catch (error) {
+    return unread(error);
+  }
   const money = (cents: number | null) => (cents === null ? "—" : formatMoney(cents, verified?.currency ?? store.currency));
   const until = new Date(link.expires * 1000).toISOString().slice(0, 10);
 

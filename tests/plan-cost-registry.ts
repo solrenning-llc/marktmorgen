@@ -62,7 +62,7 @@ import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
 import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
-import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
+import { PAID_UPLOAD_OPENS, uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, MAX_REPORT_ROWS } from "@/lib/imports";
@@ -370,6 +370,9 @@ export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
  * try (MR audit item 9, Claude 4 C4-20261106-2790-C56-167), until an official source says otherwise.
  */
 export const BLOB_TOKEN_TRIES = BLOB_PUT_TRIES;
+/** filesHeld (lib/file-store.ts) lists at most this many pages of 1000, each an Advanced Operation tried as a put is; a vault open measures once. */
+export const BLOB_LIST_PAGES = 20;
+export const BLOB_LIST_MEASURES_PER_OPEN = 1;
 /** One studio picture door (app/api/store/image/upload): its put and its token, every try, and the head that checks the name is free. */
 export const STUDIO_DOOR_BLOB = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
 /** One check of a stored picture (lib/uploaded-image.ts, lib/picture-check.ts): a head with every try, one read, its bytes counted whole. */
@@ -912,6 +915,21 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS"] },
     ],
     basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (the two lines before counted the whole figure twice). Each request is counted at the dearest kind it may be (studioBlobPerRequest): a door (its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try); a product's picture attached, its three copies checked (a head with every try, a plain read, the bytes read counted whole: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206); or a page saved, which checks each picture it takes from the door once (keptPictures). A month may also check a whole figure of pictures let in on the last day before, the door note's day: counted on top. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), and the storage of images/ (item 3).",
+  },
+  {
+    id: "blob-list",
+    feature: "Vercel Blob listing for the storage measurement of a vault open: every page, every try (MR audit item 5, 6 November 2026)",
+    monthlyUsd: (tier) => PAID_UPLOAD_OPENS[tier] * BLOB_LIST_MEASURES_PER_OPEN * BLOB_LIST_PAGES * BLOB_PUT_TRIES * BLOB_ADVANCED_OP,
+    sources: [
+      { file: "lib/file-store.ts", names: ["filesHeld", "page < 20", "blob.list"] },
+      { file: "lib/storage-quota.ts", names: ["storageUsed", "filesHeld(folder)"] },
+      { file: "lib/vault-storage.ts", names: ["openReservedVault", "storageUsed(input.folder, limit)"] },
+      { file: "lib/storage-reservations.ts", names: ["reserveStorage", "await measure()"] },
+      { file: "app/api/store/vault/route.ts", names: ["reserveStoreUpload(store, bytes, \"r2\")", "openReservedVault"] },
+      { file: "lib/upload-budget.ts", names: ["backend!=='r2'"] },
+      { file: "lib/upload-budget-policy.ts", names: ["PAID_UPLOAD_OPENS"] },
+    ],
+    basis: "A list is an Advanced Operation, US$ 5 a million, and goes through the same retrying request as a put (@vercel/blob list() calls requestApi), so BLOB_PUT_TRIES each; vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. filesHeld lists the store's prefix up to 20 pages of 1000, a page one Advanced Operation. A paying plan reaches it through one door, a vault open (openReservedVault, one measure per reserveStorage, so one per open), and each open first spends one of the plan's PAID_UPLOAD_OPENS (reserveStoreUpload), so a retry by the browser is another counted open. The product-file door (app/api/store/file/route.ts) and the stream door (app/api/store/stream/route.ts) are closed: reserveStoreUpload answers false for any backend but r2 before their measure. Not in this line, and said so: the studio page's measure for a store whose plan has ended (app/studio/page.tsx, once per render, STUDIO_PAGE_UNITS) and the daily closing job's measures and lists of ended stores (lib/plan-closing.ts), which a store that pays nothing causes and which belong to the closing exposure; and dropStamped (lib/pdf-stamp.ts), whose listFiles has no page cap and lists one product file's stamped copies, one per sale, on a legacy Blob path only (a vault path lists R2): unbounded until a cap or an official count of copies exists, never counted as zero.",
   },
   {
     id: "free-delivery",

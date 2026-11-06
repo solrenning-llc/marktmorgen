@@ -1,0 +1,4 @@
+Head d346da2b10358a6c25a0236b5f7675290570463f
+Command: node_modules/.bin/tsc --noEmit -p tsconfig.g2791-d346.json
+Run after fixing the own proof's clock control; process exit_code=0. stdout/stderr empty.
+AST comparison: 63 complete static is() call texts identical between frozen overflow proof and permanent canonical test.

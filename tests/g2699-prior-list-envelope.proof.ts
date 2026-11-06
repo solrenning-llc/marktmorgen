@@ -10,7 +10,7 @@ const DAY_SECONDS = DAY / 1000;
 const SUB = "sub_g2699refund";
 const INTENT = "pi_g2699refund";
 let response: Record<string, unknown> = {};
-let listRows: Record<string, unknown>[] = [];
+const listRows: Record<string, unknown>[] = [];
 let listEnvelope:Record<string,unknown>|null=null;
 let posts = 0;
 let refunded = 0;
@@ -47,6 +47,7 @@ async function run(label: string, reply: Record<string, unknown>, applied: boole
     ["HSET", workKey(folder), "calls", 20, "rcalls", 10],
   ]);
   const out = await giveBackUnused(seller, DAY, { final: true });
+  if(typeof out!=="object") throw Error("fixture closing state: "+out);
   const [raw] = await redis.pipeline([["HGET", paidKey(folder), SUB]]);
   const saved = JSON.parse(String(raw)) as { r?: string };
   console.log(JSON.stringify({ label, posts, refunded, out, saved: saved.r ?? null }));

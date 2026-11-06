@@ -110,8 +110,8 @@ try {
   browser = await require("playwright-core").chromium.launch({ headless: true });
   const captures = [];
   for (const spec of [
-    { slug: "store-page", context: "Demo store", sourcePath: "/@harborkitchenpreview", alt: "The actual Marktmorgen demo store with the fictional Harbor Kitchen products." },
-    { slug: "sales-pages", context: "Synthetic studio", sourcePath: "/studio/pages?store=" + fixture.sid + "&product=" + fixture.product, alt: "The actual Marktmorgen sales page editor for the fictional Weekly Meal Planner." },
+    { slug: "store-page", context: "Demo store", sourcePath: "/@harborkitchenpreview", alt: "The fictional Harbor Kitchen profile above three product cards, with product titles and price badges, in the actual Marktmorgen store interface." },
+    { slug: "sales-pages", context: "Synthetic studio", sourcePath: "/studio/pages?store=" + fixture.sid + "&product=" + fixture.product, alt: "The product list beside the fictional Weekly Meal Planner editor, with Build and Preview tabs and a page coach score, in the actual Marktmorgen studio." },
   ]) {
     // Capture server-rendered real pixels without starting automatic client analytics.
     // The hydrated store attempted POST /api/store/hit (blocked by the guard).

@@ -28,7 +28,7 @@
  *   nl:auth:rec:link:<hash>   a link sent to the recovery address, 15 minutes, spent once
  *   nl:auth:rec:until:<hash>  until when logins through the recovery address are locked
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -82,7 +82,7 @@ export async function startRecoveryAddress(email: string, session: string, raw: 
   if (!address || address.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(address)) return "invalid";
   if (address === normaliseEmail(email)) return "same";
   if (!(await withinLimit("recovery-address", normaliseEmail(email), 5, 60 * 60))) return "limited";
-  const code = String(randomBytes(4).readUInt32BE(0) % 1_000_000).padStart(6, "0");
+  const code = String(randomInt(1_000_000)).padStart(6, "0");
   const sent = await mail(address, `${code} is your code to confirm a recovery address`, [
     `The Marktmorgen account ${normaliseEmail(email)} is choosing this address to get back in if its owner can no longer open their email or lose their phone.`,
     "",

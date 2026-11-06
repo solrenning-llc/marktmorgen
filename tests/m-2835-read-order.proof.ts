@@ -1,4 +1,5 @@
 import { isValidElement } from "react";
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -33,19 +34,26 @@ async function main(): Promise<void> {
   const MAX_COMMANDS_PER_CASE = 2000;
   let commandsUsed = 0;
   let delayed = false;
+  let failingDropKey: string | null = null;
+  let faulted = false;
   redis.pipeline = async (commands) => {
     // Count before every synthetic Redis invocation. Its honest finite
     // network delay changes scheduling only; no reply or state is forged.
     if (commandsUsed + commands.length > MAX_COMMANDS_PER_CASE) throw Error("Synthetic Redis ceiling exceeded");
     commandsUsed += commands.length;
+    if (failingDropKey && !faulted && commands.some((command) => command[0] === "GET" && command[1] === failingDropKey)) {
+      faulted = true;
+      throw Error("Synthetic first cleanup read failed before execution");
+    }
     if (delayed) await new Promise((resolve) => setTimeout(resolve, 5));
     return original(commands);
   };
   try {
-    for (const due of [false, true]) {
-      redis.clear(); commandsUsed = 0; delayed = false;
-      const email = due ? "expired-key-fixture@example.test" : "active-key-fixture@example.test";
-      const handle = due ? "expired-key-fixture" : "active-key-fixture";
+    for (const scenario of ["active", "expired", "expired-first-read-failed"] as const) {
+      const due = scenario !== "active";
+      redis.clear(); commandsUsed = 0; delayed = false; failingDropKey = null; faulted = false;
+      const email = scenario === "expired-first-read-failed" ? "failed-cleanup-fixture@example.test" : due ? "expired-key-fixture@example.test" : "active-key-fixture@example.test";
+      const handle = scenario === "expired-first-read-failed" ? "failed-cleanup-fixture" : due ? "expired-key-fixture" : "active-key-fixture";
       await claimHandle(email, handle, "Synthetic read ordering", "");
       await ensureStatsId(email);
       const session = await openSession(email);
@@ -60,6 +68,9 @@ async function main(): Promise<void> {
       }
       is(`${handle}: fixture begins with a real stored key`, (await listPasskeys(email)).map((row) => row.id), ["synthetic-key"]);
       delayed = true;
+      if (scenario === "expired-first-read-failed") {
+        failingDropKey = "nl:pk:drop:" + createHash("sha256").update("nimbus-passkey-drop:" + email).digest("hex").slice(0, 40);
+      }
       answering(request());
       const tree = await StudioPage({ searchParams: Promise.resolve({}) });
       delayed = false;
@@ -70,7 +81,7 @@ async function main(): Promise<void> {
       is("the real page supplies one passkey manager", views.length, 1);
       is("the stored list applies a due removal and preserves an active key", stored, due ? [] : ["synthetic-key"]);
       is("the page supplies the exact remaining passkeys", shown, stored);
-      console.log("READ_ORDER:" + JSON.stringify({ due, stored, shown, commandsUsed, syntheticMails: mails }));
+      console.log("READ_ORDER:" + JSON.stringify({ scenario, due, faulted, stored, shown, commandsUsed, syntheticMails: mails }));
     }
   } finally {
     redis.pipeline = original;

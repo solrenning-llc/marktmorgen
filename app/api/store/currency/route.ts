@@ -12,7 +12,9 @@ import { guardStoreWrite, text } from "@/lib/store-request";
  * Changes what the store charges in. `{ currency: "eur", confirm?: true }`.
  *
  * Refused, with the reason, when:
- *   - the creator's Stripe account cannot charge in it ("unsupported");
+ *   - the creator's Stripe account cannot charge in it ("unsupported"), or
+ *     Stripe could not be asked which currencies it charges in
+ *     ("unavailable", 503): not known is never "any", nothing changed;
  *   - the store has prices and the move is between the yen and a currency
  *     with cents ("decimals"): 49.99 has no meaning in yen, and nothing is
  *     rounded behind the creator's back (lib/store.ts, setCurrency);
@@ -44,8 +46,11 @@ export async function POST(request: NextRequest) {
     if (store.currency === wanted) return Response.json({ ok: true, currency: wanted });
 
     if (store.stripeAccountId) {
+      // Null is "Stripe could not be asked", never "any currency": the store
+      // is not moved to one its account may not charge in (sweep app1, 7).
       const allowed = await chargeableCurrencies(store);
-      if (allowed && !allowed.includes(wanted)) {
+      if (allowed === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      if (!allowed.includes(wanted)) {
         return Response.json({ ok: false, error: "unsupported" }, { status: 400 });
       }
     }

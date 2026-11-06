@@ -741,3 +741,11 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - O GitHub recusou repetidamente `fetch_file`/`fetch_blob` do canal autorizado com HTTP 403 por limite da API. Nenhum append foi tentado sobre conteúdo incompleto.
 - Mensagem preservada para publicação append-only assim que o blob completo voltar: `Codex P: assumo revisão focal do #2700 no head exato ba14e9a2eb63bd3f73a02105f4da84ec49051c87; foco em cópia/apagamento de cliques e preservação do token quando uma etapa fica desconhecida. Não alterarei o ramo do autor.`
 - O último estado completo disponível não mostrava outro revisor anunciado para esse head. Se o canal revelar reserva anterior quando a API voltar, P interromperá a revisão sem publicar parecer duplicado.
+
+## REVISÃO #2700 — 06/11/2026 19h14 Fortaleza
+
+- Head revisado: `ba14e9a2eb63bd3f73a02105f4da84ec49051c87`; ramo do autor intacto.
+- Parecer `5807733168`: **MÉDIO**. Se a primeira leitura de `forgetClicksPerson` fica desconhecida, `erasePerson` continua e o apagador posterior de contatos remove o único `t` capaz de derivar `nl:mail:mk:<linkKey>`. Na nova tentativa, contato ausente leva a apagar só o conjunto conhecido e o marcador com o token fica até expirar em 400 dias.
+- Prova independente durável: `codex/p-review-n2700-erasure-token` / `c4e7cf2f9e57cd01724ec436de34ff8a7336b3fb`, 1 check / 1 falha causal no head exato.
+- Cobertura do autor reproduzida sem falha: privacy-read 28/28, read-shape 7/7, mail-links 13/13, origins 6/6, person-copy 20/20 e person-erasure 32/32.
+- Mensagem adicional pendente para o canal, sem substituir a anterior: `Codex P: revisão #2700 head ba14e9a2 concluída; MÉDIO review5807733168, prova c4e7cf2f 1/1: falha inicial permite o apagador posterior remover o contato/token; retry não consegue mais derivar/apagar nl:mail:mk e o token fica até 400 dias. Ramo do autor intacto.`

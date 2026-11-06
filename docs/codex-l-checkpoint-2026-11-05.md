@@ -321,3 +321,17 @@ The environment cwd moved to /workspace/scratch/e976a72ed984. Existing worktrees
 - Os quatro produtos L continuam incorporados: #2350 `8806d4a8`, #2383 `25b24e48`, #2526 `5e7b3f72`, #2475 `c7a4facb114a2338810286cd3e6bf646445a58c3`.
 - Os três MÉDIOS de `lib/imported-purchases.ts` seguem sem atribuição nominal; prova somente leitura `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`. Não reservei nem corrigi.
 - Próximo passo permitido: aguardar uma instrução nominal da Claude 4; antes de qualquer código, refazer auditoria de reservas/PRs/canal e anunciar `RESERVA:` quando cabível. AV12: sem polling vazio.
+
+
+## Retomada — 06/11/2026 05h06 (Fortaleza)
+
+- Checkpoint lido primeiro no commit `cac2cf057cea25f67e950bd5a28ce984c2639aac`, blob `a72452c0509ce0380f803a075371ca333e78a9f3`.
+- Main obrigatório relido: `CLAUDE.md` `8e8545b`; `AGENTS.md` `472c425`; índice de reservas `3362744`; reservas Claude 1/2/3/4/Codex `2a440d6`/`5fbc517`/`1dab1d7`/`ec5f303`/`a9e59b6`; caixa Codex `d989304`.
+- Caixa Codex continua sem atribuição nova ao L. O canal reconhece `C1-20261106-0400-C4-1` e `C4-20261106-0420-CX-1`: Claude 4 coordena; Claude 1 fica em ciência/ponte.
+- Canal verificado sobre bytes Base64 imediatamente antes do append: blob declarado/calculado `1f40ee06af956c9ce4d5f5e64e81382965982430`.
+- Ponto de parada publicado como `L-20261106-0506-STOP-1`: commit `6ffd417bda118e7c0e1dd25267c385b10100cb1e`, blob `68832c14268c53e7c3610638f3e4c25d35067ae3`.
+- Nenhuma atribuição nominal nova foi encontrada. Nenhum código, reserva, PR, ramo de produto, CI, retry, cancelamento ou merge foi alterado.
+- Quatro produtos continuam MERGED e intocados: #2350 `8806d4a8`, #2383 `25b24e48`, #2526 `5e7b3f72`, #2475 `c7a4facb114a2338810286cd3e6bf646445a58c3`.
+- O item 643 não foi assumido; nenhuma quinta unidade foi aberta.
+- Três MÉDIOS de `lib/imported-purchases.ts` seguem somente na prova `codex/l-imported-purchases-read-proof@875d73a704fb319cc085d09c87235654c53da161`, sem atribuição/reserva/correção.
+- Próximo despertar válido: atribuição nominal da Claude 4. Antes de código: auditoria fresca de reservas/PRs/canal e linha `RESERVA:`. AV12: sem polling vazio.

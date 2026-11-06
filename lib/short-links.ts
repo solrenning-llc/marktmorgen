@@ -25,6 +25,7 @@
  */
 import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { CODE, CODE_LETTERS, MAX_LINKS, type ShortLink, linkName, linkPlace, readTarget } from "@/lib/short-link-rules";
 
 export { type LinkTarget, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
@@ -60,11 +61,18 @@ export async function countLinks(statsId: string | null): Promise<number> {
   return Number.isSafeInteger(n) && n > 0 ? n : 0;
 }
 
-/** A store's links, the newest first. */
+/**
+ * A store's links, the newest first. HVALS answers an empty list when there
+ * are none, never another shape: a reply missing, of another shape or with a
+ * member that is not a string is unknown and throws UnknownReplyError
+ * (CX-123 rule 24), so neither the cap nor "one link to a name" is decided on
+ * it (addLink), and the studio shows its own words instead of "no links".
+ */
 export async function readLinks(statsId: string | null): Promise<ShortLink[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", storeKey(statsId)]]);
-  const list = (Array.isArray(raw) ? (raw as unknown[]) : []).map(parse).filter((l): l is Kept => Boolean(l && l.statsId === statsId));
+  const raw = stringList(repliesFor(await redisPipeline([["HVALS", storeKey(statsId)]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("a store's short links");
+  const list = raw.map(parse).filter((l): l is Kept => Boolean(l && l.statsId === statsId));
   return list.sort((a, b) => b.made - a.made || a.code.localeCompare(b.code)).map(shown);
 }
 
@@ -89,7 +97,12 @@ export async function addLink(
   const target = readTarget(input.target, isProduct);
   if (!target) return { ok: false, reason: "target" };
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
-  const links = await readLinks(store.statsId);
+  // Unknown is never "no links": the cap and the name are not checked on it, so nothing is written (CX-123 rule 30).
+  const links = await readLinks(store.statsId).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+  if (!links) return { ok: false, reason: "unavailable" };
   if (links.length >= MAX_LINKS) return { ok: false, reason: "full" };
   // One link to a name: two would add their results together on one row.
   if (links.some((l) => l.name === name)) return { ok: false, reason: "taken" };
@@ -97,10 +110,18 @@ export async function addLink(
     // randomInt draws each letter evenly; a byte taken modulo 31 would favour the first eight.
     const code = Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
     const kept: Kept = { code, name, place: linkPlace(input.place), target, made: now, sid: store.sid, statsId: store.statsId };
-    const [got] = await redisPipeline([["SET", linkKey(code), JSON.stringify(kept), "NX"]]);
-    if (got === null) continue;
+    const replies = repliesFor(await redisPipeline([["SET", linkKey(code), JSON.stringify(kept), "NX"]]), 1);
+    // SET NX answers "OK" when it wrote and null when the code was taken: any other reply is unknown, and the link is
+    // not added to the store's list on it (CX-123 rule 24).
+    if (replies?.[0] === null) continue;
+    if (replies?.[0] !== "OK") return { ok: false, reason: "unavailable" };
     await redisPipeline([["HSET", storeKey(store.statsId), code, JSON.stringify(kept)]]);
-    return { ok: true, link: shown(kept), links: await readLinks(store.statsId) };
+    // The list as it is after, for the panel; when it cannot be read the panel keeps its own and adds this one.
+    const after = await readLinks(store.statsId).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    });
+    return { ok: true, link: shown(kept), links: after ?? [shown(kept), ...links] };
   }
   return { ok: false, reason: "unavailable" };
 }

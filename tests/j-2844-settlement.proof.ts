@@ -13,7 +13,7 @@
  *
  * Synthetic only: a stand-in for PayPal's API on api-m.paypal.com, the Redis stub.
  */
-import { connectPayPal, onTheirWay, payWithPayPal, paysAutomatically, readPayPal, setAutoPay, settleAllPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { connectPayPal, onTheirWay, payWithPayPal, paysAutomatically, settlePayPal } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";

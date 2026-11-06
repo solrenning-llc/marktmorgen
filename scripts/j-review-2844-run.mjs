@@ -8,7 +8,7 @@ const root=process.cwd(), out=mkdtempSync(join(tmpdir(),'j2844-'));
 let failed=false;
 const files=process.argv.slice(2);
 try {
- for(const file of files.length ? files : ['j-2844-settlement.proof.ts']) {
+ for(const file of files.length ? files : ['j-2844-settlement.proof.ts','j-2844-payday.proof.ts']) {
   const bundle=join(out,file+'.cjs');
   await build({entryPoints:[join(root,'tests',file)],bundle:true,platform:'node',format:'cjs',outfile:bundle,logLevel:'error',alias:testAliases(file,root,join(root,'tests'))});
   console.log('TEST '+file);

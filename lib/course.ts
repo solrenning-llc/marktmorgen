@@ -542,7 +542,7 @@ export async function readCourseExact(id: string): Promise<Course | null> {
   const [raw] = exactReplies(await redisPipeline([["GET", courseKey(id)]]), 1, what);
   if (raw === null) return null;
   const course = parseCourse(raw);
-  if (!course) throw new UnknownReply(what);
+  if (!course || course.id !== id) throw new UnknownReply(what);
   return course;
 }
 

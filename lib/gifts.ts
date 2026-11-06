@@ -341,14 +341,32 @@ export async function revokeRefundedGifts(
           unsure = true;
           continue;
         }
-        const items = (() => {
+        // No record: nothing of this gift is held as a purchase any more (null). A record that does not read is
+        // unknown, never "no items" (rule 30, Claude 4 on #2781).
+        let items: string[] = [];
+        if (typeof given === "string") {
+          let v: unknown;
           try {
-            const v = JSON.parse(String(given)) as { items?: unknown };
-            return Array.isArray(v.items) ? (v.items as string[]) : [];
+            v = JSON.parse(given);
           } catch {
-            return [];
+            v = undefined;
           }
-        })();
+          if (!v || typeof v !== "object" || Array.isArray(v)) {
+            unsure = true;
+            continue;
+          }
+          const listed = (v as { items?: unknown }).items;
+          items = Array.isArray(listed) ? listed.filter((item): item is string => typeof item === "string") : [];
+        }
+        // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
+        // purchase, so the next run takes both away again; taking a course away twice is harmless.
+        try {
+          for (const productId of [gift.p, ...items]) await dropStart(gift.to, productId);
+        } catch (error) {
+          console.error("taking a refunded gift's course away failed; tried again next run", error);
+          unsure = true;
+          continue;
+        }
         // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24): a
         // write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
         const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, gift.to), gift.p]]), 1);
@@ -356,7 +374,6 @@ export async function revokeRefundedGifts(
           unsure = true;
           continue;
         }
-        for (const productId of [gift.p, ...items]) await dropStart(gift.to, productId);
         if (!(await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS))) {
           unsure = true;
           continue;

@@ -1,3 +1,58 @@
+# Ponto de parada C2 — 06/11/2026 03h15 (Fortaleza)
+
+Esta seção é a mais recente e prevalece onde acrescenta ou substitui o histórico abaixo. Todo head, RED, parecer e limitação anterior continua preservado.
+
+## Fontes, coordenação e invariantes desta continuidade
+
+- O checkpoint completo anterior foi lido no commit `2054acb3ff023865915a45e6db561460b5f36964`; as regras atuais do `main` e o blob integral fresco do canal foram relidos antes da ação.
+- Canal sempre append-only/CAS e nunca escrito abaixo de20KB. Um conflito409 durante o anúncio do residual #2742 foi seguido por dois minutos completos de espera, releitura integral e append novo; nenhuma mensagem foi sobrescrita. Último append C2 desta continuidade: commit de canal `566185a3669cb274f39f77219765afa03a193ce4`.
+- Nenhum workflow inteiro, job, retry, cancelamento, merge, deploy, conta, painel ou configuração externa foi iniciado. Nenhum ramo/produto/CI/reserva alheio foi editado.
+- Cinco implementações próprias permanecem abertas (#2601, #2695, #2692, #2742, #2769). Não abrir 338 [HZ3] nem outra própria antes de liberar slot. Revisões não contam.
+
+## #2742 — residual R2 corrigido; novo head financeiro exige dois pareceres e nove workflows novos
+
+- Head EXATO atual: `bbde49fe4752d482cda069e858a88de47280588b`; tree `e07f15df43b3c152b5469ea34047ed46b4cc7a7d`.
+- O head anterior `56a7b961` fechou os dois MÉDIOS CX1; retorno nominal CX1 `5796165925` era aplicável somente àquele blob. R2 confirmou o fechamento e apontou LEVE residual: `failed+paid:true` e charge `pending` anterior à primeira succeeded ainda autorizavam a garantia.
+- Fonte oficial pinada do Charge, relida06/11: `paid=true` quando succeeded ou autorizado para captura; status enumerado `succeeded|pending|failed`. Failed+true é contraditório. Pending anterior ao aparente first pode resolver e alterar a decisão once-per-person; desconhecido nunca vira ausência.
+- RED remoto ANTES do produto: `3fa6667246006a741f5318412c1b5b37b68e3b8a`, reader62/4falhas causais (próprio customer e same-address para cada vetor).
+- Correção limitada: charge-history exige `paid === (status === "succeeded")`; pending criado antes do candidato first torna a leitura unknown, tanto no próprio customer quanto no mesmo endereço. Writer, teto18, política, preço, limite, comissão, flags, gates, contas e provedores intocados.
+- GREEN: ligados241/241 (reader62+rules67+flow47+route28+page15+write22); MESMAS provas imutáveis CX1 consistency `04bc6a144`6/6, CX1 enum `711c03e0`10/10 e D2 rows `ac94903c`15/15. TS strict dirigido0, lint0, diff0, scanner3806/0.
+- Blobs remotos finais: produto `4026ffcd46fc7b3bd94870b9ba31a18d818a7780`; teste `040430a6a47e2efca167ee400afdefd660e6e808`. Comentário `6677953762` pede retornos nominais CX1/D2/R2.
+- Como o produto financeiro mudou, nenhum parecer ancestral é contado. Exigir DOIS pareceres financeiros aplicáveis e NOVE workflows completed/success no head exato. Nenhum check foi sondado ou repetido.
+
+## 325 [IN1] — #2769 publicado; parecer parcial R2 não é contado
+
+- PR próprio #2769, head EXATO `2e8af71dd7d830fca37abf4e514398cf132356b1`; tree `fec15b68151534f122b73aa887f8bed0001d000f`.
+- Só dois paths novos: `docs/upstash-fixed-plan-decision-2026-11-06.md` e `tests/upstash-fixed-plan-decision.test.ts`. Nenhuma conta/configuração Upstash foi alterada.
+- RED remoto `fa22e798f5db92cca39cc00028dfa718adc8ecde`:4/4falhas por documento ausente. GREEN focal6/6; ligados114/114; TSdir0, lint0, diff0, scanner3865/0.
+- Pela fonte oficial atual, PAYG marginal isolado: Store$3.905582/mês/$46.866978 em12piores; Studio$5.819388/$69.832660; Scale$9.274567/$111.294799. Menores fixed condicionais seriam1GB$20,5GB$100,5GB$100/mês e continuam mais caros; agregado real, picos/s, banda, regiões, ProdPack e overhead permanecem unknown, nunca0.
+- Recomendação documental: NÃO trocar agora; primeiro tetos globais pré-comando/pré-write e Auto Upgrade disabled. Runbook para antes da confirmação final, sem inventar label não publicado.
+- R2 registrou sem achado mas declarou que NÃO verificou os preços na fonte; esse recorte não é parecer integral aplicável. Aguardar UMA revisão independente completa de fontes+aritmética+unknown+runbook e NOVE workflows exatos. Sem polling/retry/cancel/headmove.
+
+## #2722 — retorno focal C2 concluído no candidato nominal
+
+- Candidato EXATO `05a4e8bdc673e90537c350d7a2ddfdc4d8d26de4`; tree `25828591e215a3317b73ccf864cf2a3ec68d88ac`.
+- Parecer focal C2 `5796189732`: LEVE financeiro `payment.type` de `5795683866` FECHADO no delta causal, sem novo achado focal. Somente `payment_intent` com seu próprio ID ou `charge` com seu próprio ID são aceitos; payment_record/tipo desconhecido/campo trocado falham antes de refund GET, crédito ou POST.
+- MESMA prova opt-in `cd19ff16dd04b336e3874fb1ba4b773b00f50901`, blobs prova/launcher/relatório byte-idênticos:4/4 verdes (antes3falhas+1controle). Ligados73/73 (11+6+52+4), TS dirigido0, lint0, diff0, scanner3812/0.
+- Next typegen concluiu. O TSC global depois foi morto pelo ambiente exit137 sem diagnóstico; NÃO chamar essa corrida verde nem falha do produto. A prova histórica C2 `2ab54442` continua não rotulada verde porque seus controles antigos não fornecem o envelope obrigatório.
+- Produto/ramo/CI/reserva L9 intocados. Fechamento focal não substitui outros pareceres ou nove checks; Claude2 controla CI/merge.
+
+## Demais estados próprios preservados sem vigia vazia
+
+- #2601: head EXATO `702cf9a8af4d8a0f33764720b446ccb211b210b4`, tree `4c35d928ee85f7ba0947bd442effe48a19ffabaa`; N `6654503257` aplicável; não consultado/repetido/movido.
+- #2695: head EXATO `33bbd1fd7637ef1bbb39faca109b15206eb500b0`; retries individuais macOS/WebKit já consumidos; não consultado/repetido/movido.
+- #2692: PRIMARY `35e670e3cf35a9997821bd5e47bb104afb9f6453` intacto. Recovery-note WIP `3a61b5bc` continua bloqueado pelo MÉDIO D2 `fbbb56fb`; outage homepage A3/#2020 continua separado e aberto. Não mover primary.
+- #2685 permanece C4; #1969 é B2/C1; #2654 fec0 mantém MÉDIO aberto. Commercial-margin é J. Tax-threshold/prova2325 continuam proibidos sem atribuição explícita C1.
+
+## Próxima ação exata
+
+1. Novidade causal nominal do #2742: repetir somente a prova/revisão pedida no head `bbde49fe`; corrigir qualquer achado com RED antes; merge só2pareceres+9exatos.
+2. Revisão independente completa do #2769 e9exatos; o parecer R2 sem verificação de preços não basta.
+3. Novidade causal terminal de #2601/#2695/#2692; AV12, sem polling vazio, retry, cancelamento ou head churn.
+4. Não iniciar HZ3: cinco próprias abertas. Se slot liberar, auditar conflitos e postar RESERVA só no canal antes de qualquer código.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 01h20 (Fortaleza)
 
 Esta seção é a mais recente e prevalece onde acrescenta ou substitui estado ao histórico abaixo. Todo o histórico, heads e REDs anteriores continua preservado.

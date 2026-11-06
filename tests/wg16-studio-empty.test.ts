@@ -56,8 +56,9 @@ is("the empty list uses the studio variant, as an h3 under the list's h2, inside
 is("its three cases keep their true words", ['"No reviews on this page"', '"Nothing new"', '"No reviews yet"', '"Choose an earlier page to see the reviews in this list."', '"Every review has been seen. New ones, and reviews their buyers change, come back here."', "\"When a buyer reviews something, it appears here and on the product's page at the same moment.\""].every((words) => reviews.includes(words)), true);
 is("its one action is the jump to asking for reviews, for a role that can switch it on, while the store has no review at all", reviews.includes('action={current.total === 0 && numbers.size === 0 && can(view.role, "settings") ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined}'), true);
 is("the place it jumps to is still a heading that takes the focus", reviews.includes('<h2 id="asking-for-reviews" tabIndex={-1}'), true);
-is("no totals yet uses the studio variant too, as an h2 like the other boxes beside it", /reviewed\.length === 0 \? \(\s*<StudioEmptyState\s+level=\{2\}/.test(reviews), true);
-is("no totals: a heading and a sentence that stay true while a product in the store has no review", reviews.includes('title="No product totals yet"') && reviews.includes('body="Each product in your store shows its stars and number of reviews here once it has a review."'), true);
-is("no bare sentence left where the list or the totals are empty", reviews.includes('<p className="text-lg font-semibold tracking-[-0.02em] text-ink">{current.total > 0') || reviews.includes("No product review totals are available in this view."), false);
+// Rule 23 (Codex Q on #2841, review 5806653591): the totals' reader cannot tell "none" from "not read", so the by-product
+// box keeps main's sentence, which only says none can be shown here; the shared empty state would claim there are none.
+is("no totals: main's sentence, which never claims there are none", reviews.includes("No product review totals are available in this view.") && !reviews.includes("No product totals yet"), true);
+is("no bare sentence left where the list is empty", reviews.includes('<p className="text-lg font-semibold tracking-[-0.02em] text-ink">{current.total > 0'), false);
 
 done();

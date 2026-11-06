@@ -203,13 +203,9 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
             <div className="card p-5 sm:p-6">
               <p className="font-semibold text-ink">By product</p>
               {reviewed.length === 0 ? (
-                <StudioEmptyState
-                  level={2}
-                  title="No product totals yet"
-                  body="Each product in your store shows its stars and number of reviews here once it has a review."
-                  compact
-                  className="mt-2"
-                />
+                // Not the shared empty state (Codex Q on #2841): the totals' reader cannot tell "none" from "not read",
+                // so this says only that none can be shown here, never that there are none.
+                <p className="mt-2 text-sm text-ink-soft">No product review totals are available in this view.</p>
               ) : (
                 <ul className="mt-3 space-y-3">
                   {reviewed.map((p) => {

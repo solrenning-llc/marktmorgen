@@ -1,0 +1,969 @@
+# #2844 return — observed outputs
+Reviewed nominal head:7b1baef666538d2a527afb22e3dca3ded947c3af
+All executions below ran behind fail-hard SDK/socket controls.
+
+## Original20 unchanged and author final151
+TEST original:j-2844-settlement.proof.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+R1 finding, independent reproduction: claim-applied-ack-lost
+  ok    first settling refuses uncertain result
+  FAIL  before retry nothing is booked
+        expected 0
+        got      3000
+  ok    before retry the recipient stays reserved
+OBSERVED {"fault":"claim-applied-ack-lost","retry":{"paid":0,"released":0,"waiting":0},"paidInBook":3000,"away":[],"secondPay":false,"batchesSent":1}
+  ok    retry preserves one accounted payout or the pending reservation
+  ok    a second batch never sends the already paid recipient
+
+R1 finding, independent reproduction: ledger-write-throws
+  FAIL  first settling refuses uncertain result
+        expected true
+        got      false
+  FAIL  before retry nothing is booked
+        expected 0
+        got      3000
+  FAIL  before retry the recipient stays reserved
+        expected ["aaaaaaaaaaaa"]
+        got      []
+OBSERVED {"fault":"ledger-write-throws","retry":{"paid":0,"released":0,"waiting":0},"paidInBook":3000,"away":[],"secondPay":false,"batchesSent":1}
+  ok    retry preserves one accounted payout or the pending reservation
+  ok    a second batch never sends the already paid recipient
+
+readLink rejects malformed stored auto metadata
+METADATA {"auto":"false","autoResult":"true"}
+  FAIL  unconfirmed boolean never grants automatic payment permission
+        expected "unknown"
+        got      "true"
+METADATA {"auto":1,"autoResult":"true"}
+  FAIL  unconfirmed boolean never grants automatic payment permission
+        expected "unknown"
+        got      "true"
+METADATA {"auto":{},"autoResult":"true"}
+  FAIL  unconfirmed boolean never grants automatic payment permission
+        expected "unknown"
+        got      "true"
+METADATA {"auto":[],"autoResult":"true"}
+  FAIL  unconfirmed boolean never grants automatic payment permission
+        expected "unknown"
+        got      "true"
+METADATA {"auto":null,"autoResult":"false"}
+  FAIL  unconfirmed boolean never grants automatic payment permission
+        expected "unknown"
+        got      "false"
+
+15 checks, 9 failing.
+GROUP_EXIT original:j-2844-settlement.proof.ts 1
+TEST original:j-2844-payday.proof.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+  ok    healthy control reaches a configured automatic payout
+PAYDAY_METADATA {"metadata":{"seen":1,"due":1,"sent":0,"failed":0,"complete":true},"batchesSent":1}
+  FAIL  malformed auto metadata never dispatches an automatic payout
+        expected 0
+        got      1
+PAYDAY {"first":{"seen":1,"due":1,"sent":0,"failed":1,"complete":true},"claim":["1"],"retry":{"seen":1,"due":1,"sent":0,"failed":0,"complete":true},"batchesSent":0}
+  ok    fixture reaches the due store and reports an unavailable link
+  FAIL  failed PayPal read leaves this month's attempt retryable
+        expected [null]
+        got      ["1"]
+  FAIL  healthy retry can dispatch the previously configured automatic payout
+        expected 1
+        got      0
+
+5 checks, 3 failing.
+GROUP_EXIT original:j-2844-payday.proof.ts 1
+TEST paypal-payouts-exact.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+Revisor 1, repro 1: the item's mark is written and its answer is lost
+  ok    that settle is not said as done
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Revisor 1, repro 2: the mark would be written, and writing the payout into the book fails (a full data room)
+  ok    that settle is not said as done
+  ok    nothing is in the book yet
+  ok    and it is still on its way, never owed
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers no reply at all: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers no reply at all: booked once, never twice
+  ok    settling does not say it settled
+  ok    booked once, before the mark
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers undefined: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers undefined: booked once, never twice
+  ok    settling does not say it settled
+  ok    booked once, before the mark
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers a number: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers a number: booked once, never twice
+  ok    settling does not say it settled
+  ok    booked once, before the mark
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers an empty string: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers an empty string: booked once, never twice
+  ok    settling does not say it settled
+  ok    booked once, before the mark
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers a list: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers a list: booked once, never twice
+  ok    settling does not say it settled
+  ok    booked once, before the mark
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers QUEUED: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers QUEUED: booked once, never twice
+  ok    settling does not say it settled
+  ok    booked once, before the mark
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers two replies: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers two replies: booked once, never twice
+  ok    settling does not say it settled
+  ok    booked once, before the mark
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Control: the mark already there and the payout in the book: nothing booked again
+  ok    not booked here, nothing left on its way
+  ok    in the book once
+
+A mark with no payout in the book (left by a failure before this change) is booked, once
+  ok    booked by this settle
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Control: a healthy settle books it once
+  ok    booked
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The daily job: a store whose record read throws stays in the settle set
+  ok    the job itself goes on
+  ok    no SREM was sent
+  ok    the store is still in the set
+
+Control: a store confirmed absent leaves the settle set
+  ok    settled none
+  ok    and it is gone from the set
+
+The PayPal link answers no reply at all: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers undefined: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers a number: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers an object: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers two replies: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers unreadable JSON: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers JSON without its Secret: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+Controls: a healthy link and a confirmed absent one
+  ok    healthy: the studio view
+  ok    absent: not connected, auto-pay off
+  ok    absent: a press says connect first
+
+151 checks, all passing.
+GROUP_EXIT paypal-payouts-exact.test.ts 0
+FAILED_GROUPS 2
+
+## New31 barriers and malformed-ledger evidence
+TEST j-2844-return.proof.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+room / not applied, unknown reply
+  ok    one unknown barrier refuses settlement
+  ok    the recipient remains reserved until a known retry
+  ok    healthy retry leaves one exact payout and nothing pending
+  ok    no second synthetic provider batch is dispatched
+BARRIER {"barrier":"room","applied":false,"retry":{"paid":1,"released":0,"waiting":0},"paid":3000,"entries":1,"room":"288"}
+
+room / applied ACK lost
+  ok    one unknown barrier refuses settlement
+  ok    the recipient remains reserved until a known retry
+  ok    healthy retry leaves one exact payout and nothing pending
+  ok    no second synthetic provider batch is dispatched
+BARRIER {"barrier":"room","applied":true,"retry":{"paid":1,"released":0,"waiting":0},"paid":3000,"entries":1,"room":"576"}
+
+ledger / not applied, unknown reply
+  ok    one unknown barrier refuses settlement
+  ok    the recipient remains reserved until a known retry
+  ok    healthy retry leaves one exact payout and nothing pending
+  ok    no second synthetic provider batch is dispatched
+BARRIER {"barrier":"ledger","applied":false,"retry":{"paid":1,"released":0,"waiting":0},"paid":3000,"entries":1,"room":"576"}
+
+ledger / applied ACK lost
+  ok    one unknown barrier refuses settlement
+  ok    the recipient remains reserved until a known retry
+  ok    healthy retry leaves one exact payout and nothing pending
+  ok    no second synthetic provider batch is dispatched
+BARRIER {"barrier":"ledger","applied":true,"retry":{"paid":0,"released":0,"waiting":0},"paid":3000,"entries":1,"room":"288"}
+
+mark / not applied, unknown reply
+  ok    one unknown barrier refuses settlement
+  ok    the recipient remains reserved until a known retry
+  ok    healthy retry leaves one exact payout and nothing pending
+  ok    no second synthetic provider batch is dispatched
+BARRIER {"barrier":"mark","applied":false,"retry":{"paid":0,"released":0,"waiting":0},"paid":3000,"entries":1,"room":"288"}
+
+mark / applied ACK lost
+  ok    one unknown barrier refuses settlement
+  ok    the recipient remains reserved until a known retry
+  ok    healthy retry leaves one exact payout and nothing pending
+  ok    no second synthetic provider batch is dispatched
+BARRIER {"barrier":"mark","applied":true,"retry":{"paid":0,"released":0,"waiting":0},"paid":3000,"entries":1,"room":"288"}
+
+Two actual concurrent settlements write one deterministic ledger entry
+  ok    concurrent settling books the item only once
+  ok    concurrent settling never dispatches another batch
+
+Real legacy random-id payout / healthy migration
+  ok    legacy ledger is read once and unknown JSON is refused
+  ok    legacy money is never counted a second time
+LEGACY {"corrupt":false,"refused":false,"paid":3000,"entries":1,"away":[]}
+
+Real legacy random-id payout / unreadable JSON reply
+  FAIL  legacy ledger is read once and unknown JSON is refused
+        expected [1,true]
+        got      [1,false]
+  FAIL  legacy money is never counted a second time
+        expected [3000,1]
+        got      [6000,2]
+LEGACY {"corrupt":true,"refused":false,"paid":6000,"entries":2,"away":[]}
+
+A deterministic field is not proof of a readable booked payout
+  FAIL  malformed deterministic row is unknown instead of booked
+        expected true
+        got      false
+
+31 checks, 3 failing.
+GROUP_EXIT j-2844-return.proof.ts 1
+FAILED_GROUPS 1
+
+## Author permanent whole RED at5d13eb011
+TEST paypal-payouts-exact.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+Revisor 1, repro 1: the item's mark is written and its answer is lost
+  ok    that settle is not said as done
+  ok    the next settle leaves nothing on its way
+  FAIL  booked exactly once
+        expected 3000
+        got      0
+  FAIL  nothing owed again
+        expected 0
+        got      3000
+  FAIL  and no second PayPal batch is sent
+        expected ["nothing",1]
+        got      ["sent",2]
+
+Revisor 1, repro 2: the mark would be written, and writing the payout into the book fails (a full data room)
+  ok    that settle is not said as done
+  ok    nothing is in the book yet
+  ok    and it is still on its way, never owed
+  ok    the next settle leaves nothing on its way
+  FAIL  booked exactly once
+        expected 3000
+        got      0
+  FAIL  nothing owed again
+        expected 0
+        got      3000
+  FAIL  and no second PayPal batch is sent
+        expected ["nothing",1]
+        got      ["sent",2]
+
+Booked before (by its reference, as before ids were derived), and the mark answers no reply at all: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers no reply at all: booked once, never twice
+  ok    settling does not say it settled
+  FAIL  booked once, before the mark
+        expected 3000
+        got      0
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers undefined: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers undefined: booked once, never twice
+  ok    settling does not say it settled
+  FAIL  booked once, before the mark
+        expected 3000
+        got      0
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers a number: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers a number: booked once, never twice
+  ok    settling does not say it settled
+  FAIL  booked once, before the mark
+        expected 3000
+        got      0
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers an empty string: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers an empty string: booked once, never twice
+  ok    settling does not say it settled
+  FAIL  booked once, before the mark
+        expected 3000
+        got      0
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers a list: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers a list: booked once, never twice
+  ok    settling does not say it settled
+  FAIL  booked once, before the mark
+        expected 3000
+        got      0
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers QUEUED: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers QUEUED: booked once, never twice
+  ok    settling does not say it settled
+  FAIL  booked once, before the mark
+        expected 3000
+        got      0
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Booked before (by its reference, as before ids were derived), and the mark answers two replies: never booked twice
+  ok    settling does not say it settled
+  ok    the book is not written again
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The item is new, and the mark answers two replies: booked once, never twice
+  ok    settling does not say it settled
+  FAIL  booked once, before the mark
+        expected 3000
+        got      0
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+Control: the mark already there and the payout in the book: nothing booked again
+  ok    not booked here, nothing left on its way
+  ok    in the book once
+
+A mark with no payout in the book (left by a failure before this change) is booked, once
+  FAIL  booked by this settle
+        expected {"paid":1,"released":0,"waiting":0}
+        got      {"paid":0,"released":0,"waiting":0}
+  ok    the next settle leaves nothing on its way
+  FAIL  booked exactly once
+        expected 3000
+        got      0
+  FAIL  nothing owed again
+        expected 0
+        got      3000
+  FAIL  and no second PayPal batch is sent
+        expected ["nothing",1]
+        got      ["sent",2]
+
+Control: a healthy settle books it once
+  ok    booked
+  ok    the next settle leaves nothing on its way
+  ok    booked exactly once
+  ok    nothing owed again
+  ok    and no second PayPal batch is sent
+
+The daily job: a store whose record read throws stays in the settle set
+  ok    the job itself goes on
+  ok    no SREM was sent
+  ok    the store is still in the set
+
+Control: a store confirmed absent leaves the settle set
+  ok    settled none
+  ok    and it is gone from the set
+
+The PayPal link answers no reply at all: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers undefined: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers a number: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers an object: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers two replies: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers unreadable JSON: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+The PayPal link answers JSON without its Secret: not "not connected", not "auto-pay off"
+  ok    the studio view rejects
+  ok    payday's auto-pay question rejects
+  ok    a press is never told 'not connected'
+  ok    turning auto-pay off is not refused as 'not connected'
+  ok    nothing sent
+
+Controls: a healthy link and a confirmed absent one
+  ok    healthy: the studio view
+  ok    absent: not connected, auto-pay off
+  ok    absent: a press says connect first
+
+151 checks, 17 failing.
+GROUP_EXIT paypal-payouts-exact.test.ts 1
+FAILED_GROUPS 1
+
+## Linked tests
+TEST paypal-payouts.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+Connecting the creator's own PayPal app
+  ok    not a Client ID
+  ok    PayPal refuses it
+  ok    an app without Payouts on
+  ok    an app with Payouts on
+  ok    the Secret is not stored readable
+  ok    the studio sees only a shortened Client ID
+
+One press
+  ok    another payout holding the lock: busy, never an error, and nothing asked of PayPal or Stripe
+  ok    a balance that does not cover it sends nothing
+  ok    everyone owed, in one batch
+  ok    with PayPal's idempotency key, the batch's own id
+  ok    each by email, in the store's currency, as PayPal writes amounts
+  ok    only fields PayPal's description has
+  ok    both on their way
+  ok    nobody is sent twice while on their way
+  ok    the book does not say paid yet
+
+Unavailable pending records never start a new payment
+  ok    unknown pending exposure rejects the read
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/dev/shm/j-2844-return-tjTiOB/current.cjs:46921:9)
+    at readPendingPayoutBatches (/dev/shm/j-2844-return-tjTiOB/current.cjs:46936:17)
+    at readOpen (/dev/shm/j-2844-return-tjTiOB/current.cjs:47115:10)
+    at async onTheirWay (/dev/shm/j-2844-return-tjTiOB/current.cjs:47119:16)
+    at async /dev/shm/j-2844-return-tjTiOB/current.cjs:47177:40
+    at async withLock (/dev/shm/j-2844-return-tjTiOB/current.cjs:4265:12)
+    at async payWithPayPal (/dev/shm/j-2844-return-tjTiOB/current.cjs:47174:12)
+    at async main (/dev/shm/j-2844-return-tjTiOB/current.cjs:47575:21)
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/dev/shm/j-2844-return-tjTiOB/current.cjs:46921:9)
+    at readPendingPayoutBatches (/dev/shm/j-2844-return-tjTiOB/current.cjs:46936:17)
+    at readOpen (/dev/shm/j-2844-return-tjTiOB/current.cjs:47115:10)
+    at async onTheirWay (/dev/shm/j-2844-return-tjTiOB/current.cjs:47119:16)
+    at async /dev/shm/j-2844-return-tjTiOB/current.cjs:47177:40
+    at async withLock (/dev/shm/j-2844-return-tjTiOB/current.cjs:4265:12)
+    at async payWithPayPal (/dev/shm/j-2844-return-tjTiOB/current.cjs:47174:12)
+    at async main (/dev/shm/j-2844-return-tjTiOB/current.cjs:47575:21)
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/dev/shm/j-2844-return-tjTiOB/current.cjs:46921:9)
+    at readPendingPayoutBatches (/dev/shm/j-2844-return-tjTiOB/current.cjs:46929:38)
+    at readOpen (/dev/shm/j-2844-return-tjTiOB/current.cjs:47115:10)
+    at async onTheirWay (/dev/shm/j-2844-return-tjTiOB/current.cjs:47119:16)
+    at async /dev/shm/j-2844-return-tjTiOB/current.cjs:47177:40
+    at async withLock (/dev/shm/j-2844-return-tjTiOB/current.cjs:4265:12)
+    at async payWithPayPal (/dev/shm/j-2844-return-tjTiOB/current.cjs:47174:12)
+    at async main (/dev/shm/j-2844-return-tjTiOB/current.cjs:47575:21)
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/dev/shm/j-2844-return-tjTiOB/current.cjs:46921:9)
+    at readPendingPayoutBatches (/dev/shm/j-2844-return-tjTiOB/current.cjs:46944:14)
+    at readOpen (/dev/shm/j-2844-return-tjTiOB/current.cjs:47115:10)
+    at async onTheirWay (/dev/shm/j-2844-return-tjTiOB/current.cjs:47119:16)
+    at async /dev/shm/j-2844-return-tjTiOB/current.cjs:47177:40
+    at async withLock (/dev/shm/j-2844-return-tjTiOB/current.cjs:4265:12)
+    at async payWithPayPal (/dev/shm/j-2844-return-tjTiOB/current.cjs:47174:12)
+    at async main (/dev/shm/j-2844-return-tjTiOB/current.cjs:47575:21)
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable (/dev/shm/j-2844-return-tjTiOB/current.cjs:46921:9)
+    at readPendingPayoutBatches (/dev/shm/j-2844-return-tjTiOB/current.cjs:46950:155)
+    at readOpen (/dev/shm/j-2844-return-tjTiOB/current.cjs:47115:10)
+    at async onTheirWay (/dev/shm/j-2844-return-tjTiOB/current.cjs:47119:16)
+    at async /dev/shm/j-2844-return-tjTiOB/current.cjs:47177:40
+    at async withLock (/dev/shm/j-2844-return-tjTiOB/current.cjs:4265:12)
+    at async payWithPayPal (/dev/shm/j-2844-return-tjTiOB/current.cjs:47174:12)
+    at async main (/dev/shm/j-2844-return-tjTiOB/current.cjs:47575:21)
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    saved pending records were not changed
+  ok    valid pending records recover immediately
+
+What PayPal reports
+  ok    paid, and still waiting to be claimed
+  ok    the book says paid for SUCCESS only
+  ok    asked again, nothing is written twice
+  ok    still counted as paid once
+  ok    not claimed in time: back to owed
+  ok    nobody on their way any more
+  ok    and they can be paid again
+
+Payday by itself
+  ok    off until asked
+  ok    on when asked
+  ok    the email says what was sent, from where
+  ok    and when nothing could be sent, why
+
+Taken away
+  ok    nothing is sent without it
+
+49 checks, all passing.
+GROUP_EXIT paypal-payouts.test.ts 0
+TEST paypal-payouts-unknown.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  ok    both still waiting, no read of a batch id PayPal never gave
+  ok    and still on their way
+
+What the creator is told never says nothing was sent
+  ok    the payday email says it is not known, and to look at PayPal
+  ok    the studio's words for it
+
+A 4xx without PayPal's own error name (nameless) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-name) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-error) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+PayPal made the batch, and writing its id got no answer: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+PayPal made the batch, and writing its id got an error: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  ok    the next press pays both, once
+  ok    both on their way under the real batch
+
+45 checks, all passing.
+GROUP_EXIT paypal-payouts-unknown.test.ts 0
+TEST paypal-payouts-reconcile.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)
+  ok    the write of its id failed, the '?' evidence is kept
+  ok    both still on their way
+  ok    a press sends no new batch
+  ok    the next day's try gets the same batch back and settles it, paid once
+
+An affiliate changed their PayPal address before the retry: never sent to another recipient (review of Codex H2 on #2681, GRAVE)
+  ok    no request to PayPal, no batch
+  ok    nothing ever sent to the new address
+  ok    left for the creator's own check
+  ok    the address itself is never kept in the batch, only its fingerprint
+  ok    the fingerprint is keyed, never a plain hash of the address
+
+The same address: the retry sends the same recipients
+  ok    same recipients as the first request
+
+Before the retry, Stripe's refunds cannot be read: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    waiting for refunds that can be read, not a manual check
+
+Before the retry, Stripe's refunds took back every sale: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    less owed now than was sent: a manual check
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The month's counts are read only in their exact envelope (review of Codex G on #2681, LEVE)
+  ok    one answer of three counts is read
+  ok    two answers to one command: not known
+  ok    an inherited reply: not known
+  ok    a getter reply: not known
+  ok    a getter count: not known
+  ok    no getter was run
+  ok    a Proxy reply: not known
+  ok    a Proxy count list: not known
+  ok    no Proxy trap was run
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+
+43 checks, all passing.
+GROUP_EXIT paypal-payouts-reconcile.test.ts 0
+TEST pending-payouts.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+✔ confirmed empty array and map remain empty (1.870923ms)
+✔ both hash shapes preserve legacy identifiers, amount and currency (0.859422ms)
+✔ empty recovery batches remain readable (0.217787ms)
+✔ missing envelope is unavailable (0.447803ms)
+✔ missing reply is unavailable (0.124587ms)
+✔ extra replies is unavailable (0.098327ms)
+✔ null hash is unavailable (0.122614ms)
+✔ string hash is unavailable (0.183727ms)
+✔ odd hash is unavailable (0.163626ms)
+✔ non-string key is unavailable (0.309575ms)
+✔ non-string value is unavailable (0.262866ms)
+✔ duplicate key is unavailable (0.218218ms)
+✔ empty key is unavailable (0.143826ms)
+✔ invalid JSON is unavailable (0.160041ms)
+✔ array record is unavailable (0.17932ms)
+✔ null record is unavailable (0.134853ms)
+✔ missing timestamp never releases a partially valid hash (0.241383ms)
+✔ negative timestamp never releases a partially valid hash (0.140001ms)
+✔ unsafe timestamp never releases a partially valid hash (0.094282ms)
+✔ timestamp string never releases a partially valid hash (0.106239ms)
+✔ missing currency never releases a partially valid hash (0.105619ms)
+✔ invalid currency never releases a partially valid hash (0.090826ms)
+✔ missing lines never releases a partially valid hash (0.089945ms)
+✔ null line never releases a partially valid hash (0.08623ms)
+✔ missing affiliate never releases a partially valid hash (0.094542ms)
+✔ blank affiliate never releases a partially valid hash (0.08018ms)
+✔ duplicate affiliate never releases a partially valid hash (0.083175ms)
+✔ zero cents never releases a partially valid hash (0.109124ms)
+✔ negative cents never releases a partially valid hash (0.133761ms)
+✔ fractional cents never releases a partially valid hash (0.129484ms)
+✔ string cents never releases a partially valid hash (0.11289ms)
+✔ unsafe cents never releases a partially valid hash (0.080281ms)
+✔ input records are left intact when any entry is invalid (0.16615ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.437817
+GROUP_EXIT pending-payouts.test.ts 0
+TEST affiliate-payouts.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+What can be paid today
+  ok    nothing waiting, nothing paid
+  ok    some still clearing
+  ok    what cleared has been paid
+  ok    paid past what cleared
+  ok    all of it still clearing
+  ok    a refund after a payout is money back
+  ok    no wait behaves exactly as before
+
+When the creator said they pay
+  ok    the 1st, seen on the 15th, is next month
+  ok    the 1st, seen on the 1st, is today
+  ok    the 28th exists in February
+  ok    the day after it is next month
+  ok    no promised day gives no date
+  ok    nothing past the 28th is allowed
+  ok    the date reads in American English
+
+How the promise reads
+  ok    1st
+  ok    2nd
+  ok    3rd
+  ok    11th, not 11st
+  ok    21st
+  ok    23rd
+  ok    a day and a wait
+  ok    no day promised says so plainly
+
+22 checks, all passing.
+GROUP_EXIT affiliate-payouts.test.ts 0
+TEST affiliate-pending-payouts-render.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+✔ unknown pending exposure hides new-batch controls without hiding recovery export (34.85619ms)
+✔ confirmed pending exposure restores existing batch controls (9.25758ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 53.207494
+GROUP_EXIT affiliate-pending-payouts-render.test.ts 0
+FAILED_GROUPS 0

@@ -1,3 +1,17 @@
+# Atualização C2 — 06/11/2026 00h18 (Fortaleza) — retorno financeiro #2722
+
+Esta atualização prevalece onde acrescenta novidade ao ponto de 00h05 imediatamente abaixo.
+
+- O canal fresco publicou candidato nominal do `#2722`: head EXATO `44f6c50ccdb12b849b21d9017e1c8bf7a3629ba2`, tree `2576cc3bdd2dd4e3b6e89a6c683fcc376a640305`; pai do corretivo `8b9b82364365e0d65457bf662650533db4ce9bac`.
+- C2 concluiu retorno independente no head exato, review GitHub `5795271817` (COMMENT porque a conta GitHub não permite REQUEST_CHANGES no próprio PR).
+- **MÉDIO original da lista de reembolsos FECHADO**: envelope Stripe List exato, `has_more === false`, no máximo 100 linhas, linhas estritas, `amount` inteiro seguro/não negativo e `status` textual; desconhecido lança antes de registro de crédito ou POST ao saldo.
+- Evidência reproduzida: `l9-invite-refund-list` 4/4, `l9-invite-credit-exact` 6/6, `creator-invites` 52/52, `refund-window` 4/4; total66/66. TS dirigido0, ESLint0, scanner3812/0 e diff-check limpo. O TSC global foi tentado e morto pelo ambiente com exit137; não é evidência de falha do produto.
+- **NÃO LIBERADO**: C2 confirmou independentemente o LOW financeiro do Revisor1. `invoice.payments?.data ?? []` ainda converte coleção expandida de pagamentos ausente/nula/ilegível em “nenhum pagamento” e não rejeita `has_more:true`; `refundedOn` pode assim somar zero e liberar crédito sem prova completa dos pagamentos/reembolsos.
+- Exigir lista de pagamentos exata e limitada, linhas/payment estritos, repetição da regressão do Revisor1 e dos ligados. Não incorporar o head `44f6c50c`; aguardar candidato nominal do controlador. C2 não editou produto, ramo, PR, CI ou reserva alheios.
+- Nenhuma vigia vazia de `#2601/#2695/#2692` foi acordada; nenhum retry, cancelamento, merge ou head move ocorreu.
+
+---
+
 # Ponto de parada C2 — 06/11/2026 00h05 (Fortaleza)
 
 ## Fontes e autoridade

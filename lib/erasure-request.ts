@@ -135,8 +135,13 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
       // C4-15 (3)(a)): their time, and a send that fails or finds the room just taken, would only ever come to
       // an address the store knows. They go to the server's log; the page always gives the privacy contact.
       afterAnswer(async () => {
-        const known = new Set(await storesKnownFor(email));
-        if (!(await knows(store, email, known))) return;
+        // An unknown library read (UnknownReplyError) is not "this store does not know them": the store's own list
+        // is still asked, and only when it does not hold the address does the unknown go to the log (afterAnswer).
+        const library = await storesKnownFor(email).then((ids) => ({ ids, unknown: null }), (error: unknown) => ({ ids: [], unknown: error }));
+        if (!(await knows(store, email, new Set(library.ids)))) {
+          if (library.unknown !== null) throw library.unknown;
+          return;
+        }
         const answer = await emailLink([store], email, input.origin);
         if (answer.status !== "sent") console.warn(`a deletion link asked from one store was not emailed: ${answer.status} (store ${store.sid})`);
       });
@@ -144,6 +149,7 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
     return { status: "sent" };
   }
   // Every store: which stores know the address, and the email, only after the answer, for the same reason.
+  // An unknown library read throws UnknownReplyError, which afterAnswer logs: never "no store knows it" in silence.
   afterAnswer(async () => {
     const stores: Store[] = [];
     for (const sid of (await storesKnownFor(email)).slice(0, MAX_ERASE_STORES)) {

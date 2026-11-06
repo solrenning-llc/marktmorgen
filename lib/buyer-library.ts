@@ -59,13 +59,17 @@ const LIBRARY_SALT = "nimbus-lib";
 const libraryKeys = (email: string) => personKeys(LIBRARY, LIBRARY_SALT, email);
 const linkKey = (token: string) => `nl:lib:link:${sha(`nimbus-lib-link:${token}`).slice(0, 40)}`;
 
-const ids = (reply: unknown) => (Array.isArray(reply) ? reply.filter((id): id is string => typeof id === "string" && STORE_ID.test(id)) : []);
-
-/** The ids of every store an address bought from or joined itself, at most MAX_LIBRARY_STORES: one command, whatever the quarters. */
+/**
+ * The ids of every store an address bought from or joined itself, at most MAX_LIBRARY_STORES: one command, whatever
+ * the quarters. Read in its exact shape (CX-123 rule 24): only a confirmed empty set is "no store knows it"; any other
+ * shape throws UnknownReplyError, so an erasure ask or a person's copy never takes an unknown for nothing to do.
+ */
 export async function storesKnownFor(email: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [all] = await redisPipeline([["SUNION", ...libraryKeys(email), ...joinedKeys(email)]]);
-  return [...new Set(ids(all))].slice(0, MAX_LIBRARY_STORES);
+  const replies = repliesFor(await redisPipeline([["SUNION", ...libraryKeys(email), ...joinedKeys(email)]]), 1);
+  const all = replies ? stringList(replies[0]) : null;
+  if (!all) throw new UnknownReplyError("a library's known stores");
+  return [...new Set(all.filter((id) => STORE_ID.test(id)))].slice(0, MAX_LIBRARY_STORES);
 }
 
 /** Forgets that this address bought from or joined the store with this id (lib/person-erasure.ts): in every quarter it can be in. */

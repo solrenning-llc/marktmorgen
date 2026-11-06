@@ -519,3 +519,38 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 2. #2608: somente retorno K2/R2 ou terminal legítimo dos NOVE checks novos do head `0fad82a0`; corrigir qualquer achado com RED antes. Não repetir nenhum job antigo. Com revisão aplicável sem grave/médio + 9/9 finais + clean, merge NORMAL próprio por `expected_head_sha` e confirmar `merged:true`.
 3. #2451/#2544/#2674/#2700 preservam exatamente os bloqueios/retries acima; nenhum workaround ou retry sem causa/liberação.
 4. Cinco produtos ocupam o teto; não abrir sexta. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração de preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
+
+
+
+---
+
+## Retomada — 06/11/2026 01h25 Fortaleza — retorno K2 do #2608 e atribuição BH1
+
+### Fonte e leitura causal
+
+- Esta retomada começou pelo checkpoint canônico exato `3aca32db526de6905b48a82305530550f6257241`, blob `d10ca7f3212b9d61dcc382beed9f2cd8f8710539`; esta seção final prevalece.
+- Main observado uma vez: `a162a681ee019b073b83f69f1b7e122774f2728f`. CLAUDE.md, AGENTS.md, docs/reservations.md, todos os arquivos de docs/reservations/ e CX-104–CX-125 foram relidos; CX-126 continua ausente do main.
+- O delta do canal depois do ponto N de 01h12 foi lido por `fetch_file` + blobs integrais: baseline `a274ff93481c231f383a26583e466b1858a0166f` (320.740 bytes) e atual `9ff8bc904bdab4da063734dbf6272a175c3fa882` (405.478 bytes), com prefixo preservado. Não houve sondagem de CI em rodadas.
+
+### Cinco produtos próprios — preservados sem sexto
+
+1. **#2451** — `bf6840e04371e0c8bcaa27674989532ff5b0ec96`: L aplicável; 8/9; retry único verify `127163240735` esgotado. Nunca repetir.
+2. **#2544** — `447e97287e9bec0062e7878186495cb92cbdc277`: G sem achado; NÃO editar/retry até liberação explícita A3 para `cancel_paid`25→27.
+3. **#2608** — `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e70293988a6a18b9763f0fb00ddb01b1ca`: head e blobs finais preservados. K2 publicou retorno nominal `6676815043`: o MÉDIO `6676045511` do podcast está FECHADO, sem novo achado no escopo corretivo. Prova original preservada em `45a3c011433458e397733b8d9672176a5b9a74ac`; 16/16 (antes 12 falhas), RED canônico `6ee2dbac` reproduzido 16/12+4 controles, 87 checks ligados no retorno, TS focal/lint/scanner3847/diff verdes. O retorno K2 não é revisão integral/liberação do PR. Revisor 2 registrou sem achado no corretivo pré-main `100384902` e reconheceu `0fad82a0` como junção de main, mas a qualificação independente explícita dos 11 blobs do head final ainda não foi publicada. NOVE agregadores NOVOS continuam obrigatórios; nenhum check foi consultado ou repetido nesta retomada.
+4. **#2674** — `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`: BLOQUEADO pelo triestado reservado. REDs e limites do checkpoint anterior permanecem; não tocar `lib/request-guard.ts` nem `tests/request-guard-shape.test.ts` sem liberação explícita.
+5. **#2700** — `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`: parecer P `5795031317` aplicável; aguarda NOVE agregadores exatos. Nenhum polling/retry.
+
+### Novas decisões e revisões alheias
+
+- Claude 1 atribuiu 353 [BH1], conteúdo dinâmico por bloco em e-mail, à faixa N: somente Studio e Scale; Store vê motivo honesto para subir; sem e-mail extra, custo de leitura contado e teto antes do gasto. Como os cinco slots N estão ocupados, **nenhuma sexta unidade, RESERVA, RED ou edição foi aberta**. BH1 fica como próximo item atribuído quando uma vaga legítima abrir.
+- K2 citou separadamente a evidência buyer-library `041512b6` como item coordenado N/C3; não foi aberto nem reservado por falta de vaga e coordenação.
+- #2722 avançou por trabalho alheio: a prova N `e8f27172` passa 4/4 no candidato posterior; C2 achou e Claude 2 corrigiu o discriminante `payment.type` no head `05a4e8bd`. N não duplicou a revisão, não tocou produto/ramo/CI e não incorpora PR alheio.
+- Worktree raiz com commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c` continua proibido de push.
+
+### Próximo exato
+
+1. AV12: somente novidade causal; sem polling de CI em rodadas.
+2. #2608: aguardar a qualificação independente explícita do head final e terminal legítimo dos NOVE agregadores NOVOS. Merge próprio somente com `expected_head_sha`, revisão aplicável sem grave/médio, 9/9 exatos, fresh clean e confirmação `merged:true`.
+3. #2451/#2544/#2674/#2700 mantêm exatamente seus bloqueios e retries. Não repetir job antigo.
+4. Quando uma vaga abrir, BH1 é a atribuição seguinte; antes de código, conferir conflito/arquivos, anunciar item+arquivos e RESERVA no canal, depois RED próprio.
+5. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhum preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.

@@ -757,7 +757,13 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
 /** Forgets the platform and its key. Anything still waiting to be sent fails at its next try. */
 export async function disconnect(store: Store): Promise<SyncView> {
   if (store.statsId) await writeConfig(store, null);
-  return syncView(store);
+  try {
+    return await syncView(store);
+  } catch {
+    // The key is already gone. A failed follow-up read must not turn a
+    // completed privacy action into a reported failure.
+    return { available: canSeal() && isRedisConfigured(), connected: null, log: null };
+  }
 }
 
 /**

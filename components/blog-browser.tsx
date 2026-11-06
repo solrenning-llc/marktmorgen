@@ -50,7 +50,7 @@ export function BlogBrowser({
                 type="button"
                 onClick={() => setCategory(option)}
                 aria-pressed={active}
-                className={`h-10 shrink-0 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
+                className={`h-11 shrink-0 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
                   active ? "bg-ink text-white" : "bg-white text-ink-soft ring-1 ring-line hover:text-ink hover:ring-line-strong"
                 }`}
               >

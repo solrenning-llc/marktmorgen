@@ -1,0 +1,192 @@
+/**
+ * 426 [BX2], unit 1: the rule that puts a store's earnings into months and
+ * sources (lib/earnings-by-month.ts; docs/bx2-earnings-design.md). Months are
+ * calendar months in the store's time zone; sources are kept apart with their
+ * provenance; currencies are never added together; refunds and disputes are
+ * taken off; a month a source could not be read in full is unknown, never a
+ * lower number and never zero; a month read in full with nothing in it is a
+ * confirmed zero; and nothing in the output ranks or rates the creator by
+ * revenue (561 [NE1]). Pure: synthetic records only.
+ */
+import {
+  EARNINGS_MONTHS,
+  SOURCE_WORDS,
+  earningsByMonth,
+  earningsMonths,
+  monthFloor,
+  readingSince,
+  type EarningsInput,
+  type ListReading,
+  type MoneyKind,
+  type ProviderReading,
+} from "@/lib/earnings-by-month";
+import { done, is, part } from "./check";
+
+const AT = Date.UTC(2026, 10, 6, 12, 0, 0); // 6 November 2026, 12:00 UTC
+const utc = (y: number, m: number, d: number, h = 12) => Date.UTC(y, m - 1, d, h);
+const FLOOR_OLDEST = Date.UTC(2025, 11, 1) - 14 * 3600_000;
+
+const list = (kind: MoneyKind, events: { id?: string; at: number; cents: number; currency: string }[], over: Partial<{ complete: boolean; reachedBack: number | null; since: number }> = {}): ListReading => ({
+  kind,
+  events,
+  since: over.since ?? FLOOR_OLDEST,
+  complete: over.complete ?? true,
+  reachedBack: over.reachedBack ?? null,
+});
+const stripe = (lists: ListReading[]): ProviderReading => ({ source: "stripe", lists });
+const input = (over: Partial<EarningsInput> = {}): EarningsInput => ({ at: AT, timeZone: "UTC", providers: [], manual: [], ...over });
+const month = (out: ReturnType<typeof earningsByMonth>, key: string) => out!.months.find((m) => m.month === key)!;
+const source = (out: ReturnType<typeof earningsByMonth>, key: string, name: string) => month(out, key).sources.find((s) => s.source === name)!;
+
+part("Twelve calendar months, newest first, in the store's time zone");
+is("the count", EARNINGS_MONTHS, 12);
+is("months from 6 November 2026 in UTC", earningsMonths(AT, "UTC"), [
+  "2026-11", "2026-10", "2026-09", "2026-08", "2026-07", "2026-06", "2026-05", "2026-04", "2026-03", "2026-02", "2026-01", "2025-12",
+]);
+is("on 1 November 01:00 UTC, São Paulo is still in October", earningsMonths(Date.UTC(2026, 10, 1, 1), "America/Sao_Paulo")[0], "2026-10");
+is("on 31 October 16:00 UTC, Tokyo is already in November", earningsMonths(Date.UTC(2026, 9, 31, 16), "Asia/Tokyo")[0], "2026-11");
+is("a month's floor: UTC midnight of the 1st less 14 hours, before any zone's midnight", monthFloor("2025-12"), FLOOR_OLDEST);
+is("the reading starts at the oldest month's floor", readingSince(AT, "UTC"), FLOOR_OLDEST);
+is("an unknown time zone gives nothing, never UTC in its place", earningsByMonth(input({ timeZone: "Mars/Olympus" })), null);
+is("a bad reading time gives nothing", earningsByMonth(input({ at: Number.NaN })), null);
+
+part("An event falls in the month of its own zone");
+{
+  const edge = Date.UTC(2026, 10, 1, 2); // 1 November 02:00 UTC = 31 October 23:00 in São Paulo
+  const events = [{ id: "cs_1", at: edge, cents: 5000, currency: "usd" }];
+  const inUtc = earningsByMonth(input({ providers: [stripe([list("sale", events)])] }));
+  const inSaoPaulo = earningsByMonth(input({ timeZone: "America/Sao_Paulo", providers: [stripe([list("sale", events)])] }));
+  is("UTC: November", (source(inUtc, "2026-11", "stripe") as { lines: unknown[] }).lines.length, 1);
+  is("São Paulo: October", (source(inSaoPaulo, "2026-10", "stripe") as { lines: { salesCents: number }[] }).lines[0].salesCents, 5000);
+  is("São Paulo: nothing in November", (source(inSaoPaulo, "2026-11", "stripe") as { lines: unknown[] }).lines, []);
+}
+
+part("Refunds and disputes are taken off, in the month they were recorded");
+{
+  const out = earningsByMonth(input({
+    providers: [stripe([
+      list("sale", [{ id: "cs_1", at: utc(2026, 10, 3), cents: 5000, currency: "usd" }, { id: "cs_2", at: utc(2026, 10, 9), cents: 2500, currency: "usd" }]),
+      list("sale", [{ id: "pi_x", at: utc(2026, 10, 3, 13), cents: 900, currency: "usd" }]),
+      list("renewal", [{ id: "in_1", at: utc(2026, 10, 20), cents: 1500, currency: "usd" }]),
+      list("refund", [{ id: "re_1", at: utc(2026, 10, 10), cents: 1000, currency: "usd" }, { id: "re_2", at: utc(2026, 11, 2), cents: 2500, currency: "usd" }]),
+      list("dispute", [{ id: "du_1", at: utc(2026, 10, 15), cents: 500, currency: "usd" }]),
+    ])],
+  }));
+  is("October, every part and the difference", (source(out, "2026-10", "stripe") as { lines: unknown[] }).lines, [
+    { currency: "usd", salesCents: 8400, renewalCents: 1500, enteredCents: 0, refundCents: 1000, disputeCents: 500, netCents: 8400 },
+  ]);
+  is("a refund in November of an October sale makes November negative, as it was", (source(out, "2026-11", "stripe") as { lines: unknown[] }).lines, [
+    { currency: "usd", salesCents: 0, renewalCents: 0, enteredCents: 0, refundCents: 2500, disputeCents: 0, netCents: -2500 },
+  ]);
+  is("the month's total", month(out, "2026-10").totals, [
+    { currency: "usd", salesCents: 8400, renewalCents: 1500, enteredCents: 0, refundCents: 1000, disputeCents: 500, netCents: 8400 },
+  ]);
+}
+
+part("Currencies are never added together");
+{
+  const out = earningsByMonth(input({
+    providers: [stripe([list("sale", [{ id: "a", at: utc(2026, 9, 2), cents: 1000, currency: "usd" }, { id: "b", at: utc(2026, 9, 3), cents: 700, currency: "EUR" }])])],
+    manual: [{ id: "m1", date: "2026-09-20", cents: 30000, currency: "usd" }],
+  }));
+  const line = (currency: string) => month(out, "2026-09").totals!.find((l) => l.currency === currency)!.netCents;
+  is("one line a currency, alphabetical", month(out, "2026-09").totals!.map((l) => l.currency), ["eur", "usd"]);
+  is("euros alone", line("eur"), 700);
+  is("dollars: Stripe and entered by you, same currency", line("usd"), 31000);
+}
+
+part("Entered by you: its own source, never verified, by the date typed");
+{
+  const out = earningsByMonth(input({ manual: [{ id: "m1", date: "2026-07-31", cents: 12000, currency: "usd" }, { id: "m2", date: "2026-08-01", cents: 500, currency: "gbp" }] }));
+  is("the words for each source", SOURCE_WORDS, { stripe: "Stripe", paypal: "PayPal", manual: "Entered by you" });
+  is("July", (source(out, "2026-07", "manual") as { lines: unknown[] }).lines, [{ currency: "usd", salesCents: 0, renewalCents: 0, enteredCents: 12000, refundCents: 0, disputeCents: 0, netCents: 12000 }]);
+  is("August, in pounds", (source(out, "2026-08", "manual") as { lines: { currency: string }[] }).lines[0].currency, "gbp");
+  const unread = earningsByMonth(input({ manual: null }));
+  is("entries that could not be read are unknown in every month", unread!.months.every((m) => m.sources.find((s) => s.source === "manual")!.state === "unknown"), true);
+  is("and the months' totals are not shown", unread!.months.every((m) => m.totals === null), true);
+  for (const [what, entry] of [
+    ["a date that does not exist", { id: "m", date: "2026-02-30", cents: 100, currency: "usd" }],
+    ["a date in a month to come", { id: "m", date: "2026-12-01", cents: 100, currency: "usd" }],
+    ["no amount", { id: "m", date: "2026-10-01", cents: 0, currency: "usd" }],
+    ["a fraction of a cent", { id: "m", date: "2026-10-01", cents: 1.5, currency: "usd" }],
+    ["no currency", { id: "m", date: "2026-10-01", cents: 100, currency: "" }],
+  ] as const) {
+    const bad = earningsByMonth(input({ manual: [entry] }));
+    is(`${what}: unknown, never left out quietly`, source(bad, "2026-10", "manual"), { source: "manual", state: "unknown", why: "invalid" });
+  }
+  const twice = earningsByMonth(input({ manual: [{ id: "m", date: "2026-10-01", cents: 100, currency: "usd" }, { id: "m", date: "2026-10-02", cents: 100, currency: "usd" }] }));
+  is("the same entry twice is unknown, never counted twice", source(twice, "2026-10", "manual"), { source: "manual", state: "unknown", why: "invalid" });
+  is("an entry before the twelve months is outside them, not an error", (source(earningsByMonth(input({ manual: [{ id: "m", date: "2025-11-30", cents: 100, currency: "usd" }] })), "2025-12", "manual") as { state: string }).state, "read");
+}
+
+part("A source that could not be read is unknown, never zero");
+{
+  const out = earningsByMonth(input({
+    providers: [stripe([list("sale", [{ id: "cs_1", at: utc(2026, 10, 3), cents: 5000, currency: "usd" }]), { kind: "refund", unread: true }])],
+    manual: [{ id: "m1", date: "2026-10-05", cents: 100, currency: "usd" }],
+  }));
+  is("every month of Stripe says why", out!.months.map((m) => m.sources.find((s) => s.source === "stripe")).every((s) => JSON.stringify(s) === JSON.stringify({ source: "stripe", state: "unknown", why: "unread" })), true);
+  is("no total is shown for a month with a source unknown", month(out, "2026-10").totals, null);
+  is("what was read is still shown, as its own source", (source(out, "2026-10", "manual") as { lines: { enteredCents: number }[] }).lines[0].enteredCents, 100);
+}
+
+part("A capped list proves only the months it reached");
+{
+  const reached = utc(2026, 8, 14); // the oldest record read: 14 August
+  const out = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "cs_9", at: utc(2026, 9, 1), cents: 100, currency: "usd" }, { id: "cs_8", at: reached, cents: 100, currency: "usd" }], { complete: false, reachedBack: reached })])] }));
+  is("September to November are read", ["2026-11", "2026-10", "2026-09"].map((k) => (source(out, k, "stripe") as { state: string }).state), ["read", "read", "read"]);
+  is("August, half read, is not shown as a lower number", source(out, "2026-08", "stripe"), { source: "stripe", state: "unknown", why: "not_reached" });
+  is("nor any month before it", (source(out, "2025-12", "stripe") as { state: string }).state, "unknown");
+  const floor = monthFloor("2026-09");
+  const at = (back: number) => (source(earningsByMonth(input({ providers: [stripe([list("sale", [], { complete: false, reachedBack: back })])] })), "2026-09", "stripe") as { state: string }).state;
+  is("reached exactly at the floor: a record of the same second may be next, so unknown", at(floor), "unknown");
+  is("reached a millisecond before the floor: read", at(floor - 1), "read");
+  is("capped with nothing reached: unknown everywhere", (source(earningsByMonth(input({ providers: [stripe([list("sale", [], { complete: false, reachedBack: null })])] })), "2026-11", "stripe") as { state: string }).state, "unknown");
+  const late = earningsByMonth(input({ providers: [stripe([list("sale", [], { complete: true, since: monthFloor("2026-06") })])] }));
+  is("a complete list that started later proves only from its start", [(source(late, "2026-06", "stripe") as { state: string }).state, (source(late, "2026-05", "stripe") as { state: string }).state], ["read", "unknown"]);
+}
+
+part("A record that cannot be understood makes its source unknown");
+for (const [what, event] of [
+  ["a negative amount", { id: "x", at: utc(2026, 10, 1), cents: -1, currency: "usd" }],
+  ["an amount that is not whole", { id: "x", at: utc(2026, 10, 1), cents: 10.5, currency: "usd" }],
+  ["a currency that is not three letters", { id: "x", at: utc(2026, 10, 1), cents: 100, currency: "US" }],
+  ["no time", { id: "x", at: Number.NaN, cents: 100, currency: "usd" }],
+  ["a time in a month to come", { id: "x", at: utc(2026, 12, 2), cents: 100, currency: "usd" }],
+] as const) {
+  const out = earningsByMonth(input({ providers: [stripe([list("sale", [event])])] }));
+  is(`${what}: unknown in every month`, out!.months.every((m) => m.sources[0].state === "unknown" && (m.sources[0] as { why: string }).why === "invalid"), true);
+}
+{
+  const twice = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "cs_1", at: utc(2026, 10, 1), cents: 100, currency: "usd" }]), list("sale", [{ id: "cs_1", at: utc(2026, 10, 1), cents: 100, currency: "usd" }])])] }));
+  is("the same record twice is unknown, never counted twice", source(twice, "2026-10", "stripe"), { source: "stripe", state: "unknown", why: "invalid" });
+  const old = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "cs_0", at: utc(2025, 11, 30), cents: 100, currency: "usd" }])])] }));
+  is("a record before the twelve months (read for the oldest month's floor) is left out, not an error", (source(old, "2025-12", "stripe") as { lines: unknown[] }).lines, []);
+  const huge = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "a", at: utc(2026, 10, 1), cents: Number.MAX_SAFE_INTEGER, currency: "usd" }, { id: "b", at: utc(2026, 10, 2), cents: 10, currency: "usd" }])])] }));
+  is("a sum past exact integers is unknown, never rounded", source(huge, "2026-10", "stripe"), { source: "stripe", state: "unknown", why: "too_large" });
+}
+
+part("A month read in full with nothing in it is a confirmed zero");
+{
+  const out = earningsByMonth(input({ providers: [stripe([list("sale", []), list("refund", [])])] }));
+  is("read, with no line", source(out, "2026-03", "stripe"), { source: "stripe", state: "read", lines: [], leftOut: [] });
+  is("and an empty total, not an unknown one", month(out, "2026-03").totals, []);
+}
+
+part("PayPal disputes are not read: said, not hidden");
+{
+  const paypal: ProviderReading = { source: "paypal", lists: [list("sale", [{ id: "pp_1", at: utc(2026, 10, 4), cents: 2000, currency: "usd" }]), list("refund", [])], notRead: ["dispute"] };
+  const out = earningsByMonth(input({ providers: [paypal] }));
+  is("read, with disputes left out", (source(out, "2026-10", "paypal") as { leftOut: string[] }).leftOut, ["dispute"]);
+  is("the month says so too", month(out, "2026-10").leftOut, [{ source: "paypal", kinds: ["dispute"] }]);
+}
+
+part("Nothing ranks or rates the creator by revenue (561 [NE1])");
+{
+  const out = earningsByMonth(input({ providers: [stripe([list("sale", [{ id: "cs_1", at: utc(2026, 10, 3), cents: 5000, currency: "usd" }])])] }));
+  is("the output's fields", Object.keys(out!).sort(), ["at", "months", "since", "timeZone"]);
+  is("a month's fields", Object.keys(month(out, "2026-10")).sort(), ["current", "leftOut", "month", "sources", "totals"]);
+  is("only the newest month is the current one", out!.months.map((m) => m.current), [true, false, false, false, false, false, false, false, false, false, false, false]);
+}
+
+done();

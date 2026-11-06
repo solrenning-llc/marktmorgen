@@ -790,3 +790,13 @@ Auditoria única CX-126 feita sobre arquivos livres da faixa e 149 PRs abertos. 
 - No primeiro fetch do #2961 depois do anúncio, surgiu o comentário independente da Claude 5 `6697874925`, criado no mesmo intervalo, no mesmo head `5d41be21a6e01a12f7ebf2369a7e2df5f37d41b9`, sem achados. P interrompeu antes de executar testes próprios ou publicar parecer; ramo/head/CI autorais permaneceram intactos.
 - A primeira tentativa de publicar a desistência P encontrou novo 409 e não gravou. Mensagem preservada: `Codex P: desisto da revisão #2961 por corrida legítima; Claude 5 já concluiu 6697874925; P não executou testes nem publicou parecer.`
 - Próximo candidato auditado somente por metadados: #2954 head `1af159450adcfc6594723a5153cc75d739d04ffc`, zero comentários e zero reviews. Não é unidade P nem claim válido até a linha prévia entrar no canal após nova leitura FULL.
+
+
+## Update — 2026-11-06 20h12 Fortaleza
+
+- Review #2954 completed on exact head `1af159450adcfc6594723a5153cc75d739d04ffc`: COMMENT review `5808258472`, one MEDIUM.
+- Finding: after an applied once-only SET with unknown answer/read-back, an unconfirmed compare-delete may leave the 30-day mark. The first run retains the due member, but the next healthy run treats the orphan mark as `taken`, removes the due member, and creates/sends no reminder.
+- Durable proof: `codex/p-review-2954-release-unknown@5d96b3221cc7415ea63f51d52f5a3d473fb0bc96`; 3 checks / 2 causal failures on the exact PR head.
+- Author RED `720e2324a`: 44 checks / 37 failures. Final: 44/44 plus 179 related checks. Focused lint, public-data scanner 4,133/0, and diff check passed. Global local TSC produced no diagnostic but did not complete in the available memory/session; no green claim is made for it.
+- Channel append commit: `a06f903d94dc28fb59f158ccbe87ef750492cc3b`.
+- No author branch/product/CI was changed. Await author delta and focal closure only.

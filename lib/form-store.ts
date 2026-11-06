@@ -143,13 +143,18 @@ function parseResponse(raw: unknown): FormResponse | null {
 /** A form's responses, newest first, and how many are kept in all. */
 export async function readResponses(statsId: string | null, formId: string, limit = KEPT_RESPONSES): Promise<{ responses: FormResponse[]; total: number }> {
   if (!statsId || !FORM_ID.test(formId) || !isRedisConfigured()) return { responses: [], total: 0 };
-  const [list, total] = await redisPipeline([
+  const what = "the form responses";
+  const [raw, total] = exactReplies(await redisPipeline([
     ["LRANGE", responsesKey(statsId, formId), 0, Math.max(0, Math.min(limit, KEPT_RESPONSES) - 1)],
     ["LLEN", responsesKey(statsId, formId)],
-  ]);
+  ]), 2, what);
+  const list = plainList(raw);
+  if (!list || typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new UnknownReply(what);
+  const responses = list.map(parseResponse);
+  if (responses.some(response => response === null)) throw new UnknownReply(what);
   return {
-    responses: (Array.isArray(list) ? list : []).map(parseResponse).filter((r): r is FormResponse => r !== null),
-    total: Number(total) || 0,
+    responses: responses as FormResponse[],
+    total,
   };
 }
 

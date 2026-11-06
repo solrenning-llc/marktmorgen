@@ -187,3 +187,101 @@ O lint foi executado com o config real e `--max-warnings=0`, sobre cópias com b
 Proveniência remota recebida do coordenador: create_tree remoto produziu a candidata `93384bd395d0f4c48b43b15b8320f84c5c1d1e3c`, e foi criado o filho sem ref `e358a3bfd1602fb2493e7183b96c1c1737ee1659`, com pai real `697f1b40a68c9e0f894cbf06d67b627bef3a857a`. O compare continuou bloqueado por quota403. **Equivalência remota de árvore/modos permanece pendente**, sem inferir files:[] ou ahead_by:1 apenas pela criação do filho. M não repetiu chamada de API ou efetuou escrita GitHub.
 
 Os logs limitados e seus metadados ficam em `validation-logs/typegen.{log,result.json}`, `validation-logs/strict-five-roots.{log,result.json}` e `validation-logs/eslint-evidence.{log,result.json}`. Os resultados comportamentais originais continuam os já registrados: autor4/16→20/0, própria25/1 e base focada0/1, com LOW condicional preexistente e sem perda de trabalho válido demonstrada.
+
+
+## Adendo de artefatos v2 — publicação central
+
+# Revisão M/#2858 — artefatos v2 e conclusão para COMMENT
+
+Head de produto revisado: `697f1b40a68c9e0f894cbf06d67b627bef3a857a`. Base do PR: `1224a5d3a4da2953c67a3324bd9acdf8e044be8f`. M é revisor independente; Claude 4 é autor do produto.
+
+**Conclusão mantida: pode entrar quanto à revisão independente, com uma observação LOW condicional e preexistente declarada ao autor.** Não há médio/grave sustentado pelas reproduções realizadas. Não é aprovação formal, confirmação de nove checks, suíte global ou equivalência remota de árvore.
+
+## Ancestral original preservado
+
+O coordenador informou publicação dos artefatos ORIGINAIS antes de autorizar runtimev2: ramo `codex/m-review-2858-assignments`, commit `06faff51d4381ebbc68168c6330a8253698df278`, tree `cc60c64bc2140cd64cc063e6e1ed2a8a2048c3ec`. Os blobs originais são:
+
+| Original | Git SHA-1 |
+| --- | --- |
+| Relatório `docs/reviews/m-2858-assignments.md` | `80fda9d0f173ad3a28be6c5732096a79dcfe46ed` |
+| Prova TS | `b5ae3729a6fc196bcca8ba4f226e3e31a7ca08b2` |
+| Runner | `dfd50a69c51f792de460b35534dbf95b08275350` |
+
+Esses arquivos locais não foram alterados para criar v2. O relatório original contém diff inteiro de cinco arquivos, blobs exatos, chamadores/transitivos, RED, erro do fixture then e retificação de grau. A v2 corrige somente ferramentas de prova de M, sem mudança no produto.
+
+## O que mudou em v2
+
+- Runner: argumentos `--git-cwd` e `--deps`, Git nativo `/usr/bin/git`, nome local `evaluatedModule` e remoção do rest não usado. Snapshots e nove validações de blob permanecem iguais.
+- Prova: World usa `typeof import` dos módulos reais assignment/person-copy e classe MemoryRedis real. O acesso global cru atravessa uma fronteira unknown explícita, sem any declarado.
+- O fixture do copier continua contendo somente os campos realmente usados pela seção de assignment; sua conversão a ErasureScope é explícita, não uma prova do escopo completo ou da autorização real.
+- A injeção proposital de retorno de pipeline inválido continua explícita. Não há stub de declaração para alterar a API do produto.
+- Os 26 casos, as asserções anteriores, os valores nil/corruptos e a string de falha residual foram preservados. Foram acrescentadas guardas de objeto/string na interpretação da cópia; nenhuma asserção anterior foi removida.
+
+O patch completo das duas ferramentas é `artifact-v2.patch`. `portability.patch` mantém a proposta inicial de parametrização separada. V2 não transforma o LOW em sucesso.
+
+## Verificações estáticas e histórico dos erros
+
+Todos os processos autorizados foram serializados, com preflight de pelo menos1,5GiB livres, heap1536MiB, timeout120s, log128KiB e monitor do mínimo livre. Não houve OOM, timeout, cruzamento do mínimo ou retry de processo por recurso.
+
+| Etapa | Resultado real |
+| --- | --- |
+| Nexttypegen oficial na cópia própria | PASS/saída0, 0,664s; ambient real de Next16.4.2, sem .d.ts vazio; tsconfig original não alterado |
+| Strict dos cinco roots do PR | PASS/saída0, 22,427s, zero diagnósticos. Não foi repetido depois |
+| Lint dos artefatos originais | FAIL/saída1, 3,726s: dois erros e um aviso. Runner: module e rest não usado; prova: any explícito. O OOM96MiB era tentativa anterior e permanece histórico |
+| Lint v2 inicial | PASS/saída0, 3,602s, zero diagnósticos |
+| Strict v2 inicial | FAIL/saída2, 17,346s: TS7006 no parâmetro record. A interseção com typeof globalThis conservava o any inferido pelo runnerJS incluído |
+| Correção da fronteira global | Alterado para `globalThis as unknown as { __M2858?: ProofWorld }`, conservando os imports de tipos reais. Não se silenciou regra nem se adicionou declaração fictícia |
+| Lint v2 final | **PASS/saída0, 3,678s**, zero diagnósticos, mínimo livre5.888.663.552 bytes |
+| Strict v2 final | **PASS/saída0, 30,283s**, zero diagnósticos, mínimo livre5.583.552.512 bytes |
+
+O config scratch de v2 inclui a prova TS e o runnerJS, estende o config real, preserva strict e os imports transitivos completos e usa ambient gerado oficialmente. **checkJs permanece false, herdado do projeto:** a checagem semântica estrita da v2 aplica-se à prova TypeScript, não certifica a semântica do runnerJavaScript. O runner foi coberto por lint e pela execução dos quatro modos. A checagem dos cinco roots de produto é separada e real.
+
+Não houve eslint-disable, redução de regras, grafo truncado, tipo/export vazio ou substituição dos tipos do produto por mocks. A interface tipada da fixture não é certificação da API ou dos serviços reais.
+
+## Runtime v2, somente após publicação ancestral
+
+Os quatro modos foram autorizados pelo coordenador depois de publicar os originais. Foram executados uma vez por modo, em sequência, com a mesma política de recursos. Os códigos de saída1 abaixo são **falhas preservadas e esperadas**, não globalgreen.
+
+| Modo v2 | Casos/PASS/FAIL | Saída | Tempo | Mínimo livre | Bytes de log |
+| --- | --- | --- | --- | --- | --- |
+| author-head | 20/20/0 | 0 | 1,651s | 6.281.224.192 | 2386 |
+| author-red | 20/4/16 | 1 | 1,562s | 6.274.650.112 | 27036 |
+| independent-head | 26/25/1 | 1 | 1,760s | 6.301.446.144 | 6867 |
+| residual-base | 1/0/1 | 1 | 1,438s | 6.300.782.592 | 4693 |
+
+Em todos os modos: nove blobs embutidos conferidos; cinco fontes locais inalteradas somaram140.960bytes; rede bloqueada no harness; Redis de memória existente; mocks não usados lançam se chamados inesperadamente. O runner mantém restauração do pipeline com finally na prova. O modo residual-base seleciona explicitamente só a mesma asserção residual, não mascara o restante como teste aprovado.
+
+Comando-base, com caminhos reais fornecidos e conferidos:
+
+```bash
+node v2/proofs/m/review-2858-assignments.mjs MODE \
+  --git-cwd /workspace/scratch/d1ece80b1417/m-source-recovery \
+  --deps /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules
+```
+
+O controlador limitador também definiu NODE_PATH para esse diretório e NEXT_TELEMETRY_DISABLED=1. As dependências reais lidas foram React19.2.8, Next16.4.2, esbuild0.28.2 e TypeScript5.9.3. Não houve instalação.
+
+## LOW, alcance causal e o que não foi demonstrado
+
+Inserir diretamente no estado interno do MemoryRedis `lessonexpor1|not-a-student` faz waitingWork informar uma linha/total1, enquanto submissionsOf filtra o who impossível. A página real mostra ao mesmo tempo `the first 0 of 1` e `Nothing is waiting`. A mesma asserção falha na base e no head.
+
+É condição de índice interno impossível; o writer público normal deriva who de hash do aluno autenticado. Não há nesta prova submissão válida gravada pelo writer público, nem evidência de trabalho válido perdido/omitido, vazamento, acesso entre alunos ou falha permanente de privacidade. O grau sustentado é LOW de apresentação, preexistente; a proposta inicial de MÉDIO foi retirada e permanece no histórico. Toda observação deve chegar ao autor por COMMENT central.
+
+Os controles continuam verificando legível/nil/ilegível, envelope desconhecido, tipos de prompt/switch, outro learner excluído da cópia, caminho interno omitido e SSR da página/componente. Nenhum ensaio é Redis nativo, upload real, comprador real ou fornecedor.
+
+## Identidade de fonte e limites
+
+A cópia própria tem base completa `2bfa8ade8f59555b8d57aa03e554a99092a1285b`, tree `3298708dd28b4342286fa86241e367f7fbc8fdbf`, mais os seis conteúdos SHA-exatos; sua tree local resulta na candidata `93384bd395d0f4c48b43b15b8320f84c5c1d1e3c`. O sexto é teste herdado necessário à identidade, sem virar root extra do strict de produto.
+
+O coordenador informou create_tree remoto93384 e filho sem ref `e358a3bfd1602fb2493e7183b96c1c1737ee1659`, pai697f. O compare remoto continuava403/pendente: equivalência de conteúdo e modos não é inferida. M não escreveu API, PR, comentário, ref ou CI.
+
+Não foram executados suíte global, os53 testes relatados pelo autor, client-bundles, build completo, browser, leitor real, produção, Redis nativo, pagamento, IA ou fornecedor. Não há nove checks completos alegados. A revisão não muda preço, limite, comissão, flag, gate, conteúdo ou dados de cliente. Custos reais permanecem desconhecidos, não zero.
+
+Logs e metadados completos limitados estão em validation-logs com os nomes typegen, strict-five-roots, eslint-evidence, eslint-artifacts-v2, strict-artifacts-v2, eslint-artifacts-v2-boundary, strict-artifacts-v2-boundary e os quatro modos v2. A publicação e o COMMENT continuam centralizados no coordenador.
+
+
+### Verificação remota posterior pelo coordenador
+
+Em 06/11/2026 às22:30UTC, compare697f1b40a68c9e0f894cbf06d67b627bef3a857a→e358a3bfd1602fb2493e7183b96c1c1737ee1659 retornou ahead_by:1, behind_by:0 e files:[], merge-base697f. Isso confirma a árvore93384bd395d0f4c48b43b15b8320f84c5c1d1e3c e seus modos contra a fonte real. O estado pendente narrado acima permanece histórico. Nenhuma referência do autor foi movida.
+
+Na publicação, o adendo permanece neste mesmo caminho reservado e os dois códigos v2 usam os mesmos caminhos da prova original; os bytes originais são recuperáveis no ancestral06faff51. Para reproduzir a partir da publicação use node proofs/m/review-2858-assignments.mjs MODE --git-cwd OBJECT_REPOSITORY --deps EXACT_NODE_MODULES; o prefixo v2 do comando histórico descreve apenas o workspace de validação.

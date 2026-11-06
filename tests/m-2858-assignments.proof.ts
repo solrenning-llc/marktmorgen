@@ -2,7 +2,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const w = (globalThis as any).__M2858;
+type ProofWorld = {
+  assignment: typeof import("@/lib/assignment");
+  redis: import("@/lib/redis-memory").MemoryRedis;
+  personCopy: typeof import("@/lib/person-copy");
+  COURSE: string;
+  LESSON: string;
+  WHO: string;
+  renderPage: () => Promise<string>;
+};
+const w = (globalThis as unknown as { __M2858?: ProofWorld }).__M2858;
 if (!w) throw new Error("Run through proofs/m/review-2858-assignments.mjs");
 const { assignment: a, redis, personCopy, COURSE, LESSON, WHO } = w;
 const OTHER = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
@@ -12,10 +21,17 @@ const waitingKey = `nl:course:${COURSE}:tasks:waiting`;
 const work = () => ({ text: "Synthetic work", file: { path: "private/synthetic/internal.pdf", name: "work.pdf", bytes: 100, type: "application/pdf" }, at: 1700000000, state: "waiting", feedback: "Synthetic feedback", reviewedAt: 0, tries: 1 });
 const rows = [{ lessonId: LESSON, who: WHO }];
 const scope = { learner: WHO, courses: [{ productId: "prd_proof", courseId: COURSE, lessonIds: [LESSON], moduleIds: [] }] };
-const copy = () => personCopy.COPIERS["lib/assignment.ts"](scope);
+const copy = async () => {
+  // The fixture supplies only the fields this real copier reads; unrelated scope fields are not fabricated.
+  const records = await personCopy.COPIERS["lib/assignment.ts"](scope as unknown as import("@/lib/erasure-rules").ErasureScope);
+  return records.map((record) => {
+    assert.ok(record !== null && typeof record === "object" && !Array.isArray(record));
+    return record as Record<string, unknown>;
+  });
+};
 async function replyWith(value: unknown, run: () => Promise<unknown>) {
   const original = redis.pipeline;
-  redis.pipeline = async () => value;
+  redis.pipeline = (async () => value) as typeof redis.pipeline;
   try { return await run(); } finally { redis.pipeline = original; }
 }
 
@@ -38,7 +54,8 @@ for (const raw of ["{", "", "null", "[]", "5", JSON.stringify({ ...work(), state
     assert.equal(records.length, 1);
     assert.equal(records[0].course, "prd_proof");
     assert.equal(records[0].lesson, LESSON);
-    assert.match(records[0].unread, /could not be read/);
+    assert.equal(typeof records[0].unread, "string");
+    assert.match(records[0].unread as string, /could not be read/);
     assert.doesNotMatch(JSON.stringify(records), /private\/synthetic|internal\.pdf/);
     assert.equal(redis.run(["GET", key()]), raw, "read does not erase the unread record");
   });

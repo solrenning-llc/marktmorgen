@@ -312,7 +312,7 @@ async function main(): Promise<void> {
   if (!shipped.ok) throw new Error(`not shipped: ${shipped.reason}`);
   for (const code of LANGUAGE_CODES) {
     await setLanguage(OWNER, code);
-    is(`${code}: the short sentence, word for word`, wordsIn(code).cardSoldBy?.(STORE), SHORT[code]);
+    is(`${code}: the short sentence, word for word`, wordsIn(code).cardSoldBy(STORE), SHORT[code]);
     is(`${code}: never wider than the Terms`, NEVER.filter((words) => SHORT[code].includes(words)), []);
     const html = await cardHtml("harbor", pan.product.id);
     is(`${code}: pasted in a frame, the button still goes straight to paying`, html.includes('action="/api/store/checkout"'), true);
@@ -340,7 +340,7 @@ async function main(): Promise<void> {
   const demoPan = await addProduct(HOUSE_OWNER, "Cast iron pan", "", "59", null);
   if (!demoPan.ok) throw new Error("no demo product");
   await setProductShipping(HOUSE_OWNER, demoPan.product.id, { cents: 0, region: "us", countries: ["US"], note: "" });
-  is("nor does the demo store's card", textOf(await cardHtml("demokitchen", demoPan.product.id)).includes(wordsIn("en").cardSoldBy?.(STORE) ?? SHORT.en), false);
+  is("nor does the demo store's card", textOf(await cardHtml("demokitchen", demoPan.product.id)).includes(wordsIn("en").cardSoldBy(STORE)), false);
   process.env.STRIPE_SECRET_KEY = "sk_test_eu_who_answers_stand_in";
   is("nor a card in test mode", textOf(await cardHtml("harbor", pan.product.id)).includes(SHORT.en), false);
   process.env.STRIPE_SECRET_KEY = "sk_live_eu_who_answers_stand_in";

@@ -15,6 +15,11 @@ import { sellsInTestMode } from "@/lib/stripe-connect";
  * own condition, as it already is for its buy button.
  */
 export function WhoAnswers({ store, className = "st-muted mt-2 text-center text-sm" }: { store: Store; className?: string }) {
-  if (isHouseStore(store) || (canSell(store) && sellsInTestMode(store))) return null;
+  if (!saysWhoAnswers(store)) return null;
   return <p className={className}>{speech(store).w.whoAnswers(store.name)}</p>;
+}
+
+/** Whether a real sale can happen in this store, so who answers for it is said: never in Stripe's test mode or on the demo store. */
+export function saysWhoAnswers(store: Store): boolean {
+  return !isHouseStore(store) && !(canSell(store) && sellsInTestMode(store));
 }

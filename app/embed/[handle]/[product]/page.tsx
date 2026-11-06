@@ -30,7 +30,7 @@ import { bookingWords } from "@/lib/buyer-words/booking";
 import { chargeNow } from "@/lib/call-deposit";
 import { slotWords } from "@/lib/slot-words";
 import { placeLine } from "@/lib/call-place";
-import { WhoAnswers } from "@/components/who-answers";
+import { WhoAnswers, saysWhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -316,6 +316,11 @@ export default async function EmbedCard({ params, searchParams }: Params) {
         : "";
   const image = product.image;
   const height = image ? CARD_HEIGHTS.picture : CARD_HEIGHTS.plain;
+  // In a frame, a button that goes straight to paying (a shipped product) leaves no room for the whole sentence on who
+  // answers for the sale (components/who-answers.tsx), so the line under the title says a short one of its own, wrapped,
+  // never cut: the card then grows past the frame and scrolls inside it rather than clip anything. The title leads to the
+  // product's page, where the whole sentence is; as a page of its own, the card has the whole one under it.
+  const soldBy = action.kind === "checkout" && open?.mode !== "page" && saysWhoAnswers(store);
   // Told what happened only on a listed site, and only while it may buy here.
   const messaging = open?.mode === "overlay" && open.live && open.site ? open.site : null;
   // Which product, never a price; and, from the script, the listed site it
@@ -335,7 +340,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     ) : null;
 
   const card = (
-      <article className="st-card flex h-full flex-col overflow-hidden p-4" style={{ boxShadow: "none" }}>
+      <article className={`st-card flex ${soldBy ? "min-h-full" : "h-full"} flex-col overflow-hidden p-4`} style={{ boxShadow: "none" }}>
         {image ? (
           <a href={page} {...aside} tabIndex={-1} className="em-cover -mx-4 -mt-4 mb-4 h-[160px] shrink-0 overflow-hidden" style={{ background: "var(--st-item)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -355,7 +360,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
                 {product.title}
               </a>
             </h1>
-            <p className="st-muted truncate text-sm">{store.name}</p>
+            {soldBy ? <p className="st-muted text-sm break-words">{w.cardSoldBy(store.name)}</p> : <p className="st-muted truncate text-sm">{store.name}</p>}
           </div>
         </div>
         <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -372,7 +377,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
             <p
               className="em-sum st-muted text-sm leading-relaxed"
               data-picture={image ? "" : undefined}
-              style={{ "--lines": product.title.length > LONG_TITLE ? 1 : 2 } as React.CSSProperties}
+              style={{ "--lines": product.title.length > LONG_TITLE || soldBy ? 1 : 2 } as React.CSSProperties}
             >
               {product.summary}
             </p>
@@ -422,7 +427,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   return (
     <div
       lang={lang.locale}
-      className={`st-page st-theme-${store.look.theme} h-screen`}
+      className={`st-page st-theme-${store.look.theme} h-screen${soldBy ? " overflow-y-auto" : ""}`}
       style={{ ...(lookStyle(store.look) as React.CSSProperties), background: "transparent" }}
       data-card-height={height}
     >

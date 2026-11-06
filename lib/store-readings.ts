@@ -30,6 +30,7 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { replyList, repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Store, ensureListId, storeRef } from "@/lib/store";
@@ -183,6 +184,25 @@ export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; 
 export const READING_COPY = KEEP_UNLESS_ERASED;
 
 /**
+ * The places a READING_COPY step answered, read only in its exact shape
+ * (CX-123 rule 24, review of #2865): a list read from its own slots
+ * (lib/redis-reply.ts, replyList; a hole, a Proxy, a getter or an inherited
+ * slot is refused, where Array#every skips a hole) of whole places from 1 to
+ * `names`, each after the one before, as the step makes them. Anything else
+ * is null, unknown: the caller keeps nothing and names nobody.
+ */
+function readingCopyPlaces(reply: unknown, names: number): number[] | null {
+  const places = replyList(reply);
+  if (!places || places.length > names) return null;
+  let last = 0;
+  for (const place of places) {
+    if (typeof place !== "number" || !Number.isSafeInteger(place) || place <= last || place > names) return null;
+    last = place;
+  }
+  return places as number[];
+}
+
+/**
  * Who a reading names by their address, for keeping it (READING_COPY): the
  * store's list (where its deleted people's prints are), the addresses in a
  * value, and the value without some of them.
@@ -259,9 +279,8 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     return { value: guard.without(value, new Set(names)), at: now, stale: false };
   };
   try {
-    const replies = await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]);
-    const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
-    const places = Array.isArray(reply) && reply.every((i) => Number.isInteger(i) && (i as number) >= 1 && (i as number) <= names.length) ? (reply as number[]) : null;
+    const replies = repliesFor(await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]), 1);
+    const places = replies ? readingCopyPlaces(replies[0], names.length) : null;
     if (!places) return await closed();
     if (!places.length) return { value, at: now, stale: false };
     return { value: guard.without(value, new Set(places.map((i) => names[i - 1]))), at: now, stale: false };

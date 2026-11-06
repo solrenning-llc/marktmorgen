@@ -314,6 +314,30 @@ async function main() {
     data: [{ ...currentHistory, id: "ch_succeededunpaidother0001", customer: unknownOther, created: NOW - 40 * DAY, status: "succeeded", paid: false }],
   };
   is("a succeeded but unpaid charge in a same-address customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: partialHistory.customer,
+    data: [currentHistory, { ...currentHistory, id: "ch_failedpaidown0001", created: NOW - 40 * DAY, status: "failed", paid: true }],
+  };
+  is("a failed but paid charge in this customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: unknownOther,
+    data: [{ ...currentHistory, id: "ch_failedpaidother0001", customer: unknownOther, created: NOW - 40 * DAY, status: "failed", paid: true }],
+  };
+  is("a failed but paid charge in a same-address customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: partialHistory.customer,
+    data: [currentHistory, { ...currentHistory, id: "ch_pendingbeforeown0001", created: NOW - 40 * DAY, status: "pending", paid: false }],
+  };
+  is("a pending charge older than this customer's first success is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: unknownOther,
+    data: [{ ...currentHistory, id: "ch_pendingbeforeother0001", customer: unknownOther, created: NOW - 40 * DAY, status: "pending", paid: false }],
+  };
+  is("a pending charge older than a same-address customer's first success is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
   world.historyReply = null;
   world.down = true;
   is("Stripe failing: unknown", (await a.read()).refund, { kind: "unknown", reason: "stripe_unread" });

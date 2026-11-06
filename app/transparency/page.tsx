@@ -21,14 +21,24 @@ const n = (value: number) => value.toLocaleString("en-US");
  * (lib/transparency.ts). Only real counts, from the day counting began.
  */
 export default async function TransparencyPage() {
-  const { since, years } = await transparencyCounts().catch(() => ({ since: null, years: [] as YearCounts[] }));
+  // A read that failed, or answered in an unknown shape, is said as not read: never "nothing counted" or a zero.
+  const read = await transparencyCounts().catch((error: unknown) => {
+    console.error("the transparency counts could not be read", error);
+    return null;
+  });
+  const since = read?.since ?? null;
+  const years: YearCounts[] = read?.years ?? [];
   return (
     <LegalPage title="Notices about content" eyebrow="Transparency" effective={null} legalNav={false}>
       <p>
         Anybody can tell us that something on a Marktmorgen store infringes their copyright or is otherwise illegal, with the
         form at <Link href="/report" className="text-black underline underline-offset-2 hover:no-underline">Report content</Link>. These are the notices we received and the ones we acted on, counted as they happen. Nothing here says who sent a notice or which store it was about.
       </p>
-      {!since ? (
+      {!read ? (
+        <p className="notice notice-info" role="status">
+          The counts could not be read just now. This does not mean no notice was received. Try again in a moment.
+        </p>
+      ) : !since ? (
         <p>No notice has been counted yet. Counting begins with the first notice.</p>
       ) : (
         <>

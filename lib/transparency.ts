@@ -10,6 +10,7 @@
  *   nl:transparency:since           ISO day counting began
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { REPORT_KINDS, type ReportKind } from "@/lib/takedown-rules";
 
 export type NoticeKind = ReportKind;
@@ -64,20 +65,27 @@ export type YearCounts = {
 /** The day counting began (null before the first count), and each year since, newest first. */
 export async function transparencyCounts(now = Date.now()): Promise<{ since: string | null; years: YearCounts[] }> {
   if (!isRedisConfigured()) return { since: null, years: [] };
-  const [since] = await redisPipeline([["GET", SINCE]]);
-  if (typeof since !== "string") return { since: null, years: [] };
+  // Only a start day that is not there is "nothing counted yet"; any other reply is unknown and throws (rule 24).
+  const [since] = repliesFor(await redisPipeline([["GET", SINCE]]), 1) ?? unknown("the day counting began");
+  if (since === null) return { since: null, years: [] };
+  if (typeof since !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(since)) unknown("the day counting began");
   const first = Number(since.slice(0, 4));
   const last = Number(yearOf(now));
   const years = Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => String(last - i));
-  const raws = await redisPipeline(years.map((y) => ["HGETALL", yearKey(y)]));
+  const raws = repliesFor(await redisPipeline(years.map((y) => ["HGETALL", yearKey(y)])), years.length) ?? unknown("a year's counts");
   return {
     since,
     years: years.map((year, i) => {
-      const flat = Array.isArray(raws[i]) ? (raws[i] as unknown[]).map(String) : [];
-      const get = (field: string) => {
-        const at = flat.findIndex((v, k) => k % 2 === 0 && v === field);
-        return at >= 0 ? Number(flat[at + 1]) || 0 : 0;
-      };
+      // An empty list is a year with nothing counted yet; anything but pairs of text, each count a whole number, is unknown.
+      const flat = stringList(raws[i]);
+      if (!flat || flat.length % 2 !== 0) unknown("a year's counts");
+      const counts = new Map<string, number>();
+      for (let k = 0; k < flat.length; k += 2) {
+        const value = /^\d{1,15}$/.test(flat[k + 1]) ? Number(flat[k + 1]) : null;
+        if (value === null) unknown("a year's counts");
+        counts.set(flat[k], value);
+      }
+      const get = (field: string) => counts.get(field) ?? 0;
       return {
         year,
         notices: { copyright: get("notice:copyright"), other: get("notice:other") },
@@ -86,4 +94,8 @@ export async function transparencyCounts(now = Date.now()): Promise<{ since: str
       };
     }),
   };
+}
+
+function unknown(what: string): never {
+  throw new UnknownReplyError(what);
 }

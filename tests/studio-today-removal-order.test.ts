@@ -64,6 +64,40 @@ async function main(): Promise<void> {
   is("the passkey that was removed is in none of them", lists.map((ids) => ids.includes("cred-today-due")), lists.map(() => false));
   is("the other passkey is in each", lists.map((ids) => ids.includes("cred-today-kept")), lists.map(() => true));
   is("and the removal was applied", (await listPasskeys(OWNER)).map((p) => p.id), ["cred-today-kept"]);
+
+  // Codex M's case on #2835 (review 5806799980): the page's own removal read fails once before it runs, so the
+  // removal is applied by the second-step checks instead; the list is still read only after them.
+  part("Today, when the page's first removal read fails once");
+  const SECOND = "today-removal-fault@example.com";
+  await claimHandle(SECOND, "todayremovalfault", "Today removal fault", "");
+  await ensureStatsId(SECOND);
+  await makePasskey(SECOND, "cred-fault-due").keep();
+  await makePasskey(SECOND, "cred-fault-kept").keep();
+  const dropKey = `nl:pk:drop:${hex(`nimbus-passkey-drop:${SECOND}`).slice(0, 40)}`;
+  await redis.pipeline([["SET", dropKey, JSON.stringify({ atOf: { "cred-fault-due": asked + REMOVAL_DAYS * 86_400_000 }, told: asked })]]);
+  const secondSession = await openSession(SECOND);
+  const original = redis.pipeline;
+  let faulted = false;
+  redis.pipeline = async (commands) => {
+    if (!faulted && commands.length === 1 && commands[0]?.[0] === "GET" && commands[0]?.[1] === dropKey) {
+      faulted = true;
+      throw new Error("SYNTHETIC_DROP_READ_FAULT");
+    }
+    return original.call(redis, commands);
+  };
+  answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${secondSession}` } }));
+  let faultTree: unknown = null;
+  try {
+    faultTree = await StudioPage({ searchParams: Promise.resolve({}) });
+  } finally {
+    redis.pipeline = original;
+    answering(null);
+  }
+  const faultLists = passkeyLists(faultTree);
+  is("the fault happened once, on the removal's first read", faulted, true);
+  is("the page still hands its passkey managers a list", faultLists.length > 0, true);
+  is("the removed passkey is in none of them", faultLists.map((ids) => ids.includes("cred-fault-due")), faultLists.map(() => false));
+  is("and the removal was applied by the second-step checks", (await listPasskeys(SECOND)).map((p) => p.id), ["cred-fault-kept"]);
   done();
 }
 

@@ -1,4 +1,4 @@
-import { dropCourseTasks } from "@/lib/assignment";
+import { applyCourseTaskDrops, dropCourseTasks, readCourseTaskDrops } from "@/lib/assignment";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -281,6 +281,21 @@ export async function POST(request: NextRequest) {
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
       // options holds one file per option as well as its own.
+      // A course's handed-in work is read before the product goes (Revisor 1 on #2810): a read that fails answers 503
+      // and removes nothing, so the work, its files and the room they take stay findable for the next try.
+      let before: Awaited<ReturnType<typeof readListing>>;
+      let beforeCourse: Awaited<ReturnType<typeof readCourse>> = null;
+      try {
+        before = await readListing(guarded.store, id);
+        if (before?.course) beforeCourse = await readCourse(before.course.id);
+      } catch (error) {
+        console.error("could not read a product or its course before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      const taskDrops = beforeCourse
+        ? await readCourseTaskDrops(beforeCourse).catch((error: unknown) => (console.error("could not read a course's handed-in work", error), null))
+        : [];
+      if (!taskDrops) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       const removed = await removeProduct(ref, id, async (going, store) => {
         if (!going.course) return true;
@@ -300,14 +315,18 @@ export async function POST(request: NextRequest) {
       result = removed.ok ? { ok: true, product: null } : removed;
       if (removed.ok) {
         const going = removed.product;
+        const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
         had.push(...imagePaths(going.image).map((pathname) => ({ pathname })));
         // A course takes its lessons with it: their records, and their files.
-        if (course) had.push(...filesInCourse(course));
+        if (removedCourse) had.push(...filesInCourse(removedCourse));
         // And the work its students handed in for its assignments (lib/assignment.ts).
-        if (course) {
-          const handed = await dropCourseTasks(course, storeKey(removed.store), removed.store).catch(() => [] as string[]);
+        if (removedCourse) {
+          // As read before the removal; a course that changed in between is read again here, and logged if it cannot be.
+          const handed = beforeCourse && beforeCourse.id === removedCourse.id
+            ? await applyCourseTaskDrops(beforeCourse, taskDrops, storeKey(removed.store), removed.store)
+            : await dropCourseTasks(removedCourse, storeKey(removed.store), removed.store).catch((error: unknown) => (console.error("could not read a removed course's handed-in work", error), [] as string[]));
           had.push(...handed.map((pathname) => ({ pathname })));
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
@@ -326,8 +345,8 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
-        if (course) {
-          await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        if (removedCourse) {
+          await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
         }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).

@@ -87,7 +87,7 @@ test("a product's course: every assignment read before the product goes (Revisor
   }
   const route = readFileSync("app/api/store/product/route.ts", "utf8");
   const read = route.indexOf("await readCourseTaskDrops(beforeCourse)");
-  const remove = route.indexOf("const removed = await removeProduct(ref, id);");
+  const remove = route.indexOf("const removed = await removeProduct(ref, id");
   assert.ok(read > 0 && remove > read, "the product route reads the course's work before it removes the product");
   assert.ok(route.slice(read, remove).includes('error: "unavailable" }, { status: 503 }'), "and answers 503 when it cannot");
   const lookup = route.indexOf("before = await readListing(guarded.store, id);");

@@ -620,6 +620,31 @@ test("a download of what was brought over reads its ids and that one entry, each
   assert.equal((await requestsIn(folder, window)) - before, DOWNLOAD_LOOKUP_UNITS + Math.ceil((3 + ORDERS_LISTING_COMMANDS) / ORDERS_UNIT_COMMANDS));
 });
 
+test("a brought-over entry removed after HKEYS is absent, not an unknown reply", async () => {
+  const { store, ids, token } = await linkStore(["Guide", "Archive"]);
+  const shop = { ...store, pastBuyers: true };
+  sessions = [];
+  const key = importedKey(shop.statsId!, BUYER);
+  await redis.pipeline([["HSET", key, ids[0], JSON.stringify({ at: 1, job: "api:1", items: null })]]);
+  const reference = importedReference(shop.statsId!, BUYER, ids[0]);
+  const beforeRace = redis.pipeline;
+  let removed = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const answers = await beforeRace(commands);
+    if (!removed && commands.some((command) => command[0] === "HKEYS" && command[1] === key)) {
+      removed = true;
+      await beforeRace([["HDEL", key, ids[0]]]);
+    }
+    return answers;
+  }) as typeof redis.pipeline;
+  try {
+    assert.equal(await findPurchase(shop, token, reference), null);
+    assert.equal(removed, true, "the field was removed between HKEYS and HGET");
+  } finally {
+    redis.pipeline = beforeRace;
+  }
+});
+
 test("a download the store has no room for reads nothing; a token or a reference not shaped like one takes nothing", async () => {
   const { store, refs, token, folder, window } = await linkStore();
   asked = 0;

@@ -23,6 +23,7 @@
  *   day record h:<answer>     answers; hc:<answer> the money of their sales
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, UnknownReplyError } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -37,8 +38,9 @@ const ANSWER_WITHIN_SECONDS = 30 * 86400;
 
 export async function heardOff(handle: string): Promise<boolean> {
   if (!isRedisConfigured()) return true;
-  const [member] = await redisPipeline([["SISMEMBER", OFF, handle]]);
-  return Number(member) === 1;
+  const reply = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
+  if (!reply || (reply[0] !== 0 && reply[0] !== 1)) throw new UnknownReplyError("the heard question setting");
+  return reply[0] === 1;
 }
 
 export async function setHeardOff(handle: string, off: boolean): Promise<void> {
@@ -55,7 +57,9 @@ export type HeardResult = "counted" | "already" | "invalid" | "off" | "unavailab
 export async function recordHeard(store: Store, sessionId: unknown, answer: unknown, now = Date.now()): Promise<HeardResult> {
   if (!isHeardAnswer(answer) || typeof sessionId !== "string" || !SESSION.test(sessionId)) return "invalid";
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return "unavailable";
-  if (await heardOff(store.handle)) return "off";
+  const off = await heardOff(store.handle).catch(() => null);
+  if (off === null) return "unavailable";
+  if (off) return "off";
   let session: Record<string, unknown>;
   try {
     session = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(sessionId)}`)) as Record<string, unknown>;

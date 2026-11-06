@@ -3,6 +3,11 @@ import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/l
 import { heardOff, recordHeard, setHeardOff } from "@/lib/heard";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StatsPanel } from "@/components/stats-panel";
+import { readStats, studioStats } from "@/lib/stats";
 
 const OWNER = "e2-a3-proof@example.com";
 const HANDLE = "e2a3proof";
@@ -80,6 +85,18 @@ async function main(): Promise<void> {
     is(`${name}: unknown must not read the provider, claim or count`, [outcome!, providerReads - readsBefore, await counts(), (await realPipeline([["GET", `nl:heard:done:${session}`]]))[0]], ["unavailable", 0, previous, null]);
     is(`${name}: next healthy request respects the same saved off`, await recordHeard(shop, session, "friend", NOW), "off");
   }
+  part("The real stats panel must not invent an enabled or disabled setting");
+  const stats = await readStats(shop, NOW);
+  if (!stats) throw new Error("the healthy statistics fixture did not load");
+  const data = studioStats(shop, stats, null, "none", []);
+  // The cast lets the pre-correction boolean-only interface render the unknown input for RED.
+  const panel = (ask: boolean | null) => renderToStaticMarkup(createElement(StatsPanel, { data, canExport: false, askHeard: ask as boolean, canSetHeard: true }));
+  const unknown = panel(null);
+  is("unknown setting has an explicit reload status", unknown.includes("Your question setting could not be read. Reload to try again.") && unknown.includes('role="status"'), true);
+  is("unknown setting offers neither guessed toggle action", unknown.includes("Stop asking") || unknown.includes("Ask buyers"), false);
+  is("confirmed enabled still offers stopping", panel(true).includes("Stop asking"), true);
+  is("confirmed disabled still offers asking", panel(false).includes("Ask buyers"), true);
+  is("the studio preserves unknown before passing the setting", /heardOff\(current\.handle\)\.catch\(\(\) => null\)/.test(readFileSync("app/studio/page.tsx", "utf8")), true);
   done();
 }
 

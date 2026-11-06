@@ -392,7 +392,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "flow-remove") {
       const result = await removeFlow(store, text(body.id, 40));
-      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, 404);
+      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "history_unconfirmed" ? 503 : 404);
     }
 
     return fail("invalid");

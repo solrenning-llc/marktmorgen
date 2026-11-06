@@ -14,12 +14,14 @@ import {store as redis} from './redis-stub';
 const list='G2HistoryRoomRace',id='a'.repeat(16),key=`nl:wf:ver:${list}:${id}`,slot='wv:'+id;
 const flow=(body:string):Flow=>({id,name:'Synthetic sequence',trigger:'joined',productId:null,createdAt:1,tag:'',active:false,steps:[{id:'b'.repeat(12),delayHours:0,subject:'Synthetic subject',body}]});
 const after=flow('The proposed next version.');
+// The workflow is saved: a version is kept only while its workflow is still there (Codex G on #1927).
+const saved=()=>redis.run(['SET',`nl:mail:flows:${list}`,JSON.stringify([after])]);
 test('control: sequential history writes retain and charge the complete list',async()=>{
- redis.clear();assert.equal(await keepFlowVersion(ROOM,list,flow('one'),after,1),true);assert.equal(await keepFlowVersion(ROOM,list,flow('two'),after,2),true);
+ redis.clear();saved();assert.equal(await keepFlowVersion(ROOM,list,flow('one'),after,1),true);assert.equal(await keepFlowVersion(ROOM,list,flow('two'),after,2),true);
  const held=redis.run(['LRANGE',key,0,-1]) as string[];assert.ok(Number(redis.run(['HGET',dataKey(ROOM)!,slot]))>=dataBytes(held,held.length));
 });
 test('recount after a refused old push cannot shrink the room of a newer third push',async()=>{
- redis.clear();assert.equal(await keepFlowVersion(ROOM,list,flow('Initial'),after,1),true);
+ redis.clear();saved();assert.equal(await keepFlowVersion(ROOM,list,flow('Initial'),after,1),true);
  const base=redis.pipeline.bind(redis);let phase=0;
  redis.pipeline=async batch=>{
   if(phase===0&&batch.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:flow-version-keep:'))){

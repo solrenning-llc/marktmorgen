@@ -1,6 +1,6 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListRaw, readFlowListStrict } from "@/lib/flow-list";
-import { changesWhatItDoes, dropFlowVersions, keepFlowVersion, readFlowVersions } from "@/lib/flow-versions";
+import { changesWhatItDoes, dropFlowVersions, keepFlowVersion, readFlowVersions, versionedFlowIds } from "@/lib/flow-versions";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
@@ -300,7 +300,7 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 
 export type FlowResult =
   | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | "history_room" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | "history_room" | "history_unconfirmed" };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -453,10 +453,18 @@ export async function removeFlow(store: Store, id: string): Promise<FlowResult> 
   });
   if (!removed) return { ok: false, reason: "unknown" };
   const { flows, next } = removed;
-  await dropFlowVersions(store, store.listId, id).catch((error) => console.error("forgetting a removed workflow's versions failed", error));
+  // Its earlier versions: a deletion that is not confirmed is said, never taken for done (Codex G on #1927); they stay in
+  // the list's index, so the store's forgetting still finds and deletes them.
+  const versionsGone = await dropFlowVersions(store, store.listId, id).then(
+    () => true,
+    (error: unknown) => {
+      console.error("forgetting a removed workflow's versions failed", error);
+      return false;
+    },
+  );
   // Its runs, their history, starts and queued steps: nothing of the people in it is kept.
   await purgeFlow(store, flows.find((f) => f.id === id)!).catch((error) => console.error("erasing a removed workflow's runs failed", error));
-  return { ok: true, flows: next };
+  return versionsGone ? { ok: true, flows: next } : { ok: false, reason: "history_unconfirmed" };
 }
 
 /**
@@ -523,8 +531,10 @@ export async function forgetStoreWorkflows(store: Store): Promise<void> {
   if (!store.listId || !isRedisConfigured()) return;
   const flows = await readFlowListStrict(store.listId);
   for (const flow of flows) await purgeFlow(store, flow);
-  // Each workflow's earlier versions go with it (Codex Reviewer 2 on #1927): a failed deletion throws, never left behind.
-  for (const flow of flows) await dropFlowVersions(null, store.listId, flow.id);
+  // Each workflow's earlier versions go with it (Codex Reviewer 2 on #1927), and so do those of a workflow already
+  // removed, found by the list's index (Codex G on #1927): a failed deletion throws, never left behind.
+  const versioned = new Set([...flows.map((flow) => flow.id), ...(await versionedFlowIds(store.listId))]);
+  for (const id of versioned) await dropFlowVersions(null, store.listId, id);
   await erase([forgetHeldCommand(store.listId), ["DEL", flowsKey(store.listId)]]);
 }
 

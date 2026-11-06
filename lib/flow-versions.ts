@@ -7,6 +7,12 @@
  *
  *   nl:wf:ver:<listId>:<flowId> -> list: the workflow before each of its last
  *                                  saves, newest first, "<ms>\n<json>"
+ *   nl:wf:ver:idx:<listId>      -> set: the workflows of the list that have
+ *                                  earlier versions kept, written in the same
+ *                                  step as each push and each deletion, so
+ *                                  forgetting a store finds every one of them,
+ *                                  also of a workflow already removed (Codex G
+ *                                  on #1927)
  *
  * What is kept is the workflow only: its trigger, its steps and their emails,
  * its goal. Never who is in it, never a run. Switching it on or off is not a
@@ -42,7 +48,12 @@ import { MAX_FLOW_VERSIONS } from "@/lib/flow-versions-rules";
 export { MAX_FLOW_VERSIONS };
 
 const versionsKey = (listId: string, flowId: string) => `nl:wf:ver:${listId}:${flowId}`;
+const indexKey = (listId: string) => `nl:wf:ver:idx:${listId}`;
+/** The workflows themselves (lib/flows.ts flowsKey): a version is pushed only while its workflow is still there. */
+const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const SLOT = (flowId: string) => `wv:${flowId}`;
+/** What a workflow's place in the list's index of kept versions takes, counted in its own slot. */
+const indexBytes = (flowId: string) => dataBytes([flowId], 1);
 
 /** What a workflow does, without whether it is on: two saves that differ only in that keep no version. */
 function whatItDoes(flow: Flow): string {
@@ -57,17 +68,24 @@ export function changesWhatItDoes(before: Flow, after: Flow): boolean {
 }
 
 /**
- * Pushes a version only while the list is as it was counted from: as long
- * (up to ARGV[4]) and with the same newest entry. 1 when kept, 0 when it
- * changed in between. Modelled by lib/redis-memory.ts.
+ * Pushes a version only while its workflow is still among the list's
+ * workflows (ARGV[5] is its id as the saved list writes it) and the list is as
+ * it was counted from: as long (up to ARGV[4]) and with the same newest entry;
+ * the workflow joins the list's index of kept versions in the same step.
+ * 1 when kept, 0 when the list changed in between, 2 when the workflow is gone
+ * (a save that finishes after its removal never brings its history back: Codex
+ * G on #1927). Modelled by lib/redis-memory.ts.
  */
-export const KEEP_FLOW_VERSION = `-- marktmorgen:flow-version-keep:v1
+export const KEEP_FLOW_VERSION = `-- marktmorgen:flow-version-keep:v2
+local flows = redis.call('GET', KEYS[2])
+if not flows or not string.find(flows, ARGV[5], 1, true) then return 2 end
 local n = redis.call('LLEN', KEYS[1])
 if n > tonumber(ARGV[4]) then n = tonumber(ARGV[4]) end
 if n ~= tonumber(ARGV[1]) then return 0 end
 if n > 0 and redis.call('LINDEX', KEYS[1], 0) ~= ARGV[2] then return 0 end
 redis.call('LPUSH', KEYS[1], ARGV[3])
 redis.call('LTRIM', KEYS[1], 0, tonumber(ARGV[4]) - 1)
+redis.call('SADD', KEYS[3], ARGV[6])
 return 1`;
 
 /** A workflow's kept list, on Redis's exact answer only: null when it cannot be known. */
@@ -97,16 +115,19 @@ export async function keepFlowVersion(store: DataStore, listId: string, before: 
     const kept = [entry, ...held].slice(0, MAX_FLOW_VERSIONS);
     // The push lands only on the list it was counted from (KEEP_FLOW_VERSION), so what it changes is known here: the
     // room moves by that, taken first when it grows, and only this push's own taking goes back when it is refused.
-    const grown = dataBytes(kept, kept.length) - dataBytes(held, held.length);
+    // The first version also takes the workflow's place in the list's index.
+    const grown = dataBytes(kept, kept.length) - dataBytes(held, held.length) + (held.length ? 0 : indexBytes(before.id));
     if (grown > 0) await needData(store, [{ slot: SLOT(before.id), bytes: grown }]);
-    const reply: unknown = await redisPipeline([["EVAL", KEEP_FLOW_VERSION, 1, key, held.length, held[0] ?? "", entry, MAX_FLOW_VERSIONS]]);
+    const named = `"id":${JSON.stringify(before.id)}`;
+    const reply: unknown = await redisPipeline([["EVAL", KEEP_FLOW_VERSION, 3, key, flowsKey(listId), indexKey(listId), held.length, held[0] ?? "", entry, MAX_FLOW_VERSIONS, named, before.id]]);
     const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
     if (answer === 1) {
       if (grown < 0) await giveData(store, [{ slot: SLOT(before.id), bytes: -grown }]);
       return true;
     }
-    // Changed meanwhile: nothing was pushed, and the room the newer push counted for itself is never touched.
-    if (answer === 0 && grown > 0) await giveData(store, [{ slot: SLOT(before.id), bytes: grown }]);
+    // Changed meanwhile, or the workflow is gone: nothing was pushed, and the room the newer push counted for itself is
+    // never touched.
+    if ((answer === 0 || answer === 2) && grown > 0) await giveData(store, [{ slot: SLOT(before.id), bytes: grown }]);
     // Any other answer: the push may have landed, and what it took stays counted.
     return false;
   } catch (error) {
@@ -152,15 +173,16 @@ export async function readFlowVersions(listId: string | null, flowId: string): P
 }
 
 /**
- * Deletes a workflow's earlier versions and answers, from the same step,
- * {records deleted (0 or 1), how many versions it held, their total length}:
- * the room given back is exactly what it removed. Modelled by lib/redis-memory.ts.
+ * Deletes a workflow's earlier versions and takes it out of the list's index,
+ * and answers, from the same step, {records deleted (0 or 1), how many
+ * versions it held, their total length, index places removed (0 or 1)}: the
+ * room given back is exactly what it removed. Modelled by lib/redis-memory.ts.
  */
-export const DROP_FLOW_VERSIONS = `-- marktmorgen:flow-version-drop:v1
+export const DROP_FLOW_VERSIONS = `-- marktmorgen:flow-version-drop:v2
 local items = redis.call('LRANGE', KEYS[1], 0, -1)
 local length = 0
 for _, item in ipairs(items) do length = length + string.len(item) end
-return {redis.call('DEL', KEYS[1]), #items, length}`;
+return {redis.call('DEL', KEYS[1]), #items, length, redis.call('SREM', KEYS[2], ARGV[1])}`;
 
 /**
  * Forgets the earlier versions of a workflow that is gone, and gives back
@@ -171,12 +193,30 @@ return {redis.call('DEL', KEYS[1]), #items, length}`;
  */
 export async function dropFlowVersions(store: DataStore | null, listId: string, flowId: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  const reply: unknown = await redisPipeline([["EVAL", DROP_FLOW_VERSIONS, 1, versionsKey(listId, flowId)]]);
+  const reply: unknown = await redisPipeline([["EVAL", DROP_FLOW_VERSIONS, 2, versionsKey(listId, flowId), indexKey(listId), flowId]]);
   const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
   const whole = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
-  if (!Array.isArray(answer) || answer.length !== 3 || (answer[0] !== 0 && answer[0] !== 1) || !whole(answer[1]) || !whole(answer[2]) || (answer[0] === 0 && (answer[1] !== 0 || answer[2] !== 0))) {
+  if (
+    !Array.isArray(answer) || answer.length !== 4 || (answer[0] !== 0 && answer[0] !== 1) || !whole(answer[1]) || !whole(answer[2]) || (answer[3] !== 0 && answer[3] !== 1) ||
+    (answer[0] === 0 && (answer[1] !== 0 || answer[2] !== 0))
+  ) {
     throw new Error("a workflow's earlier versions could not be confirmed deleted");
   }
-  const [deleted, count, length] = answer as [number, number, number];
-  if (store && deleted === 1) await giveData(store, [{ slot: SLOT(flowId), bytes: dataBytesOfLength(length, count) }]);
+  const [deleted, count, length, unindexed] = answer as [number, number, number, number];
+  const back = (deleted === 1 ? dataBytesOfLength(length, count) : 0) + (unindexed === 1 ? indexBytes(flowId) : 0);
+  if (store && back > 0) await giveData(store, [{ slot: SLOT(flowId), bytes: back }]);
+}
+
+/**
+ * The workflows of a list that have earlier versions kept, from its index, on
+ * Redis's exact answer only (a store's forgetting deletes them all, also those
+ * of a workflow already removed): throws when it cannot be known.
+ */
+export async function versionedFlowIds(listId: string): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
+  const reply: unknown = await redisPipeline([["SMEMBERS", indexKey(listId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0]) || reply[0].some((x) => typeof x !== "string")) {
+    throw new Error("the workflows with earlier versions could not be read");
+  }
+  return reply[0] as string[];
 }

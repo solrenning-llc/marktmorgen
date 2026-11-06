@@ -135,18 +135,22 @@ export class MemoryRedis {
         }
         // lib/flow-versions.ts KEEP_FLOW_VERSION: a version pushed only onto the list it was counted from.
         // lib/flow-versions.ts DROP_FLOW_VERSIONS: the list deleted, with how many versions it held and their length.
-        if (key.startsWith("-- marktmorgen:flow-version-drop:v1\n") && args[0] === "1" && args.length === 2) {
-          const items = (this.run(["LRANGE", args[1], "0", "-1"]) ?? []) as string[];
+        if (key.startsWith("-- marktmorgen:flow-version-drop:v2\n") && args[0] === "2" && args.length === 4) {
+          const [, list, index, flowId] = args;
+          const items = (this.run(["LRANGE", list, "0", "-1"]) ?? []) as string[];
           const length = items.reduce((sum, item) => sum + Buffer.byteLength(item, "utf8"), 0);
-          return [this.run(["DEL", args[1]]), items.length, length];
+          return [this.run(["DEL", list]), items.length, length, this.run(["SREM", index, flowId])];
         }
-        if (key.startsWith("-- marktmorgen:flow-version-keep:v1\n") && args[0] === "1" && args.length === 6) {
-          const [, list, length, head, entry, most] = args;
+        if (key.startsWith("-- marktmorgen:flow-version-keep:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, list, flows, index, length, head, entry, most, named, flowId] = args;
+          const saved = this.run(["GET", flows]);
+          if (typeof saved !== "string" || !saved.includes(String(named))) return 2;
           const n = Math.min(Number(this.run(["LLEN", list]) ?? 0), Number(most));
           if (n !== Number(length)) return 0;
           if (n > 0 && this.run(["LINDEX", list, "0"]) !== head) return 0;
           this.run(["LPUSH", list, entry]);
           this.run(["LTRIM", list, "0", String(Number(most) - 1)]);
+          this.run(["SADD", index, flowId]);
           return 1;
         }
         // DR1: one provider receipt and its campaign counter, atomically.

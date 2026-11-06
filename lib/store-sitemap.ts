@@ -12,7 +12,8 @@
  * What is listed is what the pages themselves tell a search engine to keep,
  * at the address each names as its own (its canonical): the front page while
  * it has something on it, every product a visitor can see, every page of the
- * store that is out, the blog and each published post. Nothing a store keeps
+ * store that is out, the community's About page while the creator has it on
+ * (233 [SK1]), the blog and each published post. Nothing a store keeps
  * back, nothing of a store switched off after notices, and nothing behind a
  * purchase. On a creator's live domain the addresses are the short ones the
  * domain serves; otherwise they are under marktmorgen.com/@handle.
@@ -30,6 +31,7 @@ import { POSTS_PER_PAGE, postSegment, publishedPosts, publishedTotal } from "@/l
 import { type SitemapSize, sitemapUnits } from "@/lib/public-read-rules";
 import { takePublicRequest } from "@/lib/traffic";
 import { SITE_URL } from "@/lib/site-url";
+import { aboutListed } from "@/lib/community-about";
 import type { Store } from "@/lib/store";
 
 /** The most posts listed: far past what a store's blog holds. */
@@ -98,6 +100,9 @@ export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.no
   for (const page of store.sitePages) {
     if (pageOut(page, nowSeconds)) out.push({ url: `${root}/${page.slug}` });
   }
+  // The community's About page, only while the creator has it on and its setting reads exactly so (lib/community-about.ts):
+  // one command, after the map is paid for (paidStoreSitemap) and counted in its cost (tests/plan-cost-registry.ts, sitemapRead).
+  if (await aboutListed(store)) out.push({ url: `${root}/community/about` });
   const posts = [];
   for (let page = 1; posts.length < MAX_POSTS && page <= Math.min(postPages, MAX_POST_PAGES); page += 1) {
     const { posts: some, total } = await publishedPosts(store.statsId, page);
@@ -138,6 +143,9 @@ export function storeRobots(store: Store): string {
     "Disallow: /thanks",
     "Disallow: /course",
     "Disallow: /community",
+    // The community's About page is for people who are not in it (233 [SK1]): the longer rule wins, so the rest stays shut.
+    // It answers not found, and asks not to be kept, while the creator has it off; the map lists it only while it is on.
+    "Allow: /community/about",
     "",
     `Sitemap: ${root}/sitemap.xml`,
     "",

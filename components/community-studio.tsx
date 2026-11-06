@@ -209,6 +209,7 @@ export function CommunityStudio({
             <Welcome config={config} busy={busy} run={run} problem={problem} />
             <Messages config={config} busy={busy} run={run} problem={problem} />
             <Room config={config} busy={busy} run={run} problem={problem} />
+            <AboutPage handle={handle} config={config} busy={busy} run={run} problem={problem} />
             <Spaces config={config} products={products} busy={busy} run={run} problem={problem} />
             <Levels config={config} rewards={rewards} courses={courses} busy={busy} run={run} problem={problem} />
           </>
@@ -407,6 +408,65 @@ function Messages({
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button type="submit" className="btn" disabled={!changed || busy !== null}>Save</button>
           {problem("dm")}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+/**
+ * The public About page (233 [SK1], lib/community-about.ts): off until the
+ * creator turns it on, and its counts a second choice. Off is off: the page
+ * answers not found.
+ */
+function AboutPage({
+  handle,
+  config,
+  busy,
+  run,
+  problem,
+}: {
+  handle: string;
+  config: CommunityConfig;
+  busy: string | null;
+  run: Runner;
+  problem: Problem;
+}) {
+  const [on, setOn] = useState(config.page.on);
+  const [counts, setCounts] = useState(config.page.counts);
+  const changed = on !== config.page.on || (on && counts !== config.page.counts);
+  return (
+    <section aria-labelledby="cm-about-page-title" className="card p-6 sm:p-8">
+      <h2 id="cm-about-page-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Public About page</h2>
+      <p className="mt-1 text-sm text-ink-soft">
+        A page anyone can open, and search engines can find, before joining: your description, the products that open
+        the community and are on sale now, with their prices. No post, lesson, event or member is ever on it.
+      </p>
+      <form
+        className="mt-5 space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (changed) run("about-page", { action: "about-page", on, counts: on && counts }, on ? "About page saved." : "About page switched off.");
+        }}
+      >
+        <label className="flex min-h-[44px] cursor-pointer items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 hover:bg-paper">
+          <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={on} onChange={(e) => setOn(e.target.checked)} />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">Show a public About page</span>
+            <span className="block text-ink-soft">Off, and the page does not exist.</span>
+          </span>
+        </label>
+        <label className={`flex min-h-[44px] items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 ${on ? "cursor-pointer hover:bg-paper" : "opacity-50"}`}>
+          <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" disabled={!on} checked={on && counts} onChange={(e) => setCounts(e.target.checked)} />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">Show how many people joined and how many posts the last 30 days had</span>
+            <span className="block text-ink-soft">The real numbers, small ones too, counted at most six hours before. Never anybody&apos;s name.</span>
+          </span>
+        </label>
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <button type="submit" className="btn" disabled={!changed || busy !== null}>Save</button>
+          {config.page.on ? <a href={`/@${handle}/community/about`} className="btn btn-ghost">Open it</a> : null}
+          {problem("about-page")}
         </div>
       </form>
     </section>

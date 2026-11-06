@@ -41,11 +41,14 @@ async function main(): Promise<void> {
 
   part("Made in the browser from the picture being shrunk, sent with it, refused unless exact");
   const shrinkSource = readFileSync("components/shrink-image.ts", "utf8");
-  is("shrink reads a 16 px sample of the canvas it drew and asks toneOf", /getImageData\(0, 0, TONE_SAMPLE, TONE_SAMPLE\)/.test(shrinkSource) && /toneOf\(/.test(shrinkSource), true);
+  // Codex K2 on #2790 (L2): a sample shrunk to 16 px averages one transparent pixel away; every pixel is read.
+  is("shrink reads every pixel of the canvas it drew and asks toneOf", /getImageData\(0, 0, source\.width, source\.height\)/.test(shrinkSource) && /toneOf\(/.test(shrinkSource) && !/TONE_SAMPLE/.test(shrinkSource), true);
   const editor = readFileSync("components/product-image-editor.tsx", "utf8");
   is("the editor sends it with the picture", /\.\.\.\(shrunk\.tone \? \{ tone: shrunk\.tone \} : \{\}\)/.test(editor), true);
   const route = readFileSync("app/api/store/image/route.ts", "utf8");
-  is("the route keeps it only when exact, and writes nothing else", /typeof body\.tone === "string" && TONE_PATTERN\.test\(body\.tone\) \? body\.tone : null/.test(route) && /\.\.\.\(tone \? \{ tone \} : \{\}\)/.test(route), true);
+  // Codex K2 on #2790 (L1), condition (1): a colour sent that is not exact refuses the picture, nothing written
+  // (tests/encanto-tone-route.test.ts runs the real route).
+  is("the route refuses a picture sent with a colour that is not exact", /body\.tone !== undefined && !\(typeof body\.tone === "string" && TONE_PATTERN\.test\(body\.tone\)\)/.test(route) && /\.\.\.\(tone \? \{ tone \} : \{\}\)/.test(route), true);
 
   part("Painted under the picture while it loads, nowhere else");
   redis.clear();

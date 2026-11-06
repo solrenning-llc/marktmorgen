@@ -2,9 +2,6 @@
 
 import { IMAGE_LONG_SIDE, MAX_IMAGE_BYTES, toneOf } from "@/lib/product-image";
 
-/** The side of the sample the picture's colour is read from (lib/product-image.ts, toneOf). */
-const TONE_SAMPLE = 16;
-
 /**
  * Shrinks a picture in the browser: never more than `longSide` on its long
  * side (IMAGE_LONG_SIDE unless told otherwise) and never more than a
@@ -69,18 +66,15 @@ export async function shrink(
 }
 
 /**
- * The picture's average colour, from a 16 px sample of the canvas it was drawn on (lib/product-image.ts, toneOf):
- * null for a picture with any transparency, or where the browser will not read the canvas back.
+ * The picture's average colour, from every pixel of the canvas it was drawn on (lib/product-image.ts, toneOf): null
+ * for a picture with any transparency, even one pixel (a sample shrunk to a few pixels would average it away; Codex
+ * K2 on #2790), or where the browser will not read the canvas back.
  */
 function sampleTone(source: HTMLCanvasElement): string | null {
   try {
-    const sample = document.createElement("canvas");
-    sample.width = TONE_SAMPLE;
-    sample.height = TONE_SAMPLE;
-    const context = sample.getContext("2d");
+    const context = source.getContext("2d");
     if (!context) return null;
-    context.drawImage(source, 0, 0, TONE_SAMPLE, TONE_SAMPLE);
-    return toneOf(context.getImageData(0, 0, TONE_SAMPLE, TONE_SAMPLE).data);
+    return toneOf(context.getImageData(0, 0, source.width, source.height).data);
   } catch {
     return null;
   }

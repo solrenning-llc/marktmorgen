@@ -210,11 +210,12 @@ async function main() {
 
     part("Review L1: a record that cannot be read leaves the due list and never holds the codes behind it");
     await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due"]]);
+    // Scheduled first: the store's cap counts the unreadable records too.
+    is("the healthy code is scheduled", (await sched.scheduleCode(shop, asked, { start, end }, NOW)).ok, true);
     for (let i = 0; i < sched.DUE_PER_RUN; i += 1) {
       const bad = `promo_bad${String(i).padStart(2, "0")}`;
       await redis.pipeline([["HSET", `nl:dsched:${STATS}`, bad, "{not json"], ["ZADD", "nl:dsched:due", start - 1, `${SID}|${STATS}|${bad}`]]);
     }
-    await sched.scheduleCode(shop, asked, { start, end }, NOW);
     calls = [];
     const first = await sched.activateScheduledCodes(Date.now() + 10_000, start, deps);
     const second = await sched.activateScheduledCodes(Date.now() + 10_000, start + RETRY_SECONDS, deps);

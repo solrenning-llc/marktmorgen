@@ -5,12 +5,16 @@
  * description and the store's book of proposals, which it reads and writes
  * back whole.
  *
- *   - The book is measured first (an exact STRLEN), and the call takes the
- *     door's one request and exactly apiReadUnits of its envelope.
+ *   - All but the book is taken first; the book is measured under its lock
+ *     (an exact STRLEN, where no other change can make it grow), and the rest
+ *     is taken before it is read: the call takes the door's one request and
+ *     exactly apiReadUnits of its envelope at what the book weighed.
  *   - From an empty book to one of more than a megabyte, what it reads and
  *     what it writes back stay inside that envelope.
  *   - With too few requests left it is refused with the door's sentence:
- *     the book is not locked, read or written, and nothing is proposed.
+ *     the book is not locked, read or written, and nothing is proposed; with
+ *     enough for all but the book, it is refused once the book is weighed,
+ *     nothing of it is read, and its lock is let go.
  *
  * Synthetic stores and keys only; no outside request.
  */
@@ -35,8 +39,15 @@ const isRecord = (c: Command) => {
 };
 
 let reads: { command: Command; bytes: number; sent: number }[] = [];
+// Set by a check: run just before the book's lock is taken, as another key's proposal finished in between.
+let beforeLock: (() => Promise<void>) | null = null;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: Command[]) => {
+  if (beforeLock && batch.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:agent:book:lock:"))) {
+    const run = beforeLock;
+    beforeLock = null;
+    await run();
+  }
   const answers = await real(batch);
   batch.forEach((command, i) => {
     if (!isRecord(command)) return;
@@ -109,10 +120,32 @@ async function main(): Promise<void> {
     is(`${tool}: proposed, and took 1 + ${units}`, [answered.body.result?.isError ?? null, after - before], [false, 1 + units]);
   }
 
+  part("A book that grew before the lock was taken is paid at what it holds under the lock");
+  {
+    // Another key's proposals land between the count and the lock: what is read must still be what was paid for.
+    const grown = await store();
+    let underLock = 0;
+    beforeLock = async () => {
+      // The other key's own reads are its own, not this call's.
+      const ours = reads.slice();
+      for (let i = 0; i < 40; i += 1) {
+        await addProposal({ ...grown, statsId }, PRODUCT_DESCRIPTION, { target: `other${i}`, before: words(4_900), after: words(4_900), asked: { by: "mcp", who: "key_y" } });
+      }
+      underLock = await held();
+      reads = ours;
+    };
+    const before = await allowanceUsed(await store(), "api");
+    const answered = await call({ product: p, description: words(1_000) });
+    const after = await allowanceUsed(await store(), "api");
+    const work = addWork(listingsWork(3 * listingsToRead(await store(), [p])), proposeWork(underLock, PRODUCT_DESCRIPTION.maxBytes));
+    const read = reads.reduce((total, r) => total + r.bytes, 0);
+    is(`grown under the lock to ${underLock} bytes: proposed, ${read} bytes read within ${work.bytes}, and took 1 + ${apiReadUnits(work)}`, [answered.body.result?.isError ?? null, read <= work.bytes, after - before], [false, true, 1 + apiReadUnits(work)]);
+  }
+
   part("From an empty book to more than a megabyte, what is read and written stays inside the envelope");
   // Other products' proposals waiting, each near its kind's ceiling, so the book passes a megabyte.
   const s = await store();
-  for (let i = 0; i < 45; i += 1) {
+  for (let i = 40; i < 46; i += 1) {
     await addProposal({ ...s, statsId }, PRODUCT_DESCRIPTION, { target: `other${i}`, before: words(4_900), after: words(4_900), asked: { by: "mcp", who: "key_x" } });
   }
   is("the book is past a megabyte", (await held()) > 1_000_000, true);
@@ -123,6 +156,21 @@ async function main(): Promise<void> {
     const sent = reads.reduce((total, r) => total + r.sent, 0) + answered.sent;
     is(`${label}: ${reads.length} record commands, ${read} bytes read and ${sent} written or sent, within ${work.commands}, ${work.bytes} and ${work.sent}`, [answered.body.result?.isError ?? null, reads.length <= work.commands, read <= work.bytes, sent <= work.sent], [false, true, true, true]);
     is(`${label}: it takes more than the door's one request`, apiReadUnits(work) > 1, true);
+  }
+
+  part("Enough for all but the book: refused once the book is weighed, nothing of it read, its lock let go");
+  {
+    const now = await store();
+    const first = apiReadUnits(addWork(listingsWork(3 * listingsToRead(now, [p])), proposeWork(0, PRODUCT_DESCRIPTION.maxBytes)));
+    const left = allowanceFor(now, "api") - (await allowanceUsed(now, "api"));
+    // The door's one and the part before the book are left; the book, past a megabyte, is not covered.
+    if (left > 1 + first) await takeAllowance(now, "api", left - 1 - first);
+    const bookBefore = (await real([["GET", bookKey]]))[0];
+    const answered = await call({ product: p, description: words(300) });
+    const bookReads = reads.filter((r) => String(r.command[0]) === "GET" && String(r.command[1]) === bookKey);
+    const lockLeft = (await real([["EXISTS", `nl:agent:book:lock:${statsId}`]]))[0];
+    is("refused with the door's sentence, which says the requests it already took stay counted", [answered.body.error?.code ?? null, /requests/i.test(answered.body.error?.message ?? ""), /stay counted/i.test(answered.body.error?.message ?? "")], [-32001, true, true]);
+    is("the book was weighed but not read, holds the same, and its lock is let go", [bookReads.length, (await real([["GET", bookKey]]))[0] === bookBefore, Number(lockLeft)], [0, true, 0]);
   }
 
   part("With too few requests left, refused with the door's sentence, and the book is not touched");

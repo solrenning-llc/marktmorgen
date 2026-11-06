@@ -75,7 +75,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 function subscription(status: string, over: Record<string, unknown> = {}, invoice: Record<string, unknown> = {}): Record<string, unknown> {
-  const period = paidPeriod();
+  const period = paidPeriod(NOW * 1_000);
   return {
     id: SUB,
     status,
@@ -95,7 +95,7 @@ async function setup() {
   emails.length = 0;
   await claimHandle(owner, handle, "Renewal unpaid shop", "");
   await ensureStatsId(owner);
-  await setSubscription(owner, { customerId: "cus_RenewalUnpaid01", subscriptionId: SUB, active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+  await setSubscription(owner, { customerId: "cus_RenewalUnpaid01", subscriptionId: SUB, active: true, tier: "pro", cycle: "month", period: paidPeriod(NOW * 1_000) });
   return (await storeForEmail(owner))!;
 }
 
@@ -112,7 +112,7 @@ async function main() {
     is("an active plan is not unpaid", paid.state === "active" && paid.renewalUnpaid, false);
     const trial = stateOf(subscription("trialing", { trial_end: NOW + 5 * DAY }));
     is("a trial is not unpaid", trial.state === "active" && trial.renewalUnpaid, false);
-    const period = paidPeriod();
+    const period = paidPeriod(NOW * 1_000);
     const afterTrial = stateOf(subscription("past_due", { trial_end: period.start }));
     is("the first payment after a trial is still not a running plan", afterTrial.state, "inactive");
   }
@@ -139,7 +139,7 @@ async function main() {
     } finally {
       clock.mock.restore();
     }
-    await setSubscription(owner, { active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+    await setSubscription(owner, { active: true, tier: "pro", cycle: "month", period: paidPeriod(NOW * 1_000) });
     is("a write that does not say keeps the first day", (await storeForEmail(owner))!.renewalUnpaidSince, since);
     is("paid: written again", await recordState((await storeForEmail(owner))!, stateOf(subscription("active"))), true);
     const paid = (await storeForEmail(owner))!;
@@ -147,7 +147,7 @@ async function main() {
     is("paid: back in the list of stores that pay", (await members(PAYING_INDEX)).includes(storeRef(paid)), true);
 
     await recordState(paid, stateOf(subscription("past_due")));
-    await setSubscription(owner, { subscriptionId: "sub_AnotherPlan0001", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+    await setSubscription(owner, { subscriptionId: "sub_AnotherPlan0001", active: true, tier: "pro", cycle: "month", period: paidPeriod(NOW * 1_000) });
     is("another subscription starts paid up", (await storeForEmail(owner))!.renewalUnpaidSince, 0);
     await recordState((await storeForEmail(owner))!, { ...stateOf(subscription("past_due")) });
     await setSubscription(owner, { active: false });
@@ -215,7 +215,7 @@ async function main() {
 
     // The first payment after a trial is not a renewal: left to the daily job.
     await setup();
-    const period = paidPeriod();
+    const period = paidPeriod(NOW * 1_000);
     list = [subscription("past_due", { trial_end: period.start })];
     await sendFailedPlanNotices();
     is("after a trial, nothing is recorded as an unpaid renewal", (await storeForEmail(owner))!.renewalUnpaidSince, 0);

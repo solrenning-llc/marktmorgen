@@ -14,7 +14,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { noteProduct, orderRoom, upsertContact } from "@/lib/contacts";
 import { enroll } from "@/lib/flows";
 import type { Store } from "@/lib/store";
@@ -67,7 +67,8 @@ export async function listOrder(store: Store, order: ListedOrder): Promise<"done
   const key = listedKey(order.sessionId);
   // This run's own claim (lib/claim-mark.ts): OK, or answered in another shape with our value read back. Taken by
   // another run, or there already: "already". Unknown: nothing is done now, and the next run asks again.
-  const claimed = await claimMark(key, WORKING_SECONDS);
+  const value = claimValue();
+  const claimed = await claimMark(key, WORKING_SECONDS, value);
   if (claimed === "taken") return "already";
   if (claimed === "unknown") return "skip";
   const products = order.products.filter((p, i) => order.products.findIndex((q) => q.id === p.id) === i);
@@ -103,7 +104,8 @@ export async function listOrder(store: Store, order: ListedOrder): Promise<"done
     return "done";
   } catch (error) {
     console.error("putting an order on the list failed", error);
-    await redisPipeline([["DEL", key]]).catch(() => null);
+    // Only our own claim is let go (Revisor 1 on #2719): one that ran out and was taken by another run stays its.
+    await releaseMark(key, value);
     return "skip";
   }
 }

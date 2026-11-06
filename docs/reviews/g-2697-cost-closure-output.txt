@@ -1,0 +1,109 @@
+
+A first-use minute window crosses UTC midnight
+  ok    old window still enforces its six admitted calls
+  ok    real route admitted exactly five residual plus 1,440 full windows
+  ok    one previous-day call is excluded from the day count
+{"withinDay":8645,"proposedAttemptCeiling":8640,"proposedExtraCommandCeiling":43200,"admittedTimesFive":43225,"scope":"route admission only; no provider or real startPitch work"}
+  FAIL  AI minute limiter alone proves at most 8,640 UTC-day draft admissions
+        expected true
+        got      false
+
+4 checks, 1 failing.
+=== g-2697-outreach-snapshot.proof.ts ===
+
+Exact known state before page read remains controlled
+  ok    known permitted state writes the last permitted draft
+  ok    local: existing refusal control
+  ok    global: existing refusal control
+  ok    day: existing refusal control
+
+Fresh confirmed state changes during source read are honored before model work
+  ok    local: interleaving really changed Redis
+  ok    local: source read cannot bypass the current refusal
+  ok    local: no extra draft counted after refusal
+  ok    global: interleaving really changed Redis
+  ok    global: source read cannot bypass the current refusal
+  ok    global: no extra draft counted after refusal
+  ok    day: interleaving really changed Redis
+  ok    day: source read cannot bypass the current refusal
+  ok    day: no extra draft counted after refusal
+
+13 checks, all passing.
+
+=== g-2697-return-boundaries.proof.ts ===
+
+Exact known state before page read remains controlled
+  ok    known permitted state writes the last permitted draft
+  ok    local: existing refusal control
+  ok    global: existing refusal control
+  ok    day: existing refusal control
+
+Fresh confirmed state changes during source read are honored before model work
+  ok    local: interleaving really changed Redis
+  ok    local: source read cannot bypass the current refusal
+  ok    local: no extra draft counted after refusal
+  ok    global: interleaving really changed Redis
+  ok    global: source read cannot bypass the current refusal
+  ok    global: no extra draft counted after refusal
+  ok    day: interleaving really changed Redis
+  ok    day: source read cannot bypass the current refusal
+  ok    day: no extra draft counted after refusal
+
+Return: unknown fresh slots and changed domain
+  ok    unknown fresh reply refuses without model
+  ok    one new bounded roundtrip
+  ok    unknown fresh reply refuses without model
+  ok    one new bounded roundtrip
+  ok    unknown fresh reply refuses without model
+  ok    one new bounded roundtrip
+  ok    unknown fresh reply refuses without model
+  ok    one new bounded roundtrip
+  ok    unknown fresh reply refuses without model
+  ok    one new bounded roundtrip
+  ok    unknown fresh reply refuses without model
+  ok    one new bounded roundtrip
+  ok    unknown fresh reply refuses without model
+  ok    one new bounded roundtrip
+  ok    documented decoded numeric GET zero remains valid
+  ok    changed subdomain permits real known buyer draft
+  ok    changed domain uses one five-command roundtrip
+  ok    other domain stop or unknown never invokes model
+  ok    all other domain slots checked
+  ok    other domain stop or unknown never invokes model
+  ok    all other domain slots checked
+  ok    other domain stop or unknown never invokes model
+  ok    all other domain slots checked
+  ok    other domain stop or unknown never invokes model
+  ok    all other domain slots checked
+
+38 checks, all passing.
+
+=== outreach-counter-admission.test.ts ===
+PASS find refuses missing counter before provider work
+PASS find refuses empty counter before provider work
+PASS find refuses partial counter before provider work
+PASS find refuses extra counter before provider work
+PASS find refuses text counter before provider work
+PASS find refuses null counter before provider work
+PASS find refuses zero counter before provider work
+PASS find refuses negative counter before provider work
+PASS find refuses unknown SET counter before provider work
+PASS find refuses a counter timeout
+PASS draft refuses missing counter before provider work
+PASS draft refuses empty counter before provider work
+PASS draft refuses partial counter before provider work
+PASS draft refuses extra counter before provider work
+PASS draft refuses text counter before provider work
+PASS draft refuses null counter before provider work
+PASS draft refuses zero counter before provider work
+PASS draft refuses negative counter before provider work
+PASS draft refuses unknown SET counter before provider work
+PASS draft refuses a counter timeout
+PASS confirmed daily counters preserve sixty reads and the original expiry
+PASS confirmed AI counters preserve the existing minute limit
+PASS a confirmed daily counter does not bypass a monthly refusal
+PASS authorization refusal precedes the counters
+PASS unrelated actions do not consume these counters
+25 passed; 0 failed
+
+Public data check: 3921 tracked files; 0 file(s) require correction.

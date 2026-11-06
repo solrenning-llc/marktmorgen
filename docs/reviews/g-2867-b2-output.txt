@@ -1,0 +1,701 @@
+
+===== g2867-head-replay.log =====
+✔ actual Path page summarizes only saved dates, keeps the current streak and makes no additional service calls (40.183053ms)
+✔ New York changes weeks at local Monday, rather than UTC Monday (7.54232ms)
+✔ a saved Pacific time zone can start Monday while UTC is still Sunday (7.437924ms)
+✔ both occurrences of the fall-back hour are the same saved check-in day (7.640959ms)
+✔ the spring-forward day and following Monday follow civil dates (11.209555ms)
+✔ a week spanning the year boundary keeps both real calendar years (4.527338ms)
+✔ unsorted duplicate saved dates count once without changing the record (3.251449ms)
+✔ known empty records describe saved dates without inventing activity (2.975604ms)
+✔ impossible, future and excessive saved dates are unavailable, never zero (6.588787ms)
+✔ an invalid saved time zone is unavailable instead of silently becoming a UTC week (1.92264ms)
+✔ the return view keeps its existing no-streak wording while showing the saved week (3.276096ms)
+✔ onboarding and failed reads do not manufacture a numerical weekly summary (1.877944ms)
+✔ the actual weekly card uses a singular rest day when the existing streak has one left (3.107192ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 111.913671
+
+
+===== g2867-singular-red-replay.log =====
+✔ actual Path page summarizes only saved dates, keeps the current streak and makes no additional service calls (28.31744ms)
+✔ New York changes weeks at local Monday, rather than UTC Monday (4.761179ms)
+✔ a saved Pacific time zone can start Monday while UTC is still Sunday (5.181972ms)
+✔ both occurrences of the fall-back hour are the same saved check-in day (5.350977ms)
+✔ the spring-forward day and following Monday follow civil dates (12.757047ms)
+✔ a week spanning the year boundary keeps both real calendar years (4.856488ms)
+✔ unsorted duplicate saved dates count once without changing the record (3.017888ms)
+✔ known empty records describe saved dates without inventing activity (2.299748ms)
+✔ impossible, future and excessive saved dates are unavailable, never zero (5.955465ms)
+✔ an invalid saved time zone is unavailable instead of silently becoming a UTC week (1.708539ms)
+✔ the return view keeps its existing no-streak wording while showing the saved week (2.641201ms)
+✔ onboarding and failed reads do not manufacture a numerical weekly summary (1.675269ms)
+✖ the actual weekly card uses a singular rest day when the existing streak has one left (2.905098ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 88.91618
+
+✖ failing tests:
+
+test at [stdin]:28745:27
+✖ the actual weekly card uses a singular rest day when the existing streak has one left (2.905098ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /1 rest day left this week\./. Input:
+  
+  '<section class="mt-8 rounded-2xl border border-line bg-white p-6" aria-labelledby="path-weekly-title"><h2 id="path-weekly-title" class="t-h3">Your week in Path</h2><p class="mt-3">Week: <time dateTime="2026-11-02">Nov 2, 2026</time> to <time dateTime="2026-11-08">Nov 8, 2026</time>.</p><p class="mt-2 text-sm text-ink-soft">Saved time zone: America/New_York. Recorded through <time dateTime="2026-11-06">Nov 6, 2026</time>. This week is still in progress.</p><p class="mt-4 font-semibold">1 saved check-in day this week</p><ul class="mt-2 list-disc space-y-1 pl-5" aria-label="Saved check-in days"><li><time dateTime="2026-11-04">Nov 4, 2026</time></li></ul><p class="mt-3 text-sm text-ink-soft">Check-in days are dates saved when you open Path.</p><p class="mt-3">Current streak: 1 check-in day. 1 rest days left this week.</p><p class="mt-3">Review the days you returned, then choose your next useful step below.</p></section>'
+  
+      at TestContext.<anonymous> ([stdin]:28748:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'his week</p><ul class="mt-2 list-disc space-y-1 pl-5" aria-label="Saved check-in days"><li><time dateTime="2026-11-04">Nov 4, 2026</time></li></ul><p class="mt-3 text-sm text-ink-soft">Check-in days are dates saved when you open Path.</p><p class="mt-3">Current streak: 1 check-in day. 1 rest days left this week.</p><p class="mt-3">Review the days you returned, then choose your next useful step below.</p></section>...',
+    expected: /1 rest day left this week\./,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+
+===== g2867-original-red-replay.log =====
+✖ actual Path page summarizes only saved dates, keeps the current streak and makes no additional service calls (39.603281ms)
+✖ New York changes weeks at local Monday, rather than UTC Monday (2.751448ms)
+✖ a saved Pacific time zone can start Monday while UTC is still Sunday (2.485317ms)
+✖ both occurrences of the fall-back hour are the same saved check-in day (2.594912ms)
+✖ the spring-forward day and following Monday follow civil dates (3.132951ms)
+✖ a week spanning the year boundary keeps both real calendar years (2.370364ms)
+✖ unsorted duplicate saved dates count once without changing the record (2.455592ms)
+✖ known empty records describe saved dates without inventing activity (2.907903ms)
+✖ impossible, future and excessive saved dates are unavailable, never zero (2.954733ms)
+✖ an invalid saved time zone is unavailable instead of silently becoming a UTC week (2.878218ms)
+✖ the return view keeps its existing no-streak wording while showing the saved week (2.568452ms)
+✔ onboarding and failed reads do not manufacture a numerical weekly summary (2.285467ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 1
+ℹ fail 11
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 86.130121
+
+✖ failing tests:
+
+test at [stdin]:28572:27
+✖ actual Path page summarizes only saved dates, keeps the current streak and makes no additional service calls (39.603281ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28575:67)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28594:27
+✖ New York changes weeks at local Monday, rather than UTC Monday (2.751448ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28596:18)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28604:27
+✖ a saved Pacific time zone can start Monday while UTC is still Sunday (2.485317ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28606:18)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28613:27
+✖ both occurrences of the fall-back hour are the same saved check-in day (2.594912ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28616:21)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28621:27
+✖ the spring-forward day and following Monday follow civil dates (3.132951ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28624:21)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28632:27
+✖ a week spanning the year boundary keeps both real calendar years (2.370364ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28634:19)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28640:27
+✖ unsorted duplicate saved dates count once without changing the record (2.455592ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28643:19)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28647:27
+✖ known empty records describe saved dates without inventing activity (2.907903ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28649:19)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28653:27
+✖ impossible, future and excessive saved dates are unavailable, never zero (2.954733ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28656:21)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28661:27
+✖ an invalid saved time zone is unavailable instead of silently becoming a UTC week (2.878218ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28663:19)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:28667:27
+✖ the return view keeps its existing no-streak wording while showing the saved week (2.568452ms)
+  AssertionError [ERR_ASSERTION]: the actual Path page must show its saved weekly check-in summary
+      at card ([stdin]:28566:25)
+      at TestContext.<anonymous> ([stdin]:28669:67)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+
+===== g2867-edges-final.log =====
+38 independent checks, all passing; no network/service calls.
+
+
+===== g2867-path-rules.test-final.log =====
+
+Missions read from facts only
+  ok    seven days
+  ok    nothing done with no facts
+  ok    a title without a line is not published
+  ok    each closes on its own fact
+  ok    two post links of three
+  ok    the subject is in the product's words
+  ok    the audience is in the fourth day
+  ok    fifteen minutes asks fewer steps
+
+The test purchase
+  ok    open in test mode
+  ok    unavailable live, never asking for a real purchase
+  ok    and it does not hold the path back: today is the sale's traffic
+  ok    counted out of the missions that can be done
+
+Traffic missions after the seven days
+  ok    none on day three
+  ok    today is the first open day
+  ok    they begin after the seventh day with no sale
+  ok    today stays the first open day of the seven
+  ok    a traffic mission closes on its count
+  ok    a real sale ends them
+  ok    and the path's seven are complete
+  ok    with nothing more to do today
+
+Levels
+  ok    none with nothing published
+  ok    First Light: a title and a product
+  ok    Sunrise: the first real sale
+  ok    Morning at $100 kept
+  ok    High Sun at $1,000
+  ok    Golden Hour at $10,000
+  ok    Zenith at $100,000
+  ok    unknown money moves no level past Sunrise
+  ok    the yen's Morning is on its prices' own scale
+  ok    the euro's is 100
+  ok    a refund takes the sale mission back
+  ok    and never the level reached
+  ok    a damaged best is read as none
+  ok    no level is named Hero or Games
+
+The streak
+  ok    six days in a row
+  ok    today not yet opened is never a missed day
+  ok    Sunday never breaks it
+  ok    two rest days in a week are free
+  ok    and the rest days left say so
+  ok    a third missed day ends it
+  ok    nothing opened, nothing counted
+  ok    days kept are bounded
+
+Quiet hours, in the person's own time
+  ok    20:30 in São Paulo may be told
+  ok    01:30 in Berlin is not
+  ok    21:00 sharp is quiet
+  ok    08:00 sharp is not
+  ok    an hour, read in the zone
+  ok    the day, read in the zone
+  ok    a zone that is not one is read as UTC
+
+The four questions
+  ok    read and cleaned
+  ok    the goal kept in the store's currency
+  ok    minutes only 15, 30 or 60
+  ok    an audience from the list
+  ok    a zone that is not one becomes UTC
+  ok    the goal said as the person's own, never a forecast
+  ok    a goal in another currency is not said as this one
+
+The reminder
+  ok    names the day and the mission, no amount
+  ok    none once the path is complete
+  ok    forbidden words are caught
+  ok    and an ordinary line passes
+
+60 checks, all passing.
+
+
+===== g2867-path-return-rules.test-final.log =====
+
+Return uses saved creator-local dates
+  ok    America/Los_Angeles before midnight
+  ok    America/Los_Angeles after midnight
+  ok    America/Los_Angeles six dates
+  ok    America/Los_Angeles seven dates
+  ok    America/Los_Angeles Path day advances at midnight
+  ok    America/New_York before midnight
+  ok    America/New_York after midnight
+  ok    America/New_York six dates
+  ok    America/New_York seven dates
+  ok    America/New_York Path day advances at midnight
+  ok    Europe/London before midnight
+  ok    Europe/London after midnight
+  ok    Europe/London six dates
+  ok    Europe/London seven dates
+  ok    Europe/London Path day advances at midnight
+  ok    Europe/Berlin before midnight
+  ok    Europe/Berlin after midnight
+  ok    Europe/Berlin six dates
+  ok    Europe/Berlin seven dates
+  ok    Europe/Berlin Path day advances at midnight
+  ok    Australia/Sydney before midnight
+  ok    Australia/Sydney after midnight
+  ok    Australia/Sydney six dates
+  ok    Australia/Sydney seven dates
+  ok    Australia/Sydney Path day advances at midnight
+  ok    America/Los_Angeles elapsed 167
+  ok    America/Los_Angeles seven dates across DST 167
+  ok    America/Los_Angeles Path calendar day across DST 167
+  ok    America/New_York elapsed 167
+  ok    America/New_York seven dates across DST 167
+  ok    America/New_York Path calendar day across DST 167
+  ok    Europe/London elapsed 167
+  ok    Europe/London seven dates across DST 167
+  ok    Europe/London Path calendar day across DST 167
+  ok    Europe/Berlin elapsed 167
+  ok    Europe/Berlin seven dates across DST 167
+  ok    Europe/Berlin Path calendar day across DST 167
+  ok    Australia/Sydney elapsed 167
+  ok    Australia/Sydney seven dates across DST 167
+  ok    Australia/Sydney Path calendar day across DST 167
+  ok    America/Los_Angeles elapsed 169
+  ok    America/Los_Angeles seven dates across DST 169
+  ok    America/Los_Angeles Path calendar day across DST 169
+  ok    America/New_York elapsed 169
+  ok    America/New_York seven dates across DST 169
+  ok    America/New_York Path calendar day across DST 169
+  ok    Europe/London elapsed 169
+  ok    Europe/London seven dates across DST 169
+  ok    Europe/London Path calendar day across DST 169
+  ok    Europe/Berlin elapsed 169
+  ok    Europe/Berlin seven dates across DST 169
+  ok    Europe/Berlin Path calendar day across DST 169
+  ok    Australia/Sydney elapsed 169
+  ok    Australia/Sydney seven dates across DST 169
+  ok    Australia/Sydney Path calendar day across DST 169
+  ok    no history
+  ok    today is present
+  ok    duplicates and order
+  ok    invalid history 2026-02-30
+  ok    invalid history not-a-date
+  ok    invalid history 2026-10-10
+  ok    invalid history 2026-10-02,bad
+  ok    invalid zone
+  ok    invalid clock
+
+Only the current published introduction can complete the small return step
+  ok    strict round trip
+  ok    malformed marker
+  ok    malformed marker
+  ok    malformed marker
+  ok    malformed marker
+  ok    malformed marker
+  ok    opening does not close
+  ok    unchanged save does not close
+  ok    empty publication does not close
+  ok    changed published introduction closes
+  ok    invalid witness does not close
+  ok    next local day quietly retires
+  ok    first visit has no invented return
+  ok    explicit opening during quiet hours is allowed
+  ok    pending reminder is welcoming
+  ok    completed step has no return reminder
+  ok    no guilt in mission or reminder
+
+81 checks, all passing.
+
+
+===== g2867-path-reminder-rules.test-final.log =====
+
+Local quiet hours apply before dispatch and the push timeout
+  ok    quiet UTC hour 0
+  ok    quiet UTC hour 7
+  ok    quiet UTC hour 21
+  ok    quiet UTC hour 23
+  ok    daytime UTC hour 8
+  ok    daytime UTC hour 12
+  ok    daytime UTC hour 20
+  ok    last seconds before quiet stay quiet
+  ok    local Brazil time is used
+  ok    local Brazil morning is allowed
+  ok    unknown time zone
+  ok    unknown time
+  ok    bounded before admission
+
+13 checks, all passing.
+
+
+===== g2867-path-growth-rules.test-final.log =====
+
+Six post-sale missions depend on server facts
+  ok    no growth before a real sale
+  ok    six distinct missions
+  ok    missing evidence stays unknown
+  ok    below each factual threshold
+  ok    all six require their own facts
+  ok    one fact closes only its own mission 0
+  ok    one fact closes only its own mission 1
+  ok    one fact closes only its own mission 2
+  ok    one fact closes only its own mission 3
+  ok    one fact closes only its own mission 4
+  ok    one fact closes only its own mission 5
+  ok    instructions always have a destination
+  ok    no buyer identities in mission model
+
+13 checks, all passing.
+
+
+===== g2867-words-complete.log =====
+
+The words drawn, for every answer and every state
+  ok    thousands of texts read
+  ok    none says what it must not
+  ok    the slogan, word for word
+  ok    the title, word for word
+  ok    the levels' names
+  ok    the goal is the person's own and predicts nothing
+  ok    a goal in another currency is not shown as this one
+
+The list catches what it is for
+  ok    caught: Make money online today
+  ok    caught: Financial freedom
+  ok    caught: replace your job
+  ok    caught: Passive income
+  ok    caught: Creators earned $5,000
+  ok    caught: earn up to $900
+  ok    caught: made $1,200 last week
+  ok    caught: Kajabi Hero
+  ok    caught: Skool Games
+  ok    caught: Studio pays for itself from $3,629
+  ok    caught: Scale from $7,273
+  ok    allowed: Your first real sale.
+  ok    allowed: $100 in real sales kept, refunds taken off.
+  ok    allowed: Make 3 post links
+
+Every Path file in the code
+  ok    the files are found
+  ok    none of them says it
+
+The documented level list matches the active display names
+  ok    current name and unchanged threshold documented
+  ok    retired display name absent from Path documentation
+  ok    retired display name absent from every current level
+  ok    High Sun remains the fourth level
+
+All six post-sale missions in every evidence state
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy second-product
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy list-email
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy repeat-buyer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy post-purchase-offer
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy buyer-review
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+  ok    post-sale copy ten-orders
+
+Welcoming return mission copy, privacy and reminder
+  ok    return copy has no forbidden claim
+  ok    return copy has no absence pressure
+
+Fixed post scripts and every control sentence follow Path wording
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    script control copy
+  ok    fixed script instagram
+  ok    fixed script instagram
+  ok    fixed script tiktok
+  ok    fixed script tiktok
+  ok    fixed script youtube
+  ok    fixed script youtube
+
+Optional wording controls and privacy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+  ok    optional wording copy
+
+Private certificate controls and artifacts
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate copy
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+  ok    certificate artifact text
+
+184 checks, all passing.
+
+
+===== g2867-types-correct-config.log =====
+
+Strict:2 roots; 406 source files; 0 diagnostics
+
+
+===== g2867-static.log =====
+Identity6/6; scanner6+3 own findings=[]; diff-check0.
+LINT 0
+

@@ -89,6 +89,17 @@
       ]
     },
     {
+      "source": "app/[handle]/community/about/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/community/about",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/community/chat/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/community/chat",
@@ -2022,6 +2033,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 137
+    "pageTemplates": 139
   }
 }

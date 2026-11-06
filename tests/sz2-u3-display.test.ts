@@ -1,0 +1,203 @@
+/**
+ * 618 [SZ2] unit 3: the legal information fields of a physical product reach
+ * the buyer, and the EU/EEA countries stay off its checkout while they are
+ * not filled (docs/sz2-physical-legal-fields.md, "Next units", 2).
+ *
+ *   - the product page shows, before the buy button, the fields the creator
+ *     filled (manufacturer, the EU responsible person when the manufacturer is
+ *     outside the EU/EEA, type or model, warnings or the "no warnings"
+ *     statement), the creator's Proposition 65 text and the unit price, under
+ *     a heading, in a definition list, as text (AX274 2.4.10, 1.4.9, 3.1.4);
+ *   - the checkout of one product and of a cart leaves out the EU/EEA
+ *     countries while gpsrClosedCountries says so; a product that ships
+ *     nowhere else is not sold; unknown (an unreadable record, a forged mark)
+ *     is closed, never open;
+ *   - the listing carries only a computed mark, so the store page and the
+ *     cart know without reading the legal record; the product page reads it
+ *     from the product's own record, in parallel, and nothing else;
+ *   - the buyer's words in the seven store languages.
+ */
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { addOption, addProduct, claimHandle, ensureStatsId, setProductImage, setProductLegal, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { listingOf, parseProduct, readListing, readProduct, readProductLegal } from "@/lib/catalog";
+import { parseShipping } from "@/lib/shipping";
+import { GPSR_AREA, unitWords } from "@/lib/physical-legal";
+import type { PhysicalLegal } from "@/lib/physical-legal-record";
+import { shippingNow, shipsNowhere } from "@/lib/physical-legal-ship";
+import { cartItemOf, cartShipping } from "@/lib/cart-shipping";
+import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { PRODUCT_SAFETY_WORDS, productSafetyWords } from "@/lib/buyer-words/product-safety";
+import { LANGUAGE_CODES } from "@/lib/store-language";
+import { ProductSafetyFacts } from "@/components/product-safety-facts";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+
+const OWNER = "sz2-u3-owner@example.com";
+const checkouts: URLSearchParams[] = [];
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const method = init?.method ?? "GET";
+  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  const path = url.pathname.replace(/^\/v1/, "");
+  if (path === "/checkout/sessions" && method === "POST") {
+    checkouts.push(new URLSearchParams(String(init?.body)));
+    return answer({ id: `cs_test_${"s".repeat(24)}`, url: "https://checkout.stripe.com/c/pay/test" });
+  }
+  if (method === "GET") return answer({ object: "list", data: [], has_more: false });
+  return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
+}) as typeof fetch;
+
+const SAFETY = {
+  manufacturer: { name: "Harbor Print Co.", postal: "1 Dock Rd, Austin, TX 78701", electronic: "safety@harbor.example", country: "US" },
+  responsible: { name: "EU Rep GmbH", postal: "Hafenstr. 1, 20457 Hamburg", electronic: "https://eurep.example/contact", country: "DE" },
+  productType: "Hardcover cookbook, 120 pages",
+  identifier: "Batch 2026-11",
+  warnings: "",
+  noWarnings: true,
+};
+const PROP65 = "WARNING: This product can expose you to lead, which is known to the State of California to cause cancer. For more information go to www.P65Warnings.ca.gov.";
+const FULL: PhysicalLegal = { safety: SAFETY, prop65: PROP65, quantities: [{ price: "", amount: "1.2", unit: "kg" }] };
+const IMAGE = { path: `images/${"a".repeat(24)}/${"b".repeat(32)}.jpg`, width: 1200, height: 800, alt: "The Supper Book", bytes: 1, small: null };
+const RAW = { id: "book1", title: "The Supper Book", priceCents: 3500, shipping: { cents: 600, region: "custom", countries: ["US", "FR", "DE"], note: "" } };
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_sz2_u3_only_a_stand_in";
+
+  part("Where it ships now: the EU/EEA only once the safety fields are filled");
+  const bare = parseProduct(RAW)!;
+  is("nothing filled: the EU/EEA countries are left out, the rest kept", [shippingNow(bare)?.countries, shippingNow(bare)?.region, shippingNow(bare)?.cents], [["US"], "custom", 600]);
+  const filled = parseProduct({ ...RAW, legal: FULL, image: IMAGE })!;
+  is("everything filled, with a picture: every country", shippingNow(filled)?.countries, ["US", "FR", "DE"]);
+  is("filled without a picture: still closed", shippingNow(parseProduct({ ...RAW, legal: FULL })!)?.countries, ["US"]);
+  is("a product that is not shipped has no shipping", shippingNow(parseProduct({ id: "pdf1", title: "PDF", priceCents: 1200 })!), null);
+  const euOnly = parseProduct({ ...RAW, shipping: { cents: 600, region: "custom", countries: ["FR", "DE"], note: "" } })!;
+  is("shipped only to the EU/EEA and not filled: still physical, shipped nowhere", [shippingNow(euOnly) !== null, shippingNow(euOnly)?.countries, shipsNowhere(euOnly), shipsNowhere(bare), shipsNowhere(filled)], [true, [], true, false, false]);
+  is("the EEA counts too", shippingNow(parseProduct({ ...RAW, shipping: { cents: 0, region: "custom", countries: ["NO", "IS", "LI", "CH"], note: "" } })!)?.countries, ["CH"]);
+  const world = parseProduct({ ...RAW, shipping: { cents: 600, region: "world", note: "" } })!;
+  const worldNow = shippingNow(world)!;
+  is("a region that loses countries is said as the countries left", [worldNow.region, worldNow.countries.some((code) => GPSR_AREA.includes(code)), worldNow.countries.length > 0], ["custom", false, true]);
+  is("an unreadable legal record reads as not filled", shippingNow(parseProduct({ ...RAW, legal: { safety: "full" }, image: IMAGE })!)?.countries, ["US"]);
+
+  part("The listing carries a computed mark, never the record");
+  const listing = listingOf(filled);
+  is("filled: the mark, and no legal record on the listing", [listing.safetyFilled, Object.hasOwn(listing, "legal")], [true, false]);
+  is("not filled: no mark", Object.hasOwn(listingOf(bare), "safetyFilled"), false);
+  is("the store page and the cart read the mark", shippingNow(listing)?.countries, ["US", "FR", "DE"]);
+  is("a mark typed into the record is not believed: a full product is read from its own record", shippingNow(parseProduct({ ...RAW, safetyFilled: true })!)?.countries, ["US"]);
+  is("a listing without the mark is closed", shippingNow(listingOf(bare))?.countries, ["US"]);
+
+  part("Kept through the store's own records");
+  await claimHandle(OWNER, "harborthree", "Harbor Books", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestSz2Three01", true);
+  await setSubscription(OWNER, { customerId: "cus_Sz2Three01", subscriptionId: "sub_Sz2Three01", active: true, period: paidPeriod() });
+  const made = await addProduct(OWNER, "The Supper Book", "Printed, 120 pages.", "35", null);
+  if (!made.ok) throw new Error("no product");
+  const id = made.product.id;
+  await setProductShipping(OWNER, id, parseShipping({ cents: 600, region: "custom", countries: ["US", "FR", "DE"], note: "" })!);
+  await addOption(OWNER, id, "Signed", "45");
+  let store = (await storeForEmail(OWNER))!;
+  const optionId = (await readProduct(store, id))!.options[0].id;
+  const legal: PhysicalLegal = { ...FULL, quantities: [...FULL.quantities, { price: optionId, amount: "1.5", unit: "kg" }] };
+  await setProductLegal(OWNER, id, legal);
+  store = (await storeForEmail(OWNER))!;
+  is("saved without a picture: the listing is not marked", (await readListing(store, id))?.safetyFilled ?? false, false);
+  await setProductImage(OWNER, id, IMAGE);
+  store = (await storeForEmail(OWNER))!;
+  is("with the picture added: marked", (await readListing(store, id))?.safetyFilled, true);
+  is("the legal record of one product, from its own record", await readProductLegal(store, id), legal);
+  is("a product without one: null", await readProductLegal(store, "nope"), null);
+  const catalog = store.catalog.id!;
+  const extrasKey = `nl:catalog:${catalog}:x:${id}`;
+  const listingKey = `nl:catalog:${catalog}:l:${id}`;
+  const savedExtras = (await redis.pipeline([["GET", extrasKey]]))[0];
+  const savedListing = (await redis.pipeline([["GET", listingKey]]))[0];
+  await redis.pipeline([["SET", extrasKey, "{not json"]]);
+  store = (await storeForEmail(OWNER))!;
+  is("its record unreadable: no legal record, and its checkout leaves the EU/EEA out though the listing is marked", [await readProductLegal(store, id), shippingNow((await readProduct(store, id))!)?.countries], [null, ["US"]]);
+  await redis.pipeline([["SET", extrasKey, String(savedExtras)], ["SET", listingKey, JSON.stringify({ ...JSON.parse(String(savedListing)), safetyFilled: "yes" })]]);
+  store = (await storeForEmail(OWNER))!;
+  is("a mark that is not exactly true is no mark", shippingNow((await readListing(store, id))!)?.countries, ["US"]);
+  await redis.pipeline([["SET", listingKey, String(savedListing)]]);
+  await setProductImage(OWNER, id, null);
+  store = (await storeForEmail(OWNER))!;
+  is("the picture taken off: the mark goes with it", (await readListing(store, id))?.safetyFilled ?? false, false);
+  await setProductImage(OWNER, id, IMAGE);
+
+  part("The checkout of one product");
+  store = (await storeForEmail(OWNER))!;
+  let product = (await readProduct(store, id))!;
+  await createCheckout(store, product, "https://marktmorgen.com", optionId, {});
+  let sent = checkouts.at(-1)!;
+  is("filled: Stripe asks for an address in every country", sent.getAll("shipping_address_collection[allowed_countries][0]").concat(sent.getAll("shipping_address_collection[allowed_countries][1]"), sent.getAll("shipping_address_collection[allowed_countries][2]")), ["US", "FR", "DE"]);
+  await setProductLegal(OWNER, id, { ...legal, safety: { ...SAFETY, productType: "" } });
+  store = (await storeForEmail(OWNER))!;
+  product = (await readProduct(store, id))!;
+  await createCheckout(store, product, "https://marktmorgen.com", optionId, {});
+  sent = checkouts.at(-1)!;
+  is("a gap: the EU/EEA countries are not offered", [sent.get("shipping_address_collection[allowed_countries][0]"), sent.has("shipping_address_collection[allowed_countries][1]")], ["US", false]);
+  is("still sold where it ships", canSellProduct(store, product), true);
+  await setProductShipping(OWNER, id, parseShipping({ cents: 600, region: "custom", countries: ["FR", "DE"], note: "" })!);
+  store = (await storeForEmail(OWNER))!;
+  product = (await readProduct(store, id))!;
+  const before = checkouts.length;
+  let refused = "opened";
+  await createCheckout(store, product, "https://marktmorgen.com", optionId, {}).catch(() => (refused = "refused"));
+  is("shipped only to the EU/EEA with a gap: not sold, refused before Stripe", [canSellProduct(store, product), canSellProduct(store, listingOf(product)), refused, checkouts.length], [false, false, "refused", before]);
+
+  part("The cart");
+  const cartBook = parseProduct({ ...RAW, id: "cartbook" })!;
+  const cartMug = parseProduct({ ...RAW, id: "cartmug", title: "Mug", legal: FULL, image: IMAGE })!;
+  is("one address, in the countries both reach now", cartShipping([cartBook, cartMug].map(cartItemOf)), { kind: "ships", countries: ["US"], cents: 1200, each: [{ id: "cartbook", cents: 600 }, { id: "cartmug", cents: 600 }] });
+  is("both filled: every country they share", cartShipping([parseProduct({ ...RAW, id: "a", legal: FULL, image: IMAGE })!, cartMug].map(cartItemOf)).kind === "ships" ? (cartShipping([parseProduct({ ...RAW, id: "a", legal: FULL, image: IMAGE })!, cartMug].map(cartItemOf)) as { countries: string[] }).countries : [], ["US", "FR", "DE"]);
+  is("a product that ships nowhere now cannot be paid for in a cart", cartShipping([euOnly].map(cartItemOf)).kind, "unreadable");
+
+  part("The buyer's words, in every store language");
+  const keys = Object.keys(PRODUCT_SAFETY_WORDS.en).sort();
+  for (const code of LANGUAGE_CODES) is(`${code}: the same words as English`, Object.keys(PRODUCT_SAFETY_WORDS[code]).sort(), keys);
+  is("the heading", productSafetyWords("en").heading, "Product safety and manufacturer");
+  is("each unit in words, as the studio's module says it", (["kg", "l", "m", "m2", "m3"] as const).map((unit) => productSafetyWords("en").per[unit]), (["kg", "l", "m", "m2", "m3"] as const).map((unit) => unitWords(unit).long));
+  is("unknown language: English", productSafetyWords("xx"), PRODUCT_SAFETY_WORDS.en);
+
+  part("On the product page, before the buy button");
+  store = (await storeForEmail(OWNER))!;
+  const shown = renderToStaticMarkup(createElement(ProductSafetyFacts, { store, product: (await readListing(store, id))!, legal }));
+  for (const words of ["<section", "<h2", "Product safety and manufacturer", "<dl", "<dt", "<dd", "Manufacturer", "Harbor Print Co.", "1 Dock Rd, Austin, TX 78701", "safety@harbor.example", "United States", "EU responsible person", "EU Rep GmbH", "Germany", "Product type or model", "Hardcover cookbook, 120 pages", "Batch 2026-11", "Harbor Books states that this product has no warnings.", "California Proposition 65", "<strong>WARNING:</strong>", "www.P65Warnings.ca.gov", "Unit price: $29.17 per kilogram", "Signed: $30 per kilogram"]) {
+    is(`shows: ${words}`, shown.includes(words), true);
+  }
+  is("as text, never a picture of text", /<img|<svg|<canvas/.test(shown), false);
+  is("the unit is never abbreviated", /\$\d+(\.\d+)? ?\/ ?kg|per kg\b/.test(shown), false);
+  is("never says the product complies", /\b(compliant|complies|compliance|certified|approved)\b/i.test(shown), false);
+  const inEu = renderToStaticMarkup(createElement(ProductSafetyFacts, { store, product: (await readListing(store, id))!, legal: { ...legal, safety: { ...SAFETY, manufacturer: { ...SAFETY.manufacturer, country: "FR" }, warnings: "Keep away from fire.", noWarnings: false } } }));
+  is("a manufacturer in the EU/EEA: no responsible person row; the warnings as typed", [inEu.includes("EU Rep GmbH"), inEu.includes("Keep away from fire."), inEu.includes("no warnings")], [false, true, false]);
+  is("nothing filled: nothing shown", renderToStaticMarkup(createElement(ProductSafetyFacts, { store, product: (await readListing(store, id))!, legal: null })), "");
+  const onlyProp65 = renderToStaticMarkup(createElement(ProductSafetyFacts, { store, product: (await readListing(store, id))!, legal: { safety: null, prop65: PROP65, quantities: [] } }));
+  is("only a Proposition 65 text: the heading and the text, no empty rows", [onlyProp65.includes("Product safety and manufacturer"), onlyProp65.includes("<strong>WARNING:</strong>"), onlyProp65.includes("Manufacturer<")], [true, true, false]);
+  const german = renderToStaticMarkup(createElement(ProductSafetyFacts, { store: { ...store, language: "de" }, product: (await readListing(store, id))!, legal }));
+  is("in the store's language", german.includes(productSafetyWords("de").heading) && german.includes(productSafetyWords("de").per.kg), true);
+
+  const page = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
+  is("the page reads the record of a shipped product only, in parallel", /activeShipping\(product\) \? readProductLegal\(store, product\.id\)\.catch\(\(\) => null\) : Promise\.resolve\(null\)/.test(page), true);
+  const block = page.indexOf("<ProductSafetyFacts");
+  is("the block comes before the buy button", block > 0 && block < page.indexOf("<BuyBox"), true);
+  is("the buy box is told what was read, so its shipping line says the same as the checkout", /<BuyBox store=\{store\} product=\{shippedNow\}/.test(page), true);
+  const box = readFileSync("components/store-product.tsx", "utf8");
+  is("the shipping line under the button says where it ships now", /const shipping = shippingNow\(product\);/.test(box), true);
+  const answers = readFileSync("lib/answers.ts", "utf8");
+  is("the store's answers say the same", /const shipping = shippingNow\(product\);/.test(answers), true);
+
+  part("The studio says why");
+  const editor = readFileSync("components/physical-legal-editor.tsx", "utf8");
+  is("the summary of what keeps it from the EU/EEA", editor.includes("gapSummary(safetyGaps("), true);
+
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

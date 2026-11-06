@@ -56,6 +56,7 @@ export async function checkHomeHero({browser,LOCAL,axeSource,is}){
 export async function checkMorningNoticeFocus({page,width,is}){
  if(width>=640)return;
  await page.keyboard.press("Tab");await page.keyboard.press("Tab");
+ is("Encanto14 notice has disclosure button semantics "+width,await page.getByRole("button",{name:"Still being built. Plans closed.",exact:true}).count(),1);
  // Native focus can still be completing the page's existing smooth scroll.
  // Observe the exact hit condition, within the original help-focus 3s bound.
  try{await page.waitForFunction(()=>{

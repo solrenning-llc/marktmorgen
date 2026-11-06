@@ -25,7 +25,7 @@ import { MAX_PRODUCTS, MAX_PRODUCT_BYTES, type Product, productIds, readProducts
 import { type Store, accountStores, addCopiedProducts, appendSitePages, applyCopiedSetup, storeForId, storeRef } from "@/lib/store";
 import { readAbout, writeAbout, MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { readPage, writePage } from "@/lib/sales-page-store";
-import { MAX_PAGE_BYTES } from "@/lib/sales-page";
+import { MAX_PAGE_BYTES, type SalesPage } from "@/lib/sales-page";
 import { MAX_SITE_PAGES, type SitePage, siteKey, slugProblem } from "@/lib/site-page-rules";
 import { freeSlug } from "@/lib/funnel-types";
 import { MAX_FORMS } from "@/lib/forms";
@@ -319,6 +319,9 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
       const left = emptyProductLeft();
       const stamp = new Date(now).toISOString();
       const copies = read.map((product) => copiedProduct(product, products(product.id), products, stamp, left));
+      // Their pages, read before anything is written: an unknown answer throws here and leaves no draft without its page.
+      const pages = new Map<string, SalesPage>();
+      for (const product of read) if (product.page) pages.set(product.id, await readPage(from.statsId, product.id));
       const added = await addCopiedProducts(storeRef(to), copies);
       if (!added.ok) return { ok: false, error: "full", message: `${to.name || `@${to.handle}`} has no room for these products now. Nothing more was copied.` };
       const fresh = added.store;
@@ -331,10 +334,8 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
           const text = await readAbout(from.statsId, product.id);
           if (text) await writeAbout(to.statsId, id, text, fresh);
         }
-        if (product.page) {
-          const page = await readPage(from.statsId, product.id);
-          await writePage(to.statsId, id, copiedPage(page, products, forms, blocksLeft), fresh);
-        }
+        const page = pages.get(product.id);
+        if (page) await writePage(to.statsId, id, copiedPage(page, products, forms, blocksLeft), fresh);
       }
       p.cursor += batch.length;
       p.made.products += added.made.length;
@@ -368,6 +369,9 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
         taken.add(slug);
         add.push({ id, slug, title: page.title, nav: false, target: products(page.target), from: -1 });
       }
+      // Every page read before the first write, as above.
+      const blocks: SalesPage[] = [];
+      for (const page of pages) blocks.push(await readPage(from.statsId, siteKey(page.id)));
       let current = to;
       if (add.length) {
         const saved = await appendSitePages(storeRef(to), add);
@@ -376,10 +380,7 @@ export async function copyStep(from: Store, to: Store, copyId: string, setup: bo
       }
       const left = emptyBlocksLeft();
       const forms = (id: string) => (id ? idFor(copyId, "f", id) : "");
-      for (const page of pages) {
-        const blocks = await readPage(from.statsId, siteKey(page.id));
-        await writePage(to.statsId, siteKey(idFor(copyId, "s", page.id)), copiedPage(blocks, products, forms, left), current);
-      }
+      for (const [i, page] of pages.entries()) await writePage(to.statsId, siteKey(idFor(copyId, "s", page.id)), copiedPage(blocks[i], products, forms, left), current);
       p.made.pages += add.length;
       p.phase = nextPhase("pages", p.setup);
     } else if (p.phase === "funnels") {

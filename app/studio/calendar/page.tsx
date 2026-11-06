@@ -69,23 +69,32 @@ export default async function StudioCalendarPage({ searchParams }: Params) {
   const store = loaded.statsId ? loaded : ((await ensureStatsId(access.ref)) ?? loaded);
   const email = access.email.toLowerCase();
 
-  // The team calls this person hosts here, and the time zone their week is written in.
-  const calls = await readKind(store, "call").catch(() => []);
-  const teams = await readTeams(store).catch(() => new Map<string, unknown>());
+  // The team calls this person hosts here, and the time zone their week is written in. When either read fails,
+  // neither is known: the calendar, which sends that zone with every action, is not shown (rule 24), never "None yet"
+  // and "UTC".
+  const unread = (error: unknown) => {
+    console.error("reading a host's team calls failed", error);
+    return null;
+  };
+  const calls = await readKind(store, "call").catch(unread);
+  const teams = calls ? await readTeams(store).catch(unread) : null;
+  const read = calls && teams ? { calls, teams } : null;
   const hosting: string[] = [];
   let tz = "UTC";
-  for (const product of calls) {
+  for (const product of read?.calls ?? []) {
     if (!product.call) continue;
-    const team = parseTeamSetup(teams.get(product.id), product.call);
+    const team = parseTeamSetup(read?.teams.get(product.id), product.call);
     const me = team?.hosts.find((h) => h.email === email);
     if (!me) continue;
     hosting.push(product.title);
     if (tz === "UTC") tz = me.tz;
   }
-  const view = await hostCalendarView(store, email, tz).catch((error) => {
-    console.error("reading a host's calendar failed", error);
-    return null;
-  });
+  const view = read
+    ? await hostCalendarView(store, email, tz).catch((error) => {
+        console.error("reading a host's calendar failed", error);
+        return null;
+      })
+    : null;
   // The store's calls to connected services used, no place this month, or not counted (lib/metered-limits.ts).
   const allowance = typeof query.cal === "string" ? serviceAllowanceWords(store, query.cal) : null;
   const said = allowance ? { tone: "warn" as const, text: allowance } : outcome(typeof query.cal === "string" ? query.cal : "");
@@ -112,7 +121,11 @@ export default async function StudioCalendarPage({ searchParams }: Params) {
               {said.text}
             </p>
           ) : null}
-          {view ? (
+          {!read ? (
+            <p className="notice notice-warn mt-6 max-w-3xl" role="status">
+              Your team calls could not be read just now, so the calendar is not shown and nothing was changed. Reload in a moment.
+            </p>
+          ) : view ? (
             <HostCalendar view={view} pin={store.sid ? `?store=${store.sid}` : ""} tz={tz} hosting={hosting} />
           ) : (
             <p className="notice notice-error mt-6" role="alert">

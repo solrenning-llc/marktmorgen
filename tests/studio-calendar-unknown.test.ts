@@ -1,5 +1,5 @@
 /**
- * CX-123 rule 24, app/studio/calendar/page.tsx (MÉDIO, proof only: not fixed here). The page reads the team calls
+ * CX-123 rule 24, app/studio/calendar/page.tsx (MÉDIO). The page reads the team calls
  * this person hosts and takes the time zone their week is written in from them; it hands that zone to the calendar
  * (components/host-calendar.tsx), which sends it with every action, and the server reads a private iCal feed's
  * floating times in it and keeps the busy times it finds (lib/host-calendar.ts, hostSync, readBusyNow).
@@ -7,6 +7,9 @@
  * When the store's team setups cannot be read (no reply from Redis), the page reads them as none: it says "None yet"
  * under "Team calls you host here" and hands the calendar "UTC" instead of the host's own zone, so busy times kept
  * from a floating-time feed are read in the wrong zone. Unknown must not become "none" or "UTC".
+ *
+ * Fixed: when either read fails, whatever the error, the calendar (and so every action that sends a zone) is not
+ * shown; the page says, in a status line, that the team calls could not be read and nothing was changed.
  *
  * Synthetic store and Redis (tests/redis-stub.ts); one read is made to fail on purpose.
  */
@@ -19,6 +22,7 @@ import type { CallSetup } from "@/lib/call-setup";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCall, setSubscription, storeForEmail } from "@/lib/store";
 import type { Store } from "@/lib/store";
 import { writeTeam } from "@/lib/team-booking";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -58,20 +62,42 @@ function find(node: unknown, type: unknown): Node["props"] | undefined {
   return undefined;
 }
 
-async function calendar(failing: boolean) {
+/** Every text inside an element whose role is the one asked, joined. */
+function roleText(node: unknown, role: string): string[] {
+  const out: string[] = [];
+  const text = (n: unknown): string =>
+    typeof n === "string" ? n : Array.isArray(n) ? n.map(text).join("") : n && typeof n === "object" ? text((n as Node).props?.children) : "";
+  const walk = (n: unknown) => {
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (!n || typeof n !== "object") return;
+    const props = (n as Node).props;
+    if (props?.role === role) out.push(text(props.children).replace(/\s+/g, " ").trim());
+    walk(props?.children);
+  };
+  walk(node);
+  return out;
+}
+
+async function page(failing: false | (() => Error)) {
   const cookie = `${SESSION_COOKIE}=${await openSession(OWNER)}`;
   const original = redis.pipeline.bind(redis);
   redis.pipeline = async (commands) => {
-    if (failing && commands.some((c) => c[0] === "HGETALL" && String(c[1]).startsWith("nl:callteam:"))) throw new Error("synthetic: no reply");
+    if (failing && commands.some((c) => c[0] === "HGETALL" && String(c[1]).startsWith("nl:callteam:"))) throw failing();
     return original(commands);
   };
   try {
     answering(new NextRequest("https://marktmorgen.com/studio/calendar", { headers: { cookie } }));
-    return find(await StudioCalendarPage({ searchParams: Promise.resolve({}) }), HostCalendar);
+    return await StudioCalendarPage({ searchParams: Promise.resolve({}) });
   } finally {
     redis.pipeline = original;
     answering(null);
   }
+}
+
+const HONEST = "Your team calls could not be read just now, so the calendar is not shown and nothing was changed. Reload in a moment.";
+
+async function calendar(failing: boolean) {
+  return find(await page(failing ? () => new Error("synthetic: no reply") : false), HostCalendar);
 }
 
 async function main() {
@@ -100,6 +126,25 @@ async function main() {
   const unknown = await calendar(true);
   is("the calendar is never handed a time zone that was not read", Boolean(unknown && unknown.tz !== ZONE), false);
   is("it never says this person hosts no team calls", Boolean(unknown && Array.isArray(unknown.hosting) && unknown.hosting.length === 0), false);
+
+  for (const [name, error] of [
+    ["any error", () => new Error("synthetic: no reply")],
+    ["an UnknownReplyError", () => new UnknownReplyError("the team setups (synthetic)")],
+  ] as const) {
+    part(`the team setups cannot be read: ${name}`);
+    const tree = await page(error);
+    is("no calendar, so no action carries a zone that was not read", Boolean(find(tree, HostCalendar)), false);
+    is("the page says so, in a status line", roleText(tree, "status"), [HONEST]);
+    is("it is not shown as the calendar settings failing", roleText(tree, "alert"), []);
+  }
+
+  part("control: a confirmed setup with no team call for this person");
+  await writeTeam(store, made.product.id, null);
+  const none = await calendar(false);
+  is("the calendar is shown", Boolean(none), true);
+  is("it says this person hosts no team calls here", none?.hosting, []);
+  is("it is handed the zone the page has always used when nothing here is hosted", none?.tz, "UTC");
+  is("no could-not-be-read line", roleText(await page(false), "status"), []);
   done();
 }
 

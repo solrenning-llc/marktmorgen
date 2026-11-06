@@ -34,7 +34,19 @@ export async function GET(request: NextRequest) {
   if (!grant || !store || storeKey(store) !== grant.k) return gone(browserLanguage(request));
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
   if (!(await takeBuyerRead(store))) return restingAway(origin, store);
-  if (!(await spendLetterOpen(token))) return gone(store.language);
+  // The link's count of opens read only in its exact shape (CX-123 rule 24): an unknown count lets no browser in, and
+  // the buyer is told in the store's words to try again, never shown a bare server error.
+  let spent: boolean;
+  try {
+    spent = await spendLetterOpen(token);
+  } catch (error) {
+    console.error("counting an emailed link's opens failed", error);
+    return new Response(letterWords(store.language).linkBusy, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
+    });
+  }
+  if (!spent) return gone(store.language);
   const pass = await mintPass(store, grant.e, "all");
   const headers = new Headers({ Location: `${origin}/@${store.handle}/letters/${grant.l}`, "Cache-Control": "no-store" });
   headers.append("Set-Cookie", passCookie(store, pass, origin.startsWith("https://")));

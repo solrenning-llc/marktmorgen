@@ -38,7 +38,7 @@ import { lockedOut, lockedUntil } from "@/lib/two-step";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
-import { essentialLimitState, type LimitState } from "@/lib/request-guard";
+import { essentialLimitState, essentialTakeBelow, type LimitState } from "@/lib/request-guard";
 import { takeAllowance } from "@/lib/store-allowance";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { ESSENTIAL_NEEDS, ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
@@ -225,6 +225,16 @@ export async function studioAccess(
  */
 export function takeEssential(store: Pick<Store, "sid" | "handle">): Promise<LimitState> {
   return essentialLimitState("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400);
+}
+
+/**
+ * One of the same requests for a use that is not leaving or paying, taken
+ * only while fewer than `below` of them were taken in the window (one
+ * script on the same key, lib/request-guard.ts essentialTakeBelow), so the
+ * rest always stays for what the owner needs to leave or pay.
+ */
+export function takeEssentialBelow(store: Pick<Store, "sid" | "handle">, below: number): Promise<LimitState> {
+  return essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400);
 }
 
 /**

@@ -51,13 +51,12 @@ export function PlanInvoicesList({ read }: { read: PlanInvoices }) {
   if (read.state === "none") {
     return (
       <p className="mt-8 text-ink-soft">
-        You have no invoices from Marktmorgen for this store. An invoice is made each time a plan is billed, and this store has no plan subscription.
+        This store has no plan subscription now, so there is nothing to read here. An invoice is made each time a plan subscription is billed; invoices of an earlier plan or of an add-on are not listed on this page.
       </p>
     );
   }
   if (read.state === "used") return <p className="notice notice-warn mt-8" role="status">{read.message}</p>;
-  // An empty page that says more follow is not an answer either.
-  if (read.state === "unknown" || (read.invoices.length === 0 && read.unreadable === 0 && read.drafts === 0 && read.more)) {
+  if (read.state === "unknown") {
     return (
       <p className="notice notice-warn mt-8" role="status">
         Your invoices could not be read just now. Nothing was changed. Try again later.
@@ -69,7 +68,7 @@ export function PlanInvoicesList({ read }: { read: PlanInvoices }) {
     <>
       {unreadable > 0 ? (
         <p className="notice notice-warn mt-8" role="status">
-          {`${unreadable === 1 ? "One invoice" : `${unreadable} invoices`} could not be read just now and ${unreadable === 1 ? "is" : "are"} not shown. Try again later.`}
+          {`${unreadable === 1 ? "One invoice" : `${unreadable} invoices`} could not be read or matched to this plan, so ${unreadable === 1 ? "it is" : "they are"} not shown.`}
         </p>
       ) : null}
       {invoices.length === 0 && unreadable === 0 && !more ? (

@@ -7,10 +7,11 @@
  *   - a store with no plan subscription asks Stripe nothing and takes nothing
  *     from its studio figure: it says, in plain text, that there are none;
  *   - the page costs the studio's figure only what every page costs; one of
- *     PLAN_INVOICES_PER_DAY reads, then one of the store's essential requests
- *     of the day (the counter countStudio keeps for leaving and paying), is
- *     taken before Stripe is asked, never more than half of that figure, and
- *     a refusal, or a count that could not be read, asks nothing;
+ *     the store's essential requests of the day (the counter countStudio
+ *     keeps for leaving and paying) is taken before Stripe is asked, only
+ *     while fewer than PLAN_INVOICES_PER_DAY were taken, in one script on
+ *     the same key, so the rest always stays whatever came first; a refusal,
+ *     or a count that could not be read, asks nothing;
  *   - a store named twice or in another shape, or one the person can no
  *     longer open, never shows another store's invoices;
  *   - Stripe's pages are linked only at Stripe's own https hosts;
@@ -39,6 +40,7 @@ import { PlanInvoicesList } from "@/components/plan-invoices-list";
 import StudioInvoicesPage from "@/app/studio/invoices/page";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
 import { countStudio, takeEssential } from "@/lib/studio-route";
+import { essentialTakeBelow } from "@/lib/request-guard";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -134,7 +136,8 @@ async function main() {
     is("none", read, { state: "none" });
     is("Stripe is not asked and no request is taken", [asked.length, taken.length], [0, 0]);
     const text = html(read);
-    is("it says so in plain text", text.includes("You have no invoices from Marktmorgen"), true);
+    // Changed (rule 23, review 2): without asking Stripe it never says "no invoices", only that there is no plan subscription now.
+    is("it says so in plain text, never as no invoices", [text.includes("This store has no plan subscription now"), text.includes("no invoices")], [true, false]);
     is("and nothing to click", text.includes("<a "), false);
   }
 
@@ -169,7 +172,8 @@ async function main() {
     is("said as used", read, { state: "used", message: PLAN_INVOICES_USED });
     is("Stripe is not asked", asked.length, 0);
     // Changed (rule 23): the refusal names both counters and their 24 hours (review 1), no longer "until tomorrow (UTC)".
-    is("the message is shown, never 'no invoices'", [html(read).includes(`up to ${PLAN_INVOICES_PER_DAY} times in 24 hours`), html(read).includes("no invoices"), html(read).includes("UTC")], [true, false, false]);
+    // Changed (rule 23, review 2): one counter now, said with what it is for.
+    is("the message is shown, never 'no invoices'", [html(read).includes(`only while fewer than ${PLAN_INVOICES_PER_DAY} of the ${ESSENTIAL_PER_DAY} requests`), html(read).includes("team changes"), html(read).includes("no invoices"), html(read).includes("UTC")], [true, true, false, false]);
     const unknown = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => "unknown");
     is("a count that could not be read asks nothing and is never said as too many", [unknown, asked.length, html(unknown).includes("today")], [{ state: "unknown" }, 0, false]);
     const thrown = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, async () => { throw new Error("redis down"); });
@@ -193,6 +197,8 @@ async function main() {
     reply = { status: 200, body: { data: [invoice({ customer: "cus_SomebodyElse1" })], has_more: false } };
     const foreign = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take);
     is("only another customer's row: nothing shown and not said as none", [foreign.state === "listed" && foreign.invoices.length, html(foreign).includes("no invoices"), html(foreign).includes("could not be read")], [0, false, true]);
+    reply = { status: 200, body: { data: [], has_more: true } };
+    is("an empty page that says more follow is unknown, in the library itself (review 2)", await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take), { state: "unknown" });
     reply = { status: 200, body: { data: [], has_more: false } };
     const empty = await planInvoicesOf({ stripeCustomerId: CUS, subscriptionId: SUB, sid: "", handle: "x" }, take);
     is("a complete, empty page: none yet, in plain text", [html(empty).includes("no invoices"), html(empty).includes("<a ")], [true, false]);
@@ -218,7 +224,8 @@ async function main() {
     answering(new NextRequest("https://marktmorgen.com/studio/invoices", { headers: { cookie } }));
     asked.length = 0;
     const none = renderToStaticMarkup((await StudioInvoicesPage({ searchParams: Promise.resolve({ store: store.sid }) })) as React.ReactElement);
-    is("no plan: plain text, Stripe not asked", [none.includes("You have no invoices from Marktmorgen"), asked.length], [true, 0]);
+    // Changed (rule 23, review 2): the words for no plan subscription.
+    is("no plan: plain text, Stripe not asked", [none.includes("This store has no plan subscription now"), asked.length], [true, 0]);
     is("one heading for the page", (none.match(/<h1/g) ?? []).length, 1);
 
     await setSubscription(email, { customerId: CUS, subscriptionId: SUB, active: true, tier: "creator", period: paidPeriod() });
@@ -231,7 +238,8 @@ async function main() {
       `GET /v1/invoices?${new URLSearchParams({ customer: CUS, subscription: SUB, limit: String(PLAN_INVOICES_SHOWN) })}`,
     ]);
     // Changed (rule 23): the page says how many reads a day and that canceling keeps the rest (review 1).
-    is("the page says what reading them counts", shown.includes(`up to ${PLAN_INVOICES_PER_DAY} times in 24 hours`) && shown.includes("canceling your plan always keeps the rest"), true);
+    // Changed (rule 23, review 2): one counter, read only below its reserve.
+    is("the page says what reading them counts", shown.includes(`only while fewer than ${PLAN_INVOICES_PER_DAY} of them have been used`) && shown.includes("canceling your plan always keeps the rest"), true);
 
     // Changed (rule 23, review 1): invoices may use at most PLAN_INVOICES_PER_DAY of the essential requests, never all of them,
     // so canceling the plan is never shut out by reading invoices.
@@ -239,7 +247,8 @@ async function main() {
     for (let n = 1; n < PLAN_INVOICES_PER_DAY; n += 1) await StudioInvoicesPage({ searchParams: Promise.resolve({ store: store.sid }) });
     asked.length = 0;
     const used = renderToStaticMarkup((await StudioInvoicesPage({ searchParams: Promise.resolve({ store: store.sid }) })) as React.ReactElement);
-    is("past its reads: said, and Stripe not asked for invoices", [used.includes(`up to ${PLAN_INVOICES_PER_DAY} times in 24 hours`), asked.filter((a) => a.path.startsWith("GET /v1/invoices")).length], [true, 0]);
+    // Changed (rule 23, review 2): the refusal's words.
+    is("past its reads: said, and Stripe not asked for invoices", [used.includes(`only while fewer than ${PLAN_INVOICES_PER_DAY}`), asked.filter((a) => a.path.startsWith("GET /v1/invoices")).length], [true, 0]);
     let left = 0;
     while ((await countStudio(store, "billing")).ok) left += 1;
     is("canceling or changing the plan still has the rest of the day's figure", left, ESSENTIAL_PER_DAY - PLAN_INVOICES_PER_DAY);
@@ -248,6 +257,16 @@ async function main() {
     const other = { sid: "s_PlanInvoicesOther", handle: "planinvoicesother" };
     for (let n = 0; n < ESSENTIAL_PER_DAY; n += 1) await takeEssential(other);
     is("an essential figure already used refuses the read", await takeInvoicesRead(other), "exceeded");
+
+    // Review 2: the reserve holds whatever came first, on the one key. Team changes or plan steps first, then reads:
+    const mixed = { sid: "s_PlanInvoicesMixed", handle: "planinvoicesmixed" };
+    for (let n = 0; n < 3; n += 1) is(`essential request ${n + 1} first`, await takeEssential(mixed), "within");
+    is("a read while fewer than the reserve's line were taken", [await takeInvoicesRead(mixed), await takeInvoicesRead(mixed)], ["within", "within"]);
+    is("then refused, and the refusal takes nothing", [await takeInvoicesRead(mixed), await takeInvoicesRead(mixed)], ["exceeded", "exceeded"]);
+    let kept = 0;
+    while ((await takeEssential(mixed)) === "within") kept += 1;
+    is("leaving or paying keeps exactly the rest", kept, ESSENTIAL_PER_DAY - PLAN_INVOICES_PER_DAY);
+    is("a ceiling that is not a positive whole number is unknown, and nothing is taken", [await essentialTakeBelow("studio-essential", "x", 0, 86_400), await essentialTakeBelow("studio-essential", "x", 1.5, 86_400), await essentialTakeBelow("studio-essential", "x", 3, 0)], ["unknown", "unknown", "unknown"]);
 
     // Review 1: a store named twice or in another shape, or one no longer open, never falls back to another store.
     const redirected = async (store: unknown) => {

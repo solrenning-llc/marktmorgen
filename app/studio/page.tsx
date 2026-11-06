@@ -23,6 +23,7 @@ import { paypalSalesConfigured } from "@/lib/paypal-sales";
 import { lowestPriceCents } from "@/lib/product-option";
 import { SaleEditor } from "@/components/sale-editor";
 import { FairPriceEditor } from "@/components/fair-price-editor";
+import { MemberPriceSection } from "@/components/member-price-section";
 import { CartDealEditor } from "@/components/cart-deal-editor";
 import { offersCart } from "@/lib/cart-checkout";
 import { allCountries, countryName } from "@/lib/fair-price";
@@ -1901,6 +1902,8 @@ export default async function StudioPage({
                   products={await saleCandidates(store)}
                   names={Object.fromEntries(allCountries().map((code) => [code, countryName(code)]))}
                 />
+
+                <MemberPriceSection store={store} connected={Boolean(current?.stripeAccountId)} />
 
                 <CartDealEditor initial={store.cartDeal} currency={store.currency} offered={offersCart(store)} />
 

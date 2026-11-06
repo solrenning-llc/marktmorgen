@@ -152,11 +152,12 @@ async function main(): Promise<void> {
   const editor = readFileSync("components/member-price-editor.tsx", "utf8");
   is("posts to its own route", editor.includes('"/api/store/member-price"'), true);
   is("each choice has a label", editor.includes("<legend") && editor.includes("field-label") && editor.includes("htmlFor="), true);
-  is("44px targets", editor.includes("min-h-11") && editor.includes("h-11 w-11"), true);
+  is("44px targets", editor.includes("min-h-11") && editor.includes("min-w-11"), true);
   is("a review step before saving, with a way back", editor.includes("Review your member prices") && editor.includes("Confirm and save") && editor.includes("Go back and change"), true);
   is("errors are announced and the server's words are shown", editor.includes('role="alert"') && editor.includes("message"), true);
   is("a rule can be removed", editor.includes("Remove this rule"), true);
   is("the same check runs before review", editor.includes("checkMemberEdit("), true);
+  is("a product no longer sold is taken out on opening, said so, saved only after the review", editor.includes("rule.by.filter((id) => sold.has(id))") && editor.includes("is no longer sold"), true);
 
   part("In the studio's settings, with no new await in the page");
   const page = readFileSync("app/studio/page.tsx", "utf8");

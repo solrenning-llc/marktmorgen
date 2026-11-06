@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { readListing } from "@/lib/catalog";
 import { studioRefusal } from "@/lib/person-tasks";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { applyAccess, applyGive, readAccessAsk, readGiveAsk, reviewAccess, reviewGive } from "@/lib/student-bulk";
+import { type PayStudio, applyAccess, applyGive, readAccessAsk, readGiveAsk, reviewAccess, reviewGive } from "@/lib/student-bulk";
 import { ACCESS_REFUSALS, GIVE_REFUSALS, type GiveRefusal, MAX_STUDENT_BODY_BYTES, givable } from "@/lib/student-bulk-rules";
 import type { Store } from "@/lib/store";
 import { countStudio } from "@/lib/studio-route";
@@ -18,8 +18,9 @@ import { countStudio } from "@/lib/studio-route";
  * read (never changed by guess), whose change could not be confirmed and whose
  * did not land. The undo is the opposite change for `changed`. `id` is the
  * product's, found through the creator's own store. The same permission as
- * taking one student off a course ("products"); the studio requests it uses
- * are taken before it writes (lib/student-bulk.ts). It sends no email and
+ * taking one student off a course ("products"); the studio requests the review
+ * and the change use are taken before anything about the students is read,
+ * and those of the writes before the first write (lib/student-bulk.ts). It sends no email and
  * refunds nothing: refunds stay one at a time.
  *
  * Unit 2: `{ change: "give" | "takeback", to, emails }` gives another of the
@@ -46,22 +47,27 @@ export async function POST(request: NextRequest) {
     const product = await readListing(store, text(body.id, 40));
     if (!product?.course) return Response.json({ ok: false, error: "product", message: ACCESS_REFUSALS.product }, { status: 404 });
     const courseId = product.course.id;
-    if (body.action === "review") return Response.json({ ok: true, review: await reviewAccess(courseId, read.ask) }, { headers: NO_STORE });
-    if (read.ask.expect === null) return Response.json({ ok: false, error: "expect", message: ACCESS_REFUSALS.expect }, { status: 400 });
-    const applied = await applyAccess(store, courseId, read.ask, async (units) => {
+    const pay: PayStudio = async (units) => {
       const counted = await countStudio(store, null, units);
       return counted.ok ? { ok: true } : { ok: false, reason: counted.reason, message: counted.message };
-    });
+    };
+    const refusal = (reason: string, message: string) => {
+      const refused = studioRefusal(reason, message);
+      return Response.json(refused.body, { status: refused.status, headers: NO_STORE });
+    };
+    if (body.action === "review") {
+      const reviewed = await reviewAccess(courseId, read.ask, pay);
+      return reviewed.kind === "refused" ? refusal(reviewed.reason, reviewed.message) : Response.json({ ok: true, review: reviewed.review }, { headers: NO_STORE });
+    }
+    if (read.ask.expect === null) return Response.json({ ok: false, error: "expect", message: ACCESS_REFUSALS.expect }, { status: 400 });
+    const applied = await applyAccess(store, courseId, read.ask, pay);
     if (applied.kind === "stale") {
       return Response.json(
         { ok: false, error: "changed", message: "Something changed since your review. Nothing was changed. Check the new count and confirm again.", review: applied.review },
         { status: 409, headers: NO_STORE },
       );
     }
-    if (applied.kind === "refused") {
-      const refused = studioRefusal(applied.reason, applied.message);
-      return Response.json(refused.body, { status: refused.status, headers: NO_STORE });
-    }
+    if (applied.kind === "refused") return refusal(applied.reason, applied.message);
     return Response.json({ ok: true, change: read.ask.change, ...applied.done }, { headers: NO_STORE });
   } catch (error) {
     console.error("changing students' access in bulk failed", error);
@@ -69,7 +75,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-const pay = (store: Store) => async (units: number) => {
+const payFor = (store: Store): PayStudio => async (units) => {
   const counted = await countStudio(store, null, units);
   return counted.ok ? ({ ok: true } as const) : { ok: false as const, reason: counted.reason, message: counted.message };
 };
@@ -93,11 +99,11 @@ async function give(store: Store, body: Record<string, unknown>): Promise<Respon
     if (!product?.course || !givable(product)) return Response.json({ ok: false, error: "product", message: GIVE_REFUSALS.product }, { status: 404 });
     const target = { productId: product.id, courseId: product.course.id };
     if (body.action === "review") {
-      const reviewed = await reviewGive(store, target, ask, pay(store));
+      const reviewed = await reviewGive(store, target, ask, payFor(store));
       return reviewed.kind === "review" ? Response.json({ ok: true, review: reviewed.review }, { headers: NO_STORE }) : refused(reviewed.reason, reviewed.message);
     }
     if (ask.expect === null) return Response.json({ ok: false, error: "expect", message: GIVE_REFUSALS.expect }, { status: 400 });
-    const applied = await applyGive(store, target, ask, pay(store));
+    const applied = await applyGive(store, target, ask, payFor(store));
     if (applied.kind === "stale") {
       return Response.json(
         { ok: false, error: "changed", message: "Something changed since your review. Nothing was changed. Check the new count and confirm again.", review: applied.review },

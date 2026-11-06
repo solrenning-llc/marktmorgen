@@ -11,7 +11,14 @@
  * is written and the review is answered again), and the studio requests the
  * change uses are taken. After it, each person is read back: only what reads
  * back as asked is said as done. No email is sent and nothing is refunded.
+ *
+ * Nothing about a person's access is read before it is paid for (review of
+ * #3035, Codex P, 5808427711): the review and the change take the studio
+ * requests their first read costs before it (accessReadUnits), and the change
+ * those of its writes and its read back before the first write
+ * (accessChangeUnits), each at its most, in commands and in bytes.
  */
+import { STUDENT_ROW_BYTES } from "@/lib/api-read-rules";
 import { readAddresses, leadsKey, parseContact } from "@/lib/contacts";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { STUDIO_GIVE_JOB, STUDIO_GIVE_PREFIX, grantImported, givenMany, takeGivenMany } from "@/lib/imported-purchases";
@@ -36,7 +43,6 @@ import {
   MAX_STUDENT_ACTION,
   STUDENTS_PER_PAGE,
   type StudentLine,
-  accessUnits,
   giveReadUnits,
   giveWriteUnits,
   labelUnits,
@@ -51,6 +57,58 @@ import {
  */
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
 const blockedKey = (courseId: string) => `nl:course:${courseId}:blocked`;
+
+/** What one studio request pays for in the database (tests/plan-cost-registry.ts, UNIT_COST.studio): twenty commands and fifty kilobytes. */
+export const STUDIO_UNIT_COMMANDS = 20;
+export const STUDIO_UNIT_BYTES = 50_000;
+/** A key of a course's or a buyer's record as sent (nl:course:<id>:students, nl:learn:paid:<store>:<person>), with room. */
+const KEY_BYTES = 128;
+/** A person as their access is filed: the hashed address (lib/learn.ts, emailKey). */
+const PERSON_KEY_BYTES = 32;
+/** One answer that is a number (a flag, a count), with its framing. */
+const NUMBER_BYTES = 8;
+
+/** What a piece of work sends through the database and gets back, at its most. */
+export type DbWork = { commands: number; bytes: number };
+
+/** The studio requests that pay for `work`: never fewer than its commands or its bytes need; none for no work. */
+export function studioUnits(work: DbWork): number {
+  const { commands, bytes } = work;
+  if (![commands, bytes].every((n) => Number.isFinite(n) && n >= 0)) return Number.POSITIVE_INFINITY;
+  return Math.ceil(Math.max(commands / STUDIO_UNIT_COMMANDS, bytes / STUDIO_UNIT_BYTES));
+}
+
+const people = (n: number) => Math.max(0, Math.floor(n));
+
+/**
+ * Reading `n` people's access (accessStates): a command pair for every
+ * ACCESS_READ_BATCH of them, each pair the two keys and every person's hashed
+ * address twice, and back each one's row (STUDENT_ROW_BYTES at its largest)
+ * and their flag.
+ */
+export function accessReadWork(n: number): DbWork {
+  const count = people(n);
+  const batches = Math.ceil(count / ACCESS_READ_BATCH);
+  return { commands: 2 * batches, bytes: batches * 2 * KEY_BYTES + count * (2 * PERSON_KEY_BYTES + STUDENT_ROW_BYTES + NUMBER_BYTES) };
+}
+
+/** Writing `n` people's access (setBlocked, lib/learn.ts): two commands each, the blocked list and the buyer's cached access, and their answers. */
+export function accessWriteWork(n: number): DbWork {
+  const count = people(n);
+  return { commands: 2 * count, bytes: count * (2 * KEY_BYTES + PERSON_KEY_BYTES + 2 * NUMBER_BYTES) };
+}
+
+/** Studio requests taken before `n` people's access is first read, by the review and by the change. */
+export function accessReadUnits(n: number): number {
+  return studioUnits(accessReadWork(n));
+}
+
+/** Studio requests taken before `n` people's access is changed: every write and the read back of each of them. */
+export function accessChangeUnits(n: number): number {
+  const write = accessWriteWork(n);
+  const back = accessReadWork(n);
+  return studioUnits({ commands: write.commands + back.commands, bytes: write.bytes + back.bytes });
+}
 
 /**
  * One page of a course's students, with each one's labels when `withLabels`:
@@ -182,35 +240,42 @@ function sortOut(states: Map<string, AccessState>, ask: AccessAsk) {
 
 const reviewOf = (s: ReturnType<typeof sortOut>): AccessReview => ({ changes: s.targets.length, already: s.already.length, notStudent: s.notStudent.length, unread: s.unread.length });
 
-/** What the change would do, with nothing written. */
-export async function reviewAccess(courseId: string, ask: AccessAsk): Promise<AccessReview> {
-  return reviewOf(sortOut(await accessStates(courseId, ask.emails), ask));
+/** Asks for studio requests: yes, or why not. */
+export type PayStudio = (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }>;
+
+/** The studio requests were not given: nothing was read or written. */
+type Refused = { kind: "refused"; reason: string; message: string };
+
+/** What the change would do, with nothing written; what reading it costs is paid for first. */
+export async function reviewAccess(courseId: string, ask: AccessAsk, pay: PayStudio): Promise<{ kind: "review"; review: AccessReview } | Refused> {
+  const paid = await pay(accessReadUnits(ask.emails.length));
+  if (!paid.ok) return { kind: "refused", reason: paid.reason, message: paid.message };
+  return { kind: "review", review: reviewOf(sortOut(await accessStates(courseId, ask.emails), ask)) };
 }
 
 export type AccessApplied =
   | { kind: "done"; done: AccessDone }
   /** The count it would change now is not the one confirmed: nothing written; this is what it would do now. */
   | { kind: "stale"; review: AccessReview }
-  /** The studio requests it needs were not given: nothing written. */
-  | { kind: "refused"; reason: string; message: string };
+  /** The studio requests it needs were not given: nothing written (nothing read, when refused before the first read). */
+  | Refused;
 
 /**
- * The change, for those it applies to now. `pay` is asked for accessUnits of
- * them before the first write. Each person's write is setBlocked, at most
+ * The change, for those it applies to now. `pay` is asked, before anything is
+ * read, for what reading everyone asked costs (accessReadUnits), and then,
+ * before the first write, for what the writes and the read back of those it
+ * changes cost (accessChangeUnits). Each person's write is setBlocked, at most
  * ACCESS_WRITES_AT_ONCE at a time; then each is read back, and only those read
  * back as asked are `changed`.
  */
-export async function applyAccess(
-  store: Store,
-  courseId: string,
-  ask: AccessAsk,
-  pay: (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }>,
-): Promise<AccessApplied> {
+export async function applyAccess(store: Store, courseId: string, ask: AccessAsk, pay: PayStudio): Promise<AccessApplied> {
+  const reading = await pay(accessReadUnits(ask.emails.length));
+  if (!reading.ok) return { kind: "refused", reason: reading.reason, message: reading.message };
   const sorted = sortOut(await accessStates(courseId, ask.emails), ask);
   if (ask.expect !== sorted.targets.length) return { kind: "stale", review: reviewOf(sorted) };
   const result: AccessDone = { asked: ask.emails.length, changed: [], already: sorted.already, notStudent: sorted.notStudent, unread: sorted.unread, unknown: [], failed: [] };
   if (!sorted.targets.length) return { kind: "done", done: result };
-  const paid = await pay(accessUnits(sorted.targets.length));
+  const paid = await pay(accessChangeUnits(sorted.targets.length));
   if (!paid.ok) return { kind: "refused", reason: paid.reason, message: paid.message };
   const removing = ask.change === "revoke";
   for (let from = 0; from < sorted.targets.length; from += ACCESS_WRITES_AT_ONCE) {
@@ -262,7 +327,6 @@ export function readGiveAsk(raw: Record<string, unknown>): { ok: true; ask: Give
 
 /** The course given: its product (what the record names) and its course (whose students and removals are read). */
 export type GiveTarget = { productId: string; courseId: string };
-type Pay = (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }>;
 /** One person's gift as read: absent from the answer is unknown, never "nothing given". */
 const grantOf = <T>(map: Map<string, T>, email: string): T | "unknown" => (map.has(email) ? (map.get(email) as T) : "unknown");
 type Sorted = { targets: string[]; already: string[]; student: string[]; removed: string[]; otherWay: string[]; unread: string[] };
@@ -302,10 +366,8 @@ async function sortGive(store: Store, target: GiveTarget, ask: GiveAsk): Promise
 
 const giveReviewOf = (s: Sorted): GiveReview => ({ changes: s.targets.length, already: s.already.length, student: s.student.length, removed: s.removed.length, otherWay: s.otherWay.length, unread: s.unread.length });
 
-type Refused = { kind: "refused"; reason: string; message: string };
-
 /** What it would do, with nothing written; its reads taken first. */
-export async function reviewGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: Pay): Promise<{ kind: "review"; review: GiveReview } | Refused> {
+export async function reviewGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: PayStudio): Promise<{ kind: "review"; review: GiveReview } | Refused> {
   const paid = await pay(giveReadUnits(ask.emails.length));
   if (!paid.ok) return { kind: "refused", reason: paid.reason, message: paid.message };
   return { kind: "review", review: giveReviewOf(await sortGive(store, target, ask)) };
@@ -321,7 +383,7 @@ const refusedAs = (reason: GiveRefusal): Refused => ({ kind: "refused", reason, 
  * the writes and their read back paid for; written; each read back, and only
  * those read back as asked said as `changed`.
  */
-export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: Pay): Promise<GiveApplied> {
+export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: PayStudio): Promise<GiveApplied> {
   const giving = ask.change === "give";
   const paused = giving ? integrationPauseWord(store) : null;
   if (paused) return refusedAs(paused);

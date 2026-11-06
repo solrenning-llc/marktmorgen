@@ -125,8 +125,8 @@ const isRecord = (value: unknown): value is Row => Boolean(value) && typeof valu
 const SESSION_STATES = new Set(["open", "complete", "expired"]);
 const SESSION_PAYMENTS = new Set(["paid", "unpaid", "no_payment_required"]);
 const INTENT_STATES = new Set(["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled", "succeeded"]);
-/** A field that Stripe always fills is read only when it is one of its values; one it may leave out may be absent. */
-const oneOf = (value: unknown, known: Set<string>) => value === undefined || (typeof value === "string" && known.has(value));
+/** A field Stripe always fills, read only when it is one of Stripe's own values: absent is not known (Codex G on #2464). */
+const oneOf = (value: unknown, known: Set<string>) => typeof value === "string" && known.has(value);
 const hasId = (row: Row) => typeof row.id === "string" && row.id.length > 0;
 const hasMeta = (row: Row) => row.metadata === undefined || row.metadata === null || isRecord(row.metadata);
 /** A Checkout Session as Stripe lists it: an id, and its state and payment state among Stripe's own. */

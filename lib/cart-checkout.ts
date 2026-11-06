@@ -28,7 +28,7 @@ import { fairOff } from "@/lib/fair-price";
 import { commissionRate } from "@/lib/affiliate-setting";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, onlyInstantMethods, saveCardForOffers } from "@/lib/instant-pay";
-import { StripeError, onAccount } from "@/lib/stripe-account";
+import { StripeError, checkoutClosesAt, onAccount } from "@/lib/stripe-account";
 import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { isHouseStore } from "@/lib/house-store";
@@ -60,7 +60,8 @@ const DISPLAY_NAME = "branding_settings[display_name]";
  * could go in one, read from its own index without a single product read.
  */
 export function offersCart(store: Store): boolean {
-  const never = KIND.free | KIND.call | KIND.recurring | KIND.limited | KIND.hidden;
+  // A limited product can go in one since its checkout holds a unit (lib/stock.ts, withCartStockHolds).
+  const never = KIND.free | KIND.call | KIND.recurring | KIND.hidden;
   let count = 0;
   for (const item of store.catalog.items) {
     if ((item.kind & KIND.paid) !== 0 && (item.kind & never) === 0 && item.options.length === 0) count += 1;
@@ -95,6 +96,8 @@ export async function createCartCheckout(
     via?: { aff: string; rate: number; own?: number | null } | null;
     /** The buyer checked the Store assistant's box for one reminder (lib/assistant-reminder.ts): the checkout closes after an hour. */
     remind?: boolean;
+    /** A unit of a limited product in it is held (lib/stock.ts, withCartStockHolds), so the checkout closes before the hold runs out. */
+    held?: boolean;
     /** The buyer's yes to access at once (lib/digital-consent.ts), needed when anything in the cart is handed over digitally. */
     digitalConsent?: DigitalConsent | null;
     /**
@@ -234,7 +237,9 @@ export async function createCartCheckout(
 
   for (;;) {
     try {
-      if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
+      // A held unit's shorter time wins over a reminder's hour, as on one product's checkout (lib/store-checkout.ts).
+      if (extras.held) body.set("expires_at", String(checkoutClosesAt()));
+      else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
       const session = await onAccount("POST", store.stripeAccountId, "/checkout/sessions", body);
       if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") throw new Error("Stripe did not return a checkout URL");
       return { url: session.url, id: session.id };

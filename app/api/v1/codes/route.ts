@@ -84,7 +84,8 @@ export async function DELETE(request: Request) {
     if (!(await stopCode(account, id))) return apiError(502, "unavailable", "The code could not be switched off on Stripe just now. Try again in a moment.");
     // Listed again, so the answer is what Stripe says now; the checkout's box stays only while a code is live.
     const after = await listCodes(account);
-    if (after.state !== "ok") return unreadable();
+    // Switched off on Stripe already: said as done, with the codes not read back, and nothing written from them.
+    if (after.state !== "ok") return apiOk({ stopped: id, listed: false, message: "The code was switched off. Your discount codes could not be read back from Stripe just now; read them again with GET /api/v1/codes." });
     await setHasDiscounts(storeRef(store), after.codes.some((c) => c.active));
     return apiOk({ data: after.codes.map(codeOut) });
   } catch (error) {

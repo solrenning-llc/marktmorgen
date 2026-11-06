@@ -70,6 +70,10 @@ export async function POST(request: NextRequest) {
     // Stripe says now rather than what we believe we just did.
     const list = await listCodes(account);
     if (list.state !== "ok") {
+      // A make or a stop Stripe already did is said as done, so it is not
+      // pressed again; only the list after it is unconfirmed, and nothing is
+      // written from it. The studio shows its "could not confirm" words.
+      if (action !== "list") return Response.json({ ok: true, done: action, listed: false });
       return Response.json({ ok: false, error: "stripe" }, { status: 502 });
     }
     await setHasDiscounts(

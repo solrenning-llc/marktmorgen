@@ -251,3 +251,28 @@ for (const outcome of ["healthy", "set unapplied", "set acknowledgement lost", "
     }
   });
 }
+
+test("a creation transport failure only reports no change after confirmed cleanup", async () => {
+  redis.clear();
+  let writes = 0;
+  let cleanups = 0;
+  let counted = 0;
+  redis.pipeline = async (commands) => {
+    counted += commands.length;
+    assert.ok(counted <= 2000, "command ceiling is counted before executing");
+    if (commands.length === 3 && commands[0]?.[0] === "SET" && commands[1]?.[0] === "HSET") {
+      writes += 1;
+      await original(commands);
+      throw new Error("Synthetic response transport failure after application");
+    }
+    if (commands.length === 2 && commands[0]?.[0] === "DEL" && commands[1]?.[0] === "HDEL") cleanups += 1;
+    return original(commands);
+  };
+  let made: Awaited<ReturnType<typeof makeKey>>;
+  try { made = await makeKey(sid, "Synthetic transport evidence"); }
+  finally { redis.pipeline = original; }
+  assert.equal(writes, 1, "the creation is never replayed");
+  assert.equal(cleanups, 1);
+  assert.deepEqual(made, { ok: false, reason: "unavailable" });
+  assert.equal((await original([["HLEN", `nl:api:keys:${sid}`]]))[0], 0, "confirmed cleanup really removed the created record");
+});

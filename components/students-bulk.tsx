@@ -371,7 +371,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
           </div>
         ) : null}
         <p className="mt-4 text-sm text-ink">Refunds stay one at a time: open the order to refund it.</p>
-        <button type="submit" className="btn btn-secondary mt-4 min-h-11" aria-disabled={busy || undefined}>
+        <button type="submit" className="btn btn-secondary mt-4" aria-disabled={busy || undefined}>
           Review the change
         </button>
         <p className="mt-2 text-sm text-danger-text" role="alert">
@@ -379,7 +379,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
         </p>
         {canExport ? (
           <div className="mt-4 border-t border-line pt-4">
-            <button type="button" className="btn btn-secondary min-h-11" aria-disabled={busy || undefined} onClick={download}>
+            <button type="button" className="btn btn-secondary" aria-disabled={busy || undefined} onClick={download}>
               {`Download the selected as a spreadsheet file (${chosen.length.toLocaleString("en-US")})`}
             </button>
             <p className="mt-1 text-xs text-ink-soft">A CSV file of the students you selected: email, progress, access and labels. Made on your device, from this page.</p>
@@ -416,7 +416,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
             </ul>
             <button
               type="button"
-              className="btn btn-primary mt-4 min-h-11"
+              className="btn btn-primary mt-4"
               aria-disabled={busy || review.review.changes === 0 || undefined}
               onClick={() => {
                 if (busy || review.review.changes === 0) return;
@@ -435,7 +435,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
             <p ref={resultLine} tabIndex={-1} className="flex flex-wrap items-center gap-3 text-sm text-ink">
               <span id="students-result-line">{result.words}</span>
               {undoable ? (
-                <button type="button" className="btn btn-secondary btn-sm min-h-11" aria-disabled={busy || undefined} aria-describedby="students-result-line" onClick={() => void undo()}>
+                <button type="button" className="btn btn-secondary btn-sm" aria-disabled={busy || undefined} aria-describedby="students-result-line" onClick={() => void undo()}>
                   Undo
                 </button>
               ) : null}

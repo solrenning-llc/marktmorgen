@@ -145,7 +145,7 @@ export default async function StudioStudentsPage({ searchParams }: Params) {
                   </div>
                 ) : null}
                 <div className="sm:col-span-2">
-                  <button type="submit" className="btn btn-secondary min-h-11">Show these students</button>
+                  <button type="submit" className="btn btn-secondary">Show these students</button>
                 </div>
               </form>
 

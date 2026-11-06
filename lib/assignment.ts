@@ -86,31 +86,69 @@ export async function saveTask(courseId: string, lessonId: string, task: Task, d
   if (grown < 0) await giveData(data, [{ slot: TASKS_SLOT(courseId), bytes: -grown }]);
 }
 
-/** Forgets an assignment and all the work handed in for it. Returns the files to delete. */
-export async function dropTask(courseId: string, lessonId: string, room: string | null, data: DataStore): Promise<string[]> {
-  if (!isRedisConfigured()) return [];
-  const [flat] = await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]);
-  const pairs = Array.isArray(flat) ? flat : [];
+/** A handed-in file's size as handIn writes it in the files' hash: a whole number of bytes, as text. */
+const FILE_BYTES_TEXT = /^(0|[1-9]\d{0,15})$/;
+
+/** What removing an assignment will forget, read in full before anything is deleted (readTaskDrop). */
+export type TaskDrop = { courseId: string; lessonId: string; files: string[]; bytes: number; gone: string[]; freed: number };
+
+/**
+ * Reads what removing an assignment will forget: its handed-in files and their sizes, the work handed in, and what
+ * the records weigh. Every reply in its exact shape (CX-123 rules 24 and 30; Claude 4 after Codex P on #2655): a
+ * files' hash, a list of work or a record that does not read throws UnknownReplyError. A caller reads this before it
+ * takes the assignment out of the course (Revisor 1 on #2810), so a read that fails leaves everything findable.
+ */
+export async function readTaskDrop(courseId: string, lessonId: string): Promise<TaskDrop> {
+  const flat = repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0];
+  const pairs: unknown[] | null = Array.isArray(flat)
+    ? flat
+    : flat && typeof flat === "object"
+      ? Object.entries(flat as Record<string, unknown>).flat()
+      : null;
+  if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
   const files: string[] = [];
   let bytes = 0;
-  for (let i = 0; i + 1 < pairs.length; i += 2) {
-    files.push(String(pairs[i]));
-    bytes += Number(pairs[i + 1]) || 0;
+  for (let i = 0; i < pairs.length; i += 2) {
+    const [name, size] = [pairs[i], pairs[i + 1]];
+    if (typeof name !== "string" || !name || typeof size !== "string" || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
+    files.push(name);
+    bytes += Number(size);
   }
   // Each student's own record, found by the list of all the work handed in.
-  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]);
-  const gone = (Array.isArray(waiting) ? waiting : []).filter((m): m is string => typeof m === "string" && m.startsWith(`${lessonId}|`));
+  const waiting = repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0];
+  if (!Array.isArray(waiting) || !waiting.every((m) => typeof m === "string")) throw new UnknownReplyError("the work handed in for a course");
+  const gone = (waiting as string[]).filter((m) => m.startsWith(`${lessonId}|`));
   // What the prompt and the work weighed comes back to the store's data room.
-  const held = await redisPipeline([["GET", taskKey(courseId, lessonId)], ...gone.map((member) => ["GET", subKey(courseId, lessonId, member.slice(lessonId.length + 1))])]);
+  const held = repliesFor(
+    await redisPipeline([["GET", taskKey(courseId, lessonId)], ...gone.map((member) => ["GET", subKey(courseId, lessonId, member.slice(lessonId.length + 1))])]),
+    1 + gone.length,
+  );
+  if (!held || !held.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("an assignment's records");
   const freed = held.reduce((sum: number, raw, i) => sum + recordBytes(raw, i === 0 ? 1 : 3), 0) + files.length * ENTRY_BYTES;
+  return { courseId, lessonId, files, bytes, gone, freed };
+}
+
+/**
+ * Forgets what readTaskDrop read, and only that: the files read leave the files' hash one by one (HDEL), so a file
+ * handed in after the reading stays listed, never lost; the work read leaves the lists. Returns the files to delete.
+ */
+export async function applyTaskDrop(drop: TaskDrop, room: string | null, data: DataStore): Promise<string[]> {
+  const { courseId, lessonId, files, bytes, gone, freed } = drop;
   await redisPipeline([
-    ["DEL", taskKey(courseId, lessonId), filesKey(courseId, lessonId)],
+    ["DEL", taskKey(courseId, lessonId)],
+    ...(files.length ? [["HDEL", filesKey(courseId, lessonId), ...files]] : []),
     ...gone.map((member) => ["DEL", subKey(courseId, lessonId, member.slice(lessonId.length + 1))]),
     ...(gone.length ? [["ZREM", waitingKey(courseId), ...gone], ["ZREM", allKey(courseId), ...gone]] : []),
   ]);
   if (room && bytes) await releaseBytes(room, bytes);
   if (freed) await giveData(data, [{ slot: TASKS_SLOT(courseId), bytes: freed }]);
   return files;
+}
+
+/** Forgets an assignment and all the work handed in for it, read first (readTaskDrop). Returns the files to delete. */
+export async function dropTask(courseId: string, lessonId: string, room: string | null, data: DataStore): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
+  return applyTaskDrop(await readTaskDrop(courseId, lessonId), room, data);
 }
 
 /** One student's work on one assignment, or null when they have handed nothing in. */
@@ -382,17 +420,29 @@ export async function tellCreatorNow(courseId: string): Promise<boolean> {
 }
 
 /** Forgets every assignment of a course that is going, and returns their files to delete. */
-export async function dropCourseTasks(course: { id: string; modules: { lessons: { id: string; task?: unknown }[] }[] }, room: string | null, data: DataStore): Promise<string[]> {
+type CourseTasks = { id: string; modules: { lessons: { id: string; task?: unknown }[] }[] };
+
+/** Every assignment of a course read for removal (readTaskDrop), before the course goes; throws on any unread. */
+export async function readCourseTaskDrops(course: CourseTasks): Promise<TaskDrop[]> {
+  const drops: TaskDrop[] = [];
+  if (!isRedisConfigured()) return drops;
+  for (const unit of course.modules) for (const lesson of unit.lessons) if (lesson.task) drops.push(await readTaskDrop(course.id, lesson.id));
+  return drops;
+}
+
+/** Forgets what readCourseTaskDrops read, then the course's lists of work. Returns the files to delete. */
+export async function applyCourseTaskDrops(course: CourseTasks, drops: TaskDrop[], room: string | null, data: DataStore): Promise<string[]> {
   const files: string[] = [];
-  for (const unit of course.modules) {
-    for (const lesson of unit.lessons) {
-      if (lesson.task) files.push(...(await dropTask(course.id, lesson.id, room, data)));
-    }
-  }
+  for (const drop of drops) files.push(...(await applyTaskDrop(drop, room, data)));
   if (files.length || course.modules.some((m) => m.lessons.some((l) => l.task))) {
     await redisPipeline([["DEL", waitingKey(course.id), allKey(course.id)]]);
   }
   return files;
+}
+
+/** A course's assignments all forgotten, each read first. Returns the files to delete. */
+export async function dropCourseTasks(course: CourseTasks, room: string | null, data: DataStore): Promise<string[]> {
+  return applyCourseTaskDrops(course, await readCourseTaskDrops(course), room, data);
 }
 
 /**

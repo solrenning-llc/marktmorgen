@@ -51,6 +51,12 @@ function main(): void {
   for (const [name, type, recipients] of malformed) {
     rejectsKnownEvent(name, type, recipients);
   }
+  Object.defineProperty(Object.prototype, "emailAddress", { configurable: true, value: "inherited@example.test" });
+  try {
+    rejectsKnownEvent("an inherited address is not provider evidence", "Bounce", [{}]);
+  } finally {
+    delete (Object.prototype as { emailAddress?: unknown }).emailAddress;
+  }
 
   part("Exact AWS shapes remain accepted and unrelated events stay ignorable");
   is("bounce object", readSesEvent(message("Bounce", [{ emailAddress: "one@example.test" }]))?.recipients, ["one@example.test"]);

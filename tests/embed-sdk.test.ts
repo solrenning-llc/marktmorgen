@@ -67,8 +67,10 @@ function standIn(hash = "") {
         child.parentNode = null;
       },
       focus() {},
-      contentWindow: tag === "iframe" ? { name: "frame-window" } : undefined,
+      contentWindow: tag === "iframe" ? { name: "frame-window", focus() { (el.contentWindow as Record<string, unknown>).focused = true; } } : undefined,
     };
+    // The browser's own modal dialog: what showModal does is recorded, nothing more.
+    if (tag === "dialog") el.showModal = () => { el.modal = true; };
     return el;
   };
   const body = make("body");
@@ -236,7 +238,7 @@ async function main(): Promise<void> {
 
   const page = standIn();
   is("nothing is touched on load", page.touched, []);
-  is("one global, with its version", (page.window.Marktmorgen as { version: number }).version, 1);
+  is("one global, with its version", (page.window.Marktmorgen as { version: number }).version, 2);
   is("a click on any other link is left alone", [page.click(page.link("https://example.com/", "overlay")), page.click(page.link("https://marktmorgen.com/@harbor", "overlay")), page.appended.length], [false, false, 0]);
   is("so is a click with a key held, for a new tab", [page.click(page.link("https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=page", "overlay"), { metaKey: true }), page.appended.length], [false, 0]);
   const pageLink = page.link("https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=page", "page");
@@ -248,6 +250,16 @@ async function main(): Promise<void> {
   const frame = box?.children[0] as { src: string; referrerPolicy: string; title: string; contentWindow: unknown; style: { height?: string } };
   is("and opens one dialog, named by the link, with a frame and a close button", [page.appended.length, box.attributes.role, box.attributes["aria-modal"], box.attributes["aria-label"], box.children.length], [1, "dialog", "true", "Buy The Reset", 2]);
   is("the frame is the card, over the page, asking for the site's origin only", [frame.src, frame.referrerPolicy], ["https://marktmorgen.com/embed/harbor/k3j9x2p1ab?mm=overlay&utm_source=blog", "origin"]);
+  // The keyboard stays in the dialog (2.4.3, 2.4.11): the browser's own modal dialog makes the rest of the page unreachable
+  // until it closes, without the script reading or changing any element of the page.
+  is("the dialog is the browser's own modal one", [(box as unknown as { tag: string }).tag, (box as unknown as { modal?: boolean }).modal], ["dialog", true]);
+  (frame as unknown as { onload?: () => void }).onload?.();
+  is("once the card has loaded, the focus is in it, on the card's own first control", (frame.contentWindow as { focused?: boolean }).focused, true);
+  const shut = box.children[1] as { tag: string; style: Record<string, string>; onfocus?: () => void; onblur?: () => void };
+  shut.onfocus?.();
+  is("its close button shows its focus in two colors, 3 px each, seen on any page under it (2.4.13)", [shut.tag, shut.style.boxShadow], ["button", "0 0 0 3px #15112e,0 0 0 6px #fff"]);
+  shut.onblur?.();
+  is("and only while it has the focus", shut.style.boxShadow, "none");
   is("the page under it stops scrolling", (page.document.documentElement as { style: { overflow: string } }).style.overflow, "hidden");
   is("a second press opens no second frame", [page.click(buy), page.appended.length], [true, 1]);
   const before = page.fired.length;
@@ -272,6 +284,10 @@ async function main(): Promise<void> {
   is("a status of another shape is left out", (page.fired.at(-1)?.detail as { status?: string }).status, undefined);
   page.key("Escape");
   is("Escape closes it", [page.appended.length, (page.fired.at(-1)?.detail as { reason: string }).reason], [0, "escape"]);
+  page.click(join);
+  let held = false;
+  (page.appended[0] as unknown as { oncancel?: (event: { preventDefault: () => void }) => void }).oncancel?.({ preventDefault: () => (held = true) });
+  is("the browser's own Escape on the dialog closes it the same way, never leaving it shown but not modal", [held, page.appended.length, (page.fired.at(-1)?.detail as { reason: string }).reason], [true, 0, "escape"]);
   is("and still nothing was read from the page", page.touched, []);
 
   const order = eventIdFor("0123456789abcdef0123456789abcdef", "sale.completed", "cs_test_123");

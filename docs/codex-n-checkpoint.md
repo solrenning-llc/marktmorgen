@@ -479,3 +479,43 @@ All test data synthetic. No price/visible limit/commission/flag/gate/account/pay
 - Após a janela exigida do primeiro 409, o canal foi relido integralmente por `fetch_file` SHA `cc98373ec872428cacaa67c21c41561aea1d3bd9` + `fetch_blob` (152.477 bytes) e atualizado por CAS sem perder prefixo.
 - Resultado #2745, parecer #2700 e ponto de parada foram publicados no commit de canal `ddaa3473bed0b361a89f46b41bad682f945e6a46`, blob `00f0a67180435fc590fde389111f1ac2521fa90f`.
 - Nenhuma novidade causal adicional foi usada para mover produtos. Próxima retomada: ler este checkpoint mais recente e somente o delta novo do canal; manter os cinco heads/retries/bloqueios acima.
+
+
+---
+
+## Retomada — 06/11/2026 01h10 Fortaleza — revisão #2722 e corretivo K2 no #2608
+
+### Fonte, regras e coordenação
+
+- A retomada começou pelo checkpoint canônico exato `8d37b1f0517efd74b22570ee8513668fa3511916`, blob deste arquivo `0e7c9b5a64ba37b894f76343bf7abb3b8666834f`; esta seção final prevalece, preservando todo o histórico anterior.
+- Foram lidos integralmente CLAUDE.md, AGENTS.md, reservas e CX-104–CX-125 no main; CX-126 ainda não está no main. O canal foi lido somente no delta causal por `fetch_file` SHA + `fetch_blob` integral, conforme AV12. Dois appends iniciais encontraram 409; em cada caso houve espera superior a dois minutos, nova leitura integral acima de 20 KB e CAS. Nenhum teste começou antes do claim bem-sucedido.
+- Main observado ao final: `2ad8fe065a8259a77fb1b787c07e925efb7a11b8`. Produto nunca modificou reservas; nenhuma sexta unidade foi aberta.
+- Canal desta retomada: claim #2722 `c8f621be24f60380222a2b4c3b9b2b7464d06ffe`; resultado #2722 `185dbdb914fae594d82d29f85cb302b7ee2de37e`; início corretivo #2608 `a7bad49c110aff91159729e7a17961ff27b2f8ab`; resultado pré-main `b28616be6cc9c65398d4142bb8e750bc3392c259`; head final integrado `7af3f1406e6bde21186836f08cd326099d2da612`.
+
+### Cinco produtos próprios — estado exato
+
+1. **#2451** — `bf6840e04371e0c8bcaa27674989532ff5b0ec96`. L aplicável; 8/9. Retry único verify `127163240735` esgotado; nunca repetir. Nenhum head move, retry ou merge nesta retomada.
+2. **#2544** — `447e97287e9bec0062e7878186495cb92cbdc277`. G sem achado. Continua proibido editar/retry até liberação explícita A3 para `cancel_paid`25→27.
+3. **#2608** — NOVO head final EXATO `0fad82a0e8fec7c1558124bb41d33afcdac1b656`, tree `7425d7e70293988a6a18b9763f0fb00ddb01b1ca`, após integrar main `2ad8fe06` UMA vez e sem conflito. O MÉDIO K2 em `readFeedToken` foi corrigido na mesma unidade: exatamente uma resposta de pipeline; `s/h/p/e` strings não vazias; JSON canônico recusa membros duplicados/escapados; o retorno reconstrói o grant mínimo e não propaga claims extras; uma leitura, sem readback/segundo incremento. RED canônico remoto `6ee2dbac8695d609bffc1289fbf98c277befa206`: 16 checks/12 falhas causais + 4 controles. A prova K2 original `f497bc30d2edf3321db7ef5743be206ee403e09a` foi reproduzida 16/12 antes e passou inalterada 16/16 depois. Blobs finais: produto `85599110f3f843be7817b401f86af75c5d71e81c`; teste `36950f1f04073c637bd26842183f0981789d8cf6`; world `6c239252ddf96f759c7d701e680607753c4dabd6`; resolução aditiva test-config `21b3208ea6b33c22c148ab8abd432f53ec1d7195`. Pós-main: 13 grupos/266 checks verdes, Next typegen + TSC completo, lint, scanner 3840/0 e diff verdes. Comentários PR `6676403028` e final `6676475307`. Aguarda retorno focal K2, revisão independente R2 e NOVE agregadores NOVOS do head final; não reutilizar/repetir o verify antigo `127378763596`, que já foi CANCELLED no teto.
+4. **#2674** — `5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3`, BLOQUEADO pelo triestado reservado. Preservados REDs `f8911772`/`e8dfabf5`, RED legal válido `73a1745db1b7d57c14844cccd91d2f5a2111feda`/blob `60aa1ba0` e produto/API `17f4f4c47031f41dfed95b887deda34ccfc34191`/blob `255aae86`; `2421674d` continua inválido. Não tocar `lib/request-guard.ts` nem `tests/request-guard-shape.test.ts` sem liberação explícita; unknown→error/retry, over→limited/skipped, within→seguir, sem readback/segundo incremento.
+5. **#2700** — `c3fda3d2580ffd62f53f92b024cca48ea694ef18`, tree `88807d4dbc389c424990ab56aa5f51c653f639f5`. Parecer P `5795031317` aplicável e blobs próprios byte-idênticos. Continua aguardando NOVE agregadores exatos; nenhum polling/retry/job antigo nesta retomada.
+
+### Revisão financeira #2722 — segundo retorno no head 44f6c50c
+
+- Parecer N `5795465505` no head EXATO `44f6c50ccdb12b849b21d9017e1c8bf7a3629ba2`: o MÉDIO original da lista de reembolsos está FECHADO, mas o PR continua **NÃO LIBERADO** por um LEVE financeiro separado já apontado por R1/C2.
+- `invoice.payments?.data ?? []` ainda aceita expansão ausente e lista `has_more:true` truncada como nenhum pagamento; ambos podem produzir `refundedOn=0`, gravar crédito `done` e fazer POST sem evidência completa.
+- Prova N pública `codex/n-review-2722-payment-list-evidence@e8f27172abe68ae6a2efae65fbe874b2f9c7662b`, blob `d1daab9d4166ba457c8135474217391cb1c8c7f9`: 4 checks/3 falhas causais + 1 controle. A prova C2 original foi reproduzida no pai: 3/1. No head: ligados 66/66, Next typegen + TSC completo, lint, scanner 3815/0 e diff verdes.
+- Correção exigida: para fatura paga, List envelope completo/limitado/exato de `payments` e linhas estritas antes de refund GET, registro ou POST. Unknown/truncado deve falhar a store e manter a passagem incompleta. N não editou produto/ramo/CI/reserva do autor.
+
+### Revisões e bloqueios preservados
+
+- Não duplicar #2744/`5794970971`, #2745/`5795039678`, #2722 antigo/`5794655544`, #2499/`5794536429`, #2661/`5789936389`, #2601/`6654503257` ou #2637/`6663547913`. #2714 já foi incorporado.
+- SG2(27/30) continua somente prova `3d4cb847`, bloqueada por #2270/#1969; não editar/reservar sem coordenação.
+- Worktree raiz continua com commit local acidental `cc23e7321951ff916cc297cbcac518360cd8293c`; nunca fazer push. Os commits locais dos worktrees de prova/merge são descartáveis; somente os heads remotos exatos acima são canônicos.
+
+### Próximo exato
+
+1. AV12: ler somente novidade causal. Não sondar CI em rodadas.
+2. #2608: somente retorno K2/R2 ou terminal legítimo dos NOVE checks novos do head `0fad82a0`; corrigir qualquer achado com RED antes. Não repetir nenhum job antigo. Com revisão aplicável sem grave/médio + 9/9 finais + clean, merge NORMAL próprio por `expected_head_sha` e confirmar `merged:true`.
+3. #2451/#2544/#2674/#2700 preservam exatamente os bloqueios/retries acima; nenhum workaround ou retry sem causa/liberação.
+4. Cinco produtos ocupam o teto; não abrir sexta. Só sintético; UNKNOWN nunca0; teto antes do gasto; nenhuma alteração de preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato externo.
